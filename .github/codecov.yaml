@@ -1,0 +1,30 @@
+codecov:
+  require_ci_to_pass: yes
+
+coverage:
+  precision: 1
+  round: down
+  range: "50...100"
+  status:
+    project:
+      default:
+        target: auto
+        threshold: 0.5%
+
+ignore:
+  - "opentelemetry/src/testing" # test harnesses
+  - "opentelemetry-jaeger/src/testing" # test harness
+  - "opentelemetry-jaeger/src/exporter/thrift" # auto generated files
+  - "opentelemetry-otlp/src/proto" # auto generated files
+  - "opentelemetry-proto/src/proto" # auto generated files
+  # examples below
+  - "examples"
+  - "opentelemetry-jaeger/examples"
+  - "opentelemetry-zipkin/examples"
+  - "opentelemetry-otlp/examples"
+  - "opentelemetry-aws/examples"
+  - "opentelemetry-datadog/examples"
+  - "opentelemetry-dynatrace/examples"
+  - "opentelemetry-http/examples"
+  - "opentelemetry-prometheus/examples"
+  - "opentelemetry-zpages/examples"

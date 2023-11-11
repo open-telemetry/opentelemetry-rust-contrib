@@ -1,0 +1,154 @@
+name: CI
+env:
+  CI: true
+on:
+  pull_request:
+  push:
+    branches:
+    - main
+    paths-ignore:
+    - '**.md'
+jobs:
+  test:
+    strategy:
+      matrix:
+        rust: [stable, beta]
+    runs-on: ubuntu-latest
+    steps:
+    - name: Free disk space
+      run: |
+        df -h
+        sudo rm -rf /usr/local/lib/android
+        sudo rm -rf /usr/share/dotnet
+        df -h
+    - uses: actions/checkout@v1
+      with:
+        submodules: true
+    - uses: actions-rs/toolchain@v1
+      with:
+        toolchain: ${{ matrix.rust }}
+        components: rustfmt
+        profile: minimal
+    - uses: arduino/setup-protoc@v1
+    - name: Test
+      run: ./scripts/test.sh
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v1
+      with:
+        submodules: true
+    - uses: actions-rs/toolchain@v1
+      with:
+        toolchain: stable
+        components: rustfmt
+        profile: minimal
+    - uses: arduino/setup-protoc@v1
+    - uses: actions-rs/cargo@v1
+      with:
+        command: fmt
+        args: --all -- --check
+    - name: Lint
+      run: ./scripts/lint.sh
+  external-types:
+    strategy:
+      matrix:
+        example: [opentelemetry, opentelemetry-sdk]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v2
+      - uses: actions-rs/toolchain@v1
+        with:
+          toolchain: nightly
+          components: rustfmt
+          override: true
+      - name: external-type-check
+        run: |
+          cargo install cargo-check-external-types
+          cd ${{ matrix.example }}
+          cargo check-external-types --config allowed-external-types.toml
+  non-default-examples:
+    strategy:
+      matrix:
+        example: [opentelemetry-otlp/examples/external-otlp-grpcio-async-std, opentelemetry-otlp/examples/basic-otlp]
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v1
+      with:
+        submodules: true
+    - uses: actions-rs/toolchain@v1
+      with:
+        toolchain: stable
+        components: rustfmt
+        profile: minimal
+    - uses: arduino/setup-protoc@v1
+    - name: Build
+      run: |
+        cd ${{ matrix.example }}
+        cargo build --verbose
+  msrv:
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v1
+      with:
+        submodules: true
+    - uses: actions-rs/toolchain@v1
+      with:
+        profile: minimal
+        toolchain: 1.65.0
+        override: true
+    - name: Patch dependencies versions # some dependencies bump MSRV without major version bump
+      run: ./scripts/patch_dependencies.sh
+    - name: Run tests
+      run: cargo --version &&
+        cargo test --manifest-path=opentelemetry/Cargo.toml --features trace,metrics,testing &&
+        cargo test --manifest-path=opentelemetry-jaeger/Cargo.toml --features rt-tokio &&
+        cargo test --manifest-path=opentelemetry-zipkin/Cargo.toml
+  cargo-deny:
+    runs-on: ubuntu-latest
+    continue-on-error: true # Prevent sudden announcement of a new advisory from failing ci
+    steps:
+      - uses: actions/checkout@v2
+      - uses: EmbarkStudios/cargo-deny-action@v1
+        with:
+          command: check advisories
+  docs:
+    continue-on-error: true
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v2
+      - uses: actions-rs/toolchain@v1
+        with:
+          toolchain: nightly
+          components: rustfmt
+          override: true
+      - uses: arduino/setup-protoc@v1
+      - name: doc
+        run: cargo doc --no-deps --all-features
+        env:
+          CARGO_INCREMENTAL: '0'
+          RUSTDOCFLAGS: -Dwarnings
+  coverage:
+    continue-on-error: true
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v3
+        with:
+          submodules: true
+      - uses: actions-rs/toolchain@v1
+        with:
+          toolchain: stable
+          components: rustfmt,llvm-tools-preview
+          override: true
+      - uses: arduino/setup-protoc@v1
+      - name: cargo install cargo-llvm-cov
+        uses: taiki-e/install-action@cargo-llvm-cov
+      - name: cargo generate-lockfile
+        if: hashFiles('Cargo.lock') == ''
+        run: cargo generate-lockfile
+      - name: cargo llvm-cov
+        run: cargo llvm-cov --locked --all-features --workspace --lcov --output-path lcov.info
+      - name: Upload to codecov.io
+        uses: codecov/codecov-action@v3
+        with:
+          fail_ci_if_error: true

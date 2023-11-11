@@ -1,0 +1,29 @@
+[package]
+name = "tracing-grpc"
+version = "0.1.0"
+edition = "2021"
+license = "Apache-2.0"
+publish = false
+
+[[bin]] # Bin to run the gRPC server
+name = "grpc-server"
+path = "src/server.rs"
+
+[[bin]] # Bin to run the gRPC client
+name = "grpc-client"
+path = "src/client.rs"
+
+[dependencies]
+opentelemetry = { version = "0.20" }
+opentelemetry_sdk = { version = "0.20", features = ["rt-tokio"] }
+opentelemetry-jaeger = { version = "0.19", features = ["rt-tokio"] }
+prost = "0.11"
+tokio = { version = "1.28", features = ["full"] }
+tonic = "0.9.2"
+tracing = "0.1"
+tracing-futures = "0.2"
+tracing-opentelemetry = "0.20"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+
+[build-dependencies]
+tonic-build = "0.9.2"
