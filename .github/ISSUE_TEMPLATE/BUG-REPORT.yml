@@ -2,7 +2,7 @@ name: Bug Report
 description: File a bug report
 title: "[Bug]: "
 labels: ["bug", "triage:todo"]
-projects: ["open-telemetry/opentelemetry-rust"]
+projects: ["open-telemetry/opentelemetry-rust-contrib"]
 body:
   - type: markdown
     attributes:
@@ -34,14 +34,19 @@ body:
     validations:
       required: true
   - type: dropdown
-    id: browsers
+    id: components
     attributes:
-      label: What Exporters are you seeing the problem on?
+      label: What component are you working with?
       multiple: true
       options:
-        - OTLP
-        - Zipkin
-        - Jaeger (Deprecated)
+        - opentelemetry-aws
+        - opentelemetry-contrib
+        - opentelemetry-datadog
+        - opentelemetry-dynatrace
+        - opentelemetry-stackdriver
+        - opentelemetry-user-events-logs
+        - opentelemetry-user-events-metrics
+        - opentelemetry-zpages
         - N/A
   - type: textarea
     id: logs

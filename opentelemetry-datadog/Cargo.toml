@@ -2,8 +2,8 @@
 name = "opentelemetry-datadog"
 version = "0.9.0"
 description = "Datadog exporters and propagators for OpenTelemetry"
-homepage = "https://github.com/open-telemetry/opentelemetry-rust/tree/main/opentelemetry-datadog"
-repository = "https://github.com/open-telemetry/opentelemetry-rust/tree/main/opentelemetry-datadog"
+homepage = "https://github.com/open-telemetry/opentelemetry-rust-contrib/tree/main/opentelemetry-datadog"
+repository = "https://github.com/open-telemetry/opentelemetry-rust-contrib/tree/main/opentelemetry-datadog"
 readme = "README.md"
 categories = [
     "development-tools::debugging",
@@ -26,10 +26,11 @@ surf-client = ["surf", "opentelemetry-http/surf"]
 [dependencies]
 indexmap = "2.0"
 once_cell = "1.12"
-opentelemetry = { version = "0.21", path = "../opentelemetry", features = ["trace"] }
-opentelemetry_sdk = { version = "0.21", path = "../opentelemetry-sdk", features = ["trace"] }
-opentelemetry-http = { version = "0.10", path = "../opentelemetry-http" }
-opentelemetry-semantic-conventions = { version = "0.13", path = "../opentelemetry-semantic-conventions" }
+# TODO: Replace with opentelemetry version before release
+opentelemetry = { git = "https://github.com/open-telemetry/opentelemetry-rust.git", branch = "main" , features = ["trace"] }
+opentelemetry_sdk = { git = "https://github.com/open-telemetry/opentelemetry-rust.git", branch = "main" , features = ["trace"] }
+opentelemetry-http = { version = "0.10" }
+opentelemetry-semantic-conventions = { version = "0.13" }
 rmp = "0.8"
 url = "2.2"
 reqwest = { version = "0.11", default-features = false, optional = true }
@@ -45,7 +46,7 @@ base64 = "0.13"
 bytes = "1"
 futures-util = { version = "0.3", default-features = false, features = ["io"] }
 isahc = "1.4"
-opentelemetry_sdk = { path = "../opentelemetry-sdk", features = ["trace", "testing"] }
+opentelemetry_sdk = { version = "0.21", features = ["trace", "testing"] }
 
 [[example]]
 name = "datadog"

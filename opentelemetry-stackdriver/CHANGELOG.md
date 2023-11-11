@@ -2,6 +2,8 @@
 
 ## vNext
 
+WARNING The current version relies on features only in upstream git version. This should be modified before releasing.
+
 ## v0.18.0
 
 ### Changed

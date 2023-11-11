@@ -2,8 +2,8 @@
 name = "opentelemetry-contrib"
 version = "0.13.0"
 description = "Rust contrib repo for OpenTelemetry"
-homepage = "https://github.com/open-telemetry/opentelemetry-rust/tree/main/opentelemetry-contrib"
-repository = "https://github.com/open-telemetry/opentelemetry-rust/tree/main/opentelemetry-contrib"
+homepage = "https://github.com/open-telemetry/opentelemetry-rust-contrib/tree/main/opentelemetry-contrib"
+repository = "https://github.com/open-telemetry/opentelemetry-rust-contrib/tree/main/opentelemetry-contrib"
 readme = "README.md"
 categories = [
     "development-tools::debugging",
@@ -35,9 +35,9 @@ base64 = { version = "0.13", optional = true }
 futures-core = { version = "0.3", optional = true }
 futures-util = { version = "0.3", optional = true, default-features = false }
 once_cell = "1.17.1"
-opentelemetry = { version = "0.21", path = "../opentelemetry" }
-opentelemetry_sdk = { version = "0.21", optional = true, path = "../opentelemetry-sdk" }
-opentelemetry-semantic-conventions = { version = "0.13", optional = true, path = "../opentelemetry-semantic-conventions" }
+opentelemetry = { version = "0.21" }
+opentelemetry_sdk = { version = "0.21", optional = true }
+opentelemetry-semantic-conventions = { version = "0.13", optional = true }
 serde_json = { version = "1", optional = true }
 tokio = { version = "1.0", features = ["fs", "io-util"], optional = true }
 
@@ -45,7 +45,7 @@ tokio = { version = "1.0", features = ["fs", "io-util"], optional = true }
 base64 = "0.13"
 criterion = { version = "0.5", features = ["html_reports"] }
 futures-util = { version = "0.3", default-features = false, features = ["std"] }
-opentelemetry_sdk = { path = "../opentelemetry-sdk", features = ["trace", "testing"] }
+opentelemetry_sdk = { version = "0.21", features = ["trace", "testing"] }
 [target.'cfg(not(target_os = "windows"))'.dev-dependencies]
 pprof = { version = "0.13", features = ["flamegraph", "criterion"] }
 

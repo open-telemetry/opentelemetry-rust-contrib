@@ -3,7 +3,7 @@ name: "Feature Request"
 description: Request a feature for the OpenTelemetry Rust implementation.
 title: "[Feature]: "
 labels: ["enhancement", "triage:todo"]
-projects: ["open-telemetry/opentelemetry-rust"]
+projects: ["open-telemetry/opentelemetry-rust-contrib"]
 body:
   - type: markdown
     attributes:
@@ -22,6 +22,21 @@ body:
       placeholder: Include the Issue ID from this or other repos.
     validations:
       required: false
+  - type: dropdown
+    id: components
+    attributes:
+      label: What component are you working with?
+      multiple: true
+      options:
+        - opentelemetry-aws
+        - opentelemetry-contrib
+        - opentelemetry-datadog
+        - opentelemetry-dynatrace
+        - opentelemetry-stackdriver
+        - opentelemetry-user-events-logs
+        - opentelemetry-user-events-metrics
+        - opentelemetry-zpages
+        - N/A
   - type: textarea
     id: solution
     attributes:
