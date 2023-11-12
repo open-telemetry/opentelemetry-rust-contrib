@@ -1,0 +1,21 @@
+[workspace]
+members = [
+    "opentelemetry-aws",
+    "opentelemetry-contrib",
+# TODO: Add back in once this relies on a published version
+#    "opentelemetry-datadog",
+# TODO: Add back in once this relies on a published version
+#    "opentelemetry-stackdriver",
+    "opentelemetry-user-events-logs",
+    "opentelemetry-user-events-metrics",
+# TODO: Add back in once this relies on a published version
+#    "opentelemetry-zpages",
+    "examples/traceresponse",
+]
+resolver = "2"
+
+[profile.bench]
+# https://doc.rust-lang.org/cargo/reference/profiles.html#bench
+# See function names in profiling reports.
+# 2/true is too much, 0 is not enough, 1 is just right for back traces
+debug = 1
