@@ -4,7 +4,7 @@ use opentelemetry::{
     KeyValue,
 };
 use opentelemetry_sdk::{
-    metrics::{PeriodicReader, MeterProvider as SdkMeterProvider},
+    metrics::{MeterProvider as SdkMeterProvider, PeriodicReader},
     runtime, Resource,
 };
 use opentelemetry_user_events_metrics::MetricsExporter;

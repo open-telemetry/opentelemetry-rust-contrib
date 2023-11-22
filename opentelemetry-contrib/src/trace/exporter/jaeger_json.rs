@@ -4,7 +4,13 @@
 use async_trait::async_trait;
 use futures_core::future::BoxFuture;
 use futures_util::FutureExt;
-use opentelemetry::trace::{SpanId, TraceError};
+use opentelemetry::trace::SpanId;
+#[cfg(any(
+    feature = "rt-tokio",
+    feature = "rt-async-std",
+    feature = "rt-tokio-current-thread"
+))]
+use opentelemetry::trace::TraceError;
 use opentelemetry_sdk::{
     export::trace::{ExportResult, SpanData, SpanExporter},
     runtime::RuntimeChannel,
