@@ -46,7 +46,7 @@ base64 = "0.13"
 bytes = "1"
 futures-util = { version = "0.3", default-features = false, features = ["io"] }
 isahc = "1.4"
-opentelemetry_sdk = { version = "0.21", features = ["trace", "testing"] }
+opentelemetry_sdk = { git = "https://github.com/open-telemetry/opentelemetry-rust.git", branch = "main" , features = ["trace", "testing"] }
 
 [[example]]
 name = "datadog"

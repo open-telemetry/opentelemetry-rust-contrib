@@ -12,6 +12,10 @@ members = [
 #    "opentelemetry-zpages",
     "examples/traceresponse",
 ]
+exclude = [
+    "opentelemetry-datadog",
+    "opentelemetry-stackdriver",
+]
 resolver = "2"
 
 [profile.bench]
