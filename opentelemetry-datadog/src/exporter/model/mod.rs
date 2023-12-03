@@ -20,6 +20,10 @@ mod v05;
 // https://github.com/DataDog/dd-trace-js/blob/c89a35f7d27beb4a60165409376e170eacb194c5/packages/dd-trace/src/constants.js#L4
 static SAMPLING_PRIORITY_KEY: &str = "_sampling_priority_v1";
 
+// https://github.com/DataDog/datadog-agent/blob/ec96f3c24173ec66ba235bda7710504400d9a000/pkg/trace/traceutil/span.go#L20
+#[cfg(feature = "measure")]
+static DD_MEASURED_KEY: &str = "_dd.measured";
+
 /// Custom mapping between opentelemetry spans and datadog spans.
 ///
 /// User can provide custom function to change the mapping. It currently supports customizing the following

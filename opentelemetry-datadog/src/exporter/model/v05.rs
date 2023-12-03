@@ -1,6 +1,12 @@
 use crate::exporter::intern::StringInterner;
+#[cfg(feature = "measure")]
+use crate::exporter::model::DD_MEASURED_KEY;
 use crate::exporter::model::SAMPLING_PRIORITY_KEY;
 use crate::exporter::{Error, ModelConfig};
+#[cfg(feature = "agent-sampling")]
+use crate::propagator::TRACE_STATE_PRIORITY_SAMPLING;
+#[cfg(feature = "measure")]
+use crate::propagator::TRACE_STATE_MEASURE;
 use opentelemetry::trace::Status;
 use opentelemetry_sdk::export::trace::SpanData;
 use std::time::SystemTime;
@@ -204,16 +210,39 @@ where
                 rmp::encode::write_u32(&mut encoded, interner.intern(kv.key.as_str()))?;
                 rmp::encode::write_u32(&mut encoded, interner.intern(kv.value.as_str().as_ref()))?;
             }
-            rmp::encode::write_map_len(&mut encoded, 1)?;
+
+            const MEASURE_ENTRY : u32 = if cfg!(feature = "measure") { 1 } else { 0 };
+            const METRICS_LEN : u32 = 1 + MEASURE_ENTRY;
+
+            #[cfg(not(feature = "agent-sampling"))]
+            let sampling_priority = true;
+            #[cfg(feature = "agent-sampling")]
+            let sampling_priority = span.span_context
+                .trace_state()
+                .get(TRACE_STATE_PRIORITY_SAMPLING)
+                .map(|x| x == "1")
+                .unwrap_or(false);
+
+            rmp::encode::write_map_len(&mut encoded, METRICS_LEN)?;
             rmp::encode::write_u32(&mut encoded, interner.intern(SAMPLING_PRIORITY_KEY))?;
             rmp::encode::write_f64(
                 &mut encoded,
-                if span.span_context.is_sampled() {
+                if sampling_priority  {
                     1.0
                 } else {
                     0.0
                 },
             )?;
+            #[cfg(feature = "measure")]
+            {
+                let is_measure = span.span_context
+                    .trace_state()
+                    .get(TRACE_STATE_MEASURE)
+                    .map(|x| if x == "1" { 1.0 } else { 0.0 })
+                    .unwrap_or(0.0);
+                rmp::encode::write_u32(&mut encoded, interner.intern(DD_MEASURED_KEY))?;
+                rmp::encode::write_f64(&mut encoded, is_measure)?;
+            }
             rmp::encode::write_u32(&mut encoded, span_type)?;
         }
     }

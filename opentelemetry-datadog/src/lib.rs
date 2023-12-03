@@ -141,6 +141,10 @@ pub use exporter::{
     ModelConfig,
 };
 pub use propagator::DatadogPropagator;
+#[cfg(feature = "agent-sampling")]
+pub use propagator::TRACE_STATE_PRIORITY_SAMPLING;
+#[cfg(feature = "measure")]
+pub use propagator::TRACE_STATE_MEASURE;
 
 mod propagator {
     use once_cell::sync::Lazy;
@@ -155,6 +159,10 @@ mod propagator {
     const DATADOG_SAMPLING_PRIORITY_HEADER: &str = "x-datadog-sampling-priority";
 
     const TRACE_FLAG_DEFERRED: TraceFlags = TraceFlags::new(0x02);
+    #[cfg(feature = "agent-sampling")]
+    pub const TRACE_STATE_PRIORITY_SAMPLING: &str = "psr";
+    #[cfg(feature = "measure")]
+    pub const TRACE_STATE_MEASURE: &str = "m";
 
     static DATADOG_HEADER_FIELDS: Lazy<[String; 3]> = Lazy::new(|| {
         [
@@ -262,7 +270,12 @@ mod propagator {
                 Err(_) => TRACE_FLAG_DEFERRED,
             };
 
+            #[cfg(not(feature = "agent-sampling"))]
             let trace_state = TraceState::default();
+            #[cfg(feature = "agent-sampling")]
+            let trace_state = TraceState::from_key_value(
+                [(TRACE_STATE_PRIORITY_SAMPLING, if sampled.is_sampled() { "1" } else { "0" })]
+            ).unwrap_or_default();
 
             Ok(SpanContext::new(
                 trace_id,
@@ -289,7 +302,18 @@ mod propagator {
                 );
 
                 if span_context.trace_flags() & TRACE_FLAG_DEFERRED != TRACE_FLAG_DEFERRED {
+                    #[cfg(not(feature = "agent-sampling"))]
                     let sampling_priority = if span_context.is_sampled() {
+                        SamplingPriority::AutoKeep
+                    } else {
+                        SamplingPriority::AutoReject
+                    };
+                    #[cfg(feature = "agent-sampling")]
+                    let sampling_priority =
+                        if span_context
+                            .trace_state()
+                            .get(TRACE_STATE_PRIORITY_SAMPLING)
+                            .unwrap_or("0") == "1" {
                         SamplingPriority::AutoKeep
                     } else {
                         SamplingPriority::AutoReject
