@@ -188,10 +188,13 @@ where
                     _ => 0,
                 },
             )?;
+
+            const GIT_META_TAGS_COUNT: u32 = if matches!((option_env!("DD_GIT_REPOSITORY_URL"), option_env!("DD_GIT_COMMIT_SHA")), (Some(_), Some(_))) { 2 } else { 0 };
             rmp::encode::write_map_len(
                 &mut encoded,
                 (span.attributes.len() + span.resource.len()) as u32
-                    + unified_tags.compute_attribute_size(),
+                    + unified_tags.compute_attribute_size()
+                    + GIT_META_TAGS_COUNT,
             )?;
             for (key, value) in span.resource.iter() {
                 rmp::encode::write_u32(&mut encoded, interner.intern(key.as_str()))?;
@@ -204,6 +207,14 @@ where
                 rmp::encode::write_u32(&mut encoded, interner.intern(kv.key.as_str()))?;
                 rmp::encode::write_u32(&mut encoded, interner.intern(kv.value.as_str().as_ref()))?;
             }
+
+            if let (Some(repository_url), Some(commit_sha)) = (option_env!("DD_GIT_REPOSITORY_URL"), option_env!("DD_GIT_COMMIT_SHA")) {
+                rmp::encode::write_u32(&mut encoded, interner.intern("git.repository_url"))?;
+                rmp::encode::write_u32(&mut encoded, interner.intern(repository_url))?;
+                rmp::encode::write_u32(&mut encoded, interner.intern("git.commit.sha"))?;
+                rmp::encode::write_u32(&mut encoded, interner.intern(commit_sha))?;
+            }
+
             rmp::encode::write_map_len(&mut encoded, 1)?;
             rmp::encode::write_u32(&mut encoded, interner.intern(SAMPLING_PRIORITY_KEY))?;
             rmp::encode::write_f64(
