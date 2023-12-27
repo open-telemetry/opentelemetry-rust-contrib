@@ -1,11 +1,11 @@
 use crate::exporter::intern::StringInterner;
-#[cfg(feature = "measure")]
-use crate::exporter::model::DD_MEASURED_KEY;
-use crate::exporter::model::SAMPLING_PRIORITY_KEY;
+use crate::exporter::model::{
+    DD_MEASURED_KEY,
+    SAMPLING_PRIORITY_KEY,
+};
 use crate::exporter::{Error, ModelConfig};
 #[cfg(feature = "agent-sampling")]
 use crate::propagator::TRACE_STATE_PRIORITY_SAMPLING;
-#[cfg(feature = "measure")]
 use crate::propagator::TRACE_STATE_MEASURE;
 use opentelemetry::trace::Status;
 use opentelemetry_sdk::export::trace::SpanData;
@@ -14,6 +14,7 @@ use std::time::SystemTime;
 use super::unified_tags::{UnifiedTagField, UnifiedTags};
 
 const SPAN_NUM_ELEMENTS: u32 = 12;
+const METRICS_LEN : u32 = 2;
 
 // Protocol documentation sourced from https://github.com/DataDog/datadog-agent/blob/c076ea9a1ffbde4c76d35343dbc32aecbbf99cb9/pkg/trace/api/version.go
 //
@@ -120,6 +121,28 @@ fn write_unified_tag(
     Ok(())
 }
 
+fn get_metric_by_name(span: &SpanData, name: &str) -> f64 {
+    span.span_context
+        .trace_state()
+        .get(name)
+        .map(|x| if x == "1" { 1.0 } else { 0.0 })
+        .unwrap_or(0.0)
+}
+
+#[cfg(not(feature = "agent-sampling"))]
+fn get_sampling_priority(_span: &SpanData) -> f64 {
+    1.0
+}
+
+#[cfg(feature = "agent-sampling")]
+fn get_sampling_priority(span: &SpanData) -> f64 {
+    get_metric_by_name(TRACE_STATE_PRIORITY_SAMPLING)
+}
+
+fn get_is_measure(span: &SpanData) -> f64 {
+    get_metric_by_name(span, TRACE_STATE_MEASURE)
+}
+
 fn encode_traces<S, N, R>(
     interner: &mut StringInterner,
     model_config: &ModelConfig,
@@ -211,38 +234,14 @@ where
                 rmp::encode::write_u32(&mut encoded, interner.intern(kv.value.as_str().as_ref()))?;
             }
 
-            const MEASURE_ENTRY : u32 = if cfg!(feature = "measure") { 1 } else { 0 };
-            const METRICS_LEN : u32 = 1 + MEASURE_ENTRY;
-
-            #[cfg(not(feature = "agent-sampling"))]
-            let sampling_priority = true;
-            #[cfg(feature = "agent-sampling")]
-            let sampling_priority = span.span_context
-                .trace_state()
-                .get(TRACE_STATE_PRIORITY_SAMPLING)
-                .map(|x| x == "1")
-                .unwrap_or(false);
-
             rmp::encode::write_map_len(&mut encoded, METRICS_LEN)?;
             rmp::encode::write_u32(&mut encoded, interner.intern(SAMPLING_PRIORITY_KEY))?;
-            rmp::encode::write_f64(
-                &mut encoded,
-                if sampling_priority  {
-                    1.0
-                } else {
-                    0.0
-                },
-            )?;
-            #[cfg(feature = "measure")]
-            {
-                let is_measure = span.span_context
-                    .trace_state()
-                    .get(TRACE_STATE_MEASURE)
-                    .map(|x| if x == "1" { 1.0 } else { 0.0 })
-                    .unwrap_or(0.0);
-                rmp::encode::write_u32(&mut encoded, interner.intern(DD_MEASURED_KEY))?;
-                rmp::encode::write_f64(&mut encoded, is_measure)?;
-            }
+            let sampling_priority = get_sampling_priority(&span);
+            rmp::encode::write_f64(&mut encoded, sampling_priority)?;
+
+            rmp::encode::write_u32(&mut encoded, interner.intern(DD_MEASURED_KEY))?;
+            let is_measure = get_is_measure(&span);
+            rmp::encode::write_f64(&mut encoded, is_measure)?;
             rmp::encode::write_u32(&mut encoded, span_type)?;
         }
     }

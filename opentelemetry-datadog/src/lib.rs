@@ -143,7 +143,6 @@ pub use exporter::{
 pub use propagator::DatadogPropagator;
 #[cfg(feature = "agent-sampling")]
 pub use propagator::TRACE_STATE_PRIORITY_SAMPLING;
-#[cfg(feature = "measure")]
 pub use propagator::TRACE_STATE_MEASURE;
 
 mod propagator {
@@ -161,7 +160,6 @@ mod propagator {
     const TRACE_FLAG_DEFERRED: TraceFlags = TraceFlags::new(0x02);
     #[cfg(feature = "agent-sampling")]
     pub const TRACE_STATE_PRIORITY_SAMPLING: &str = "psr";
-    #[cfg(feature = "measure")]
     pub const TRACE_STATE_MEASURE: &str = "m";
 
     static DATADOG_HEADER_FIELDS: Lazy<[String; 3]> = Lazy::new(|| {

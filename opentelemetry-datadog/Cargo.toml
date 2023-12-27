@@ -19,7 +19,6 @@ all-features = true
 rustdoc-args = ["--cfg", "docsrs"]
 
 [features]
-measure = []
 agent-sampling = []
 reqwest-blocking-client = ["reqwest/blocking", "opentelemetry-http/reqwest"]
 reqwest-client = ["reqwest", "opentelemetry-http/reqwest"]

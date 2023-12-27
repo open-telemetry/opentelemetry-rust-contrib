@@ -21,7 +21,6 @@ mod v05;
 static SAMPLING_PRIORITY_KEY: &str = "_sampling_priority_v1";
 
 // https://github.com/DataDog/datadog-agent/blob/ec96f3c24173ec66ba235bda7710504400d9a000/pkg/trace/traceutil/span.go#L20
-#[cfg(feature = "measure")]
 static DD_MEASURED_KEY: &str = "_dd.measured";
 
 /// Custom mapping between opentelemetry spans and datadog spans.
