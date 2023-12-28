@@ -6,7 +6,10 @@ use crate::exporter::model::{
 use crate::exporter::{Error, ModelConfig};
 #[cfg(feature = "agent-sampling")]
 use crate::propagator::TRACE_STATE_PRIORITY_SAMPLING;
-use crate::propagator::TRACE_STATE_MEASURE;
+use crate::propagator::{
+    TRACE_STATE_MEASURE,
+    TRACE_STATE_TRUE_VALUE,
+};
 use opentelemetry::trace::Status;
 use opentelemetry_sdk::export::trace::SpanData;
 use std::time::SystemTime;
@@ -125,7 +128,7 @@ fn get_metric_by_name(span: &SpanData, name: &str) -> f64 {
     span.span_context
         .trace_state()
         .get(name)
-        .map(|x| if x == "1" { 1.0 } else { 0.0 })
+        .map(|x| if x == TRACE_STATE_TRUE_VALUE { 1.0 } else { 0.0 })
         .unwrap_or(0.0)
 }
 
@@ -136,7 +139,7 @@ fn get_sampling_priority(_span: &SpanData) -> f64 {
 
 #[cfg(feature = "agent-sampling")]
 fn get_sampling_priority(span: &SpanData) -> f64 {
-    get_metric_by_name(TRACE_STATE_PRIORITY_SAMPLING)
+    get_metric_by_name(span, TRACE_STATE_PRIORITY_SAMPLING)
 }
 
 fn get_is_measure(span: &SpanData) -> f64 {

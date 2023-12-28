@@ -143,7 +143,11 @@ pub use exporter::{
 pub use propagator::DatadogPropagator;
 #[cfg(feature = "agent-sampling")]
 pub use propagator::TRACE_STATE_PRIORITY_SAMPLING;
-pub use propagator::TRACE_STATE_MEASURE;
+pub use propagator::{
+    TRACE_STATE_MEASURE,
+    TRACE_STATE_TRUE_VALUE,
+    TRACE_STATE_FALSE_VALUE,
+};
 
 mod propagator {
     use once_cell::sync::Lazy;
@@ -161,6 +165,8 @@ mod propagator {
     #[cfg(feature = "agent-sampling")]
     pub const TRACE_STATE_PRIORITY_SAMPLING: &str = "psr";
     pub const TRACE_STATE_MEASURE: &str = "m";
+    pub const TRACE_STATE_TRUE_VALUE: &str = "1";
+    pub const TRACE_STATE_FALSE_VALUE: &str = "0";
 
     static DATADOG_HEADER_FIELDS: Lazy<[String; 3]> = Lazy::new(|| {
         [
@@ -205,15 +211,19 @@ mod propagator {
     }
 
     #[cfg(not(feature = "agent-sampling"))]
-    fn create_trace_state(_trace_flags: &TraceFlags) -> TraceState {
-        TraceState::default()
+    fn create_trace_state_and_flags(trace_flags: TraceFlags) -> (TraceState, TraceFlags) {
+        (TraceState::default(), trace_flags)
     }
 
     #[cfg(feature = "agent-sampling")]
-    fn create_trace_state(trace_flags: &TraceFlags) -> TraceState {
-        TraceState::from_key_value(
-            [(TRACE_STATE_PRIORITY_SAMPLING, if trace_flags.is_sampled() { "1" } else { "0" })]
-        ).unwrap_or_default()
+    fn create_trace_state_and_flags(trace_flags: TraceFlags) -> (TraceState, TraceFlags) {
+        if trace_flags & TRACE_FLAG_DEFERRED == TRACE_FLAG_DEFERRED {
+            (TraceState::default(), trace_flags)
+        } else {
+            (TraceState::from_key_value(
+                [(TRACE_STATE_PRIORITY_SAMPLING, if trace_flags.is_sampled() { TRACE_STATE_TRUE_VALUE } else { TRACE_STATE_FALSE_VALUE })]
+            ).unwrap_or_default(), TraceFlags::SAMPLED)
+        }
     }
 
     impl DatadogPropagator {
@@ -280,12 +290,12 @@ mod propagator {
                 Err(_) => TRACE_FLAG_DEFERRED,
             };
 
-            let trace_state = create_trace_state(&sampled);
+            let (trace_state, trace_flags) = create_trace_state_and_flags(sampled);
 
             Ok(SpanContext::new(
                 trace_id,
                 span_id,
-                sampled,
+                trace_flags,
                 true,
                 trace_state,
             ))
@@ -306,7 +316,7 @@ mod propagator {
         if span_context
             .trace_state()
             .get(TRACE_STATE_PRIORITY_SAMPLING)
-            .unwrap_or("0") == "1" {
+            .unwrap_or(TRACE_STATE_FALSE_VALUE) == TRACE_STATE_TRUE_VALUE {
             SamplingPriority::AutoKeep
         } else {
             SamplingPriority::AutoReject
@@ -358,7 +368,18 @@ mod propagator {
 
         #[rustfmt::skip]
         fn extract_test_data() -> Vec<(Vec<(&'static str, &'static str)>, SpanContext)> {
-            vec![
+            #[cfg(feature = "agent-sampling")]
+            return vec![
+                (vec![], SpanContext::empty_context()),
+                (vec![(DATADOG_SAMPLING_PRIORITY_HEADER, "0")], SpanContext::empty_context()),
+                (vec![(DATADOG_TRACE_ID_HEADER, "garbage")], SpanContext::empty_context()),
+                (vec![(DATADOG_TRACE_ID_HEADER, "1234"), (DATADOG_PARENT_ID_HEADER, "garbage")], SpanContext::new(TraceId::from_u128(1234), SpanId::INVALID, TRACE_FLAG_DEFERRED, true, TraceState::default())),
+                (vec![(DATADOG_TRACE_ID_HEADER, "1234"), (DATADOG_PARENT_ID_HEADER, "12")], SpanContext::new(TraceId::from_u128(1234), SpanId::from_u64(12), TRACE_FLAG_DEFERRED, true, TraceState::default())),
+                (vec![(DATADOG_TRACE_ID_HEADER, "1234"), (DATADOG_PARENT_ID_HEADER, "12"), (DATADOG_SAMPLING_PRIORITY_HEADER, "0")], SpanContext::new(TraceId::from_u128(1234), SpanId::from_u64(12), TraceFlags::SAMPLED, true, TraceState::from_key_value([(TRACE_STATE_PRIORITY_SAMPLING, TRACE_STATE_FALSE_VALUE)]).unwrap())),
+                (vec![(DATADOG_TRACE_ID_HEADER, "1234"), (DATADOG_PARENT_ID_HEADER, "12"), (DATADOG_SAMPLING_PRIORITY_HEADER, "1")], SpanContext::new(TraceId::from_u128(1234), SpanId::from_u64(12), TraceFlags::SAMPLED, true, TraceState::from_key_value([(TRACE_STATE_PRIORITY_SAMPLING, TRACE_STATE_TRUE_VALUE)]).unwrap())),
+            ];
+            #[cfg(not(feature = "agent-sampling"))]
+            return vec![
                 (vec![], SpanContext::empty_context()),
                 (vec![(DATADOG_SAMPLING_PRIORITY_HEADER, "0")], SpanContext::empty_context()),
                 (vec![(DATADOG_TRACE_ID_HEADER, "garbage")], SpanContext::empty_context()),
@@ -366,12 +387,23 @@ mod propagator {
                 (vec![(DATADOG_TRACE_ID_HEADER, "1234"), (DATADOG_PARENT_ID_HEADER, "12")], SpanContext::new(TraceId::from_u128(1234), SpanId::from_u64(12), TRACE_FLAG_DEFERRED, true, TraceState::default())),
                 (vec![(DATADOG_TRACE_ID_HEADER, "1234"), (DATADOG_PARENT_ID_HEADER, "12"), (DATADOG_SAMPLING_PRIORITY_HEADER, "0")], SpanContext::new(TraceId::from_u128(1234), SpanId::from_u64(12), TraceFlags::default(), true, TraceState::default())),
                 (vec![(DATADOG_TRACE_ID_HEADER, "1234"), (DATADOG_PARENT_ID_HEADER, "12"), (DATADOG_SAMPLING_PRIORITY_HEADER, "1")], SpanContext::new(TraceId::from_u128(1234), SpanId::from_u64(12), TraceFlags::SAMPLED, true, TraceState::default())),
-            ]
+            ];
         }
 
         #[rustfmt::skip]
         fn inject_test_data() -> Vec<(Vec<(&'static str, &'static str)>, SpanContext)> {
-            vec![
+            #[cfg(feature = "agent-sampling")]
+            return vec![
+                (vec![], SpanContext::empty_context()),
+                (vec![], SpanContext::new(TraceId::INVALID, SpanId::INVALID, TRACE_FLAG_DEFERRED, true, TraceState::default())),
+                (vec![], SpanContext::new(TraceId::from_hex("1234").unwrap(), SpanId::INVALID, TRACE_FLAG_DEFERRED, true, TraceState::default())),
+                (vec![], SpanContext::new(TraceId::from_hex("1234").unwrap(), SpanId::INVALID, TraceFlags::SAMPLED, true, TraceState::default())),
+                (vec![(DATADOG_TRACE_ID_HEADER, "1234"), (DATADOG_PARENT_ID_HEADER, "12")], SpanContext::new(TraceId::from_u128(1234), SpanId::from_u64(12), TRACE_FLAG_DEFERRED, true, TraceState::default())),
+                (vec![(DATADOG_TRACE_ID_HEADER, "1234"), (DATADOG_PARENT_ID_HEADER, "12"), (DATADOG_SAMPLING_PRIORITY_HEADER, "0")], SpanContext::new(TraceId::from_u128(1234), SpanId::from_u64(12), TraceFlags::SAMPLED, true, TraceState::from_key_value([(TRACE_STATE_PRIORITY_SAMPLING, TRACE_STATE_FALSE_VALUE)]).unwrap())),
+                (vec![(DATADOG_TRACE_ID_HEADER, "1234"), (DATADOG_PARENT_ID_HEADER, "12"), (DATADOG_SAMPLING_PRIORITY_HEADER, "1")], SpanContext::new(TraceId::from_u128(1234), SpanId::from_u64(12), TraceFlags::SAMPLED, true, TraceState::from_key_value([(TRACE_STATE_PRIORITY_SAMPLING, TRACE_STATE_TRUE_VALUE)]).unwrap())),
+            ];
+            #[cfg(not(feature = "agent-sampling"))]
+            return vec![
                 (vec![], SpanContext::empty_context()),
                 (vec![], SpanContext::new(TraceId::INVALID, SpanId::INVALID, TRACE_FLAG_DEFERRED, true, TraceState::default())),
                 (vec![], SpanContext::new(TraceId::from_hex("1234").unwrap(), SpanId::INVALID, TRACE_FLAG_DEFERRED, true, TraceState::default())),
@@ -379,7 +411,7 @@ mod propagator {
                 (vec![(DATADOG_TRACE_ID_HEADER, "1234"), (DATADOG_PARENT_ID_HEADER, "12")], SpanContext::new(TraceId::from_u128(1234), SpanId::from_u64(12), TRACE_FLAG_DEFERRED, true, TraceState::default())),
                 (vec![(DATADOG_TRACE_ID_HEADER, "1234"), (DATADOG_PARENT_ID_HEADER, "12"), (DATADOG_SAMPLING_PRIORITY_HEADER, "0")], SpanContext::new(TraceId::from_u128(1234), SpanId::from_u64(12), TraceFlags::default(), true, TraceState::default())),
                 (vec![(DATADOG_TRACE_ID_HEADER, "1234"), (DATADOG_PARENT_ID_HEADER, "12"), (DATADOG_SAMPLING_PRIORITY_HEADER, "1")], SpanContext::new(TraceId::from_u128(1234), SpanId::from_u64(12), TraceFlags::SAMPLED, true, TraceState::default())),
-            ]
+            ];
         }
 
         #[test]
