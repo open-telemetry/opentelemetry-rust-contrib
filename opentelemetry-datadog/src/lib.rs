@@ -392,8 +392,7 @@ mod propagator {
     fn get_sampling_priority(span_context: &SpanContext) -> SamplingPriority {
         if span_context
             .trace_state()
-            .get(TRACE_STATE_PRIORITY_SAMPLING)
-            .unwrap_or(TRACE_STATE_FALSE_VALUE) == TRACE_STATE_TRUE_VALUE {
+            .priority_sampling_enabled() {
             SamplingPriority::AutoKeep
         } else {
             SamplingPriority::AutoReject
