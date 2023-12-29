@@ -140,13 +140,10 @@ pub use exporter::{
     new_pipeline, ApiVersion, DatadogExporter, DatadogPipelineBuilder, Error, FieldMappingFn,
     ModelConfig,
 };
-pub use propagator::DatadogPropagator;
-#[cfg(feature = "agent-sampling")]
-pub use propagator::TRACE_STATE_PRIORITY_SAMPLING;
 pub use propagator::{
-    TRACE_STATE_MEASURE,
-    TRACE_STATE_TRUE_VALUE,
-    TRACE_STATE_FALSE_VALUE,
+    DatadogPropagator,
+    DatadogTraceState,
+    DatadogTraceStateBuilder,
 };
 
 mod propagator {
@@ -163,10 +160,10 @@ mod propagator {
 
     const TRACE_FLAG_DEFERRED: TraceFlags = TraceFlags::new(0x02);
     #[cfg(feature = "agent-sampling")]
-    pub const TRACE_STATE_PRIORITY_SAMPLING: &str = "psr";
-    pub const TRACE_STATE_MEASURE: &str = "m";
-    pub const TRACE_STATE_TRUE_VALUE: &str = "1";
-    pub const TRACE_STATE_FALSE_VALUE: &str = "0";
+    const TRACE_STATE_PRIORITY_SAMPLING: &str = "psr";
+    const TRACE_STATE_MEASURE: &str = "m";
+    const TRACE_STATE_TRUE_VALUE: &str = "1";
+    const TRACE_STATE_FALSE_VALUE: &str = "0";
 
     static DATADOG_HEADER_FIELDS: Lazy<[String; 3]> = Lazy::new(|| {
         [
@@ -175,6 +172,88 @@ mod propagator {
             DATADOG_SAMPLING_PRIORITY_HEADER.to_string(),
         ]
     });
+
+    #[derive(Default)]
+    pub struct DatadogTraceStateBuilder {
+        #[cfg(feature = "agent-sampling")]
+        priority_sampling: bool,
+        measuring: bool,
+    }
+
+    fn boolean_to_trace_state_flag(value: bool) -> &'static str {
+        if value { TRACE_STATE_TRUE_VALUE } else { TRACE_STATE_FALSE_VALUE }
+    }
+
+    fn trace_flag_to_boolean(value: &str) -> bool {
+        value == TRACE_STATE_TRUE_VALUE
+    }
+
+    impl DatadogTraceStateBuilder {
+        #[cfg(feature = "agent-sampling")]
+        pub fn with_priority_sampling(self, enabled: bool) -> Self {
+            Self {
+                priority_sampling: enabled,
+                ..self
+            }
+        }
+
+        pub fn with_measuring(self, enabled: bool) -> Self {
+            Self {
+                measuring: enabled,
+                ..self
+            }
+        }
+
+        pub fn build(self) -> TraceState {
+            #[cfg(not(feature = "agent-sampling"))]
+            let values = [(TRACE_STATE_MEASURE, boolean_to_trace_state_flag(self.measuring))];
+            #[cfg(feature = "agent-sampling")]
+            let values = [
+                (TRACE_STATE_MEASURE, boolean_to_trace_state_flag(self.measuring)),
+                (TRACE_STATE_PRIORITY_SAMPLING, boolean_to_trace_state_flag(self.priority_sampling)),
+            ];
+
+            TraceState::from_key_value(values).unwrap_or_default()
+        }
+    }
+
+    pub trait DatadogTraceState {
+        fn with_measuring(&self, enabled: bool) -> TraceState;
+
+        fn measuring_enabled(&self) -> bool;
+
+        #[cfg(feature = "agent-sampling")]
+        fn with_priority_sampling(&self, enabled: bool) -> TraceState;
+
+        #[cfg(feature = "agent-sampling")]
+        fn priority_sampling_enabled(&self) -> bool;
+    }
+
+    impl DatadogTraceState for TraceState {
+        fn with_measuring(&self, enabled: bool) -> TraceState {
+            self.insert(TRACE_STATE_MEASURE, boolean_to_trace_state_flag(enabled))
+                .unwrap_or_else(|_err| self.clone())
+        }
+
+        fn measuring_enabled(&self) -> bool {
+            self.get(TRACE_STATE_MEASURE)
+                .map(trace_flag_to_boolean)
+                .unwrap_or_default()
+        }
+
+        #[cfg(feature = "agent-sampling")]
+        fn with_priority_sampling(&self, enabled: bool) -> TraceState {
+            self.insert(TRACE_STATE_PRIORITY_SAMPLING, boolean_to_trace_state_flag(enabled))
+                .unwrap_or_else(|_err| self.clone())
+        }
+
+        #[cfg(feature = "agent-sampling")]
+        fn priority_sampling_enabled(&self) -> bool {
+            self.get(TRACE_STATE_PRIORITY_SAMPLING)
+                .map(trace_flag_to_boolean)
+                .unwrap_or_default()
+        }
+    }
 
     enum SamplingPriority {
         UserReject = -1,
@@ -220,9 +299,7 @@ mod propagator {
         if trace_flags & TRACE_FLAG_DEFERRED == TRACE_FLAG_DEFERRED {
             (TraceState::default(), trace_flags)
         } else {
-            (TraceState::from_key_value(
-                [(TRACE_STATE_PRIORITY_SAMPLING, if trace_flags.is_sampled() { TRACE_STATE_TRUE_VALUE } else { TRACE_STATE_FALSE_VALUE })]
-            ).unwrap_or_default(), TraceFlags::SAMPLED)
+            (DatadogTraceStateBuilder::default().with_priority_sampling(trace_flags.is_sampled()).build(), TraceFlags::SAMPLED)
         }
     }
 
@@ -375,8 +452,8 @@ mod propagator {
                 (vec![(DATADOG_TRACE_ID_HEADER, "garbage")], SpanContext::empty_context()),
                 (vec![(DATADOG_TRACE_ID_HEADER, "1234"), (DATADOG_PARENT_ID_HEADER, "garbage")], SpanContext::new(TraceId::from_u128(1234), SpanId::INVALID, TRACE_FLAG_DEFERRED, true, TraceState::default())),
                 (vec![(DATADOG_TRACE_ID_HEADER, "1234"), (DATADOG_PARENT_ID_HEADER, "12")], SpanContext::new(TraceId::from_u128(1234), SpanId::from_u64(12), TRACE_FLAG_DEFERRED, true, TraceState::default())),
-                (vec![(DATADOG_TRACE_ID_HEADER, "1234"), (DATADOG_PARENT_ID_HEADER, "12"), (DATADOG_SAMPLING_PRIORITY_HEADER, "0")], SpanContext::new(TraceId::from_u128(1234), SpanId::from_u64(12), TraceFlags::SAMPLED, true, TraceState::from_key_value([(TRACE_STATE_PRIORITY_SAMPLING, TRACE_STATE_FALSE_VALUE)]).unwrap())),
-                (vec![(DATADOG_TRACE_ID_HEADER, "1234"), (DATADOG_PARENT_ID_HEADER, "12"), (DATADOG_SAMPLING_PRIORITY_HEADER, "1")], SpanContext::new(TraceId::from_u128(1234), SpanId::from_u64(12), TraceFlags::SAMPLED, true, TraceState::from_key_value([(TRACE_STATE_PRIORITY_SAMPLING, TRACE_STATE_TRUE_VALUE)]).unwrap())),
+                (vec![(DATADOG_TRACE_ID_HEADER, "1234"), (DATADOG_PARENT_ID_HEADER, "12"), (DATADOG_SAMPLING_PRIORITY_HEADER, "0")], SpanContext::new(TraceId::from_u128(1234), SpanId::from_u64(12), TraceFlags::SAMPLED, true, DatadogTraceStateBuilder::default().with_priority_sampling(false).build())),
+                (vec![(DATADOG_TRACE_ID_HEADER, "1234"), (DATADOG_PARENT_ID_HEADER, "12"), (DATADOG_SAMPLING_PRIORITY_HEADER, "1")], SpanContext::new(TraceId::from_u128(1234), SpanId::from_u64(12), TraceFlags::SAMPLED, true, DatadogTraceStateBuilder::default().with_priority_sampling(true).build())),
             ];
             #[cfg(not(feature = "agent-sampling"))]
             return vec![
@@ -399,8 +476,8 @@ mod propagator {
                 (vec![], SpanContext::new(TraceId::from_hex("1234").unwrap(), SpanId::INVALID, TRACE_FLAG_DEFERRED, true, TraceState::default())),
                 (vec![], SpanContext::new(TraceId::from_hex("1234").unwrap(), SpanId::INVALID, TraceFlags::SAMPLED, true, TraceState::default())),
                 (vec![(DATADOG_TRACE_ID_HEADER, "1234"), (DATADOG_PARENT_ID_HEADER, "12")], SpanContext::new(TraceId::from_u128(1234), SpanId::from_u64(12), TRACE_FLAG_DEFERRED, true, TraceState::default())),
-                (vec![(DATADOG_TRACE_ID_HEADER, "1234"), (DATADOG_PARENT_ID_HEADER, "12"), (DATADOG_SAMPLING_PRIORITY_HEADER, "0")], SpanContext::new(TraceId::from_u128(1234), SpanId::from_u64(12), TraceFlags::SAMPLED, true, TraceState::from_key_value([(TRACE_STATE_PRIORITY_SAMPLING, TRACE_STATE_FALSE_VALUE)]).unwrap())),
-                (vec![(DATADOG_TRACE_ID_HEADER, "1234"), (DATADOG_PARENT_ID_HEADER, "12"), (DATADOG_SAMPLING_PRIORITY_HEADER, "1")], SpanContext::new(TraceId::from_u128(1234), SpanId::from_u64(12), TraceFlags::SAMPLED, true, TraceState::from_key_value([(TRACE_STATE_PRIORITY_SAMPLING, TRACE_STATE_TRUE_VALUE)]).unwrap())),
+                (vec![(DATADOG_TRACE_ID_HEADER, "1234"), (DATADOG_PARENT_ID_HEADER, "12"), (DATADOG_SAMPLING_PRIORITY_HEADER, "0")], SpanContext::new(TraceId::from_u128(1234), SpanId::from_u64(12), TraceFlags::SAMPLED, true, DatadogTraceStateBuilder::default().with_priority_sampling(false).build())),
+                (vec![(DATADOG_TRACE_ID_HEADER, "1234"), (DATADOG_PARENT_ID_HEADER, "12"), (DATADOG_SAMPLING_PRIORITY_HEADER, "1")], SpanContext::new(TraceId::from_u128(1234), SpanId::from_u64(12), TraceFlags::SAMPLED, true, DatadogTraceStateBuilder::default().with_priority_sampling(true).build())),
             ];
             #[cfg(not(feature = "agent-sampling"))]
             return vec![

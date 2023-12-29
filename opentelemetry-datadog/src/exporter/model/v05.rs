@@ -4,12 +4,7 @@ use crate::exporter::model::{
     SAMPLING_PRIORITY_KEY,
 };
 use crate::exporter::{Error, ModelConfig};
-#[cfg(feature = "agent-sampling")]
-use crate::propagator::TRACE_STATE_PRIORITY_SAMPLING;
-use crate::propagator::{
-    TRACE_STATE_MEASURE,
-    TRACE_STATE_TRUE_VALUE,
-};
+use crate::propagator::DatadogTraceState;
 use opentelemetry::trace::Status;
 use opentelemetry_sdk::export::trace::SpanData;
 use std::time::SystemTime;
@@ -124,14 +119,6 @@ fn write_unified_tag(
     Ok(())
 }
 
-fn get_metric_by_name(span: &SpanData, name: &str) -> f64 {
-    span.span_context
-        .trace_state()
-        .get(name)
-        .map(|x| if x == TRACE_STATE_TRUE_VALUE { 1.0 } else { 0.0 })
-        .unwrap_or(0.0)
-}
-
 #[cfg(not(feature = "agent-sampling"))]
 fn get_sampling_priority(_span: &SpanData) -> f64 {
     1.0
@@ -139,11 +126,19 @@ fn get_sampling_priority(_span: &SpanData) -> f64 {
 
 #[cfg(feature = "agent-sampling")]
 fn get_sampling_priority(span: &SpanData) -> f64 {
-    get_metric_by_name(span, TRACE_STATE_PRIORITY_SAMPLING)
+    if span.span_context.trace_state().priority_sampling_enabled() {
+        1.0
+    } else {
+        0.0
+    }
 }
 
-fn get_is_measure(span: &SpanData) -> f64 {
-    get_metric_by_name(span, TRACE_STATE_MEASURE)
+fn get_measuring(span: &SpanData) -> f64 {
+    if span.span_context.trace_state().measuring_enabled() {
+        1.0
+    } else {
+        0.0
+    }
 }
 
 fn encode_traces<S, N, R>(
@@ -243,7 +238,7 @@ where
             rmp::encode::write_f64(&mut encoded, sampling_priority)?;
 
             rmp::encode::write_u32(&mut encoded, interner.intern(DD_MEASURED_KEY))?;
-            let is_measure = get_is_measure(&span);
+            let is_measure = get_measuring(&span);
             rmp::encode::write_f64(&mut encoded, is_measure)?;
             rmp::encode::write_u32(&mut encoded, span_type)?;
         }
