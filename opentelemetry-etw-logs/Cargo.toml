@@ -10,7 +10,7 @@ rust-version = "1.65.0"
 keywords = ["opentelemetry", "log", "trace", "etw"]
 license = "Apache-2.0"
 
-[dependencies]linu
+[dependencies]
 eventheader = "0.3.2"
 eventheader_dynamic = "0.3.3"
 opentelemetry = { version = "0.21", features = ["logs"] }
