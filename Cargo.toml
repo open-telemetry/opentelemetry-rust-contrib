@@ -4,6 +4,7 @@ members = [
     "opentelemetry-contrib",
 # TODO: Add back in once this relies on a published version
 #    "opentelemetry-datadog",
+    "opentelemetry-etw-logs",
 # TODO: Add back in once this relies on a published version
 #    "opentelemetry-stackdriver",
     "opentelemetry-user-events-logs",
