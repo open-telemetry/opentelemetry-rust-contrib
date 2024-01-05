@@ -140,7 +140,9 @@ pub struct Builder {
 }
 
 impl Builder {
-    /// Set the number of concurrent requests to send to StackDriver.
+    /// Set the maximum shutdown duration to export all the remaining data.
+    ///
+    /// If not set, defaults to 5 seconds.
     pub fn maximum_shutdown_duration(mut self, duration: Duration) -> Self {
         self.maximum_shutdown_duration = Some(duration);
         self
