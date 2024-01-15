@@ -16,10 +16,8 @@ hex = "0.4"
 http = "0.2"
 hyper = "0.14.2"
 hyper-rustls = { version = "0.24", optional = true }
-# TODO: Replace with opentelemetry version before release
-opentelemetry = { git = "https://github.com/open-telemetry/opentelemetry-rust.git", branch = "main" }
-# TODO: Replace with opentelemetry version before release
-opentelemetry_sdk = { git = "https://github.com/open-telemetry/opentelemetry-rust.git", branch = "main" }
+opentelemetry = "0.21.0"
+opentelemetry_sdk = "0.21.2"
 opentelemetry-semantic-conventions = { version = "0.13" }
 prost = "0.11.0"
 prost-types = "0.11.1"

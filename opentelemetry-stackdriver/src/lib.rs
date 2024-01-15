@@ -25,11 +25,13 @@ use std::{
 use async_trait::async_trait;
 use futures_core::future::BoxFuture;
 use futures_util::stream::StreamExt;
+use opentelemetry::trace::Link as OtelLink;
 use opentelemetry::{
     global::handle_error,
     trace::{SpanId, TraceError},
     Key, KeyValue, Value,
 };
+use opentelemetry_sdk::trace::EvictedQueue;
 use opentelemetry_sdk::{
     export::{
         trace::{ExportResult, SpanData, SpanExporter},
@@ -738,14 +740,14 @@ impl From<(Vec<KeyValue>, &Resource)> for Attributes {
                     return None;
                 }
 
-                if k.as_str() == semconv::resource::SERVICE_NAME {
+                if k == semconv::resource::SERVICE_NAME {
                     return Some((GCP_SERVICE_NAME.to_owned(), v.into()));
                 } else if key == HTTP_PATH {
                     return Some((GCP_HTTP_PATH.to_owned(), v.into()));
                 }
 
                 for (otel_key, gcp_key) in KEY_MAP {
-                    if otel_key == k.as_str() {
+                    if otel_key.as_str() == key {
                         return Some((gcp_key.to_owned(), v.into()));
                     }
                 }
@@ -764,13 +766,13 @@ impl From<(Vec<KeyValue>, &Resource)> for Attributes {
     }
 }
 
-fn transform_links(links: &opentelemetry_sdk::trace::SpanLinks) -> Option<Links> {
+fn transform_links(links: &EvictedQueue<OtelLink>) -> Option<Links> {
     if links.is_empty() {
         return None;
     }
 
     Some(Links {
-        dropped_links_count: links.dropped_count as i32,
+        dropped_links_count: links.dropped_count() as i32,
         link: links
             .iter()
             .map(|link| Link {
@@ -783,15 +785,15 @@ fn transform_links(links: &opentelemetry_sdk::trace::SpanLinks) -> Option<Links>
 }
 
 // Map conventional OpenTelemetry keys to their GCP counterparts.
-const KEY_MAP: [(&str, &str); 8] = [
-    (HTTP_HOST, "/http/host"),
+const KEY_MAP: [(Key, &str); 8] = [
+    (Key::from_static_str(HTTP_HOST), "/http/host"),
     (semconv::trace::HTTP_METHOD, "/http/method"),
     (semconv::trace::HTTP_TARGET, "/http/path"),
     (semconv::trace::HTTP_URL, "/http/url"),
-    (HTTP_USER_AGENT, "/http/user_agent"),
+    (Key::from_static_str(HTTP_USER_AGENT), "/http/user_agent"),
     (semconv::trace::HTTP_STATUS_CODE, "/http/status_code"),
     (semconv::trace::HTTP_ROUTE, "/http/route"),
-    (HTTP_PATH, GCP_HTTP_PATH),
+    (Key::from_static_str(HTTP_PATH), GCP_HTTP_PATH),
 ];
 
 impl From<opentelemetry::trace::SpanKind> for SpanKind {
