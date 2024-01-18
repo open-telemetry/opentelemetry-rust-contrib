@@ -14,7 +14,7 @@ rust-version = "1.65"
 opentelemetry = { version = "0.21", features = ["metrics"] }
 opentelemetry_sdk = { version = "0.21", features = ["metrics", "rt-tokio"] }
 opentelemetry-proto = { version = "0.4", features = ["gen-tonic", "metrics"] }
-eventheader = { version = "= 0.3.2" }
+eventheader = { version = "= 0.3.4" }
 async-trait = "0.1"
 prost = "0.11"
 
