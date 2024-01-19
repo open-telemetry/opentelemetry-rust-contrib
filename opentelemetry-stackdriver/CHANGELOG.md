@@ -1,6 +1,7 @@
 # Changelog
 
 ## vNext
+- Added support for `GoogleTraceContextPropagator`
 
 WARNING The current version relies on features only in upstream git version. This should be modified before releasing.
 

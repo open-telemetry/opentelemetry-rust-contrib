@@ -51,6 +51,9 @@ use yup_oauth2::authenticator::Authenticator;
 #[allow(clippy::derive_partial_eq_without_eq)] // tonic doesn't derive Eq for generated types
 pub mod proto;
 
+#[cfg(feature = "propagator")]
+pub mod google_trace_context_propagator;
+
 const HTTP_HOST: &str = "http.host";
 const HTTP_PATH: &str = "http.path";
 const HTTP_USER_AGENT: &str = "http.user_agent";
