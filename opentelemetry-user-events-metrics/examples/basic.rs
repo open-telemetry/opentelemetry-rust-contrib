@@ -139,5 +139,4 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         // Sleep for 1 second
         thread::sleep(Duration::from_secs(1));
     }
-
 }
