@@ -1,6 +1,6 @@
-use crate::transform::transform_resource_metrics;
 use async_trait::async_trait;
 use opentelemetry::metrics::{MetricsError, Result};
+use opentelemetry_proto::tonic::collector::metrics::v1::ExportMetricsServiceRequest;
 use opentelemetry_sdk::metrics::{
     data::{ResourceMetrics, Temporality},
     exporter::PushMetricsExporter,
@@ -69,7 +69,7 @@ impl Debug for MetricsExporter {
 impl PushMetricsExporter for MetricsExporter {
     async fn export(&self, metrics: &mut ResourceMetrics) -> Result<()> {
         if self.trace_point.enabled() {
-            let proto_message = transform_resource_metrics(metrics);
+            let proto_message: ExportMetricsServiceRequest = (&*metrics).into();
 
             let mut byte_array = Vec::new();
             let _encode_result = proto_message
