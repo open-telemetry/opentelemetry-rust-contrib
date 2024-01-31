@@ -1,12 +1,12 @@
 use async_trait::async_trait;
 use opentelemetry::metrics::{MetricsError, Result};
+use opentelemetry_proto::tonic::collector::metrics::v1::ExportMetricsServiceRequest;
 use opentelemetry_sdk::metrics::{
     data::{ResourceMetrics, Temporality},
     exporter::PushMetricsExporter,
     reader::{AggregationSelector, DefaultAggregationSelector, TemporalitySelector},
     Aggregation, InstrumentKind,
 };
-use opentelemetry_proto::tonic::collector::metrics::v1::ExportMetricsServiceRequest;
 
 use crate::tracepoint;
 use eventheader::_internal as ehi;
@@ -69,7 +69,7 @@ impl Debug for MetricsExporter {
 impl PushMetricsExporter for MetricsExporter {
     async fn export(&self, metrics: &mut ResourceMetrics) -> Result<()> {
         if self.trace_point.enabled() {
-            let proto_message: ExportMetricsServiceRequest  = (&*metrics).into();
+            let proto_message: ExportMetricsServiceRequest = (&*metrics).into();
 
             let mut byte_array = Vec::new();
             let _encode_result = proto_message

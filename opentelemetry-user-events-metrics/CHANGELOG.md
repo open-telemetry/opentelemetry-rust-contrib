@@ -3,7 +3,7 @@
 ## Unreleased
 
 - Support all metric instruments
-    [#27](https://github.com/open-telemetry/opentelemetry-rust-contrib/pull/27).
+    [#30](https://github.com/open-telemetry/opentelemetry-rust-contrib/pull/30).
 
 ## v0.2.1
 
