@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- Support all metric instruments
+    [#27](https://github.com/open-telemetry/opentelemetry-rust-contrib/pull/27).
+
 ## v0.2.1
 
 - Update eventheader version to 0.3.4.
