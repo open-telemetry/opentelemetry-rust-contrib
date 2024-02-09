@@ -7,6 +7,7 @@ mod context;
 pub use context::{new_span_if_parent_sampled, new_span_if_recording, Contextualized};
 
 pub mod exporter;
+pub mod id_generator;
 pub mod propagator;
 
 #[cfg(feature = "api")]
