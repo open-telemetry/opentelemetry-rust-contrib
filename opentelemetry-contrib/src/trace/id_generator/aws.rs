@@ -23,8 +23,8 @@ use std::time::{Duration, UNIX_EPOCH};
 /// ## Example
 ///
 /// ```
-/// use opentelemetry_sdk::trace::{self, TracerProvider, XrayIdGenerator};
-///
+/// use opentelemetry_sdk::trace::{self, TracerProvider};
+/// use opentelemetry_contrib::trace::id_generator::XrayIdGenerator;
 /// let _provider: TracerProvider = TracerProvider::builder()
 ///     .with_config(trace::config().with_id_generator(XrayIdGenerator::default()))
 ///     .build();
