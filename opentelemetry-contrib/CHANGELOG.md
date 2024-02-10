@@ -8,7 +8,7 @@
 
 - Bump MSRV to 1.65 [#1318](https://github.com/open-telemetry/opentelemetry-rust/pull/1318)
 - Bump MSRV to 1.64 [#1203](https://github.com/open-telemetry/opentelemetry-rust/pull/1203)
-- Move Xray IdGenerator from `opentelemetry-rust` to `opentelemetry-contrib`  [#1489]
+- Move Xray IdGenerator from `opentelemetry-rust` to `opentelemetry-contrib`  [#33](https://github.com/open-telemetry/opentelemetry-rust-contrib/pull/33)
 
 ## v0.12.0
 
