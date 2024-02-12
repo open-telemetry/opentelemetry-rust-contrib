@@ -4,6 +4,12 @@
 
 WARNING The current version relies on features only in upstream git version. This should be modified before releasing.
 
+### Changed
+
+- allow send all traces to `datadog-agent` with `agent-sampling` feature.
+- allow `datadog-agent` generate metrics from spans for [APM](https://docs.datadoghq.com/tracing/metrics/).
+
+
 ## v0.9.0
 
 ### Changed
