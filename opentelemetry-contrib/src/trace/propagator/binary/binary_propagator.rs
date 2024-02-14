@@ -15,7 +15,7 @@ pub trait BinaryFormat {
     fn serialize_into_bytes(&self, context: &SpanContext) -> [u8; 29];
 
     /// Deserializes a span context from a byte array.
-    fn deserialize_from_bytes(&self, bytes: Vec<u8>) -> SpanContext;
+    fn deserialize_from_bytes(&self, bytes: &[u8]) -> SpanContext;
 }
 
 /// Extracts and injects `SpanContext`s from byte arrays.
@@ -46,7 +46,7 @@ impl BinaryFormat for BinaryPropagator {
     }
 
     /// Deserializes a span context from a byte array.
-    fn deserialize_from_bytes(&self, bytes: Vec<u8>) -> SpanContext {
+    fn deserialize_from_bytes(&self, bytes: &[u8]) -> SpanContext {
         if bytes.is_empty() {
             return SpanContext::empty_context();
         }
@@ -172,7 +172,7 @@ mod tests {
         let propagator = BinaryPropagator::new();
 
         for (context, data) in from_bytes_data() {
-            assert_eq!(propagator.deserialize_from_bytes(data), context)
+            assert_eq!(propagator.deserialize_from_bytes(&data), context)
         }
     }
 }
