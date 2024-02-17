@@ -17,15 +17,19 @@ http = "0.2"
 hyper = "0.14.2"
 hyper-rustls = { version = "0.24", optional = true }
 # TODO: Replace with opentelemetry version before release
-opentelemetry = { git = "https://github.com/open-telemetry/opentelemetry-rust.git", branch = "main" }
+opentelemetry = { git = "https://github.com/open-telemetry/opentelemetry-rust.git", rev = "6175c3" }
 # TODO: Replace with opentelemetry version before release
-opentelemetry_sdk = { git = "https://github.com/open-telemetry/opentelemetry-rust.git", branch = "main" }
-opentelemetry-semantic-conventions = { version = "0.13" }
+opentelemetry_sdk = { git = "https://github.com/open-telemetry/opentelemetry-rust.git", rev = "6175c3" }
+# TODO: Replace with opentelemetry version before release
+opentelemetry-semantic-conventions = { git = "https://github.com/open-telemetry/opentelemetry-rust.git", rev = "6175c3" }
 prost = "0.11.0"
 prost-types = "0.11.1"
 thiserror = "1.0.30"
 tonic = { version = "0.9.0", features = ["gzip", "tls", "transport"] }
 yup-oauth2 = { version = "8.1.0", optional = true }
+once_cell = { version = "1.19", optional = true }
+# we don't need unicode support
+regex = { version = "1.10", default-features = false, features = ["std", "perf"], optional = true }
 
 # Futures
 futures-core = "0.3"
@@ -37,6 +41,7 @@ default = ["yup-authorizer", "tls-native-roots"]
 yup-authorizer = ["hyper-rustls", "yup-oauth2"]
 tls-native-roots = ["tonic/tls-roots"]
 tls-webpki-roots = ["tonic/tls-webpki-roots"]
+propagator = ["once_cell", "regex"]
 
 [dev-dependencies]
 reqwest = "0.11.9"
@@ -45,3 +50,6 @@ tokio = "1"
 tonic-build = "0.9.0"
 walkdir = "2.3.2"
 futures-util = { version = "0.3", default-features = false }
+# TODO: Replace with opentelemetry version before release
+opentelemetry = { git = "https://github.com/open-telemetry/opentelemetry-rust.git", rev = "6175c3", features = ["testing"] }
+

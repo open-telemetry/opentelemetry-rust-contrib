@@ -51,6 +51,9 @@ use yup_oauth2::authenticator::Authenticator;
 #[allow(clippy::derive_partial_eq_without_eq)] // tonic doesn't derive Eq for generated types
 pub mod proto;
 
+#[cfg(feature = "propagator")]
+pub mod google_trace_context_propagator;
+
 const HTTP_HOST: &str = "http.host";
 const HTTP_PATH: &str = "http.path";
 const HTTP_USER_AGENT: &str = "http.user_agent";
@@ -140,7 +143,9 @@ pub struct Builder {
 }
 
 impl Builder {
-    /// Set the number of concurrent requests to send to StackDriver.
+    /// Set the maximum shutdown duration to export all the remaining data.
+    ///
+    /// If not set, defaults to 5 seconds.
     pub fn maximum_shutdown_duration(mut self, duration: Duration) -> Self {
         self.maximum_shutdown_duration = Some(duration);
         self

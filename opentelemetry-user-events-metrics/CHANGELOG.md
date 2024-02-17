@@ -2,6 +2,16 @@
 
 ## Unreleased
 
+## v0.2.2
+
+- Fixed a bug which caused Histogram, Gauge metrics to be dropped.
+    [#30](https://github.com/open-telemetry/opentelemetry-rust-contrib/pull/30).
+
+## v0.2.1
+
+- Update eventheader version to 0.3.4.
+    [#27](https://github.com/open-telemetry/opentelemetry-rust-contrib/pull/27).
+
 ## v0.2.0
 
 - Fix aggregation selector and temporality so every instruments are aggregated
