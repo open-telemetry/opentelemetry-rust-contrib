@@ -52,3 +52,8 @@ opentelemetry_sdk = { git = "https://github.com/open-telemetry/opentelemetry-rus
 [[example]]
 name = "datadog"
 path = "examples/datadog.rs"
+
+[[example]]
+name = "agent_sampling"
+path = "examples/agent_sampling.rs"
+required-features = ["agent-sampling"]
