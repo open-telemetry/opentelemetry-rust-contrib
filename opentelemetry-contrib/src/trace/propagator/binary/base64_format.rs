@@ -32,7 +32,7 @@ where
 
     fn deserialize_from_base64(&self, base64: &str) -> SpanContext {
         if let Ok(bytes) = decode(base64.as_bytes()) {
-            self.deserialize_from_bytes(bytes)
+            self.deserialize_from_bytes(&bytes)
         } else {
             SpanContext::empty_context()
         }

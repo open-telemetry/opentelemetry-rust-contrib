@@ -2,6 +2,10 @@
 
 ## vNext
 
+### Changed
+
+- Update `BinaryFormat::deserialize_from_bytes` to take a byte slice instead of a Vec [#32](https://github.com/open-telemetry/opentelemetry-rust-contrib/pull/32)
+
 ## v0.13.0
 
 ### Changed
