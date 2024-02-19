@@ -1,4 +1,3 @@
-
 use opentelemetry::trace::{SpanId, TraceId};
 use opentelemetry_sdk::trace::{IdGenerator, RandomIdGenerator};
 use std::time::{Duration, UNIX_EPOCH};
@@ -24,11 +23,12 @@ use std::time::{Duration, UNIX_EPOCH};
 /// ## Example
 ///
 /// ```
-/// use opentelemetry_sdk::trace::{self, TracerProvider};
-/// use opentelemetry_aws::trace::id_generator::XrayIdGenerator;
+/// use opentelemetry::trace::{TraceId};
+/// use opentelemetry_sdk::trace::{self, IdGenerator, TracerProvider};
+/// use opentelemetry_aws::trace::XrayIdGenerator;
 /// let _provider: TracerProvider = TracerProvider::builder()
-///     .with_config(trace::config().with_id_generator(XrayIdGenerator::default()))
-///     .build();
+///      .with_config(trace::config().with_id_generator(XrayIdGenerator::default()))
+///      .build();
 /// ```
 ///
 /// [otel-collector]: https://github.com/open-telemetry/opentelemetry-collector-contrib#opentelemetry-collector-contrib

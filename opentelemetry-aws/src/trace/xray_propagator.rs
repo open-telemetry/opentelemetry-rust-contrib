@@ -43,9 +43,7 @@ use once_cell::sync::Lazy;
 use opentelemetry::{
     global::{self, Error},
     propagation::{text_map_propagator::FieldIter, Extractor, Injector, TextMapPropagator},
-    trace::{
-        SpanContext, SpanId, TraceContextExt, TraceError, TraceFlags, TraceId, TraceState,
-    },
+    trace::{SpanContext, SpanId, TraceContextExt, TraceError, TraceFlags, TraceId, TraceState},
     Context,
 };
 use std::borrow::Cow;
@@ -63,8 +61,7 @@ const REQUESTED_SAMPLE_DECISION: &str = "?";
 
 const TRACE_FLAG_DEFERRED: TraceFlags = TraceFlags::new(0x02);
 
-static AWS_XRAY_HEADER_FIELD: Lazy<[String; 1]> =
-    Lazy::new(|| [AWS_XRAY_TRACE_HEADER.to_owned()]);
+static AWS_XRAY_HEADER_FIELD: Lazy<[String; 1]> = Lazy::new(|| [AWS_XRAY_TRACE_HEADER.to_owned()]);
 
 /// Extracts and injects `SpanContext`s into `Extractor`s or `Injector`s using AWS X-Ray header format.
 ///
@@ -383,4 +380,3 @@ mod tests {
         }
     }
 }
-

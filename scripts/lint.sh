@@ -25,7 +25,6 @@ if rustup component add clippy; then
   cargo_feature opentelemetry-contrib "api"
   cargo_feature opentelemetry-contrib "base64_format"
   cargo_feature opentelemetry-contrib "binary_propagator"
-  cargo_feature opentelemetry-contrib "xray_id_generator"
   cargo_feature opentelemetry-contrib "jaeger_json_exporter"
   cargo_feature opentelemetry-contrib "rt-tokio"
   cargo_feature opentelemetry-contrib "rt-tokio-current-thread"
