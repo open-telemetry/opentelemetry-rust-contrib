@@ -29,7 +29,7 @@
 
 - reduce `tokio` feature requirements #750
 - Update to opentelemetry v0.18.0
-- - Move Xray IdGenerator from `opentelemetry-rust` to `opentelemetry-aws` [#33](https://github.com/open-telemetry/opentelemetry-rust-contrib/pull/33)
+- Move Xray IdGenerator from `opentelemetry-rust` to `opentelemetry-aws` [#33](https://github.com/open-telemetry/opentelemetry-rust-contrib/pull/33)
 
 ### Fixed
 
