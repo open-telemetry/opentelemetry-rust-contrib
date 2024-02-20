@@ -22,6 +22,6 @@ to AWS's telemetry platform.
 
 ## Supported component
 
-Currently, this crate only supports `XRay` propagator. Contributions are welcome.
+Currently, this crate only supports `XRay` propagator and `Xray` ID Generator. Contributions are welcome.
 
 [`OpenTelemetry`]: https://crates.io/crates/opentelemetry
