@@ -13,14 +13,14 @@ license = "Apache-2.0"
 [dependencies]
 eventheader = "0.3.2"
 eventheader_dynamic = "0.3.3"
-opentelemetry = { version = "0.21", features = ["logs"] }
-opentelemetry_sdk = { version = "0.21", features = ["logs"] }
+opentelemetry = { workspace = true, features = ["logs"] }
+opentelemetry_sdk = { workspace = true, features = ["logs"] }
 async-std = { version="1.6" }
 async-trait = { version="0.1" }
-chrono = { version="0.4", default-features = false, features=["std"] }
+chrono = { version = "0.4", default-features = false, features = ["std"] }
 
 [dev-dependencies]
-opentelemetry-appender-tracing = { version = "0.2" }
+opentelemetry-appender-tracing = { workspace = true }
 tracing = { version = "0.1", default-features = false, features = ["std"] }
 tracing-core = "0.1.31"
 tracing-subscriber = { version = "0.3.0", default-features = false, features = ["registry", "std"] }
@@ -28,7 +28,7 @@ microbench = "0.5"
 
 [features]
 logs_level_enabled = ["opentelemetry/logs_level_enabled", "opentelemetry_sdk/logs_level_enabled"]
-default=["logs_level_enabled"]
+default = ["logs_level_enabled"]
 
 [[example]]
 name = "basic"
