@@ -187,15 +187,18 @@ pub struct Http {
 /// 1. Leaf request fields (recursive expansion nested messages in the request
 ///     message) are classified into three categories:
 ///     - Fields referred by the path template. They are passed via the URL path.
-///     - Fields referred by the [HttpRule.body][google.api.HttpRule.body]. They are passed via the HTTP
+///     - Fields referred by the [HttpRule.body][google.api.HttpRule.body]. They
+///     are passed via the HTTP
 ///       request body.
 ///     - All other fields are passed via the URL query parameters, and the
 ///       parameter name is the field path in the request message. A repeated
 ///       field can be represented as multiple query parameters under the same
 ///       name.
-///   2. If [HttpRule.body][google.api.HttpRule.body] is "*", there is no URL query parameter, all fields
+///   2. If [HttpRule.body][google.api.HttpRule.body] is "*", there is no URL
+///   query parameter, all fields
 ///      are passed via URL path and HTTP request body.
-///   3. If [HttpRule.body][google.api.HttpRule.body] is omitted, there is no HTTP request body, all
+///   3. If [HttpRule.body][google.api.HttpRule.body] is omitted, there is no HTTP
+///   request body, all
 ///      fields are passed via URL path and URL query parameters.
 ///
 /// ### Path template syntax
@@ -292,7 +295,8 @@ pub struct Http {
 pub struct HttpRule {
     /// Selects a method to which this rule applies.
     ///
-    /// Refer to [selector][google.api.DocumentationRule.selector] for syntax details.
+    /// Refer to [selector][google.api.DocumentationRule.selector] for syntax
+    /// details.
     #[prost(string, tag = "1")]
     pub selector: ::prost::alloc::string::String,
     /// The name of the request field whose value is mapped to the HTTP request
@@ -457,7 +461,9 @@ pub struct CommonLanguageSettings {
 #[allow(clippy::derive_partial_eq_without_eq)]
 #[derive(Clone, PartialEq, ::prost::Message)]
 pub struct ClientLibrarySettings {
-    /// Version of the API to apply these settings to.
+    /// Version of the API to apply these settings to. This is the full protobuf
+    /// package for the API, ending in the version element.
+    /// Examples: "google.cloud.speech.v1" and "google.spanner.admin.database.v1".
     #[prost(string, tag = "1")]
     pub version: ::prost::alloc::string::String,
     /// Launch stage of this version of the API.
@@ -502,7 +508,7 @@ pub struct Publishing {
     /// long-running operation pattern.
     #[prost(message, repeated, tag = "2")]
     pub method_settings: ::prost::alloc::vec::Vec<MethodSettings>,
-    /// Link to a place that API users can report issues.  Example:
+    /// Link to a *public* URI where users can report issues.  Example:
     /// <https://issuetracker.google.com/issues/new?component=190865&template=1161103>
     #[prost(string, tag = "101")]
     pub new_issue_uri: ::prost::alloc::string::String,
@@ -534,6 +540,10 @@ pub struct Publishing {
     /// settings with the same version string are discarded.
     #[prost(message, repeated, tag = "109")]
     pub library_settings: ::prost::alloc::vec::Vec<ClientLibrarySettings>,
+    /// Optional link to proto reference documentation.  Example:
+    /// <https://cloud.google.com/pubsub/lite/docs/reference/rpc>
+    #[prost(string, tag = "110")]
+    pub proto_reference_documentation_uri: ::prost::alloc::string::String,
 }
 /// Settings for Java client libraries.
 #[allow(clippy::derive_partial_eq_without_eq)]
@@ -612,6 +622,38 @@ pub struct DotnetSettings {
     /// Some settings.
     #[prost(message, optional, tag = "1")]
     pub common: ::core::option::Option<CommonLanguageSettings>,
+    /// Map from original service names to renamed versions.
+    /// This is used when the default generated types
+    /// would cause a naming conflict. (Neither name is
+    /// fully-qualified.)
+    /// Example: Subscriber to SubscriberServiceApi.
+    #[prost(map = "string, string", tag = "2")]
+    pub renamed_services:
+        ::std::collections::HashMap<::prost::alloc::string::String, ::prost::alloc::string::String>,
+    /// Map from full resource types to the effective short name
+    /// for the resource. This is used when otherwise resource
+    /// named from different services would cause naming collisions.
+    /// Example entry:
+    /// "datalabeling.googleapis.com/Dataset": "DataLabelingDataset"
+    #[prost(map = "string, string", tag = "3")]
+    pub renamed_resources:
+        ::std::collections::HashMap<::prost::alloc::string::String, ::prost::alloc::string::String>,
+    /// List of full resource types to ignore during generation.
+    /// This is typically used for API-specific Location resources,
+    /// which should be handled by the generator as if they were actually
+    /// the common Location resources.
+    /// Example entry: "documentai.googleapis.com/Location"
+    #[prost(string, repeated, tag = "4")]
+    pub ignored_resources: ::prost::alloc::vec::Vec<::prost::alloc::string::String>,
+    /// Namespaces which must be aliased in snippets due to
+    /// a known (but non-generator-predictable) naming collision
+    #[prost(string, repeated, tag = "5")]
+    pub forced_namespace_aliases: ::prost::alloc::vec::Vec<::prost::alloc::string::String>,
+    /// Method signatures (in the form "service.method(signature)")
+    /// which are provided separately, so shouldn't be generated.
+    /// Snippets *calling* these methods are still generated, however.
+    #[prost(string, repeated, tag = "6")]
+    pub handwritten_signatures: ::prost::alloc::vec::Vec<::prost::alloc::string::String>,
 }
 /// Settings for Ruby client libraries.
 #[allow(clippy::derive_partial_eq_without_eq)]
@@ -644,8 +686,8 @@ pub struct MethodSettings {
     /// Example of a YAML configuration::
     ///
     ///   publishing:
-    ///     method_behavior:
-    ///       - selector: CreateAdDomain
+    ///     method_settings:
+    ///       - selector: google.cloud.speech.v2.Speech.BatchRecognize
     ///         long_running:
     ///           initial_poll_delay:
     ///             seconds: 60 # 1 minute
@@ -656,6 +698,19 @@ pub struct MethodSettings {
     ///              seconds: 54000 # 90 minutes
     #[prost(message, optional, tag = "2")]
     pub long_running: ::core::option::Option<method_settings::LongRunning>,
+    /// List of top-level fields of the request message, that should be
+    /// automatically populated by the client libraries based on their
+    /// (google.api.field_info).format. Currently supported format: UUID4.
+    ///
+    /// Example of a YAML configuration:
+    ///
+    ///   publishing:
+    ///     method_settings:
+    ///       - selector: google.example.v1.ExampleService.CreateExample
+    ///         auto_populated_fields:
+    ///         - request_id
+    #[prost(string, repeated, tag = "3")]
+    pub auto_populated_fields: ::prost::alloc::vec::Vec<::prost::alloc::string::String>,
 }
 /// Nested message and enum types in `MethodSettings`.
 pub mod method_settings {
@@ -701,6 +756,12 @@ pub enum ClientLibraryOrganization {
     Photos = 3,
     /// Street View Org.
     StreetView = 4,
+    /// Shopping Org.
+    Shopping = 5,
+    /// Geo Org.
+    Geo = 6,
+    /// Generative AI - <https://developers.generativeai.google>
+    GenerativeAi = 7,
 }
 impl ClientLibraryOrganization {
     /// String value of the enum field names used in the ProtoBuf definition.
@@ -714,6 +775,9 @@ impl ClientLibraryOrganization {
             ClientLibraryOrganization::Ads => "ADS",
             ClientLibraryOrganization::Photos => "PHOTOS",
             ClientLibraryOrganization::StreetView => "STREET_VIEW",
+            ClientLibraryOrganization::Shopping => "SHOPPING",
+            ClientLibraryOrganization::Geo => "GEO",
+            ClientLibraryOrganization::GenerativeAi => "GENERATIVE_AI",
         }
     }
     /// Creates an enum from field names used in the ProtoBuf definition.
@@ -724,6 +788,9 @@ impl ClientLibraryOrganization {
             "ADS" => Some(Self::Ads),
             "PHOTOS" => Some(Self::Photos),
             "STREET_VIEW" => Some(Self::StreetView),
+            "SHOPPING" => Some(Self::Shopping),
+            "GEO" => Some(Self::Geo),
+            "GENERATIVE_AI" => Some(Self::GenerativeAi),
             _ => None,
         }
     }
@@ -805,6 +872,19 @@ pub enum FieldBehavior {
     /// a non-empty value will be returned. The user will not be aware of what
     /// non-empty value to expect.
     NonEmptyDefault = 7,
+    /// Denotes that the field in a resource (a message annotated with
+    /// google.api.resource) is used in the resource name to uniquely identify the
+    /// resource. For AIP-compliant APIs, this should only be applied to the
+    /// `name` field on the resource.
+    ///
+    /// This behavior should not be applied to references to other resources within
+    /// the message.
+    ///
+    /// The identifier field of resources often have different field behavior
+    /// depending on the request it is embedded in (e.g. for Create methods name
+    /// is optional and unused, while for Update methods it is required). Instead
+    /// of method-specific annotations, only `IDENTIFIER` is required.
+    Identifier = 8,
 }
 impl FieldBehavior {
     /// String value of the enum field names used in the ProtoBuf definition.
@@ -821,6 +901,7 @@ impl FieldBehavior {
             FieldBehavior::Immutable => "IMMUTABLE",
             FieldBehavior::UnorderedList => "UNORDERED_LIST",
             FieldBehavior::NonEmptyDefault => "NON_EMPTY_DEFAULT",
+            FieldBehavior::Identifier => "IDENTIFIER",
         }
     }
     /// Creates an enum from field names used in the ProtoBuf definition.
@@ -834,6 +915,7 @@ impl FieldBehavior {
             "IMMUTABLE" => Some(Self::Immutable),
             "UNORDERED_LIST" => Some(Self::UnorderedList),
             "NON_EMPTY_DEFAULT" => Some(Self::NonEmptyDefault),
+            "IDENTIFIER" => Some(Self::Identifier),
             _ => None,
         }
     }
@@ -1130,9 +1212,10 @@ pub mod label_descriptor {
         }
     }
 }
-/// An object that describes the schema of a [MonitoredResource][google.api.MonitoredResource] object using a
-/// type name and a set of labels.  For example, the monitored resource
-/// descriptor for Google Compute Engine VM instances has a type of
+/// An object that describes the schema of a
+/// [MonitoredResource][google.api.MonitoredResource] object using a type name
+/// and a set of labels.  For example, the monitored resource descriptor for
+/// Google Compute Engine VM instances has a type of
 /// `"gce_instance"` and specifies the use of the labels `"instance_id"` and
 /// `"zone"` to identify particular VM instances.
 ///
@@ -1181,11 +1264,13 @@ pub struct MonitoredResourceDescriptor {
 /// An object representing a resource that can be used for monitoring, logging,
 /// billing, or other purposes. Examples include virtual machine instances,
 /// databases, and storage devices such as disks. The `type` field identifies a
-/// [MonitoredResourceDescriptor][google.api.MonitoredResourceDescriptor] object that describes the resource's
-/// schema. Information in the `labels` field identifies the actual resource and
-/// its attributes according to the schema. For example, a particular Compute
-/// Engine VM instance could be represented by the following object, because the
-/// [MonitoredResourceDescriptor][google.api.MonitoredResourceDescriptor] for `"gce_instance"` has labels
+/// [MonitoredResourceDescriptor][google.api.MonitoredResourceDescriptor] object
+/// that describes the resource's schema. Information in the `labels` field
+/// identifies the actual resource and its attributes according to the schema.
+/// For example, a particular Compute Engine VM instance could be represented by
+/// the following object, because the
+/// [MonitoredResourceDescriptor][google.api.MonitoredResourceDescriptor] for
+/// `"gce_instance"` has labels
 /// `"project_id"`, `"instance_id"` and `"zone"`:
 ///
 ///      { "type": "gce_instance",
@@ -1196,10 +1281,12 @@ pub struct MonitoredResourceDescriptor {
 #[derive(Clone, PartialEq, ::prost::Message)]
 pub struct MonitoredResource {
     /// Required. The monitored resource type. This field must match
-    /// the `type` field of a [MonitoredResourceDescriptor][google.api.MonitoredResourceDescriptor] object. For
-    /// example, the type of a Compute Engine VM instance is `gce_instance`.
-    /// Some descriptors include the service name in the type; for example,
-    /// the type of a Datastream stream is `datastream.googleapis.com/Stream`.
+    /// the `type` field of a
+    /// [MonitoredResourceDescriptor][google.api.MonitoredResourceDescriptor]
+    /// object. For example, the type of a Compute Engine VM instance is
+    /// `gce_instance`. Some descriptors include the service name in the type; for
+    /// example, the type of a Datastream stream is
+    /// `datastream.googleapis.com/Stream`.
     #[prost(string, tag = "1")]
     pub r#type: ::prost::alloc::string::String,
     /// Required. Values for all of the labels listed in the associated monitored
@@ -1209,12 +1296,12 @@ pub struct MonitoredResource {
     pub labels:
         ::std::collections::HashMap<::prost::alloc::string::String, ::prost::alloc::string::String>,
 }
-/// Auxiliary metadata for a [MonitoredResource][google.api.MonitoredResource] object.
-/// [MonitoredResource][google.api.MonitoredResource] objects contain the minimum set of information to
-/// uniquely identify a monitored resource instance. There is some other useful
-/// auxiliary metadata. Monitoring and Logging use an ingestion
-/// pipeline to extract metadata for cloud resources of all types, and store
-/// the metadata in this message.
+/// Auxiliary metadata for a [MonitoredResource][google.api.MonitoredResource]
+/// object. [MonitoredResource][google.api.MonitoredResource] objects contain the
+/// minimum set of information to uniquely identify a monitored resource
+/// instance. There is some other useful auxiliary metadata. Monitoring and
+/// Logging use an ingestion pipeline to extract metadata for cloud resources of
+/// all types, and store the metadata in this message.
 #[allow(clippy::derive_partial_eq_without_eq)]
 #[derive(Clone, PartialEq, ::prost::Message)]
 pub struct MonitoredResourceMetadata {
