@@ -29,7 +29,3 @@ microbench = "0.5"
 [features]
 logs_level_enabled = ["opentelemetry/logs_level_enabled", "opentelemetry_sdk/logs_level_enabled"]
 default = ["logs_level_enabled"]
-
-[[example]]
-name = "basic"
-path = "examples/basic.rs"
