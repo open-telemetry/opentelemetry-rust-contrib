@@ -1,5 +1,5 @@
 /// Defines the HTTP configuration for an API service. It contains a list of
-/// \[HttpRule][google.api.HttpRule\], each specifying the mapping of an RPC method
+/// [HttpRule][google.api.HttpRule], each specifying the mapping of an RPC method
 /// to one or more HTTP REST API methods.
 #[allow(clippy::derive_partial_eq_without_eq)]
 #[derive(Clone, PartialEq, ::prost::Message)]
@@ -26,7 +26,7 @@ pub struct Http {
 /// APIs](<https://github.com/googleapis/googleapis>),
 /// [Cloud Endpoints](<https://cloud.google.com/endpoints>), [gRPC
 /// Gateway](<https://github.com/grpc-ecosystem/grpc-gateway>),
-/// and \[Envoy\](<https://github.com/envoyproxy/envoy>) proxy support this feature
+/// and [Envoy](<https://github.com/envoyproxy/envoy>) proxy support this feature
 /// and use it for large scale production services.
 ///
 /// `HttpRule` defines the schema of the gRPC/REST mapping. The mapping specifies
@@ -187,23 +187,23 @@ pub struct Http {
 /// 1. Leaf request fields (recursive expansion nested messages in the request
 ///     message) are classified into three categories:
 ///     - Fields referred by the path template. They are passed via the URL path.
-///     - Fields referred by the \[HttpRule.body][google.api.HttpRule.body\]. They are passed via the HTTP
+///     - Fields referred by the [HttpRule.body][google.api.HttpRule.body]. They are passed via the HTTP
 ///       request body.
 ///     - All other fields are passed via the URL query parameters, and the
 ///       parameter name is the field path in the request message. A repeated
 ///       field can be represented as multiple query parameters under the same
 ///       name.
-///   2. If \[HttpRule.body][google.api.HttpRule.body\] is "*", there is no URL query parameter, all fields
+///   2. If [HttpRule.body][google.api.HttpRule.body] is "*", there is no URL query parameter, all fields
 ///      are passed via URL path and HTTP request body.
-///   3. If \[HttpRule.body][google.api.HttpRule.body\] is omitted, there is no HTTP request body, all
+///   3. If [HttpRule.body][google.api.HttpRule.body] is omitted, there is no HTTP request body, all
 ///      fields are passed via URL path and URL query parameters.
 ///
 /// ### Path template syntax
 ///
-///      Template = "/" Segments [ Verb ] ;
+///      Template = "/" Segments \[ Verb \] ;
 ///      Segments = Segment { "/" Segment } ;
 ///      Segment  = "*" | "**" | LITERAL | Variable ;
-///      Variable = "{" FieldPath [ "=" Segments ] "}" ;
+///      Variable = "{" FieldPath \[ "=" Segments \] "}" ;
 ///      FieldPath = IDENT { "." IDENT } ;
 ///      Verb     = ":" LITERAL ;
 ///
@@ -292,7 +292,7 @@ pub struct Http {
 pub struct HttpRule {
     /// Selects a method to which this rule applies.
     ///
-    /// Refer to \[selector][google.api.DocumentationRule.selector\] for syntax details.
+    /// Refer to [selector][google.api.DocumentationRule.selector] for syntax details.
     #[prost(string, tag = "1")]
     pub selector: ::prost::alloc::string::String,
     /// The name of the request field whose value is mapped to the HTTP request
@@ -663,7 +663,7 @@ pub mod method_settings {
     /// long-running operation pattern.
     /// All default values below are from those used in the client library
     /// generators (e.g.
-    /// \[Java\](<https://github.com/googleapis/gapic-generator-java/blob/04c2faa191a9b5a10b92392fe8482279c4404803/src/main/java/com/google/api/generator/gapic/composer/common/RetrySettingsComposer.java>)).
+    /// [Java](<https://github.com/googleapis/gapic-generator-java/blob/04c2faa191a9b5a10b92392fe8482279c4404803/src/main/java/com/google/api/generator/gapic/composer/common/RetrySettingsComposer.java>)).
     #[allow(clippy::derive_partial_eq_without_eq)]
     #[derive(Clone, PartialEq, ::prost::Message)]
     pub struct LongRunning {
@@ -895,7 +895,7 @@ pub struct ResourceDescriptor {
     /// Example: `storage.googleapis.com/Bucket`
     ///
     /// The value of the resource_type_kind must follow the regular expression
-    /// /\[A-Za-z][a-zA-Z0-9\]+/. It should start with an upper case character and
+    /// /[A-Za-z][a-zA-Z0-9]+/. It should start with an upper case character and
     /// should use PascalCase (UpperCamelCase). The maximum number of
     /// characters allowed for the `resource_type_kind` is 100.
     #[prost(string, tag = "1")]
@@ -1130,7 +1130,7 @@ pub mod label_descriptor {
         }
     }
 }
-/// An object that describes the schema of a \[MonitoredResource][google.api.MonitoredResource\] object using a
+/// An object that describes the schema of a [MonitoredResource][google.api.MonitoredResource] object using a
 /// type name and a set of labels.  For example, the monitored resource
 /// descriptor for Google Compute Engine VM instances has a type of
 /// `"gce_instance"` and specifies the use of the labels `"instance_id"` and
@@ -1181,11 +1181,11 @@ pub struct MonitoredResourceDescriptor {
 /// An object representing a resource that can be used for monitoring, logging,
 /// billing, or other purposes. Examples include virtual machine instances,
 /// databases, and storage devices such as disks. The `type` field identifies a
-/// \[MonitoredResourceDescriptor][google.api.MonitoredResourceDescriptor\] object that describes the resource's
+/// [MonitoredResourceDescriptor][google.api.MonitoredResourceDescriptor] object that describes the resource's
 /// schema. Information in the `labels` field identifies the actual resource and
 /// its attributes according to the schema. For example, a particular Compute
 /// Engine VM instance could be represented by the following object, because the
-/// \[MonitoredResourceDescriptor][google.api.MonitoredResourceDescriptor\] for `"gce_instance"` has labels
+/// [MonitoredResourceDescriptor][google.api.MonitoredResourceDescriptor] for `"gce_instance"` has labels
 /// `"project_id"`, `"instance_id"` and `"zone"`:
 ///
 ///      { "type": "gce_instance",
@@ -1196,7 +1196,7 @@ pub struct MonitoredResourceDescriptor {
 #[derive(Clone, PartialEq, ::prost::Message)]
 pub struct MonitoredResource {
     /// Required. The monitored resource type. This field must match
-    /// the `type` field of a \[MonitoredResourceDescriptor][google.api.MonitoredResourceDescriptor\] object. For
+    /// the `type` field of a [MonitoredResourceDescriptor][google.api.MonitoredResourceDescriptor] object. For
     /// example, the type of a Compute Engine VM instance is `gce_instance`.
     /// Some descriptors include the service name in the type; for example,
     /// the type of a Datastream stream is `datastream.googleapis.com/Stream`.
@@ -1209,8 +1209,8 @@ pub struct MonitoredResource {
     pub labels:
         ::std::collections::HashMap<::prost::alloc::string::String, ::prost::alloc::string::String>,
 }
-/// Auxiliary metadata for a \[MonitoredResource][google.api.MonitoredResource\] object.
-/// \[MonitoredResource][google.api.MonitoredResource\] objects contain the minimum set of information to
+/// Auxiliary metadata for a [MonitoredResource][google.api.MonitoredResource] object.
+/// [MonitoredResource][google.api.MonitoredResource] objects contain the minimum set of information to
 /// uniquely identify a monitored resource instance. There is some other useful
 /// auxiliary metadata. Monitoring and Logging use an ingestion
 /// pipeline to extract metadata for cloud resources of all types, and store
@@ -1226,7 +1226,7 @@ pub struct MonitoredResourceMetadata {
     /// strings. For example:
     ///
     ///      { "name": "my-test-instance",
-    ///        "security_group": ["a", "b", "c"],
+    ///        "security_group": \["a", "b", "c"\],
     ///        "spot_instance": false }
     #[prost(message, optional, tag = "1")]
     pub system_labels: ::core::option::Option<::prost_types::Struct>,

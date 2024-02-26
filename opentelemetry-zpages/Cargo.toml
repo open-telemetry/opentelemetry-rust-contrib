@@ -20,9 +20,8 @@ all-features = true
 rustdoc-args = ["--cfg", "docsrs"]
 
 [dependencies]
-# TODO: Set to published version before pushing.
-opentelemetry = { git = "https://github.com/open-telemetry/opentelemetry-rust.git", branch = "main" }
-opentelemetry_sdk = { git = "https://github.com/open-telemetry/opentelemetry-rust.git", branch = "main", default-features = false, features = ["trace"] }
+opentelemetry = { workspace = true }
+opentelemetry_sdk = { workspace = true, default-features = false, features = ["trace"] }
 opentelemetry-proto = { workspace = true, features = ["zpages", "gen-tonic", "with-serde"], default-features = false }
 async-channel = "1.6"
 futures-channel = "0.3"
