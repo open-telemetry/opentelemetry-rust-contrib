@@ -29,8 +29,8 @@ once_cell = "1.12"
 # TODO: Replace with opentelemetry version before release
 opentelemetry = { git = "https://github.com/open-telemetry/opentelemetry-rust.git", branch = "main" , features = ["trace"] }
 opentelemetry_sdk = { git = "https://github.com/open-telemetry/opentelemetry-rust.git", branch = "main" , features = ["trace"] }
-opentelemetry-http = { version = "0.10" }
-opentelemetry-semantic-conventions = { version = "0.13" }
+opentelemetry-http = { workspace = true }
+opentelemetry-semantic-conventions = { workspace = true }
 rmp = "0.8"
 url = "2.2"
 reqwest = { version = "0.11", default-features = false, optional = true }

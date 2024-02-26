@@ -24,12 +24,12 @@ trace = ["opentelemetry/trace", "opentelemetry_sdk"]
 
 [dependencies]
 once_cell = "1.12"
-opentelemetry = { version = "0.21" }
-opentelemetry_sdk = { version = "0.21", optional = true }
+opentelemetry = { workspace = true }
+opentelemetry_sdk = { workspace = true, optional = true }
 
 [dev-dependencies]
-opentelemetry_sdk = { version = "0.21", features = ["trace", "testing"] }
-opentelemetry-http = { version = "0.10" }
-opentelemetry-stdout = { version = "0.2", features = ["trace"] }
+opentelemetry_sdk = { workspace = true, features = ["trace", "testing"] }
+opentelemetry-http = { workspace = true }
+opentelemetry-stdout = { workspace = true, features = ["trace"] }
 hyper = { version = "0.14" }
 tokio = { version = "1.0", features = ["macros", "rt"] }
