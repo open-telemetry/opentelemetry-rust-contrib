@@ -1,4 +1,4 @@
-//! run with `$ cargo run --example basic --all-features
+//! run with `$ cargo run --example basic-logs --all-features
 
 use opentelemetry_appender_tracing::layer;
 use opentelemetry_sdk::logs::LoggerProvider;
