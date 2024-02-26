@@ -4,7 +4,7 @@ use opentelemetry::{
     KeyValue,
 };
 use opentelemetry_sdk::{
-    metrics::{MeterProvider as SdkMeterProvider, PeriodicReader},
+    metrics::{PeriodicReader, SdkMeterProvider},
     runtime, Resource,
 };
 use opentelemetry_user_events_metrics::MetricsExporter;
@@ -53,7 +53,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .with_description("test_description")
         .init();
     let histogram2 = meter
-        .i64_histogram("histogram_i64_test")
+        .u64_histogram("histogram_u64_test")
         .with_description("test_description")
         .init();
 
@@ -65,7 +65,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .init();
 
     let gauge2 = meter
-        .i64_observable_gauge("observable_gauge_i64_test")
+        .u64_observable_gauge("observable_gauge_u64_test")
         .with_unit(Unit::new("test_unit"))
         .with_description("test_description")
         .init();
@@ -82,7 +82,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     })?;
 
     meter.register_callback(&[gauge2.as_any()], move |observer| {
-        observer.observe_i64(
+        observer.observe_u64(
             &gauge2,
             1,
             &[

@@ -16,16 +16,13 @@ hex = "0.4"
 http = "0.2"
 hyper = "0.14.2"
 hyper-rustls = { version = "0.24", optional = true }
-# TODO: Replace with opentelemetry version before release
-opentelemetry = { git = "https://github.com/open-telemetry/opentelemetry-rust.git", rev = "6175c3" }
-# TODO: Replace with opentelemetry version before release
-opentelemetry_sdk = { git = "https://github.com/open-telemetry/opentelemetry-rust.git", rev = "6175c3" }
-# TODO: Replace with opentelemetry version before release
-opentelemetry-semantic-conventions = { git = "https://github.com/open-telemetry/opentelemetry-rust.git", rev = "6175c3" }
-prost = "0.11.0"
-prost-types = "0.11.1"
+opentelemetry = { workspace = true }
+opentelemetry_sdk = { workspace = true, features = ["trace"] }
+opentelemetry-semantic-conventions = { workspace = true }
+prost = "0.12"
+prost-types = "0.12"
 thiserror = "1.0.30"
-tonic = { version = "0.9.0", features = ["gzip", "tls", "transport"] }
+tonic = { version = "0.11", features = ["gzip", "tls", "transport"] }
 yup-oauth2 = { version = "8.1.0", optional = true }
 once_cell = { version = "1.19", optional = true }
 # we don't need unicode support
@@ -47,9 +44,7 @@ propagator = ["once_cell", "regex"]
 reqwest = "0.11.9"
 tempfile = "3.3.0"
 tokio = "1"
-tonic-build = "0.9.0"
+tonic-build = "0.11"
 walkdir = "2.3.2"
 futures-util = { version = "0.3", default-features = false }
-# TODO: Replace with opentelemetry version before release
-opentelemetry = { git = "https://github.com/open-telemetry/opentelemetry-rust.git", rev = "6175c3", features = ["testing"] }
-
+opentelemetry = { workspace = true, features = ["testing"] }

@@ -16,7 +16,7 @@ opentelemetry_sdk = { workspace = true, features = ["metrics", "rt-tokio"] }
 opentelemetry-proto = { workspace = true, features = ["gen-tonic", "metrics"] }
 eventheader = { version = "= 0.3.4" }
 async-trait = "0.1"
-prost = "0.11"
+prost = "0.12"
 
 [dev-dependencies]
 tokio = { version = "1.0", features = ["full"] }
