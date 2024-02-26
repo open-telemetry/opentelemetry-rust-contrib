@@ -2,14 +2,11 @@
 members = [
     "opentelemetry-aws",
     "opentelemetry-contrib",
-# TODO: Add back in once this relies on a published version
-#    "opentelemetry-datadog",
-# TODO: Add back in once this relies on a published version
-#    "opentelemetry-stackdriver",
+    "opentelemetry-datadog",
+    "opentelemetry-stackdriver",
     "opentelemetry-user-events-logs",
     "opentelemetry-user-events-metrics",
-# TODO: Add back in once this relies on a published version
-#    "opentelemetry-zpages",
+    "opentelemetry-zpages",
     "examples/traceresponse",
 ]
 exclude = [
