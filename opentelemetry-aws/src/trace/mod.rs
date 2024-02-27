@@ -1,4 +1,6 @@
+#[cfg(feature = "trace")]
 pub mod id_generator;
+#[cfg(feature = "trace")]
 pub mod xray_propagator;
 
 #[cfg(feature = "trace")]
