@@ -11,7 +11,7 @@ This crate contains OpenTelemetry metrics exporter to
 for efficient tracing of kernel or application-defined events, similar to user-events on Linux.
 ETW events can be consumed in real-time or from a log file.
 
-ETW is included in Microsoft Windows 2000 and later.
+ETW events created with this crate can be generated and collected on Windows Vista or later.
 
 This ETW exporter enables applications to use OpenTelemetry APIs to capture telemetry events and write to the ETW subsystem. From ETWs, the events can be
 captured by agents running locally and listening for specific ETW events.
