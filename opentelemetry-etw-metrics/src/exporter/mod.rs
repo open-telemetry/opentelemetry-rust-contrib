@@ -82,7 +82,6 @@ impl PushMetricsExporter for MetricsExporter {
         Ok(())
     }
 
-    /// TODO: What do we do if no one calls shutdown? Can we use drop somehow?
     fn shutdown(&self) -> Result<()> {
         self.provider.unregister();
 
