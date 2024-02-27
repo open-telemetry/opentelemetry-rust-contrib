@@ -7,7 +7,7 @@ members = [
     "opentelemetry-user-events-logs",
     "opentelemetry-user-events-metrics",
     "opentelemetry-zpages",
-    "examples/traceresponse",
+    "examples/traceresponse", "opentelemetry-etw-metrics",
 ]
 exclude = [
     "opentelemetry-datadog",
