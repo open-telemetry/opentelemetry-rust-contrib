@@ -17,7 +17,8 @@ opentelemetry-proto = { workspace = true, features = ["gen-tonic", "metrics"] }
 eventheader = { version = "= 0.3.4" }
 async-trait = "0.1"
 prost = "0.12"
-tracelogging = "1.2.1"
+tracelogging_dynamic = "1.2.1"
+lazy_static = "1.4.0"
 
 [dev-dependencies]
 tokio = { version = "1.0", features = ["full"] }

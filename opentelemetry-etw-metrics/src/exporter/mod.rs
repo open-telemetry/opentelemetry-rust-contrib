@@ -9,25 +9,25 @@ use opentelemetry_sdk::metrics::{
 
 use async_trait::async_trait;
 use prost::Message;
-use tracelogging;
+use tracelogging_dynamic as tld;
 
 use std::fmt::{Debug, Formatter};
 
 use crate::etw;
 
-pub struct MetricsExporter {}
-
-impl MetricsExporter {
-    pub fn new() -> MetricsExporter {
-        etw::register();
-
-        MetricsExporter {}
-    }
+pub struct MetricsExporter {
+    provider: etw::ProviderGuard,
 }
 
-impl Default for MetricsExporter {
-    fn default() -> Self {
-        Self::new()
+impl MetricsExporter {
+    pub fn new(
+        name: &str,
+        id: Option<tld::Guid>,
+        options: Option<tld::ProviderOptions>,
+    ) -> Result<MetricsExporter> {
+        Ok(MetricsExporter {
+            provider: etw::ProviderGuard::register(name, id, options)?,
+        })
     }
 }
 
@@ -68,7 +68,7 @@ impl PushMetricsExporter for MetricsExporter {
             .encode(&mut byte_array)
             .map_err(|err| MetricsError::Other(err.to_string()))?;
 
-        let result = etw::write(&byte_array);
+        let result = self.provider.write(&byte_array);
 
         match result {
             0 => println!("Successfully wrote ETW event"),
@@ -84,7 +84,7 @@ impl PushMetricsExporter for MetricsExporter {
 
     /// TODO: What do we do if no one calls shutdown? Can we use drop somehow?
     fn shutdown(&self) -> Result<()> {
-        etw::unregister();
+        self.provider.unregister();
 
         Ok(())
     }
