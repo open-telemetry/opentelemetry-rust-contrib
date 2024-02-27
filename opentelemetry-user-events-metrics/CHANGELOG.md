@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+## v0.3.0
+
+### Changed
+
+- Bump opentelemetry version to 0.22, opentelemetry_sdk version to 0.22,
+  opentelemetry-proto version to 0.5.
+
 ## v0.2.2
 
 - Fixed a bug which caused Histogram, Gauge metrics to be dropped.
