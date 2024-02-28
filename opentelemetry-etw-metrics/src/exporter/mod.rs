@@ -9,21 +9,24 @@ use opentelemetry_sdk::metrics::{
 
 use async_trait::async_trait;
 use prost::Message;
-use tracelogging_dynamic as tld;
 
 use std::fmt::{Debug, Formatter};
 
 use crate::etw;
 
-pub struct MetricsExporter {
-    provider: etw::ProviderGuard,
-}
+pub struct MetricsExporter {}
 
 impl MetricsExporter {
-    pub fn new(name: &str) -> Result<MetricsExporter> {
-        Ok(MetricsExporter {
-            provider: etw::ProviderGuard::register(name)?,
-        })
+    pub fn new() -> MetricsExporter {
+        etw::register();
+
+        MetricsExporter {}
+    }
+}
+
+impl Default for MetricsExporter {
+    fn default() -> Self {
+        Self::new()
     }
 }
 
@@ -64,9 +67,7 @@ impl PushMetricsExporter for MetricsExporter {
             .encode(&mut byte_array)
             .map_err(|err| MetricsError::Other(err.to_string()))?;
 
-        let result = self.provider.write(&byte_array);
-
-        match result {
+        match etw::write(&byte_array) {
             0 => println!("Successfully wrote ETW event"),
             error_code => eprintln!("Failed to write ETW event with error code: {}", error_code),
         }
@@ -79,7 +80,7 @@ impl PushMetricsExporter for MetricsExporter {
     }
 
     fn shutdown(&self) -> Result<()> {
-        self.provider.unregister();
+        etw::unregister();
 
         Ok(())
     }
