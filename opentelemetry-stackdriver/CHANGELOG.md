@@ -1,9 +1,14 @@
 # Changelog
 
 ## vNext
+
+### Added
+
 - Added support for `GoogleTraceContextPropagator`
 
-WARNING The current version relies on features only in upstream git version. This should be modified before releasing.
+### Changed
+
+- Bump opentelemetry version to 0.22, opentelemetry_sdk version to 0.22
 
 ## v0.18.0
 

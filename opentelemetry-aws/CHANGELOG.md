@@ -2,14 +2,18 @@
 
 ## vNext
 
+## v0.10.0
+
 ### Changed
 
 - Move Xray IdGenerator from `opentelemetry-rust` to `opentelemetry-aws` [#33](https://github.com/open-telemetry/opentelemetry-rust-contrib/pull/33)
+- Bump opentelemetry version to 0.22.0, opentelemetry_sdk version to 0.22.0
 
 ## v0.9.0
 
 ### Changed
 
+- Update to opentelemetry v0.21.0
 - Bump MSRV to 1.65 [#1318](https://github.com/open-telemetry/opentelemetry-rust/pull/1318)
 - Bump MSRV to 1.64 [#1203](https://github.com/open-telemetry/opentelemetry-rust/pull/1203)
 
@@ -17,13 +21,16 @@
 
 ### Changed
 
-- Update to opentelemetry-api v0.20.0
+- Update to opentelemetry v0.20.0
 
 ## v0.7.0
+
 ### Added
+
 - Add public functions for AWS trace header [#887](https://github.com/open-telemetry/opentelemetry-rust/pull/887).
 
 ### Changed
+
 - Bump MSRV to 1.57 [#953](https://github.com/open-telemetry/opentelemetry-rust/pull/953)
 - Update dependencies and bump MSRV to 1.60 [#969](https://github.com/open-telemetry/opentelemetry-rust/pull/969).
 
