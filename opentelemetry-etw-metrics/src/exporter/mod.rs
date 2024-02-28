@@ -20,13 +20,9 @@ pub struct MetricsExporter {
 }
 
 impl MetricsExporter {
-    pub fn new(
-        name: &str,
-        id: Option<tld::Guid>,
-        options: Option<tld::ProviderOptions>,
-    ) -> Result<MetricsExporter> {
+    pub fn new(name: &str) -> Result<MetricsExporter> {
         Ok(MetricsExporter {
-            provider: etw::ProviderGuard::register(name, id, options)?,
+            provider: etw::ProviderGuard::register(name)?,
         })
     }
 }
