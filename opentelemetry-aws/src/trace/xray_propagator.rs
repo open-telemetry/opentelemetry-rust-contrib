@@ -37,7 +37,6 @@
 //!     Ok(())
 //! }
 //! ```
-//! A more detailed example can be found in [opentelemetry-rust](https://github.com/open-telemetry/opentelemetry-rust/tree/main/examples/aws-xray) repo
 
 use once_cell::sync::Lazy;
 use opentelemetry::{
