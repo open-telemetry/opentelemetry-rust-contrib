@@ -12,17 +12,14 @@ use opentelemetry_sdk::{
 use std::{thread, time::Duration};
 
 const SERVICE_NAME: &str = "service-name";
-const METRICS_ACCOUNT: &str = "metrics-account";
-const METRICS_NAMESPACE: &str = "metrics-namespace";
 
 fn init_metrics(exporter: MetricsExporter) -> SdkMeterProvider {
     let reader = PeriodicReader::builder(exporter, runtime::Tokio).build();
     SdkMeterProvider::builder()
-        .with_resource(Resource::new(vec![
-            KeyValue::new("service.name", SERVICE_NAME),
-            KeyValue::new("_metrics_account", METRICS_ACCOUNT),
-            KeyValue::new("_metrics_namespace", METRICS_NAMESPACE),
-        ]))
+        .with_resource(Resource::new(vec![KeyValue::new(
+            "service.name",
+            SERVICE_NAME,
+        )]))
         .with_reader(reader)
         .build()
 }
