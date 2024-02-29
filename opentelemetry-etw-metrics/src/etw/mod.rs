@@ -52,10 +52,10 @@ pub fn unregister() {
     if ETW_PROVIDER_REGISTRANT.is_completed() {
         match PROVIDER.unregister() {
             0 => println!("Successfully unregistered ETW provider"),
-            error_code => eprintln!(
+            error_code => global::handle_error(MetricsError::Other(format!(
                 "Failed to unregister ETW provider with error code: {}",
                 error_code
-            ),
+            ))),
         }
     } else {
         println!("ETW provider is not registered so there is nothing to unregister.");
