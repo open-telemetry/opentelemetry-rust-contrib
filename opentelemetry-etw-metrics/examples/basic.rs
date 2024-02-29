@@ -35,60 +35,58 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .with_unit(Unit::new("test_unit"))
         .init();
 
-    loop {
-        c.add(
-            1.0,
-            [
-                KeyValue::new("name", "apple"),
-                KeyValue::new("color", "red"),
-            ]
-            .as_ref(),
-        );
-        c.add(
-            2.0,
-            [
-                KeyValue::new("name", "lemon"),
-                KeyValue::new("color", "yellow"),
-            ]
-            .as_ref(),
-        );
-        c.add(
-            1.0,
-            [
-                KeyValue::new("name", "lemon"),
-                KeyValue::new("color", "yellow"),
-            ]
-            .as_ref(),
-        );
-        c.add(
-            2.0,
-            [
-                KeyValue::new("name", "apple"),
-                KeyValue::new("color", "green"),
-            ]
-            .as_ref(),
-        );
-        c.add(
-            5.0,
-            [
-                KeyValue::new("name", "apple"),
-                KeyValue::new("color", "red"),
-            ]
-            .as_ref(),
-        );
-        c.add(
-            4.0,
-            [
-                KeyValue::new("name", "lemon"),
-                KeyValue::new("color", "yellow"),
-            ]
-            .as_ref(),
-        );
+    c.add(
+        1.0,
+        [
+            KeyValue::new("name", "apple"),
+            KeyValue::new("color", "red"),
+        ]
+        .as_ref(),
+    );
+    c.add(
+        2.0,
+        [
+            KeyValue::new("name", "lemon"),
+            KeyValue::new("color", "yellow"),
+        ]
+        .as_ref(),
+    );
+    c.add(
+        1.0,
+        [
+            KeyValue::new("name", "lemon"),
+            KeyValue::new("color", "yellow"),
+        ]
+        .as_ref(),
+    );
+    c.add(
+        2.0,
+        [
+            KeyValue::new("name", "apple"),
+            KeyValue::new("color", "green"),
+        ]
+        .as_ref(),
+    );
+    c.add(
+        5.0,
+        [
+            KeyValue::new("name", "apple"),
+            KeyValue::new("color", "red"),
+        ]
+        .as_ref(),
+    );
+    c.add(
+        4.0,
+        [
+            KeyValue::new("name", "lemon"),
+            KeyValue::new("color", "yellow"),
+        ]
+        .as_ref(),
+    );
 
-        // Sleep for 1 second
-        thread::sleep(Duration::from_secs(1));
-        println!("Running...");
-    }
+    // Sleep for 1 second
+    thread::sleep(Duration::from_secs(1));
+    println!("Running...");
 
     meter_provider.shutdown()?;
     Ok(())
