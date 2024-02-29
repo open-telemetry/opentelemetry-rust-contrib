@@ -1,4 +1,4 @@
-//! run with `$ cargo run --example basic --all-features
+//! run with `$ cargo run --example advanced-metrics --all-features
 use opentelemetry::{
     metrics::{MeterProvider as _, Unit},
     KeyValue,
@@ -11,19 +11,17 @@ use opentelemetry_sdk::{
 
 use std::{thread, time::Duration};
 
-const SERVICE_NAME: &str = "hello-geneva-user-events";
-const METRICS_ACCOUNT: &str = "your-geneva-metrics-account";
-const METRICS_NAMESPACE: &str = "your-geneva-metrics-namespace";
+const SERVICE_NAME: &str = "service-name";
+const METRICS_ACCOUNT: &str = "metrics-account";
+const METRICS_NAMESPACE: &str = "metrics-namespace";
 
 fn init_metrics(exporter: MetricsExporter) -> SdkMeterProvider {
-    let reader = PeriodicReader::builder(exporter, runtime::Tokio)
-        .with_interval(std::time::Duration::from_millis(1000))
-        .build();
+    let reader = PeriodicReader::builder(exporter, runtime::Tokio).build();
     SdkMeterProvider::builder()
         .with_resource(Resource::new(vec![
             KeyValue::new("service.name", SERVICE_NAME),
-            KeyValue::new("_microsoft_metrics_account", METRICS_ACCOUNT),
-            KeyValue::new("_microsoft_metrics_namespace", METRICS_NAMESPACE),
+            KeyValue::new("_metrics_account", METRICS_ACCOUNT),
+            KeyValue::new("_metrics_namespace", METRICS_NAMESPACE),
         ]))
         .with_reader(reader)
         .build()
