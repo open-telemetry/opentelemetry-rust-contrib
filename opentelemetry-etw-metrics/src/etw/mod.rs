@@ -23,14 +23,12 @@ pub fn register() {
     // The second precondition is upheld as calls to `unregister` will not occur unless the PROVIDER has been registered (checked using the `is_completed` method of `std::sync::Once`)
     // which guarantees that a call to `unregister` will not occur as `register` is occurring. There is a chance that `unregister`
     // will do nothing if `register` is ongoing but this is not unsound.
-    ETW_PROVIDER_REGISTRANT.call_once(|| match unsafe { PROVIDER.register() } {
-        0 => {
-            println!("Successfully registered ETW provider")
-        }
-        error_code => {
+    ETW_PROVIDER_REGISTRANT.call_once(|| {
+        let result = unsafe { PROVIDER.register() };
+        if result != 0 {
             global::handle_error(MetricsError::Other(format!(
                 "Failed to register ETW provider with error code: {}",
-                error_code
+                result
             )));
         }
     });
@@ -50,15 +48,13 @@ pub fn write(buffer: &[u8]) -> u32 {
 /// Unregister the provider.
 pub fn unregister() {
     if ETW_PROVIDER_REGISTRANT.is_completed() {
-        match PROVIDER.unregister() {
-            0 => println!("Successfully unregistered ETW provider"),
-            error_code => global::handle_error(MetricsError::Other(format!(
+        let result = PROVIDER.unregister();
+        if result != 0 {
+            global::handle_error(MetricsError::Other(format!(
                 "Failed to unregister ETW provider with error code: {}",
-                error_code
-            ))),
+                result
+            )));
         }
-    } else {
-        println!("ETW provider is not registered so there is nothing to unregister.");
     }
 }
 

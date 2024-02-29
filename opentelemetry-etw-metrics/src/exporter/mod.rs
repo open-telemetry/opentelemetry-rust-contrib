@@ -1,4 +1,7 @@
-use opentelemetry::metrics::{MetricsError, Result};
+use opentelemetry::{
+    global,
+    metrics::{MetricsError, Result},
+};
 use opentelemetry_proto::tonic::collector::metrics::v1::ExportMetricsServiceRequest;
 use opentelemetry_sdk::metrics::{
     data::{ResourceMetrics, Temporality},
@@ -67,9 +70,12 @@ impl PushMetricsExporter for MetricsExporter {
             .encode(&mut byte_array)
             .map_err(|err| MetricsError::Other(err.to_string()))?;
 
-        match etw::write(&byte_array) {
-            0 => println!("Successfully wrote ETW event"),
-            error_code => eprintln!("Failed to write ETW event with error code: {}", error_code),
+        let result = etw::write(&byte_array);
+        if result != 0 {
+            global::handle_error(MetricsError::Other(format!(
+                "Failed to write ETW event with error code: {}",
+                result
+            )));
         }
 
         Ok(())
