@@ -13,7 +13,7 @@ use std::{thread, time::Duration};
 
 const SERVICE_NAME: &str = "hello-geneva-user-events";
 const METRICS_ACCOUNT: &str = "your-geneva-metrics-account";
-const METRICS_NAMESPACE: &str = "your-geneva-metrics-namespace"; // The namespace will be automatically created by Geneva metrics backend, if not existing.
+const METRICS_NAMESPACE: &str = "your-geneva-metrics-namespace";
 
 fn init_metrics(exporter: MetricsExporter) -> SdkMeterProvider {
     let reader = PeriodicReader::builder(exporter, runtime::Tokio)
