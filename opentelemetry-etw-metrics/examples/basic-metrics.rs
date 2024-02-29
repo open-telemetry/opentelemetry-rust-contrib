@@ -31,12 +31,11 @@ fn setup_meter_provider() -> SdkMeterProvider {
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let meter_provider = setup_meter_provider();
 
-    // The name of the meter is ignored in Geneva today.
     let meter = meter_provider.meter("user-event-test");
     let c = meter
-        .f64_counter("MyFruitCounter") // This will be the metric name in Geneva
-        .with_description("test_description") // The description is ignored in Geneva today
-        .with_unit(Unit::new("test_unit")) // The unit is ignored in Geneva today
+        .f64_counter("MyFruitCounter")
+        .with_description("test_description")
+        .with_unit(Unit::new("test_unit"))
         .init();
 
     loop {
