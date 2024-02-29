@@ -2,9 +2,9 @@
 
 [splash]: https://raw.githubusercontent.com/open-telemetry/opentelemetry-rust/main/assets/logo-text.png
 
-# OpenTelemetry user_events Exporter
+# OpenTelemetry ETW Exporter
 
-[![Crates.io: opentelemetry-user-events-metrics](https://img.shields.io/crates/v/opentelemetry-user-events-metrics.svg)](https://crates.io/crates/opentelemetry-user-events-metrics)
+[![Crates.io: opentelemetry-etw-metrics](https://img.shields.io/crates/v/opentelemetry-etw-metrics.svg)](https://crates.io/crates/opentelemetry-etw-metrics)
 
 This crate contains OpenTelemetry metrics exporter to
 [ETW (Event Tracing for Windows)](https://learn.microsoft.com/en-us/windows-hardware/drivers/devtest/event-tracing-for-windows--etw-), a Windows solution
