@@ -17,11 +17,7 @@ This ETW exporter enables applications to use OpenTelemetry APIs to capture tele
 captured by agents running locally and listening for specific ETW events.
 
 ## Viewing ETW Logs
-<<<<<<< Updated upstream
-ETW logs can be viewed numerous ways, including through the use of (traceview)[https://learn.microsoft.com/en-us/windows-hardware/drivers/devtest/traceview] and (tracelog)[https://learn.microsoft.com/en-us/windows-hardware/drivers/devtest/tracelog] + (tracefmt)[https://learn.microsoft.com/en-us/windows-hardware/drivers/devtest/tracefmt]. `Traceview` provides a GUI while `tracelog` is geared towards command line usage.
-=======
 ETW logs can be viewed numerous ways, including through the use of [traceview](https://learn.microsoft.com/en-us/windows-hardware/drivers/devtest/traceview) and [tracelog](https://learn.microsoft.com/en-us/windows-hardware/drivers/devtest/tracelog) + [tracefmt](https://learn.microsoft.com/en-us/windows-hardware/drivers/devtest/tracefmt). `Traceview` provides a GUI while `tracelog` is geared towards command line usage.
->>>>>>> Stashed changes
 
 ### Traceview
 After downloading `traceview`, its GUI can be spawned by invoking `traceview.exe`. A new session can be created via `File -> Create New Log Session` and then specifying a method for obtaining the control GUID. This crate currently writes traces with a GUID of `EDC24920-E004-40F6-A8E1-0E6E48F39D84` so choosing the `Manually Entered Control GUID or Hashed Name` option and entering `EDC24920-E004-40F6-A8E1-0E6E48F39D84` will correctly capture events.
