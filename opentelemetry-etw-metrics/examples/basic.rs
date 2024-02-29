@@ -1,4 +1,4 @@
-//! run with `$ cargo run --example basic-metrics --all-features
+//! run with `$ cargo run --example basic --all-features
 use opentelemetry::{
     metrics::{MeterProvider as _, Unit},
     KeyValue,
