@@ -7,7 +7,7 @@ use std::sync::Once;
 tlg::define_provider!(
     PROVIDER,
     "NativeMetricsExtension_Provider",
-    id("EDC24920-E004-40F6-A8E1-0E6E48F39D84") // GUID is defined in https://github.com/microsoft/common-schema/blob/main/v4.0/Mappings/OTelMetrics.md
+    id("EDC24920-E004-40F6-A8E1-0E6E48F39D84")
 );
 
 static ETW_PROVIDER_REGISTRANT: Once = Once::new();
@@ -40,8 +40,8 @@ pub fn register() {
 pub fn write(buffer: &[u8]) -> u32 {
     tracelogging::write_event!(
         PROVIDER,
-        "otlp_metrics", // Name is defined in https://github.com/microsoft/common-schema/blob/main/v4.0/Mappings/OTelMetrics.md
-        id_version(81, 0), // Event id 81 is defined in https://github.com/microsoft/common-schema/blob/main/v4.0/Mappings/OTelMetrics.md
+        "otlp_metrics",
+        id_version(81, 0),
         level(tracelogging::Level::Informational),
         raw_data(&buffer)
     )
