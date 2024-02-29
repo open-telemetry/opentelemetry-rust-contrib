@@ -1,6 +1,6 @@
 ![OpenTelemetry — An observability framework for cloud-native software.][splash]
 
-[splash]: https://raw.githubusercontent.com/open-telemetry/opentelemetry-rust/main/assets/logo-text.png
+[splash]: https://raw.githubusercontent.com/open-telemetry/opentelemetry-rust-contrib/main/assets/logo-text.png
 
 # OpenTelemetry ETW Exporter
 
