@@ -31,11 +31,6 @@ static TRACE_CONTEXT_HEADER_FIELDS: Lazy<[String; 1]> =
     Lazy::new(|| [CLOUD_TRACE_CONTEXT_HEADER.to_owned()]);
 
 impl GoogleTraceContextPropagator {
-    /// Create a new `GoogleTraceContextPropagator`.
-    pub fn new() -> Self {
-        GoogleTraceContextPropagator { _private: () }
-    }
-
     fn extract_span_context(&self, extractor: &dyn Extractor) -> Result<SpanContext, ()> {
         let header_value = extractor
             .get(CLOUD_TRACE_CONTEXT_HEADER)
@@ -103,7 +98,7 @@ mod tests {
 
     #[test]
     fn test_extract_span_context_valid() {
-        let propagator = GoogleTraceContextPropagator::new();
+        let propagator = GoogleTraceContextPropagator::default();
         let mut headers = HashMap::new();
         headers.insert(
             // hashmap implementation of Extractor trait uses lowercase keys
@@ -122,7 +117,7 @@ mod tests {
 
     #[test]
     fn test_extract_span_context_valid_without_options() {
-        let propagator = GoogleTraceContextPropagator::new();
+        let propagator = GoogleTraceContextPropagator::default();
         let mut headers = HashMap::new();
         headers.insert(
             // hashmap implementation of Extractor trait uses lowercase keys
@@ -141,7 +136,7 @@ mod tests {
 
     #[test]
     fn test_extract_span_context_valid_not_sampled() {
-        let propagator = GoogleTraceContextPropagator::new();
+        let propagator = GoogleTraceContextPropagator::default();
         let mut headers = HashMap::new();
         headers.insert(
             // hashmap implementation of Extractor trait uses lowercase keys
@@ -160,7 +155,7 @@ mod tests {
 
     #[test]
     fn test_extract_span_context_invalid() {
-        let propagator = GoogleTraceContextPropagator::new();
+        let propagator = GoogleTraceContextPropagator::default();
         let headers = HashMap::new();
 
         assert!(propagator.extract_span_context(&headers).is_err());
@@ -168,7 +163,7 @@ mod tests {
 
     #[test]
     fn test_inject_context_valid() {
-        let propagator = GoogleTraceContextPropagator::new();
+        let propagator = GoogleTraceContextPropagator::default();
         let mut headers = HashMap::new();
         let span = TestSpan(SpanContext::new(
             TraceId::from_hex("105445aa7843bc8bf206b12000100000").unwrap(),
@@ -189,7 +184,7 @@ mod tests {
 
     #[test]
     fn test_extract_with_context_valid() {
-        let propagator = GoogleTraceContextPropagator::new();
+        let propagator = GoogleTraceContextPropagator::default();
         let mut headers = HashMap::new();
         headers.insert(
             CLOUD_TRACE_CONTEXT_HEADER.to_string().to_lowercase(),
@@ -207,7 +202,7 @@ mod tests {
 
     #[test]
     fn test_extract_with_context_invalid_trace_id() {
-        let propagator = GoogleTraceContextPropagator::new();
+        let propagator = GoogleTraceContextPropagator::default();
         let mut headers = HashMap::new();
         // Insert a trace ID with less than 32 characters
         headers.insert(
@@ -223,7 +218,7 @@ mod tests {
 
     #[test]
     fn test_extract_with_context_invalid_span_id() {
-        let propagator = GoogleTraceContextPropagator::new();
+        let propagator = GoogleTraceContextPropagator::default();
         let mut headers = HashMap::new();
         // Insert a trace ID with less than 32 characters
         headers.insert(
