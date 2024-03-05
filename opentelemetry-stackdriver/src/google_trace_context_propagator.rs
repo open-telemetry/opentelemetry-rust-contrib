@@ -1,9 +1,10 @@
+use std::str::FromStr;
+
 use once_cell::sync::Lazy;
 use opentelemetry::propagation::text_map_propagator::FieldIter;
 use opentelemetry::propagation::{Extractor, Injector, TextMapPropagator};
 use opentelemetry::trace::{SpanContext, SpanId, TraceContextExt, TraceFlags, TraceId, TraceState};
 use opentelemetry::Context;
-use regex::Regex;
 
 /// Propagates span context in the Google Cloud Trace format,
 /// using the __X-Cloud-Trace-Context__ header.
@@ -25,14 +26,9 @@ pub struct GoogleTraceContextPropagator {
 // - trace flags is optional, 0 to 9 (0 - not sampled, missing or any other number - sampled)
 
 const CLOUD_TRACE_CONTEXT_HEADER: &str = "X-Cloud-Trace-Context";
-const GOOGLE_PROPAGATION_HEADER_VALUE_REGEX_STR: &str =
-    r"^(?P<trace_id>[0-9a-f]{32})/(?P<span_id>[0-9]{1,20})(;o=(?P<trace_flags>[0-9]))?$";
 
 static TRACE_CONTEXT_HEADER_FIELDS: Lazy<[String; 1]> =
     Lazy::new(|| [CLOUD_TRACE_CONTEXT_HEADER.to_owned()]);
-
-static GOOGLE_PROPAGATION_HEADER_VALUE_REGEX: Lazy<Option<Regex>> =
-    Lazy::new(|| Regex::new(GOOGLE_PROPAGATION_HEADER_VALUE_REGEX_STR).ok());
 
 impl GoogleTraceContextPropagator {
     /// Create a new `GoogleTraceContextPropagator`.
@@ -46,42 +42,19 @@ impl GoogleTraceContextPropagator {
             .map(|v| v.trim())
             .ok_or(())?;
 
-        let regex = GOOGLE_PROPAGATION_HEADER_VALUE_REGEX.as_ref().ok_or(())?;
+        let (trace_id, rest) = match header_value.split_once('/') {
+            Some((trace_id, rest)) if trace_id.len() == 32 => (trace_id, rest),
+            _ => return Err(()),
+        };
 
-        // we could do a quick check if the header value matches the regex here to avoid more expensive regex capture in the next step if it doesn't match
-        // but the assumption is that the header value will almost always be valid, so that would add an unnecessary check in majority of cases
-        let caps = regex.captures(header_value).ok_or(())?;
+        let (span_id, trace_flags) = match rest.split_once(";o=") {
+            Some((span_id, trace_flags)) => (span_id, trace_flags),
+            None => (rest, "1"),
+        };
 
-        // trace id is mandatory, if it's missing, the header value is invalid
-        let trace_id_hex = caps.name("trace_id").map(|m| m.as_str()).ok_or(())?;
-
-        // span id is mandatory, if it's missing, the header value is invalid
-        let span_id_dec = caps.name("span_id").map(|m| m.as_str()).ok_or(())?;
-
-        // the request is sampled by default, it's not sampled only if explicitly set to 0
-        let trace_flags = caps.name("trace_flags").map_or(TraceFlags::SAMPLED, |m| {
-            if m.as_str() == "0" {
-                TraceFlags::NOT_SAMPLED
-            } else {
-                TraceFlags::SAMPLED
-            }
-        });
-
-        Self::construct_span_context(trace_flags, trace_id_hex, span_id_dec)
-    }
-
-    fn construct_span_context(
-        trace_flags: TraceFlags,
-        trace_id_hex: &str,
-        span_id_dec: &str,
-    ) -> Result<SpanContext, ()> {
-        let trace_id = TraceId::from_hex(trace_id_hex).map_err(|_| ())?;
-
-        let span_id = span_id_dec
-            .parse::<u64>()
-            .map(|v| SpanId::from_bytes(v.to_be_bytes())) // we can create SPAN ID only from bytes or hex string
-            .map_err(|_| ())?;
-
+        let trace_id = TraceId::from_hex(trace_id).map_err(|_| ())?;
+        let span_id = SpanId::from(u64::from_str(span_id).map_err(|_| ())?);
+        let trace_flags = TraceFlags::new(u8::from_str(trace_flags).map_err(|_| ())?);
         let span_context = SpanContext::new(trace_id, span_id, trace_flags, true, TraceState::NONE);
 
         // Ensure span is valid
@@ -127,26 +100,6 @@ mod tests {
     use opentelemetry::testing::trace::TestSpan;
     use opentelemetry::trace::TraceState;
     use std::collections::HashMap;
-
-    #[test]
-    fn test_google_propagation_header_value_regex_str_valid() {
-        // Try to create a Regex from the string
-        let regex_result = Regex::new(GOOGLE_PROPAGATION_HEADER_VALUE_REGEX_STR);
-
-        // Assert that the Regex was created successfully
-        assert!(
-            regex_result.is_ok(),
-            "Failed to create Regex from GOOGLE_PROPAGATION_HEADER_VALUE_REGEX_STR"
-        );
-
-        // If the Regex was created successfully, validate it against a known valid string
-        let regex = regex_result.unwrap();
-        let valid_string = "105445aa7843bc8bf206b12000100000/1;o=1";
-        assert!(
-            regex.is_match(valid_string),
-            "Regex does not match known valid string"
-        );
-    }
 
     #[test]
     fn test_extract_span_context_valid() {
