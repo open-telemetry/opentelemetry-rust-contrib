@@ -240,12 +240,16 @@ mod tests {
         let mut headers = HashMap::new();
         headers.insert(
             CLOUD_TRACE_CONTEXT_HEADER.to_string().to_lowercase(),
-            "105445aa7843bc8bf206b12000100000/1;o=1".to_string(),
+            "105445aa7843bc8bf206b12000100000/10;o=1".to_string(),
         );
         let cx = Context::current();
 
         let new_cx = propagator.extract_with_context(&cx, &headers);
         assert!(new_cx.span().span_context().is_valid());
+        assert_eq!(
+            new_cx.span().span_context().span_id().to_string(),
+            "000000000000000a"
+        );
     }
 
     #[test]
