@@ -39,10 +39,12 @@ impl ResourceDetector for ProcessResourceDetector {
     }
 }
 
-#[cfg(target_os = "linux")]
+#[cfg(target_os = "macos")]
 #[cfg(test)]
 mod tests {
-    use crate::resource::{ProcessResourceDetector, ResourceDetector};
+    use super::ProcessResourceDetector;
+    use opentelemetry_sdk::resource::ResourceDetector;
+
     use std::time::Duration;
 
     #[test]

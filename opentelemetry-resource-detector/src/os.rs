@@ -29,22 +29,20 @@ impl ResourceDetector for OsResourceDetector {
 #[cfg(target_os = "linux")]
 #[cfg(test)]
 mod tests {
-    use crate::resource::os::OsResourceDetector;
-    use crate::resource::ResourceDetector;
-    use opentelemetry::Key;
+    use super::OsResourceDetector;
+    use opentelemetry::{Key, Value};
+    use opentelemetry_sdk::resource::ResourceDetector;
     use std::time::Duration;
 
     #[test]
     fn test_os_resource_detector() {
         let resource = OsResourceDetector.detect(Duration::from_secs(0));
+        assert_eq!(resource.len(), 1);
         assert_eq!(
-            resource
-                .iter()
-                .0
-                .find(|(k, _v)| **k
-                    == Key::from_static_str(opentelemetry_semantic_conventions::resource::OS_TYPE))
-                .map(|(_k, v)| v.to_string()),
-            Some("linux".to_string())
-        );
+            resource.get(Key::from_static_str(
+                opentelemetry_semantic_conventions::resource::OS_TYPE
+            )),
+            Some(Value::from("linux"))
+        )
     }
 }
