@@ -1,10 +1,10 @@
 [package]
-name = "opentelemetry-resource-detector"
+name = "opentelemetry-resource-detectors"
 version = "0.1.0"
 edition = "2021"
-description = "OpenTelemetry metrics exporter to ETW (Event Tracing for Windows)"
-homepage = "https://github.com/open-telemetry/opentelemetry-rust-contrib/tree/main/opentelemetry-resource-detector"
-repository = "https://github.com/open-telemetry/opentelemetry-rust-contrib/tree/main/opentelemetry-resource-detector"
+description = "OpenTelemetry contrib resource detectors"
+homepage = "https://github.com/open-telemetry/opentelemetry-rust-contrib/tree/main/opentelemetry-resource-detectors"
+repository = "https://github.com/open-telemetry/opentelemetry-rust-contrib/tree/main/opentelemetry-resource-detectors"
 readme = "README.md"
 keywords = ["opentelemetry", "resource", "detector"]
 license = "Apache-2.0"
