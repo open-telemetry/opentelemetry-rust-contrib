@@ -12,3 +12,5 @@ cargo test --manifest-path=opentelemetry-stackdriver/Cargo.toml --all-features
 
 cargo test --manifest-path=opentelemetry-user-events-logs/Cargo.toml --all-features
 cargo test --manifest-path=opentelemetry-user-events-metrics/Cargo.toml --all-features
+
+cargo test --manifest-path=opentelemetry-resource-detector/Cargo.toml --all-features
