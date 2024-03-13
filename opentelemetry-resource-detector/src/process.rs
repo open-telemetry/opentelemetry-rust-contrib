@@ -16,7 +16,6 @@ use std::time::Duration;
 /// - process command line arguments(`process.command_args`), the full command arguments of this
 /// application.
 /// - OS assigned process id(`process.pid`).
-#[derive(Debug)]
 pub struct ProcessResourceDetector;
 
 impl ResourceDetector for ProcessResourceDetector {
@@ -39,7 +38,7 @@ impl ResourceDetector for ProcessResourceDetector {
     }
 }
 
-#[cfg(target_os = "macos")]
+#[cfg(target_os = "linux")]
 #[cfg(test)]
 mod tests {
     use super::ProcessResourceDetector;

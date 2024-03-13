@@ -14,7 +14,6 @@ use std::time::Duration;
 ///
 /// [`OS constant`]: https://doc.rust-lang.org/std/env/consts/constant.OS.html
 /// [`OpenTelemetry spec`]: https://github.com/open-telemetry/opentelemetry-specification/blob/main/specification/resource/semantic_conventions/os.md
-#[derive(Debug)]
 pub struct OsResourceDetector;
 
 impl ResourceDetector for OsResourceDetector {
