@@ -2,13 +2,13 @@
 
 [splash]: https://raw.githubusercontent.com/open-telemetry/opentelemetry-rust/main/assets/logo-text.png
 
-# OpenTelemetry Contrib Resource Detectors
+# OpenTelemetry Resource Detectors
 
 Community supported Resource detectors implementations for applications instrumented with [`OpenTelemetry`].
 
 ## Overview
 
-[`The contrib resource detector`] crate provides a collection of tools to detect resources from the runtime. This crate provides additional detectors for OS and process-related resources. Despite not being included in the SDK due to their lack of stability, these detectors can facilitate gathering additional telemetry information.
+[`The opentelemetry-resource-detectors`] crate provides a collection of tools to detect resources from the runtime. This crate provides additional detectors for OS and process-related resources. Despite not being included in the SDK due to their lack of stability, these detectors can facilitate gathering additional telemetry information.
 
 ## Features
 
