@@ -9,6 +9,7 @@ members = [
     "opentelemetry-zpages",
     "examples/traceresponse",
     "opentelemetry-etw-metrics",
+    "opentelemetry-resource-detectors",
 ]
 exclude = [
     "opentelemetry-datadog",
