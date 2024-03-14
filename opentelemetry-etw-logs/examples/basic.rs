@@ -1,8 +1,8 @@
 //! run with `$ cargo run --example basic --all-features
 
 use opentelemetry_appender_tracing::layer;
-use opentelemetry_sdk::logs::LoggerProvider;
 use opentelemetry_etw_logs::{ExporterConfig, ReentrantLogProcessor};
+use opentelemetry_sdk::logs::LoggerProvider;
 use std::collections::HashMap;
 use tracing::error;
 use tracing_subscriber::prelude::*;
@@ -12,7 +12,8 @@ fn init_logger() -> LoggerProvider {
         default_keyword: 1,
         keywords_map: HashMap::new(),
     };
-    let reenterant_processor = ReentrantLogProcessor::new("test", None, exporter_config);
+    let reenterant_processor =
+        ReentrantLogProcessor::new("test", "table".into(), None, exporter_config);
     LoggerProvider::builder()
         .with_log_processor(reenterant_processor)
         .build()

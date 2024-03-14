@@ -1,6 +1,7 @@
 use opentelemetry::logs::AnyValue;
-use opentelemetry::{Key, OrderMap};
+use opentelemetry::Key;
 use serde_json::{json, Map, Value};
+use std::collections::HashMap;
 
 pub(super) trait IntoJson {
     fn as_json_value(&self) -> Value;
@@ -20,7 +21,7 @@ impl IntoJson for AnyValue {
     }
 }
 
-impl IntoJson for OrderMap<Key, AnyValue> {
+impl IntoJson for HashMap<Key, AnyValue> {
     fn as_json_value(&self) -> Value {
         Value::Object(
             self.iter()

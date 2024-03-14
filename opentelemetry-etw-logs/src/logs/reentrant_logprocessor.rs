@@ -22,10 +22,11 @@ impl ReentrantLogProcessor {
     /// constructor
     pub fn new(
         provider_name: &str,
+        event_name: String,
         provider_group: ProviderGroup,
         exporter_config: ExporterConfig,
     ) -> Self {
-        let exporter = ETWExporter::new(provider_name, provider_group, exporter_config);
+        let exporter = ETWExporter::new(provider_name, event_name, provider_group, exporter_config);
         ReentrantLogProcessor {
             event_exporter: exporter,
         }

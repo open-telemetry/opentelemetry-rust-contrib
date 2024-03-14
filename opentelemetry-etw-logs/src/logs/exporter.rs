@@ -55,6 +55,7 @@ impl ExporterConfig {
 pub(crate) struct ETWExporter {
     provider: Pin<Arc<tld::Provider>>,
     exporter_config: ExporterConfig,
+    event_name: String,
 }
 
 const EVENT_ID: &str = "event_id";
@@ -77,6 +78,7 @@ fn enabled_callback(
 impl ETWExporter {
     pub(crate) fn new(
         provider_name: &str,
+        event_name: String,
         _provider_group: ProviderGroup,
         exporter_config: ExporterConfig,
     ) -> Self {
@@ -95,6 +97,7 @@ impl ETWExporter {
         ETWExporter {
             provider,
             exporter_config,
+            event_name,
         }
     }
 
@@ -191,12 +194,7 @@ impl ETWExporter {
         let mut event = tld::EventBuilder::new();
 
         // reset
-        event.reset(
-            log_data.instrumentation.name.as_ref(),
-            level,
-            keyword,
-            event_tags,
-        );
+        event.reset(&self.event_name, level, keyword, event_tags);
 
         event.add_u16("__csver__", 0x0401u16, tld::OutType::Hex, field_tag);
 
@@ -209,7 +207,7 @@ impl ETWExporter {
         // Write event to ETW
         event.write(&self.provider, None, None);
 
-        return Ok(());
+        Ok(())
     }
 
     fn populate_part_a(
@@ -333,7 +331,7 @@ impl ETWExporter {
             }
         }
 
-        return (event_id, event_name);
+        (event_id, event_name)
     }
 }
 
