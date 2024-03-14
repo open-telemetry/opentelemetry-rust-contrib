@@ -60,3 +60,53 @@ impl opentelemetry_sdk::logs::LogProcessor for ReentrantLogProcessor {
         self.event_exporter.event_enabled(level, target, name)
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use opentelemetry_sdk::logs::LogProcessor;
+
+    #[test]
+    fn test_shutdown() {
+        let mut processor = ReentrantLogProcessor::new(
+            "provider_name",
+            "event_name".into(),
+            None,
+            ExporterConfig::default(),
+        );
+
+        assert_eq!(processor.shutdown().is_ok(), true);
+    }
+
+    #[test]
+    fn test_force_flush() {
+        let processor = ReentrantLogProcessor::new(
+            "provider_name",
+            "event_name".into(),
+            None,
+            ExporterConfig::default(),
+        );
+
+        assert_eq!(processor.force_flush().is_ok(), true);
+    }
+
+    #[test]
+    fn test_emit() {
+        let processor = ReentrantLogProcessor::new(
+            "provider_name",
+            "event_name".into(),
+            None,
+            ExporterConfig::default(),
+        );
+
+        let log_data = LogData {
+            instrumentation: Default::default(),
+            record: Default::default(),
+            resource: Default::default(),
+        };
+
+        processor.emit(log_data);
+
+        assert!(true);
+    }
+}

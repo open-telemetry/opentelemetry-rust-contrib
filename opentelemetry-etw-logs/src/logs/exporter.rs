@@ -83,6 +83,7 @@ impl ETWExporter {
         exporter_config: ExporterConfig,
     ) -> Self {
         let mut options = tld::Provider::options();
+        // TODO: Implement callback
         options.callback(enabled_callback, 0x0);
         let provider = Arc::pin(tld::Provider::new(provider_name, &options));
         // SAFETY: tracelogging (ETW) enables an ETW callback into the provider when `register()` is called.
@@ -405,5 +406,56 @@ fn add_attribute_to_event(event: &mut tld::EventBuilder, key: &Key, value: &AnyV
                 0,
             );
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use opentelemetry::logs::Severity;
+    use opentelemetry_sdk::export::logs::LogData;
+
+    #[test]
+    fn test_export_log_data() {
+        let exporter = ETWExporter::new(
+            "test_provider",
+            "test_event".to_string(),
+            None,
+            ExporterConfig::default(),
+        );
+
+        let log_data = LogData {
+            instrumentation: Default::default(),
+            record: Default::default(),
+            resource: Default::default(),
+        };
+
+        let result = exporter.export_log_data(&log_data);
+        assert!(result.is_ok());
+    }
+
+    #[test]
+    fn test_get_severity_level() {
+        let exporter = ETWExporter::new(
+            "test_provider",
+            "test_event".to_string(),
+            None,
+            ExporterConfig::default(),
+        );
+
+        let result = exporter.get_severity_level(Severity::Debug);
+        assert_eq!(result, tld::Level::Verbose);
+
+        let result = exporter.get_severity_level(Severity::Info);
+        assert_eq!(result, tld::Level::Informational);
+
+        let result = exporter.get_severity_level(Severity::Error);
+        assert_eq!(result, tld::Level::Error);
+
+        let result = exporter.get_severity_level(Severity::Fatal);
+        assert_eq!(result, tld::Level::Critical);
+
+        let result = exporter.get_severity_level(Severity::Warn);
+        assert_eq!(result, tld::Level::Warning);
     }
 }
