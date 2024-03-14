@@ -75,7 +75,7 @@ mod tests {
             ExporterConfig::default(),
         );
 
-        assert_eq!(processor.shutdown().is_ok(), true);
+        assert!(processor.shutdown().is_ok());
     }
 
     #[test]
@@ -87,7 +87,7 @@ mod tests {
             ExporterConfig::default(),
         );
 
-        assert_eq!(processor.force_flush().is_ok(), true);
+        assert!(processor.force_flush().is_ok());
     }
 
     #[test]
@@ -106,7 +106,5 @@ mod tests {
         };
 
         processor.emit(log_data);
-
-        assert!(true);
     }
 }
