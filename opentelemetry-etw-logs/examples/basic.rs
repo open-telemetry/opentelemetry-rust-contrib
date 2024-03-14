@@ -13,7 +13,7 @@ fn init_logger() -> LoggerProvider {
         keywords_map: HashMap::new(),
     };
     let reenterant_processor =
-        ReentrantLogProcessor::new("test", "table".into(), None, exporter_config);
+        ReentrantLogProcessor::new("my-provider-name", "table".into(), None, exporter_config);
     LoggerProvider::builder()
         .with_log_processor(reenterant_processor)
         .build()

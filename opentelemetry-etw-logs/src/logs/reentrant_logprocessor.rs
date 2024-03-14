@@ -69,8 +69,8 @@ mod tests {
     #[test]
     fn test_shutdown() {
         let mut processor = ReentrantLogProcessor::new(
-            "provider_name",
-            "event_name".into(),
+            "test-provider-name",
+            "test-event-name".into(),
             None,
             ExporterConfig::default(),
         );
@@ -81,8 +81,8 @@ mod tests {
     #[test]
     fn test_force_flush() {
         let processor = ReentrantLogProcessor::new(
-            "provider_name",
-            "event_name".into(),
+            "test-provider-name",
+            "test-event-name".into(),
             None,
             ExporterConfig::default(),
         );
@@ -93,8 +93,8 @@ mod tests {
     #[test]
     fn test_emit() {
         let processor = ReentrantLogProcessor::new(
-            "provider_name",
-            "event_name".into(),
+            "test-provider-name",
+            "test-event-name".into(),
             None,
             ExporterConfig::default(),
         );

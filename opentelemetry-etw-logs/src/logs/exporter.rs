@@ -418,8 +418,8 @@ mod tests {
     #[test]
     fn test_export_log_data() {
         let exporter = ETWExporter::new(
-            "test_provider",
-            "test_event".to_string(),
+            "test-provider-name",
+            "test-event-name".to_string(),
             None,
             ExporterConfig::default(),
         );
@@ -437,8 +437,8 @@ mod tests {
     #[test]
     fn test_get_severity_level() {
         let exporter = ETWExporter::new(
-            "test_provider",
-            "test_event".to_string(),
+            "test-provider-name",
+            "test-event-name".to_string(),
             None,
             ExporterConfig::default(),
         );
