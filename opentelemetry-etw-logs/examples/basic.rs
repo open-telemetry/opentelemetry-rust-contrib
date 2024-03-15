@@ -1,15 +1,15 @@
 //! Basic example of logs instrumentation with the opentelemetry-etw-logs crate.
 
 //! This example demonstrates how to use the opentelemetry-etw-logs crate with the tracing crate.
-//! 
+//!
 //! run with `$ cargo run --example basic --all-features
-//! 
+//!
 //! To view the telemetry emitted to ETW you can use [`logman`](https://learn.microsoft.com/windows-server/administration/windows-commands/logman) along with `perfview`. `logman` will listen to ETW
 //! events from the given provider (on this example, `my-provider-name`) and store them in a `.etl` file.
 //! [`perfview`](https://github.com/microsoft/perfview) will allow you to visualize the events.
-//! 
+//!
 //! Instructions using Powershell:
-//! 
+//!
 //! 1. Get the ETW Session Guid for the given provider (on this example `my-provider-name`):
 //!   ```
 //!   $EtwSessionGuid = (new-object System.Diagnostics.Tracing.EventSource("my-provider-name")).Guid.ToString()`
@@ -36,7 +36,7 @@
 //!    a. Double-click `Events` in the left-panel.
 //!    a. Double-click the `my-provider-name/my-event-name` in the left-panel.
 //!    a. You should see the events in the right-panel.
-//! 
+//!
 
 use opentelemetry_appender_tracing::layer;
 use opentelemetry_etw_logs::{ExporterConfig, ReentrantLogProcessor};
@@ -50,8 +50,12 @@ fn init_logger() -> LoggerProvider {
         default_keyword: 1,
         keywords_map: HashMap::new(),
     };
-    let reenterant_processor =
-        ReentrantLogProcessor::new("my-provider-name", "my-event-name".into(), None, exporter_config);
+    let reenterant_processor = ReentrantLogProcessor::new(
+        "my-provider-name",
+        "my-event-name".into(),
+        None,
+        exporter_config,
+    );
     LoggerProvider::builder()
         .with_log_processor(reenterant_processor)
         .build()
