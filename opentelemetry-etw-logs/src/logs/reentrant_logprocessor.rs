@@ -9,9 +9,7 @@ use opentelemetry_sdk::export::logs::LogExporter;
 use crate::logs::exporter::ExporterConfig;
 use crate::logs::exporter::*;
 
-/// This export processor exports without synchronization.
-/// This is currently only used in users_event exporter, where we know
-/// that the underlying exporter is safe under concurrent calls
+/// Thread-safe LogProcessor for exporting logs to ETW.
 
 #[derive(Debug)]
 pub struct ReentrantLogProcessor {
