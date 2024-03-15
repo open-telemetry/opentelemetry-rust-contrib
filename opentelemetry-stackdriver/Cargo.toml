@@ -32,7 +32,8 @@ futures-util = { version = "0.3", default-features = false, features = ["alloc"]
 futures-channel = { version = "0.3", default-features = false, features = ["std"] }
 
 [features]
-default = ["dep:gcp_auth", "tls-native-roots"]
+default = ["gcp-authorizer", "tls-native-roots"]
+gcp-authorizer = ["dep:gcp_auth"]
 yup-authorizer = ["hyper-rustls", "dep:yup-oauth2"]
 tls-native-roots = ["tonic/tls-roots"]
 tls-webpki-roots = ["tonic/tls-webpki-roots"]
