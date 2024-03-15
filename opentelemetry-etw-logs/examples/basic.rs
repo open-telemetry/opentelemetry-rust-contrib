@@ -4,11 +4,11 @@
 //! 
 //! run with `$ cargo run --example basic --all-features
 //! 
-//! To view the telemetry emitted to ETW you can use [`logman`](https://learn.microsoft.com/en-us/windows-server/administration/windows-commands/logman) along with `perfview`. `logman` will listen to ETW
+//! To view the telemetry emitted to ETW you can use [`logman`](https://learn.microsoft.com/windows-server/administration/windows-commands/logman) along with `perfview`. `logman` will listen to ETW
 //! events from the given provider (on this example, `my-provider-name`) and store them in a `.etl` file.
 //! [`perfview`](https://github.com/microsoft/perfview) will allow you to visualize the events.
 //! 
-//! Instructions:
+//! Instructions using Powershell:
 //! 
 //! 1. Get the ETW Session Guid for the given provider (on this example `my-provider-name`):
 //!   ```

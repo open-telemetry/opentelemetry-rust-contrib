@@ -206,9 +206,12 @@ impl ETWExporter {
         self.populate_part_b(&mut event, log_data, level, event_id, event_name);
 
         // Write event to ETW
-        event.write(&self.provider, None, None);
+        let result = event.write(&self.provider, None, None);
 
-        Ok(())
+        match result {
+            0 => Ok(()),
+            _ => Err(format!("Failed to write event to ETW. ETW reason: {result}").into()),
+        }
     }
 
     fn populate_part_a(
