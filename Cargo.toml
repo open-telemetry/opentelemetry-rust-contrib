@@ -3,6 +3,7 @@ members = [
     "opentelemetry-aws",
     "opentelemetry-contrib",
     "opentelemetry-datadog",
+    "opentelemetry-etw-logs",
     "opentelemetry-stackdriver",
     "opentelemetry-user-events-logs",
     "opentelemetry-user-events-metrics",
