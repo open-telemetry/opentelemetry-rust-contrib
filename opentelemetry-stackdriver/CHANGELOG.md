@@ -2,13 +2,18 @@
 
 ## vNext
 
+## v0.19.0
+
 ### Added
 
-- Added support for `GoogleTraceContextPropagator`
+- Added support for `GoogleTraceContextPropagator` [#25](https://github.com/open-telemetry/opentelemetry-rust-contrib/pull/25)
 
 ### Changed
 
-- Bump opentelemetry version to 0.22, opentelemetry_sdk version to 0.22
+- Use gcp_auth as the default authorizer [#50](https://github.com/open-telemetry/opentelemetry-rust-contrib/pull/50)
+  yup-oauth2 is still supported and can be enabled via the `yup-authorizer` feature.
+- Bump opentelemetry version to 0.22, opentelemetry_sdk version to 0.22 [#39](https://github.com/open-telemetry/opentelemetry-rust-contrib/pull/39)
+- Bump gcp_auth to 0.11 [#50](https://github.com/open-telemetry/opentelemetry-rust-contrib/pull/50)
 
 ## v0.18.0
 
