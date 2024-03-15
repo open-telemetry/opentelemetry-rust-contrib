@@ -1,9 +1,9 @@
 [package]
 name = "opentelemetry-stackdriver"
-version = "0.18.0"
+version = "0.19.0"
 description = "A Rust opentelemetry exporter that uploads traces to Google Stackdriver trace."
 documentation = "https://docs.rs/opentelemetry-stackdriver/"
-repository = "https://github.com/open-telemetry/opentelemetry-rust"
+repository = "https://github.com/open-telemetry/opentelemetry-rust-contrib"
 license = "Apache-2.0"
 edition = "2021"
 exclude = ["/proto"]
@@ -11,7 +11,7 @@ rust-version = "1.65"
 
 [dependencies]
 async-trait = "0.1.48"
-gcp_auth = { version = "0.9", optional = true }
+gcp_auth = { version = "0.11", optional = true }
 hex = "0.4"
 http = "0.2"
 hyper = "0.14.2"
@@ -32,8 +32,8 @@ futures-util = { version = "0.3", default-features = false, features = ["alloc"]
 futures-channel = { version = "0.3", default-features = false, features = ["std"] }
 
 [features]
-default = ["yup-authorizer", "tls-native-roots"]
-yup-authorizer = ["hyper-rustls", "yup-oauth2"]
+default = ["dep:gcp_auth", "tls-native-roots"]
+yup-authorizer = ["hyper-rustls", "dep:yup-oauth2"]
 tls-native-roots = ["tonic/tls-roots"]
 tls-webpki-roots = ["tonic/tls-webpki-roots"]
 propagator = ["once_cell"]
