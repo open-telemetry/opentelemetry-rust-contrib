@@ -2,7 +2,15 @@
 
 ## vNext
 
-WARNING The current version relies on features only in upstream git version. This should be modified before releasing.
+## v0.10.0
+
+### Added
+
+- Pass DD_GIT_REPOSITORY_URL and DD_GIT_COMMIT_SHA during build
+
+### Changed
+
+- Bump opentelemetry version to 0.22, opentelemetry_sdk version to 0.22
 
 ### Changed
 

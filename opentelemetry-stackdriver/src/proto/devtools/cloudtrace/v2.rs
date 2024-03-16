@@ -11,7 +11,7 @@
 pub struct Span {
     /// Required. The resource name of the span in the following format:
     ///
-    ///   * `projects/\[PROJECT_ID]/traces/[TRACE_ID]/spans/[SPAN_ID\]`
+    ///   * `projects/\[PROJECT_ID\]/traces/\[TRACE_ID\]/spans/\[SPAN_ID\]`
     ///
     /// `\[TRACE_ID\]` is a unique identifier for a trace within a project;
     /// it is a 32-character hexadecimal encoding of a 16-byte array. It should
@@ -350,7 +350,7 @@ pub mod span {
         }
     }
 }
-/// The allowed types for `\[VALUE\]` in a `\[KEY]:[VALUE\]` attribute.
+/// The allowed types for `\[VALUE\]` in a `\[KEY\]:[VALUE]` attribute.
 #[allow(clippy::derive_partial_eq_without_eq)]
 #[derive(Clone, PartialEq, ::prost::Message)]
 pub struct AttributeValue {

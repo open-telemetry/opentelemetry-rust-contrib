@@ -40,4 +40,6 @@ if rustup component add clippy; then
   cargo_feature opentelemetry-user-events-logs "logs_level_enabled"
 
   cargo_feature opentelemetry-user-events-metrics ""
+
+  cargo_feature opentelemetry-resource-detectors ""
 fi

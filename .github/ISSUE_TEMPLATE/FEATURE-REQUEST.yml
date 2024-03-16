@@ -32,10 +32,12 @@ body:
         - opentelemetry-contrib
         - opentelemetry-datadog
         - opentelemetry-dynatrace
+        - opentelemetry-etw-logs
         - opentelemetry-stackdriver
         - opentelemetry-user-events-logs
         - opentelemetry-user-events-metrics
         - opentelemetry-zpages
+        - opentelemetry-resource-detectors
         - N/A
   - type: textarea
     id: solution

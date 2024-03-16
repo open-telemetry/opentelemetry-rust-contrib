@@ -13,7 +13,17 @@ use super::unified_tags::{UnifiedTagField, UnifiedTags};
 
 const SPAN_NUM_ELEMENTS: u32 = 12;
 const METRICS_LEN : u32 = 2;
-const GIT_META_TAGS_COUNT: u32 = if matches!((option_env!("DD_GIT_REPOSITORY_URL"), option_env!("DD_GIT_COMMIT_SHA")), (Some(_), Some(_))) { 2 } else { 0 };
+const GIT_META_TAGS_COUNT: u32 = if matches!(
+    (
+        option_env!("DD_GIT_REPOSITORY_URL"),
+        option_env!("DD_GIT_COMMIT_SHA")
+    ),
+    (Some(_), Some(_))
+) {
+    2
+} else {
+    0
+};
 
 // Protocol documentation sourced from https://github.com/DataDog/datadog-agent/blob/c076ea9a1ffbde4c76d35343dbc32aecbbf99cb9/pkg/trace/api/version.go
 //
@@ -235,7 +245,10 @@ where
                 rmp::encode::write_u32(&mut encoded, interner.intern(kv.value.as_str().as_ref()))?;
             }
 
-            if let (Some(repository_url), Some(commit_sha)) = (option_env!("DD_GIT_REPOSITORY_URL"), option_env!("DD_GIT_COMMIT_SHA")) {
+            if let (Some(repository_url), Some(commit_sha)) = (
+                option_env!("DD_GIT_REPOSITORY_URL"),
+                option_env!("DD_GIT_COMMIT_SHA"),
+            ) {
                 rmp::encode::write_u32(&mut encoded, interner.intern("git.repository_url"))?;
                 rmp::encode::write_u32(&mut encoded, interner.intern(repository_url))?;
                 rmp::encode::write_u32(&mut encoded, interner.intern("git.commit.sha"))?;

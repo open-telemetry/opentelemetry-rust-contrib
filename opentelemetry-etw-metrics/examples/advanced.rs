@@ -1,22 +1,24 @@
-//! run with `$ cargo run --example basic --all-features
+//! run with `$ cargo run --example advanced --all-features
 use opentelemetry::{
     metrics::{MeterProvider as _, Unit},
     KeyValue,
 };
+use opentelemetry_etw_metrics::MetricsExporter;
 use opentelemetry_sdk::{
-    metrics::{MeterProvider as SdkMeterProvider, PeriodicReader},
+    metrics::{PeriodicReader, SdkMeterProvider},
     runtime, Resource,
 };
-use opentelemetry_user_events_metrics::MetricsExporter;
-use std::thread;
-use std::time::Duration;
+
+use std::{thread, time::Duration};
+
+const SERVICE_NAME: &str = "service-name";
 
 fn init_metrics(exporter: MetricsExporter) -> SdkMeterProvider {
     let reader = PeriodicReader::builder(exporter, runtime::Tokio).build();
     SdkMeterProvider::builder()
         .with_resource(Resource::new(vec![KeyValue::new(
             "service.name",
-            "metric-demo",
+            SERVICE_NAME,
         )]))
         .with_reader(reader)
         .build()
@@ -25,10 +27,10 @@ fn init_metrics(exporter: MetricsExporter) -> SdkMeterProvider {
 #[tokio::main]
 #[allow(unused_must_use)]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
-    let exporter = opentelemetry_user_events_metrics::MetricsExporter::new();
+    let exporter = opentelemetry_etw_metrics::MetricsExporter::new();
     let meter_provider = init_metrics(exporter);
 
-    let meter = meter_provider.meter("user-event-test");
+    let meter = meter_provider.meter("etw-test");
 
     // Create a Counter Instrument.
     let counter = meter
@@ -53,7 +55,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .with_description("test_description")
         .init();
     let histogram2 = meter
-        .i64_histogram("histogram_i64_test")
+        .u64_histogram("histogram_u64_test")
         .with_description("test_description")
         .init();
 
@@ -65,7 +67,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .init();
 
     let gauge2 = meter
-        .i64_observable_gauge("observable_gauge_i64_test")
+        .u64_observable_gauge("observable_gauge_u64_test")
         .with_unit(Unit::new("test_unit"))
         .with_description("test_description")
         .init();
@@ -82,7 +84,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     })?;
 
     meter.register_callback(&[gauge2.as_any()], move |observer| {
-        observer.observe_i64(
+        observer.observe_u64(
             &gauge2,
             1,
             &[
@@ -204,6 +206,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 KeyValue::new("mykey2", "myvalue2"),
             ],
         );
+
         histogram2.record(
             10,
             &[

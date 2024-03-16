@@ -2,15 +2,15 @@
 members = [
     "opentelemetry-aws",
     "opentelemetry-contrib",
-# TODO: Add back in once this relies on a published version
-#    "opentelemetry-datadog",
-# TODO: Add back in once this relies on a published version
-#    "opentelemetry-stackdriver",
+    "opentelemetry-datadog",
+    "opentelemetry-etw-logs",
+    "opentelemetry-stackdriver",
     "opentelemetry-user-events-logs",
     "opentelemetry-user-events-metrics",
-# TODO: Add back in once this relies on a published version
-#    "opentelemetry-zpages",
+    "opentelemetry-zpages",
     "examples/traceresponse",
+    "opentelemetry-etw-metrics",
+    "opentelemetry-resource-detectors",
 ]
 exclude = [
     "opentelemetry-datadog",
@@ -23,3 +23,12 @@ resolver = "2"
 # See function names in profiling reports.
 # 2/true is too much, 0 is not enough, 1 is just right for back traces
 debug = 1
+
+[workspace.dependencies]
+opentelemetry = "0.22"
+opentelemetry-appender-tracing = "0.3"
+opentelemetry-http = "0.11"
+opentelemetry-proto = { version = "0.5", default-features = false }
+opentelemetry_sdk = { version = "0.22", default-features = false }
+opentelemetry-stdout = "0.3"
+opentelemetry-semantic-conventions = "0.14"

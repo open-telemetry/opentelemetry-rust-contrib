@@ -1,6 +1,6 @@
 [package]
 name = "opentelemetry-user-events-metrics"
-version = "0.2.2"
+version = "0.3.0"
 description = "OpenTelemetry metrics exporter to user events"
 homepage = "https://github.com/open-telemetry/opentelemetry-rust-contrib/tree/main/opentelemetry-user-events-metrics"
 repository = "https://github.com/open-telemetry/opentelemetry-rust-contrib/tree/main/opentelemetry-user-events-metrics"
@@ -11,16 +11,12 @@ edition = "2021"
 rust-version = "1.65"
 
 [dependencies]
-opentelemetry = { version = "0.21", features = ["metrics"] }
-opentelemetry_sdk = { version = "0.21", features = ["metrics", "rt-tokio"] }
-opentelemetry-proto = { version = "0.4", features = ["gen-tonic", "metrics"] }
+opentelemetry = { workspace = true, features = ["metrics"] }
+opentelemetry_sdk = { workspace = true, features = ["metrics", "rt-tokio"] }
+opentelemetry-proto = { workspace = true, features = ["gen-tonic", "metrics"] }
 eventheader = { version = "= 0.3.4" }
 async-trait = "0.1"
-prost = "0.11"
+prost = "0.12"
 
 [dev-dependencies]
 tokio = { version = "1.0", features = ["full"] }
-
-[[example]]
-name = "basic"
-path = "examples/basic.rs"
