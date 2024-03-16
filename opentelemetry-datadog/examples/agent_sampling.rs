@@ -31,14 +31,15 @@ impl ShouldSample for AgentBasedSampler {
         _links: &[opentelemetry::trace::Link],
     ) -> opentelemetry::trace::SamplingResult {
         let trace_state = parent_context
-            .map(|parent_context|
-                parent_context.span().span_context().trace_state().clone() // inherit sample decision from parent span
+            .map(
+                |parent_context| parent_context.span().span_context().trace_state().clone(), // inherit sample decision from parent span
             )
-            .unwrap_or_else(|| DatadogTraceStateBuilder::default()
-                .with_priority_sampling(true) // always sample root span(span without remote or local parent)
-                .with_measuring(true) // datadog-agent will create metric for this span for APM
-                .build()
-            );
+            .unwrap_or_else(|| {
+                DatadogTraceStateBuilder::default()
+                    .with_priority_sampling(true) // always sample root span(span without remote or local parent)
+                    .with_measuring(true) // datadog-agent will create metric for this span for APM
+                    .build()
+            });
 
         SamplingResult {
             decision: opentelemetry::trace::SamplingDecision::RecordAndSample, // send all spans to datadog-agent
@@ -55,7 +56,7 @@ fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync + 'static>> {
         .with_trace_config(
             trace::config()
                 .with_sampler(AgentBasedSampler)
-                .with_id_generator(RandomIdGenerator::default())
+                .with_id_generator(RandomIdGenerator::default()),
         )
         .install_simple()?;
 

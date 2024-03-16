@@ -1,8 +1,5 @@
 use crate::exporter::intern::StringInterner;
-use crate::exporter::model::{
-    DD_MEASURED_KEY,
-    SAMPLING_PRIORITY_KEY,
-};
+use crate::exporter::model::{DD_MEASURED_KEY, SAMPLING_PRIORITY_KEY};
 use crate::exporter::{Error, ModelConfig};
 use crate::propagator::DatadogTraceState;
 use opentelemetry::trace::Status;
@@ -12,7 +9,7 @@ use std::time::SystemTime;
 use super::unified_tags::{UnifiedTagField, UnifiedTags};
 
 const SPAN_NUM_ELEMENTS: u32 = 12;
-const METRICS_LEN : u32 = 2;
+const METRICS_LEN: u32 = 2;
 const GIT_META_TAGS_COUNT: u32 = if matches!(
     (
         option_env!("DD_GIT_REPOSITORY_URL"),

@@ -140,11 +140,7 @@ pub use exporter::{
     new_pipeline, ApiVersion, DatadogExporter, DatadogPipelineBuilder, Error, FieldMappingFn,
     ModelConfig,
 };
-pub use propagator::{
-    DatadogPropagator,
-    DatadogTraceState,
-    DatadogTraceStateBuilder,
-};
+pub use propagator::{DatadogPropagator, DatadogTraceState, DatadogTraceStateBuilder};
 
 mod propagator {
     use once_cell::sync::Lazy;
@@ -181,7 +177,11 @@ mod propagator {
     }
 
     fn boolean_to_trace_state_flag(value: bool) -> &'static str {
-        if value { TRACE_STATE_TRUE_VALUE } else { TRACE_STATE_FALSE_VALUE }
+        if value {
+            TRACE_STATE_TRUE_VALUE
+        } else {
+            TRACE_STATE_FALSE_VALUE
+        }
     }
 
     fn trace_flag_to_boolean(value: &str) -> bool {
@@ -206,11 +206,20 @@ mod propagator {
 
         pub fn build(self) -> TraceState {
             #[cfg(not(feature = "agent-sampling"))]
-            let values = [(TRACE_STATE_MEASURE, boolean_to_trace_state_flag(self.measuring))];
+            let values = [(
+                TRACE_STATE_MEASURE,
+                boolean_to_trace_state_flag(self.measuring),
+            )];
             #[cfg(feature = "agent-sampling")]
             let values = [
-                (TRACE_STATE_MEASURE, boolean_to_trace_state_flag(self.measuring)),
-                (TRACE_STATE_PRIORITY_SAMPLING, boolean_to_trace_state_flag(self.priority_sampling)),
+                (
+                    TRACE_STATE_MEASURE,
+                    boolean_to_trace_state_flag(self.measuring),
+                ),
+                (
+                    TRACE_STATE_PRIORITY_SAMPLING,
+                    boolean_to_trace_state_flag(self.priority_sampling),
+                ),
             ];
 
             TraceState::from_key_value(values).unwrap_or_default()
@@ -243,8 +252,11 @@ mod propagator {
 
         #[cfg(feature = "agent-sampling")]
         fn with_priority_sampling(&self, enabled: bool) -> TraceState {
-            self.insert(TRACE_STATE_PRIORITY_SAMPLING, boolean_to_trace_state_flag(enabled))
-                .unwrap_or_else(|_err| self.clone())
+            self.insert(
+                TRACE_STATE_PRIORITY_SAMPLING,
+                boolean_to_trace_state_flag(enabled),
+            )
+            .unwrap_or_else(|_err| self.clone())
         }
 
         #[cfg(feature = "agent-sampling")]
@@ -299,7 +311,12 @@ mod propagator {
         if trace_flags & TRACE_FLAG_DEFERRED == TRACE_FLAG_DEFERRED {
             (TraceState::default(), trace_flags)
         } else {
-            (DatadogTraceStateBuilder::default().with_priority_sampling(trace_flags.is_sampled()).build(), TraceFlags::SAMPLED)
+            (
+                DatadogTraceStateBuilder::default()
+                    .with_priority_sampling(trace_flags.is_sampled())
+                    .build(),
+                TraceFlags::SAMPLED,
+            )
         }
     }
 
@@ -385,14 +402,12 @@ mod propagator {
             SamplingPriority::AutoKeep
         } else {
             SamplingPriority::AutoReject
-        }   
+        }
     }
 
     #[cfg(feature = "agent-sampling")]
     fn get_sampling_priority(span_context: &SpanContext) -> SamplingPriority {
-        if span_context
-            .trace_state()
-            .priority_sampling_enabled() {
+        if span_context.trace_state().priority_sampling_enabled() {
             SamplingPriority::AutoKeep
         } else {
             SamplingPriority::AutoReject
