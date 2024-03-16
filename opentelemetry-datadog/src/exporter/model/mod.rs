@@ -147,7 +147,7 @@ impl ApiVersion {
     pub(crate) fn encode(
         self,
         model_config: &ModelConfig,
-        traces: Vec<Vec<trace::SpanData>>,
+        traces: Vec<&[trace::SpanData]>,
         mapping: &Mapping,
         unified_tags: &UnifiedTags,
     ) -> Result<Vec<u8>, Error> {
@@ -252,7 +252,7 @@ pub(crate) mod tests {
         };
         let encoded = base64::encode(ApiVersion::Version03.encode(
             &model_config,
-            traces,
+            traces.iter().map(|x| &x[..]).collect(),
             &Mapping::empty(),
             &UnifiedTags::new(),
         )?);
@@ -280,7 +280,7 @@ pub(crate) mod tests {
 
         let _encoded = base64::encode(ApiVersion::Version05.encode(
             &model_config,
-            traces,
+            traces.iter().map(|x| &x[..]).collect(),
             &Mapping::empty(),
             &unified_tags,
         )?);
