@@ -429,7 +429,7 @@ mod propagator {
                 );
 
                 if span_context.trace_flags() & TRACE_FLAG_DEFERRED != TRACE_FLAG_DEFERRED {
-                    let sampling_priority = get_sampling_priority(&span_context);
+                    let sampling_priority = get_sampling_priority(span_context);
 
                     injector.set(
                         DATADOG_SAMPLING_PRIORITY_HEADER,
