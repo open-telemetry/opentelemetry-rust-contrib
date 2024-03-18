@@ -2,6 +2,12 @@
 
 ## vNext
 
+## v0.19.1
+
+### Fixed
+
+- Fixed Cargo features for `GcpAuthorizer` [#51](https://github.com/open-telemetry/opentelemetry-rust-contrib/pull/51)
+
 ## v0.19.0
 
 ### Added

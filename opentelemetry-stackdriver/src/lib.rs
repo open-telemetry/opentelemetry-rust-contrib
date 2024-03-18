@@ -38,7 +38,7 @@ use opentelemetry_sdk::{
 };
 use opentelemetry_semantic_conventions as semconv;
 use thiserror::Error;
-#[cfg(any(feature = "yup-authorizer", feature = "gcp_auth"))]
+#[cfg(any(feature = "yup-authorizer", feature = "gcp-authorizer"))]
 use tonic::metadata::MetadataValue;
 use tonic::{
     transport::{Channel, ClientTlsConfig},
@@ -453,13 +453,13 @@ impl Authorizer for YupAuthorizer {
     }
 }
 
-#[cfg(feature = "gcp_auth")]
+#[cfg(feature = "gcp-authorizer")]
 pub struct GcpAuthorizer {
     manager: gcp_auth::AuthenticationManager,
     project_id: String,
 }
 
-#[cfg(feature = "gcp_auth")]
+#[cfg(feature = "gcp-authorizer")]
 impl GcpAuthorizer {
     pub async fn new() -> Result<Self, Error> {
         let manager = gcp_auth::AuthenticationManager::new()
@@ -484,7 +484,7 @@ impl GcpAuthorizer {
     }
 }
 
-#[cfg(feature = "gcp_auth")]
+#[cfg(feature = "gcp-authorizer")]
 #[async_trait]
 impl Authorizer for GcpAuthorizer {
     type Error = Error;
