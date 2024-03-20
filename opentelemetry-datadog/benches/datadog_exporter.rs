@@ -53,7 +53,7 @@ fn get_http_target(rng: &mut ThreadRng) -> String {
         format!("/v1/user/{id}"),
         format!("/v1/student/{id}"),
         format!("/v2/family/{id}"),
-        format!("/v3/awesome/endpoint"),
+        "/v3/awesome/endpoint".to_string(),
     ];
     targets.choose(rng).unwrap().to_string()
 }
@@ -102,25 +102,18 @@ fn get_boolean_value(rng: &mut ThreadRng) -> bool {
 
 fn get_array_of_ints(rng: &mut ThreadRng) -> Value {
     let len = rng.next_u32() % 8;
-    Value::Array(Array::I64(
-        (0..len).into_iter().map(|_| get_int_value(rng)).collect(),
-    ))
+    Value::Array(Array::I64((0..len).map(|_| get_int_value(rng)).collect()))
 }
 
 fn get_array_of_floats(rng: &mut ThreadRng) -> Value {
     let len = rng.next_u32() % 8;
-    Value::Array(Array::F64(
-        (0..len).into_iter().map(|_| get_float_value(rng)).collect(),
-    ))
+    Value::Array(Array::F64((0..len).map(|_| get_float_value(rng)).collect()))
 }
 
 fn get_array_of_booleans(rng: &mut ThreadRng) -> Value {
     let len = rng.next_u32() % 8;
     Value::Array(Array::Bool(
-        (0..len)
-            .into_iter()
-            .map(|_| get_boolean_value(rng))
-            .collect(),
+        (0..len).map(|_| get_boolean_value(rng)).collect(),
     ))
 }
 
@@ -189,11 +182,9 @@ fn generate_traces(number_of_traces: usize, spans_per_trace: usize) -> Vec<SpanD
     let mut rng = thread_rng();
 
     let mut result: Vec<SpanData> = (0..number_of_traces)
-        .into_iter()
         .flat_map(|trace_id| {
             let id = &trace_id;
             (0..spans_per_trace)
-                .into_iter()
                 .map(|span_id| get_span(*id as u128, span_id as u64, span_id as u64, &mut rng))
                 .collect::<Vec<_>>()
         })
