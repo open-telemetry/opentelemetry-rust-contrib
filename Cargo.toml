@@ -1,20 +1,10 @@
 [workspace]
 members = [
-    "opentelemetry-aws",
-    "opentelemetry-contrib",
-    "opentelemetry-datadog",
-    "opentelemetry-etw-logs",
-    "opentelemetry-stackdriver",
-    "opentelemetry-user-events-logs",
-    "opentelemetry-user-events-metrics",
-    "opentelemetry-zpages",
-    "examples/traceresponse",
-    "opentelemetry-etw-metrics",
-    "opentelemetry-resource-detectors",
+    "opentelemetry-*",
+    "examples/*",
 ]
 exclude = [
-    "opentelemetry-datadog",
-    "opentelemetry-stackdriver",
+    "opentelemetry-dynatrace",
 ]
 resolver = "2"
 
