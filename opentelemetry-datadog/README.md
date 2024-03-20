@@ -24,6 +24,7 @@ to [`Datadog`].
 
 `opentelemetry-datadog` supports following features:
 
+- `agent-sampling`: move decision making about sampling to `datadog-agent` (see `agent_sampling.rs` example).
 - `reqwest-blocking-client`: use `reqwest` blocking http client to send spans.
 - `reqwest-client`: use `reqwest` http client to send spans.
 - `surf-client`: use `surf` http client to send spans.

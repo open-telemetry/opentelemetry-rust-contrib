@@ -19,6 +19,7 @@ all-features = true
 rustdoc-args = ["--cfg", "docsrs"]
 
 [features]
+agent-sampling = []
 reqwest-blocking-client = ["reqwest/blocking", "opentelemetry-http/reqwest"]
 reqwest-client = ["reqwest", "opentelemetry-http/reqwest"]
 
@@ -49,3 +50,8 @@ opentelemetry_sdk = { workspace = true, features = ["trace", "testing"] }
 [[example]]
 name = "datadog"
 path = "examples/datadog.rs"
+
+[[example]]
+name = "agent_sampling"
+path = "examples/agent_sampling.rs"
+required-features = ["agent-sampling"]
