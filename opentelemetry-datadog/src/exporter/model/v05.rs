@@ -251,11 +251,11 @@ where
 
             rmp::encode::write_map_len(&mut encoded, METRICS_LEN)?;
             rmp::encode::write_u32(&mut encoded, interner.intern(SAMPLING_PRIORITY_KEY))?;
-            let sampling_priority = get_sampling_priority(&span);
+            let sampling_priority = get_sampling_priority(span);
             rmp::encode::write_f64(&mut encoded, sampling_priority)?;
 
             rmp::encode::write_u32(&mut encoded, interner.intern(DD_MEASURED_KEY))?;
-            let measuring = get_measuring(&span);
+            let measuring = get_measuring(span);
             rmp::encode::write_f64(&mut encoded, measuring)?;
             rmp::encode::write_u32(&mut encoded, span_type)?;
         }
