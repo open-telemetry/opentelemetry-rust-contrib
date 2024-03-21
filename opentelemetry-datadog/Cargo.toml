@@ -46,6 +46,12 @@ bytes = "1"
 futures-util = { version = "0.3", default-features = false, features = ["io"] }
 isahc = "1.4"
 opentelemetry_sdk = { workspace = true, features = ["trace", "testing"] }
+criterion = "0.5"
+rand = "0.8"
+
+[[bench]]
+name = "datadog_exporter"
+harness = false
 
 [[example]]
 name = "datadog"
