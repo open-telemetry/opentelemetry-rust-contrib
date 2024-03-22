@@ -12,7 +12,8 @@ Community supported Resource detectors implementations for applications instrume
 
 ## Features
 
-| Detector       | Implemented Resources                               | Semantic Conventions       |
-| -------------- | --------------------------------------------------- | -------------------------- |
+| Detector                | Implemented Resources                               | Semantic Conventions       |
+|-------------------------| --------------------------------------------------- | -------------------------- |
 | ProcessResourceDetector | PROCESS_COMMAND_ARGS, PROCESS_PID | https://github.com/open-telemetry/opentelemetry-specification/blob/v1.6.x/specification/resource/semantic_conventions/process.md |
-| OsResourceDetector  | OS_TYPE | https://github.com/open-telemetry/opentelemetry-specification/blob/v1.6.x/specification/resource/semantic_conventions/os.md |
+| OsResourceDetector      | OS_TYPE | https://github.com/open-telemetry/opentelemetry-specification/blob/v1.6.x/specification/resource/semantic_conventions/os.md |
+| HostResourceDetector    | HOST_ID | https://github.com/open-telemetry/opentelemetry-specification/blob/v1.6.x/specification/resource/semantic_conventions/host.md |
