@@ -37,6 +37,7 @@ fn host_id_detect() -> Option<String> {
     read_to_string(machine_id_path).or_else(|_|{read_to_string(dbus_machine_id_path)}).ok()
 }
 
+// TODO: Implement non-linux platforms
 #[cfg(not(target_os = "linux"))]
 fn host_id_detect() -> Option<String> {
     None
