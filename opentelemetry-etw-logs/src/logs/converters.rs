@@ -54,40 +54,39 @@ mod tests {
         let result = vec.as_json_value();
         assert_eq!(result, json!([1, 2, 3, 0, -2]));
 
-        let vec = vec![];
-        let result = vec.as_json_value();
+        let result = [].as_json_value();
         assert_eq!(result, json!([]));
 
-        let vec = vec![AnyValue::ListAny(vec![
+        let array = [AnyValue::ListAny(vec![
             AnyValue::Int(1),
             AnyValue::Int(2),
             AnyValue::Int(3),
         ])];
-        let result = vec.as_json_value();
+        let result = array.as_json_value();
         assert_eq!(result, json!([[1, 2, 3]]));
 
-        let vec = vec![
+        let array = [
             AnyValue::ListAny(vec![AnyValue::Int(1), AnyValue::Int(2)]),
             AnyValue::ListAny(vec![AnyValue::Int(3), AnyValue::Int(4)]),
         ];
-        let result = vec.as_json_value();
+        let result = array.as_json_value();
         assert_eq!(result, json!([[1, 2], [3, 4]]));
 
-        let vec = vec![AnyValue::Boolean(true), AnyValue::Boolean(false)];
-        let result = vec.as_json_value();
+        let array = [AnyValue::Boolean(true), AnyValue::Boolean(false)];
+        let result = array.as_json_value();
         assert_eq!(result, json!([true, false]));
 
-        let vec = vec![
+        let array = [
             AnyValue::Double(1.0),
             AnyValue::Double(-1.0),
             AnyValue::Double(0.0),
             AnyValue::Double(0.1),
             AnyValue::Double(-0.5),
         ];
-        let result = vec.as_json_value();
+        let result = array.as_json_value();
         assert_eq!(result, json!([1.0, -1.0, 0.0, 0.1, -0.5]));
 
-        let vec = vec![
+        let array = [
             AnyValue::String("".into()),
             AnyValue::String("a".into()),
             AnyValue::String(r#"""#.into()),
@@ -95,7 +94,7 @@ mod tests {
             AnyValue::String(r#"foo bar"#.into()),
             AnyValue::String(r#""foo bar""#.into()),
         ];
-        let result = vec.as_json_value();
+        let result = array.as_json_value();
         assert_eq!(
             result,
             json!(["", "a", "\"", "\"\"", "foo bar", "\"foo bar\""])
@@ -105,11 +104,11 @@ mod tests {
     #[test]
     #[should_panic]
     fn test_convert_bytes_panics() {
-        let vec = vec![
+        let array = [
             AnyValue::Bytes(vec![97u8, 98u8, 99u8]),
             AnyValue::Bytes(vec![]),
         ];
-        let result = vec.as_json_value();
+        let result = array.as_json_value();
         assert_eq!(result, json!(["abc", ""]));
     }
 
