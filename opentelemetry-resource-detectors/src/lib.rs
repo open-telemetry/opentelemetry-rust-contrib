@@ -6,10 +6,10 @@
 //! - [`OsResourceDetector`] - detect OS from runtime.
 //! - [`ProcessResourceDetector`] - detect process information.
 //! - [`HostResourceDetector`] - detect unique host ID.
+mod host;
 mod os;
 mod process;
-mod host;
 
+pub use host::HostResourceDetector;
 pub use os::OsResourceDetector;
 pub use process::ProcessResourceDetector;
-pub use host::HostResourceDetector;
