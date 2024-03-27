@@ -4,7 +4,7 @@
 
 ### Added
 
-- Host resource detector
+- Added `HostResourceDetector` which populates "host.id" attribute. Currently only Linux is supported.
 
 ## v0.1.0
 
