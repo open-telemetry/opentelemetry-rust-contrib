@@ -6,7 +6,7 @@ use std::time::SystemTime;
 
 pub(crate) fn encode<S, N, R>(
     model_config: &ModelConfig,
-    traces: Vec<Vec<SpanData>>,
+    traces: Vec<&[SpanData]>,
     get_service_name: S,
     get_name: N,
     get_resource: R,
@@ -22,7 +22,7 @@ where
     for trace in traces.into_iter() {
         rmp::encode::write_array_len(&mut encoded, trace.len() as u32)?;
 
-        for span in trace.into_iter() {
+        for span in trace {
             // Safe until the year 2262 when Datadog will need to change their API
             let start = span
                 .start_time
@@ -53,13 +53,13 @@ where
 
             // Datadog span name is OpenTelemetry component name - see module docs for more information
             rmp::encode::write_str(&mut encoded, "service")?;
-            rmp::encode::write_str(&mut encoded, get_service_name(&span, model_config))?;
+            rmp::encode::write_str(&mut encoded, get_service_name(span, model_config))?;
 
             rmp::encode::write_str(&mut encoded, "name")?;
-            rmp::encode::write_str(&mut encoded, get_name(&span, model_config))?;
+            rmp::encode::write_str(&mut encoded, get_name(span, model_config))?;
 
             rmp::encode::write_str(&mut encoded, "resource")?;
-            rmp::encode::write_str(&mut encoded, get_resource(&span, model_config))?;
+            rmp::encode::write_str(&mut encoded, get_resource(span, model_config))?;
 
             rmp::encode::write_str(&mut encoded, "trace_id")?;
             rmp::encode::write_u64(
