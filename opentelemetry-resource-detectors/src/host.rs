@@ -4,7 +4,6 @@
 use opentelemetry::KeyValue;
 use opentelemetry_sdk::resource::ResourceDetector;
 use opentelemetry_sdk::Resource;
-use std::error::Error;
 use std::fs::read_to_string;
 use std::path::Path;
 use std::time::Duration;
