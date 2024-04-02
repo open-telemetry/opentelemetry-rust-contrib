@@ -56,7 +56,7 @@ impl Default for HostResourceDetector {
 #[cfg(test)]
 mod tests {
     use super::HostResourceDetector;
-    use opentelemetry::{Key, Value};
+    use opentelemetry::Key;
     use opentelemetry_sdk::resource::ResourceDetector;
     use std::time::Duration;
 
