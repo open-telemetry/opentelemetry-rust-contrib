@@ -6,10 +6,7 @@ use std::{
     hash::{BuildHasherDefault, Hash},
 };
 
-#[cfg(any(
-    feature = "intern-ahash",
-    all(feature = "intern-std", feature = "intern-ahash")
-))]
+#[cfg(feature = "intern-ahash")]
 type InternHasher = ahash::AHasher;
 
 #[cfg(all(feature = "intern-std", not(feature = "intern-ahash")))]
