@@ -63,7 +63,6 @@ impl Default for HostResourceDetector {
     }
 }
 
-#[cfg(target_os = "linux")]
 #[cfg(test)]
 mod tests {
     use super::HostResourceDetector;
@@ -71,6 +70,7 @@ mod tests {
     use opentelemetry_sdk::resource::ResourceDetector;
     use std::time::Duration;
 
+    #[cfg(target_os = "linux")]
     #[test]
     fn test_host_resource_detector() {
         let resource = HostResourceDetector::default().detect(Duration::from_secs(0));
@@ -80,11 +80,37 @@ mod tests {
                 opentelemetry_semantic_conventions::resource::HOST_ID
             ))
             .is_some());
+        assert!(resource
+            .get(Key::from_static_str(
+                opentelemetry_semantic_conventions::resource::HOST_ARCH
+            ))
+            .is_some())
+    }
+
+    #[test]
+    fn test_resource_host_arch_value() {
+        let resource = HostResourceDetector::default().detect(Duration::from_secs(0));
+
+        assert!(resource
+            .get(Key::from_static_str(
+                opentelemetry_semantic_conventions::resource::HOST_ARCH
+            ))
+            .is_some());
+
+        #[cfg(target_arch = "x86_64")]
         assert_eq!(
             resource.get(Key::from_static_str(
                 opentelemetry_semantic_conventions::resource::HOST_ARCH
             )),
             Some(Value::from("x86_64"))
+        );
+
+        #[cfg(target_arch = "aarch64")]
+        assert_eq!(
+            resource.get(Key::from_static_str(
+                opentelemetry_semantic_conventions::resource::HOST_ARCH
+            )),
+            Some(Value::from("aarch64"))
         )
     }
 }
