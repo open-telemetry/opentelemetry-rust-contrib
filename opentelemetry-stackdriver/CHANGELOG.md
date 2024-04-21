@@ -2,6 +2,7 @@
 
 ## vNext
 
+- Bump proto versions adds documentation and versioning fields [#61]
 - Bump yup-oauth2 to 8.3.3 [#58](https://github.com/open-telemetry/opentelemetry-rust-contrib/pull/58)
 - Bump hyper-rustls to 0.25 [#58](https://github.com/open-telemetry/opentelemetry-rust-contrib/pull/58)
 
