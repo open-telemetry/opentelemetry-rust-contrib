@@ -2,7 +2,7 @@
 
 use opentelemetry::trace::SpanContext;
 use opentelemetry_sdk::export::trace::SpanData;
-#[cfg(feature = "serialize")]
+#[cfg(feature = "with-serde")]
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
