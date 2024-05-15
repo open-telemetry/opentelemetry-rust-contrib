@@ -100,7 +100,6 @@ mod tests {
         let log_data = LogData {
             instrumentation: Default::default(),
             record: Default::default(),
-            resource: Default::default(),
         };
 
         processor.emit(log_data);
