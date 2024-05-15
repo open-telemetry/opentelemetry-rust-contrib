@@ -286,7 +286,6 @@ impl TracezResponse {
     /// Convert the `TracezResponse` into json.
     ///
     /// Throw a `TracezError` if the serialization fails.
-    #[cfg(feature = "with-serde")]
     pub fn into_json(self) -> Result<String, TracezError> {
         serde_json::to_string(&self).map_err(|_| TracezError::Serialization)
     }
