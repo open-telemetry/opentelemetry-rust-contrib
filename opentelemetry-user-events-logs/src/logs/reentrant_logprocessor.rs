@@ -45,7 +45,7 @@ impl opentelemetry_sdk::logs::LogProcessor for ReentrantLogProcessor {
 
     // This is a no-op no special cleanup is required before
     // shutdown.
-    fn shutdown(&mut self) -> LogResult<()> {
+    fn shutdown(&self) -> LogResult<()> {
         Ok(())
     }
 
