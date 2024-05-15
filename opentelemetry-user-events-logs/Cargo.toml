@@ -11,8 +11,8 @@ keywords = ["opentelemetry", "log", "trace", "user_events"]
 license = "Apache-2.0"
 
 [dependencies]
-eventheader = "0.3.2"
-eventheader_dynamic = "0.3.3"
+eventheader = "0.4.0"
+eventheader_dynamic = "0.4.0"
 opentelemetry = { workspace = true, features = ["logs"] }
 opentelemetry_sdk = { workspace = true, features = ["logs"] }
 async-std = { version="1.6" }
