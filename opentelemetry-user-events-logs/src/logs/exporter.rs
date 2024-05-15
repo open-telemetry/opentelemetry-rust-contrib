@@ -202,7 +202,7 @@ impl UserEventsExporter {
                     .record
                     .timestamp
                     .or_else(|| log_data.record.observed_timestamp)
-                    .unwrap_or_else(SystemTime::now); // observerd_timestamp will never be None as per otel specs
+                    .unwrap_or_else(SystemTime::now);
                 cs_a_count += 1; // for event_time
                 eb.add_struct("PartA", cs_a_count, 0);
                 {
