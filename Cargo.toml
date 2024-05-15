@@ -5,6 +5,9 @@ members = [
 ]
 exclude = [
     "opentelemetry-dynatrace",
+    "opentelemetry-datadog",
+    "opentelemetry-stackdriver",
+    "opentelemetry-zpages"
 ]
 resolver = "2"
 
