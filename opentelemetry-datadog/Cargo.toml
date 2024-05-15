@@ -22,6 +22,7 @@ rustdoc-args = ["--cfg", "docsrs"]
 agent-sampling = []
 reqwest-blocking-client = ["reqwest/blocking", "opentelemetry-http/reqwest"]
 reqwest-client = ["reqwest", "opentelemetry-http/reqwest"]
+surf-client = []
 
 [dependencies]
 indexmap = "2.0"
