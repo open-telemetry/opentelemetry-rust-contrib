@@ -2,6 +2,11 @@
 
 ## vNext
 
+### Changed
+
+- Bump opentelemetry and opentelemetry_sdk versions to 0.23
+- Bump opentelemetry-semantic-conventions version to 0.15
+
 ## v0.14.0
 
 ### Changed

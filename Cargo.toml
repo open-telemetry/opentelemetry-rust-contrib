@@ -18,10 +18,10 @@ resolver = "2"
 debug = 1
 
 [workspace.dependencies]
-opentelemetry = "0.22"
-opentelemetry-appender-tracing = "0.3"
-opentelemetry-http = "0.11"
-opentelemetry-proto = { version = "0.5", default-features = false }
-opentelemetry_sdk = { version = "0.22", default-features = false }
-opentelemetry-stdout = "0.3"
-opentelemetry-semantic-conventions = "0.14"
+opentelemetry = "0.23"
+opentelemetry-appender-tracing = "0.4"
+opentelemetry-http = "0.12"
+opentelemetry-proto = { version = "0.6", default-features = false }
+opentelemetry_sdk = { version = "0.23", default-features = false }
+opentelemetry-stdout = "0.4"
+opentelemetry-semantic-conventions = "0.15"
