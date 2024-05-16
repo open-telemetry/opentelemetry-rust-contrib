@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+### Changed
+
 - Bump opentelemetry and opentelemetry_sdk versions to 0.23
 - Bump eventheader and eventheader_dynamics versions to 0.4
 
