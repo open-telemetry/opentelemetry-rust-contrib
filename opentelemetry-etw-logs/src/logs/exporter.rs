@@ -223,7 +223,8 @@ impl ETWExporter {
         let event_time: SystemTime = log_data
             .record
             .timestamp
-            .unwrap_or(log_data.record.observed_timestamp);
+            .or(log_data.record.observed_timestamp)
+            .unwrap_or_else(SystemTime::now);
 
         const COUNT_TIME: u8 = 1u8;
         const PART_A_COUNT: u8 = COUNT_TIME;
@@ -430,7 +431,6 @@ mod tests {
         let log_data = LogData {
             instrumentation: Default::default(),
             record: Default::default(),
-            resource: Default::default(),
         };
 
         let result = exporter.export_log_data(&log_data);

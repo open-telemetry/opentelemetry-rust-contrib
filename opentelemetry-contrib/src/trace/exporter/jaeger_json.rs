@@ -11,6 +11,7 @@ use opentelemetry::trace::SpanId;
     feature = "rt-tokio-current-thread"
 ))]
 use opentelemetry::trace::TraceError;
+use opentelemetry::trace::TracerProvider as _;
 use opentelemetry_sdk::{
     export::trace::{ExportResult, SpanData, SpanExporter},
     runtime::RuntimeChannel,
@@ -51,13 +52,11 @@ impl<R: JaegerJsonRuntime> JaegerJsonExporter<R> {
         let runtime = self.runtime.clone();
         let provider_builder = TracerProvider::builder().with_batch_exporter(self, runtime);
         let provider = provider_builder.build();
-        let tracer = opentelemetry::trace::TracerProvider::versioned_tracer(
-            &provider,
-            "opentelemetry",
-            Some(env!("CARGO_PKG_VERSION")),
-            Some(SCHEMA_URL),
-            None,
-        );
+        let tracer = provider
+            .tracer_builder("opentelemetry")
+            .with_version(env!("CARGO_PKG_VERSION"))
+            .with_schema_url(SCHEMA_URL)
+            .build();
         let _ = opentelemetry::global::set_tracer_provider(provider);
 
         tracer

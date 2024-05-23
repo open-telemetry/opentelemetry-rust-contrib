@@ -44,7 +44,7 @@ impl opentelemetry_sdk::logs::LogProcessor for ReentrantLogProcessor {
 
     // This is a no-op no special cleanup is required before
     // shutdown.
-    fn shutdown(&mut self) -> LogResult<()> {
+    fn shutdown(&self) -> LogResult<()> {
         Ok(())
     }
 
@@ -66,7 +66,7 @@ mod tests {
 
     #[test]
     fn test_shutdown() {
-        let mut processor = ReentrantLogProcessor::new(
+        let processor = ReentrantLogProcessor::new(
             "test-provider-name",
             "test-event-name".into(),
             None,
@@ -100,7 +100,6 @@ mod tests {
         let log_data = LogData {
             instrumentation: Default::default(),
             record: Default::default(),
-            resource: Default::default(),
         };
 
         processor.emit(log_data);
