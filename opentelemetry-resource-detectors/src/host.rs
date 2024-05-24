@@ -9,6 +9,8 @@ use std::env::consts::ARCH;
 use std::fs::read_to_string;
 #[cfg(target_os = "linux")]
 use std::path::Path;
+#[cfg(target_os = "macos")]
+use std::process::Command;
 use std::time::Duration;
 
 /// Detect host information.
@@ -53,8 +55,26 @@ fn host_id_detect() -> Option<String> {
         .ok()
 }
 
+#[cfg(target_os = "macos")]
+fn host_id_detect() -> Option<String> {
+    let output = Command::new("ioreg")
+        .arg("-rd1")
+        .arg("-c")
+        .arg("IOPlatformExpertDevice")
+        .output()
+        .ok()?
+        .stdout;
+
+    let output = String::from_utf8(output).ok()?;
+    let line = output
+        .lines()
+        .find(|line| line.contains("IOPlatformUUID"))?;
+
+    Some(line.split_once('=')?.1.trim().trim_matches('"').to_owned())
+}
+
 // TODO: Implement non-linux platforms
-#[cfg(not(target_os = "linux"))]
+#[cfg(not(any(target_os = "linux", target_os = "macos")))]
 fn host_id_detect() -> Option<String> {
     None
 }
@@ -74,8 +94,26 @@ mod tests {
 
     #[cfg(target_os = "linux")]
     #[test]
-    fn test_host_resource_detector() {
+    fn test_host_resource_detector_linux() {
         let resource = HostResourceDetector::default().detect(Duration::from_secs(0));
+        assert_eq!(resource.len(), 2);
+        assert!(resource
+            .get(Key::from_static_str(
+                opentelemetry_semantic_conventions::resource::HOST_ID
+            ))
+            .is_some());
+        assert!(resource
+            .get(Key::from_static_str(
+                opentelemetry_semantic_conventions::resource::HOST_ARCH
+            ))
+            .is_some())
+    }
+
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn test_host_resource_detector_macos() {
+        let resource = HostResourceDetector::default().detect(Duration::from_secs(0));
+        dbg!(&resource);
         assert_eq!(resource.len(), 2);
         assert!(resource
             .get(Key::from_static_str(
