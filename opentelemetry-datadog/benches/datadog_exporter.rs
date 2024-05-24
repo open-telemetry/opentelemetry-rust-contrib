@@ -155,8 +155,7 @@ fn get_span(trace_id: u128, parent_span_id: u64, span_id: u64, rng: &mut ThreadR
     let events = SpanEvents::default();
     let links = SpanLinks::default();
     let resource = Resource::new(vec![KeyValue::new("host.name", "test")]);
-    let instrumentation_lib = InstrumentationLibrary::builder("component")
-        .build();
+    let instrumentation_lib = InstrumentationLibrary::builder("component").build();
 
     SpanData {
         span_context,

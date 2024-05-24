@@ -224,9 +224,7 @@ pub(crate) mod tests {
         let events = SpanEvents::default();
         let links = SpanLinks::default();
         let resource = Resource::new(vec![KeyValue::new("host.name", "test")]);
-        let instrumentation_lib = InstrumentationLibrary::builder(
-            "component")
-            .build();
+        let instrumentation_lib = InstrumentationLibrary::builder("component").build();
 
         trace::SpanData {
             span_context,
