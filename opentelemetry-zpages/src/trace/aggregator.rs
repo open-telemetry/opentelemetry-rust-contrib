@@ -394,7 +394,7 @@ mod tests {
                 assert_ne!(aggregator.summaries.len(), 0);
                 let summary = aggregator
                     .summaries
-                    .get::<String>(&"test-service".to_string())
+                    .get::<String>(&"test-service".into())
                     .unwrap();
 
                 assert_span_queue(

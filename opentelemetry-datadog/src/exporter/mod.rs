@@ -287,13 +287,11 @@ impl DatadogPipelineBuilder {
         let mut provider_builder = TracerProvider::builder().with_simple_exporter(exporter);
         provider_builder = provider_builder.with_config(config);
         let provider = provider_builder.build();
-        let tracer = opentelemetry::trace::TracerProvider::versioned_tracer(
-            &provider,
-            "opentelemetry-datadog",
-            Some(env!("CARGO_PKG_VERSION")),
-            Some(semcov::SCHEMA_URL),
-            None,
-        );
+        let tracer = opentelemetry::trace::TracerProvider::tracer_builder(&provider, "opentelemyietry-datadog")
+            .with_version(env!("CARGO_PKG_VERSION"))
+            .with_schema_url(semcov::SCHEMA_URL)
+            .with_attributes(None)
+            .build();
         let _ = global::set_tracer_provider(provider);
         Ok(tracer)
     }
@@ -306,13 +304,11 @@ impl DatadogPipelineBuilder {
         let mut provider_builder = TracerProvider::builder().with_batch_exporter(exporter, runtime);
         provider_builder = provider_builder.with_config(config);
         let provider = provider_builder.build();
-        let tracer = opentelemetry::trace::TracerProvider::versioned_tracer(
-            &provider,
-            "opentelemetry-datadog",
-            Some(env!("CARGO_PKG_VERSION")),
-            Some(semcov::SCHEMA_URL),
-            None,
-        );
+        let tracer = opentelemetry::trace::TracerProvider::tracer_builder(&provider, "opentelemyietry-datadog")
+            .with_version(env!("CARGO_PKG_VERSION"))
+            .with_schema_url(semcov::SCHEMA_URL)
+            .with_attributes(None)
+            .build();
         let _ = global::set_tracer_provider(provider);
         Ok(tracer)
     }
