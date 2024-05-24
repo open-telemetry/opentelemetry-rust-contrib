@@ -5,7 +5,9 @@ use opentelemetry::KeyValue;
 use opentelemetry_sdk::resource::ResourceDetector;
 use opentelemetry_sdk::Resource;
 use std::env::consts::ARCH;
+#[cfg(target_os = "linux")]
 use std::fs::read_to_string;
+#[cfg(target_os = "linux")]
 use std::path::Path;
 use std::time::Duration;
 
