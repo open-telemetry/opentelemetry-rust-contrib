@@ -10,7 +10,7 @@
 ### Added
 
 - Add "host.arch" attribute into the `HostResourceDetector`.
-- Added `HostResourceDetector` which populates "host.id" attribute. Currently only Linux is supported.
+- Added `HostResourceDetector` which populates "host.id" attribute. Currently only Linux and macOS are supported.
 
 ## v0.1.0
 
