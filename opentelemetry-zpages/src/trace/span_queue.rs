@@ -2,8 +2,6 @@
 
 use opentelemetry::trace::SpanContext;
 use opentelemetry_sdk::export::trace::SpanData;
-#[cfg(feature = "serialize")]
-use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
 /// This queue maintains an ordered list of elements, Elements are
