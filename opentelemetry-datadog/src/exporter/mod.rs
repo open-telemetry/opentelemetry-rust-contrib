@@ -513,4 +513,22 @@ mod tests {
             .build_exporter()
             .unwrap();
     }
+
+    #[test]
+    fn test_install_simple() {
+        new_pipeline()
+            .with_service_name("test_service")
+            .with_http_client(DummyClient)
+            .install_simple()
+            .unwrap();
+    }
+
+    #[test]
+    fn test_install_batch() {
+        new_pipeline()
+            .with_service_name("test_service")
+            .with_http_client(DummyClient)
+            .install_batch(opentelemetry_sdk::runtime::AsyncStd {})
+            .unwrap();
+    }
 }
