@@ -19,6 +19,10 @@ rust-version = "1.65"
 all-features = true
 rustdoc-args = ["--cfg", "docsrs"]
 
+[features]
+serialize = []
+with-serde = []
+
 [dependencies]
 opentelemetry = { workspace = true }
 opentelemetry_sdk = { workspace = true, default-features = false, features = ["trace"] }
