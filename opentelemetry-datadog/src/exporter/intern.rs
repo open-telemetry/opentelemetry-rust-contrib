@@ -192,7 +192,8 @@ impl<'a> StringInterner<'a> {
             static BUFFER: RefCell<Vec<u8>> = RefCell::new(Vec::with_capacity(4096));
         }
 
-        BUFFER.with_borrow_mut(|reusable_buffer| {
+        BUFFER.with(|cell| {
+            let reusable_buffer = &mut cell.borrow_mut();
             rmp::encode::write_array_len(payload, self.data.len() as u32)?;
             for data in self.data.iter() {
                 data.write_as_str(payload, reusable_buffer)?;
