@@ -455,30 +455,30 @@ impl Authorizer for YupAuthorizer {
 
 #[cfg(feature = "gcp-authorizer")]
 pub struct GcpAuthorizer {
-    manager: gcp_auth::AuthenticationManager,
-    project_id: String,
+    provider: Arc<dyn gcp_auth::TokenProvider>,
+    project_id: Arc<str>,
 }
 
 #[cfg(feature = "gcp-authorizer")]
 impl GcpAuthorizer {
     pub async fn new() -> Result<Self, Error> {
-        let manager = gcp_auth::AuthenticationManager::new()
+        let provider = gcp_auth::provider()
             .await
             .map_err(|e| Error::Authorizer(e.into()))?;
 
-        let project_id = manager
+        let project_id = provider
             .project_id()
             .await
             .map_err(|e| Error::Authorizer(e.into()))?;
 
         Ok(Self {
-            manager,
+            provider,
             project_id,
         })
     }
-    pub fn from_gcp_auth(manager: gcp_auth::AuthenticationManager, project_id: String) -> Self {
+    pub fn from_gcp_auth(provider: Arc<dyn gcp_auth::TokenProvider>, project_id: Arc<str>) -> Self {
         Self {
-            manager,
+            provider,
             project_id,
         }
     }
@@ -499,8 +499,8 @@ impl Authorizer for GcpAuthorizer {
         scopes: &[&str],
     ) -> Result<(), Self::Error> {
         let token = self
-            .manager
-            .get_token(scopes)
+            .provider
+            .token(scopes)
             .await
             .map_err(|e| Error::Authorizer(e.into()))?;
 
