@@ -8,7 +8,6 @@ pub use model::FieldMappingFn;
 use crate::exporter::model::FieldMapping;
 use futures_core::future::BoxFuture;
 use http::{Method, Request, Uri};
-use itertools::Itertools;
 use opentelemetry::{global, trace::TraceError, KeyValue};
 use opentelemetry_http::{HttpClient, ResponseExt};
 use opentelemetry_sdk::{
@@ -90,8 +89,11 @@ impl DatadogExporter {
         }
     }
 
-    fn build_request(&self, batch: Vec<SpanData>) -> Result<http::Request<Vec<u8>>, TraceError> {
-        let traces: Vec<Vec<SpanData>> = group_into_traces(batch);
+    fn build_request(
+        &self,
+        mut batch: Vec<SpanData>,
+    ) -> Result<http::Request<Vec<u8>>, TraceError> {
+        let traces: Vec<&[SpanData]> = group_into_traces(&mut batch);
         let trace_count = traces.len();
         let data = self.api_version.encode(
             &self.model_config,
@@ -394,12 +396,27 @@ impl DatadogPipelineBuilder {
     }
 }
 
-fn group_into_traces(spans: Vec<SpanData>) -> Vec<Vec<SpanData>> {
-    spans
-        .into_iter()
-        .into_group_map_by(|span_data| span_data.span_context.trace_id())
-        .into_values()
-        .collect()
+fn group_into_traces(spans: &mut [SpanData]) -> Vec<&[SpanData]> {
+    if spans.is_empty() {
+        return vec![];
+    }
+
+    spans.sort_by_key(|x| x.span_context.trace_id().to_bytes());
+
+    let mut traces: Vec<&[SpanData]> = Vec::with_capacity(spans.len());
+
+    let mut start = 0;
+    let mut start_trace_id = spans[start].span_context.trace_id();
+    for (idx, span) in spans.iter().enumerate() {
+        let current_trace_id = span.span_context.trace_id();
+        if start_trace_id != current_trace_id {
+            traces.push(&spans[start..idx]);
+            start = idx;
+            start_trace_id = current_trace_id;
+        }
+    }
+    traces.push(&spans[start..]);
+    traces
 }
 
 async fn send_request(
@@ -450,13 +467,13 @@ mod tests {
 
     #[test]
     fn test_out_of_order_group() {
-        let batch = vec![get_span(1, 1, 1), get_span(2, 2, 2), get_span(1, 1, 3)];
+        let mut batch = vec![get_span(1, 1, 1), get_span(2, 2, 2), get_span(1, 1, 3)];
         let expected = vec![
             vec![get_span(1, 1, 1), get_span(1, 1, 3)],
             vec![get_span(2, 2, 2)],
         ];
 
-        let mut traces = group_into_traces(batch);
+        let mut traces = group_into_traces(&mut batch);
         // We need to sort the output in order to compare, but this is not required by the Datadog agent
         traces.sort_by_key(|t| u128::from_be_bytes(t[0].span_context.trace_id().to_bytes()));
 

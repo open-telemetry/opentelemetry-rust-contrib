@@ -19,10 +19,13 @@ all-features = true
 rustdoc-args = ["--cfg", "docsrs"]
 
 [features]
+default = ["intern-ahash"]
 agent-sampling = []
 reqwest-blocking-client = ["reqwest/blocking", "opentelemetry-http/reqwest"]
 reqwest-client = ["reqwest", "opentelemetry-http/reqwest"]
 surf-client = ["dep:surf"]
+intern-ahash = ["ahash"]
+intern-std = []
 
 [dependencies]
 indexmap = "2.0"
@@ -39,6 +42,9 @@ thiserror = "1.0"
 itertools = "0.11"
 http = "0.2"
 futures-core = "0.3"
+ryu = "1"
+itoa = "1"
+ahash = { version = "0.8", optional = true }
 
 [dev-dependencies]
 async-trait = "0.1"
