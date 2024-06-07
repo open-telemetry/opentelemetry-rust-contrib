@@ -1,9 +1,9 @@
 # Contributing to opentelemetry-rust
 
-The Rust special interest group (SIG) meets weekly on Tuesdays at 8 AM Pacific
-Time (16:00 UTC). The meeting is subject to change depending on contributors'
+The Rust special interest group (SIG) meets weekly on Tuesdays at 9 AM Pacific
+Time. The meeting is subject to change depending on contributors'
 availability. Check the [OpenTelemetry community
-calendar](https://calendar.google.com/calendar/embed?src=google.com_b79e3e90j7bbsa2n2p5an5lf60%40group.calendar.google.com)
+calendar](https://github.com/open-telemetry/community?tab=readme-ov-file#calendar)
 for specific dates and for Zoom meeting links. "OTel Rust SIG" is the name of
 meeting for this group.
 
@@ -19,34 +19,19 @@ you're more than welcome to participate!
 
 ## Pull Requests
 
-### Prerequisites
-
-Crate `opentelemetry-otlp` uses gRPC + Protocol Buffers.
-You can provide the protocol compiler protoc path programmatically (only works with tonic) or build it from source
-
-```sh
-export PROTOC=$(which protoc)
-```
-
-Prerequisites to build the protocol compiler protoc from source
-
-- [protoc](https://github.com/protocolbuffers/protobuf)
-- [cmake](https://cmake.org)
-- [llvm](https://releases.llvm.org/download.html) (and `LIBCLANG_PATH` environment variable pointing to the `bin` directory of LLVM install)
-
 ### How to Send Pull Requests
 
 Everyone is welcome to contribute code to `opentelemetry-rust` via
 GitHub pull requests (PRs).
 
 ```sh
-git clone --recurse-submodule https://github.com/open-telemetry/opentelemetry-rust
+git clone --recurse-submodule https://github.com/open-telemetry/opentelemetry-rust-contrib
 ```
 
 Enter the newly created directory and add your fork as a new remote:
 
 ```sh
-git remote add <YOUR_FORK> git@github.com:<YOUR_GITHUB_USERNAME>/opentelemetry-rust
+git remote add <YOUR_FORK> git@github.com:<YOUR_GITHUB_USERNAME>/opentelemetry-rust-contrib
 ```
 
 Check out a new branch, make modifications, run linters and tests, and
@@ -61,7 +46,7 @@ $ git push <YOUR_FORK> <YOUR_BRANCH_NAME>
 ```
 
 Open a pull request against the main
-[opentelemetry-rust](https://github.com/open-telemetry/opentelemetry-rust)
+[opentelemetry-rust-contrib](https://github.com/open-telemetry/opentelemetry-rust-contrib)
 repo.
 
 > **Note**
@@ -151,37 +136,6 @@ projects in this workspace.
 - Run `cargo bench` - this will run benchmarks to show performance
 - Run `cargo bench` - this will run benchmarks to show performance
 regressions
-
-## Approvers and Maintainers
-
-For GitHub groups see the [code owners](CODEOWNERS) file.
-
-### Maintainers
-
-* [Cijo Thomas](https://github.com/cijothomas)
-* [Harold Dost](https://github.com/hdost)
-* [Julian Tescher](https://github.com/jtescher)
-* [Zhongyang Wu](https://github.com/TommyCpp)
-
-### Approvers
-
-* [Lalit Kumar Bhasin](https://github.com/lalitb)
-* [Shaun Cox](https://github.com/shaun-cox)
-
-### Emeritus
-
-- [Dirkjan Ochtman](https://github.com/djc)
-- [Jan Kühle](https://github.com/frigus02)
-- [Isobel Redelmeier](https://github.com/iredelmeier)
-
-### Become an Approver or a Maintainer
-
-See the [community membership document in OpenTelemetry community
-repo](https://github.com/open-telemetry/community/blob/master/community-membership.md).
-
-### Thanks to all the people who have contributed
-
-[![contributors](https://contributors-img.web.app/image?repo=open-telemetry/opentelemetry-rust)](https://github.com/open-telemetry/opentelemetry-rust/graphs/contributors)
 
 ## FAQ
 
