@@ -2,7 +2,9 @@
 
 ## Unreleased
 
+## v0.2.0
 ### Changed
+
  - Bump opentelemetry and opentelemetry_sdk versions to 0.23
  - Bump opentelemetry-proto version to 0.6
 
