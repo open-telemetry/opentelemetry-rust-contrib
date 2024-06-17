@@ -6,7 +6,7 @@
 
 This crate contains OpenTelemetry Log exporter to
 [ETW (Event Tracing for Windows)](https://learn.microsoft.com/en-us/windows-hardware/drivers/devtest/event-tracing-for-windows--etw-), a Windows solution
-for efficient tracing of kernel or application-defined events, similar to user-events on Linux.
+for efficient tracing of kernel or application-defined events, similar to user_events on Linux.
 ETW events can be consumed in real-time or from a log file.
 
 ETW events created with this crate can be generated and collected on Windows Vista or later.
