@@ -47,7 +47,7 @@ impl ExporterConfig {
     }
 }
 
-/// UserEventsExporter is a log exporter that exports logs in EventHeader format to user_events tracpoint.
+/// UserEventsExporter is a log exporter that exports logs in EventHeader format to user_events tracepoint.
 pub struct UserEventsExporter {
     provider: Arc<eventheader_dynamic::Provider>,
     exporter_config: ExporterConfig,
