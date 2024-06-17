@@ -14,9 +14,9 @@ ETW events created with this crate can be generated and collected on Windows Vis
 This ETW exporter enables applications to use OpenTelemetry APIs to capture telemetry events and write to the ETW subsystem. From ETWs, the events can be
 captured by agents running locally and listening for specific ETW events.
 
-[![Crates.io: opentelemetry-etw-logs](https://img.shields.io/crates/v/opentelemetry-etw-logs.svg)](https://crates.io/crates/opentelemetry-etw-logs)
-[![Documentation](https://docs.rs/opentelemetry-etw-logs/badge.svg)](https://docs.rs/opentelemetry-etw-logs)
-[![LICENSE](https://img.shields.io/crates/l/opentelemetry-etw-logs)](./LICENSE)
+[![Crates.io: opentelemetry-etw-metrics](https://img.shields.io/crates/v/opentelemetry-etw-metrics.svg)](https://crates.io/crates/opentelemetry-etw-metrics)
+[![Documentation](https://docs.rs/opentelemetry-etw-metrics/badge.svg)](https://docs.rs/opentelemetry-etw-metrics)
+[![LICENSE](https://img.shields.io/crates/l/opentelemetry-etw-metrics)](./LICENSE)
 [![GitHub Actions CI](https://github.com/open-telemetry/opentelemetry-rust/workflows/CI/badge.svg)](https://github.com/open-telemetry/opentelemetry-rust/actions?query=workflow%3ACI+branch%3Amain)
 [![Slack](https://img.shields.io/badge/slack-@cncf/otel/rust-brightgreen.svg?logo=slack)](https://cloud-native.slack.com/archives/C03GDP0H023)
 
