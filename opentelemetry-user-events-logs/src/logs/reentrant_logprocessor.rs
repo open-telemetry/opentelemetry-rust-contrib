@@ -6,7 +6,6 @@ use opentelemetry_sdk::export::logs::LogData;
 #[cfg(feature = "logs_level_enabled")]
 use opentelemetry_sdk::export::logs::LogExporter;
 
-use crate::logs::exporter::ExporterConfig;
 use crate::logs::exporter::*;
 
 /// This export processor exports without synchronization.
@@ -19,13 +18,8 @@ pub struct ReentrantLogProcessor {
 }
 
 impl ReentrantLogProcessor {
-    /// constructor
-    pub fn new(
-        provider_name: &str,
-        provider_group: ProviderGroup,
-        exporter_config: ExporterConfig,
-    ) -> Self {
-        let exporter = UserEventsExporter::new(provider_name, provider_group, exporter_config);
+    /// constructor that accepts an exporter instance
+    pub fn new(exporter: UserEventsExporter) -> Self {
         ReentrantLogProcessor {
             event_exporter: exporter,
         }
