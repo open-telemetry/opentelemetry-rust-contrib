@@ -4,7 +4,7 @@
 
 [splash]: https://raw.githubusercontent.com/open-telemetry/opentelemetry-rust/main/assets/logo-text.png
 
-This crate contains a Metric Exporter to export logs to Linux
+This crate contains a Metric Exporter to export metrics to Linux
 [user_events](https://docs.kernel.org/trace/user_events.html), which is a
 solution for user process tracing, similar to ETW (Event Tracing for Windows) on
 Windows. It builds on top of the Linux Tracepoints, and so allows user processes
