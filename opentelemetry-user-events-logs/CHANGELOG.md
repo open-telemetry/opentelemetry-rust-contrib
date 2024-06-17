@@ -2,6 +2,19 @@
 
 ## Unreleased
 
+- **BREAKING** Decouple Exporter creation with the Reentrant processor [#82](https://github.com/open-telemetry/opentelemetry-rust-contrib/pull/82)
+  The UserEventsExporter is now created separately and passed to the ReentrantProcessor. Update your application code from:
+  ```rust
+    let reenterant_processor = ReentrantLogProcessor::new("test", None, exporter_config);
+  ```
+  to:
+
+  ```rust
+      let exporter = UserEventsExporter::new("test", None, exporter_config);
+      let reenterant_processor = ReentrantLogProcessor::new(exporter);
+  ```
+
+
 
 ## v0.4.0
 
