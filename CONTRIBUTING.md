@@ -1,4 +1,4 @@
-# Contributing to opentelemetry-rust
+# Contributing to Opentelemetry Rust contrib repo
 
 The Rust special interest group (SIG) meets weekly on Tuesdays at 9 AM Pacific
 Time. The meeting is subject to change depending on contributors'
@@ -21,11 +21,11 @@ you're more than welcome to participate!
 
 ### How to Send Pull Requests
 
-Everyone is welcome to contribute code to `opentelemetry-rust` via
+Everyone is welcome to contribute code to `opentelemetry-rust-contrib` via
 GitHub pull requests (PRs).
 
 ```sh
-git clone --recurse-submodule https://github.com/open-telemetry/opentelemetry-rust-contrib
+git clone https://github.com/open-telemetry/opentelemetry-rust-contrib
 ```
 
 Enter the newly created directory and add your fork as a new remote:
