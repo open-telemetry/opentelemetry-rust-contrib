@@ -16,10 +16,10 @@ if rustup component add clippy; then
 
   cargo_feature opentelemetry-aws "default"
 
-# TODO: Can re-enable once back in the workspace.
-#  cargo_feature opentelemetry-datadog "reqwest-blocking-client"
-#  cargo_feature opentelemetry-datadog "reqwest-client"
-#  cargo_feature opentelemetry-datadog "surf-client"
+  cargo_feature opentelemetry-datadog "reqwest-blocking-client,intern-std"
+  cargo_feature opentelemetry-datadog "reqwest-client,intern-std"
+# TODO: Clippy doesn't seem to like surf client.
+#  cargo_feature opentelemetry-datadog "surf-client,intern-std"
 
   cargo_feature opentelemetry-contrib "default"
   cargo_feature opentelemetry-contrib "api"
