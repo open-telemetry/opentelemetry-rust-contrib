@@ -147,7 +147,7 @@ impl ApiVersion {
     pub(crate) fn encode(
         self,
         model_config: &ModelConfig,
-        traces: Vec<Vec<trace::SpanData>>,
+        traces: Vec<&[trace::SpanData]>,
         mapping: &Mapping,
         unified_tags: &UnifiedTags,
     ) -> Result<Vec<u8>, Error> {
@@ -224,6 +224,7 @@ pub(crate) mod tests {
         let events = SpanEvents::default();
         let links = SpanLinks::default();
         let resource = Resource::new(vec![KeyValue::new("host.name", "test")]);
+        let instrumentation_lib = InstrumentationLibrary::builder("component").build();
 
         trace::SpanData {
             span_context,
@@ -238,12 +239,7 @@ pub(crate) mod tests {
             links,
             status: Status::Ok,
             resource: Cow::Owned(resource),
-            instrumentation_lib: InstrumentationLibrary::new(
-                "component",
-                None::<&'static str>,
-                None::<&'static str>,
-                None,
-            ),
+            instrumentation_lib,
         }
     }
 
@@ -256,7 +252,7 @@ pub(crate) mod tests {
         };
         let encoded = base64::encode(ApiVersion::Version03.encode(
             &model_config,
-            traces,
+            traces.iter().map(|x| &x[..]).collect(),
             &Mapping::empty(),
             &UnifiedTags::new(),
         )?);
@@ -284,7 +280,7 @@ pub(crate) mod tests {
 
         let _encoded = base64::encode(ApiVersion::Version05.encode(
             &model_config,
-            traces,
+            traces.iter().map(|x| &x[..]).collect(),
             &Mapping::empty(),
             &unified_tags,
         )?);

@@ -1,8 +1,12 @@
 # Changelog
 
-## vNext
+## v0.20.0
 
-- Bump yup-oauth2 to 8.3.3 [#58](https://github.com/open-telemetry/opentelemetry-rust-contrib/pull/58)
+### Changed
+
+- Update to opentelemetry v0.23.0 [#69](https://github.com/open-telemetry/opentelemetry-rust-contrib/pull/69)
+- Bump gcp_auth to 0.12 [#75](https://github.com/open-telemetry/opentelemetry-rust-contrib/pull/75)
+- Bump yup-oauth2 to 9 [#71](https://github.com/open-telemetry/opentelemetry-rust-contrib/pull/71)
 - Bump hyper-rustls to 0.25 [#58](https://github.com/open-telemetry/opentelemetry-rust-contrib/pull/58)
 
 ## v0.19.1

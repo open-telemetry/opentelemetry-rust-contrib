@@ -188,6 +188,7 @@ mod propagator {
         value == TRACE_STATE_TRUE_VALUE
     }
 
+    #[allow(clippy::needless_update)]
     impl DatadogTraceStateBuilder {
         #[cfg(feature = "agent-sampling")]
         pub fn with_priority_sampling(self, enabled: bool) -> Self {
