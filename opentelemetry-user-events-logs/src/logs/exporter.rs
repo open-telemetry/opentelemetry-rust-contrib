@@ -46,7 +46,9 @@ impl ExporterConfig {
         }
     }
 }
-pub(crate) struct UserEventsExporter {
+
+/// UserEventsExporter is a log exporter that exports logs in EventHeader format to user_events tracepoint.
+pub struct UserEventsExporter {
     provider: Arc<eventheader_dynamic::Provider>,
     exporter_config: ExporterConfig,
 }
@@ -55,9 +57,9 @@ const EVENT_ID: &str = "event_id";
 const EVENT_NAME_PRIMARY: &str = "event_name";
 const EVENT_NAME_SECONDARY: &str = "name";
 
-//TBD - How to configure provider name and provider group
 impl UserEventsExporter {
-    pub(crate) fn new(
+    /// Create instance of the exporter
+    pub fn new(
         provider_name: &str,
         _provider_group: ProviderGroup,
         exporter_config: ExporterConfig,
