@@ -4,12 +4,12 @@
 
 [splash]: https://raw.githubusercontent.com/open-telemetry/opentelemetry-rust/main/assets/logo-text.png
 
-This crate contains a Log Exporter to export logs to Linux
-[user_events](https://docs.kernel.org/trace/user_events.html), which is a
-solution for user process tracing, similar to ETW (Event Tracing for Windows) on
-Windows. It builds on top of the Linux Tracepoints, and so allows user processes
-to create events and trace data that can be viewed via existing tools like
-ftrace and perf.
+This crate provides a Log Exporter to export logs to the systemd journal (journald) using the OpenTelemetry framework. The exporter supports both plain text and JSON formats for log entries and includes options for setting message size limits, identifiers, and attribute prefixes.
+
+Journald is a system service for collecting and storing log data. It is a part of systemd, a suite of system management daemons, libraries, and utilities designed for Linux. This exporter allows OpenTelemetry to send log data directly to journald, enabling seamless integration with systemd's logging infrastructure.
+
+This exporter requires libsystemd for sending log entries to the journald daemon.
+
 
 This kernel feature is supported started in Linux kernel 5.18 onwards. The feature enables
  - A faster path for tracing from user mode application utilizing kernel mode memory address space. 
@@ -19,9 +19,9 @@ This kernel feature is supported started in Linux kernel 5.18 onwards. The featu
   - Captured by the agents running locally, and listening for specific events withing user_events subsystem.
   - Or real-time monitoring using local Linux tool like [perf](https://perf.wiki.kernel.org/index.php/Main_Page) or ftrace.
 
-[![Crates.io: opentelemetry-user-events-logs](https://img.shields.io/crates/v/opentelemetry-user-events-logs.svg)](https://crates.io/crates/opentelemetry-user-events-logs)
-[![Documentation](https://docs.rs/opentelemetry-user-events-logs/badge.svg)](https://docs.rs/opentelemetry-user-events-logs)
-[![LICENSE](https://img.shields.io/crates/l/opentelemetry-user-events-logs)](./LICENSE)
+[![Crates.io: opentelemetry-journald-logs](https://img.shields.io/crates/v/opentelemetry-journald-logs.svg)](https://crates.io/crates/opentelemetry-journald-logs)
+[![Documentation](https://docs.rs/opentelemetry-journald-logs/badge.svg)](https://docs.rs/opentelemetry-journald-logs)
+[![LICENSE](https://img.shields.io/crates/l/opentelemetry-journald-logs)](./LICENSE)
 [![GitHub Actions CI](https://github.com/open-telemetry/opentelemetry-rust/workflows/CI/badge.svg)](https://github.com/open-telemetry/opentelemetry-rust/actions?query=workflow%3ACI+branch%3Amain)
 [![Slack](https://img.shields.io/badge/slack-@cncf/otel/rust-brightgreen.svg?logo=slack)](https://cloud-native.slack.com/archives/C03GDP0H023)
 

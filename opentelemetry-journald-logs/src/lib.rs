@@ -212,7 +212,7 @@ impl LogEntry {
             .record
             .body
             .as_ref()
-            .map_or_else(|| "".to_string(), |body| format_any_value(body));
+            .map_or_else(|| "".to_string(), format_any_value);
 
         LogEntry {
             message,
