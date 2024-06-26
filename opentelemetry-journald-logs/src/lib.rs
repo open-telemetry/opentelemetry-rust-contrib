@@ -118,9 +118,8 @@ impl JournaldLogExporter {
         } else {
             // Add the MESSAGE field
             if let Some(body) = &log_data.record.body {
-                let formatted_body = format_any_value(body);
-                let message_str = format!("MESSAGE={}", formatted_body);
-                message = Some(CString::new(message_str).unwrap());
+                message =
+                    Some(CString::new(format!("MESSAGE={}", format_any_value(body))).unwrap());
             }
 
             // Add other attributes
@@ -128,12 +127,14 @@ impl JournaldLogExporter {
                 for (key, value) in attr_list.iter() {
                     let key_str = sanitize_field_name(key.as_str());
                     let value_str = format_any_value(value);
-                    let attribute_str = if let Some(ref prefix) = self.attribute_prefix {
-                        format!("{}{}={}", prefix, key_str, value_str)
-                    } else {
-                        format!("{}={}", key_str, value_str)
-                    };
-                    attributes.push(CString::new(attribute_str).unwrap());
+                    attributes.push(
+                        CString::new(if let Some(ref prefix) = self.attribute_prefix {
+                            format!("{}{}={}", prefix, key_str, value_str)
+                        } else {
+                            format!("{}={}", key_str, value_str)
+                        })
+                        .unwrap(),
+                    );
                 }
             }
         }

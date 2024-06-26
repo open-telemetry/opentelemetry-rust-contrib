@@ -11,7 +11,7 @@ fn init_logger() -> LoggerProvider {
         .identifier("opentelemetry-journal-exporter")
         .message_size_limit(4 * 1024)
         .attribute_prefix(Some("OTEL_".to_string()))
-        //.json_format(true) //uncomment to log in json format
+        .json_format(true) //uncomment to log in json format
         .build()
         .expect("Failed to build JournaldLogExporter");
 
