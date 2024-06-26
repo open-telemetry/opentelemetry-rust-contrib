@@ -87,7 +87,6 @@ impl JournaldLogExporter {
 
     fn send_log_to_journald(&self, log_data: &LogData) -> Result<(), std::io::Error> {
         let mut iovecs: Vec<libc::iovec> = Vec::new();
-        let mut cstrings: Vec<CString> = Vec::new();
 
         // Add the SYSLOG_IDENTIFIER field
         let identifier_str = format!("SYSLOG_IDENTIFIER={}", self.identifier.to_str().unwrap());
@@ -96,19 +95,18 @@ impl JournaldLogExporter {
             iov_base: identifier_field.as_ptr() as *mut c_void,
             iov_len: identifier_field.as_bytes().len(),
         });
-        cstrings.push(identifier_field);
+
+        // Initialize potential message and attributes outside conditional blocks
+        let mut message: Option<CString> = None;
+        let mut attributes: Vec<CString> = Vec::new();
+
         if self.json_format {
             #[cfg(feature = "json")]
             {
                 // Serialize message and attributes as JSON
                 let log_entry = LogEntry::from_log_data(log_data, self.attribute_prefix.clone());
                 let message_str = format!("MESSAGE={}", serde_json::to_string(&log_entry).unwrap());
-                let message = CString::new(message_str).unwrap();
-                iovecs.push(libc::iovec {
-                    iov_base: message.as_ptr() as *mut c_void,
-                    iov_len: message.as_bytes().len(),
-                });
-                cstrings.push(message);
+                message = Some(CString::new(message_str).unwrap());
             }
             #[cfg(not(feature = "json"))]
             {
@@ -122,12 +120,7 @@ impl JournaldLogExporter {
             if let Some(body) = &log_data.record.body {
                 let formatted_body = format_any_value(body);
                 let message_str = format!("MESSAGE={}", formatted_body);
-                let message = CString::new(message_str).unwrap();
-                iovecs.push(libc::iovec {
-                    iov_base: message.as_ptr() as *mut c_void,
-                    iov_len: message.as_bytes().len(),
-                });
-                cstrings.push(message);
+                message = Some(CString::new(message_str).unwrap());
             }
 
             // Add other attributes
@@ -140,14 +133,25 @@ impl JournaldLogExporter {
                     } else {
                         format!("{}={}", key_str, value_str)
                     };
-                    let attribute = CString::new(attribute_str).unwrap();
-                    iovecs.push(libc::iovec {
-                        iov_base: attribute.as_ptr() as *mut c_void,
-                        iov_len: attribute.as_bytes().len(),
-                    });
-                    cstrings.push(attribute);
+                    attributes.push(CString::new(attribute_str).unwrap());
                 }
             }
+        }
+
+        // Add the message to iovecs if it was set
+        if let Some(msg) = &message {
+            iovecs.push(libc::iovec {
+                iov_base: msg.as_ptr() as *mut c_void,
+                iov_len: msg.as_bytes().len(),
+            });
+        }
+
+        // Add attributes to iovecs
+        for attribute in &attributes {
+            iovecs.push(libc::iovec {
+                iov_base: attribute.as_ptr() as *mut c_void,
+                iov_len: attribute.as_bytes().len(),
+            });
         }
 
         // Add the PRIORITY field
@@ -160,7 +164,6 @@ impl JournaldLogExporter {
             iov_base: priority.as_ptr() as *mut c_void,
             iov_len: priority.as_bytes().len(),
         });
-        cstrings.push(priority);
 
         let total_size: usize = iovecs.iter().map(|iov| iov.iov_len).sum();
         let size_exceeded = total_size > self.message_size_limit;
