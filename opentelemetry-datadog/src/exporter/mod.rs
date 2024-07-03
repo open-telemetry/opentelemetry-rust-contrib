@@ -291,7 +291,7 @@ impl DatadogPipelineBuilder {
         let provider = provider_builder.build();
         let tracer = opentelemetry::trace::TracerProvider::tracer_builder(
             &provider,
-            "opentelemyietry-datadog",
+            "opentelemetry-datadog",
         )
         .with_version(env!("CARGO_PKG_VERSION"))
         .with_schema_url(semcov::SCHEMA_URL)
@@ -311,7 +311,7 @@ impl DatadogPipelineBuilder {
         let provider = provider_builder.build();
         let tracer = opentelemetry::trace::TracerProvider::tracer_builder(
             &provider,
-            "opentelemyietry-datadog",
+            "opentelemetry-datadog",
         )
         .with_version(env!("CARGO_PKG_VERSION"))
         .with_schema_url(semcov::SCHEMA_URL)
