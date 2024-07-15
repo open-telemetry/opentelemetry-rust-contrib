@@ -31,5 +31,5 @@ opentelemetry_sdk = { workspace = true, optional = true }
 opentelemetry_sdk = { workspace = true, features = ["testing"] }
 opentelemetry-http = { workspace = true }
 opentelemetry-stdout = { workspace = true, features = ["trace"] }
-hyper = { version = "0.14" }
+hyper = { version = "1.4.1" }
 tokio = { version = "1.0", features = ["macros", "rt"] }
