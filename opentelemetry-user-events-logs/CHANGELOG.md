@@ -12,7 +12,9 @@
   ```rust
       let exporter = UserEventsExporter::new("test", None, exporter_config);
       let reenterant_processor = ReentrantLogProcessor::new(exporter);
-  ```
+  ``
+- Bump opentelemetry and opentelemetry_sdk versions to 0.24
+
 
 
 

@@ -27,7 +27,7 @@ impl ReentrantLogProcessor {
 }
 
 impl opentelemetry_sdk::logs::LogProcessor for ReentrantLogProcessor {
-    fn emit(&self, data: LogData) {
+    fn emit(&self, data: &mut LogData) {
         _ = self.event_exporter.export_log_data(&data);
     }
 
