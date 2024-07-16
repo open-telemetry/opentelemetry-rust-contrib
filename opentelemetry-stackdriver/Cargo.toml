@@ -46,4 +46,4 @@ tokio = "1"
 tonic-build = "0.11"
 walkdir = "2.3.2"
 futures-util = { version = "0.3", default-features = false }
-opentelemetry = { workspace = true, features = ["testing"] }
+opentelemetry = { version = "0.23", features = ["testing"] }
