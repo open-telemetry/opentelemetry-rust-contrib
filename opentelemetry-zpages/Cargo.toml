@@ -24,9 +24,9 @@ rustdoc-args = ["--cfg", "docsrs"]
 with-serde = []
 
 [dependencies]
-opentelemetry = { version = "0.23" }
-opentelemetry_sdk = { version = "0.23", default-features = false, features = ["trace"] }
-opentelemetry-proto = { version = "0.6", features = ["zpages", "gen-tonic", "with-serde"], default-features = false }
+opentelemetry = { workspace = true }
+opentelemetry_sdk = { workspace = true, default-features = false, features = ["trace"] }
+opentelemetry-proto = { workspace = true, features = ["zpages", "gen-tonic", "with-serde"], default-features = false }
 async-channel = "1.6"
 futures-channel = "0.3"
 futures-util = { version = "0.3", default-features = false, features = ["std"] }
