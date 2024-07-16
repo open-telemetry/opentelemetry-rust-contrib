@@ -9,7 +9,6 @@ categories = [
     "development-tools::debugging",
     "development-tools::profiling",
     "asynchronous",
-    "experimental",
 ]
 keywords = ["opentelemetry", "zipkin", "tracing", "async"]
 license = "Apache-2.0"
