@@ -1,6 +1,8 @@
 # Changelog
 
-## Unreleased
+## vNext
+
+## v0.16.0 
 
 ### Changed
 

@@ -1,13 +1,13 @@
 # Changelog
 
-## Unreleased
+## vNext
 
-### Changed
+### v0.12.0
 
 - Bump opentelemetry and opentelemetry_sdk versions to 0.24.0
 - Update hyper to 1.4.1
 
-## v0.10.0
+## v0.11.0
 
 ### Changed
 

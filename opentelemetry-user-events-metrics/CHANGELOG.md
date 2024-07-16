@@ -1,6 +1,8 @@
 # Changelog
 
-## Unreleased
+## vNext
+
+## v0.5.0
 
 ### Changed
 

@@ -1,6 +1,6 @@
 [package]
 name = "opentelemetry-user-events-metrics"
-version = "0.4.0"
+version = "0.5.0"
 description = "OpenTelemetry metrics exporter to user events"
 homepage = "https://github.com/open-telemetry/opentelemetry-rust-contrib/tree/main/opentelemetry-user-events-metrics"
 repository = "https://github.com/open-telemetry/opentelemetry-rust-contrib/tree/main/opentelemetry-user-events-metrics"
