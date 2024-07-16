@@ -1,8 +1,5 @@
 //! run with `$ cargo run --example basic --all-features
-use opentelemetry::{
-    metrics::{MeterProvider as _, Unit},
-    KeyValue,
-};
+use opentelemetry::{metrics::MeterProvider as _, KeyValue};
 use opentelemetry_etw_metrics::MetricsExporter;
 use opentelemetry_sdk::{
     metrics::{PeriodicReader, SdkMeterProvider},
@@ -32,7 +29,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let c = meter
         .f64_counter("MyFruitCounter")
         .with_description("test_description")
-        .with_unit(Unit::new("test_unit"))
+        .with_unit("test_unit")
         .init();
 
     c.add(

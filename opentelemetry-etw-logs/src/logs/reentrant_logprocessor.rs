@@ -32,8 +32,8 @@ impl ReentrantLogProcessor {
 }
 
 impl opentelemetry_sdk::logs::LogProcessor for ReentrantLogProcessor {
-    fn emit(&self, data: LogData) {
-        _ = self.event_exporter.export_log_data(&data);
+    fn emit(&self, data: &mut LogData) {
+        _ = self.event_exporter.export_log_data(data);
     }
 
     // This is a no-op as this processor doesn't keep anything
@@ -97,11 +97,11 @@ mod tests {
             ExporterConfig::default(),
         );
 
-        let log_data = LogData {
+        let mut log_data = LogData {
             instrumentation: Default::default(),
             record: Default::default(),
         };
 
-        processor.emit(log_data);
+        processor.emit(&mut log_data);
     }
 }

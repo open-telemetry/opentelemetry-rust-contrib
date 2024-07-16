@@ -16,9 +16,9 @@ hex = "0.4"
 http = "0.2"
 hyper = "0.14.2"
 hyper-rustls = { version = "0.25", optional = true }
-opentelemetry = { workspace = true }
-opentelemetry_sdk = { workspace = true, features = ["trace"] }
-opentelemetry-semantic-conventions = { workspace = true }
+opentelemetry = { version = "0.23" }
+opentelemetry_sdk = { version = "0.23", features = ["trace"] }
+opentelemetry-semantic-conventions = { version = "0.15.0" }
 prost = "0.12"
 prost-types = "0.12"
 thiserror = "1.0.30"
@@ -46,4 +46,4 @@ tokio = "1"
 tonic-build = "0.11"
 walkdir = "2.3.2"
 futures-util = { version = "0.3", default-features = false }
-opentelemetry = { workspace = true, features = ["testing"] }
+opentelemetry = { version = "0.23", features = ["testing"] }

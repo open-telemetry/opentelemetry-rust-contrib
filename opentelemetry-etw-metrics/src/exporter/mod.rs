@@ -9,9 +9,9 @@ use opentelemetry_sdk::metrics::{
     reader::{AggregationSelector, DefaultAggregationSelector, TemporalitySelector},
     Aggregation, InstrumentKind,
 };
+use prost::Message;
 
 use async_trait::async_trait;
-use prost::Message;
 
 use std::fmt::{Debug, Formatter};
 
