@@ -4,13 +4,13 @@
 
 ### Changed
 
-- Bump opentelemetry version to 0.22, opentelemetry_sdk version to 0.24
+- Bump opentelemetry version to 0.24, opentelemetry_sdk version to 0.24
 
-## v0.7.0
+## v0.8.0
 
 ### Changed
 
-- Bump opentelemetry version to 0.22, opentelemetry_sdk version to 0.23
+- Bump opentelemetry version to 0.23, opentelemetry_sdk version to 0.23
 
 ## v0.7.0
 
