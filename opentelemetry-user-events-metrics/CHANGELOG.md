@@ -6,6 +6,7 @@
 
 - Bump opentelemetry and opentelemetry_sdk versions to 0.24,
   opentelemetry-proto version to 0.7.
+- Update prost to 0.13
 
 ## v0.4.0
 
