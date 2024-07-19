@@ -52,12 +52,6 @@ pub mod proto;
 #[cfg(feature = "propagator")]
 pub mod google_trace_context_propagator;
 
-const HTTP_HOST: &str = "http.host";
-const HTTP_PATH: &str = "http.path";
-const HTTP_USER_AGENT: &str = "http.user_agent";
-
-const GCP_HTTP_PATH: &str = "/http/path";
-
 use proto::devtools::cloudtrace::v2::span::time_event::Annotation;
 use proto::devtools::cloudtrace::v2::span::{
     Attributes, Link, Links, SpanKind, TimeEvent, TimeEvents,
@@ -767,6 +761,11 @@ const KEY_MAP: [(&str, &str); 8] = [
     (semconv::trace::HTTP_ROUTE, "/http/route"),
     (HTTP_PATH, GCP_HTTP_PATH),
 ];
+
+const HTTP_HOST: &str = "http.host";
+const HTTP_PATH: &str = "http.path";
+const HTTP_USER_AGENT: &str = "http.user_agent";
+const GCP_HTTP_PATH: &str = "/http/path";
 
 impl From<opentelemetry::trace::SpanKind> for SpanKind {
     fn from(span_kind: opentelemetry::trace::SpanKind) -> Self {
