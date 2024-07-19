@@ -1,5 +1,16 @@
 # Changelog
 
+## v0.21.0
+
+### Changed
+
+- Update to opentelemetry v0.24.0 [#92](https://github.com/open-telemetry/opentelemetry-rust-contrib/pull/92)
+- Remove `yup-authorizer` feature, which seems to be unused; the yup-oath2 dependency does not seem get much maintenance
+  [#92](https://github.com/open-telemetry/opentelemetry-rust-contrib/pull/92)
+- Bump http to 1 and reqwest to 0.12 [#92](https://github.com/open-telemetry/opentelemetry-rust-contrib/pull/92)
+- Bump prost (0.13), tonic-build (0.12) and tonic (0.12)
+  [#92](https://github.com/open-telemetry/opentelemetry-rust-contrib/pull/92)
+
 ## v0.20.0
 
 ### Changed
