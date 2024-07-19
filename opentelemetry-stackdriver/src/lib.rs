@@ -741,15 +741,26 @@ fn transform_links(links: &opentelemetry_sdk::trace::SpanLinks) -> Option<Links>
 }
 
 // Map conventional OpenTelemetry keys to their GCP counterparts.
-const KEY_MAP: [(&str, &str); 10] = [
+//
+// https://cloud.google.com/trace/docs/trace-labels
+const KEY_MAP: [(&str, &str); 16] = [
     (semconv::resource::SERVICE_NAME, GCP_SERVICE_NAME),
     (HTTP_PATH, GCP_HTTP_PATH),
     (semconv::attribute::HTTP_HOST, "/http/host"),
+    ("http.request.header.host", "/http/host"),
     (semconv::attribute::HTTP_METHOD, "/http/method"),
+    (semconv::attribute::HTTP_REQUEST_METHOD, "/http/method"),
     (semconv::attribute::HTTP_TARGET, "/http/path"),
+    (semconv::attribute::URL_PATH, "/http/path"),
     (semconv::attribute::HTTP_URL, "/http/url"),
+    (semconv::attribute::URL_FULL, "/http/url"),
     (semconv::attribute::HTTP_USER_AGENT, "/http/user_agent"),
+    (semconv::attribute::USER_AGENT_ORIGINAL, "/http/user_agent"),
     (semconv::attribute::HTTP_STATUS_CODE, "/http/status_code"),
+    (
+        semconv::attribute::HTTP_RESPONSE_STATUS_CODE,
+        "/http/status_code",
+    ),
     (semconv::trace::HTTP_ROUTE, "/http/route"),
     (HTTP_PATH, GCP_HTTP_PATH),
 ];
