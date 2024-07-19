@@ -27,7 +27,7 @@ use futures_util::stream::StreamExt;
 use opentelemetry::{
     global::handle_error,
     trace::{SpanId, TraceError},
-    Key, KeyValue, Value,
+    KeyValue, Value,
 };
 use opentelemetry_sdk::{
     export::{
@@ -656,14 +656,14 @@ impl Attributes {
     ///
     /// The `Resource` takes precedence over the `EvictedHashMap` attributes.
     fn new(attributes: Vec<KeyValue>, resource: &Resource) -> Self {
-        let mut dropped_attributes_count: i32 = 0;
+        let mut dropped_attributes_count = 0;
         let num_resource_attributes = resource.len();
         let num_attributes = attributes.len();
 
-        let attributes_as_key_value_tuples: Vec<(Key, Value)> = attributes
+        let attributes_as_key_value_tuples = attributes
             .into_iter()
             .map(|kv| (kv.key, kv.value))
-            .collect();
+            .collect::<Vec<_>>();
 
         let attribute_map = resource
             .into_iter()
