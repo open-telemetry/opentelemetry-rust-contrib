@@ -349,7 +349,7 @@ pub struct WriteLogEntriesRequest {
 }
 /// Result returned from WriteLogEntries.
 #[allow(clippy::derive_partial_eq_without_eq)]
-#[derive(Clone, PartialEq, ::prost::Message)]
+#[derive(Clone, Copy, PartialEq, ::prost::Message)]
 pub struct WriteLogEntriesResponse {}
 /// Error details for WriteLogEntries with partial success.
 #[allow(clippy::derive_partial_eq_without_eq)]
@@ -577,7 +577,7 @@ pub struct TailLogEntriesResponse {
 pub mod tail_log_entries_response {
     /// Information about entries that were omitted from the session.
     #[allow(clippy::derive_partial_eq_without_eq)]
-    #[derive(Clone, PartialEq, ::prost::Message)]
+    #[derive(Clone, Copy, PartialEq, ::prost::Message)]
     pub struct SuppressionInfo {
         /// The reason that entries were omitted from the session.
         #[prost(enumeration = "suppression_info::Reason", tag = "1")]

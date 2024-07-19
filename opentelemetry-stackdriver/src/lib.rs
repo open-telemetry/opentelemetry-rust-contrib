@@ -17,7 +17,7 @@ use std::{
     future::Future,
     sync::{
         atomic::{AtomicUsize, Ordering},
-        Arc,
+        Arc, RwLock,
     },
     time::{Duration, Instant},
 };
@@ -81,6 +81,7 @@ pub struct StackDriverExporter {
     tx: futures_channel::mpsc::Sender<Vec<SpanData>>,
     pending_count: Arc<AtomicUsize>,
     maximum_shutdown_duration: Duration,
+    resource: Arc<RwLock<Option<Resource>>>,
 }
 
 impl StackDriverExporter {
@@ -114,6 +115,13 @@ impl SpanExporter for StackDriverExporter {
             // Spin for a bit and give the inner export some time to upload, with a timeout.
         }
     }
+
+    fn set_resource(&mut self, resource: &Resource) {
+        match self.resource.write() {
+            Ok(mut guard) => *guard = Some(resource.clone()),
+            Err(poisoned) => *poisoned.into_inner() = Some(resource.clone()),
+        }
+    }
 }
 
 impl fmt::Debug for StackDriverExporter {
@@ -123,6 +131,7 @@ impl fmt::Debug for StackDriverExporter {
             tx: _,
             pending_count,
             maximum_shutdown_duration,
+            resource: _,
         } = self;
         f.debug_struct("StackDriverExporter")
             .field("tx", &"(elided)")
@@ -211,6 +220,7 @@ impl Builder {
         });
 
         let count_clone = pending_count.clone();
+        let resource = Arc::new(RwLock::new(None));
         let future = async move {
             let trace_client = TraceServiceClient::new(trace_channel);
             let authorizer = &authenticator;
@@ -220,12 +230,14 @@ impl Builder {
                 let log_client = log_client.clone();
                 let pending_count = count_clone.clone();
                 let scopes = scopes.clone();
+                let resource = resource.clone();
                 ExporterContext {
                     trace_client,
                     log_client,
                     authorizer,
                     pending_count,
                     scopes,
+                    resource,
                 }
                 .export(batch)
             })
@@ -237,6 +249,7 @@ impl Builder {
             pending_count,
             maximum_shutdown_duration: maximum_shutdown_duration
                 .unwrap_or_else(|| Duration::from_secs(5)),
+            resource: Arc::new(RwLock::new(None)),
         };
 
         Ok((exporter, future))
@@ -249,6 +262,7 @@ struct ExporterContext<'a, A> {
     authorizer: &'a A,
     pending_count: Arc<AtomicUsize>,
     scopes: Arc<Vec<&'static str>>,
+    resource: Arc<RwLock<Option<Resource>>>,
 }
 
 impl<A: Authorizer> ExporterContext<'_, A>
@@ -321,6 +335,12 @@ where
                 }
             };
 
+            let resource = self.resource.read().ok();
+            let attributes = match resource {
+                Some(resource) => Attributes::new(span.attributes, resource.as_ref()),
+                None => Attributes::new(span.attributes, None),
+            };
+
             spans.push(Span {
                 name: format!(
                     "projects/{}/traces/{}/spans/{}",
@@ -338,7 +358,7 @@ where
                 },
                 start_time: Some(span.start_time.into()),
                 end_time: Some(span.end_time.into()),
-                attributes: Some(Attributes::new(span.attributes, span.resource.as_ref())),
+                attributes: Some(attributes),
                 time_events: Some(TimeEvents {
                     time_event,
                     ..Default::default()
@@ -656,17 +676,19 @@ impl Attributes {
     /// Combines `EvictedHashMap` and `Resource` attributes into a maximum of 32.
     ///
     /// The `Resource` takes precedence over the `EvictedHashMap` attributes.
-    fn new(attributes: Vec<KeyValue>, resource: &Resource) -> Self {
+    fn new(attributes: Vec<KeyValue>, resource: Option<&Resource>) -> Self {
         let mut new = Self {
             dropped_attributes_count: 0,
             attribute_map: HashMap::with_capacity(Ord::min(
                 MAX_ATTRIBUTES_PER_SPAN,
-                attributes.len() + resource.len(),
+                attributes.len() + resource.map_or(0, |r| r.len()),
             )),
         };
 
-        for (k, v) in resource.iter() {
-            new.push(Cow::Borrowed(k), Cow::Borrowed(v));
+        if let Some(resource) = resource {
+            for (k, v) in resource.iter() {
+                new.push(Cow::Borrowed(k), Cow::Borrowed(v));
+            }
         }
 
         for kv in attributes {
@@ -737,11 +759,11 @@ fn transform_links(links: &opentelemetry_sdk::trace::SpanLinks) -> Option<Links>
 // Map conventional OpenTelemetry keys to their GCP counterparts.
 const KEY_MAP: [(&str, &str); 8] = [
     (HTTP_HOST, "/http/host"),
-    (semconv::trace::HTTP_METHOD, "/http/method"),
-    (semconv::trace::HTTP_TARGET, "/http/path"),
-    (semconv::trace::HTTP_URL, "/http/url"),
+    (semconv::attribute::HTTP_METHOD, "/http/method"),
+    (semconv::attribute::HTTP_TARGET, "/http/path"),
+    (semconv::attribute::HTTP_URL, "/http/url"),
     (HTTP_USER_AGENT, "/http/user_agent"),
-    (semconv::trace::HTTP_STATUS_CODE, "/http/status_code"),
+    (semconv::attribute::HTTP_STATUS_CODE, "/http/status_code"),
     (semconv::trace::HTTP_ROUTE, "/http/route"),
     (HTTP_PATH, GCP_HTTP_PATH),
 ];
@@ -793,14 +815,14 @@ mod tests {
         attributes.push(KeyValue::new(HTTP_HOST, "example.com:8080"));
 
         // 	methodAttribute     = "http.method"
-        attributes.push(KeyValue::new(semcov::trace::HTTP_METHOD, "POST"));
+        attributes.push(KeyValue::new(semcov::attribute::HTTP_METHOD, "POST"));
 
         // 	pathAttribute       = "http.path"
         attributes.push(KeyValue::new(HTTP_PATH, "/path/12314/?q=ddds#123"));
 
         // 	urlAttribute        = "http.url"
         attributes.push(KeyValue::new(
-            semcov::trace::HTTP_URL,
+            semcov::attribute::HTTP_URL,
             "https://example.com:8080/webshop/articles/4?s=1",
         ));
 
@@ -811,7 +833,7 @@ mod tests {
         ));
 
         // 	statusCodeAttribute = "http.status_code"
-        attributes.push(KeyValue::new(semcov::trace::HTTP_STATUS_CODE, 200i64));
+        attributes.push(KeyValue::new(semcov::attribute::HTTP_STATUS_CODE, 200i64));
 
         // 	statusCodeAttribute = "http.route"
         attributes.push(KeyValue::new(
@@ -825,7 +847,7 @@ mod tests {
             "Test Service Name",
         )]);
 
-        let actual = Attributes::new(attributes, &resources);
+        let actual = Attributes::new(attributes, Some(&resources));
         assert_eq!(actual.attribute_map.len(), 8);
         assert_eq!(actual.dropped_attributes_count, 0);
         assert_eq!(
@@ -888,7 +910,7 @@ mod tests {
             ));
         }
 
-        let actual = Attributes::new(attributes, &resources);
+        let actual = Attributes::new(attributes, Some(&resources));
         assert_eq!(actual.attribute_map.len(), 32);
         assert_eq!(actual.dropped_attributes_count, 1);
         assert_eq!(
@@ -902,14 +924,14 @@ mod tests {
     #[test]
     fn test_attributes_mapping_http_target() {
         let attributes = vec![KeyValue::new(
-            semcov::trace::HTTP_TARGET,
+            semcov::attribute::HTTP_TARGET,
             "/path/12314/?q=ddds#123",
         )];
 
         //	hostAttribute       = "http.target"
 
         let resources = Resource::new([]);
-        let actual = Attributes::new(attributes, &resources);
+        let actual = Attributes::new(attributes, Some(&resources));
         assert_eq!(actual.attribute_map.len(), 1);
         assert_eq!(actual.dropped_attributes_count, 0);
         assert_eq!(
@@ -925,7 +947,7 @@ mod tests {
         let attributes = vec![KeyValue::new("answer", Value::I64(42)),KeyValue::new("long_attribute_key_dvwmacxpeefbuemoxljmqvldjxmvvihoeqnuqdsyovwgljtnemouidabhkmvsnauwfnaihekcfwhugejboiyfthyhmkpsaxtidlsbwsmirebax", Value::String("Some value".into()))];
 
         let resources = Resource::new([]);
-        let actual = Attributes::new(attributes, &resources);
+        let actual = Attributes::new(attributes, Some(&resources));
         assert_eq!(
             actual,
             Attributes {

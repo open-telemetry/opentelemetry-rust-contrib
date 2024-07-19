@@ -13,14 +13,14 @@ rust-version = "1.65"
 async-trait = "0.1.48"
 gcp_auth = { version = "0.12", optional = true }
 hex = "0.4"
-http = "0.2"
-opentelemetry = { version = "0.23" }
-opentelemetry_sdk = { version = "0.23", features = ["trace"] }
-opentelemetry-semantic-conventions = { version = "0.15.0" }
-prost = "0.12"
-prost-types = "0.12"
+http = "1"
+opentelemetry = "0.24"
+opentelemetry_sdk = { version = "0.24", features = ["trace"] }
+opentelemetry-semantic-conventions = "0.16"
+prost = "0.13"
+prost-types = "0.13"
 thiserror = "1.0.30"
-tonic = { version = "0.11", features = ["gzip", "tls", "transport"] }
+tonic = { version = "0.12", features = ["gzip", "tls", "transport"] }
 once_cell = { version = "1.19", optional = true }
 
 # Futures
@@ -36,10 +36,10 @@ tls-webpki-roots = ["tonic/tls-webpki-roots"]
 propagator = ["once_cell"]
 
 [dev-dependencies]
-reqwest = "0.11.9"
+reqwest = "0.12"
 tempfile = "3.3.0"
 tokio = "1"
-tonic-build = "0.11"
+tonic-build = "0.12"
 walkdir = "2.3.2"
 futures-util = { version = "0.3", default-features = false }
-opentelemetry = { version = "0.23", features = ["testing"] }
+opentelemetry = { version = "0.24", features = ["testing"] }
