@@ -11,6 +11,7 @@
 )]
 
 use std::{
+    borrow::Cow,
     collections::HashMap,
     fmt,
     future::Future,
@@ -27,7 +28,7 @@ use futures_util::stream::StreamExt;
 use opentelemetry::{
     global::handle_error,
     trace::{SpanId, TraceError},
-    KeyValue, Value,
+    Key, KeyValue, Value,
 };
 use opentelemetry_sdk::{
     export::{
@@ -656,49 +657,62 @@ impl Attributes {
     ///
     /// The `Resource` takes precedence over the `EvictedHashMap` attributes.
     fn new(attributes: Vec<KeyValue>, resource: &Resource) -> Self {
-        let mut dropped_attributes_count = 0;
-        let num_resource_attributes = resource.len();
-        let num_attributes = attributes.len();
+        let mut new = Self {
+            dropped_attributes_count: 0,
+            attribute_map: HashMap::with_capacity(Ord::min(
+                MAX_ATTRIBUTES_PER_SPAN,
+                attributes.len() + resource.len(),
+            )),
+        };
 
-        let attributes_as_key_value_tuples = attributes
-            .into_iter()
-            .map(|kv| (kv.key, kv.value))
-            .collect::<Vec<_>>();
-
-        let attribute_map = resource
-            .into_iter()
-            .map(|(k, v)| (k.clone(), v.clone()))
-            .chain(attributes_as_key_value_tuples)
-            .flat_map(|(k, v)| {
-                let key = k.as_str();
-                if key.len() > 128 {
-                    dropped_attributes_count += 1;
-                    return None;
-                }
-
-                if k.as_str() == semconv::resource::SERVICE_NAME {
-                    return Some((GCP_SERVICE_NAME.to_owned(), v.into()));
-                } else if key == HTTP_PATH {
-                    return Some((GCP_HTTP_PATH.to_owned(), v.into()));
-                }
-
-                for (otel_key, gcp_key) in KEY_MAP {
-                    if otel_key == k.as_str() {
-                        return Some((gcp_key.to_owned(), v.into()));
-                    }
-                }
-
-                Some((key.to_owned(), v.into()))
-            })
-            .take(MAX_ATTRIBUTES_PER_SPAN)
-            .collect();
-
-        Attributes {
-            attribute_map,
-            dropped_attributes_count: dropped_attributes_count
-                + (num_resource_attributes + num_attributes).saturating_sub(MAX_ATTRIBUTES_PER_SPAN)
-                    as i32,
+        for (k, v) in resource.iter() {
+            new.push(Cow::Borrowed(k), Cow::Borrowed(v));
         }
+
+        for kv in attributes {
+            new.push(Cow::Owned(kv.key), Cow::Owned(kv.value));
+        }
+
+        new
+    }
+
+    fn push(&mut self, key: Cow<'_, Key>, value: Cow<'_, Value>) {
+        if self.attribute_map.len() >= MAX_ATTRIBUTES_PER_SPAN {
+            self.dropped_attributes_count += 1;
+            return;
+        }
+
+        let key_str = key.as_str();
+        if key_str.len() > 128 {
+            self.dropped_attributes_count += 1;
+            return;
+        }
+
+        if key_str == semconv::resource::SERVICE_NAME {
+            self.attribute_map
+                .insert(GCP_SERVICE_NAME.to_owned(), value.into_owned().into());
+            return;
+        } else if key_str == HTTP_PATH {
+            self.attribute_map
+                .insert(GCP_HTTP_PATH.to_owned(), value.into_owned().into());
+            return;
+        }
+
+        for (otel_key, gcp_key) in KEY_MAP {
+            if otel_key == key_str {
+                self.attribute_map
+                    .insert(gcp_key.to_owned(), value.into_owned().into());
+                return;
+            }
+        }
+
+        self.attribute_map.insert(
+            match key {
+                Cow::Owned(k) => k.to_string(),
+                Cow::Borrowed(k) => k.to_string(),
+            },
+            value.into_owned().into(),
+        );
     }
 }
 
