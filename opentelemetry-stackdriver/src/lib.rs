@@ -337,7 +337,7 @@ where
                 },
                 start_time: Some(span.start_time.into()),
                 end_time: Some(span.end_time.into()),
-                attributes: Some((span.attributes, span.resource.as_ref()).into()),
+                attributes: Some(Attributes::new(span.attributes, span.resource.as_ref())),
                 time_events: Some(TimeEvents {
                     time_event,
                     ..Default::default()
@@ -651,11 +651,11 @@ pub enum MonitoredResource {
     },
 }
 
-impl From<(Vec<KeyValue>, &Resource)> for Attributes {
+impl Attributes {
     /// Combines `EvictedHashMap` and `Resource` attributes into a maximum of 32.
     ///
     /// The `Resource` takes precedence over the `EvictedHashMap` attributes.
-    fn from((attributes, resource): (Vec<KeyValue>, &Resource)) -> Self {
+    fn new(attributes: Vec<KeyValue>, resource: &Resource) -> Self {
         let mut dropped_attributes_count: i32 = 0;
         let num_resource_attributes = resource.len();
         let num_attributes = attributes.len();
@@ -811,8 +811,7 @@ mod tests {
             "Test Service Name",
         )]);
 
-        let actual: Attributes = (attributes, &resources).into();
-
+        let actual = Attributes::new(attributes, &resources);
         assert_eq!(actual.attribute_map.len(), 8);
         assert_eq!(actual.dropped_attributes_count, 0);
         assert_eq!(
@@ -875,8 +874,7 @@ mod tests {
             ));
         }
 
-        let actual: Attributes = (attributes, &resources).into();
-
+        let actual = Attributes::new(attributes, &resources);
         assert_eq!(actual.attribute_map.len(), 32);
         assert_eq!(actual.dropped_attributes_count, 1);
         assert_eq!(
@@ -897,8 +895,7 @@ mod tests {
         //	hostAttribute       = "http.target"
 
         let resources = Resource::new([]);
-        let actual: Attributes = (attributes, &resources).into();
-
+        let actual = Attributes::new(attributes, &resources);
         assert_eq!(actual.attribute_map.len(), 1);
         assert_eq!(actual.dropped_attributes_count, 0);
         assert_eq!(
@@ -914,7 +911,7 @@ mod tests {
         let attributes = vec![KeyValue::new("answer", Value::I64(42)),KeyValue::new("long_attribute_key_dvwmacxpeefbuemoxljmqvldjxmvvihoeqnuqdsyovwgljtnemouidabhkmvsnauwfnaihekcfwhugejboiyfthyhmkpsaxtidlsbwsmirebax", Value::String("Some value".into()))];
 
         let resources = Resource::new([]);
-        let actual: Attributes = (attributes, &resources).into();
+        let actual = Attributes::new(attributes, &resources);
         assert_eq!(
             actual,
             Attributes {
