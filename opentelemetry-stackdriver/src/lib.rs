@@ -704,16 +704,6 @@ impl Attributes {
             return;
         }
 
-        if key_str == semconv::resource::SERVICE_NAME {
-            self.attribute_map
-                .insert(GCP_SERVICE_NAME.to_owned(), value.into_owned().into());
-            return;
-        } else if key_str == HTTP_PATH {
-            self.attribute_map
-                .insert(GCP_HTTP_PATH.to_owned(), value.into_owned().into());
-            return;
-        }
-
         for (otel_key, gcp_key) in KEY_MAP {
             if otel_key == key_str {
                 self.attribute_map
@@ -751,7 +741,9 @@ fn transform_links(links: &opentelemetry_sdk::trace::SpanLinks) -> Option<Links>
 }
 
 // Map conventional OpenTelemetry keys to their GCP counterparts.
-const KEY_MAP: [(&str, &str); 8] = [
+const KEY_MAP: [(&str, &str); 10] = [
+    (semconv::resource::SERVICE_NAME, GCP_SERVICE_NAME),
+    (HTTP_PATH, GCP_HTTP_PATH),
     (semconv::attribute::HTTP_HOST, "/http/host"),
     (semconv::attribute::HTTP_METHOD, "/http/method"),
     (semconv::attribute::HTTP_TARGET, "/http/path"),
