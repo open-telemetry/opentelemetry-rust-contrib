@@ -14,8 +14,6 @@ async-trait = "0.1.48"
 gcp_auth = { version = "0.12", optional = true }
 hex = "0.4"
 http = "0.2"
-hyper = "0.14.2"
-hyper-rustls = { version = "0.25", optional = true }
 opentelemetry = { version = "0.23" }
 opentelemetry_sdk = { version = "0.23", features = ["trace"] }
 opentelemetry-semantic-conventions = { version = "0.15.0" }
@@ -23,7 +21,6 @@ prost = "0.12"
 prost-types = "0.12"
 thiserror = "1.0.30"
 tonic = { version = "0.11", features = ["gzip", "tls", "transport"] }
-yup-oauth2 = { version = "9", optional = true }
 once_cell = { version = "1.19", optional = true }
 
 # Futures
@@ -34,7 +31,6 @@ futures-channel = { version = "0.3", default-features = false, features = ["std"
 [features]
 default = ["gcp-authorizer", "tls-native-roots"]
 gcp-authorizer = ["dep:gcp_auth"]
-yup-authorizer = ["hyper-rustls", "dep:yup-oauth2"]
 tls-native-roots = ["tonic/tls-roots"]
 tls-webpki-roots = ["tonic/tls-webpki-roots"]
 propagator = ["once_cell"]

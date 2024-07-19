@@ -38,14 +38,12 @@ use opentelemetry_sdk::{
 };
 use opentelemetry_semantic_conventions as semconv;
 use thiserror::Error;
-#[cfg(any(feature = "yup-authorizer", feature = "gcp-authorizer"))]
+#[cfg(feature = "gcp-authorizer")]
 use tonic::metadata::MetadataValue;
 use tonic::{
     transport::{Channel, ClientTlsConfig},
     Code, Request,
 };
-#[cfg(feature = "yup-authorizer")]
-use yup_oauth2::authenticator::Authenticator;
 
 #[allow(clippy::derive_partial_eq_without_eq)] // tonic doesn't derive Eq for generated types
 pub mod proto;
@@ -386,70 +384,6 @@ where
         } else if let Err(e) = client.client.write_log_entries(req).await {
             handle_error(TraceError::from(Error::Transport(e.into())));
         }
-    }
-}
-
-#[cfg(feature = "yup-authorizer")]
-pub struct YupAuthorizer {
-    authenticator: Authenticator<hyper_rustls::HttpsConnector<hyper::client::HttpConnector>>,
-    project_id: String,
-}
-
-#[cfg(feature = "yup-authorizer")]
-impl YupAuthorizer {
-    pub async fn new(
-        credentials_path: impl AsRef<std::path::Path>,
-        persistent_token_file: impl Into<Option<std::path::PathBuf>>,
-    ) -> Result<Self, Error> {
-        let service_account_key = yup_oauth2::read_service_account_key(&credentials_path).await?;
-        let project_id = service_account_key
-            .project_id
-            .as_ref()
-            .ok_or_else(|| Error::Other("project_id is missing".into()))?
-            .clone();
-        let mut authenticator =
-            yup_oauth2::ServiceAccountAuthenticator::builder(service_account_key);
-        if let Some(persistent_token_file) = persistent_token_file.into() {
-            authenticator = authenticator.persist_tokens_to_disk(persistent_token_file);
-        }
-
-        Ok(Self {
-            authenticator: authenticator.build().await?,
-            project_id,
-        })
-    }
-}
-
-#[cfg(feature = "yup-authorizer")]
-#[async_trait]
-impl Authorizer for YupAuthorizer {
-    type Error = Error;
-
-    fn project_id(&self) -> &str {
-        &self.project_id
-    }
-
-    async fn authorize<T: Send + Sync>(
-        &self,
-        req: &mut Request<T>,
-        scopes: &[&str],
-    ) -> Result<(), Self::Error> {
-        let token = self
-            .authenticator
-            .token(scopes)
-            .await
-            .map_err(|e| Error::Authorizer(e.into()))?;
-
-        let token = match token.token() {
-            Some(token) => token,
-            None => return Err(Error::Other("unable to access token contents".into())),
-        };
-
-        req.metadata_mut().insert(
-            "authorization",
-            MetadataValue::try_from(format!("Bearer {}", token)).unwrap(),
-        );
-        Ok(())
     }
 }
 
