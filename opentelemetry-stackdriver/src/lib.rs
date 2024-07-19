@@ -752,19 +752,17 @@ fn transform_links(links: &opentelemetry_sdk::trace::SpanLinks) -> Option<Links>
 
 // Map conventional OpenTelemetry keys to their GCP counterparts.
 const KEY_MAP: [(&str, &str); 8] = [
-    (HTTP_HOST, "/http/host"),
+    (semconv::attribute::HTTP_HOST, "/http/host"),
     (semconv::attribute::HTTP_METHOD, "/http/method"),
     (semconv::attribute::HTTP_TARGET, "/http/path"),
     (semconv::attribute::HTTP_URL, "/http/url"),
-    (HTTP_USER_AGENT, "/http/user_agent"),
+    (semconv::attribute::HTTP_USER_AGENT, "/http/user_agent"),
     (semconv::attribute::HTTP_STATUS_CODE, "/http/status_code"),
     (semconv::trace::HTTP_ROUTE, "/http/route"),
     (HTTP_PATH, GCP_HTTP_PATH),
 ];
 
-const HTTP_HOST: &str = "http.host";
 const HTTP_PATH: &str = "http.path";
-const HTTP_USER_AGENT: &str = "http.user_agent";
 const GCP_HTTP_PATH: &str = "/http/path";
 
 impl From<opentelemetry::trace::SpanKind> for SpanKind {
@@ -811,7 +809,10 @@ mod tests {
         let mut attributes = Vec::with_capacity(capacity);
 
         //	hostAttribute       = "http.host"
-        attributes.push(KeyValue::new(HTTP_HOST, "example.com:8080"));
+        attributes.push(KeyValue::new(
+            semconv::attribute::HTTP_HOST,
+            "example.com:8080",
+        ));
 
         // 	methodAttribute     = "http.method"
         attributes.push(KeyValue::new(semcov::attribute::HTTP_METHOD, "POST"));
@@ -827,7 +828,7 @@ mod tests {
 
         // 	userAgentAttribute  = "http.user_agent"
         attributes.push(KeyValue::new(
-            HTTP_USER_AGENT,
+            semconv::attribute::HTTP_USER_AGENT,
             "CERN-LineMode/2.15 libwww/2.17b3",
         ));
 
