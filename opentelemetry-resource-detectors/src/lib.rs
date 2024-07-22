@@ -6,10 +6,14 @@
 //! - [`OsResourceDetector`] - detect OS from runtime.
 //! - [`ProcessResourceDetector`] - detect process information.
 //! - [`HostResourceDetector`] - detect unique host ID.
+//! - [`LambdaResourceDetector`] - detect resource metadata from an AWS Lambda environment.
+mod aws;
 mod host;
 mod os;
 mod process;
 
+#[cfg(feature = "aws-lambda")]
+pub use aws::LambdaResourceDetector;
 pub use host::HostResourceDetector;
 pub use os::OsResourceDetector;
 pub use process::ProcessResourceDetector;
