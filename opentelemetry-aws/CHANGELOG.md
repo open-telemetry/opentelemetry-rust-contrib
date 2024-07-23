@@ -2,6 +2,10 @@
 
 ## vNext
 
+### Added
+
+- `LambdaResourceDetector` has been added to the crate to detect AWS Lambda attributes. To enable it in your code, use the feature `detector-aws-lambda`.
+
 ### v0.12.0
 
 - Bump opentelemetry and opentelemetry_sdk versions to 0.24.0

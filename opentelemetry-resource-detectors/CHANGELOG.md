@@ -2,10 +2,6 @@
 
 ## vNext
 
-### Added
-
-- `LambdaResourceDetector` has been added to the crate to detect AWS Lambda attributes. To enable it in your code, use the feature `aws-lambda`.
-
 ## v0.3.0
 
 ### Changed

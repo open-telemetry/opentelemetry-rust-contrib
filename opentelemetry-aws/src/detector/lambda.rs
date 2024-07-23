@@ -46,7 +46,6 @@ impl ResourceDetector for LambdaResourceDetector {
 }
 
 #[cfg(test)]
-#[cfg(feature = "aws-lambda")]
 mod tests {
     use super::*;
     use sealed_test::prelude::*;
