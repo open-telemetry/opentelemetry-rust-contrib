@@ -119,7 +119,7 @@ impl UserEventsExporter {
                 eb.add_value(field_name, f, FieldFormat::Float, 0);
             }
             AnyValue::String(s) => {
-                eb.add_str(field_name, &s.to_string(), FieldFormat::Default, 0);
+                eb.add_str(field_name, s.to_string(), FieldFormat::Default, 0);
             }
             _ => (),
         }

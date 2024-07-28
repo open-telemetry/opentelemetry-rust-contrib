@@ -90,25 +90,27 @@
 //! use bytes::Bytes;
 //! use futures_util::io::AsyncReadExt as _;
 //! use http::{Request, Response};
+//! use http_body_util::BodyExt;
 //! use std::convert::TryInto as _;
 //!
 //! // `reqwest` and `surf` are supported through features, if you prefer an
 //! // alternate http client you can add support by implementing `HttpClient` as
 //! // shown here.
 //! #[derive(Debug)]
-//! struct IsahcClient(isahc::HttpClient);
+//! struct HyperClient(hyper_util::client::legacy::Client<hyperlocal::UnixConnector, http_body_util::Full<hyper::body::Bytes>>);
 //!
 //! #[async_trait]
-//! impl HttpClient for IsahcClient {
+//! impl HttpClient for HyperClient {
 //!     async fn send(&self, request: Request<Vec<u8>>) -> Result<Response<Bytes>, HttpError> {
-//!         let mut response = self.0.send_async(request).await?;
+//!         let (parts, body) = request.into_parts();
+//!         let request = hyper::Request::from_parts(parts, body.into());
+//!         let mut response = self.0.request(request).await?;
 //!         let status = response.status();
-//!         let mut bytes = Vec::with_capacity(response.body().len().unwrap_or(0).try_into()?);
-//!         isahc::AsyncReadResponseExt::copy_to(&mut response, &mut bytes).await?;
 //!
+//!         let body = response.into_body().collect().await?;
 //!         Ok(Response::builder()
-//!             .status(response.status())
-//!             .body(bytes.into())?)
+//!             .status(status)
+//!             .body(body.to_bytes().into())?)
 //!     }
 //! }
 //!

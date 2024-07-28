@@ -397,7 +397,7 @@ fn add_attribute_to_event(event: &mut tld::EventBuilder, key: &Key, value: &AnyV
         AnyValue::ListAny(l) => {
             event.add_str8(
                 key.as_str(),
-                &l.as_json_value().to_string(),
+                l.as_json_value().to_string(),
                 tld::OutType::Json,
                 0,
             );
@@ -405,7 +405,7 @@ fn add_attribute_to_event(event: &mut tld::EventBuilder, key: &Key, value: &AnyV
         AnyValue::Map(m) => {
             event.add_str8(
                 key.as_str(),
-                &m.as_json_value().to_string(),
+                m.as_json_value().to_string(),
                 tld::OutType::Json,
                 0,
             );
