@@ -54,7 +54,7 @@ fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync + 'static>> {
         .with_service_name("agent-sampling-demo")
         .with_api_version(ApiVersion::Version05)
         .with_trace_config(
-            trace::config()
+            trace::Config::default()
                 .with_sampler(AgentBasedSampler)
                 .with_id_generator(RandomIdGenerator::default()),
         )

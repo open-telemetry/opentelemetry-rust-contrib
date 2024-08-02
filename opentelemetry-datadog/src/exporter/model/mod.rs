@@ -1,8 +1,11 @@
 use crate::exporter::ModelConfig;
 use http::uri;
-use opentelemetry_sdk::export::{
-    trace::{self, SpanData},
-    ExportError,
+use opentelemetry_sdk::{
+    export::{
+        trace::{self, SpanData},
+        ExportError,
+    },
+    Resource,
 };
 use std::fmt::Debug;
 use url::ParseError;
@@ -150,6 +153,7 @@ impl ApiVersion {
         traces: Vec<&[trace::SpanData]>,
         mapping: &Mapping,
         unified_tags: &UnifiedTags,
+        resource: Option<&Resource>,
     ) -> Result<Vec<u8>, Error> {
         match self {
             Self::Version03 => v03::encode(
@@ -167,6 +171,7 @@ impl ApiVersion {
                     Some(f) => f(span, config),
                     None => default_resource_mapping(span, config),
                 },
+                resource,
             ),
             Self::Version05 => v05::encode(
                 model_config,
@@ -184,6 +189,7 @@ impl ApiVersion {
                     None => default_resource_mapping(span, config),
                 },
                 unified_tags,
+                resource,
             ),
         }
     }
@@ -199,9 +205,8 @@ pub(crate) mod tests {
     use opentelemetry_sdk::{
         self,
         trace::{SpanEvents, SpanLinks},
-        InstrumentationLibrary, Resource,
+        InstrumentationLibrary,
     };
-    use std::borrow::Cow;
     use std::time::{Duration, SystemTime};
 
     fn get_traces() -> Vec<Vec<trace::SpanData>> {
@@ -223,7 +228,6 @@ pub(crate) mod tests {
         let attributes = vec![KeyValue::new("span.type", "web")];
         let events = SpanEvents::default();
         let links = SpanLinks::default();
-        let resource = Resource::new(vec![KeyValue::new("host.name", "test")]);
         let instrumentation_lib = InstrumentationLibrary::builder("component").build();
 
         trace::SpanData {
@@ -238,7 +242,6 @@ pub(crate) mod tests {
             events,
             links,
             status: Status::Ok,
-            resource: Cow::Owned(resource),
             instrumentation_lib,
         }
     }
@@ -250,11 +253,13 @@ pub(crate) mod tests {
             service_name: "service_name".to_string(),
             ..Default::default()
         };
+        let resource = Resource::new(vec![KeyValue::new("host.name", "test")]);
         let encoded = base64::encode(ApiVersion::Version03.encode(
             &model_config,
             traces.iter().map(|x| &x[..]).collect(),
             &Mapping::empty(),
             &UnifiedTags::new(),
+            Some(&resource),
         )?);
 
         assert_eq!(encoded.as_str(), "kZGMpHR5cGWjd2Vip3NlcnZpY2Wsc2VydmljZV9uYW1lpG5hbWWpY29tcG9uZW\
@@ -272,6 +277,7 @@ pub(crate) mod tests {
             service_name: "service_name".to_string(),
             ..Default::default()
         };
+        let resource = Resource::new(vec![KeyValue::new("host.name", "test")]);
 
         let mut unified_tags = UnifiedTags::new();
         unified_tags.set_env(Some(String::from("test-env")));
@@ -283,6 +289,7 @@ pub(crate) mod tests {
             traces.iter().map(|x| &x[..]).collect(),
             &Mapping::empty(),
             &unified_tags,
+            Some(&resource),
         )?);
 
         // TODO: Need someone to generate the expected result or instructions to do so.

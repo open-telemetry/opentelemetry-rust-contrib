@@ -68,6 +68,7 @@ pub struct DatadogExporter {
     api_version: ApiVersion,
     mapping: Mapping,
     unified_tags: UnifiedTags,
+    resource: Option<Resource>,
 }
 
 impl DatadogExporter {
@@ -86,6 +87,7 @@ impl DatadogExporter {
             api_version,
             mapping,
             unified_tags,
+            resource: None,
         }
     }
 
@@ -100,6 +102,7 @@ impl DatadogExporter {
             traces,
             &self.mapping,
             &self.unified_tags,
+            self.resource.as_ref(),
         )?;
         let req = Request::builder()
             .method(Method::POST)
@@ -219,10 +222,9 @@ impl DatadogPipelineBuilder {
                 ));
                 cfg
             } else {
-                Config {
-                    resource: Cow::Owned(Resource::empty()),
-                    ..Default::default()
-                }
+                let mut cfg = Config::default();
+                cfg.resource = Cow::Owned(Resource::empty());
+                cfg
             };
             (config, service_name)
         } else {
@@ -231,14 +233,10 @@ impl DatadogPipelineBuilder {
                 .get(semcov::resource::SERVICE_NAME.into())
                 .unwrap()
                 .to_string();
-            (
-                Config {
-                    // use a empty resource to prevent TracerProvider to assign a service name.
-                    resource: Cow::Owned(Resource::empty()),
-                    ..Default::default()
-                },
-                service_name,
-            )
+            let mut cfg = Config::default();
+            // use a empty resource to prevent TracerProvider to assign a service name.
+            cfg.resource = Cow::Owned(Resource::empty());
+            (cfg, service_name)
         }
     }
 
@@ -437,6 +435,9 @@ impl SpanExporter for DatadogExporter {
 
         let client = self.client.clone();
         Box::pin(send_request(client, request))
+    }
+    fn set_resource(&mut self, resource: &Resource) {
+        self.resource = Some(resource.clone());
     }
 }
 

@@ -14,7 +14,7 @@ use std::time::Duration;
 /// This resource detector returns the following information:
 ///
 /// - process command line arguments(`process.command_args`), the full command arguments of this
-/// application.
+///   application.
 /// - OS assigned process id(`process.pid`).
 pub struct ProcessResourceDetector;
 
