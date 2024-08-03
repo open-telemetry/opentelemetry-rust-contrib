@@ -4,7 +4,7 @@ use std::sync::{Mutex, OnceLock};
 use syn::__private::ToTokens;
 use syn::meta::ParseNestedMeta;
 use syn::parse::Parser;
-use syn::{Block, ItemFn, LitStr};
+use syn::{Block, ItemFn, LitBool, LitStr};
 
 pub const EXPORTER_CRATE: &'static str = "opentelemetry_contrib";
 
@@ -73,10 +73,14 @@ impl CountedBuilder {
     }
 
     pub fn build(&mut self) -> Result<TokenStream, syn::Error> {
+        let mut item_fn = self.item_fn.take().unwrap();
+        if !self.attrs.enabled {
+            return Ok(TokenStream::from(item_fn.into_token_stream()));
+        }
+
         self.check_metric_name_availability();
         let mut code_block = self.build_code_block()?;
 
-        let mut item_fn = self.item_fn.take().unwrap();
         code_block.stmts.extend_from_slice(&*item_fn.block.stmts);
         item_fn.block.stmts = code_block.stmts;
 
@@ -88,6 +92,7 @@ pub struct CountedAttributes {
     name: String,
     description: String,
     meter_provider: String,
+    enabled: bool,
     labels: String,
     labels_size: u8,
 }
@@ -98,19 +103,22 @@ impl CountedAttributes {
         const DEFAULT_DESCRIPTION: &'static str = "Empty description!";
         const METER_PROVIDER_NAME_ATTR_NAME: &'static str = "meter_provider";
         const NAME_ATTR_NAME: &'static str = "name";
+        const ENABLED_ATTR_NAME: &'static str = "enabled";
         const DESCRIPTION_ATTR_NAME: &'static str = "description";
         const LABELS_ATTR_NAME: &'static str = "labels";
         const ATTR_ERROR_MESSAGE: &'static str = "unsupported attribute for counted macro!";
 
         let mut name = format!("fn_{}_count", item_fn.sig.ident.to_string());
+        let mut enabled = true;
         let mut meter_provider = DEFAULT_METER_PROVIDER_NAME.to_string();
         let mut description = DEFAULT_DESCRIPTION.to_string();
         let mut labels = "".to_string();
         let mut labels_size = 0;
-
         let parser = syn::meta::parser(|meta| {
             if meta.path.is_ident(NAME_ATTR_NAME) {
                 name = meta.value()?.parse::<LitStr>()?.value();
+            } else if meta.path.is_ident(ENABLED_ATTR_NAME) {
+                enabled = meta.value()?.parse::<LitBool>()?.value();
             } else if meta.path.is_ident(METER_PROVIDER_NAME_ATTR_NAME) {
                 meter_provider = meta.value()?.parse::<LitStr>()?.value();
             } else if meta.path.is_ident(DESCRIPTION_ATTR_NAME) {
@@ -133,6 +141,7 @@ impl CountedAttributes {
             name,
             description,
             meter_provider,
+            enabled,
             labels,
             labels_size,
         })
