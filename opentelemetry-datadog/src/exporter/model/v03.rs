@@ -2,6 +2,7 @@ use crate::exporter::model::{Error, SAMPLING_PRIORITY_KEY};
 use crate::exporter::ModelConfig;
 use opentelemetry::trace::Status;
 use opentelemetry_sdk::export::trace::SpanData;
+use opentelemetry_sdk::Resource;
 use std::time::SystemTime;
 
 pub(crate) fn encode<S, N, R>(
@@ -10,6 +11,7 @@ pub(crate) fn encode<S, N, R>(
     get_service_name: S,
     get_name: N,
     get_resource: R,
+    resource: Option<&Resource>,
 ) -> Result<Vec<u8>, Error>
 where
     for<'a> S: Fn(&'a SpanData, &'a ModelConfig) -> &'a str,
@@ -97,11 +99,13 @@ where
             rmp::encode::write_str(&mut encoded, "meta")?;
             rmp::encode::write_map_len(
                 &mut encoded,
-                (span.attributes.len() + span.resource.len()) as u32,
+                (span.attributes.len() + resource.map(|r| r.len()).unwrap_or(0)) as u32,
             )?;
-            for (key, value) in span.resource.iter() {
-                rmp::encode::write_str(&mut encoded, key.as_str())?;
-                rmp::encode::write_str(&mut encoded, value.as_str().as_ref())?;
+            if let Some(resource) = resource {
+                for (key, value) in resource.iter() {
+                    rmp::encode::write_str(&mut encoded, key.as_str())?;
+                    rmp::encode::write_str(&mut encoded, value.as_str().as_ref())?;
+                }
             }
             for kv in span.attributes.iter() {
                 rmp::encode::write_str(&mut encoded, kv.key.as_str())?;
