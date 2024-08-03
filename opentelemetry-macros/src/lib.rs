@@ -1,6 +1,6 @@
 use proc_macro::TokenStream;
 
-use syn::{ItemFn, parse_macro_input};
+use syn::{parse_macro_input, ItemFn};
 
 use crate::metrics::counted::CountedBuilder;
 
@@ -16,11 +16,7 @@ pub fn counted(attr: TokenStream, item: TokenStream) -> TokenStream {
     };
 
     match builder.build() {
-        Ok(value) => {
-            value
-        }
-        Err(err) => {
-            TokenStream::from(err.to_compile_error())
-        }
+        Ok(value) => value,
+        Err(err) => TokenStream::from(err.to_compile_error()),
     }
 }

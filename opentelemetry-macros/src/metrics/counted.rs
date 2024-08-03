@@ -1,10 +1,10 @@
 use proc_macro::TokenStream;
-use std::sync::Mutex;
+use std::sync::{Mutex, OnceLock};
 
-use syn::{Block, ItemFn, LitStr};
 use syn::__private::ToTokens;
 use syn::meta::ParseNestedMeta;
 use syn::parse::Parser;
+use syn::{Block, ItemFn, LitStr};
 
 pub const EXPORTER_CRATE: &'static str = "opentelemetry_contrib";
 
@@ -26,11 +26,11 @@ impl CountedBuilder {
         const DETECTED_METRIC_NAME_DUPLICATION: &'static str = "detected metric name duplication!";
         const LOCK_ERROR_METRIC_NAME_CHECKER: &'static str = "unexpected error encountered trying to lock shared data structure for metric name availability checker!";
 
-        static METRIC_NAMES: std::sync::LazyLock<Mutex<Vec<String>>> =
-            std::sync::LazyLock::new(|| Mutex::new(Vec::new()));
+        static METRIC_NAMES: OnceLock<Mutex<Vec<String>>> = OnceLock::new();
+        let metric_names_value = METRIC_NAMES.get_or_init(|| Mutex::new(Vec::new()));
 
         let attrs = &self.attrs;
-        match METRIC_NAMES.lock() {
+        match metric_names_value.lock() {
             Ok(mut names) => {
                 if names.contains(&attrs.name.as_str().to_string()) {
                     panic!("{}", DETECTED_METRIC_NAME_DUPLICATION);
@@ -53,16 +53,18 @@ impl CountedBuilder {
         let result = syn::parse_str::<Block>(&format!(
             r#"
             {{
-             {EXPORTER_CRATE}::lazy_static::lazy_static! {{
-             static ref LABELS: [{EXPORTER_CRATE}::opentelemetry::KeyValue; {label_size}] = {{
-                [{labels}]
-                }};
-            static ref COUNTER: {EXPORTER_CRATE}::opentelemetry::metrics::Counter<u64> = {{
+        static LABELS: std::sync::OnceLock<[{EXPORTER_CRATE}::opentelemetry::KeyValue; {label_size}]> = std::sync::OnceLock::new();
+        let labels_value = LABELS.get_or_init(|| {{
+            [{labels}]
+        }});
+
+        static COUNTER: std::sync::OnceLock<{EXPORTER_CRATE}::opentelemetry::metrics::Counter<u64>> = std::sync::OnceLock::new();
+        let counter_value = COUNTER.get_or_init(|| {{
                 let meter = {EXPORTER_CRATE}::opentelemetry::global::meter("{meter_provider}");
                 meter.u64_counter("{name}").with_description("{description}").init()
-                }};
-            }}
-            COUNTER.add(1, &*LABELS);
+        }});
+
+        counter_value.add(1, labels_value);
             }}
     "#
         ))?;
