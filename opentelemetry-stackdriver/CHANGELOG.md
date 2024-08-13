@@ -1,5 +1,11 @@
 # Changelog
 
+## vNext
+
+### Added
+
+- Added support for `MonitoredResource::CloudRunJob` [#100](https://github.com/open-telemetry/opentelemetry-rust-contrib/issues/100)
+
 ## v0.21.0
 
 ### Changed
