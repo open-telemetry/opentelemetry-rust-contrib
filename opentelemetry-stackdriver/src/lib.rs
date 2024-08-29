@@ -181,8 +181,15 @@ impl Builder {
         } = self;
         let uri = http::uri::Uri::from_static("https://cloudtrace.googleapis.com:443");
 
+        #[cfg(all(feature = "tls-native-roots", not(feature = "tls-webpki-roots")))]
+        let tls_config = ClientTlsConfig::new().with_native_roots();
+        #[cfg(feature = "tls-webpki-roots")]
+        let tls_config = ClientTlsConfig::new().with_webpki_roots();
+        #[cfg(not(any(feature = "tls-native-roots", feature = "tls-webpki-roots")))]
+        let tls_config = ClientTlsConfig::new();
+
         let trace_channel = Channel::builder(uri)
-            .tls_config(ClientTlsConfig::new())
+            .tls_config(tls_config.clone())
             .map_err(|e| Error::Transport(e.into()))?
             .connect()
             .await
@@ -193,7 +200,7 @@ impl Builder {
                 let log_channel = Channel::builder(http::uri::Uri::from_static(
                     "https://logging.googleapis.com:443",
                 ))
-                .tls_config(ClientTlsConfig::new())
+                .tls_config(tls_config)
                 .map_err(|e| Error::Transport(e.into()))?
                 .connect()
                 .await
