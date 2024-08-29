@@ -553,6 +553,24 @@ impl From<LogContext> for InternalLogContext {
     fn from(cx: LogContext) -> Self {
         let mut labels = HashMap::default();
         let resource = match cx.resource {
+            MonitoredResource::CloudRunJob {
+                project_id,
+                job_name,
+                location,
+            } => {
+                labels.insert("project_id".to_string(), project_id);
+                if let Some(job_name) = job_name {
+                    labels.insert("job_name".to_string(), job_name);
+                }
+                if let Some(location) = location {
+                    labels.insert("location".to_string(), location);
+                }
+
+                proto::api::MonitoredResource {
+                    r#type: "cloud_run_job".to_owned(),
+                    labels,
+                }
+            }
             MonitoredResource::CloudRunRevision {
                 project_id,
                 service_name,
@@ -664,6 +682,11 @@ pub enum MonitoredResource {
         namespace: Option<String>,
         job: Option<String>,
         task_id: Option<String>,
+    },
+    CloudRunJob {
+        project_id: String,
+        job_name: Option<String>,
+        location: Option<String>,
     },
     CloudRunRevision {
         project_id: String,
