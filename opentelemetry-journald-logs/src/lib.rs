@@ -43,7 +43,15 @@ impl JournaldLogExporterBuilder {
     }
 
     pub fn with_json_format(mut self, json_format: bool) -> Self {
-        self.json_format = json_format;
+        #[cfg(feature = "json")]
+        {
+            self.json_format = json_format;
+        }
+        #[cfg(not(feature = "json"))]
+        {
+            let _ = json_format; // Prevents unused variable warning
+            self.json_format = false;
+        }
         self
     }
 
@@ -107,13 +115,6 @@ impl JournaldLogExporter {
                 let log_entry = LogEntry::from_log_data(log_data, self.attribute_prefix.clone());
                 let message_str = format!("MESSAGE={}", serde_json::to_string(&log_entry).unwrap());
                 message = Some(CString::new(message_str).unwrap());
-            }
-            #[cfg(not(feature = "json"))]
-            {
-                return Err(std::io::Error::new(
-                    std::io::ErrorKind::Unsupported,
-                    "JSON format is not supported without the `json` feature",
-                ));
             }
         } else {
             // Add the MESSAGE field
