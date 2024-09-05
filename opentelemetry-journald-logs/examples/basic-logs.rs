@@ -8,12 +8,11 @@ use tracing_subscriber::prelude::*;
 
 fn init_logger() -> LoggerProvider {
     let exporter = JournaldLogExporter::builder()
-        .identifier("opentelemetry-journal-exporter")
-        .message_size_limit(4 * 1024)
-        .attribute_prefix(Some("OTEL_".to_string()))
-        .json_format(true) //uncomment to log in json format
-        .build()
-        .expect("Failed to build JournaldLogExporter");
+        .with_identifier("opentelemetry-journal-exporter")
+        .with_message_size_limit(4 * 1024)
+        .with_attribute_prefix("OTEL")
+        //.with_json_format(true) //uncomment to log in json format
+        .build();
 
     LoggerProvider::builder()
         .with_simple_exporter(exporter)

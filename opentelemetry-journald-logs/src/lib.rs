@@ -25,41 +25,41 @@ pub struct JournaldLogExporterBuilder {
 }
 
 impl JournaldLogExporterBuilder {
-    pub fn identifier(mut self, identifier: &str) -> Self {
+    pub fn with_identifier(mut self, identifier: &str) -> Self {
         self.identifier = Some(identifier.to_string());
         self
     }
 
-    pub fn message_size_limit(mut self, message_size_limit: usize) -> Self {
-        self.message_size_limit = Some(message_size_limit);
-        self
-    }
-
-    pub fn attribute_prefix(mut self, attribute_prefix: Option<String>) -> Self {
-        if let Some(prefix) = attribute_prefix {
-            self.attribute_prefix = Some(prefix.to_uppercase());
-        } else {
-            self.attribute_prefix = None;
+    pub fn with_message_size_limit(mut self, message_size_limit: usize) -> Self {
+        if message_size_limit > 0 {
+            self.message_size_limit = Some(message_size_limit);
         }
         self
     }
 
-    pub fn json_format(mut self, json_format: bool) -> Self {
+    pub fn with_attribute_prefix(mut self, attribute_prefix: &str) -> Self {
+        self.attribute_prefix = Some(attribute_prefix.to_string().to_uppercase());
+        self
+    }
+
+    pub fn with_json_format(mut self, json_format: bool) -> Self {
         self.json_format = json_format;
         self
     }
 
-    pub fn build(self) -> Result<JournaldLogExporter, &'static str> {
-        let identifier = self.identifier.ok_or("Identifier is required")?;
-        let message_size_limit = self
-            .message_size_limit
-            .ok_or("Message size limit is required")?;
-        Ok(JournaldLogExporter {
-            identifier: CString::new(identifier).map_err(|_| "Invalid identifier")?,
-            message_size_limit,
+    pub fn build(self) -> JournaldLogExporter {
+        JournaldLogExporter {
+            identifier: CString::new(
+                self.identifier
+                    .as_deref()
+                    .filter(|s| !s.is_empty())
+                    .unwrap_or(""),
+            )
+            .unwrap(),
+            message_size_limit: self.message_size_limit.unwrap_or(0),
             attribute_prefix: self.attribute_prefix,
             json_format: self.json_format,
-        })
+        }
     }
 }
 
