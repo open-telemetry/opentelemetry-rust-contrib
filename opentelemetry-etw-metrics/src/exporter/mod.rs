@@ -16,6 +16,7 @@ use async_trait::async_trait;
 use std::fmt::{Debug, Formatter};
 
 use crate::etw;
+use crate::etw::MAX_EVENT_SIZE;
 
 pub struct MetricsExporter {}
 
@@ -70,14 +71,22 @@ impl PushMetricsExporter for MetricsExporter {
             .encode(&mut byte_array)
             .map_err(|err| MetricsError::Other(err.to_string()))?;
 
-        let result = etw::write(&byte_array);
-        if result != 0 {
+        if (byte_array.len()) > etw::MAX_EVENT_SIZE {
             global::handle_error(MetricsError::Other(format!(
-                "Failed to write ETW event with error code: {}",
-                result
+                "Exporting failed due to event size {} exceeding the maximum size of {} bytes",
+                byte_array.len(),
+                etw::MAX_EVENT_SIZE
             )));
+        } else {
+            let result = etw::write(&byte_array);
+            // println!("Exported {} bytes to ETW", byte_array.len());
+            if result != 0 {
+                global::handle_error(MetricsError::Other(format!(
+                    "Failed to write ETW event with error code: {}",
+                    result
+                )));
+            }
         }
-
         Ok(())
     }
 

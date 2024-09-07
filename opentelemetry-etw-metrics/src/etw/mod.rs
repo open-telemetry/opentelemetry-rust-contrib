@@ -11,6 +11,7 @@ tlg::define_provider!(
 );
 
 static ETW_PROVIDER_REGISTRANT: Once = Once::new();
+pub(crate) const MAX_EVENT_SIZE: usize = 65360;
 
 /// Register the ETW provider.
 pub fn register() {
