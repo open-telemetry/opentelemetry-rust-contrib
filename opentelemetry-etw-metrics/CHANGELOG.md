@@ -2,6 +2,9 @@
 
 ## vNext
 
+- Improved logging when ETW write fails due to size limit being hit.
+    [105](https://github.com/open-telemetry/opentelemetry-rust-contrib/pull/105)
+
 ## v0.3.0
 
 ### Changed
