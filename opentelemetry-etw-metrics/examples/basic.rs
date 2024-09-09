@@ -1,4 +1,4 @@
-//! run with `$ cargo run --example basic
+//! run with `$ cargo run --example basic --all-features
 use opentelemetry::{metrics::MeterProvider as _, KeyValue};
 use opentelemetry_etw_metrics::MetricsExporter;
 use opentelemetry_sdk::{
@@ -8,18 +8,15 @@ use opentelemetry_sdk::{
 use std::{thread, time::Duration};
 
 const SERVICE_NAME: &str = "service-name";
-const METRICS_ACCOUNT: &str = "cijo-account";
-const METRICS_NAMESPACE: &str = "cijo-namespace"; // The namespace will be automatically created by Geneva metrics backend, if not existing.
 
 fn setup_meter_provider() -> SdkMeterProvider {
     let exporter = MetricsExporter::new();
-    let reader = PeriodicReader::builder(exporter, runtime::Tokio).with_interval(Duration::from_secs(1)).build();
+    let reader = PeriodicReader::builder(exporter, runtime::Tokio).build();
     SdkMeterProvider::builder()
-        .with_resource(Resource::new(vec![
-            KeyValue::new("service.name", SERVICE_NAME),
-            KeyValue::new("_microsoft_metrics_account", METRICS_ACCOUNT),
-            KeyValue::new("_microsoft_metrics_namespace", METRICS_NAMESPACE),
-        ]))
+        .with_resource(Resource::new(vec![KeyValue::new(
+            "service.name",
+            SERVICE_NAME,
+        )]))
         .with_reader(reader)
         .build()
 }
@@ -35,22 +32,54 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .with_unit("test_unit")
         .init();
 
-    let c2 = meter
-    .f64_counter("MyFruitCounter")
-    .with_description("test_description")
-    .with_unit("test_unit")
-    .init();
-
-    loop {
-        for v in 0..1000 {
-            c.add(10.0, &[KeyValue::new("A", v.to_string())]);
-        }
-    
-        for v in 0..1000 {
-            c2.add(10.0, &[KeyValue::new("A", v.to_string())]);
-        }
-    }
-    
+    c.add(
+        1.0,
+        [
+            KeyValue::new("name", "apple"),
+            KeyValue::new("color", "red"),
+        ]
+        .as_ref(),
+    );
+    c.add(
+        2.0,
+        [
+            KeyValue::new("name", "lemon"),
+            KeyValue::new("color", "yellow"),
+        ]
+        .as_ref(),
+    );
+    c.add(
+        1.0,
+        [
+            KeyValue::new("name", "lemon"),
+            KeyValue::new("color", "yellow"),
+        ]
+        .as_ref(),
+    );
+    c.add(
+        2.0,
+        [
+            KeyValue::new("name", "apple"),
+            KeyValue::new("color", "green"),
+        ]
+        .as_ref(),
+    );
+    c.add(
+        5.0,
+        [
+            KeyValue::new("name", "apple"),
+            KeyValue::new("color", "red"),
+        ]
+        .as_ref(),
+    );
+    c.add(
+        4.0,
+        [
+            KeyValue::new("name", "lemon"),
+            KeyValue::new("color", "yellow"),
+        ]
+        .as_ref(),
+    );
 
     meter_provider.shutdown()?;
     Ok(())
