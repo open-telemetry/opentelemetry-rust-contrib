@@ -2,6 +2,10 @@
 
 ## vNext
 
+## v0.4.0
+
+- ump opentelemetry and opentelemetry_sdk versions to 0.25
+
 ## v0.3.0
 
 ### Changed

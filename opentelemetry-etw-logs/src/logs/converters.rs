@@ -57,17 +57,17 @@ mod tests {
         let result = [].as_json_value();
         assert_eq!(result, json!([]));
 
-        let array = [AnyValue::ListAny(vec![
+        let array = [AnyValue::ListAny(Box::new(vec![
             AnyValue::Int(1),
             AnyValue::Int(2),
             AnyValue::Int(3),
-        ])];
+        ]))];
         let result = array.as_json_value();
         assert_eq!(result, json!([[1, 2, 3]]));
 
         let array = [
-            AnyValue::ListAny(vec![AnyValue::Int(1), AnyValue::Int(2)]),
-            AnyValue::ListAny(vec![AnyValue::Int(3), AnyValue::Int(4)]),
+            AnyValue::ListAny(Box::new(vec![AnyValue::Int(1), AnyValue::Int(2)])),
+            AnyValue::ListAny(Box::new(vec![AnyValue::Int(3), AnyValue::Int(4)])),
         ];
         let result = array.as_json_value();
         assert_eq!(result, json!([[1, 2], [3, 4]]));
@@ -105,8 +105,8 @@ mod tests {
     #[should_panic]
     fn test_convert_bytes_panics() {
         let array = [
-            AnyValue::Bytes(vec![97u8, 98u8, 99u8]),
-            AnyValue::Bytes(vec![]),
+            AnyValue::Bytes(Box::new(vec![97u8, 98u8, 99u8])),
+            AnyValue::Bytes(Box::new(vec![])),
         ];
         let result = array.as_json_value();
         assert_eq!(result, json!(["abc", ""]));
@@ -134,7 +134,7 @@ mod tests {
         let mut map = HashMap::new();
         map.insert(Key::new("d"), AnyValue::Int(4));
         map.insert(Key::new("e"), AnyValue::Int(5));
-        map.insert(Key::new("f"), AnyValue::Map(inner_map));
+        map.insert(Key::new("f"), AnyValue::Map(Box::new(inner_map)));
         let result = map.as_json_value();
         assert_eq!(result, json!({"d":4,"e":5,"f":{"a":1,"b":2,"c":3}}));
 
@@ -183,24 +183,30 @@ mod tests {
         let empty_vec = vec![];
 
         let mut complex_map = HashMap::new();
-        complex_map.insert(Key::new("a"), AnyValue::Map(simple_map.clone()));
-        complex_map.insert(Key::new("b"), AnyValue::Map(empty_map.clone()));
-        complex_map.insert(Key::new("c"), AnyValue::ListAny(simple_vec.clone()));
-        complex_map.insert(Key::new("d"), AnyValue::ListAny(empty_vec.clone()));
+        complex_map.insert(Key::new("a"), AnyValue::Map(Box::new(simple_map.clone())));
+        complex_map.insert(Key::new("b"), AnyValue::Map(Box::new(empty_map.clone())));
+        complex_map.insert(
+            Key::new("c"),
+            AnyValue::ListAny(Box::new(simple_vec.clone())),
+        );
+        complex_map.insert(
+            Key::new("d"),
+            AnyValue::ListAny(Box::new(empty_vec.clone())),
+        );
         let result = complex_map.as_json_value();
         assert_eq!(result, json!({"a":{"a":1,"b":2},"b":{},"c":[1,2],"d":[]}));
 
         let complex_vec = vec![
-            AnyValue::Map(simple_map.clone()),
-            AnyValue::Map(empty_map.clone()),
-            AnyValue::ListAny(simple_vec.clone()),
-            AnyValue::ListAny(empty_vec.clone()),
+            AnyValue::Map(Box::new(simple_map.clone())),
+            AnyValue::Map(Box::new(empty_map.clone())),
+            AnyValue::ListAny(Box::new(simple_vec.clone())),
+            AnyValue::ListAny(Box::new(empty_vec.clone())),
         ];
         let result = complex_vec.as_json_value();
         assert_eq!(result, json!([{"a":1,"b":2},{},[1,2],[]]));
 
         let mut nested_complex_map = HashMap::new();
-        nested_complex_map.insert(Key::new("a"), AnyValue::Map(complex_map.clone()));
+        nested_complex_map.insert(Key::new("a"), AnyValue::Map(Box::new(complex_map.clone())));
         let result = nested_complex_map.as_json_value();
         assert_eq!(
             result,
