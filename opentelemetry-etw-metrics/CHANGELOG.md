@@ -2,6 +2,8 @@
 
 ## vNext
 
+## v0.4.0
+
 - Improved logging when ETW write fails due to size limit being hit.
     [105](https://github.com/open-telemetry/opentelemetry-rust-contrib/pull/105)
 - Bump opentelemetry,opentelemetry_sdk and opentelemetry-proto versions to 0.25
