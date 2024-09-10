@@ -78,6 +78,9 @@ impl PushMetricsExporter for MetricsExporter {
             )));
         } else {
             let result = etw::write(&byte_array);
+            // TODO: Better logging/internal metrics needed here for non-failure
+            // case Uncomment the line below to see the exported bytes until a
+            // better logging solution is implemented
             // println!("Exported {} bytes to ETW", byte_array.len());
             if result != 0 {
                 global::handle_error(MetricsError::Other(format!(
