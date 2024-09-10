@@ -63,7 +63,6 @@ impl opentelemetry_sdk::logs::LogProcessor for ReentrantLogProcessor {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use opentelemetry::InstrumentationLibrary;
     use opentelemetry_sdk::logs::LogProcessor;
 
     #[test]

@@ -55,7 +55,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .init();
 
     // Create a ObservableGauge instrument and register a callback that reports the measurement.
-    let gauge = meter
+    let _gauge = meter
         .f64_observable_gauge("observable_gauge_f64_test")
         .with_unit("test_unit")
         .with_description("test_description")
@@ -70,7 +70,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         })
         .init();
 
-    let gauge2 = meter
+    let _gauge2 = meter
         .u64_observable_gauge("observable_gauge_u64_test")
         .with_unit("test_unit")
         .with_description("test_description")
@@ -86,7 +86,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .init();
 
     // Create a ObservableCounter instrument and register a callback that reports the measurement.
-    let observable_counter = meter
+    let _observable_counter = meter
         .u64_observable_counter("observable_counter_u64_test")
         .with_description("test_description")
         .with_unit("test_unit")
@@ -101,7 +101,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         })
         .init();
 
-    let observable_counter2 = meter
+    let _observable_counter2 = meter
         .f64_observable_counter("observable_counter_f64_test")
         .with_description("test_description")
         .with_unit("test_unit")
@@ -117,7 +117,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .init();
 
     // Create a Observable UpDownCounter instrument and register a callback that reports the measurement.
-    let observable_up_down_counter = meter
+    let _observable_up_down_counter = meter
         .i64_observable_up_down_counter("observable_up_down_counter_i64_test")
         .with_description("test_description")
         .with_unit("test_unit")
@@ -131,7 +131,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             )
         })
         .init();
-    let observable_up_down_counter2 = meter
+    let _observable_up_down_counter2 = meter
         .f64_observable_up_down_counter("observable_up_down_counter_f64_test")
         .with_description("test_description")
         .with_unit("test_unit")

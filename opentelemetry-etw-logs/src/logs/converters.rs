@@ -44,7 +44,7 @@ mod tests {
 
     #[test]
     fn test_convert_vec_of_any_value_to_string() {
-        let vec = vec![
+        let vec = [
             AnyValue::Int(1),
             AnyValue::Int(2),
             AnyValue::Int(3),
@@ -106,7 +106,7 @@ mod tests {
     fn test_convert_bytes_panics() {
         let array = [
             AnyValue::Bytes(Box::new(vec![97u8, 98u8, 99u8])),
-            AnyValue::Bytes(Box::new(vec![])),
+            AnyValue::Bytes(Box::default()),
         ];
         let result = array.as_json_value();
         assert_eq!(result, json!(["abc", ""]));
@@ -196,7 +196,7 @@ mod tests {
         let result = complex_map.as_json_value();
         assert_eq!(result, json!({"a":{"a":1,"b":2},"b":{},"c":[1,2],"d":[]}));
 
-        let complex_vec = vec![
+        let complex_vec = [
             AnyValue::Map(Box::new(simple_map.clone())),
             AnyValue::Map(Box::new(empty_map.clone())),
             AnyValue::ListAny(Box::new(simple_vec.clone())),
