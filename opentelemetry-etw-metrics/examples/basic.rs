@@ -1,4 +1,4 @@
-//! run with `$ cargo run --example basic --all-features
+//! run with `$ cargo run --example basic
 use opentelemetry::{global, metrics::MeterProvider as _, KeyValue};
 use opentelemetry_etw_metrics::MetricsExporter;
 use opentelemetry_sdk::{
