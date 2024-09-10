@@ -1,11 +1,10 @@
 //! run with `$ cargo run --example basic --all-features
-use opentelemetry::{metrics::MeterProvider as _, KeyValue};
+use opentelemetry::{global, metrics::MeterProvider as _, KeyValue};
 use opentelemetry_etw_metrics::MetricsExporter;
 use opentelemetry_sdk::{
     metrics::{PeriodicReader, SdkMeterProvider},
     runtime, Resource,
 };
-use std::{thread, time::Duration};
 
 const SERVICE_NAME: &str = "service-name";
 
@@ -24,6 +23,7 @@ fn setup_meter_provider() -> SdkMeterProvider {
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let meter_provider = setup_meter_provider();
+    global::set_meter_provider(meter_provider.clone());
 
     let meter = meter_provider.meter("user-event-test");
     let c = meter

@@ -16,7 +16,6 @@ use async_trait::async_trait;
 use std::fmt::{Debug, Formatter};
 
 use crate::etw;
-use crate::etw::MAX_EVENT_SIZE;
 
 pub struct MetricsExporter {}
 
