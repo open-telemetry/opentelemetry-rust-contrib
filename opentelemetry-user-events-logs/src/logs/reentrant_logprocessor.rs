@@ -1,7 +1,6 @@
 use std::fmt::Debug;
 
 use opentelemetry::logs::LogResult;
-use opentelemetry_sdk::export::logs::LogData;
 
 #[cfg(feature = "logs_level_enabled")]
 use opentelemetry_sdk::export::logs::LogExporter;
@@ -27,8 +26,12 @@ impl ReentrantLogProcessor {
 }
 
 impl opentelemetry_sdk::logs::LogProcessor for ReentrantLogProcessor {
-    fn emit(&self, data: &mut LogData) {
-        _ = self.event_exporter.export_log_data(data);
+    fn emit(
+        &self,
+        record: &mut opentelemetry_sdk::logs::LogRecord,
+        instrumentation: &opentelemetry::InstrumentationLibrary,
+    ) {
+        _ = self.event_exporter.export_log_data(record, instrumentation);
     }
 
     // This is a no-op as this processor doesn't keep anything
