@@ -173,14 +173,14 @@ impl ETWExporter {
 
     pub(crate) fn export_log_data(
         &self,
-        log_data: &opentelemetry_sdk::export::logs::LogData,
+        log_record: &opentelemetry_sdk::logs::LogRecord,
+        instrumentation: &opentelemetry::InstrumentationLibrary,
     ) -> opentelemetry_sdk::export::logs::ExportResult {
-        let level =
-            self.get_severity_level(log_data.record.severity_number.unwrap_or(Severity::Debug));
+        let level = self.get_severity_level(log_record.severity_number.unwrap_or(Severity::Debug));
 
         let keyword = match self
             .exporter_config
-            .get_log_keyword_or_default(log_data.instrumentation.name.as_ref())
+            .get_log_keyword_or_default(instrumentation.name.as_ref())
         {
             Some(keyword) => keyword,
             _ => return Ok(()),
@@ -199,11 +199,11 @@ impl ETWExporter {
 
         event.add_u16("__csver__", 0x0401u16, tld::OutType::Hex, field_tag);
 
-        self.populate_part_a(&mut event, log_data, field_tag);
+        self.populate_part_a(&mut event, log_record, field_tag);
 
-        let (event_id, event_name) = self.populate_part_c(&mut event, log_data, field_tag);
+        let (event_id, event_name) = self.populate_part_c(&mut event, log_record, field_tag);
 
-        self.populate_part_b(&mut event, log_data, level, event_id, event_name);
+        self.populate_part_b(&mut event, log_record, level, event_id, event_name);
 
         // Write event to ETW
         let result = event.write(&self.provider, None, None);
@@ -217,13 +217,12 @@ impl ETWExporter {
     fn populate_part_a(
         &self,
         event: &mut tld::EventBuilder,
-        log_data: &opentelemetry_sdk::export::logs::LogData,
+        log_record: &opentelemetry_sdk::logs::LogRecord,
         field_tag: u32,
     ) {
-        let event_time: SystemTime = log_data
-            .record
+        let event_time: SystemTime = log_record
             .timestamp
-            .or(log_data.record.observed_timestamp)
+            .or(log_record.observed_timestamp)
             .unwrap_or_else(SystemTime::now);
 
         const COUNT_TIME: u8 = 1u8;
@@ -238,7 +237,7 @@ impl ETWExporter {
     fn populate_part_b(
         &self,
         event: &mut tld::EventBuilder,
-        log_data: &opentelemetry_sdk::export::logs::LogData,
+        log_record: &opentelemetry_sdk::logs::LogRecord,
         level: tld::Level,
         event_id: Option<i64>,
         event_name: Option<&str>,
@@ -249,8 +248,8 @@ impl ETWExporter {
 
         let field_count = COUNT_TYPE_NAME
             + COUNT_SEVERITY_NUMBER
-            + log_data.record.body.is_some() as u8
-            + log_data.record.severity_text.is_some() as u8
+            + log_record.body.is_some() as u8
+            + log_record.severity_text.is_some() as u8
             + event_id.is_some() as u8
             + event_name.is_some() as u8;
 
@@ -260,19 +259,14 @@ impl ETWExporter {
         // Fill fields of PartB struct
         event.add_str8("_typeName", "Logs", tld::OutType::Default, 0);
 
-        if let Some(body) = log_data.record.body.clone() {
+        if let Some(body) = log_record.body.clone() {
             add_attribute_to_event(event, &Key::new("body"), &body);
         }
 
         event.add_u8("severityNumber", level.as_int(), tld::OutType::Default, 0);
 
-        if let Some(severity_text) = &log_data.record.severity_text {
-            event.add_str8(
-                "severityText",
-                severity_text.as_ref(),
-                tld::OutType::Default,
-                0,
-            );
+        if let Some(severity_text) = &log_record.severity_text {
+            event.add_str8("severityText", severity_text, tld::OutType::Default, 0);
         }
 
         if let Some(event_id) = event_id {
@@ -287,55 +281,52 @@ impl ETWExporter {
     fn populate_part_c<'a>(
         &'a self,
         event: &mut tld::EventBuilder,
-        log_data: &'a opentelemetry_sdk::export::logs::LogData,
+        log_record: &'a opentelemetry_sdk::logs::LogRecord,
         field_tag: u32,
     ) -> (Option<i64>, Option<&str>) {
         //populate CS PartC
         let mut event_id: Option<i64> = None;
         let mut event_name: Option<&str> = None;
 
-        if let Some(attr_list) = &log_data.record.attributes {
-            let mut cs_c_count = 0;
-
+        let mut cs_c_count = 0;
+        for (key, value) in log_record.attributes_iter() {
             // find if we have PartC and its information
-            for (key, value) in attr_list.iter() {
-                match (key.as_str(), &value) {
-                    (EVENT_ID, AnyValue::Int(value)) => {
-                        event_id = Some(*value);
-                        continue;
-                    }
-                    (EVENT_NAME_PRIMARY, AnyValue::String(value)) => {
-                        event_name = Some(value.as_str());
-                        continue;
-                    }
-                    (EVENT_NAME_SECONDARY, AnyValue::String(value)) => {
-                        if event_name.is_none() {
-                            event_name = Some(value.as_str());
-                        }
-                        continue;
-                    }
-                    _ => {
-                        cs_c_count += 1;
-                    }
+            match (key.as_str(), &value) {
+                (EVENT_ID, AnyValue::Int(value)) => {
+                    event_id = Some(*value);
+                    continue;
                 }
-            }
-
-            if cs_c_count > 0 {
-                event.add_struct("PartC", cs_c_count, field_tag);
-
-                for (key, value) in attr_list.iter() {
-                    match (key.as_str(), &value) {
-                        (EVENT_ID, _) | (EVENT_NAME_PRIMARY, _) | (EVENT_NAME_SECONDARY, _) => {
-                            continue;
-                        }
-                        _ => {
-                            add_attribute_to_event(event, key, value);
-                        }
+                (EVENT_NAME_PRIMARY, AnyValue::String(value)) => {
+                    event_name = Some(value.as_str());
+                    continue;
+                }
+                (EVENT_NAME_SECONDARY, AnyValue::String(value)) => {
+                    if event_name.is_none() {
+                        event_name = Some(value.as_str());
                     }
+                    continue;
+                }
+                _ => {
+                    cs_c_count += 1;
                 }
             }
         }
 
+        // If there are additional PartC attributes, add them to the event
+        if cs_c_count > 0 {
+            event.add_struct("PartC", cs_c_count, field_tag);
+
+            for (key, value) in log_record.attributes_iter() {
+                match (key.as_str(), &value) {
+                    (EVENT_ID, _) | (EVENT_NAME_PRIMARY, _) | (EVENT_NAME_SECONDARY, _) => {
+                        continue;
+                    }
+                    _ => {
+                        add_attribute_to_event(event, key, value);
+                    }
+                }
+            }
+        }
         (event_id, event_name)
     }
 }
@@ -348,12 +339,12 @@ impl Debug for ETWExporter {
 
 #[async_trait]
 impl opentelemetry_sdk::export::logs::LogExporter for ETWExporter {
-    async fn export<'a>(
+    async fn export(
         &mut self,
-        batch: Vec<Cow<'a, opentelemetry_sdk::export::logs::LogData>>,
+        batch: opentelemetry_sdk::export::logs::LogBatch<'_>,
     ) -> opentelemetry::logs::LogResult<()> {
-        for log_data in batch {
-            let _ = self.export_log_data(&log_data);
+        for (log_record, instrumentation) in batch.iter() {
+            let _ = self.export_log_data(log_record, instrumentation);
         }
         Ok(())
     }
@@ -417,7 +408,6 @@ fn add_attribute_to_event(event: &mut tld::EventBuilder, key: &Key, value: &AnyV
 mod tests {
     use super::*;
     use opentelemetry::logs::Severity;
-    use opentelemetry_sdk::export::logs::LogData;
 
     #[test]
     fn test_export_log_data() {
@@ -427,13 +417,10 @@ mod tests {
             None,
             ExporterConfig::default(),
         );
+        let record = Default::default();
+        let instrumentation = Default::default();
 
-        let log_data = LogData {
-            instrumentation: Default::default(),
-            record: Default::default(),
-        };
-
-        let result = exporter.export_log_data(&log_data);
+        let result = exporter.export_log_data(&record, &instrumentation);
         assert!(result.is_ok());
     }
 
