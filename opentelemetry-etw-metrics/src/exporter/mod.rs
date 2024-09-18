@@ -363,7 +363,7 @@ mod tests {
     use crate::etw;
 
     #[tokio::test(flavor = "multi_thread")]
-    async fn fail_to_export_too_many_metrics() {
+    async fn emit_metrics_that_combined_exceed_etw_max_event_size() {
         let exporter = super::MetricsExporter::new();
         let reader = PeriodicReader::builder(exporter, runtime::Tokio).build();
         let meter_provider = SdkMeterProvider::builder()
@@ -375,10 +375,53 @@ mod tests {
             .build();
 
         let meter = meter_provider.meter("user-event-test");
-        let c = meter
-            .f64_counter("TestCounter")
-            .with_description("test_description")
-            .with_unit("test_unit")
+
+        let u64_histogram = meter
+            .u64_histogram("Testu64Histogram")
+            .with_description("u64_histogram_test_description")
+            .with_unit("u64_histogram_test_unit")
+            .init();
+
+        let f64_histogram = meter
+            .f64_histogram("TestHistogram")
+            .with_description("f64_histogram_test_description")
+            .with_unit("f64_histogram_test_unit")
+            .init();
+
+        let u64_counter = meter
+            .u64_counter("Testu64Counter")
+            .with_description("u64_counter_test_description")
+            .with_unit("u64_counter_test_units")
+            .init();
+
+        let f64_counter = meter
+            .f64_counter("Testf64Counter")
+            .with_description("f64_counter_test_description")
+            .with_unit("f64_counter_test_units")
+            .init();
+
+        let i64_counter = meter
+            .i64_up_down_counter("Testi64Counter")
+            .with_description("i64_counter_test_description")
+            .with_unit("i64_counter_test_units")
+            .init();
+
+        let u64_gauge = meter
+            .u64_gauge("Testu64Gauge")
+            .with_description("u64_gauge_test_description")
+            .with_unit("u64_gauge_test_unit")
+            .init();
+
+        let i64_gauge = meter
+            .i64_gauge("Testi64Gauge")
+            .with_description("i64_gauge_test_description")
+            .with_unit("i64_gauge_test_unit")
+            .init();
+
+        let f64_gauge = meter
+            .f64_gauge("Testf64Gauge")
+            .with_description("f64_gauge_test_description")
+            .with_unit("f64_gauge_test_unit")
             .init();
 
         // Create a key that is 1/10th the size of the MAX_EVENT_SIZE
@@ -386,7 +429,56 @@ mod tests {
         let large_key = "a".repeat(key_size);
 
         for index in 0..11 {
-            c.add(
+            u64_histogram.record(
+                1,
+                [KeyValue::new(large_key.clone(), format!("{index}"))].as_ref(),
+            );
+        }
+
+        for index in 0..11 {
+            f64_histogram.record(
+                1.0,
+                [KeyValue::new(large_key.clone(), format!("{index}"))].as_ref(),
+            );
+        }
+
+        for index in 0..11 {
+            u64_counter.add(
+                1,
+                [KeyValue::new(large_key.clone(), format!("{index}"))].as_ref(),
+            );
+        }
+
+        for index in 0..11 {
+            f64_counter.add(
+                1.0,
+                [KeyValue::new(large_key.clone(), format!("{index}"))].as_ref(),
+            );
+        }
+
+        for index in 0..11 {
+            i64_counter.add(
+                1,
+                [KeyValue::new(large_key.clone(), format!("{index}"))].as_ref(),
+            );
+        }
+
+        for index in 0..11 {
+            u64_gauge.record(
+                1,
+                [KeyValue::new(large_key.clone(), format!("{index}"))].as_ref(),
+            );
+        }
+
+        for index in 0..11 {
+            i64_gauge.record(
+                1,
+                [KeyValue::new(large_key.clone(), format!("{index}"))].as_ref(),
+            );
+        }
+
+        for index in 0..11 {
+            f64_gauge.record(
                 1.0,
                 [KeyValue::new(large_key.clone(), format!("{index}"))].as_ref(),
             );
