@@ -56,7 +56,7 @@ fn generated_code_is_fresh() {
         .build_client(true)
         .build_server(false)
         .out_dir(&tmp_dir)
-        .compile(&schemas, &["proto"])
+        .compile_protos(&schemas, &["proto"])
         .unwrap();
 
     // Next, wrangle the generated file names into a directory hierarchy.
