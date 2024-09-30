@@ -594,9 +594,9 @@ pub mod tail_log_entries_response {
             /// (if the ProtoBuf definition does not change) and safe for programmatic use.
             pub fn as_str_name(&self) -> &'static str {
                 match self {
-                    Reason::Unspecified => "REASON_UNSPECIFIED",
-                    Reason::RateLimit => "RATE_LIMIT",
-                    Reason::NotConsumed => "NOT_CONSUMED",
+                    Self::Unspecified => "REASON_UNSPECIFIED",
+                    Self::RateLimit => "RATE_LIMIT",
+                    Self::NotConsumed => "NOT_CONSUMED",
                 }
             }
             /// Creates an enum from field names used in the ProtoBuf definition.
@@ -613,7 +613,13 @@ pub mod tail_log_entries_response {
 }
 /// Generated client implementations.
 pub mod logging_service_v2_client {
-    #![allow(unused_variables, dead_code, missing_docs, clippy::let_unit_value)]
+    #![allow(
+        unused_variables,
+        dead_code,
+        missing_docs,
+        clippy::wildcard_imports,
+        clippy::let_unit_value
+    )]
     use tonic::codegen::http::Uri;
     use tonic::codegen::*;
     /// Service for ingesting and querying logs.
@@ -705,10 +711,7 @@ pub mod logging_service_v2_client {
             request: impl tonic::IntoRequest<super::DeleteLogRequest>,
         ) -> std::result::Result<tonic::Response<()>, tonic::Status> {
             self.inner.ready().await.map_err(|e| {
-                tonic::Status::new(
-                    tonic::Code::Unknown,
-                    format!("Service was not ready: {}", e.into()),
-                )
+                tonic::Status::unknown(format!("Service was not ready: {}", e.into()))
             })?;
             let codec = tonic::codec::ProstCodec::default();
             let path = http::uri::PathAndQuery::from_static(
@@ -734,10 +737,7 @@ pub mod logging_service_v2_client {
         ) -> std::result::Result<tonic::Response<super::WriteLogEntriesResponse>, tonic::Status>
         {
             self.inner.ready().await.map_err(|e| {
-                tonic::Status::new(
-                    tonic::Code::Unknown,
-                    format!("Service was not ready: {}", e.into()),
-                )
+                tonic::Status::unknown(format!("Service was not ready: {}", e.into()))
             })?;
             let codec = tonic::codec::ProstCodec::default();
             let path = http::uri::PathAndQuery::from_static(
@@ -760,10 +760,7 @@ pub mod logging_service_v2_client {
         ) -> std::result::Result<tonic::Response<super::ListLogEntriesResponse>, tonic::Status>
         {
             self.inner.ready().await.map_err(|e| {
-                tonic::Status::new(
-                    tonic::Code::Unknown,
-                    format!("Service was not ready: {}", e.into()),
-                )
+                tonic::Status::unknown(format!("Service was not ready: {}", e.into()))
             })?;
             let codec = tonic::codec::ProstCodec::default();
             let path = http::uri::PathAndQuery::from_static(
@@ -785,10 +782,7 @@ pub mod logging_service_v2_client {
             tonic::Status,
         > {
             self.inner.ready().await.map_err(|e| {
-                tonic::Status::new(
-                    tonic::Code::Unknown,
-                    format!("Service was not ready: {}", e.into()),
-                )
+                tonic::Status::unknown(format!("Service was not ready: {}", e.into()))
             })?;
             let codec = tonic::codec::ProstCodec::default();
             let path = http::uri::PathAndQuery::from_static(
@@ -808,10 +802,7 @@ pub mod logging_service_v2_client {
             request: impl tonic::IntoRequest<super::ListLogsRequest>,
         ) -> std::result::Result<tonic::Response<super::ListLogsResponse>, tonic::Status> {
             self.inner.ready().await.map_err(|e| {
-                tonic::Status::new(
-                    tonic::Code::Unknown,
-                    format!("Service was not ready: {}", e.into()),
-                )
+                tonic::Status::unknown(format!("Service was not ready: {}", e.into()))
             })?;
             let codec = tonic::codec::ProstCodec::default();
             let path = http::uri::PathAndQuery::from_static(
@@ -834,10 +825,7 @@ pub mod logging_service_v2_client {
             tonic::Status,
         > {
             self.inner.ready().await.map_err(|e| {
-                tonic::Status::new(
-                    tonic::Code::Unknown,
-                    format!("Service was not ready: {}", e.into()),
-                )
+                tonic::Status::unknown(format!("Service was not ready: {}", e.into()))
             })?;
             let codec = tonic::codec::ProstCodec::default();
             let path = http::uri::PathAndQuery::from_static(
