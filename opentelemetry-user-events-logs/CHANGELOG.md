@@ -2,6 +2,12 @@
 
 ## vNext
 
+## v0.6.0
+
+### Changed
+
+- Bump opentelemetry and opentelemetry_sdk versions to 0.25
+
 ## v0.5.0
 
 - **BREAKING** Decouple Exporter creation with the Reentrant processor [#82](https://github.com/open-telemetry/opentelemetry-rust-contrib/pull/82)
