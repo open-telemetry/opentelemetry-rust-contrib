@@ -2,8 +2,11 @@
 
 ## vNext
 
+## v0.22.0
+
 ### Added
 
+- Update to opentelemetry v0.25.0, opentelemetry_sdk v0.25.0, opentelemetry-semantic-conventions v0.25.0
 - Added support for `MonitoredResource::CloudRunJob` [#100](https://github.com/open-telemetry/opentelemetry-rust-contrib/issues/100)
 
 ## v0.21.0
