@@ -1,6 +1,6 @@
 [package]
 name = "opentelemetry-stackdriver"
-version = "0.21.0"
+version = "0.22.0"
 description = "A Rust opentelemetry exporter that uploads traces to Google Stackdriver trace."
 documentation = "https://docs.rs/opentelemetry-stackdriver/"
 repository = "https://github.com/open-telemetry/opentelemetry-rust-contrib"
@@ -14,9 +14,9 @@ async-trait = "0.1.48"
 gcp_auth = { version = "0.12", optional = true }
 hex = "0.4"
 http = "1"
-opentelemetry = "0.24"
-opentelemetry_sdk = { version = "0.24", features = ["trace"] }
-opentelemetry-semantic-conventions = "0.16"
+opentelemetry = {workspace = true}
+opentelemetry_sdk = { workspace = true, features = ["trace"] }
+opentelemetry-semantic-conventions = { workspace = true}
 prost = "0.13"
 prost-types = "0.13"
 thiserror = "1.0.30"
@@ -42,4 +42,4 @@ tokio = "1"
 tonic-build = "0.12"
 walkdir = "2.3.2"
 futures-util = { version = "0.3", default-features = false }
-opentelemetry = { version = "0.24", features = ["testing"] }
+opentelemetry = { workspace = true, features = ["testing"] }
