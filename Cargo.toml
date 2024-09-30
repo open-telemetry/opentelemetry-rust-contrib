@@ -4,6 +4,7 @@ members = [
     "opentelemetry-config",
     "opentelemetry-contrib",
     "opentelemetry-datadog",
+    "opentelemetry-derive",
     "opentelemetry-etw-logs",
     "opentelemetry-etw-metrics",
     "opentelemetry-instrumentation-actix-web",
