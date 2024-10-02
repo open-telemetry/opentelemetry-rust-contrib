@@ -283,7 +283,7 @@ impl ETWExporter {
         event: &mut tld::EventBuilder,
         log_record: &'a opentelemetry_sdk::logs::LogRecord,
         field_tag: u32,
-    ) -> (Option<i64>, Option<&str>) {
+    ) -> (Option<i64>, Option<&'a str>) {
         //populate CS PartC
         let mut event_id: Option<i64> = None;
         let mut event_name: Option<&str> = None;

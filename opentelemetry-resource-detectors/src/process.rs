@@ -27,11 +27,11 @@ impl ResourceDetector for ProcessResourceDetector {
             .collect::<Vec<StringValue>>();
         Resource::new(vec![
             KeyValue::new(
-                opentelemetry_semantic_conventions::resource::PROCESS_COMMAND_ARGS,
+                opentelemetry_semantic_conventions::attribute::PROCESS_COMMAND_ARGS,
                 Value::Array(cmd_arg_val.into()),
             ),
             KeyValue::new(
-                opentelemetry_semantic_conventions::resource::PROCESS_PID,
+                opentelemetry_semantic_conventions::attribute::PROCESS_PID,
                 id() as i64,
             ),
         ])
