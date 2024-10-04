@@ -8,6 +8,7 @@
 
  - Bump opentelemetry and opentelemetry_sdk versions to 0.26
  - Bump opentelemetry-proto version to 0.26
+ - Bump rust msrv to v1.71.1
 
 ## v0.4.0
 
