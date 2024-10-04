@@ -2,7 +2,6 @@
 /// A common proto for logging HTTP requests. Only contains semantics
 /// defined by the HTTP specification. Product-specific logging
 /// information MUST be defined in a separate message.
-#[allow(clippy::derive_partial_eq_without_eq)]
 #[derive(Clone, PartialEq, ::prost::Message)]
 pub struct HttpRequest {
     /// The request method. Examples: `"GET"`, `"HEAD"`, `"PUT"`, `"POST"`.
@@ -114,15 +113,15 @@ impl LogSeverity {
     /// (if the ProtoBuf definition does not change) and safe for programmatic use.
     pub fn as_str_name(&self) -> &'static str {
         match self {
-            LogSeverity::Default => "DEFAULT",
-            LogSeverity::Debug => "DEBUG",
-            LogSeverity::Info => "INFO",
-            LogSeverity::Notice => "NOTICE",
-            LogSeverity::Warning => "WARNING",
-            LogSeverity::Error => "ERROR",
-            LogSeverity::Critical => "CRITICAL",
-            LogSeverity::Alert => "ALERT",
-            LogSeverity::Emergency => "EMERGENCY",
+            Self::Default => "DEFAULT",
+            Self::Debug => "DEBUG",
+            Self::Info => "INFO",
+            Self::Notice => "NOTICE",
+            Self::Warning => "WARNING",
+            Self::Error => "ERROR",
+            Self::Critical => "CRITICAL",
+            Self::Alert => "ALERT",
+            Self::Emergency => "EMERGENCY",
         }
     }
     /// Creates an enum from field names used in the ProtoBuf definition.

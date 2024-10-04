@@ -1,7 +1,4 @@
-use std::{
-    borrow::Cow,
-    time::{Duration, SystemTime},
-};
+use std::time::{Duration, SystemTime};
 
 use criterion::{black_box, criterion_group, criterion_main, Criterion};
 use http::Request;
@@ -14,7 +11,6 @@ use opentelemetry_http::HttpClient;
 use opentelemetry_sdk::{
     export::trace::{SpanData, SpanExporter},
     trace::{SpanEvents, SpanLinks},
-    Resource,
 };
 use rand::seq::SliceRandom;
 use rand::{rngs::ThreadRng, thread_rng, RngCore};
@@ -154,7 +150,6 @@ fn get_span(trace_id: u128, parent_span_id: u64, span_id: u64, rng: &mut ThreadR
     ];
     let events = SpanEvents::default();
     let links = SpanLinks::default();
-    let resource = Resource::new(vec![KeyValue::new("host.name", "test")]);
     let instrumentation_lib = InstrumentationLibrary::builder("component").build();
 
     SpanData {
@@ -169,7 +164,6 @@ fn get_span(trace_id: u128, parent_span_id: u64, span_id: u64, rng: &mut ThreadR
         events,
         links,
         status: Status::Ok,
-        resource: Cow::Owned(resource),
         instrumentation_lib,
     }
 }

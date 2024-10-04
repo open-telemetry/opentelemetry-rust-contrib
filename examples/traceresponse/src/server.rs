@@ -1,7 +1,6 @@
-use hyper::{
-    service::{make_service_fn, service_fn},
-    Body, Request, Response, Server,
-};
+use http_body_util::{combinators::BoxBody, BodyExt, Full};
+use hyper::{body::Incoming, service::service_fn, Request, Response};
+use hyper_util::rt::{TokioExecutor, TokioIo};
 use opentelemetry::{
     global,
     propagation::TextMapPropagator,
@@ -9,12 +8,15 @@ use opentelemetry::{
     Context,
 };
 use opentelemetry_contrib::trace::propagator::trace_context_response::TraceContextResponsePropagator;
-use opentelemetry_http::{HeaderExtractor, HeaderInjector};
+use opentelemetry_http::{Bytes, HeaderExtractor, HeaderInjector};
 use opentelemetry_sdk::{propagation::TraceContextPropagator, trace::TracerProvider};
 use opentelemetry_stdout::SpanExporter;
 use std::{convert::Infallible, net::SocketAddr};
+use tokio::net::TcpListener;
 
-async fn handle(req: Request<Body>) -> Result<Response<Body>, Infallible> {
+async fn handle(
+    req: Request<Incoming>,
+) -> Result<Response<BoxBody<Bytes, hyper::Error>>, Infallible> {
     let parent_cx = global::get_text_map_propagator(|propagator| {
         propagator.extract(&HeaderExtractor(req.headers()))
     });
@@ -30,8 +32,11 @@ async fn handle(req: Request<Body>) -> Result<Response<Body>, Infallible> {
 
     cx.span().add_event("handling this...", Vec::new());
 
-    let mut res = Response::new("Hello, World!".into());
-
+    let mut res = Response::new(
+        Full::new(Bytes::from_static(b"Server is up and running!"))
+            .map_err(|err| match err {})
+            .boxed(),
+    );
     let response_propagator: &dyn TextMapPropagator = &TraceContextResponsePropagator::new();
     response_propagator.inject_context(&cx, &mut HeaderInjector(res.headers_mut()));
 
@@ -53,15 +58,17 @@ fn init_tracer() {
 
 #[tokio::main]
 async fn main() {
+    use hyper_util::server::conn::auto::Builder;
     init_tracer();
     let addr = SocketAddr::from(([127, 0, 0, 1], 3000));
+    let listener = TcpListener::bind(addr).await.unwrap();
 
-    let make_svc = make_service_fn(|_conn| async { Ok::<_, Infallible>(service_fn(handle)) });
-
-    let server = Server::bind(&addr).serve(make_svc);
-
-    println!("Listening on {addr}");
-    if let Err(e) = server.await {
-        eprintln!("server error: {e}");
+    while let Ok((stream, _addr)) = listener.accept().await {
+        if let Err(err) = Builder::new(TokioExecutor::new())
+            .serve_connection(TokioIo::new(stream), service_fn(handle))
+            .await
+        {
+            eprintln!("{err}");
+        }
     }
 }

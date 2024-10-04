@@ -2,6 +2,19 @@
 
 ## vNext
 
+## v0.13.0
+
+### Changed
+
+- Bump opentelemetry and opentelemetry_sdk version to 0.25
+
+## v0.12.0
+
+### Changed
+
+- Bump opentelemetry and opentelemetry_sdk version to 0.24
+- Bump hyper to version 1
+
 ## v0.10.0
 
 ### Added
@@ -16,7 +29,6 @@
 
 - allow send all traces to `datadog-agent` with `agent-sampling` feature.
 - allow `datadog-agent` generate metrics from spans for [APM](https://docs.datadoghq.com/tracing/metrics/).
-
 
 ## v0.9.0
 

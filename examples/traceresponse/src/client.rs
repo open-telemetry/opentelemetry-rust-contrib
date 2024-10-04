@@ -1,5 +1,6 @@
+use http_body_util::Full;
 use hyper::http::HeaderValue;
-use hyper::{body::Body, Client};
+use hyper_util::{client::legacy::Client, rt::TokioExecutor};
 use opentelemetry::{
     global,
     propagation::TextMapPropagator,
@@ -7,7 +8,7 @@ use opentelemetry::{
     Context, KeyValue,
 };
 use opentelemetry_contrib::trace::propagator::trace_context_response::TraceContextResponsePropagator;
-use opentelemetry_http::{HeaderExtractor, HeaderInjector};
+use opentelemetry_http::{Bytes, HeaderExtractor, HeaderInjector};
 use opentelemetry_sdk::{propagation::TraceContextPropagator, trace::TracerProvider};
 use opentelemetry_stdout::SpanExporter;
 
@@ -27,7 +28,7 @@ fn init_tracer() {
 async fn main() -> std::result::Result<(), Box<dyn std::error::Error + Send + Sync + 'static>> {
     init_tracer();
 
-    let client = Client::new();
+    let client = Client::builder(TokioExecutor::new()).build_http();
     let tracer = global::tracer("example/client");
     let span = tracer
         .span_builder("say hello")
@@ -39,7 +40,9 @@ async fn main() -> std::result::Result<(), Box<dyn std::error::Error + Send + Sy
     global::get_text_map_propagator(|propagator| {
         propagator.inject_context(&cx, &mut HeaderInjector(req.headers_mut().unwrap()))
     });
-    let res = client.request(req.body(Body::from("Hello!"))?).await?;
+    let res = client
+        .request(req.body(Full::new(Bytes::from("Hello!")))?)
+        .await?;
 
     let response_propagator: &dyn TextMapPropagator = &TraceContextResponsePropagator::new();
 

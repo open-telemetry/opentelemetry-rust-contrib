@@ -53,7 +53,7 @@ impl SpanProcessor for ZPagesSpanProcessor {
         Ok(())
     }
 
-    fn shutdown(&mut self) -> TraceResult<()> {
+    fn shutdown(&self) -> TraceResult<()> {
         // do nothing
         Ok(())
     }

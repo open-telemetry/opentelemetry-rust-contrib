@@ -106,9 +106,9 @@ impl UserEventsExporter {
         }
     }
 
-    fn add_attribute_to_event(&self, eb: &mut EventBuilder, attrib: &(Key, AnyValue)) {
-        let field_name = &attrib.0.to_string();
-        match attrib.1.to_owned() {
+    fn add_attribute_to_event(&self, eb: &mut EventBuilder, (key, value): (&Key, &AnyValue)) {
+        let field_name = key.as_str();
+        match value.to_owned() {
             AnyValue::Boolean(b) => {
                 eb.add_value(field_name, b, FieldFormat::Boolean, 0);
             }
@@ -119,7 +119,7 @@ impl UserEventsExporter {
                 eb.add_value(field_name, f, FieldFormat::Float, 0);
             }
             AnyValue::String(s) => {
-                eb.add_str(field_name, &s.to_string(), FieldFormat::Default, 0);
+                eb.add_str(field_name, s.to_string(), FieldFormat::Default, 0);
             }
             _ => (),
         }
@@ -166,16 +166,17 @@ impl UserEventsExporter {
 
     pub(crate) fn export_log_data(
         &self,
-        log_data: &opentelemetry_sdk::export::logs::LogData,
+        log_record: &opentelemetry_sdk::logs::LogRecord,
+        instrumentation: &opentelemetry::InstrumentationLibrary,
     ) -> opentelemetry_sdk::export::logs::ExportResult {
         let mut level: Level = Level::Invalid;
-        if log_data.record.severity_number.is_some() {
-            level = self.get_severity_level(log_data.record.severity_number.unwrap());
+        if log_record.severity_number.is_some() {
+            level = self.get_severity_level(log_record.severity_number.unwrap());
         }
 
         let keyword = self
             .exporter_config
-            .get_log_keyword_or_default(log_data.instrumentation.name.as_ref());
+            .get_log_keyword_or_default(instrumentation.name.as_ref());
 
         if keyword.is_none() {
             return Ok(());
@@ -193,17 +194,16 @@ impl UserEventsExporter {
             EBW.with(|eb| {
                 let mut eb = eb.borrow_mut();
                 let event_tags: u32 = 0; // TBD name and event_tag values
-                eb.reset(log_data.instrumentation.name.as_ref(), event_tags as u16);
+                eb.reset(instrumentation.name.as_ref(), event_tags as u16);
                 eb.opcode(Opcode::Info);
 
                 eb.add_value("__csver__", 0x0401u16, FieldFormat::HexInt, 0);
 
                 // populate CS PartA
                 let mut cs_a_count = 0;
-                let event_time: SystemTime = log_data
-                    .record
+                let event_time: SystemTime = log_record
                     .timestamp
-                    .or(log_data.record.observed_timestamp)
+                    .or(log_record.observed_timestamp)
                     .unwrap_or_else(SystemTime::now);
                 cs_a_count += 1; // for event_time
                 eb.add_struct("PartA", cs_a_count, 0);
@@ -216,35 +216,33 @@ impl UserEventsExporter {
                 //populate CS PartC
                 let (mut is_event_id, mut event_id) = (false, 0);
                 let (mut is_event_name, mut event_name) = (false, "");
+                let (mut is_part_c_present, mut cs_c_bookmark, mut cs_c_count) = (false, 0, 0);
 
-                if let Some(attr_list) = &log_data.record.attributes {
-                    let (mut is_part_c_present, mut cs_c_bookmark, mut cs_c_count) = (false, 0, 0);
-                    for attrib in attr_list.iter() {
-                        match (attrib.0.as_str(), &attrib.1) {
-                            (EVENT_ID, AnyValue::Int(value)) => {
-                                is_event_id = true;
-                                event_id = *value;
-                                continue;
-                            }
-                            (EVENT_NAME_PRIMARY, AnyValue::String(value)) => {
-                                is_event_name = true;
+                for (key, value) in log_record.attributes_iter() {
+                    match (key.as_str(), value) {
+                        (EVENT_ID, AnyValue::Int(value)) => {
+                            is_event_id = true;
+                            event_id = *value;
+                            continue;
+                        }
+                        (EVENT_NAME_PRIMARY, AnyValue::String(value)) => {
+                            is_event_name = true;
+                            event_name = value.as_str();
+                            continue;
+                        }
+                        (EVENT_NAME_SECONDARY, AnyValue::String(value)) => {
+                            if !is_event_name {
                                 event_name = value.as_str();
-                                continue;
                             }
-                            (EVENT_NAME_SECONDARY, AnyValue::String(value)) => {
-                                if !is_event_name {
-                                    event_name = value.as_str();
-                                }
-                                continue;
+                            continue;
+                        }
+                        _ => {
+                            if !is_part_c_present {
+                                eb.add_struct_with_bookmark("PartC", 1, 0, &mut cs_c_bookmark);
+                                is_part_c_present = true;
                             }
-                            _ => {
-                                if !is_part_c_present {
-                                    eb.add_struct_with_bookmark("PartC", 1, 0, &mut cs_c_bookmark);
-                                    is_part_c_present = true;
-                                }
-                                self.add_attribute_to_event(&mut eb, attrib);
-                                cs_c_count += 1;
-                            }
+                            self.add_attribute_to_event(&mut eb, (key, value));
+                            cs_c_count += 1;
                         }
                     }
 
@@ -259,10 +257,10 @@ impl UserEventsExporter {
                 eb.add_str("_typeName", "Logs", FieldFormat::Default, 0);
                 cs_b_count += 1;
 
-                if log_data.record.body.is_some() {
+                if log_record.body.is_some() {
                     eb.add_str(
                         "body",
-                        match log_data.record.body.as_ref().unwrap() {
+                        match log_record.body.as_ref().unwrap() {
                             AnyValue::Int(value) => value.to_string(),
                             AnyValue::String(value) => value.to_string(),
                             AnyValue::Boolean(value) => value.to_string(),
@@ -280,10 +278,10 @@ impl UserEventsExporter {
                     eb.add_value("severityNumber", level.as_int(), FieldFormat::SignedInt, 0);
                     cs_b_count += 1;
                 }
-                if log_data.record.severity_text.is_some() {
+                if log_record.severity_text.is_some() {
                     eb.add_str(
                         "severityText",
-                        log_data.record.severity_text.as_ref().unwrap().as_ref(),
+                        log_record.severity_text.as_ref().unwrap(),
                         FieldFormat::SignedInt,
                         0,
                     );
@@ -317,10 +315,10 @@ impl Debug for UserEventsExporter {
 impl opentelemetry_sdk::export::logs::LogExporter for UserEventsExporter {
     async fn export(
         &mut self,
-        batch: Vec<opentelemetry_sdk::export::logs::LogData>,
+        batch: opentelemetry_sdk::export::logs::LogBatch<'_>,
     ) -> opentelemetry::logs::LogResult<()> {
-        for log_data in batch {
-            let _ = self.export_log_data(&log_data);
+        for (record, instrumentation) in batch.iter() {
+            let _ = self.export_log_data(record, instrumentation);
         }
         Ok(())
     }
