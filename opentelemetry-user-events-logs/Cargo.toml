@@ -15,7 +15,6 @@ eventheader = "0.4.0"
 eventheader_dynamic = "0.4.0"
 opentelemetry = { workspace = true, features = ["logs"] }
 opentelemetry_sdk = { workspace = true, features = ["logs"] }
-async-std = { version="1.6" }
 async-trait = { version="0.1" }
 chrono = { version = "0.4", default-features = false, features = ["std"] }
 

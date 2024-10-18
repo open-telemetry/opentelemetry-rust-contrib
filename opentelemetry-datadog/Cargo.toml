@@ -36,7 +36,6 @@ url = "2.2"
 reqwest = { version = "0.12", default-features = false, optional = true }
 surf = { version = "2.0", default-features = false, optional = true }
 thiserror = "1.0"
-itertools = "0.11"
 http = "1"
 futures-core = "0.3"
 ryu = "1"
