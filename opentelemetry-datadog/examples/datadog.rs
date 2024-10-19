@@ -1,7 +1,7 @@
 use opentelemetry::{
     global::{self, shutdown_tracer_provider},
     trace::{Span, TraceContextExt, Tracer},
-    Key,
+    Key, KeyValue, Value,
 };
 use opentelemetry_datadog::{new_pipeline, ApiVersion};
 use std::thread;
@@ -10,8 +10,14 @@ use std::time::Duration;
 fn bar() {
     let tracer = global::tracer("component-bar");
     let mut span = tracer.start("bar");
-    span.set_attribute(Key::new("span.type").string("sql"));
-    span.set_attribute(Key::new("sql.query").string("SELECT * FROM table"));
+    span.set_attribute(KeyValue::new(
+        Key::new("span.type"),
+        Value::String("sql".into()),
+    ));
+    span.set_attribute(KeyValue::new(
+        Key::new("sql.query"),
+        Value::String("SELECT * FROM table".into()),
+    ));
     thread::sleep(Duration::from_millis(6));
     span.end()
 }
@@ -24,10 +30,19 @@ fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync + 'static>> {
 
     tracer.in_span("foo", |cx| {
         let span = cx.span();
-        span.set_attribute(Key::new("span.type").string("web"));
-        span.set_attribute(Key::new("http.url").string("http://localhost:8080/foo"));
-        span.set_attribute(Key::new("http.method").string("GET"));
-        span.set_attribute(Key::new("http.status_code").i64(200));
+        span.set_attribute(KeyValue::new(
+            Key::new("span.type"),
+            Value::String("web".into()),
+        ));
+        span.set_attribute(KeyValue::new(
+            Key::new("http.url"),
+            Value::String("http://localhost:8080/foo".into()),
+        ));
+        span.set_attribute(KeyValue::new(
+            Key::new("http.method"),
+            Value::String("GET".into()),
+        ));
+        span.set_attribute(KeyValue::new(Key::new("http.status_code"), Value::I64(200)));
 
         thread::sleep(Duration::from_millis(6));
         bar();
