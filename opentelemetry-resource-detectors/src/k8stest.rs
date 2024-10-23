@@ -1,43 +1,58 @@
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::env;
+    use std::time::Duration;
+    use temp_env;
 
     #[test]
     fn test_k8s_resource_detector_with_env_vars() {
-        // Set environment variables for testing
-        env::set_var("K8S_POD_NAME", "test-pod");
-        env::set_var("K8S_NAMESPACE_NAME", "test-namespace");
-        env::set_var("K8S_NODE_NAME", "test-node");
-
-        // Create an instance of K8sResourceDetector
-        let detector = K8sResourceDetector;
-        
-        // Call detect function to get the Resource
-        let resource = detector.detect(Duration::from_secs(0));
-
-        // Verify that the resource contains the expected values
-        assert_eq!(resource.get(&resource::K8S_POD_NAME).unwrap().to_string(), "test-pod");
-        assert_eq!(resource.get(&resource::K8S_NAMESPACE_NAME).unwrap().to_string(), "test-namespace");
-        assert_eq!(resource.get(&resource::K8S_NODE_NAME).unwrap().to_string(), "test-node");
+        // Temporarily set environment variables for the test
+        temp_env::with_vars(
+            [
+                ("K8S_POD_NAME", Some("test-pod")),
+                ("K8S_NAMESPACE_NAME", Some("test-namespace")),
+                ("K8S_NODE_NAME", Some("test-node")),
+            ],
+            || {
+                // Create the K8sResourceDetector
+                let detector = K8sResourceDetector::new();
+                // Use the detector to fetch the resources
+                let resource = detector.detect(Duration::from_secs(5));
+                
+                // Assert that the detected resource attributes match the expected values
+                assert_eq!(
+                    resource,
+                    Resource::new(vec![
+                        KeyValue::new("k8s.pod.name", "test-pod"),
+                        KeyValue::new("k8s.namespace.name", "test-namespace"),
+                        KeyValue::new("k8s.node.name", "test-node"),
+                    ])
+                );
+            },
+        );
     }
 
     #[test]
-    fn test_k8s_resource_detector_without_env_vars() {
-        // Unset environment variables to simulate a missing environment
-        env::remove_var("K8S_POD_NAME");
-        env::remove_var("K8S_NAMESPACE_NAME");
-        env::remove_var("K8S_NODE_NAME");
+    fn test_k8s_resource_detector_with_missing_env_vars() {
+        // Temporarily set only one environment variable to test defaults
+        temp_env::with_vars(
+            [("K8S_POD_NAME", Some("test-pod"))],
+            || {
+                // Create the K8sResourceDetector
+                let detector = K8sResourceDetector::new();
+                // Use the detector to fetch the resources
+                let resource = detector.detect(Duration::from_secs(5));
 
-        // Create an instance of K8sResourceDetector
-        let detector = K8sResourceDetector;
-
-        // Call detect function to get the Resource
-        let resource = detector.detect(Duration::from_secs(0));
-
-        // Verify that the resource uses default "unknown" values
-        assert_eq!(resource.get(&resource::K8S_POD_NAME).unwrap().to_string(), "unknown_pod");
-        assert_eq!(resource.get(&resource::K8S_NAMESPACE_NAME).unwrap().to_string(), "unknown_namespace");
-        assert_eq!(resource.get(&resource::K8S_NODE_NAME).unwrap().to_string(), "unknown_node");
+                // Assert that missing values use the default "unknown" values
+                assert_eq!(
+                    resource,
+                    Resource::new(vec![
+                        KeyValue::new("k8s.pod.name", "test-pod"),
+                        KeyValue::new("k8s.namespace.name", "unknown_namespace"),
+                        KeyValue::new("k8s.node.name", "unknown_node"),
+                    ])
+                );
+            },
+        );
     }
 }
