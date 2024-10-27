@@ -4,8 +4,8 @@ use opentelemetry_proto::tonic::collector::metrics::v1::ExportMetricsServiceRequ
 use opentelemetry_sdk::metrics::{
     data::{ResourceMetrics, Temporality},
     exporter::PushMetricsExporter,
-    reader::{AggregationSelector, DefaultAggregationSelector, TemporalitySelector},
-    Aggregation, InstrumentKind,
+    reader::TemporalitySelector,
+    InstrumentKind,
 };
 
 use crate::tracepoint;
@@ -49,14 +49,6 @@ impl TemporalitySelector for MetricsExporter {
                 Temporality::Cumulative
             }
         }
-    }
-}
-
-impl AggregationSelector for MetricsExporter {
-    // TODO: this should ideally be done at SDK level by default
-    // without exporters having to do it.
-    fn aggregation(&self, kind: InstrumentKind) -> Aggregation {
-        DefaultAggregationSelector::new().aggregation(kind)
     }
 }
 

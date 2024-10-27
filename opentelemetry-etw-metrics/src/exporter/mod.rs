@@ -9,8 +9,8 @@ use opentelemetry_sdk::metrics::{
         ScopeMetrics, Temporality,
     },
     exporter::PushMetricsExporter,
-    reader::{AggregationSelector, DefaultAggregationSelector, TemporalitySelector},
-    Aggregation, InstrumentKind,
+    reader::TemporalitySelector,
+    InstrumentKind,
 };
 use prost::Message;
 
@@ -48,12 +48,6 @@ impl TemporalitySelector for MetricsExporter {
                 Temporality::Cumulative
             }
         }
-    }
-}
-
-impl AggregationSelector for MetricsExporter {
-    fn aggregation(&self, kind: InstrumentKind) -> Aggregation {
-        DefaultAggregationSelector::new().aggregation(kind)
     }
 }
 

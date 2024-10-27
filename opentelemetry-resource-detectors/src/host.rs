@@ -30,13 +30,13 @@ impl ResourceDetector for HostResourceDetector {
                 // Get host.id
                 (self.host_id_detect)().map(|host_id| {
                     KeyValue::new(
-                        opentelemetry_semantic_conventions::resource::HOST_ID,
+                        opentelemetry_semantic_conventions::attribute::HOST_ID,
                         host_id,
                     )
                 }),
                 // Get host.arch
                 Some(KeyValue::new(
-                    opentelemetry_semantic_conventions::resource::HOST_ARCH,
+                    opentelemetry_semantic_conventions::attribute::HOST_ARCH,
                     ARCH,
                 )),
             ]
@@ -99,12 +99,12 @@ mod tests {
         assert_eq!(resource.len(), 2);
         assert!(resource
             .get(Key::from_static_str(
-                opentelemetry_semantic_conventions::resource::HOST_ID
+                opentelemetry_semantic_conventions::attribute::HOST_ID
             ))
             .is_some());
         assert!(resource
             .get(Key::from_static_str(
-                opentelemetry_semantic_conventions::resource::HOST_ARCH
+                opentelemetry_semantic_conventions::attribute::HOST_ARCH
             ))
             .is_some())
     }
@@ -117,12 +117,12 @@ mod tests {
         assert_eq!(resource.len(), 2);
         assert!(resource
             .get(Key::from_static_str(
-                opentelemetry_semantic_conventions::resource::HOST_ID
+                opentelemetry_semantic_conventions::attribute::HOST_ID
             ))
             .is_some());
         assert!(resource
             .get(Key::from_static_str(
-                opentelemetry_semantic_conventions::resource::HOST_ARCH
+                opentelemetry_semantic_conventions::attribute::HOST_ARCH
             ))
             .is_some())
     }
@@ -133,14 +133,14 @@ mod tests {
 
         assert!(resource
             .get(Key::from_static_str(
-                opentelemetry_semantic_conventions::resource::HOST_ARCH
+                opentelemetry_semantic_conventions::attribute::HOST_ARCH
             ))
             .is_some());
 
         #[cfg(target_arch = "x86_64")]
         assert_eq!(
             resource.get(Key::from_static_str(
-                opentelemetry_semantic_conventions::resource::HOST_ARCH
+                opentelemetry_semantic_conventions::attribute::HOST_ARCH
             )),
             Some(Value::from("x86_64"))
         );
@@ -148,7 +148,7 @@ mod tests {
         #[cfg(target_arch = "aarch64")]
         assert_eq!(
             resource.get(Key::from_static_str(
-                opentelemetry_semantic_conventions::resource::HOST_ARCH
+                opentelemetry_semantic_conventions::attribute::HOST_ARCH
             )),
             Some(Value::from("aarch64"))
         )

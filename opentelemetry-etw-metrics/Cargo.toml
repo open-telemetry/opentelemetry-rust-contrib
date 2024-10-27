@@ -1,6 +1,6 @@
 [package]
 name = "opentelemetry-etw-metrics"
-version = "0.4.0"
+version = "0.5.0"
 edition = "2021"
 description = "OpenTelemetry metrics exporter to ETW (Event Tracing for Windows)"
 homepage = "https://github.com/open-telemetry/opentelemetry-rust-contrib/tree/main/opentelemetry-etw-metrics"
@@ -8,12 +8,12 @@ repository = "https://github.com/open-telemetry/opentelemetry-rust-contrib/tree/
 readme = "README.md"
 keywords = ["opentelemetry", "metrics", "etw"]
 license = "Apache-2.0"
-rust-version = "1.65"
+rust-version = "1.71.1"
 
 [dependencies]
-opentelemetry = { version = "0.25", features = ["metrics"] }
-opentelemetry_sdk = { version = "0.25", features = ["metrics", "rt-tokio"] }
-opentelemetry-proto = { version = "0.25", features = ["gen-tonic", "metrics"] }
+opentelemetry = { workspace = true, features = ["metrics"] }
+opentelemetry_sdk = { workspace = true, features = ["metrics", "rt-tokio"] }
+opentelemetry-proto = { workspace = true, features = ["gen-tonic", "metrics"] }
 async-trait = "0.1"
 prost = "0.13"
 tracelogging = "1.2.1"
