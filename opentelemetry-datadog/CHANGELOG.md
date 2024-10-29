@@ -2,6 +2,14 @@
 
 ## vNext
 
+## v0.14.0
+
+### Changed
+
+- Bump opentelemetry and opentelemetry_sdk versions to 0.26
+- Bump opentelemetry-http and opentelemetry-semantic-conventions versions to 0.26
+- Remove unused itertools dependency
+
 ## v0.13.0
 
 ### Changed
