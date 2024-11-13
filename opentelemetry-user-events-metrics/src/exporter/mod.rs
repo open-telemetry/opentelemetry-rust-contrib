@@ -383,8 +383,5 @@ mod tests {
                 [KeyValue::new(large_key.clone(), format!("{index}"))].as_ref(),
             );
         }
-
-        // The output will be verified through logs or the handling of oversized messages in the code.
-        // You may also consider adding assertions for logging or verifying how oversize events are discarded.
     }
 }
