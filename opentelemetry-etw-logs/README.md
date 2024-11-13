@@ -21,12 +21,26 @@ captured by agents running locally and listening for specific ETW events.
 [![Slack](https://img.shields.io/badge/slack-@cncf/otel/rust-brightgreen.svg?logo=slack)](https://cloud-native.slack.com/archives/C03GDP0H023)
 
 ## Viewing ETW Logs
-
 Logs exported to ETW can be viewed using tools like `logman`, `perfview` etc.
-// TODO - add instructions.
 
+#### Instructions using Powershell:
+1. Get the ETW Session Guid for the given provider (on this example `my-provider-name`):<br />
+   ``PS> $EtwSessionGuid = (new-object System.Diagnostics.Tracing.EventSource("my-provider-name")).Guid.ToString()``
+2. Start Logman session:<br />
+   ```PS> logman create trace OtelETWExampleBasic -o OtelETWExampleBasic.log -p "{$EtwSessionGuid}" -f bincirc -max 1000```
+   ```PS> logman start OtelETWExampleBasic```
+3. Stop and Remove `logman` session:<br />
+   ```PS> logman stop OtelETWExampleBasic```<br />
+   ```PS> logman delete OtelETWExampleBasic```<br />
+4. View the events with `perfview`:<br />
+   4.1. [Download PerView](https://github.com/microsoft/perfview/blob/main/documentation/Downloading.md):[PerfView releases](https://github.com/Microsoft/perfview/releases)
+   4.2. Open PerfView.
+   4.3. Go the location of the `.etl` file: `OtelETWExampleBasic.log_000001.etl` and open it.
+   4.4. Double-click `Events` in the left-panel.
+   4.5. Double-click the `my-provider-name/my-event-name` in the left-panel.
+   4.6. You should see the events in the right-panel.
+   
 ## OpenTelemetry Overview
-
 OpenTelemetry is an Observability framework and toolkit designed to create and
 manage telemetry data such as traces, metrics, and logs. OpenTelemetry is
 vendor- and tool-agnostic, meaning that it can be used with a broad variety of
