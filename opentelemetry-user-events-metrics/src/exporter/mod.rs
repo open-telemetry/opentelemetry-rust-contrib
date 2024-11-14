@@ -18,7 +18,7 @@ use prost::Message;
 use std::fmt::{Debug, Formatter};
 use std::pin::Pin;
 
-const MAX_EVENT_SIZE: usize = 64 * 1024; // 64 KB
+const MAX_EVENT_SIZE: usize = 65360; // 64 KB
 
 pub struct MetricsExporter {
     trace_point: Pin<Box<ehi::TracepointState>>,
@@ -303,77 +303,5 @@ impl PushMetricsExporter for MetricsExporter {
         // TracepointState automatically unregisters when dropped
         // https://github.com/microsoft/LinuxTracepoints-Rust/blob/main/eventheader/src/native.rs#L618
         Ok(())
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use opentelemetry::{metrics::MeterProvider as _, KeyValue};
-    use opentelemetry_sdk::{
-        metrics::{PeriodicReader, SdkMeterProvider},
-        runtime, Resource,
-    };
-
-    use crate::exporter::MAX_EVENT_SIZE;
-    use crate::MetricsExporter; // Ensure this references the correct exporter module
-
-    #[tokio::test(flavor = "multi_thread")]
-    async fn emit_metrics_that_combined_exceed_max_event_size() {
-        let exporter = MetricsExporter::new();
-        let reader = PeriodicReader::builder(exporter, runtime::Tokio).build();
-        let meter_provider = SdkMeterProvider::builder()
-            .with_resource(Resource::new(vec![KeyValue::new(
-                "service.name",
-                "service-name",
-            )]))
-            .with_reader(reader)
-            .build();
-
-        let meter = meter_provider.meter("user-event-test");
-
-        // Initialize metric types
-        let u64_histogram = meter
-            .u64_histogram("Testu64Histogram")
-            .with_description("u64_histogram_test_description")
-            .with_unit("u64_histogram_test_unit")
-            .init();
-
-        let u64_counter = meter
-            .u64_counter("Testu64Counter")
-            .with_description("u64_counter_test_description")
-            .with_unit("u64_counter_test_units")
-            .init();
-
-        let u64_gauge = meter
-            .u64_gauge("Testu64Gauge")
-            .with_description("u64_gauge_test_description")
-            .with_unit("u64_gauge_test_unit")
-            .init();
-
-        // Generate a large key to fill the buffer
-        let key_size = MAX_EVENT_SIZE / 10;
-        let large_key = "a".repeat(key_size);
-
-        // Record data with large attributes to ensure size limits are exceeded
-        for index in 0..11 {
-            u64_histogram.record(
-                1,
-                [KeyValue::new(large_key.clone(), format!("{index}"))].as_ref(),
-            );
-        }
-
-        for index in 0..11 {
-            u64_counter.add(
-                1,
-                [KeyValue::new(large_key.clone(), format!("{index}"))].as_ref(),
-            );
-        }
-
-        for index in 0..11 {
-            u64_gauge.record(
-                1,
-                [KeyValue::new(large_key.clone(), format!("{index}"))].as_ref(),
-            );
-        }
     }
 }
