@@ -18,7 +18,7 @@ use prost::Message;
 use std::fmt::{Debug, Formatter};
 use std::pin::Pin;
 
-const MAX_EVENT_SIZE: usize = 65360; // 64 KB
+const MAX_EVENT_SIZE: usize = 65360;
 
 pub struct MetricsExporter {
     trace_point: Pin<Box<ehi::TracepointState>>,
