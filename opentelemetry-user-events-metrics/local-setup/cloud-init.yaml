@@ -1,0 +1,72 @@
+# cloud-init.yaml
+#cloud-config
+package_update: true
+packages:
+  - git
+  - wget
+  - build-essential
+  - cmake
+  - flex
+  - bison
+  - linux-tools-generic
+  - python3.12-venv
+
+runcmd:
+  - echo "Hello, Multipass!" > /home/ubuntu/hello.txt
+  - sudo apt-get update
+  - sudo apt-get install -y git wget build-essential cmake flex bison linux-tools-generic python3.12-venv
+  - sudo -u ubuntu bash -c "
+      cd /home/ubuntu &&
+      curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y &&
+      source /home/ubuntu/.cargo/env &&
+      git clone https://github.com/microsoft/LinuxTracepoints &&
+      cd LinuxTracepoints && mkdir build && cd build && cmake .. && make &&
+      sudo cp bin/perf-decode /usr/local/bin &&
+      cd /home/ubuntu && rm -rf LinuxTracepoints &&
+      git clone https://github.com/open-telemetry/opentelemetry-rust-contrib.git /home/ubuntu/opentelemetry-rust-contrib &&
+      python3 -m venv /home/ubuntu/userevents-env &&
+      source /home/ubuntu/userevents-env/bin/activate &&
+      pip install opentelemetry-proto
+    "
+  - |
+    cat << 'EOF' > /home/ubuntu/decrypt_python.py
+    import sys
+    import json
+    from opentelemetry.proto.collector.metrics.v1.metrics_service_pb2 import ExportMetricsServiceRequest
+
+    # Check if a filename is provided
+    if len(sys.argv) < 2:
+        print("Usage: python decrypt_metric.py <filename>")
+        sys.exit(1)
+
+    try:
+        # Read the JSON file
+        with open(sys.argv[1], 'r', encoding='utf-8-sig') as file:
+            data = json.load(file)
+
+            # Traverse through each item in the JSON data
+            for key in data:
+                for item in data[key]:
+                    result = ExportMetricsServiceRequest()
+                    # Convert the buffer list to bytes and parse it
+                    buffer_data = bytes(item['buffer'])
+                    result.ParseFromString(buffer_data)
+                    print(result)
+
+    except json.JSONDecodeError as e:
+        print(f"JSON decoding error: {e}")
+        print("Please ensure the JSON file is properly formatted.")
+    except Exception as e:
+        print(f"An error occurred: {e}")
+    EOF
+
+users:
+  - name: ubuntu
+    sudo: ["ALL=(ALL) NOPASSWD:ALL"]
+    groups: sudo
+    home: /home/ubuntu
+    shell: /bin/bash
+    lock_passwd: false  # Ensure the password is not locked
+    plain_text_passwd: "ubuntu"  # Set a password for user 'ubuntu' (you can set this to any preferred password)
+
+ssh_pwauth: true  # Enable password authentication for SSH
