@@ -25,14 +25,14 @@ This directory contains `cloud-init.yaml`, a configuration file to set up an Ubu
     Launched: my-test-vm
     ```
 
-    This will some time to create and configure the VM. Validate that the VM is created and running:
+    This will take some time to create and configure the VM. Validate that the VM is created and running:
     ```bash
     PS> multipass list
     Name                    State             IPv4             Image
     my-test-vm              Running           172.27.162.116   Ubuntu 24.04 LTS    
     ```
 
-2. **Login into the VM:** You should get the ubuntu bash shell. 
+2. **Login into the VM:** You should get the ubuntu bash shell after login:
     ```bash
     PS> multipass shell my-test-vm
     ..
@@ -45,12 +45,12 @@ This directory contains `cloud-init.yaml`, a configuration file to set up an Ubu
     CONFIG_USER_EVENTS=y
     ```
 
-3. **Run perf tool:** Start running the perf tool to capture the user-events:
+3. **Run perf tool:** Invoke the perf tool to capture the user-events. Keep it running:
     ```bash
     ubuntu@my-test-vm:~$ sudo perf  record -e user_events:otlp_metrics
     ```
 
-3. **Run user_events example** Open another shell, and build and run the opentelemetry-user-events-metrics exporter example:
+4. **Run user_events example** Open another shell, and build and run the opentelemetry-user-events-metrics exporter example:
     ```bash
     PS> multipass shell my-test-vm
     ubuntu@my-test-vm:~$ cd opentelemetry-rust-contrib/opentelemetry-user-events-metrics/ && cargo build --example basic-metrics --all-features
@@ -58,27 +58,27 @@ This directory contains `cloud-init.yaml`, a configuration file to set up an Ubu
     Tracepoint registered successfully.
     ```
 
-4. Terminate perf capture (Ctrl+C). It should show something like
+5. Terminate perf capture (Ctrl+C) after some time. It should show something like
     ```bash
     [ perf record: Woken up 1 times to write data ]
     [ perf record: Captured and wrote 0.175 MB perf.data (5 samples) ]
     ```
-5. Convert perf data to json:
+6. Convert perf data to json:
     ```bash
     ubuntu@my-test-vm:~$ sudo chmod uog+r ./perf.data
     ubuntu@my-test-vm:~$ perf-decode ./perf.data > perf.json
     ```
-6. Ensure that `perf.json` contains something like:
+7. Ensure that `perf.json` contains something like:
     ```bash
     "./perf.data": [ { "n": "user_events:otlp_metrics", "protocol": 0, "version": "v0.19.00", "buffer": [ ... ], "meta": { "time": 816.790831600, "cpu": 0, "pid": 4957, "tid": 4958 } } ]
     ```
-7. Convert perf json to OpenTelemetry format:
+8. Convert perf json to OpenTelemetry format:
     ```bash
     ubuntu@my-test-vm:~$ source userevents-env/bin/activate
     (userevents-env) ubuntu@my-test-vm:~$ python3 decrypt_python.py perf.json
     ```
 
-6. The output will look something like this:
+9. The output will look something like this:
 <details>
 <summary>Click to expand output</summary>
 
@@ -253,4 +253,15 @@ resource_metrics {
     }
   }
 }
+```
+
+10. **Cleanup the VM:** Once tests are done, if required the VM can be stopped and/or deleted with below steps:
+```bash
+PS> multipass stop my-test-vm
+```
+
+And to delete:
+```bash
+PS> multipass delete my-test-vm
+PS> multipass purge
 ```
