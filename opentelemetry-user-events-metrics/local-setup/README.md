@@ -5,7 +5,7 @@ This directory contains `cloud-init.yaml`, a configuration file to set up an Ubu
 ## Prerequisites
 
 1. **Virtualization Support**: Ensure that your machine supports virtualization. Virtualization options vary by operating system:
-   - **Windows**: Requires Hyper-V, available on Windows 10 and above.
+   - **Windows**: Requires Hyper-V, available on Windows 10 Pro or Enterprise and above.
    - **macOS**: Requires Apple Silicon (M1, M2) or Intel hardware with virtualization enabled in BIOS.
    - **Linux**: Ensure KVM or VirtualBox is available and enabled in your distribution. Run `lsmod | grep kvm` to verify if KVM is installed.
 
