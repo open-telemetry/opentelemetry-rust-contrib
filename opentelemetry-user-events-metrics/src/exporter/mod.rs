@@ -12,8 +12,6 @@ use opentelemetry_sdk::metrics::{
     InstrumentKind,
 };
 
-use opentelemetry::global::otel_debug;
-
 use crate::tracepoint;
 use eventheader::_internal as ehi;
 use prost::Message;
@@ -68,8 +66,6 @@ impl Debug for MetricsExporter {
 
 impl MetricsExporter {
     async fn serialize_and_write(&self, resource_metric: &ResourceMetrics) -> Result<()> {
-        otel_debug!(name: "MetricsExporter.Serialize", size = resource_metric.scope_metrics.len());
-
         // Allocate a local buffer for each write operation
         // TODO: Investigate if this can be optimized to avoid reallocation or
         // allocate a fixed buffer size for all writes
@@ -88,7 +84,6 @@ impl MetricsExporter {
             let error = Err(MetricsError::Other(
                 "Event size exceeds maximum allowed limit".into(),
             ));
-            otel_warn!(name: "MetricsExporter.EventFailed", error = format!("{:?}", error), size = byte_array.len());
             return Err(MetricsError::Other(
                 "Event size exceeds maximum allowed limit".into(),
             ));
