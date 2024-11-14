@@ -79,8 +79,6 @@ This directory contains `cloud-init.yaml`, a configuration file to set up an Ubu
     ```
 
 9. The output will look something like this:
-<details>
-<summary>Click to expand output</summary>
 
 ```plaintext
 resource_metrics {
@@ -148,109 +146,7 @@ resource_metrics {
         is_monotonic: true
       }
     }
-    metrics {
-      name: "up_down_counter_i64_test"
-      sum {
-        data_points {
-          start_time_unix_nano: 1731569594054471309
-          time_unix_nano: 1731569834056844774
-          as_int: 2400
-          attributes {
-            key: "mykey1"
-            value {
-              string_value: "myvalue1"
-            }
-          }
-          attributes {
-            key: "mykey2"
-            value {
-              string_value: "myvalue2"
-            }
-          }
-        }
-        aggregation_temporality: AGGREGATION_TEMPORALITY_CUMULATIVE
-      }
-    }
-    metrics {
-      name: "up_down_counter_f64_test"
-      sum {
-        data_points {
-          start_time_unix_nano: 1731569594054479809
-          time_unix_nano: 1731569834056854074
-          as_double: 2400
-          attributes {
-            key: "mykey1"
-            value {
-              string_value: "myvalue1"
-            }
-          }
-          attributes {
-            key: "mykey2"
-            value {
-              string_value: "myvalue2"
-            }
-          }
-        }
-        aggregation_temporality: AGGREGATION_TEMPORALITY_CUMULATIVE
-      }
-    }
-    metrics {
-      name: "histogram_f64_test"
-      description: "test_description"
-      histogram {
-        data_points {
-          start_time_unix_nano: 1731569774055377418
-          time_unix_nano: 1731569834056858674
-          count: 60
-          sum: 630
-          bucket_counts: 0
-          bucket_counts: 0
-          bucket_counts: 0
-          bucket_counts: 60
-          bucket_counts: 0
-          bucket_counts: 0
-          bucket_counts: 0
-          bucket_counts: 0
-          bucket_counts: 0
-          bucket_counts: 0
-          bucket_counts: 0
-          bucket_counts: 0
-          bucket_counts: 0
-          bucket_counts: 0
-          bucket_counts: 0
-          explicit_bounds: 0
-          explicit_bounds: 5
-          explicit_bounds: 10
-          explicit_bounds: 25
-          explicit_bounds: 50
-          explicit_bounds: 75
-          explicit_bounds: 100
-          explicit_bounds: 250
-          explicit_bounds: 500
-          explicit_bounds: 750
-          explicit_bounds: 1000
-          explicit_bounds: 2500
-          explicit_bounds: 5000
-          explicit_bounds: 7500
-          explicit_bounds: 10000
-          attributes {
-            key: "mykey1"
-            value {
-              string_value: "myvalue1"
-            }
-          }
-          attributes {
-            key: "mykey2"
-            value {
-              string_value: "myvalue2"
-            }
-          }
-          min: 10.5
-          max: 10.5
-        }
-        aggregation_temporality: AGGREGATION_TEMPORALITY_DELTA
-      }
-    }
+    ...
   }
 }
 ```
