@@ -2,6 +2,10 @@
 
 ## vNext
 
+### Changed
+
+- Add support for skipping the metric data point if the size exceeds 65360 bytes.
+
 ## v0.7.0
 
 ### Changed
