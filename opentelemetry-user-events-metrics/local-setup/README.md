@@ -1,4 +1,4 @@
-# Local Setup for testing with user_events using multipass:
+# Local Setup for Testing `user_events` with *Multipass*:
 
 This directory contains `cloud-init.yaml`, a configuration file to set up an Ubuntu 24.04 virtual machine environment with essential tools required for running and validating user_events example contained in this repository. The setup includes enabling `user_events` and installing the `perf` tool, along with utilities for decoding `user_events` data and processing `proto` data.
 
@@ -13,7 +13,7 @@ This directory contains `cloud-init.yaml`, a configuration file to set up an Ubu
 
    After installation, verify by running:
    ```bash
-   multipass --version
+   PS> multipass --version
    ```
 
 ## Usage
@@ -21,16 +21,11 @@ This directory contains `cloud-init.yaml`, a configuration file to set up an Ubu
 1. **Launch a VM with cloud-init.yaml:** 
     Use the following command to start a VM with the specified configuration:
     ```bash
-    PS> multipass launch --name my-test-vm --cloud-init cloud-init.yaml
+    PS> multipass launch --name my-test-vm -m 6G -d 10G --cloud-init cloud-init.yaml
     Launched: my-test-vm
     ```
 
-    You can also specify the memory and disk size while creating the VM:
-    ```bash
-    PS> multipass launch --name my-test-vm -m 10G -d 40G --cloud-init cloud-init.yaml
-    ```
-
-    This will same time to create and configure the VM. Validate that the VM is created and running:
+    This will some time to create and configure the VM. Validate that the VM is created and running:
     ```bash
     PS> multipass list
     Name                    State             IPv4             Image
