@@ -96,7 +96,7 @@ impl MetricsExporter {
 impl PushMetricsExporter for MetricsExporter {
     async fn export(&self, metrics: &mut ResourceMetrics) -> Result<()> {
         if self.trace_point.enabled() {
-            let mut resource_metrics_list = Vec::new();
+            let mut errors = Vec::new();
 
             for scope_metric in &metrics.scope_metrics {
                 for metric in &scope_metric.metrics {
@@ -119,7 +119,9 @@ impl PushMetricsExporter for MetricsExporter {
                                     }],
                                 }],
                             };
-                            resource_metrics_list.push(resource_metric);
+                            if let Err(e) = self.serialize_and_write(&resource_metric) {
+                                errors.push(e);
+                            }
                         }
                     } else if let Some(histogram) = data.downcast_ref::<data::Histogram<f64>>() {
                         for data_point in &histogram.data_points {
@@ -138,7 +140,9 @@ impl PushMetricsExporter for MetricsExporter {
                                     }],
                                 }],
                             };
-                            resource_metrics_list.push(resource_metric);
+                            if let Err(e) = self.serialize_and_write(&resource_metric) {
+                                errors.push(e);
+                            }
                         }
                     } else if let Some(gauge) = data.downcast_ref::<data::Gauge<u64>>() {
                         for data_point in &gauge.data_points {
@@ -156,7 +160,9 @@ impl PushMetricsExporter for MetricsExporter {
                                     }],
                                 }],
                             };
-                            resource_metrics_list.push(resource_metric);
+                            if let Err(e) = self.serialize_and_write(&resource_metric) {
+                                errors.push(e);
+                            }
                         }
                     } else if let Some(gauge) = data.downcast_ref::<data::Gauge<i64>>() {
                         for data_point in &gauge.data_points {
@@ -174,7 +180,9 @@ impl PushMetricsExporter for MetricsExporter {
                                     }],
                                 }],
                             };
-                            resource_metrics_list.push(resource_metric);
+                            if let Err(e) = self.serialize_and_write(&resource_metric) {
+                                errors.push(e);
+                            }
                         }
                     } else if let Some(gauge) = data.downcast_ref::<data::Gauge<f64>>() {
                         for data_point in &gauge.data_points {
@@ -192,7 +200,9 @@ impl PushMetricsExporter for MetricsExporter {
                                     }],
                                 }],
                             };
-                            resource_metrics_list.push(resource_metric);
+                            if let Err(e) = self.serialize_and_write(&resource_metric) {
+                                errors.push(e);
+                            }
                         }
                     } else if let Some(sum) = data.downcast_ref::<data::Sum<u64>>() {
                         for data_point in &sum.data_points {
@@ -212,7 +222,9 @@ impl PushMetricsExporter for MetricsExporter {
                                     }],
                                 }],
                             };
-                            resource_metrics_list.push(resource_metric);
+                            if let Err(e) = self.serialize_and_write(&resource_metric) {
+                                errors.push(e);
+                            }
                         }
                     } else if let Some(sum) = data.downcast_ref::<data::Sum<i64>>() {
                         for data_point in &sum.data_points {
@@ -232,7 +244,9 @@ impl PushMetricsExporter for MetricsExporter {
                                     }],
                                 }],
                             };
-                            resource_metrics_list.push(resource_metric);
+                            if let Err(e) = self.serialize_and_write(&resource_metric) {
+                                errors.push(e);
+                            }
                         }
                     } else if let Some(sum) = data.downcast_ref::<data::Sum<f64>>() {
                         for data_point in &sum.data_points {
@@ -252,7 +266,9 @@ impl PushMetricsExporter for MetricsExporter {
                                     }],
                                 }],
                             };
-                            resource_metrics_list.push(resource_metric);
+                            if let Err(e) = self.serialize_and_write(&resource_metric) {
+                                errors.push(e);
+                            }
                         }
                     } else if let Some(exp_hist) =
                         data.downcast_ref::<data::ExponentialHistogram<u64>>()
@@ -299,7 +315,9 @@ impl PushMetricsExporter for MetricsExporter {
                                     }],
                                 }],
                             };
-                            resource_metrics_list.push(resource_metric);
+                            if let Err(e) = self.serialize_and_write(&resource_metric) {
+                                errors.push(e);
+                            }
                         }
                     } else if let Some(exp_hist) =
                         data.downcast_ref::<data::ExponentialHistogram<f64>>()
@@ -346,15 +364,20 @@ impl PushMetricsExporter for MetricsExporter {
                                     }],
                                 }],
                             };
-                            resource_metrics_list.push(resource_metric);
+                            if let Err(e) = self.serialize_and_write(&resource_metric) {
+                                errors.push(e);
+                            }
                         }
                     }
                 }
             }
 
-            // Asynchronously serialize and write each ResourceMetrics to tracepoint
-            for resource_metric in resource_metrics_list {
-                self.serialize_and_write(&resource_metric)?;
+            // Return any errors if present
+            if !errors.is_empty() {
+                return Err(MetricsError::Other(format!(
+                    "Encountered {} errors during export",
+                    errors.len()
+                )));
             }
         }
         Ok(())
