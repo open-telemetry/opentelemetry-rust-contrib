@@ -65,7 +65,7 @@ impl Debug for MetricsExporter {
 }
 
 impl MetricsExporter {
-    async fn serialize_and_write(&self, resource_metric: &ResourceMetrics) -> Result<()> {
+    fn serialize_and_write(&self, resource_metric: &ResourceMetrics) -> Result<()> {
         // Allocate a local buffer for each write operation
         // TODO: Investigate if this can be optimized to avoid reallocation or
         // allocate a fixed buffer size for all writes
@@ -159,6 +159,24 @@ impl PushMetricsExporter for MetricsExporter {
                             resource_metrics_list.push(resource_metric);
                         }
                     } else if let Some(gauge) = data.downcast_ref::<data::Gauge<i64>>() {
+                        for data_point in &gauge.data_points {
+                            let resource_metric = ResourceMetrics {
+                                resource: metrics.resource.clone(),
+                                scope_metrics: vec![ScopeMetrics {
+                                    scope: scope_metric.scope.clone(),
+                                    metrics: vec![Metric {
+                                        name: metric.name.clone(),
+                                        description: metric.description.clone(),
+                                        unit: metric.unit.clone(),
+                                        data: Box::new(data::Gauge {
+                                            data_points: vec![data_point.clone()],
+                                        }),
+                                    }],
+                                }],
+                            };
+                            resource_metrics_list.push(resource_metric);
+                        }
+                    } else if let Some(gauge) = data.downcast_ref::<data::Gauge<f64>>() {
                         for data_point in &gauge.data_points {
                             let resource_metric = ResourceMetrics {
                                 resource: metrics.resource.clone(),
@@ -283,13 +301,60 @@ impl PushMetricsExporter for MetricsExporter {
                             };
                             resource_metrics_list.push(resource_metric);
                         }
+                    } else if let Some(exp_hist) =
+                        data.downcast_ref::<data::ExponentialHistogram<f64>>()
+                    {
+                        for data_point in &exp_hist.data_points {
+                            let resource_metric = ResourceMetrics {
+                                resource: metrics.resource.clone(),
+                                scope_metrics: vec![ScopeMetrics {
+                                    scope: scope_metric.scope.clone(),
+                                    metrics: vec![Metric {
+                                        name: metric.name.clone(),
+                                        description: metric.description.clone(),
+                                        unit: metric.unit.clone(),
+                                        data: Box::new(data::ExponentialHistogram {
+                                            temporality: exp_hist.temporality,
+                                            data_points: vec![ExponentialHistogramDataPoint {
+                                                attributes: data_point.attributes.clone(),
+                                                count: data_point.count,
+                                                start_time: data_point.start_time,
+                                                time: data_point.time,
+                                                min: data_point.min,
+                                                max: data_point.max,
+                                                sum: data_point.sum,
+                                                scale: data_point.scale,
+                                                zero_count: data_point.zero_count,
+                                                zero_threshold: data_point.zero_threshold,
+                                                positive_bucket: ExponentialBucket {
+                                                    offset: data_point.positive_bucket.offset,
+                                                    counts: data_point
+                                                        .positive_bucket
+                                                        .counts
+                                                        .clone(),
+                                                },
+                                                negative_bucket: ExponentialBucket {
+                                                    offset: data_point.negative_bucket.offset,
+                                                    counts: data_point
+                                                        .negative_bucket
+                                                        .counts
+                                                        .clone(),
+                                                },
+                                                exemplars: data_point.exemplars.clone(),
+                                            }],
+                                        }),
+                                    }],
+                                }],
+                            };
+                            resource_metrics_list.push(resource_metric);
+                        }
                     }
                 }
             }
 
             // Asynchronously serialize and write each ResourceMetrics to tracepoint
             for resource_metric in resource_metrics_list {
-                self.serialize_and_write(&resource_metric).await?;
+                self.serialize_and_write(&resource_metric)?;
             }
         }
         Ok(())
