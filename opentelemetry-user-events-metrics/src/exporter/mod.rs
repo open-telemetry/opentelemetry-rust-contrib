@@ -81,9 +81,6 @@ impl MetricsExporter {
 
         // Check if the encoded message exceeds the 64 KB limit
         if byte_array.len() > MAX_EVENT_SIZE {
-            let error = Err(MetricsError::Other(
-                "Event size exceeds maximum allowed limit".into(),
-            ));
             return Err(MetricsError::Other(
                 "Event size exceeds maximum allowed limit".into(),
             ));
