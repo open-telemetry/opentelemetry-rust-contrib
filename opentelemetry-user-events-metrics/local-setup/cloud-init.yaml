@@ -12,7 +12,6 @@ packages:
   - python3.12-venv
 
 runcmd:
-  - echo "Hello, Multipass!" > /home/ubuntu/hello.txt
   - sudo apt-get update
   - sudo apt-get install -y git wget build-essential cmake flex bison linux-tools-generic python3.12-venv
   - sudo -u ubuntu bash -c "
