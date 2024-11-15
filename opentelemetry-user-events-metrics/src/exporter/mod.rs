@@ -53,7 +53,7 @@ impl MetricsExporter {
         &self,
         resource_metric: &ResourceMetrics,
         metric_name: &str,
-        data_type: &str,
+        metric_type: &str,
     ) -> MetricResult<()> {
         // Allocate a local buffer for each write operation
         // TODO: Investigate if this can be optimized to avoid reallocation or
@@ -64,21 +64,21 @@ impl MetricsExporter {
         let proto_message: ExportMetricsServiceRequest = resource_metric.into();
         otel_debug!(name: "SerializeStart", 
             metric_name = metric_name,
-            data_type = data_type);
+            metric_type = metric_type);
 
         // Encode directly into the buffer
         match proto_message.encode(&mut byte_array) {
             Ok(_) => {
                 otel_debug!(name: "SerializeSuccess", 
                     metric_name = metric_name,
-                    data_type = data_type,
+                    metric_type = metric_type,
                     size = byte_array.len());
             }
             Err(err) => {
                 otel_debug!(name: "SerializeFailed",
                     error = err.to_string(),
                     metric_name = metric_name,
-                    data_type = data_type,
+                    metric_type = metric_type,
                     size = byte_array.len());
                 return Err(MetricError::Other(err.to_string()));
             }
@@ -90,7 +90,7 @@ impl MetricsExporter {
                 name: "MaxEventSizeExceeded",
                 reason = format!("Encoded event size exceeds maximum allowed limit of {} bytes. Event will be dropped.", MAX_EVENT_SIZE),
                 metric_name = metric_name,
-                data_type = data_type,
+                metric_type = metric_type,
                 size = byte_array.len()
             );
             return Err(MetricError::Other(
@@ -101,7 +101,7 @@ impl MetricsExporter {
         // Write to the tracepoint
         let result = tracepoint::write(&self.trace_point, &byte_array);
         if result > 0 {
-            otel_debug!(name: "TracepointWrite", message = "Encoded data successfully written to tracepoint", size = byte_array.len(), metric_name = metric_name, agg_type = data_type);
+            otel_debug!(name: "TracepointWrite", message = "Encoded data successfully written to tracepoint", size = byte_array.len(), metric_name = metric_name, metric_type = metric_type);
         }
 
         Ok(())
