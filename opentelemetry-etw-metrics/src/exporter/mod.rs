@@ -350,49 +350,49 @@ mod tests {
             .u64_histogram("Testu64Histogram")
             .with_description("u64_histogram_test_description")
             .with_unit("u64_histogram_test_unit")
-            .init();
+            .build();
 
         let f64_histogram = meter
             .f64_histogram("TestHistogram")
             .with_description("f64_histogram_test_description")
             .with_unit("f64_histogram_test_unit")
-            .init();
+            .build();
 
         let u64_counter = meter
             .u64_counter("Testu64Counter")
             .with_description("u64_counter_test_description")
             .with_unit("u64_counter_test_units")
-            .init();
+            .build();
 
         let f64_counter = meter
             .f64_counter("Testf64Counter")
             .with_description("f64_counter_test_description")
             .with_unit("f64_counter_test_units")
-            .init();
+            .build();
 
         let i64_counter = meter
             .i64_up_down_counter("Testi64Counter")
             .with_description("i64_counter_test_description")
             .with_unit("i64_counter_test_units")
-            .init();
+            .build();
 
         let u64_gauge = meter
             .u64_gauge("Testu64Gauge")
             .with_description("u64_gauge_test_description")
             .with_unit("u64_gauge_test_unit")
-            .init();
+            .build();
 
         let i64_gauge = meter
             .i64_gauge("Testi64Gauge")
             .with_description("i64_gauge_test_description")
             .with_unit("i64_gauge_test_unit")
-            .init();
+            .build();
 
         let f64_gauge = meter
             .f64_gauge("Testf64Gauge")
             .with_description("f64_gauge_test_description")
             .with_unit("f64_gauge_test_unit")
-            .init();
+            .build();
 
         // Create a key that is 1/10th the size of the MAX_EVENT_SIZE
         let key_size = etw::MAX_EVENT_SIZE / 10;
