@@ -2,6 +2,11 @@
 
 ## vNext
 
+- Bump opentelemetry and opentelemetry_sdk versions to 0.27
+- Bump opentelemetry-proto version to 0.27
+- Uses internal logging from `opentelemetry` crate, which routes internal logs
+  via `tracing`.
+
 ## v0.5.0
 
 ### Changed
