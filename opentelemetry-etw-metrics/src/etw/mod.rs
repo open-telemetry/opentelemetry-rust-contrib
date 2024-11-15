@@ -1,4 +1,4 @@
-use opentelemetry::{global, metrics::MetricsError};
+use opentelemetry::otel_warn;
 
 use tracelogging as tlg;
 
@@ -27,10 +27,7 @@ pub fn register() {
     ETW_PROVIDER_REGISTRANT.call_once(|| {
         let result = unsafe { PROVIDER.register() };
         if result != 0 {
-            global::handle_error(MetricsError::Other(format!(
-                "Failed to register ETW provider with error code: {}",
-                result
-            )));
+            otel_warn!(name: "MetricExporter.EtwRegisterFailed", error_code = result);
         }
     });
 }
@@ -51,10 +48,7 @@ pub fn unregister() {
     if ETW_PROVIDER_REGISTRANT.is_completed() {
         let result = PROVIDER.unregister();
         if result != 0 {
-            global::handle_error(MetricsError::Other(format!(
-                "Failed to unregister ETW provider with error code: {}",
-                result
-            )));
+            otel_warn!(name: "MetricExporter.EtwUnRegisterFailed", error_code = result);
         }
     }
 }
