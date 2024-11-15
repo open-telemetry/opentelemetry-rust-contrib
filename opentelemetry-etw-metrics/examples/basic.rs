@@ -30,7 +30,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .f64_counter("MyFruitCounter")
         .with_description("test_description")
         .with_unit("test_unit")
-        .init();
+        .build();
 
     c.add(
         1.0,

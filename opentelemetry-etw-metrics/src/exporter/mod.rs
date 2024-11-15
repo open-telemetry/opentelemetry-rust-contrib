@@ -1,16 +1,13 @@
-use opentelemetry::{
-    global,
-    metrics::{MetricsError, Result},
-};
+use opentelemetry::otel_warn;
+
 use opentelemetry_proto::tonic::collector::metrics::v1::ExportMetricsServiceRequest;
 use opentelemetry_sdk::metrics::{
     data::{
         self, ExponentialBucket, ExponentialHistogramDataPoint, Metric, ResourceMetrics,
-        ScopeMetrics, Temporality,
+        ScopeMetrics,
     },
-    exporter::PushMetricsExporter,
-    reader::TemporalitySelector,
-    InstrumentKind,
+    exporter::PushMetricExporter,
+    MetricError, MetricResult, Temporality,
 };
 use prost::Message;
 
@@ -36,21 +33,6 @@ impl Default for MetricsExporter {
     }
 }
 
-impl TemporalitySelector for MetricsExporter {
-    fn temporality(&self, kind: InstrumentKind) -> Temporality {
-        match kind {
-            InstrumentKind::Counter
-            | InstrumentKind::ObservableCounter
-            | InstrumentKind::ObservableGauge
-            | InstrumentKind::Histogram
-            | InstrumentKind::Gauge => Temporality::Delta,
-            InstrumentKind::UpDownCounter | InstrumentKind::ObservableUpDownCounter => {
-                Temporality::Cumulative
-            }
-        }
-    }
-}
-
 impl Debug for MetricsExporter {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         f.write_str("ETW metrics exporter")
@@ -58,8 +40,8 @@ impl Debug for MetricsExporter {
 }
 
 #[async_trait]
-impl PushMetricsExporter for MetricsExporter {
-    async fn export(&self, metrics: &mut ResourceMetrics) -> Result<()> {
+impl PushMetricExporter for MetricsExporter {
+    async fn export(&self, metrics: &mut ResourceMetrics) -> MetricResult<()> {
         for scope_metric in &metrics.scope_metrics {
             for metric in &scope_metric.metrics {
                 let mut resource_metrics = Vec::new();
@@ -296,10 +278,7 @@ impl PushMetricsExporter for MetricsExporter {
                         resource_metrics.push(resource_metric);
                     }
                 } else {
-                    global::handle_error(MetricsError::Other(format!(
-                        "Unsupported aggregation type: {:?}",
-                        data
-                    )));
+                    otel_warn!(name: "MetricExportFailedDueToUnsupportedMetricType", metric_type = format!("{:?}", data));
                 }
 
                 for resource_metric in resource_metrics {
@@ -307,14 +286,10 @@ impl PushMetricsExporter for MetricsExporter {
                     let proto_message: ExportMetricsServiceRequest = (&resource_metric).into();
                     proto_message
                         .encode(&mut byte_array)
-                        .map_err(|err| MetricsError::Other(err.to_string()))?;
+                        .map_err(|err| MetricError::Other(err.to_string()))?;
 
                     if (byte_array.len()) > etw::MAX_EVENT_SIZE {
-                        global::handle_error(MetricsError::Other(format!(
-                        "Exporting failed due to event size {} exceeding the maximum size of {} bytes",
-                        byte_array.len(),
-                        etw::MAX_EVENT_SIZE
-                    )));
+                        otel_warn!(name: "MetricExportFailedDueToMaxSizeLimit", size = byte_array.len(), max_size = etw::MAX_EVENT_SIZE);
                     } else {
                         let result = etw::write(&byte_array);
                         // TODO: Better logging/internal metrics needed here for non-failure
@@ -322,10 +297,7 @@ impl PushMetricsExporter for MetricsExporter {
                         // better logging solution is implemented
                         // println!("Exported {} bytes to ETW", byte_array.len());
                         if result != 0 {
-                            global::handle_error(MetricsError::Other(format!(
-                                "Failed to write ETW event with error code: {}",
-                                result
-                            )));
+                            otel_warn!(name: "MetricExportFailed", error_code = result);
                         }
                     }
                 }
@@ -335,14 +307,18 @@ impl PushMetricsExporter for MetricsExporter {
         Ok(())
     }
 
-    async fn force_flush(&self) -> Result<()> {
+    async fn force_flush(&self) -> MetricResult<()> {
         Ok(())
     }
 
-    fn shutdown(&self) -> Result<()> {
+    fn shutdown(&self) -> MetricResult<()> {
         etw::unregister();
 
         Ok(())
+    }
+
+    fn temporality(&self) -> Temporality {
+        Temporality::Delta
     }
 }
 
