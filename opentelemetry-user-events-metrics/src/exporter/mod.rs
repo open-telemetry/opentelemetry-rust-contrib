@@ -101,7 +101,7 @@ impl MetricsExporter {
         // Write to the tracepoint
         let result = tracepoint::write(&self.trace_point, &byte_array);
         if result > 0 {
-            otel_debug!(name: "TracepointWrite", message = "Writing encoded data to tracepoint", size = byte_array.len(), metric_name = metric_name, agg_type = data_type);
+            otel_debug!(name: "TracepointWrite", message = "Encoded data successfully written to tracepoint", size = byte_array.len(), metric_name = metric_name, agg_type = data_type);
         }
 
         Ok(())
