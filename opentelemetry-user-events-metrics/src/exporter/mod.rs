@@ -67,7 +67,6 @@ impl MetricsExporter {
             data_type = data_type);
 
         // Encode directly into the buffer
-        // Encode directly into the buffer
         match proto_message.encode(&mut byte_array) {
             Ok(_) => {
                 otel_debug!(name: "SerializeSuccess", 
