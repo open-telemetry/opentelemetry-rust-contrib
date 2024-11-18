@@ -4,7 +4,7 @@
 // When this PR is merged we should be able to remove this attribute:
 // https://github.com/danburkert/prost/pull/291
 #![allow(
-    clippy::doc_lazy_continuation,
+    //clippy::doc_lazy_continuation,
     deprecated,
     rustdoc::bare_urls,
     rustdoc::broken_intra_doc_links,
@@ -27,15 +27,12 @@ use async_trait::async_trait;
 use futures_core::future::BoxFuture;
 use futures_util::stream::StreamExt;
 use opentelemetry::{
-    global::handle_error,
+    otel_error,
     trace::{SpanId, TraceError},
     Key, KeyValue, Value,
 };
 use opentelemetry_sdk::{
-    export::{
-        trace::{ExportResult, SpanData, SpanExporter},
-        ExportError,
-    },
+    export::trace::{ExportResult, SpanData, SpanExporter},
     Resource,
 };
 use opentelemetry_semantic_conventions as semconv;
@@ -379,9 +376,9 @@ where
 
         self.pending_count.fetch_sub(1, Ordering::Relaxed);
         if let Err(e) = self.authorizer.authorize(&mut req, &self.scopes).await {
-            handle_error(TraceError::from(Error::Authorizer(e.into())));
+            otel_error!(name: "ExportAuthorizeError", error = format!("{:?}", TraceError::from(Error::Authorizer(e.into()))));
         } else if let Err(e) = self.trace_client.batch_write_spans(req).await {
-            handle_error(TraceError::from(Error::Transport(e.into())));
+            otel_error!(name: "ExportTransportError", error = format!("{:?}", TraceError::from(Error::Transport(e.into()))));
         }
 
         let client = match &mut self.log_client {
@@ -403,9 +400,9 @@ where
         });
 
         if let Err(e) = self.authorizer.authorize(&mut req, &self.scopes).await {
-            handle_error(TraceError::from(Error::from(e)));
+            otel_error!(name: "ExportAuthorizeError", error = format!("{:?}", TraceError::from(Error::Authorizer(e.into()))));
         } else if let Err(e) = client.client.write_log_entries(req).await {
-            handle_error(TraceError::from(Error::Transport(e.into())));
+            otel_error!(name: "ExportTransportError", error = format!("{:?}", TraceError::from(Error::Transport(e.into()))));
         }
     }
 }
@@ -491,6 +488,7 @@ impl From<Value> for AttributeValue {
             Value::I64(v) => attribute_value::Value::IntValue(v),
             Value::String(v) => attribute_value::Value::StringValue(to_truncate(v.to_string())),
             Value::Array(_) => attribute_value::Value::StringValue(to_truncate(v.to_string())),
+            _ => attribute_value::Value::StringValue(to_truncate("".to_string())),
         };
         AttributeValue {
             value: Some(new_value),
@@ -517,7 +515,7 @@ pub enum Error {
     Transport(#[source] Box<dyn std::error::Error + Send + Sync>),
 }
 
-impl ExportError for Error {
+impl opentelemetry::trace::ExportError for Error {
     fn exporter_name(&self) -> &'static str {
         "stackdriver"
     }

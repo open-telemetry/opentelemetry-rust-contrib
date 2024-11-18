@@ -1,8 +1,8 @@
 use std::fmt::Debug;
 
-use opentelemetry::logs::LogResult;
-use opentelemetry::InstrumentationLibrary;
+use opentelemetry::InstrumentationScope;
 use opentelemetry_sdk::logs::LogRecord;
+use opentelemetry_sdk::logs::LogResult;
 
 #[cfg(feature = "logs_level_enabled")]
 use opentelemetry_sdk::export::logs::LogExporter;
@@ -33,7 +33,7 @@ impl ReentrantLogProcessor {
 }
 
 impl opentelemetry_sdk::logs::LogProcessor for ReentrantLogProcessor {
-    fn emit(&self, data: &mut LogRecord, instrumentation: &InstrumentationLibrary) {
+    fn emit(&self, data: &mut LogRecord, instrumentation: &InstrumentationScope) {
         _ = self.event_exporter.export_log_data(data, instrumentation);
     }
 

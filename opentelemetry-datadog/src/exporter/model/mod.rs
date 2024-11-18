@@ -71,7 +71,7 @@ fn default_service_name_mapping<'a>(_span: &'a SpanData, config: &'a ModelConfig
 }
 
 fn default_name_mapping<'a>(span: &'a SpanData, _config: &'a ModelConfig) -> &'a str {
-    span.instrumentation_lib.name.as_ref()
+    span.instrumentation_scope.name()
 }
 
 fn default_resource_mapping<'a>(span: &'a SpanData, _config: &'a ModelConfig) -> &'a str {
@@ -198,6 +198,7 @@ impl ApiVersion {
 #[cfg(test)]
 pub(crate) mod tests {
     use super::*;
+    use opentelemetry::InstrumentationScope;
     use opentelemetry::{
         trace::{SpanContext, SpanId, SpanKind, Status, TraceFlags, TraceId, TraceState},
         KeyValue,
@@ -205,7 +206,6 @@ pub(crate) mod tests {
     use opentelemetry_sdk::{
         self,
         trace::{SpanEvents, SpanLinks},
-        InstrumentationLibrary,
     };
     use std::time::{Duration, SystemTime};
 
@@ -228,7 +228,7 @@ pub(crate) mod tests {
         let attributes = vec![KeyValue::new("span.type", "web")];
         let events = SpanEvents::default();
         let links = SpanLinks::default();
-        let instrumentation_lib = InstrumentationLibrary::builder("component").build();
+        let instrumentation_scope = InstrumentationScope::builder("component").build();
 
         trace::SpanData {
             span_context,
@@ -242,7 +242,7 @@ pub(crate) mod tests {
             events,
             links,
             status: Status::Ok,
-            instrumentation_lib,
+            instrumentation_scope,
         }
     }
 
