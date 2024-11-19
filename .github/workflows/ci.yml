@@ -23,7 +23,7 @@ jobs:
         df -h
     - name: Install libsystemd (required by opentelemetry-journald-logs)
       run: sudo apt-get install -y libsystemd-dev
-    - uses: actions/checkout@v1
+    - uses: actions/checkout@v4
       with:
         submodules: true
     - uses: actions-rs/toolchain@v1
@@ -37,7 +37,7 @@ jobs:
   lint:
     runs-on: ubuntu-latest
     steps:
-    - uses: actions/checkout@v1
+    - uses: actions/checkout@v4
       with:
         submodules: true
     - uses: actions-rs/toolchain@v1
@@ -56,7 +56,7 @@ jobs:
 #  msrv:
 #    runs-on: ubuntu-latest
 #    steps:
-#    - uses: actions/checkout@v1
+#    - uses: actions/checkout@v4
 #      with:
 #        submodules: true
 #    - uses: actions-rs/toolchain@v1
@@ -75,7 +75,7 @@ jobs:
     runs-on: ubuntu-latest
     continue-on-error: true # Prevent sudden announcement of a new advisory from failing ci
     steps:
-      - uses: actions/checkout@v2
+      - uses: actions/checkout@v4
       - uses: EmbarkStudios/cargo-deny-action@v1
         with:
           command: check advisories
@@ -83,7 +83,7 @@ jobs:
     continue-on-error: true
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v2
+      - uses: actions/checkout@v4
       - uses: actions-rs/toolchain@v1
         with:
           toolchain: nightly
@@ -99,7 +99,7 @@ jobs:
     continue-on-error: true
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v3
+      - uses: actions/checkout@v4
         with:
           submodules: true
       - uses: actions-rs/toolchain@v1
@@ -119,3 +119,19 @@ jobs:
         uses: codecov/codecov-action@v4
         with:
           fail_ci_if_error: true
+  cargo-machete:
+    continue-on-error: true
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: true
+      - uses: actions-rs/toolchain@v1
+        with:
+          toolchain: stable
+          override: true
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-machete
+      - name: cargo machete
+        run: cargo machete

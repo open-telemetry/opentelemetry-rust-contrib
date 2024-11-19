@@ -1,18 +1,24 @@
 use async_trait::async_trait;
-use opentelemetry::metrics::{MetricsError, Result};
 use opentelemetry_proto::tonic::collector::metrics::v1::ExportMetricsServiceRequest;
+use opentelemetry_sdk::metrics::data;
+use opentelemetry_sdk::metrics::exporter::PushMetricExporter;
 use opentelemetry_sdk::metrics::{
-    data::{ResourceMetrics, Temporality},
-    exporter::PushMetricsExporter,
-    reader::TemporalitySelector,
-    InstrumentKind,
+    data::{
+        ExponentialBucket, ExponentialHistogramDataPoint, Metric, ResourceMetrics, ScopeMetrics,
+    },
+    Temporality,
 };
+use opentelemetry_sdk::metrics::{MetricError, MetricResult};
+
+use opentelemetry::{otel_debug, otel_warn};
 
 use crate::tracepoint;
 use eventheader::_internal as ehi;
 use prost::Message;
 use std::fmt::{Debug, Formatter};
 use std::pin::Pin;
+
+const MAX_EVENT_SIZE: usize = 65360;
 
 pub struct MetricsExporter {
     trace_point: Pin<Box<ehi::TracepointState>>,
@@ -36,48 +42,415 @@ impl Default for MetricsExporter {
     }
 }
 
-impl TemporalitySelector for MetricsExporter {
-    // This is matching OTLP exporters delta.
-    fn temporality(&self, kind: InstrumentKind) -> Temporality {
-        match kind {
-            InstrumentKind::Counter
-            | InstrumentKind::ObservableCounter
-            | InstrumentKind::ObservableGauge
-            | InstrumentKind::Histogram
-            | InstrumentKind::Gauge => Temporality::Delta,
-            InstrumentKind::UpDownCounter | InstrumentKind::ObservableUpDownCounter => {
-                Temporality::Cumulative
-            }
-        }
-    }
-}
-
 impl Debug for MetricsExporter {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         f.write_str("user_events metrics exporter")
     }
 }
 
-#[async_trait]
-impl PushMetricsExporter for MetricsExporter {
-    async fn export(&self, metrics: &mut ResourceMetrics) -> Result<()> {
-        if self.trace_point.enabled() {
-            let proto_message: ExportMetricsServiceRequest = (&*metrics).into();
+impl MetricsExporter {
+    fn serialize_and_write(
+        &self,
+        resource_metric: &ResourceMetrics,
+        metric_name: &str,
+        metric_type: &str,
+    ) -> MetricResult<()> {
+        // Allocate a local buffer for each write operation
+        // TODO: Investigate if this can be optimized to avoid reallocation or
+        // allocate a fixed buffer size for all writes
+        let mut byte_array = Vec::new();
 
-            let mut byte_array = Vec::new();
-            let _encode_result = proto_message
-                .encode(&mut byte_array)
-                .map_err(|err| MetricsError::Other(err.to_string()))?;
-            let _result = tracepoint::write(&self.trace_point, byte_array.as_slice());
+        // Convert to proto message
+        let proto_message: ExportMetricsServiceRequest = resource_metric.into();
+        otel_debug!(name: "SerializeStart", 
+            metric_name = metric_name,
+            metric_type = metric_type);
+
+        // Encode directly into the buffer
+        match proto_message.encode(&mut byte_array) {
+            Ok(_) => {
+                otel_debug!(name: "SerializeSuccess", 
+                    metric_name = metric_name,
+                    metric_type = metric_type,
+                    size = byte_array.len());
+            }
+            Err(err) => {
+                otel_debug!(name: "SerializeFailed",
+                    error = err.to_string(),
+                    metric_name = metric_name,
+                    metric_type = metric_type,
+                    size = byte_array.len());
+                return Err(MetricError::Other(err.to_string()));
+            }
+        }
+
+        // Check if the encoded message exceeds the 64 KB limit
+        if byte_array.len() > MAX_EVENT_SIZE {
+            otel_debug!(
+                name: "MaxEventSizeExceeded",
+                reason = format!("Encoded event size exceeds maximum allowed limit of {} bytes. Event will be dropped.", MAX_EVENT_SIZE),
+                metric_name = metric_name,
+                metric_type = metric_type,
+                size = byte_array.len()
+            );
+            return Err(MetricError::Other(
+                "Event size exceeds maximum allowed limit".into(),
+            ));
+        }
+
+        // Write to the tracepoint
+        let result = tracepoint::write(&self.trace_point, &byte_array);
+        if result > 0 {
+            otel_debug!(name: "TracepointWrite", message = "Encoded data successfully written to tracepoint", size = byte_array.len(), metric_name = metric_name, metric_type = metric_type);
+        }
+
+        Ok(())
+    }
+}
+
+#[async_trait]
+impl PushMetricExporter for MetricsExporter {
+    async fn export(&self, metrics: &mut ResourceMetrics) -> MetricResult<()> {
+        otel_debug!(name: "ExportStart", message = "Starting metrics export");
+        if !self.trace_point.enabled() {
+            // TODO - This can flood the logs if the tracepoint is disabled for long periods of time
+            otel_warn!(name: "TracepointDisabled", message = "Tracepoint is disabled, skipping export");
+            return Ok(());
+        }
+
+        if self.trace_point.enabled() {
+            let mut errors = Vec::new();
+
+            for scope_metric in &metrics.scope_metrics {
+                for metric in &scope_metric.metrics {
+                    let data = &metric.data.as_any();
+
+                    if let Some(histogram) = data.downcast_ref::<data::Histogram<u64>>() {
+                        for data_point in &histogram.data_points {
+                            let resource_metric = ResourceMetrics {
+                                resource: metrics.resource.clone(),
+                                scope_metrics: vec![ScopeMetrics {
+                                    scope: scope_metric.scope.clone(),
+                                    metrics: vec![Metric {
+                                        name: metric.name.clone(),
+                                        description: metric.description.clone(),
+                                        unit: metric.unit.clone(),
+                                        data: Box::new(data::Histogram {
+                                            temporality: histogram.temporality,
+                                            data_points: vec![data_point.clone()],
+                                        }),
+                                    }],
+                                }],
+                            };
+                            if let Err(e) = self.serialize_and_write(
+                                &resource_metric,
+                                &metric.name,
+                                "Histogram<u64>",
+                            ) {
+                                errors.push(e.to_string());
+                            }
+                        }
+                    } else if let Some(histogram) = data.downcast_ref::<data::Histogram<f64>>() {
+                        for data_point in &histogram.data_points {
+                            let resource_metric = ResourceMetrics {
+                                resource: metrics.resource.clone(),
+                                scope_metrics: vec![ScopeMetrics {
+                                    scope: scope_metric.scope.clone(),
+                                    metrics: vec![Metric {
+                                        name: metric.name.clone(),
+                                        description: metric.description.clone(),
+                                        unit: metric.unit.clone(),
+                                        data: Box::new(data::Histogram {
+                                            temporality: histogram.temporality,
+                                            data_points: vec![data_point.clone()],
+                                        }),
+                                    }],
+                                }],
+                            };
+                            if let Err(e) = self.serialize_and_write(
+                                &resource_metric,
+                                &metric.name,
+                                "Histogram<f64>",
+                            ) {
+                                errors.push(e.to_string());
+                            }
+                        }
+                    } else if let Some(gauge) = data.downcast_ref::<data::Gauge<u64>>() {
+                        for data_point in &gauge.data_points {
+                            let resource_metric = ResourceMetrics {
+                                resource: metrics.resource.clone(),
+                                scope_metrics: vec![ScopeMetrics {
+                                    scope: scope_metric.scope.clone(),
+                                    metrics: vec![Metric {
+                                        name: metric.name.clone(),
+                                        description: metric.description.clone(),
+                                        unit: metric.unit.clone(),
+                                        data: Box::new(data::Gauge {
+                                            data_points: vec![data_point.clone()],
+                                        }),
+                                    }],
+                                }],
+                            };
+                            if let Err(e) = self.serialize_and_write(
+                                &resource_metric,
+                                &metric.name,
+                                "Gauge<u64>",
+                            ) {
+                                errors.push(e.to_string());
+                            }
+                        }
+                    } else if let Some(gauge) = data.downcast_ref::<data::Gauge<i64>>() {
+                        for data_point in &gauge.data_points {
+                            let resource_metric = ResourceMetrics {
+                                resource: metrics.resource.clone(),
+                                scope_metrics: vec![ScopeMetrics {
+                                    scope: scope_metric.scope.clone(),
+                                    metrics: vec![Metric {
+                                        name: metric.name.clone(),
+                                        description: metric.description.clone(),
+                                        unit: metric.unit.clone(),
+                                        data: Box::new(data::Gauge {
+                                            data_points: vec![data_point.clone()],
+                                        }),
+                                    }],
+                                }],
+                            };
+                            if let Err(e) = self.serialize_and_write(
+                                &resource_metric,
+                                &metric.name,
+                                "Gauge<i64>",
+                            ) {
+                                errors.push(e.to_string());
+                            }
+                        }
+                    } else if let Some(gauge) = data.downcast_ref::<data::Gauge<f64>>() {
+                        for data_point in &gauge.data_points {
+                            let resource_metric = ResourceMetrics {
+                                resource: metrics.resource.clone(),
+                                scope_metrics: vec![ScopeMetrics {
+                                    scope: scope_metric.scope.clone(),
+                                    metrics: vec![Metric {
+                                        name: metric.name.clone(),
+                                        description: metric.description.clone(),
+                                        unit: metric.unit.clone(),
+                                        data: Box::new(data::Gauge {
+                                            data_points: vec![data_point.clone()],
+                                        }),
+                                    }],
+                                }],
+                            };
+                            if let Err(e) = self.serialize_and_write(
+                                &resource_metric,
+                                &metric.name,
+                                "Gauge<f64>",
+                            ) {
+                                errors.push(e.to_string());
+                            }
+                        }
+                    } else if let Some(sum) = data.downcast_ref::<data::Sum<u64>>() {
+                        for data_point in &sum.data_points {
+                            let resource_metric = ResourceMetrics {
+                                resource: metrics.resource.clone(),
+                                scope_metrics: vec![ScopeMetrics {
+                                    scope: scope_metric.scope.clone(),
+                                    metrics: vec![Metric {
+                                        name: metric.name.clone(),
+                                        description: metric.description.clone(),
+                                        unit: metric.unit.clone(),
+                                        data: Box::new(data::Sum {
+                                            temporality: sum.temporality,
+                                            data_points: vec![data_point.clone()],
+                                            is_monotonic: sum.is_monotonic,
+                                        }),
+                                    }],
+                                }],
+                            };
+                            if let Err(e) =
+                                self.serialize_and_write(&resource_metric, &metric.name, "Sum<u64>")
+                            {
+                                errors.push(e.to_string());
+                            }
+                        }
+                    } else if let Some(sum) = data.downcast_ref::<data::Sum<i64>>() {
+                        for data_point in &sum.data_points {
+                            let resource_metric = ResourceMetrics {
+                                resource: metrics.resource.clone(),
+                                scope_metrics: vec![ScopeMetrics {
+                                    scope: scope_metric.scope.clone(),
+                                    metrics: vec![Metric {
+                                        name: metric.name.clone(),
+                                        description: metric.description.clone(),
+                                        unit: metric.unit.clone(),
+                                        data: Box::new(data::Sum {
+                                            temporality: sum.temporality,
+                                            data_points: vec![data_point.clone()],
+                                            is_monotonic: sum.is_monotonic,
+                                        }),
+                                    }],
+                                }],
+                            };
+                            if let Err(e) =
+                                self.serialize_and_write(&resource_metric, &metric.name, "Sum<i64>")
+                            {
+                                errors.push(e.to_string());
+                            }
+                        }
+                    } else if let Some(sum) = data.downcast_ref::<data::Sum<f64>>() {
+                        for data_point in &sum.data_points {
+                            let resource_metric = ResourceMetrics {
+                                resource: metrics.resource.clone(),
+                                scope_metrics: vec![ScopeMetrics {
+                                    scope: scope_metric.scope.clone(),
+                                    metrics: vec![Metric {
+                                        name: metric.name.clone(),
+                                        description: metric.description.clone(),
+                                        unit: metric.unit.clone(),
+                                        data: Box::new(data::Sum {
+                                            temporality: sum.temporality,
+                                            data_points: vec![data_point.clone()],
+                                            is_monotonic: sum.is_monotonic,
+                                        }),
+                                    }],
+                                }],
+                            };
+                            if let Err(e) =
+                                self.serialize_and_write(&resource_metric, &metric.name, "Sum<f64>")
+                            {
+                                errors.push(e.to_string());
+                            }
+                        }
+                    } else if let Some(exp_hist) =
+                        data.downcast_ref::<data::ExponentialHistogram<u64>>()
+                    {
+                        for data_point in &exp_hist.data_points {
+                            let resource_metric = ResourceMetrics {
+                                resource: metrics.resource.clone(),
+                                scope_metrics: vec![ScopeMetrics {
+                                    scope: scope_metric.scope.clone(),
+                                    metrics: vec![Metric {
+                                        name: metric.name.clone(),
+                                        description: metric.description.clone(),
+                                        unit: metric.unit.clone(),
+                                        data: Box::new(data::ExponentialHistogram {
+                                            temporality: exp_hist.temporality,
+                                            data_points: vec![ExponentialHistogramDataPoint {
+                                                attributes: data_point.attributes.clone(),
+                                                count: data_point.count,
+                                                start_time: data_point.start_time,
+                                                time: data_point.time,
+                                                min: data_point.min,
+                                                max: data_point.max,
+                                                sum: data_point.sum,
+                                                scale: data_point.scale,
+                                                zero_count: data_point.zero_count,
+                                                zero_threshold: data_point.zero_threshold,
+                                                positive_bucket: ExponentialBucket {
+                                                    offset: data_point.positive_bucket.offset,
+                                                    counts: data_point
+                                                        .positive_bucket
+                                                        .counts
+                                                        .clone(),
+                                                },
+                                                negative_bucket: ExponentialBucket {
+                                                    offset: data_point.negative_bucket.offset,
+                                                    counts: data_point
+                                                        .negative_bucket
+                                                        .counts
+                                                        .clone(),
+                                                },
+                                                exemplars: data_point.exemplars.clone(),
+                                            }],
+                                        }),
+                                    }],
+                                }],
+                            };
+                            if let Err(e) = self.serialize_and_write(
+                                &resource_metric,
+                                &metric.name,
+                                "ExponentialHistogram<u64>",
+                            ) {
+                                errors.push(e.to_string());
+                            }
+                        }
+                    } else if let Some(exp_hist) =
+                        data.downcast_ref::<data::ExponentialHistogram<f64>>()
+                    {
+                        for data_point in &exp_hist.data_points {
+                            let resource_metric = ResourceMetrics {
+                                resource: metrics.resource.clone(),
+                                scope_metrics: vec![ScopeMetrics {
+                                    scope: scope_metric.scope.clone(),
+                                    metrics: vec![Metric {
+                                        name: metric.name.clone(),
+                                        description: metric.description.clone(),
+                                        unit: metric.unit.clone(),
+                                        data: Box::new(data::ExponentialHistogram {
+                                            temporality: exp_hist.temporality,
+                                            data_points: vec![ExponentialHistogramDataPoint {
+                                                attributes: data_point.attributes.clone(),
+                                                count: data_point.count,
+                                                start_time: data_point.start_time,
+                                                time: data_point.time,
+                                                min: data_point.min,
+                                                max: data_point.max,
+                                                sum: data_point.sum,
+                                                scale: data_point.scale,
+                                                zero_count: data_point.zero_count,
+                                                zero_threshold: data_point.zero_threshold,
+                                                positive_bucket: ExponentialBucket {
+                                                    offset: data_point.positive_bucket.offset,
+                                                    counts: data_point
+                                                        .positive_bucket
+                                                        .counts
+                                                        .clone(),
+                                                },
+                                                negative_bucket: ExponentialBucket {
+                                                    offset: data_point.negative_bucket.offset,
+                                                    counts: data_point
+                                                        .negative_bucket
+                                                        .counts
+                                                        .clone(),
+                                                },
+                                                exemplars: data_point.exemplars.clone(),
+                                            }],
+                                        }),
+                                    }],
+                                }],
+                            };
+                            if let Err(e) = self.serialize_and_write(
+                                &resource_metric,
+                                &metric.name,
+                                "ExponentialHistogram<f64>",
+                            ) {
+                                errors.push(e.to_string());
+                            }
+                        }
+                    }
+                }
+            }
+
+            // Return any errors if present
+            if !errors.is_empty() {
+                let error_message = format!(
+                    "Export encountered {} errors: [{}]",
+                    errors.len(),
+                    errors.join("; ")
+                );
+                return Err(MetricError::Other(error_message));
+            }
         }
         Ok(())
     }
 
-    async fn force_flush(&self) -> Result<()> {
+    fn temporality(&self) -> Temporality {
+        Temporality::Delta
+    }
+
+    async fn force_flush(&self) -> MetricResult<()> {
         Ok(()) // In this implementation, flush does nothing
     }
 
-    fn shutdown(&self) -> Result<()> {
+    fn shutdown(&self) -> MetricResult<()> {
         // TracepointState automatically unregisters when dropped
         // https://github.com/microsoft/LinuxTracepoints-Rust/blob/main/eventheader/src/native.rs#L618
         Ok(())
