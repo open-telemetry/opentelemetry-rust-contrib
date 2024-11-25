@@ -174,13 +174,13 @@ impl ETWExporter {
     pub(crate) fn export_log_data(
         &self,
         log_record: &opentelemetry_sdk::logs::LogRecord,
-        instrumentation: &opentelemetry::InstrumentationLibrary,
+        instrumentation: &opentelemetry::InstrumentationScope,
     ) -> opentelemetry_sdk::export::logs::ExportResult {
         let level = self.get_severity_level(log_record.severity_number.unwrap_or(Severity::Debug));
 
         let keyword = match self
             .exporter_config
-            .get_log_keyword_or_default(instrumentation.name.as_ref())
+            .get_log_keyword_or_default(instrumentation.name())
         {
             Some(keyword) => keyword,
             _ => return Ok(()),
@@ -342,14 +342,14 @@ impl opentelemetry_sdk::export::logs::LogExporter for ETWExporter {
     async fn export(
         &mut self,
         batch: opentelemetry_sdk::export::logs::LogBatch<'_>,
-    ) -> opentelemetry::logs::LogResult<()> {
+    ) -> opentelemetry_sdk::logs::LogResult<()> {
         for (log_record, instrumentation) in batch.iter() {
             let _ = self.export_log_data(log_record, instrumentation);
         }
         Ok(())
     }
 
-    #[cfg(feature = "logs_level_enabled")]
+    #[cfg(feature = "spec_unstable_logs_enabled")]
     fn event_enabled(&self, level: Severity, _target: &str, name: &str) -> bool {
         let (found, keyword) = if self.exporter_config.keywords_map.is_empty() {
             (true, self.exporter_config.default_keyword)
@@ -400,6 +400,11 @@ fn add_attribute_to_event(event: &mut tld::EventBuilder, key: &Key, value: &AnyV
                 tld::OutType::Json,
                 0,
             );
+        }
+        &_ => {
+            // If we reach this line is because we are upgrading opentelemetry to a version that contains a new type.
+            // We must add support for the new type.
+            todo!("Add support for new types");
         }
     }
 }
