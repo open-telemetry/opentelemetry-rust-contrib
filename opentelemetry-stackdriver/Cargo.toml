@@ -45,3 +45,6 @@ tonic-build = "0.12"
 walkdir = "2.3.2"
 futures-util = { version = "0.3", default-features = false }
 opentelemetry = { workspace = true, features = ["testing"] }
+
+[package.metadata.cargo-machete]
+ignored = ["tracing"]

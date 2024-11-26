@@ -38,3 +38,7 @@ opentelemetry-stdout = { workspace = true, features = ["trace"] }
 hyper = { version = "1.4.1" }
 tokio = { version = "1.0", features = ["macros", "rt"] }
 sealed_test = "1.1.0"
+
+[package.metadata.cargo-machete]
+ignored = ["tracing"]
+
