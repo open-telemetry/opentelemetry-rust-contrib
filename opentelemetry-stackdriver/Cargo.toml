@@ -22,6 +22,7 @@ prost-types = "0.13"
 thiserror = "1.0.30"
 tonic = { version = "0.12", features = ["gzip", "tls", "transport"] }
 once_cell = { version = "1.19", optional = true }
+tracing = { version = "0.1", optional = true }
 
 # Futures
 futures-core = "0.3"
@@ -34,6 +35,7 @@ gcp-authorizer = ["dep:gcp_auth"]
 tls-native-roots = ["tonic/tls-roots"]
 tls-webpki-roots = ["tonic/tls-webpki-roots"]
 propagator = ["once_cell"]
+internal-logs = ["tracing"]
 
 [dev-dependencies]
 reqwest = "0.12"
