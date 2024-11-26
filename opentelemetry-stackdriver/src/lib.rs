@@ -4,7 +4,7 @@
 // When this PR is merged we should be able to remove this attribute:
 // https://github.com/danburkert/prost/pull/291
 #![allow(
-    //clippy::doc_lazy_continuation,
+    clippy::doc_lazy_continuation,
     deprecated,
     rustdoc::bare_urls,
     rustdoc::broken_intra_doc_links,

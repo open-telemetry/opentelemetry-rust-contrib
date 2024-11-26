@@ -19,7 +19,7 @@ all-features = true
 rustdoc-args = ["--cfg", "docsrs"]
 
 [features]
-default = ["trace"]
+default = ["trace", "internal-logs"]
 trace = ["opentelemetry/trace", "opentelemetry_sdk/trace"]
 detector-aws-lambda = ["dep:opentelemetry-semantic-conventions"]
 internal-logs = ["tracing"]

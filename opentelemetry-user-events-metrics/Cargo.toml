@@ -24,3 +24,4 @@ tokio = { version = "1.0", features = ["full"] }
 
 [features]
 internal-logs = ["tracing"]
+default = ["internal-logs"]
