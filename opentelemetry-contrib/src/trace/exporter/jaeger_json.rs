@@ -12,6 +12,7 @@ use opentelemetry::trace::SpanId;
 ))]
 use opentelemetry::trace::TraceError;
 use opentelemetry::trace::TracerProvider as _;
+use opentelemetry::InstrumentationScope;
 use opentelemetry_sdk::{
     export::trace::{ExportResult, SpanData, SpanExporter},
     runtime::RuntimeChannel,
@@ -52,11 +53,11 @@ impl<R: JaegerJsonRuntime> JaegerJsonExporter<R> {
         let runtime = self.runtime.clone();
         let provider_builder = TracerProvider::builder().with_batch_exporter(self, runtime);
         let provider = provider_builder.build();
-        let tracer = provider
-            .tracer_builder("opentelemetry")
+        let scope = InstrumentationScope::builder("opentelemetry")
             .with_version(env!("CARGO_PKG_VERSION"))
             .with_schema_url(SCHEMA_URL)
             .build();
+        let tracer = provider.tracer_with_scope(scope);
         let _ = opentelemetry::global::set_tracer_provider(provider);
 
         tracer
@@ -211,6 +212,7 @@ fn opentelemetry_value_to_json(value: &opentelemetry::Value) -> (&str, serde_jso
         opentelemetry::Value::F64(f) => ("float64", serde_json::json!(f)),
         opentelemetry::Value::String(s) => ("string", serde_json::json!(s.as_str())),
         v @ opentelemetry::Value::Array(_) => ("string", serde_json::json!(v.to_string())),
+        &_ => ("", serde_json::json!("".to_string())),
     }
 }
 

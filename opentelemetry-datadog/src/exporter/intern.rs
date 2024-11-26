@@ -10,7 +10,7 @@ use std::{
 type InternHasher = ahash::AHasher;
 
 #[cfg(all(feature = "intern-std", not(feature = "intern-ahash")))]
-type InternHasher = std::hash::DefaultHasher;
+type InternHasher = std::collections::hash_map::DefaultHasher;
 
 #[derive(PartialEq)]
 pub(crate) enum InternValue<'a> {
@@ -36,7 +36,9 @@ impl<'a> Hash for InternValue<'a> {
                         }
                     }
                     opentelemetry::Array::String(x) => x.hash(state),
+                    &_ => {}
                 },
+                &_ => {}
             },
         }
     }
@@ -110,7 +112,9 @@ impl<'a> InternValue<'a> {
                     opentelemetry::Array::String(x) => {
                         Self::write_generic_array(payload, reusable_buffer, x)
                     }
+                    _ => Self::write_empty_array(payload),
                 },
+                _ => Self::write_empty_array(payload),
             },
         }
     }

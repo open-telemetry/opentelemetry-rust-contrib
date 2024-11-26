@@ -1,6 +1,6 @@
 [package]
 name = "opentelemetry-stackdriver"
-version = "0.23.0"
+version = "0.24.0"
 description = "A Rust opentelemetry exporter that uploads traces to Google Stackdriver trace."
 documentation = "https://docs.rs/opentelemetry-stackdriver/"
 repository = "https://github.com/open-telemetry/opentelemetry-rust-contrib"
@@ -22,6 +22,7 @@ prost-types = "0.13"
 thiserror = "1.0.30"
 tonic = { version = "0.12", features = ["gzip", "tls", "transport"] }
 once_cell = { version = "1.19", optional = true }
+tracing = { version = "0.1", optional = true }
 
 # Futures
 futures-core = "0.3"
@@ -29,11 +30,12 @@ futures-util = { version = "0.3", default-features = false, features = ["alloc"]
 futures-channel = { version = "0.3", default-features = false, features = ["std"] }
 
 [features]
-default = ["gcp-authorizer", "tls-native-roots"]
+default = ["gcp-authorizer", "tls-native-roots", "internal-logs"]
 gcp-authorizer = ["dep:gcp_auth"]
 tls-native-roots = ["tonic/tls-roots"]
 tls-webpki-roots = ["tonic/tls-webpki-roots"]
 propagator = ["once_cell"]
+internal-logs = ["tracing"]
 
 [dev-dependencies]
 reqwest = "0.12"
@@ -43,3 +45,6 @@ tonic-build = "0.12"
 walkdir = "2.3.2"
 futures-util = { version = "0.3", default-features = false }
 opentelemetry = { workspace = true, features = ["testing"] }
+
+[package.metadata.cargo-machete]
+ignored = ["tracing"]
