@@ -174,13 +174,13 @@ impl ETWExporter {
     pub(crate) fn export_log_data(
         &self,
         log_record: &opentelemetry_sdk::logs::LogRecord,
-        instrumentation: &opentelemetry::InstrumentationLibrary,
+        instrumentation: &opentelemetry::InstrumentationScope,
     ) -> opentelemetry_sdk::export::logs::ExportResult {
         let level = self.get_severity_level(log_record.severity_number.unwrap_or(Severity::Debug));
 
         let keyword = match self
             .exporter_config
-            .get_log_keyword_or_default(instrumentation.name.as_ref())
+            .get_log_keyword_or_default(instrumentation.name().as_ref())
         {
             Some(keyword) => keyword,
             _ => return Ok(()),
@@ -342,7 +342,7 @@ impl opentelemetry_sdk::export::logs::LogExporter for ETWExporter {
     async fn export(
         &mut self,
         batch: opentelemetry_sdk::export::logs::LogBatch<'_>,
-    ) -> opentelemetry::logs::LogResult<()> {
+    ) -> opentelemetry_sdk::logs::LogResult<()> {
         for (log_record, instrumentation) in batch.iter() {
             let _ = self.export_log_data(log_record, instrumentation);
         }
@@ -401,6 +401,7 @@ fn add_attribute_to_event(event: &mut tld::EventBuilder, key: &Key, value: &AnyV
                 0,
             );
         }
+        &_ => {}
     }
 }
 

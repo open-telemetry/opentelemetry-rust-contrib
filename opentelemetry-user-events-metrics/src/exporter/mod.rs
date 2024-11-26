@@ -1,16 +1,16 @@
 use async_trait::async_trait;
-use opentelemetry::metrics::{MetricsError, Result};
 use opentelemetry_proto::tonic::collector::metrics::v1::ExportMetricsServiceRequest;
 use opentelemetry_sdk::metrics::data;
+use opentelemetry_sdk::metrics::exporter::PushMetricExporter;
 use opentelemetry_sdk::metrics::{
     data::{
         ExponentialBucket, ExponentialHistogramDataPoint, Metric, ResourceMetrics, ScopeMetrics,
-        Temporality,
     },
-    exporter::PushMetricsExporter,
-    reader::TemporalitySelector,
-    InstrumentKind,
+    Temporality,
 };
+use opentelemetry_sdk::metrics::{MetricError, MetricResult};
+
+use opentelemetry::{otel_debug, otel_warn};
 
 use crate::tracepoint;
 use eventheader::_internal as ehi;
@@ -42,22 +42,6 @@ impl Default for MetricsExporter {
     }
 }
 
-impl TemporalitySelector for MetricsExporter {
-    // This is matching OTLP exporters delta.
-    fn temporality(&self, kind: InstrumentKind) -> Temporality {
-        match kind {
-            InstrumentKind::Counter
-            | InstrumentKind::ObservableCounter
-            | InstrumentKind::ObservableGauge
-            | InstrumentKind::Histogram
-            | InstrumentKind::Gauge => Temporality::Delta,
-            InstrumentKind::UpDownCounter | InstrumentKind::ObservableUpDownCounter => {
-                Temporality::Cumulative
-            }
-        }
-    }
-}
-
 impl Debug for MetricsExporter {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         f.write_str("user_events metrics exporter")
@@ -65,7 +49,12 @@ impl Debug for MetricsExporter {
 }
 
 impl MetricsExporter {
-    fn serialize_and_write(&self, resource_metric: &ResourceMetrics) -> Result<()> {
+    fn serialize_and_write(
+        &self,
+        resource_metric: &ResourceMetrics,
+        metric_name: &str,
+        metric_type: &str,
+    ) -> MetricResult<()> {
         // Allocate a local buffer for each write operation
         // TODO: Investigate if this can be optimized to avoid reallocation or
         // allocate a fixed buffer size for all writes
@@ -73,28 +62,62 @@ impl MetricsExporter {
 
         // Convert to proto message
         let proto_message: ExportMetricsServiceRequest = resource_metric.into();
+        otel_debug!(name: "SerializeStart", 
+            metric_name = metric_name,
+            metric_type = metric_type);
 
         // Encode directly into the buffer
-        proto_message
-            .encode(&mut byte_array)
-            .map_err(|err| MetricsError::Other(err.to_string()))?;
+        match proto_message.encode(&mut byte_array) {
+            Ok(_) => {
+                otel_debug!(name: "SerializeSuccess", 
+                    metric_name = metric_name,
+                    metric_type = metric_type,
+                    size = byte_array.len());
+            }
+            Err(err) => {
+                otel_debug!(name: "SerializeFailed",
+                    error = err.to_string(),
+                    metric_name = metric_name,
+                    metric_type = metric_type,
+                    size = byte_array.len());
+                return Err(MetricError::Other(err.to_string()));
+            }
+        }
 
         // Check if the encoded message exceeds the 64 KB limit
         if byte_array.len() > MAX_EVENT_SIZE {
-            return Err(MetricsError::Other(
+            otel_debug!(
+                name: "MaxEventSizeExceeded",
+                reason = format!("Encoded event size exceeds maximum allowed limit of {} bytes. Event will be dropped.", MAX_EVENT_SIZE),
+                metric_name = metric_name,
+                metric_type = metric_type,
+                size = byte_array.len()
+            );
+            return Err(MetricError::Other(
                 "Event size exceeds maximum allowed limit".into(),
             ));
         }
 
         // Write to the tracepoint
-        tracepoint::write(&self.trace_point, &byte_array);
+        let result = tracepoint::write(&self.trace_point, &byte_array);
+        if result > 0 {
+            otel_debug!(name: "TracepointWrite", message = "Encoded data successfully written to tracepoint", size = byte_array.len(), metric_name = metric_name, metric_type = metric_type);
+        }
+
         Ok(())
     }
 }
 
 #[async_trait]
-impl PushMetricsExporter for MetricsExporter {
-    async fn export(&self, metrics: &mut ResourceMetrics) -> Result<()> {
+impl PushMetricExporter for MetricsExporter {
+    async fn export(&self, metrics: &mut ResourceMetrics) -> MetricResult<()> {
+        otel_debug!(name: "ExportStart", message = "Starting metrics export");
+        if !self.trace_point.enabled() {
+            // TODO - This can flood the logs if the tracepoint is disabled for long periods of time
+            otel_warn!(name: "TracepointDisabled", message = "Tracepoint is disabled, skipping export");
+            return Ok(());
+        }
+
         if self.trace_point.enabled() {
             let mut errors = Vec::new();
 
@@ -119,8 +142,12 @@ impl PushMetricsExporter for MetricsExporter {
                                     }],
                                 }],
                             };
-                            if let Err(e) = self.serialize_and_write(&resource_metric) {
-                                errors.push(e);
+                            if let Err(e) = self.serialize_and_write(
+                                &resource_metric,
+                                &metric.name,
+                                "Histogram<u64>",
+                            ) {
+                                errors.push(e.to_string());
                             }
                         }
                     } else if let Some(histogram) = data.downcast_ref::<data::Histogram<f64>>() {
@@ -140,8 +167,12 @@ impl PushMetricsExporter for MetricsExporter {
                                     }],
                                 }],
                             };
-                            if let Err(e) = self.serialize_and_write(&resource_metric) {
-                                errors.push(e);
+                            if let Err(e) = self.serialize_and_write(
+                                &resource_metric,
+                                &metric.name,
+                                "Histogram<f64>",
+                            ) {
+                                errors.push(e.to_string());
                             }
                         }
                     } else if let Some(gauge) = data.downcast_ref::<data::Gauge<u64>>() {
@@ -160,8 +191,12 @@ impl PushMetricsExporter for MetricsExporter {
                                     }],
                                 }],
                             };
-                            if let Err(e) = self.serialize_and_write(&resource_metric) {
-                                errors.push(e);
+                            if let Err(e) = self.serialize_and_write(
+                                &resource_metric,
+                                &metric.name,
+                                "Gauge<u64>",
+                            ) {
+                                errors.push(e.to_string());
                             }
                         }
                     } else if let Some(gauge) = data.downcast_ref::<data::Gauge<i64>>() {
@@ -180,8 +215,12 @@ impl PushMetricsExporter for MetricsExporter {
                                     }],
                                 }],
                             };
-                            if let Err(e) = self.serialize_and_write(&resource_metric) {
-                                errors.push(e);
+                            if let Err(e) = self.serialize_and_write(
+                                &resource_metric,
+                                &metric.name,
+                                "Gauge<i64>",
+                            ) {
+                                errors.push(e.to_string());
                             }
                         }
                     } else if let Some(gauge) = data.downcast_ref::<data::Gauge<f64>>() {
@@ -200,8 +239,12 @@ impl PushMetricsExporter for MetricsExporter {
                                     }],
                                 }],
                             };
-                            if let Err(e) = self.serialize_and_write(&resource_metric) {
-                                errors.push(e);
+                            if let Err(e) = self.serialize_and_write(
+                                &resource_metric,
+                                &metric.name,
+                                "Gauge<f64>",
+                            ) {
+                                errors.push(e.to_string());
                             }
                         }
                     } else if let Some(sum) = data.downcast_ref::<data::Sum<u64>>() {
@@ -222,8 +265,10 @@ impl PushMetricsExporter for MetricsExporter {
                                     }],
                                 }],
                             };
-                            if let Err(e) = self.serialize_and_write(&resource_metric) {
-                                errors.push(e);
+                            if let Err(e) =
+                                self.serialize_and_write(&resource_metric, &metric.name, "Sum<u64>")
+                            {
+                                errors.push(e.to_string());
                             }
                         }
                     } else if let Some(sum) = data.downcast_ref::<data::Sum<i64>>() {
@@ -244,8 +289,10 @@ impl PushMetricsExporter for MetricsExporter {
                                     }],
                                 }],
                             };
-                            if let Err(e) = self.serialize_and_write(&resource_metric) {
-                                errors.push(e);
+                            if let Err(e) =
+                                self.serialize_and_write(&resource_metric, &metric.name, "Sum<i64>")
+                            {
+                                errors.push(e.to_string());
                             }
                         }
                     } else if let Some(sum) = data.downcast_ref::<data::Sum<f64>>() {
@@ -266,8 +313,10 @@ impl PushMetricsExporter for MetricsExporter {
                                     }],
                                 }],
                             };
-                            if let Err(e) = self.serialize_and_write(&resource_metric) {
-                                errors.push(e);
+                            if let Err(e) =
+                                self.serialize_and_write(&resource_metric, &metric.name, "Sum<f64>")
+                            {
+                                errors.push(e.to_string());
                             }
                         }
                     } else if let Some(exp_hist) =
@@ -315,8 +364,12 @@ impl PushMetricsExporter for MetricsExporter {
                                     }],
                                 }],
                             };
-                            if let Err(e) = self.serialize_and_write(&resource_metric) {
-                                errors.push(e);
+                            if let Err(e) = self.serialize_and_write(
+                                &resource_metric,
+                                &metric.name,
+                                "ExponentialHistogram<u64>",
+                            ) {
+                                errors.push(e.to_string());
                             }
                         }
                     } else if let Some(exp_hist) =
@@ -364,8 +417,12 @@ impl PushMetricsExporter for MetricsExporter {
                                     }],
                                 }],
                             };
-                            if let Err(e) = self.serialize_and_write(&resource_metric) {
-                                errors.push(e);
+                            if let Err(e) = self.serialize_and_write(
+                                &resource_metric,
+                                &metric.name,
+                                "ExponentialHistogram<f64>",
+                            ) {
+                                errors.push(e.to_string());
                             }
                         }
                     }
@@ -374,20 +431,26 @@ impl PushMetricsExporter for MetricsExporter {
 
             // Return any errors if present
             if !errors.is_empty() {
-                return Err(MetricsError::Other(format!(
-                    "Encountered {} errors during export",
-                    errors.len()
-                )));
+                let error_message = format!(
+                    "Export encountered {} errors: [{}]",
+                    errors.len(),
+                    errors.join("; ")
+                );
+                return Err(MetricError::Other(error_message));
             }
         }
         Ok(())
     }
 
-    async fn force_flush(&self) -> Result<()> {
+    fn temporality(&self) -> Temporality {
+        Temporality::Delta
+    }
+
+    async fn force_flush(&self) -> MetricResult<()> {
         Ok(()) // In this implementation, flush does nothing
     }
 
-    fn shutdown(&self) -> Result<()> {
+    fn shutdown(&self) -> MetricResult<()> {
         // TracepointState automatically unregisters when dropped
         // https://github.com/microsoft/LinuxTracepoints-Rust/blob/main/eventheader/src/native.rs#L618
         Ok(())

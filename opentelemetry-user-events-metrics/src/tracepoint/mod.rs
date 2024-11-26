@@ -1,6 +1,6 @@
 use core::ffi;
 use eventheader::_internal as ehi;
-use opentelemetry::{global, metrics::MetricsError};
+use opentelemetry::{otel_debug, otel_error, otel_info};
 use std::panic;
 use std::pin::Pin;
 
@@ -41,12 +41,12 @@ pub fn write(trace_point: &ehi::TracepointState, buffer: &[u8]) -> i32 {
     // This must stay in sync with the METRICS_EVENT_DEF string.
     // Return error -1 if buffer exceeds max size
     if buffer.len() > u16::MAX as usize {
-        eprintln!("Buffer exceeds max length.");
+        otel_debug!(name: "TracePointWriteError", reason = "Buffer exceeds max length.", buffer_size = buffer.len());
         return -1;
     }
 
     if PROTOBUF_VERSION.len() != 8 {
-        eprintln!("Version must be char[8].");
+        otel_debug!(name: "TracePointWriteError", reason = "Version must be char[8].", version = format!("{:?}", PROTOBUF_VERSION));
         return -1;
     }
 
@@ -93,24 +93,21 @@ pub unsafe fn register(trace_point: Pin<&ehi::TracepointState>) -> i32 {
             if value == 0 {
                 // Temporary print as a measure for quick testing
                 // will be replaced with proper logging mechanism
-                println!("Tracepoint registered successfully.")
+                otel_info!(name: "TracePointRegistered", reason = "Tracepoint registered successfully.");
             } else if value == 95 {
-                global::handle_error(MetricsError::Other(
-                    "Trace/debug file systems are not mounted.".into(),
-                ));
+                otel_error!(name: "TracePointRegisterError", reason = "Trace/debug file systems are not mounted.");
             } else if value == 13 {
-                global::handle_error(MetricsError::Other(
-                    "Insufficient permissions. You need read/write/execute permissions to user_events tracing directory.".into(),
-                ));
+                otel_error!(name: "TracePointRegisterError", reason = "Insufficient permissions. You need read/write/execute permissions to user_events tracing directory.");
             }
             value
         }
         // We don't want to ever panic so we catch the error and return a unique code for retry
         Err(err) => {
-            global::handle_error(MetricsError::Other(format!(
-                "Tracepoint failed to register: {:?}.",
-                err,
-            )));
+            otel_error!(
+                name: "TracePointRegisterError",
+                reason = "Tracepoint failed to register.",
+                error = format!("{:?}", err)
+            );
             -1
         }
     }

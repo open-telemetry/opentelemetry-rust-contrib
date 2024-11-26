@@ -1,9 +1,13 @@
 # Changelog
 
-## vNext
+## v0.8.0
 
 ### Changed
 
+- Bump opentelemetry and opentelemetry_sdk versions to 0.27
+- Bump opentelemetry-proto version to 0.27
+- Uses internal logging from `opentelemetry` crate, which routes internal logs
+  via `tracing`
 - Add support for skipping the metric data point if the size exceeds 65360 bytes.
 
 ## v0.7.0
