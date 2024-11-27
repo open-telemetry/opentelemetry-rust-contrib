@@ -23,8 +23,12 @@ opentelemetry-appender-tracing = { workspace = true }
 tracing = { version = "0.1", default-features = false, features = ["std"] }
 tracing-core = "0.1.31"
 tracing-subscriber = { version = "0.3.0", default-features = false, features = ["registry", "std"] }
-microbench = "0.5"
+criterion = "0.4" # Add the Criterion crate for benchmarking
 
 [features]
 logs_level_enabled = ["opentelemetry/logs_level_enabled", "opentelemetry_sdk/logs_level_enabled"]
 default = ["logs_level_enabled"]
+
+[[bench]]
+name = "benchmark"
+harness = false
