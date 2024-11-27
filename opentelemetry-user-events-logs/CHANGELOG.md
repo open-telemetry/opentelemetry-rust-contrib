@@ -2,6 +2,8 @@
 
 ## vNext
 
+- Renamed  `logs_level_enabled` flag to `spec_unstable_logs_enabled` to be consistent with core repo.
+
 ## v0.8.0
 
 ### Changed
