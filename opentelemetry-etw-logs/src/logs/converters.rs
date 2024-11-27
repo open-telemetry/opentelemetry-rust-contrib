@@ -17,6 +17,7 @@ impl IntoJson for AnyValue {
             AnyValue::Bytes(_value) => todo!("No support for AnyValue::Bytes yet."),
             AnyValue::ListAny(value) => value.as_json_value(),
             AnyValue::Map(value) => value.as_json_value(),
+            &_ => Value::Null,
         }
     }
 }

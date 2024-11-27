@@ -46,7 +46,7 @@ pub fn write(trace_point: &ehi::TracepointState, buffer: &[u8]) -> i32 {
     }
 
     if PROTOBUF_VERSION.len() != 8 {
-        otel_debug!(name: "TracePointWriteError", reason = "Version must be char[8].", version = PROTOBUF_VERSION);
+        otel_debug!(name: "TracePointWriteError", reason = "Version must be char[8].", version = format!("{:?}", PROTOBUF_VERSION));
         return -1;
     }
 
