@@ -2,7 +2,7 @@ use std::fmt::Debug;
 
 use opentelemetry_sdk::logs::LogResult;
 
-#[cfg(feature = "logs_level_enabled")]
+#[cfg(feature = "spec_unstable_logs_enabled")]
 use opentelemetry_sdk::export::logs::LogExporter;
 
 use crate::logs::exporter::*;
@@ -46,7 +46,7 @@ impl opentelemetry_sdk::logs::LogProcessor for ReentrantLogProcessor {
         Ok(())
     }
 
-    #[cfg(feature = "logs_level_enabled")]
+    #[cfg(feature = "spec_unstable_logs_enabled")]
     fn event_enabled(
         &self,
         level: opentelemetry::logs::Severity,
