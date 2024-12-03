@@ -39,13 +39,38 @@ impl Debug for MetricsExporter {
     }
 }
 
+fn emit_metric(resource_metric: &ResourceMetrics, buffer: &mut Vec<u8>) -> MetricResult<()> {
+    // Zero the buffer to ensure no data is left over from previous writes
+    buffer.clear();
+
+    let proto_message: ExportMetricsServiceRequest = (&*resource_metric).into();
+    proto_message
+        .encode(buffer)
+        .map_err(|err| MetricError::Other(err.to_string()))?;
+
+    if (proto_message.encoded_len()) > etw::MAX_EVENT_SIZE {
+        otel_warn!(name: "MetricExportFailedDueToMaxSizeLimit", size = proto_message.encoded_len(), max_size = etw::MAX_EVENT_SIZE);
+    } else {
+        let result = etw::write(&buffer);
+        // TODO: Better logging/internal metrics needed here for non-failure
+        // case Uncomment the line below to see the exported bytes until a
+        // better logging solution is implemented
+        // println!("Exported {} bytes to ETW", byte_array.len());
+        if result != 0 {
+            otel_warn!(name: "MetricExportFailed", error_code = result);
+        }
+    }
+
+    Ok(())
+}
+
 #[async_trait]
 impl PushMetricExporter for MetricsExporter {
     async fn export(&self, metrics: &mut ResourceMetrics) -> MetricResult<()> {
+        let mut encoding_buffer: Vec<u8> = Vec::with_capacity(1024);
+
         for scope_metric in &metrics.scope_metrics {
             for metric in &scope_metric.metrics {
-                let mut resource_metrics = Vec::new();
-
                 let data = &metric.data.as_any();
                 if let Some(hist) = data.downcast_ref::<data::Histogram<u64>>() {
                     for data_point in &hist.data_points {
@@ -64,7 +89,7 @@ impl PushMetricExporter for MetricsExporter {
                                 }],
                             }],
                         };
-                        resource_metrics.push(resource_metric);
+                        emit_metric(&resource_metric, &mut encoding_buffer)?;
                     }
                 } else if let Some(hist) = data.downcast_ref::<data::Histogram<f64>>() {
                     for data_point in &hist.data_points {
@@ -83,7 +108,7 @@ impl PushMetricExporter for MetricsExporter {
                                 }],
                             }],
                         };
-                        resource_metrics.push(resource_metric);
+                        emit_metric(&resource_metric, &mut encoding_buffer)?;
                     }
                 } else if let Some(hist) = data.downcast_ref::<data::ExponentialHistogram<u64>>() {
                     for data_point in &hist.data_points {
@@ -122,7 +147,7 @@ impl PushMetricExporter for MetricsExporter {
                                 }],
                             }],
                         };
-                        resource_metrics.push(resource_metric);
+                        emit_metric(&resource_metric, &mut encoding_buffer)?;
                     }
                 } else if let Some(hist) = data.downcast_ref::<data::ExponentialHistogram<f64>>() {
                     for data_point in &hist.data_points {
@@ -161,7 +186,7 @@ impl PushMetricExporter for MetricsExporter {
                                 }],
                             }],
                         };
-                        resource_metrics.push(resource_metric);
+                        emit_metric(&resource_metric, &mut encoding_buffer)?;
                     }
                 } else if let Some(sum) = data.downcast_ref::<data::Sum<u64>>() {
                     for data_point in &sum.data_points {
@@ -181,7 +206,7 @@ impl PushMetricExporter for MetricsExporter {
                                 }],
                             }],
                         };
-                        resource_metrics.push(resource_metric);
+                        emit_metric(&resource_metric, &mut encoding_buffer)?;
                     }
                 } else if let Some(sum) = data.downcast_ref::<data::Sum<i64>>() {
                     for data_point in &sum.data_points {
@@ -201,7 +226,7 @@ impl PushMetricExporter for MetricsExporter {
                                 }],
                             }],
                         };
-                        resource_metrics.push(resource_metric);
+                        emit_metric(&resource_metric, &mut encoding_buffer)?;
                     }
                 } else if let Some(sum) = data.downcast_ref::<data::Sum<f64>>() {
                     for data_point in &sum.data_points {
@@ -221,7 +246,7 @@ impl PushMetricExporter for MetricsExporter {
                                 }],
                             }],
                         };
-                        resource_metrics.push(resource_metric);
+                        emit_metric(&resource_metric, &mut encoding_buffer)?;
                     }
                 } else if let Some(gauge) = data.downcast_ref::<data::Gauge<u64>>() {
                     for data_point in &gauge.data_points {
@@ -239,7 +264,7 @@ impl PushMetricExporter for MetricsExporter {
                                 }],
                             }],
                         };
-                        resource_metrics.push(resource_metric);
+                        emit_metric(&resource_metric, &mut encoding_buffer)?;
                     }
                 } else if let Some(gauge) = data.downcast_ref::<data::Gauge<i64>>() {
                     for data_point in &gauge.data_points {
@@ -257,7 +282,7 @@ impl PushMetricExporter for MetricsExporter {
                                 }],
                             }],
                         };
-                        resource_metrics.push(resource_metric);
+                        emit_metric(&resource_metric, &mut encoding_buffer)?;
                     }
                 } else if let Some(gauge) = data.downcast_ref::<data::Gauge<f64>>() {
                     for data_point in &gauge.data_points {
@@ -275,31 +300,10 @@ impl PushMetricExporter for MetricsExporter {
                                 }],
                             }],
                         };
-                        resource_metrics.push(resource_metric);
+                        emit_metric(&resource_metric, &mut encoding_buffer)?;
                     }
                 } else {
                     otel_warn!(name: "MetricExportFailedDueToUnsupportedMetricType", metric_type = format!("{:?}", data));
-                }
-
-                for resource_metric in resource_metrics {
-                    let mut byte_array = Vec::new();
-                    let proto_message: ExportMetricsServiceRequest = (&resource_metric).into();
-                    proto_message
-                        .encode(&mut byte_array)
-                        .map_err(|err| MetricError::Other(err.to_string()))?;
-
-                    if (byte_array.len()) > etw::MAX_EVENT_SIZE {
-                        otel_warn!(name: "MetricExportFailedDueToMaxSizeLimit", size = byte_array.len(), max_size = etw::MAX_EVENT_SIZE);
-                    } else {
-                        let result = etw::write(&byte_array);
-                        // TODO: Better logging/internal metrics needed here for non-failure
-                        // case Uncomment the line below to see the exported bytes until a
-                        // better logging solution is implemented
-                        // println!("Exported {} bytes to ETW", byte_array.len());
-                        if result != 0 {
-                            otel_warn!(name: "MetricExportFailed", error_code = result);
-                        }
-                    }
                 }
             }
         }
