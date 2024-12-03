@@ -13,18 +13,16 @@ RAM:
 |                                |             |
 */
 
+use opentelemetry_etw_metrics::etw::write;
 use criterion::{criterion_group, criterion_main, Criterion};
 
-fn fibonacci(n: u64) -> u64 {
-    match n {
-        0 => 0,
-        1 => 1,
-        _ => fibonacci(n - 1) + fibonacci(n - 2),
-    }
+fn write_event() {
+    let buffer = "This is a test buffer".as_bytes();
+    write(buffer);
 }
 
 fn criterion_benchmark(c: &mut Criterion) {
-    c.bench_function("fib 20", |b| b.iter(|| fibonacci(20)));
+    c.bench_function("write_event", |b| b.iter(|| write_event()));
 }
 
 criterion_group!(benches, criterion_benchmark);
