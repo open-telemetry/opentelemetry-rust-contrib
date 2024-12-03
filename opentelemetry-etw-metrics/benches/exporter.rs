@@ -13,17 +13,10 @@ RAM: 64.0 GB
 | exporter                       | 847.38µs    |
 */
 
-use opentelemetry::metrics::Gauge;
 use opentelemetry::{metrics::MeterProvider as _, KeyValue};
-use opentelemetry::{InstrumentationScope, InstrumentationScopeBuilder};
 use opentelemetry_etw_metrics::MetricsExporter;
-use opentelemetry_sdk::metrics::reader::MetricReader;
-use opentelemetry_sdk::metrics::{ManualReader, PeriodicReader, SdkMeterProvider};
 use opentelemetry_sdk::{
-    metrics::{
-        data::{ResourceMetrics, ScopeMetrics},
-        exporter::PushMetricExporter,
-    },
+    metrics::{reader::MetricReader, PeriodicReader, SdkMeterProvider},
     runtime, Resource,
 };
 
