@@ -13,18 +13,26 @@ RAM:
 |                                |             |
 */
 
+use opentelemetry_etw_metrics::MetricsExporter;
+use opentelemetry_sdk::{metrics::{data::{ResourceMetrics, ScopeMetrics}, exporter::PushMetricExporter}, Resource};
+
 use criterion::{criterion_group, criterion_main, Criterion};
 
-fn fibonacci(n: u64) -> u64 {
-    match n {
-        0 => 0,
-        1 => 1,
-        _ => fibonacci(n - 1) + fibonacci(n - 2),
-    }
+fn export() {
+    let exporter = MetricsExporter::new();
+    let mut resource_metrics = ResourceMetrics {
+        resource: Resource::default(),
+        scope_metrics: vec![ScopeMetrics::default(), ScopeMetrics::default()],
+    };
+
+    let runtime = tokio::runtime::Runtime::new().unwrap();
+    runtime.block_on(async {
+        exporter.export(&mut resource_metrics).await.unwrap();
+    });
 }
 
 fn criterion_benchmark(c: &mut Criterion) {
-    c.bench_function("fib 20", |b| b.iter(|| fibonacci(20)));
+    c.bench_function("export", |b| b.iter(|| { export()}));
 }
 
 criterion_group!(benches, criterion_benchmark);
