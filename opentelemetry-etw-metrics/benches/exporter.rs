@@ -5,12 +5,12 @@
 /*
 The benchmark results:
 criterion = "0.5.1"
-OS:
-Hardware:
-RAM:
+OS: Windows 11 Enterprise N, 23H2, Build 22631.4460
+Hardware: Intel(R) Xeon(R) Platinum 8370C CPU @ 2.80GHz   2.79 GHz, 16vCPUs
+RAM: 64.0 GB
 | Test                           | Average time|
 |--------------------------------|-------------|
-|                                |             |
+| exporter                       | 1.2927ms    |
 */
 
 use opentelemetry_etw_metrics::MetricsExporter;
