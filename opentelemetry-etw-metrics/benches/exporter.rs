@@ -10,29 +10,55 @@ Hardware: Intel(R) Xeon(R) Platinum 8370C CPU @ 2.80GHz   2.79 GHz, 16vCPUs
 RAM: 64.0 GB
 | Test                           | Average time|
 |--------------------------------|-------------|
-| exporter                       | 1.2927ms    |
+| exporter                       | 847.38µs    |
 */
 
+use opentelemetry::metrics::Gauge;
+use opentelemetry::{metrics::MeterProvider as _, KeyValue};
+use opentelemetry::{InstrumentationScope, InstrumentationScopeBuilder};
 use opentelemetry_etw_metrics::MetricsExporter;
-use opentelemetry_sdk::{metrics::{data::{ResourceMetrics, ScopeMetrics}, exporter::PushMetricExporter}, Resource};
+use opentelemetry_sdk::metrics::reader::MetricReader;
+use opentelemetry_sdk::metrics::{ManualReader, PeriodicReader, SdkMeterProvider};
+use opentelemetry_sdk::{
+    metrics::{
+        data::{ResourceMetrics, ScopeMetrics},
+        exporter::PushMetricExporter,
+    },
+    runtime, Resource,
+};
 
 use criterion::{criterion_group, criterion_main, Criterion};
 
 fn export() {
-    let exporter = MetricsExporter::new();
-    let mut resource_metrics = ResourceMetrics {
-        resource: Resource::default(),
-        scope_metrics: vec![ScopeMetrics::default(), ScopeMetrics::default()],
-    };
+    // Create a new tokio runtime that blocks on the async execution
+    tokio::runtime::Builder::new_multi_thread()
+        .worker_threads(1)
+        .enable_all()
+        .build()
+        .unwrap()
+        .block_on(async {
+            let exporter = MetricsExporter::new();
+            let reader = PeriodicReader::builder(exporter, runtime::Tokio).build();
+            let meter_provider = SdkMeterProvider::builder()
+                .with_resource(Resource::new(vec![KeyValue::new(
+                    "service.name",
+                    "service-name",
+                )]))
+                .with_reader(reader.clone())
+                .build();
+            let meter = meter_provider.meter("etw-bench");
+            let gauge = meter.u64_gauge("gauge").build();
 
-    let runtime = tokio::runtime::Runtime::new().unwrap();
-    runtime.block_on(async {
-        exporter.export(&mut resource_metrics).await.unwrap();
-    });
+            for _ in 0..10_000 {
+                gauge.record(1, &[KeyValue::new("key", "value")]);
+            }
+
+            reader.force_flush().unwrap();
+        });
 }
 
 fn criterion_benchmark(c: &mut Criterion) {
-    c.bench_function("export", |b| b.iter(|| { export()}));
+    c.bench_function("export", |b| b.iter(|| export()));
 }
 
 criterion_group!(benches, criterion_benchmark);
