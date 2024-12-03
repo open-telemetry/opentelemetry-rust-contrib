@@ -13,8 +13,8 @@ RAM: 64.0 GB
 | write_event                    | 2.0649ns    |
 */
 
-use opentelemetry_etw_metrics::etw::write;
 use criterion::{criterion_group, criterion_main, Criterion};
+use opentelemetry_etw_metrics::etw::write;
 
 fn write_event() {
     let buffer = "This is a test buffer".as_bytes();
