@@ -324,7 +324,7 @@ impl opentelemetry_sdk::export::logs::LogExporter for UserEventsExporter {
         Ok(())
     }
 
-    #[cfg(feature = "logs_level_enabled")]
+    #[cfg(feature = "spec_unstable_logs_enabled")]
     fn event_enabled(&self, level: Severity, _target: &str, name: &str) -> bool {
         let (found, keyword) = if self.exporter_config.keywords_map.is_empty() {
             (true, self.exporter_config.default_keyword)
