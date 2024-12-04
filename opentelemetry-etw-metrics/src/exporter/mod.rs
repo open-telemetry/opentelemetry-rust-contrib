@@ -1,5 +1,6 @@
-use opentelemetry::otel_warn;
+use crate::etw;
 
+use opentelemetry::otel_warn;
 use opentelemetry_proto::tonic::{
     collector::metrics::v1::ExportMetricsServiceRequest,
     metrics::v1::{
@@ -12,13 +13,11 @@ use opentelemetry_proto::tonic::{
 use opentelemetry_sdk::metrics::{
     data::ResourceMetrics, exporter::PushMetricExporter, MetricError, MetricResult, Temporality,
 };
-use prost::Message;
-
-use async_trait::async_trait;
 
 use std::fmt::{Debug, Formatter};
 
-use crate::etw;
+use async_trait::async_trait;
+use prost::Message;
 
 pub struct MetricsExporter {}
 
