@@ -74,7 +74,7 @@ mod tests {
             ),
             KeyValue::new(semconv::resource::FAAS_NAME, "my-lambda-function"),
             KeyValue::new(semconv::resource::FAAS_VERSION, "$LATEST"),
-            KeyValue::new(semconv::resource::FAAS_MAX_MEMORY, 128),
+            KeyValue::new(semconv::resource::FAAS_MAX_MEMORY, 128 * 1024 * 1024),
         ]);
 
         let detector = LambdaResourceDetector {};
