@@ -91,7 +91,7 @@ pub fn new_span_if_recording(
 /// ```
 /// use opentelemetry::trace::{SpanBuilder, TraceContextExt as _};
 /// use opentelemetry_contrib::trace::{new_span_if_parent_sampled, Contextualized, TracerSource};
-
+///
 /// enum Message{Command};
 /// let (tx, rx) = std::sync::mpsc::channel();
 ///
