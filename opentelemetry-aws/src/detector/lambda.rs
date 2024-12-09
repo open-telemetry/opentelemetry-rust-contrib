@@ -27,7 +27,7 @@ impl ResourceDetector for LambdaResourceDetector {
 
         let aws_region = env::var(AWS_REGION_ENV_VAR).unwrap_or_default();
         let function_version = env::var(AWS_LAMBDA_FUNCTION_VERSION_ENV_VAR).unwrap_or_default();
-        // Convert memory limit from MB to Bytes as required by semantic conventions.
+        // Convert memory limit from MB (string) to Bytes (int) as required by semantic conventions.
         let function_memory_limit = env::var(AWS_LAMBDA_MEMORY_LIMIT_ENV_VAR)
             .map(|s| s.parse::<i64>().unwrap_or_default() * 1024 * 1024)
             .unwrap_or_default();
