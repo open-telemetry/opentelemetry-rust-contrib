@@ -152,7 +152,7 @@ impl Display for Environment {
 
 fn parent_sampled_tracer(inner_sampler: Sampler) -> (TracerProvider, BoxedTracer) {
     let provider = TracerProvider::builder()
-        .with_config(Config::default().with_sampler(Sampler::ParentBased(Box::new(inner_sampler))))
+        .with_sampler(Sampler::ParentBased(Box::new(inner_sampler)))
         .with_simple_exporter(NoopExporter)
         .build();
     let tracer = provider.tracer(module_path!());
