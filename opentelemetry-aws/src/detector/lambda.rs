@@ -1,4 +1,4 @@
-use opentelemetry::KeyValue;
+use opentelemetry::{Array, KeyValue, StringValue, Value};
 use opentelemetry_sdk::resource::ResourceDetector;
 use opentelemetry_sdk::Resource;
 use opentelemetry_semantic_conventions as semconv;
@@ -46,7 +46,7 @@ impl ResourceDetector for LambdaResourceDetector {
             KeyValue::new(semconv::resource::FAAS_MAX_MEMORY, function_memory_limit),
             KeyValue::new(
                 semconv::resource::AWS_LOG_GROUP_NAMES,
-                vec![log_group_name].into(),
+                Value::Array(Array::from(vec![StringValue::from(log_group_name)])),
             ),
         ];
 
@@ -87,7 +87,9 @@ mod tests {
             KeyValue::new(semconv::resource::FAAS_MAX_MEMORY, 128 * 1024 * 1024),
             KeyValue::new(
                 semconv::resource::AWS_LOG_GROUP_NAMES,
-                vec!["/aws/lambda/my-lambda-function"].into(),
+                Value::Array(Array::from(vec![StringValue::from(
+                    "/aws/lambda/my-lambda-function".to_string(),
+                )])),
             ),
         ]);
 
