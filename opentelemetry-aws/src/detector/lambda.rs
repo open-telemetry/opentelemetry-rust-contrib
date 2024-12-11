@@ -12,6 +12,7 @@ const AWS_REGION_ENV_VAR: &str = "AWS_REGION";
 const AWS_LAMBDA_FUNCTION_VERSION_ENV_VAR: &str = "AWS_LAMBDA_FUNCTION_VERSION";
 const AWS_LAMBDA_LOG_STREAM_NAME_ENV_VAR: &str = "AWS_LAMBDA_LOG_STREAM_NAME";
 const AWS_LAMBDA_MEMORY_LIMIT_ENV_VAR: &str = "AWS_LAMBDA_FUNCTION_MEMORY_SIZE";
+const AWS_LAMBDA_LOG_GROUP_NAME_ENV_VAR: &str = "AWS_LAMBDA_LOG_GROUP_NAME";
 
 /// Resource detector that collects resource information from AWS Lambda environment.
 pub struct LambdaResourceDetector;
@@ -31,6 +32,7 @@ impl ResourceDetector for LambdaResourceDetector {
         // Instance attributes corresponds to the log stream name for AWS Lambda;
         // See the FaaS resource specification for more details.
         let instance = env::var(AWS_LAMBDA_LOG_STREAM_NAME_ENV_VAR).unwrap_or_default();
+        let log_group_name = env::var(AWS_LAMBDA_LOG_GROUP_NAME_ENV_VAR).unwrap_or_default();
 
         let attributes = [
             KeyValue::new(semconv::resource::CLOUD_PROVIDER, "aws"),
@@ -39,6 +41,10 @@ impl ResourceDetector for LambdaResourceDetector {
             KeyValue::new(semconv::resource::FAAS_NAME, lambda_name),
             KeyValue::new(semconv::resource::FAAS_VERSION, function_version),
             KeyValue::new(semconv::resource::FAAS_MAX_MEMORY, function_memory_limit),
+            KeyValue::new(
+                semconv::resource::AWS_LOG_GROUP_NAMES,
+                vec![log_group_name].into(),
+            ),
         ];
 
         Resource::new(attributes)
@@ -61,6 +67,10 @@ mod tests {
             "2023/01/01/[$LATEST]5d1edb9e525d486696cf01a3503487bc",
         );
         set_var(AWS_LAMBDA_MEMORY_LIMIT_ENV_VAR, "128");
+        set_var(
+            AWS_LAMBDA_LOG_GROUP_NAME_ENV_VAR,
+            "/aws/lambda/my-lambda-function",
+        );
 
         let expected = Resource::new([
             KeyValue::new(semconv::resource::CLOUD_PROVIDER, "aws"),
@@ -72,6 +82,10 @@ mod tests {
             KeyValue::new(semconv::resource::FAAS_NAME, "my-lambda-function"),
             KeyValue::new(semconv::resource::FAAS_VERSION, "$LATEST"),
             KeyValue::new(semconv::resource::FAAS_MAX_MEMORY, "128"),
+            KeyValue::new(
+                semconv::resource::AWS_LOG_GROUP_NAMES,
+                vec!["/aws/lambda/my-lambda-function"].into(),
+            ),
         ]);
 
         let detector = LambdaResourceDetector {};
@@ -84,6 +98,7 @@ mod tests {
         remove_var(AWS_LAMBDA_FUNCTION_VERSION_ENV_VAR);
         remove_var(AWS_LAMBDA_LOG_STREAM_NAME_ENV_VAR);
         remove_var(AWS_LAMBDA_MEMORY_LIMIT_ENV_VAR);
+        remove_var(AWS_LAMBDA_LOG_GROUP_NAME_ENV_VAR);
     }
 
     #[sealed_test]
