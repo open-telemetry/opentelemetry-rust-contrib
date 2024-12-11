@@ -27,7 +27,10 @@ impl ResourceDetector for LambdaResourceDetector {
 
         let aws_region = env::var(AWS_REGION_ENV_VAR).unwrap_or_default();
         let function_version = env::var(AWS_LAMBDA_FUNCTION_VERSION_ENV_VAR).unwrap_or_default();
-        let function_memory_limit = env::var(AWS_LAMBDA_MEMORY_LIMIT_ENV_VAR).unwrap_or_default();
+        // Convert memory limit from MB (string) to Bytes (int) as required by semantic conventions.
+        let function_memory_limit = env::var(AWS_LAMBDA_MEMORY_LIMIT_ENV_VAR)
+            .map(|s| s.parse::<i64>().unwrap_or_default() * 1024 * 1024)
+            .unwrap_or_default();
         // Instance attributes corresponds to the log stream name for AWS Lambda;
         // See the FaaS resource specification for more details.
         let instance = env::var(AWS_LAMBDA_LOG_STREAM_NAME_ENV_VAR).unwrap_or_default();
@@ -71,7 +74,7 @@ mod tests {
             ),
             KeyValue::new(semconv::resource::FAAS_NAME, "my-lambda-function"),
             KeyValue::new(semconv::resource::FAAS_VERSION, "$LATEST"),
-            KeyValue::new(semconv::resource::FAAS_MAX_MEMORY, "128"),
+            KeyValue::new(semconv::resource::FAAS_MAX_MEMORY, 128 * 1024 * 1024),
         ]);
 
         let detector = LambdaResourceDetector {};
