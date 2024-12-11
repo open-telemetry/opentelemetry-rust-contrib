@@ -1,0 +1,26 @@
+[package]
+name = "stress"
+version = "0.1.0"
+edition = "2021"
+publish = false
+
+[[bin]] # Bin to run the metrics stress tests for Counter
+name = "user-events-enabled"
+path = "src/user_events_enabled.rs"
+doc = false
+
+[dependencies]
+ctrlc = "3.2.5"
+lazy_static = "1.4.0"
+num_cpus = "1.15.0"
+rand = { version = "0.8.4", features = ["small_rng"] }
+num-format = "0.4.4"
+sysinfo = { version = "0.32", optional = true }
+libc = "=0.2.164" # https://github.com/GuillaumeGomez/sysinfo/issues/1392
+async-trait = "0.1.51"
+futures-executor = "0.3"
+eventheader_dynamic = "0.4.0"
+eventheader = "0.4.0"
+
+[features]
+stats = ["sysinfo"]
