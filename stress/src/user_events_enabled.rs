@@ -1,3 +1,8 @@
+// To run the test, execute the following command in the stress directory as sudo:
+// sudo -E ~/.cargo/bin/cargo rnu --bin user-events-enabled --release
+
+// TODO : Add stess result here.
+
 mod throughput;
 use eventheader_dynamic::{Provider, ProviderOptions};
 use lazy_static::lazy_static;
