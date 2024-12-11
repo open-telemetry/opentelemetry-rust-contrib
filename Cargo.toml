@@ -1,8 +1,5 @@
 [workspace]
-members = [
-    "opentelemetry-*",
-    "examples/*",
-]
+members = ["opentelemetry-*", "examples/*"]
 resolver = "2"
 
 [profile.bench]
@@ -18,4 +15,7 @@ opentelemetry-http = "0.27"
 opentelemetry-proto = { version = "0.27", default-features = false }
 opentelemetry_sdk = { version = "0.27", default-features = false }
 opentelemetry-stdout = "0.27"
-opentelemetry-semantic-conventions = { version = "0.27", features = ["semconv_experimental"] }
+opentelemetry-semantic-conventions = { version = "0.27", features = [
+    "semconv_experimental",
+] }
+criterion = "0.5"
