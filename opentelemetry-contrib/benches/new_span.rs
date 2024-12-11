@@ -13,7 +13,7 @@ use opentelemetry_contrib::trace::{
 };
 use opentelemetry_sdk::{
     export::trace::{ExportResult, SpanData, SpanExporter},
-    trace::{Config, Sampler, TracerProvider},
+    trace::{Sampler, TracerProvider},
 };
 #[cfg(not(target_os = "windows"))]
 use pprof::criterion::{Output, PProfProfiler};
