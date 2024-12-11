@@ -16,7 +16,6 @@ num_cpus = "1.15.0"
 num-format = "0.4.4"
 sysinfo = { version = "0.32", optional = true }
 eventheader_dynamic = "0.4.0"
-eventheader = "0.4.0"
 
 [features]
 stats = ["sysinfo"]
