@@ -287,7 +287,7 @@ impl DatadogPipelineBuilder {
         let (config, service_name) = self.build_config_and_service_name();
         let exporter = self.build_exporter_with_service_name(service_name)?;
         let mut provider_builder = TracerProvider::builder().with_simple_exporter(exporter);
-        provider_builder = provider_builder.with_config(config);
+        provider_builder = provider_builder.with_resource(config.resource.into_owned());
         let provider = provider_builder.build();
         let scope = InstrumentationScope::builder("opentelemetry-datadog")
             .with_version(env!("CARGO_PKG_VERSION"))
@@ -305,7 +305,7 @@ impl DatadogPipelineBuilder {
         let (config, service_name) = self.build_config_and_service_name();
         let exporter = self.build_exporter_with_service_name(service_name)?;
         let mut provider_builder = TracerProvider::builder().with_batch_exporter(exporter, runtime);
-        provider_builder = provider_builder.with_config(config);
+        provider_builder = provider_builder.with_resource(config.resource.into_owned());
         let provider = provider_builder.build();
         let scope = InstrumentationScope::builder("opentelemetry-datadog")
             .with_version(env!("CARGO_PKG_VERSION"))
