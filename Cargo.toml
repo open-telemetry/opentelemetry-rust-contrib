@@ -2,6 +2,7 @@
 members = [
     "opentelemetry-*",
     "examples/*",
+    "stress",
 ]
 resolver = "2"
 
