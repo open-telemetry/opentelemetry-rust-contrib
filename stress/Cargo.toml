@@ -4,7 +4,7 @@ version = "0.1.0"
 edition = "2021"
 publish = false
 
-[[bin]] # Bin to run the metrics stress tests for Counter
+[[bin]] # Bin to run the metrics stress tests for Logs UserEvent Exporter
 name = "user-events-enabled"
 path = "src/user_events_enabled.rs"
 doc = false
