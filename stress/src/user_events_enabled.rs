@@ -2,6 +2,10 @@ mod throughput;
 use eventheader_dynamic::{Provider, ProviderOptions};
 use lazy_static::lazy_static;
 
+// Global constants for level and keyword
+const LEVEL: u8 = 4; // Example level (Informational)
+const KEYWORD: u64 = 0x01; // Example keyword
+
 lazy_static! {
     static ref PROVIDER: Provider = {
         // Initialize the Provider with dynamic options
@@ -10,9 +14,7 @@ lazy_static! {
         let mut provider = Provider::new("testprovider", &options);
 
         // Register events with specific levels and keywords
-        let keyword = 0x01; // Example keyword
-        let level = 4; // Example level (Informational)
-        provider.register_set(level.into(), keyword);
+        provider.register_set(LEVEL.into(), KEYWORD);
 
         provider
     };
@@ -24,12 +26,8 @@ fn main() {
 }
 
 fn test_user_events_enabled() {
-    let level = 4; // Informational level
-    let keyword = 0x01; // Example keyword
-
     // Find and check if the event is enabled
-    if let Some(event_set) = PROVIDER.find_set(level.into(), keyword) {
-        println!("echk for enableD");
+    if let Some(event_set) = PROVIDER.find_set(LEVEL.into(), KEYWORD) {
         let _ = event_set.enabled(); // Perform the enabled check
     }
 }
