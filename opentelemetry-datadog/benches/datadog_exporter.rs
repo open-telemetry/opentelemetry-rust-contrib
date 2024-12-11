@@ -4,7 +4,7 @@ use criterion::{black_box, criterion_group, criterion_main, Criterion};
 use http::Request;
 use opentelemetry::{
     trace::{SpanContext, SpanId, SpanKind, Status, TraceFlags, TraceId, TraceState},
-    Array, InstrumentationLibrary, KeyValue, Value,
+    Array, InstrumentationScope, KeyValue, Value,
 };
 use opentelemetry_datadog::{new_pipeline, ApiVersion};
 use opentelemetry_http::HttpClient;
@@ -150,7 +150,7 @@ fn get_span(trace_id: u128, parent_span_id: u64, span_id: u64, rng: &mut ThreadR
     ];
     let events = SpanEvents::default();
     let links = SpanLinks::default();
-    let instrumentation_lib = InstrumentationLibrary::builder("component").build();
+    let instrumentation_scope = InstrumentationScope::builder("component").build();
 
     SpanData {
         span_context,
@@ -164,7 +164,7 @@ fn get_span(trace_id: u128, parent_span_id: u64, span_id: u64, rng: &mut ThreadR
         events,
         links,
         status: Status::Ok,
-        instrumentation_lib,
+        instrumentation_scope,
     }
 }
 

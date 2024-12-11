@@ -1,5 +1,4 @@
 /// Unified tags - See: https://docs.datadoghq.com/getting_started/tagging/unified_service_tagging
-
 pub struct UnifiedTags {
     pub service: UnifiedTagField,
     pub env: UnifiedTagField,

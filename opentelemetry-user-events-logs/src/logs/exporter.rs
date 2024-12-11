@@ -167,7 +167,7 @@ impl UserEventsExporter {
     pub(crate) fn export_log_data(
         &self,
         log_record: &opentelemetry_sdk::logs::LogRecord,
-        instrumentation: &opentelemetry::InstrumentationLibrary,
+        instrumentation: &opentelemetry::InstrumentationScope,
     ) -> opentelemetry_sdk::export::logs::ExportResult {
         let mut level: Level = Level::Invalid;
         if log_record.severity_number.is_some() {
@@ -176,7 +176,7 @@ impl UserEventsExporter {
 
         let keyword = self
             .exporter_config
-            .get_log_keyword_or_default(instrumentation.name.as_ref());
+            .get_log_keyword_or_default(instrumentation.name().as_ref());
 
         if keyword.is_none() {
             return Ok(());
@@ -194,7 +194,7 @@ impl UserEventsExporter {
             EBW.with(|eb| {
                 let mut eb = eb.borrow_mut();
                 let event_tags: u32 = 0; // TBD name and event_tag values
-                eb.reset(instrumentation.name.as_ref(), event_tags as u16);
+                eb.reset(instrumentation.name().as_ref(), event_tags as u16);
                 eb.opcode(Opcode::Info);
 
                 eb.add_value("__csver__", 0x0401u16, FieldFormat::HexInt, 0);
@@ -268,6 +268,7 @@ impl UserEventsExporter {
                             AnyValue::Bytes(value) => String::from_utf8_lossy(value).to_string(),
                             AnyValue::ListAny(_value) => "".to_string(),
                             AnyValue::Map(_value) => "".to_string(),
+                            &_ => "".to_string(),
                         },
                         FieldFormat::Default,
                         0,
@@ -316,14 +317,14 @@ impl opentelemetry_sdk::export::logs::LogExporter for UserEventsExporter {
     async fn export(
         &mut self,
         batch: opentelemetry_sdk::export::logs::LogBatch<'_>,
-    ) -> opentelemetry::logs::LogResult<()> {
+    ) -> opentelemetry_sdk::logs::LogResult<()> {
         for (record, instrumentation) in batch.iter() {
             let _ = self.export_log_data(record, instrumentation);
         }
         Ok(())
     }
 
-    #[cfg(feature = "logs_level_enabled")]
+    #[cfg(feature = "spec_unstable_logs_enabled")]
     fn event_enabled(&self, level: Severity, _target: &str, name: &str) -> bool {
         let (found, keyword) = if self.exporter_config.keywords_map.is_empty() {
             (true, self.exporter_config.default_keyword)

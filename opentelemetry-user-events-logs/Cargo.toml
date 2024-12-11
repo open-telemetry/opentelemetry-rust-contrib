@@ -1,7 +1,7 @@
 [package]
 name = "opentelemetry-user-events-logs"
 description = "OpenTelemetry-Rust exporter to userevents"
-version = "0.7.0"
+version = "0.8.0"
 edition = "2021"
 homepage = "https://github.com/open-telemetry/opentelemetry-rust-contrib/tree/main/opentelemetry-user-events-logs"
 repository = "https://github.com/open-telemetry/opentelemetry-rust-contrib/tree/main/opentelemetry-user-events-logs"
@@ -26,5 +26,5 @@ tracing-subscriber = { version = "0.3.0", default-features = false, features = [
 microbench = "0.5"
 
 [features]
-logs_level_enabled = ["opentelemetry/logs_level_enabled", "opentelemetry_sdk/logs_level_enabled"]
-default = ["logs_level_enabled"]
+spec_unstable_logs_enabled = ["opentelemetry/spec_unstable_logs_enabled", "opentelemetry_sdk/spec_unstable_logs_enabled", "opentelemetry-appender-tracing/spec_unstable_logs_enabled"]
+default = ["spec_unstable_logs_enabled"]

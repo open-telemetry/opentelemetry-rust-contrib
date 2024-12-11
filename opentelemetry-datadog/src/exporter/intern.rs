@@ -10,7 +10,7 @@ use std::{
 type InternHasher = ahash::AHasher;
 
 #[cfg(all(feature = "intern-std", not(feature = "intern-ahash")))]
-type InternHasher = std::hash::DefaultHasher;
+type InternHasher = std::collections::hash_map::DefaultHasher;
 
 #[derive(PartialEq)]
 pub(crate) enum InternValue<'a> {
@@ -18,7 +18,7 @@ pub(crate) enum InternValue<'a> {
     OpenTelemetryValue(&'a Value),
 }
 
-impl<'a> Hash for InternValue<'a> {
+impl Hash for InternValue<'_> {
     fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
         match &self {
             InternValue::RegularString(s) => s.hash(state),
@@ -36,13 +36,15 @@ impl<'a> Hash for InternValue<'a> {
                         }
                     }
                     opentelemetry::Array::String(x) => x.hash(state),
+                    &_ => {}
                 },
+                &_ => {}
             },
         }
     }
 }
 
-impl<'a> Eq for InternValue<'a> {}
+impl Eq for InternValue<'_> {}
 
 const BOOLEAN_TRUE: &str = "true";
 const BOOLEAN_FALSE: &str = "false";
@@ -82,7 +84,7 @@ impl WriteAsLiteral for StringValue {
     }
 }
 
-impl<'a> InternValue<'a> {
+impl InternValue<'_> {
     pub(crate) fn write_as_str<W: RmpWrite>(
         &self,
         payload: &mut W,
@@ -110,7 +112,9 @@ impl<'a> InternValue<'a> {
                     opentelemetry::Array::String(x) => {
                         Self::write_generic_array(payload, reusable_buffer, x)
                     }
+                    _ => Self::write_empty_array(payload),
                 },
+                _ => Self::write_empty_array(payload),
             },
         }
     }
