@@ -1,5 +1,5 @@
 // To run the test, execute the following command in the stress directory as sudo:
-// sudo -E ~/.cargo/bin/cargo rnu --bin user-events-enabled --release
+// sudo -E ~/.cargo/bin/cargo run --bin eventheader --release -- <num-of-threads>
 
 // TODO : Add stess result here.
 
