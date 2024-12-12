@@ -1,7 +1,10 @@
 // To run the test, execute the following command in the stress directory as sudo:
 // sudo -E ~/.cargo/bin/cargo run --bin eventheader --release -- <num-of-threads>
 
-// TODO : Add stess result here.
+// Conf - AMD EPYC 7763 64-Core Processor 2.44 GHz, 64GB RAM, Cores:8 , Logical processors: 16
+// Number of threads 1: 231,423,880 iterations/sec
+// Number of threads 2:  27,482,150 iterations/sec
+// Number of threads 16:  26,651,534 iterations/sec
 
 mod throughput;
 use eventheader_dynamic::{Provider, ProviderOptions};
