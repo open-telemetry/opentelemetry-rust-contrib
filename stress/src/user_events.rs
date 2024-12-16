@@ -8,8 +8,19 @@
 //!   - Add `0` to `/sys/kernel/debug/tracing/events/user_events/testprovider_L4K1Gtestprovider/enable`:
 //!     `echo 0 > /sys/kernel/debug/tracing/events/user_events/testprovider_L4K1Gtestprovider/enable`
 //!
-//! NOTE: Running as `sudo -E` ensures the environment variables for Rust and Cargo are retained,
-//! and you have sufficient permissions to access `/sys/kernel/debug/tracing` and utilize `user_events`.
+//!
+// Conf - AMD EPYC 7763 64-Core Processor 2.44 GHz, 64GB RAM, Cores:8 , Logical processors: 16
+// Stress Test Results (user_events disabled)
+// Threads: 1 - Average Throughput: 30,866,752 iterations/sec
+// Threads: 5 - Average Throughput: 32,662,641 iterations/sec
+// Threads: 10 - Average Throughput: 25,776,394 iterations/sec
+// Threads: 16 - Average Throughput: 16,915,860 iterations/sec
+
+// Stress Test Results (user_events enabled)
+// Threads: 1 - Average Throughput: 212,594 iterations/sec
+// Threads: 5 - Average Throughput: 372,695 iterations/sec
+// Threads: 10 - Average Throughput: 277,675 iterations/sec
+// Threads: 16 - Average Throughput: 268,940 iterations/sec
 
 use opentelemetry_appender_tracing::layer;
 use opentelemetry_sdk::logs::LoggerProvider;
