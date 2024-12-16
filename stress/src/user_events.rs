@@ -62,7 +62,7 @@ fn main() {
     // Use the provided stress test framework
     println!("Starting stress test for UserEventsExporter...");
     throughput::test_throughput(|| {
-        log_event_task(); // Log the error event in each iteration
+        log_event_task();
     });
     println!("Stress test completed.");
 }
