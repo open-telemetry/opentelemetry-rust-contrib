@@ -15,7 +15,7 @@ use opentelemetry_appender_tracing::layer;
 use opentelemetry_sdk::logs::LoggerProvider;
 use opentelemetry_user_events_logs::{ExporterConfig, ReentrantLogProcessor, UserEventsExporter};
 use std::collections::HashMap;
-use tracing::error;
+use tracing::info;
 use tracing_subscriber::prelude::*;
 mod throughput;
 
@@ -25,7 +25,7 @@ fn init_logger() -> LoggerProvider {
         default_keyword: 1,
         keywords_map: HashMap::new(),
     };
-    let exporter = UserEventsExporter::new("test", None, exporter_config);
+    let exporter = UserEventsExporter::new("testprovider", None, exporter_config);
     let reentrant_processor = ReentrantLogProcessor::new(exporter);
     LoggerProvider::builder()
         .with_log_processor(reentrant_processor)
@@ -34,7 +34,7 @@ fn init_logger() -> LoggerProvider {
 
 // Function that performs the logging task
 fn log_event_task() {
-    error!(
+    info!(
         name = "my-event-name",
         event_id = 20,
         user_name = "otel user",
