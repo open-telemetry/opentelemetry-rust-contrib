@@ -4,9 +4,14 @@ version = "0.1.0"
 edition = "2021"
 publish = false
 
-[[bin]] # Bin to run the metrics stress tests for Logs UserEvent Exporter
+[[bin]]
 name = "eventheader"
 path = "src/eventheader.rs"
+doc = false
+
+[[bin]]
+name = "user_events"
+path = "src/user_events.rs"
 doc = false
 
 [dependencies]
@@ -16,6 +21,13 @@ num_cpus = "1.15.0"
 num-format = "0.4.4"
 sysinfo = { version = "0.32", optional = true }
 eventheader_dynamic = "0.4.0"
+
+opentelemetry-appender-tracing = { workspace = true }
+opentelemetry_sdk = { workspace = true, features = ["logs"] }
+opentelemetry-user-events-logs = { path = "../opentelemetry-user-events-logs"}
+tracing = { version = "0.1", default-features = false, features = ["std"] }
+tracing-core = "0.1.31"
+tracing-subscriber = { version = "0.3.0", default-features = false, features = ["registry", "std"] }
 
 [features]
 stats = ["sysinfo"]
