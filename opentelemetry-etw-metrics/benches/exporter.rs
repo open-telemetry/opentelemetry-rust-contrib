@@ -32,30 +32,46 @@ async fn export(exporter: &MetricsExporter, mut resource_metrics: ResourceMetric
 }
 
 fn create_resource_metrics() -> ResourceMetrics {
-    let data_point = DataPoint {
-        attributes: vec![KeyValue::new("datapoint key", "datapoint value")],
-        start_time: Some(std::time::SystemTime::now()),
-        time: Some(std::time::SystemTime::now()),
-        value: 1.0_f64,
-        exemplars: vec![],
-    };
+    // Metric does not implement clone so this helper function is used to create a metric
+    fn create_metric() -> Metric {
+        let data_point = DataPoint {
+            attributes: vec![KeyValue::new("datapoint key", "datapoint value")],
+            start_time: Some(std::time::SystemTime::now()),
+            time: Some(std::time::SystemTime::now()),
+            value: 1.0_f64,
+            exemplars: vec![],
+        };
 
-    let sum: Sum<f64> = Sum {
-        data_points: vec![data_point.clone(), data_point.clone(), data_point],
-        temporality: Temporality::Delta,
-        is_monotonic: true,
-    };
+        let sum: Sum<f64> = Sum {
+            data_points: vec![data_point.clone(); 2_000],
+            temporality: Temporality::Delta,
+            is_monotonic: true,
+        };
+
+        Metric {
+            name: "metric_name".into(),
+            description: "metric description".into(),
+            unit: "metric unit".into(),
+            data: Box::new(sum),
+        }
+    }
 
     let resource_metrics = ResourceMetrics {
         resource: Resource::new(vec![KeyValue::new("service.name", "my-service")]),
         scope_metrics: vec![ScopeMetrics {
             scope: InstrumentationScope::default(),
-            metrics: vec![Metric {
-                name: "metric_name".into(),
-                description: "metric description".into(),
-                unit: "metric unit".into(),
-                data: Box::new(sum),
-            }],
+            metrics: vec![
+                create_metric(),
+                create_metric(),
+                create_metric(),
+                create_metric(),
+                create_metric(),
+                create_metric(),
+                create_metric(),
+                create_metric(),
+                create_metric(),
+                create_metric(),
+            ],
         }],
     };
 
