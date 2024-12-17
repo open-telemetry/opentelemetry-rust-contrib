@@ -27,8 +27,7 @@ use opentelemetry_sdk::{
 
 use criterion::{criterion_group, criterion_main, Criterion};
 
-async fn export(mut resource_metrics: ResourceMetrics) {
-    let exporter = MetricsExporter::new();
+async fn export(exporter: &MetricsExporter, mut resource_metrics: ResourceMetrics) {
     exporter.export(&mut resource_metrics).await.unwrap();
 }
 
@@ -70,9 +69,11 @@ fn criterion_benchmark(c: &mut Criterion) {
         .build()
         .unwrap();
 
+    let exporter = MetricsExporter::new();
+
     c.bench_function("export", |b| {
         b.to_async(&runtime)
-            .iter(|| export(create_resource_metrics()))
+            .iter(|| export(&exporter, create_resource_metrics()))
     });
 }
 
