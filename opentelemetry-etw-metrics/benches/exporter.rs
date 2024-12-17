@@ -56,7 +56,7 @@ fn create_resource_metrics() -> ResourceMetrics {
         }
     }
 
-    let resource_metrics = ResourceMetrics {
+    ResourceMetrics {
         resource: Resource::new(vec![KeyValue::new("service.name", "my-service")]),
         scope_metrics: vec![ScopeMetrics {
             scope: InstrumentationScope::default(),
@@ -73,9 +73,7 @@ fn create_resource_metrics() -> ResourceMetrics {
                 create_metric(),
             ],
         }],
-    };
-
-    resource_metrics
+    }
 }
 
 fn criterion_benchmark(c: &mut Criterion) {
