@@ -56,6 +56,7 @@ impl ShouldSample for AgentBasedSampler {
 }
 
 fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync + 'static>> {
+    #[allow(deprecated)]
     let tracer = new_pipeline()
         .with_service_name("agent-sampling-demo")
         .with_api_version(ApiVersion::Version05)

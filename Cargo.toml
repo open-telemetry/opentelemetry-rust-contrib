@@ -1,5 +1,9 @@
 [workspace]
-members = ["opentelemetry-*", "examples/*"]
+members = [
+    "opentelemetry-*",
+    "examples/*",
+    "stress",
+]
 resolver = "2"
 
 [profile.bench]
