@@ -31,9 +31,5 @@ default = ["internal-logs"]
 ignored = ["tracing"]
 
 [[bench]]
-name = "etw"
-harness = false
-
-[[bench]]
 name = "exporter"
 harness = false
