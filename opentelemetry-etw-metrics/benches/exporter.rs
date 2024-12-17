@@ -13,45 +13,67 @@ RAM: 64.0 GB
 | exporter                       | 847.38µs    |
 */
 
-use opentelemetry::{metrics::MeterProvider as _, KeyValue};
+use opentelemetry::{InstrumentationScope, KeyValue};
 use opentelemetry_etw_metrics::MetricsExporter;
+
 use opentelemetry_sdk::{
-    metrics::{reader::MetricReader, PeriodicReader, SdkMeterProvider},
-    runtime, Resource,
+    metrics::{
+        data::{DataPoint, Metric, ResourceMetrics, ScopeMetrics, Sum},
+        exporter::PushMetricExporter,
+        Temporality,
+    },
+    Resource,
 };
 
 use criterion::{criterion_group, criterion_main, Criterion};
 
-fn export() {
-    // Create a new tokio runtime that blocks on the async execution
-    tokio::runtime::Builder::new_multi_thread()
-        .worker_threads(1)
-        .enable_all()
-        .build()
-        .unwrap()
-        .block_on(async {
-            let exporter = MetricsExporter::new();
-            let reader = PeriodicReader::builder(exporter, runtime::Tokio).build();
-            let meter_provider = SdkMeterProvider::builder()
-                .with_resource(Resource::new(vec![KeyValue::new(
-                    "service.name",
-                    "service-name",
-                )]))
-                .with_reader(reader.clone())
-                .build();
-            let meter = meter_provider.meter("etw-bench");
-            let gauge = meter.u64_gauge("gauge").build();
+async fn export(mut resource_metrics: ResourceMetrics) {
+    let exporter = MetricsExporter::new();
+    exporter.export(&mut resource_metrics).await.unwrap();
+}
 
-            for _ in 0..10_000 {
-                gauge.record(1, &[KeyValue::new("key", "value")]);
-            }
+fn create_resource_metrics() -> ResourceMetrics {
+    let data_point = DataPoint {
+        attributes: vec![KeyValue::new("datapoint key", "datapoint value")],
+        start_time: Some(std::time::SystemTime::now()),
+        time: Some(std::time::SystemTime::now()),
+        value: 1.0_f64,
+        exemplars: vec![],
+    };
 
-            reader.force_flush().unwrap();
-        });
+    let sum: Sum<f64> = Sum {
+        data_points: vec![data_point.clone(), data_point.clone(), data_point],
+        temporality: Temporality::Delta,
+        is_monotonic: true,
+    };
+
+    let resource_metrics = ResourceMetrics {
+        resource: Resource::new(vec![KeyValue::new("service.name", "my-service")]),
+        scope_metrics: vec![ScopeMetrics {
+            scope: InstrumentationScope::default(),
+            metrics: vec![Metric {
+                name: "metric_name".into(),
+                description: "metric description".into(),
+                unit: "metric unit".into(),
+                data: Box::new(sum),
+            }],
+        }],
+    };
+
+    resource_metrics
 }
 
 fn criterion_benchmark(c: &mut Criterion) {
-    c.bench_function("export", |b| b.iter(|| export()));
+    let runtime = tokio::runtime::Builder::new_multi_thread()
+        .worker_threads(1)
+        .enable_all()
+        .build()
+        .unwrap();
+
+    c.bench_function("export", |b| {
+        b.to_async(&runtime)
+            .iter(|| export(create_resource_metrics()))
+    });
 }
 
 criterion_group!(benches, criterion_benchmark);
