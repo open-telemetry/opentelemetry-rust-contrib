@@ -84,14 +84,17 @@ fn criterion_benchmark(c: &mut Criterion) {
         .unwrap();
 
     c.bench_function("export", move |b| {
-        b.to_async(&runtime).iter_custom(|iters| async move {
+        b.iter_custom(|iters| {
             let exporter = MetricsExporter::new();
 
             let mut resource_metrics = create_resource_metrics();
 
             let start = std::time::Instant::now();
+
             for _i in 0..iters {
-                export(&exporter, &mut resource_metrics).await
+                runtime.block_on(async {
+                    export(&exporter, &mut resource_metrics).await;
+                });
             }
             start.elapsed()
         })
