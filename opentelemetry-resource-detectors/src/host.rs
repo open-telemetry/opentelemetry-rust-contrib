@@ -52,6 +52,7 @@ fn host_id_detect() -> Option<String> {
     let dbus_machine_id_path = Path::new("/var/lib/dbus/machine-id");
     read_to_string(machine_id_path)
         .or_else(|_| read_to_string(dbus_machine_id_path))
+        .map(|id| id.trim().to_string())
         .ok()
 }
 
