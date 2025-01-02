@@ -397,7 +397,7 @@ fn group_into_traces(spans: &mut [SpanData]) -> Vec<&[SpanData]> {
         return vec![];
     }
 
-    spans.sort_by_key(|x| x.span_context.trace_id().to_bytes());
+    spans.sort_unstable_by_key(|x| x.span_context.trace_id().to_bytes());
 
     let mut traces: Vec<&[SpanData]> = Vec::with_capacity(spans.len());
 
