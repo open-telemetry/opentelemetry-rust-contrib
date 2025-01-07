@@ -32,8 +32,9 @@ microbench = "0.5"
 logs_level_enabled = [
     "opentelemetry/spec_unstable_logs_enabled",
     "opentelemetry_sdk/spec_unstable_logs_enabled",
+    "opentelemetry-appender-tracing/spec_unstable_logs_enabled"
 ]
-default = ["logs_level_enabled"]
+default = ["spec_unstable_logs_enabled"]
 
 [[example]]
 name = "basic"
