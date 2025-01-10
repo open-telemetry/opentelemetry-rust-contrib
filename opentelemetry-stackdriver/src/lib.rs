@@ -772,7 +772,7 @@ fn transform_links(links: &opentelemetry_sdk::trace::SpanLinks) -> Option<Links>
 // Map conventional OpenTelemetry keys to their GCP counterparts.
 //
 // https://cloud.google.com/trace/docs/trace-labels
-const KEY_MAP: [(&str, &str); 16] = [
+const KEY_MAP: [(&str, &str); 20] = [
     (semconv::resource::SERVICE_NAME, GCP_SERVICE_NAME),
     (HTTP_PATH, GCP_HTTP_PATH),
     (semconv::attribute::HTTP_HOST, "/http/host"),
@@ -786,9 +786,26 @@ const KEY_MAP: [(&str, &str); 16] = [
     (semconv::attribute::HTTP_USER_AGENT, "/http/user_agent"),
     (semconv::attribute::USER_AGENT_ORIGINAL, "/http/user_agent"),
     (semconv::attribute::HTTP_STATUS_CODE, "/http/status_code"),
+    // https://cloud.google.com/trace/docs/trace-labels#canonical-gke
     (
         semconv::attribute::HTTP_RESPONSE_STATUS_CODE,
         "/http/status_code",
+    ),
+    (
+        semconv::attribute::K8S_CLUSTER_NAME,
+        "g.co/r/k8s_container/cluster_name",
+    ),
+    (
+        semconv::attribute::K8S_NAMESPACE_NAME,
+        "g.co/r/k8s_container/namespace",
+    ),
+    (
+        semconv::attribute::K8S_POD_NAME,
+        "g.co/r/k8s_container/pod_name",
+    ),
+    (
+        semconv::attribute::K8S_CONTAINER_NAME,
+        "g.co/r/k8s_container/container_name",
     ),
     (semconv::trace::HTTP_ROUTE, "/http/route"),
     (HTTP_PATH, GCP_HTTP_PATH),
