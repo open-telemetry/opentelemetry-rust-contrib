@@ -220,6 +220,7 @@ impl Builder {
 
         let count_clone = pending_count.clone();
         let resource = Arc::new(RwLock::new(None));
+        let ctx_resource = resource.clone();
         let future = async move {
             let trace_client = TraceServiceClient::new(trace_channel);
             let authorizer = &authenticator;
@@ -229,7 +230,7 @@ impl Builder {
                 let log_client = log_client.clone();
                 let pending_count = count_clone.clone();
                 let scopes = scopes.clone();
-                let resource = resource.clone();
+                let resource = ctx_resource.clone();
                 ExporterContext {
                     trace_client,
                     log_client,
@@ -248,7 +249,7 @@ impl Builder {
             pending_count,
             maximum_shutdown_duration: maximum_shutdown_duration
                 .unwrap_or_else(|| Duration::from_secs(5)),
-            resource: Arc::new(RwLock::new(None)),
+            resource,
         };
 
         Ok((exporter, future))
