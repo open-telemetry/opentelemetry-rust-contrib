@@ -772,8 +772,7 @@ fn transform_links(links: &opentelemetry_sdk::trace::SpanLinks) -> Option<Links>
 // Map conventional OpenTelemetry keys to their GCP counterparts.
 //
 // https://cloud.google.com/trace/docs/trace-labels
-const KEY_MAP: [(&str, &str); 20] = [
-    (semconv::resource::SERVICE_NAME, GCP_SERVICE_NAME),
+const KEY_MAP: [(&str, &str); 19] = [
     (HTTP_PATH, GCP_HTTP_PATH),
     (semconv::attribute::HTTP_HOST, "/http/host"),
     ("http.request.header.host", "/http/host"),
@@ -843,7 +842,6 @@ fn status(value: opentelemetry::trace::Status) -> Option<Status> {
 }
 const TRACE_APPEND: &str = "https://www.googleapis.com/auth/trace.append";
 const LOGGING_WRITE: &str = "https://www.googleapis.com/auth/logging.write";
-const GCP_SERVICE_NAME: &str = "g.co/gae/app/module";
 const MAX_ATTRIBUTES_PER_SPAN: usize = 32;
 
 #[cfg(test)]
@@ -937,19 +935,13 @@ mod tests {
             actual.attribute_map.get("/http/status_code"),
             Some(&AttributeValue::from(Value::I64(200))),
         );
-        assert_eq!(
-            actual.attribute_map.get("g.co/gae/app/module"),
-            Some(&AttributeValue::from(Value::String(
-                "Test Service Name".into()
-            ))),
-        );
     }
 
     #[test]
     fn test_too_many() {
         let resources = Resource::new([KeyValue::new(
-            semcov::resource::SERVICE_NAME,
-            "Test Service Name",
+            semconv::attribute::USER_AGENT_ORIGINAL,
+            "Test Service Name UA",
         )]);
         let mut attributes = Vec::with_capacity(32);
         for i in 0..32 {
@@ -963,9 +955,9 @@ mod tests {
         assert_eq!(actual.attribute_map.len(), 32);
         assert_eq!(actual.dropped_attributes_count, 1);
         assert_eq!(
-            actual.attribute_map.get("g.co/gae/app/module"),
+            actual.attribute_map.get("/http/user_agent"),
             Some(&AttributeValue::from(Value::String(
-                "Test Service Name".into()
+                "Test Service Name UA".into()
             ))),
         );
     }
