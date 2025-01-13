@@ -44,7 +44,7 @@ impl Debug for MetricsExporter {
 fn emit_export_metric_service_request(
     export_metric_service_request: &ExportMetricsServiceRequest,
 ) -> MetricResult<()> {
-    let mut encoding_buffer = Vec::new();
+    let mut encoding_buffer = Vec::with_capacity(export_metric_service_request.encoded_len());
 
     export_metric_service_request
         .encode(&mut encoding_buffer)
