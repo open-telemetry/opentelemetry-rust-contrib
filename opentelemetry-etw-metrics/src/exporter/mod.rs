@@ -43,17 +43,21 @@ impl Debug for MetricsExporter {
 
 fn emit_export_metric_service_request(
     export_metric_service_request: &ExportMetricsServiceRequest,
+    encoding_buffer: &mut Vec<u8>,
 ) -> MetricResult<()> {
-    let mut encoding_buffer = Vec::with_capacity(export_metric_service_request.encoded_len());
-
-    export_metric_service_request
-        .encode(&mut encoding_buffer)
-        .map_err(|err| MetricError::Other(err.to_string()))?;
-
-    if (encoding_buffer.len()) > etw::MAX_EVENT_SIZE {
-        otel_warn!(name: "MetricExportFailedDueToMaxSizeLimit", size = encoding_buffer.len(), max_size = etw::MAX_EVENT_SIZE);
+    if (export_metric_service_request.encoded_len()) > etw::MAX_EVENT_SIZE {
+        otel_warn!(name: "MetricExportFailedDueToMaxSizeLimit", size = export_metric_service_request.encoded_len(), max_size = etw::MAX_EVENT_SIZE);
     } else {
-        let result = etw::write(&encoding_buffer);
+        encoding_buffer.resize_with(
+            export_metric_service_request.encoded_len(),
+            Default::default,
+        );
+
+        export_metric_service_request
+            .encode(encoding_buffer)
+            .map_err(|err| MetricError::Other(err.to_string()))?;
+
+        let result = etw::write(encoding_buffer);
         // TODO: Better logging/internal metrics needed here for non-failure
         // case Uncomment the line below to see the exported bytes until a
         // better logging solution is implemented
@@ -74,6 +78,8 @@ impl PushMetricExporter for MetricsExporter {
             .schema_url()
             .map(Into::into)
             .unwrap_or_default();
+
+        let mut encoding_buffer = Vec::new();
 
         for scope_metric in &metrics.scope_metrics {
             for metric in &scope_metric.metrics {
@@ -111,6 +117,7 @@ impl PushMetricExporter for MetricsExporter {
                                 }));
                                 emit_export_metric_service_request(
                                     &export_metrics_service_request,
+                                    &mut encoding_buffer,
                                 )?;
                             }
                         }
@@ -127,6 +134,7 @@ impl PushMetricExporter for MetricsExporter {
                                 ));
                                 emit_export_metric_service_request(
                                     &export_metrics_service_request,
+                                    &mut encoding_buffer,
                                 )?;
                             }
                         }
@@ -140,6 +148,7 @@ impl PushMetricExporter for MetricsExporter {
                                 }));
                                 emit_export_metric_service_request(
                                     &export_metrics_service_request,
+                                    &mut encoding_buffer,
                                 )?;
                             }
                         }
@@ -155,6 +164,7 @@ impl PushMetricExporter for MetricsExporter {
                                 }));
                                 emit_export_metric_service_request(
                                     &export_metrics_service_request,
+                                    &mut encoding_buffer,
                                 )?;
                             }
                         }
@@ -168,6 +178,7 @@ impl PushMetricExporter for MetricsExporter {
                                 }));
                                 emit_export_metric_service_request(
                                     &export_metrics_service_request,
+                                    &mut encoding_buffer,
                                 )?;
                             }
                         }
