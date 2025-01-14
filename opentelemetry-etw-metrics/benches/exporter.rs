@@ -10,7 +10,7 @@ Hardware: Intel(R) Xeon(R) Platinum 8370C CPU @ 2.80GHz   2.79 GHz, 16vCPUs
 RAM: 64.0 GB
 | Test                           | Average time|
 |--------------------------------|-------------|
-| exporter                       | 847.38µs    |
+| exporter                       |  22.203 ms  |
 */
 
 use opentelemetry::{InstrumentationScope, KeyValue};
