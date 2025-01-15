@@ -1,10 +1,9 @@
-use std::str::FromStr;
-
-use once_cell::sync::Lazy;
 use opentelemetry::propagation::text_map_propagator::FieldIter;
 use opentelemetry::propagation::{Extractor, Injector, TextMapPropagator};
 use opentelemetry::trace::{SpanContext, SpanId, TraceContextExt, TraceFlags, TraceId, TraceState};
 use opentelemetry::Context;
+use std::str::FromStr;
+use std::sync::OnceLock;
 
 /// Propagates span context in the Google Cloud Trace format,
 /// using the __X-Cloud-Trace-Context__ header.
@@ -27,8 +26,12 @@ pub struct GoogleTraceContextPropagator {
 
 const CLOUD_TRACE_CONTEXT_HEADER: &str = "X-Cloud-Trace-Context";
 
-static TRACE_CONTEXT_HEADER_FIELDS: Lazy<[String; 1]> =
-    Lazy::new(|| [CLOUD_TRACE_CONTEXT_HEADER.to_owned()]);
+// TODO Replace this with LazyLock when MSRV is 1.80+
+static TRACE_CONTEXT_HEADER_FIELDS: OnceLock<[String; 1]> = OnceLock::new();
+
+fn trace_context_header_fields() -> &'static [String; 1] {
+    TRACE_CONTEXT_HEADER_FIELDS.get_or_init(|| [CLOUD_TRACE_CONTEXT_HEADER.to_owned()])
+}
 
 impl GoogleTraceContextPropagator {
     fn extract_span_context(&self, extractor: &dyn Extractor) -> Result<SpanContext, ()> {
@@ -85,7 +88,7 @@ impl TextMapPropagator for GoogleTraceContextPropagator {
     }
 
     fn fields(&self) -> FieldIter<'_> {
-        FieldIter::new(TRACE_CONTEXT_HEADER_FIELDS.as_ref())
+        FieldIter::new(trace_context_header_fields())
     }
 }
 
