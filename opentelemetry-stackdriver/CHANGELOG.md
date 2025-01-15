@@ -2,6 +2,10 @@
 
 ## vNext
 
+### Changed
+
+- Remove `server` feature from tonic dependency
+
 ## v0.24.0
 
 ### Changed
