@@ -50,25 +50,28 @@ jobs:
         args: --all -- --check
     - name: Lint
       run: ./scripts/lint.sh
-# TODO: re-add this test
-#  msrv:
-#    runs-on: ubuntu-latest
-#    steps:
-#    - uses: actions/checkout@v4
-#      with:
-#        submodules: true
-#    - uses: actions-rs/toolchain@v1
-#      with:
-#        profile: minimal
-#        toolchain: 1.65.0
-#        override: true
-#    - name: Patch dependencies versions # some dependencies bump MSRV without major version bump
-#      run: ./scripts/patch_dependencies.sh
-#    - name: Run tests
-#      run: cargo --version &&
-#        cargo test --manifest-path=opentelemetry/Cargo.toml --features trace,metrics,testing &&
-#        cargo test --manifest-path=opentelemetry-jaeger/Cargo.toml --features rt-tokio &&
-#        cargo test --manifest-path=opentelemetry-zipkin/Cargo.toml
+  msrv:
+    strategy:
+      matrix:
+        rust: ["1.70.0", "1.71.1"]
+    runs-on: ubuntu-latest
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: true
+      - name: Set up Rust ${{ matrix.rust }}
+        uses: actions-rs/toolchain@v1
+        with:
+          toolchain: ${{ matrix.rust }}
+          override: true
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-msrv
+      - name: Patch dependencies versions
+        run: bash ./scripts/patch_dependencies.sh
+      - name: Check MSRV for all crates
+        run: bash ./scripts/msrv.sh ${{ matrix.rust }}
   cargo-deny:
     runs-on: ubuntu-latest
     continue-on-error: true # Prevent sudden announcement of a new advisory from failing ci

@@ -1,0 +1,16 @@
+{
+  "1.70.0": [
+    "opentelemetry-aws",
+    "opentelemetry-contrib",
+    "opentelemetry-datadog",
+    "opentelemetry-etw-logs",
+    "opentelemetry-resource-detectors",
+    "opentelemetry-user-events-logs"
+  ],
+  "1.71.1": [
+    "opentelemetry-etw-metrics",
+    "opentelemetry-stackdriver",
+    "opentelemetry-user-events-metrics",
+    "opentelemetry-zpages"
+  ]
+}
