@@ -49,4 +49,5 @@ for package in $packages; do
   package=$(echo "$package" | tr -d '\r\n') # Remove any newline and carriage return characters
   echo "Verifying MSRV version $installed_version for $package"
   rustup run "$installed_version" cargo msrv verify --path "$package" --output-format json
+  echo "" # just for nicer separation between packages
 done
