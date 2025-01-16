@@ -17,7 +17,7 @@ OpenTelemetry-based utilities that don't fit the primary scope of the
 [OpenTelemetry Rust](https://github.com/open-telemetry/opentelemetry-rust)
 project.
 
-*Compiler support: [requires `rustc` 1.65+][msrv]*
+*Compiler support: [requires `rustc` 1.70+][msrv]*
 
 [msrv]: #supported-rust-versions
 
