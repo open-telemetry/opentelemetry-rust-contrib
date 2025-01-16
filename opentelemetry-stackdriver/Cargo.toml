@@ -21,7 +21,6 @@ prost = "0.13"
 prost-types = "0.13"
 thiserror = "2.0"
 tonic = { version = "0.12", default-features = false, features = ["channel", "codegen", "gzip", "prost", "tls"] }
-once_cell = { version = "1.19", optional = true }
 tracing = { version = "0.1", optional = true }
 
 # Futures
@@ -34,7 +33,7 @@ default = ["gcp-authorizer", "tls-native-roots", "internal-logs"]
 gcp-authorizer = ["dep:gcp_auth"]
 tls-native-roots = ["tonic/tls-roots"]
 tls-webpki-roots = ["tonic/tls-webpki-roots"]
-propagator = ["once_cell"]
+propagator = []
 internal-logs = ["tracing"]
 
 [dev-dependencies]
