@@ -220,6 +220,7 @@ impl Builder {
 
         let count_clone = pending_count.clone();
         let resource = Arc::new(RwLock::new(None));
+        let ctx_resource = resource.clone();
         let future = async move {
             let trace_client = TraceServiceClient::new(trace_channel);
             let authorizer = &authenticator;
@@ -229,7 +230,7 @@ impl Builder {
                 let log_client = log_client.clone();
                 let pending_count = count_clone.clone();
                 let scopes = scopes.clone();
-                let resource = resource.clone();
+                let resource = ctx_resource.clone();
                 ExporterContext {
                     trace_client,
                     log_client,
@@ -248,7 +249,7 @@ impl Builder {
             pending_count,
             maximum_shutdown_duration: maximum_shutdown_duration
                 .unwrap_or_else(|| Duration::from_secs(5)),
-            resource: Arc::new(RwLock::new(None)),
+            resource,
         };
 
         Ok((exporter, future))
@@ -772,8 +773,7 @@ fn transform_links(links: &opentelemetry_sdk::trace::SpanLinks) -> Option<Links>
 // Map conventional OpenTelemetry keys to their GCP counterparts.
 //
 // https://cloud.google.com/trace/docs/trace-labels
-const KEY_MAP: [(&str, &str); 16] = [
-    (semconv::resource::SERVICE_NAME, GCP_SERVICE_NAME),
+const KEY_MAP: [(&str, &str); 19] = [
     (HTTP_PATH, GCP_HTTP_PATH),
     (semconv::attribute::HTTP_HOST, "/http/host"),
     ("http.request.header.host", "/http/host"),
@@ -786,9 +786,26 @@ const KEY_MAP: [(&str, &str); 16] = [
     (semconv::attribute::HTTP_USER_AGENT, "/http/user_agent"),
     (semconv::attribute::USER_AGENT_ORIGINAL, "/http/user_agent"),
     (semconv::attribute::HTTP_STATUS_CODE, "/http/status_code"),
+    // https://cloud.google.com/trace/docs/trace-labels#canonical-gke
     (
         semconv::attribute::HTTP_RESPONSE_STATUS_CODE,
         "/http/status_code",
+    ),
+    (
+        semconv::attribute::K8S_CLUSTER_NAME,
+        "g.co/r/k8s_container/cluster_name",
+    ),
+    (
+        semconv::attribute::K8S_NAMESPACE_NAME,
+        "g.co/r/k8s_container/namespace",
+    ),
+    (
+        semconv::attribute::K8S_POD_NAME,
+        "g.co/r/k8s_container/pod_name",
+    ),
+    (
+        semconv::attribute::K8S_CONTAINER_NAME,
+        "g.co/r/k8s_container/container_name",
     ),
     (semconv::trace::HTTP_ROUTE, "/http/route"),
     (HTTP_PATH, GCP_HTTP_PATH),
@@ -826,7 +843,6 @@ fn status(value: opentelemetry::trace::Status) -> Option<Status> {
 }
 const TRACE_APPEND: &str = "https://www.googleapis.com/auth/trace.append";
 const LOGGING_WRITE: &str = "https://www.googleapis.com/auth/logging.write";
-const GCP_SERVICE_NAME: &str = "g.co/gae/app/module";
 const MAX_ATTRIBUTES_PER_SPAN: usize = 32;
 
 #[cfg(test)]
@@ -920,19 +936,13 @@ mod tests {
             actual.attribute_map.get("/http/status_code"),
             Some(&AttributeValue::from(Value::I64(200))),
         );
-        assert_eq!(
-            actual.attribute_map.get("g.co/gae/app/module"),
-            Some(&AttributeValue::from(Value::String(
-                "Test Service Name".into()
-            ))),
-        );
     }
 
     #[test]
     fn test_too_many() {
         let resources = Resource::new([KeyValue::new(
-            semcov::resource::SERVICE_NAME,
-            "Test Service Name",
+            semconv::attribute::USER_AGENT_ORIGINAL,
+            "Test Service Name UA",
         )]);
         let mut attributes = Vec::with_capacity(32);
         for i in 0..32 {
@@ -946,9 +956,9 @@ mod tests {
         assert_eq!(actual.attribute_map.len(), 32);
         assert_eq!(actual.dropped_attributes_count, 1);
         assert_eq!(
-            actual.attribute_map.get("g.co/gae/app/module"),
+            actual.attribute_map.get("/http/user_agent"),
             Some(&AttributeValue::from(Value::String(
-                "Test Service Name".into()
+                "Test Service Name UA".into()
             ))),
         );
     }
