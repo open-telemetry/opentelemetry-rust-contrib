@@ -19,7 +19,7 @@ opentelemetry_sdk = { workspace = true, features = ["trace"] }
 opentelemetry-semantic-conventions = { workspace = true}
 prost = "0.13"
 prost-types = "0.13"
-thiserror = "1.0.30"
+thiserror = "2.0"
 tonic = { version = "0.12", default-features = false, features = ["channel", "codegen", "gzip", "prost", "tls"] }
 tracing = { version = "0.1", optional = true }
 

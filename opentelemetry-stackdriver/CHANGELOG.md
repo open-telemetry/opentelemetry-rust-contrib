@@ -5,6 +5,7 @@
 ### Changed
 
 - Remove `server` feature from tonic dependency
+- Bump thiserror to 2.0
 
 ## v0.24.0
 
