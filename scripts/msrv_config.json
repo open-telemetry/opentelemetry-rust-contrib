@@ -1,0 +1,19 @@
+{
+  "//": [
+    "setting the version to 1.71.1 for all packages is temporary,",
+    "because cargo-msrv doesn't work with Rust <1.71",
+    "and the next OTel version will raise MSRV to 1.75.0 anyway"
+  ],
+  "1.71.1": [
+    "opentelemetry-aws",
+    "opentelemetry-contrib",
+    "opentelemetry-datadog",
+    "opentelemetry-etw-logs",
+    "opentelemetry-etw-metrics",
+    "opentelemetry-resource-detectors",
+    "opentelemetry-stackdriver",
+    "opentelemetry-user-events-logs",
+    "opentelemetry-user-events-metrics",
+    "opentelemetry-zpages"
+  ]
+}
