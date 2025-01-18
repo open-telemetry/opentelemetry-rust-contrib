@@ -2,6 +2,8 @@
 
 ## vNext
 
+- Bump thiserror to 2.0
+
 ## v0.15.0
 
 ### Changed

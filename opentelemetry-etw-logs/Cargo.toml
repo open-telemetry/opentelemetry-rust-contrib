@@ -6,7 +6,7 @@ edition = "2021"
 homepage = "https://github.com/open-telemetry/opentelemetry-rust-contrib/tree/main/opentelemetry-etw-logs"
 repository = "https://github.com/open-telemetry/opentelemetry-rust-contrib/tree/main/opentelemetry-etw-logs"
 readme = "README.md"
-rust-version = "1.65.0"
+rust-version = "1.70.0"
 keywords = ["opentelemetry", "log", "trace", "etw"]
 license = "Apache-2.0"
 
