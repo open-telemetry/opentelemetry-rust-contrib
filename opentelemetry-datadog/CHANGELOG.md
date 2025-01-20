@@ -3,6 +3,7 @@
 ## vNext
 
 - Bump thiserror to 2.0
+- [Breaking] Replace `opentelemetry::global::shutdown_tracer_provider()` with `tracer_provider.shutdown()` (original PR [opentelemetry-rust#2369](https://github.com/open-telemetry/opentelemetry-rust/pull/2369))
 
 ## v0.15.0
 
