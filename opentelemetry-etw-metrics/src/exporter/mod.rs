@@ -79,6 +79,7 @@ impl PushMetricExporter for MetricsExporter {
             .map(Into::into)
             .unwrap_or_default();
 
+        // TODO: Reuse this vec across exports by storing it in `MetricsExporter`
         let mut encoding_buffer = Vec::new();
 
         for scope_metric in &metrics.scope_metrics {
