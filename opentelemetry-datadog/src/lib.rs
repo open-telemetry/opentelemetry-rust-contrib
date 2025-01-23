@@ -48,7 +48,7 @@
 //!
 //! ```no_run
 //! # fn main() -> Result<(), opentelemetry::trace::TraceError> {
-//! let tracer = opentelemetry_datadog::new_pipeline()
+//! let (tracer, provider) = opentelemetry_datadog::new_pipeline()
 //!     .install_batch(opentelemetry_sdk::runtime::Tokio)?;
 //! # Ok(())
 //! # }
@@ -80,7 +80,7 @@
 //! [`DatadogPipelineBuilder`]: struct.DatadogPipelineBuilder.html
 //!
 //! ```no_run
-//! use opentelemetry::{KeyValue, trace::Tracer};
+//! use opentelemetry::{global, KeyValue, trace::Tracer};
 //! use opentelemetry_sdk::{trace::{self, RandomIdGenerator, Sampler}, Resource};
 //! use opentelemetry_sdk::export::trace::ExportResult;
 //! use opentelemetry_datadog::{new_pipeline, ApiVersion, Error};
@@ -125,6 +125,7 @@
 //!                 .with_id_generator(RandomIdGenerator::default())
 //!         )
 //!         .install_batch(opentelemetry_sdk::runtime::Tokio)?;
+//!     global::set_tracer_provider(provider.clone());
 //!
 //!     tracer.in_span("doing_work", |cx| {
 //!         // Traced app logic here...

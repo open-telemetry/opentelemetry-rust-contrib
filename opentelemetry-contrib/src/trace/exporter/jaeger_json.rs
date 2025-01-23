@@ -49,7 +49,7 @@ impl<R: JaegerJsonRuntime> JaegerJsonExporter<R> {
     }
 
     /// Install the exporter using the internal provided runtime
-    pub fn install_batch(self) -> Tracer {
+    pub fn install_batch(self) -> (Tracer, TracerProvider) {
         let runtime = self.runtime.clone();
         let provider_builder = TracerProvider::builder().with_batch_exporter(self, runtime);
         let provider = provider_builder.build();
@@ -58,9 +58,8 @@ impl<R: JaegerJsonRuntime> JaegerJsonExporter<R> {
             .with_schema_url(SCHEMA_URL)
             .build();
         let tracer = provider.tracer_with_scope(scope);
-        let _ = opentelemetry::global::set_tracer_provider(provider);
 
-        tracer
+        (tracer, provider)
     }
 }
 

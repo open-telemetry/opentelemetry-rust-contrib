@@ -4,7 +4,7 @@ use hyper_util::{client::legacy::Client, rt::TokioExecutor};
 use opentelemetry::{
     global,
     propagation::TextMapPropagator,
-    trace::{SpanKind, TraceContextExt, Tracer},
+    trace::{SpanKind, TraceContextExt, TraceError, Tracer},
     Context, KeyValue,
 };
 use opentelemetry_contrib::trace::propagator::trace_context_response::TraceContextResponsePropagator;
@@ -12,21 +12,20 @@ use opentelemetry_http::{Bytes, HeaderExtractor, HeaderInjector};
 use opentelemetry_sdk::{propagation::TraceContextPropagator, trace::TracerProvider};
 use opentelemetry_stdout::SpanExporter;
 
-fn init_tracer() {
+fn init_traces() -> Result<TracerProvider, TraceError> {
     global::set_text_map_propagator(TraceContextPropagator::new());
     // Install stdout exporter pipeline to be able to retrieve the collected spans.
     // For the demonstration, use `Sampler::AlwaysOn` sampler to sample all traces. In a production
     // application, use `Sampler::ParentBased` or `Sampler::TraceIdRatioBased` with a desired ratio.
-    let provider = TracerProvider::builder()
+    Ok(TracerProvider::builder()
         .with_simple_exporter(SpanExporter::default())
-        .build();
-
-    global::set_tracer_provider(provider);
+        .build())
 }
 
 #[tokio::main]
-async fn main() -> std::result::Result<(), Box<dyn std::error::Error + Send + Sync + 'static>> {
-    init_tracer();
+async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync + 'static>> {
+    let tracer_provider = init_traces()?;
+    global::set_tracer_provider(tracer_provider.clone());
 
     let client = Client::builder(TokioExecutor::new()).build_http();
     let tracer = global::tracer("example/client");
@@ -67,6 +66,8 @@ async fn main() -> std::result::Result<(), Box<dyn std::error::Error + Send + Sy
             KeyValue::new("child_sampled", response_span.span_context().is_sampled()),
         ],
     );
+
+    tracer_provider.shutdown()?;
 
     Ok(())
 }

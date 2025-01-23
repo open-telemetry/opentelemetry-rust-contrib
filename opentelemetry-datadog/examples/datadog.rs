@@ -27,6 +27,7 @@ fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync + 'static>> {
         .with_service_name("trace-demo")
         .with_api_version(ApiVersion::Version05)
         .install_simple()?;
+    global::set_tracer_provider(provider.clone());
 
     tracer.in_span("foo", |cx| {
         let span = cx.span();

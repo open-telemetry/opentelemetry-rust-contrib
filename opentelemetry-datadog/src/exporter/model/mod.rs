@@ -44,19 +44,20 @@ static DD_MEASURED_KEY: &str = "_dd.measured";
 ///
 /// For example,
 /// ```no_run
+/// use opentelemetry::global;
 /// use opentelemetry_datadog::{ApiVersion, new_pipeline};
-/// fn main() -> Result<(), opentelemetry::trace::TraceError> {
-///    let tracer = new_pipeline()
-///            .with_service_name("my_app")
-///            .with_api_version(ApiVersion::Version05)
-///            // the custom mapping below will change the all spans' name to datadog spans
-///            .with_name_mapping(|span, model_config|{
-///                 "datadog spans"
-///             })
-///            .with_agent_endpoint("http://localhost:8126")
-///            .install_batch(opentelemetry_sdk::runtime::Tokio)?;
 ///
-///    Ok(())
+/// fn main() -> Result<(), opentelemetry::trace::TraceError> {
+///     let (tracer, provider) = new_pipeline()
+///         .with_service_name("my_app")
+///         .with_api_version(ApiVersion::Version05)
+///         // the custom mapping below will change the all spans' name to datadog spans
+///         .with_name_mapping(|span, model_config|{"datadog spans"})
+///         .with_agent_endpoint("http://localhost:8126")
+///         .install_batch(opentelemetry_sdk::runtime::Tokio)?;
+///     global::set_tracer_provider(provider.clone());
+///
+///     Ok(())
 /// }
 /// ```
 pub type FieldMappingFn = dyn for<'a> Fn(&'a SpanData, &'a ModelConfig) -> &'a str + Send + Sync;

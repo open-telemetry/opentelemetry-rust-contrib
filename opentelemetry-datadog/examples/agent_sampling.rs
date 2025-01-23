@@ -66,6 +66,7 @@ fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync + 'static>> {
                 .with_id_generator(RandomIdGenerator::default()),
         )
         .install_simple()?;
+    global::set_tracer_provider(provider.clone());
 
     tracer.in_span("foo", |cx| {
         let span = cx.span();

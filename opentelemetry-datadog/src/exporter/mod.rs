@@ -10,7 +10,7 @@ use crate::exporter::model::FieldMapping;
 use futures_core::future::BoxFuture;
 use http::{Method, Request, Uri};
 use opentelemetry::trace::TracerProvider as _;
-use opentelemetry::{global, trace::TraceError, KeyValue};
+use opentelemetry::{trace::TraceError, KeyValue};
 use opentelemetry_http::{HttpClient, ResponseExt};
 use opentelemetry_sdk::{
     export::trace::{ExportResult, SpanData, SpanExporter},
@@ -295,7 +295,7 @@ impl DatadogPipelineBuilder {
             .with_attributes(None)
             .build();
         let tracer = provider.tracer_with_scope(scope);
-        let _ = global::set_tracer_provider(provider.clone());
+
         Ok((tracer, provider))
     }
 
@@ -316,7 +316,7 @@ impl DatadogPipelineBuilder {
             .with_attributes(None)
             .build();
         let tracer = provider.tracer_with_scope(scope);
-        let _ = global::set_tracer_provider(provider.clone());
+
         Ok((tracer, provider))
     }
 
