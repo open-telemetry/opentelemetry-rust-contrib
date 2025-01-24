@@ -42,7 +42,7 @@
 //!
 //! ```toml
 //! [dependencies]
-//! opentelemetry = { version = "*", features = ["rt-tokio"] }
+//! opentelemetry_sdk = { version = "*", features = ["rt-tokio"] }
 //! opentelemetry-datadog = "*"
 //! ```
 //!
@@ -83,7 +83,6 @@
 //! use opentelemetry::{KeyValue, trace::Tracer};
 //! use opentelemetry_sdk::{trace::{self, RandomIdGenerator, Sampler}, Resource};
 //! use opentelemetry_sdk::export::trace::ExportResult;
-//! use opentelemetry::global::shutdown_tracer_provider;
 //! use opentelemetry_datadog::{new_pipeline, ApiVersion, Error};
 //! use opentelemetry_http::{HttpClient, HttpError};
 //! use async_trait::async_trait;
@@ -115,7 +114,8 @@
 //! }
 //!
 //! fn main() -> Result<(), opentelemetry::trace::TraceError> {
-//!     let tracer = new_pipeline()
+//!     #[allow(deprecated)]
+//!     let (tracer, provider) = new_pipeline()
 //!         .with_service_name("my_app")
 //!         .with_api_version(ApiVersion::Version05)
 //!         .with_agent_endpoint("http://localhost:8126")
@@ -130,7 +130,7 @@
 //!         // Traced app logic here...
 //!     });
 //!
-//!     shutdown_tracer_provider(); // sending remaining spans before exit
+//!     provider.shutdown()?; // sending remaining spans before exit
 //!
 //!     Ok(())
 //! }
