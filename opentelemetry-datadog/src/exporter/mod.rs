@@ -4,19 +4,17 @@ mod model;
 pub use model::ApiVersion;
 pub use model::Error;
 pub use model::FieldMappingFn;
-use opentelemetry::InstrumentationScope;
 
 use crate::exporter::model::FieldMapping;
 use futures_core::future::BoxFuture;
 use http::{Method, Request, Uri};
-use opentelemetry::trace::TracerProvider as _;
 use opentelemetry::{trace::TraceError, KeyValue};
 use opentelemetry_http::{HttpClient, ResponseExt};
 use opentelemetry_sdk::{
     export::trace::{ExportResult, SpanData, SpanExporter},
     resource::{ResourceDetector, SdkProvidedResourceDetector},
     runtime::RuntimeChannel,
-    trace::{Config, Tracer, TracerProvider},
+    trace::{Config, TracerProvider},
     Resource,
 };
 use opentelemetry_semantic_conventions as semcov;
@@ -283,20 +281,13 @@ impl DatadogPipelineBuilder {
     }
 
     /// Install the Datadog trace exporter pipeline using a simple span processor.
-    pub fn install_simple(mut self) -> Result<(Tracer, TracerProvider), TraceError> {
+    pub fn install_simple(mut self) -> Result<TracerProvider, TraceError> {
         let (config, service_name) = self.build_config_and_service_name();
         let exporter = self.build_exporter_with_service_name(service_name)?;
-        let mut provider_builder = TracerProvider::builder().with_simple_exporter(exporter);
-        provider_builder = provider_builder.with_resource(config.resource.into_owned());
-        let provider = provider_builder.build();
-        let scope = InstrumentationScope::builder("opentelemetry-datadog")
-            .with_version(env!("CARGO_PKG_VERSION"))
-            .with_schema_url(semcov::SCHEMA_URL)
-            .with_attributes(None)
-            .build();
-        let tracer = provider.tracer_with_scope(scope);
-
-        Ok((tracer, provider))
+        Ok(TracerProvider::builder()
+            .with_simple_exporter(exporter)
+            .with_resource(config.resource.into_owned())
+            .build())
     }
 
     /// Install the Datadog trace exporter pipeline using a batch span processor with the specified
@@ -304,20 +295,13 @@ impl DatadogPipelineBuilder {
     pub fn install_batch<R: RuntimeChannel>(
         mut self,
         runtime: R,
-    ) -> Result<(Tracer, TracerProvider), TraceError> {
+    ) -> Result<TracerProvider, TraceError> {
         let (config, service_name) = self.build_config_and_service_name();
         let exporter = self.build_exporter_with_service_name(service_name)?;
-        let mut provider_builder = TracerProvider::builder().with_batch_exporter(exporter, runtime);
-        provider_builder = provider_builder.with_resource(config.resource.into_owned());
-        let provider = provider_builder.build();
-        let scope = InstrumentationScope::builder("opentelemetry-datadog")
-            .with_version(env!("CARGO_PKG_VERSION"))
-            .with_schema_url(semcov::SCHEMA_URL)
-            .with_attributes(None)
-            .build();
-        let tracer = provider.tracer_with_scope(scope);
-
-        Ok((tracer, provider))
+        Ok(TracerProvider::builder()
+            .with_batch_exporter(exporter, runtime)
+            .with_resource(config.resource.into_owned())
+            .build())
     }
 
     /// Assign the service name under which to group traces

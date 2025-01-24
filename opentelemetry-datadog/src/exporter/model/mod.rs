@@ -48,7 +48,7 @@ static DD_MEASURED_KEY: &str = "_dd.measured";
 /// use opentelemetry_datadog::{ApiVersion, new_pipeline};
 ///
 /// fn main() -> Result<(), opentelemetry::trace::TraceError> {
-///     let (tracer, provider) = new_pipeline()
+///     let provider = new_pipeline()
 ///         .with_service_name("my_app")
 ///         .with_api_version(ApiVersion::Version05)
 ///         // the custom mapping below will change the all spans' name to datadog spans
@@ -56,6 +56,7 @@ static DD_MEASURED_KEY: &str = "_dd.measured";
 ///         .with_agent_endpoint("http://localhost:8126")
 ///         .install_batch(opentelemetry_sdk::runtime::Tokio)?;
 ///     global::set_tracer_provider(provider.clone());
+///     let tracer = global::tracer("opentelemetry-datadog");
 ///
 ///     Ok(())
 /// }

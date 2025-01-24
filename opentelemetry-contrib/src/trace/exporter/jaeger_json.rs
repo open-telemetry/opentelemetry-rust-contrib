@@ -11,14 +11,11 @@ use opentelemetry::trace::SpanId;
     feature = "rt-tokio-current-thread"
 ))]
 use opentelemetry::trace::TraceError;
-use opentelemetry::trace::TracerProvider as _;
-use opentelemetry::InstrumentationScope;
 use opentelemetry_sdk::{
     export::trace::{ExportResult, SpanData, SpanExporter},
     runtime::RuntimeChannel,
-    trace::{Tracer, TracerProvider},
+    trace::TracerProvider,
 };
-use opentelemetry_semantic_conventions::SCHEMA_URL;
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::time::SystemTime;
@@ -49,17 +46,11 @@ impl<R: JaegerJsonRuntime> JaegerJsonExporter<R> {
     }
 
     /// Install the exporter using the internal provided runtime
-    pub fn install_batch(self) -> (Tracer, TracerProvider) {
+    pub fn install_batch(self) -> TracerProvider {
         let runtime = self.runtime.clone();
-        let provider_builder = TracerProvider::builder().with_batch_exporter(self, runtime);
-        let provider = provider_builder.build();
-        let scope = InstrumentationScope::builder("opentelemetry")
-            .with_version(env!("CARGO_PKG_VERSION"))
-            .with_schema_url(SCHEMA_URL)
-            .build();
-        let tracer = provider.tracer_with_scope(scope);
-
-        (tracer, provider)
+        TracerProvider::builder()
+            .with_batch_exporter(self, runtime)
+            .build()
     }
 }
 
