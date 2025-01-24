@@ -42,7 +42,7 @@
 //!
 //! ```toml
 //! [dependencies]
-//! opentelemetry = { version = "*", features = ["rt-tokio"] }
+//! opentelemetry_sdk = { version = "*", features = ["rt-tokio"] }
 //! opentelemetry-datadog = "*"
 //! ```
 //!
