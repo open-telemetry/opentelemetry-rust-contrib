@@ -11,16 +11,16 @@
 //!
 // Conf - AMD EPYC 7763 64-Core Processor 2.44 GHz, 64GB RAM, Cores:8 , Logical processors: 16
 // Stress Test Results (user_events disabled)
-// Threads: 1 - Average Throughput: 30,866,752 iterations/sec
-// Threads: 5 - Average Throughput: 32,662,641 iterations/sec
-// Threads: 10 - Average Throughput: 25,776,394 iterations/sec
-// Threads: 16 - Average Throughput: 16,915,860 iterations/sec
+// Threads: 1 - Average Throughput: 42,086,520 iterations/sec
+// Threads: 5 - Average Throughput: 35,767,375 iterations/sec
+// Threads: 10 - Average Throughput: 29,189,340 iterations/sec
+// Threads: 16 - Average Throughput: 19,579,138 iterations/sec
 
 // Stress Test Results (user_events enabled)
-// Threads: 1 - Average Throughput: 212,594 iterations/sec
-// Threads: 5 - Average Throughput: 372,695 iterations/sec
-// Threads: 10 - Average Throughput: 277,675 iterations/sec
-// Threads: 16 - Average Throughput: 268,940 iterations/sec
+// Threads: 1 - Average Throughput: 285,692 iterations/sec
+// Threads: 5 - Average Throughput: 392,906 iterations/sec
+// Threads: 10 - Average Throughput: 349,334 iterations/sec
+// Threads: 16 - Average Throughput: 297,232 iterations/sec
 
 use opentelemetry_appender_tracing::layer;
 use opentelemetry_sdk::logs::LoggerProvider;

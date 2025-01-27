@@ -42,7 +42,7 @@
 //!
 //! ```toml
 //! [dependencies]
-//! opentelemetry = { version = "*", features = ["rt-tokio"] }
+//! opentelemetry_sdk = { version = "*", features = ["rt-tokio"] }
 //! opentelemetry-datadog = "*"
 //! ```
 //!
@@ -83,7 +83,6 @@
 //! use opentelemetry::{KeyValue, trace::Tracer};
 //! use opentelemetry_sdk::{trace::{self, RandomIdGenerator, Sampler}, Resource};
 //! use opentelemetry_sdk::export::trace::ExportResult;
-//! use opentelemetry::global::shutdown_tracer_provider;
 //! use opentelemetry_datadog::{new_pipeline, ApiVersion, Error};
 //! use opentelemetry_http::{HttpClient, HttpError};
 //! use async_trait::async_trait;
@@ -115,7 +114,8 @@
 //! }
 //!
 //! fn main() -> Result<(), opentelemetry::trace::TraceError> {
-//!     let tracer = new_pipeline()
+//!     #[allow(deprecated)]
+//!     let (tracer, provider) = new_pipeline()
 //!         .with_service_name("my_app")
 //!         .with_api_version(ApiVersion::Version05)
 //!         .with_agent_endpoint("http://localhost:8126")
@@ -130,7 +130,7 @@
 //!         // Traced app logic here...
 //!     });
 //!
-//!     shutdown_tracer_provider(); // sending remaining spans before exit
+//!     provider.shutdown()?; // sending remaining spans before exit
 //!
 //!     Ok(())
 //! }
@@ -145,12 +145,12 @@ pub use exporter::{
 pub use propagator::{DatadogPropagator, DatadogTraceState, DatadogTraceStateBuilder};
 
 mod propagator {
-    use once_cell::sync::Lazy;
     use opentelemetry::{
         propagation::{text_map_propagator::FieldIter, Extractor, Injector, TextMapPropagator},
         trace::{SpanContext, SpanId, TraceContextExt, TraceFlags, TraceId, TraceState},
         Context,
     };
+    use std::sync::OnceLock;
 
     const DATADOG_TRACE_ID_HEADER: &str = "x-datadog-trace-id";
     const DATADOG_PARENT_ID_HEADER: &str = "x-datadog-parent-id";
@@ -163,13 +163,18 @@ mod propagator {
     const TRACE_STATE_TRUE_VALUE: &str = "1";
     const TRACE_STATE_FALSE_VALUE: &str = "0";
 
-    static DATADOG_HEADER_FIELDS: Lazy<[String; 3]> = Lazy::new(|| {
-        [
-            DATADOG_TRACE_ID_HEADER.to_string(),
-            DATADOG_PARENT_ID_HEADER.to_string(),
-            DATADOG_SAMPLING_PRIORITY_HEADER.to_string(),
-        ]
-    });
+    // TODO Replace this with LazyLock when MSRV is 1.80+
+    static TRACE_CONTEXT_HEADER_FIELDS: OnceLock<[String; 3]> = OnceLock::new();
+
+    fn trace_context_header_fields() -> &'static [String; 3] {
+        TRACE_CONTEXT_HEADER_FIELDS.get_or_init(|| {
+            [
+                DATADOG_TRACE_ID_HEADER.to_owned(),
+                DATADOG_PARENT_ID_HEADER.to_owned(),
+                DATADOG_SAMPLING_PRIORITY_HEADER.to_owned(),
+            ]
+        })
+    }
 
     #[derive(Default)]
     pub struct DatadogTraceStateBuilder {
@@ -449,7 +454,7 @@ mod propagator {
         }
 
         fn fields(&self) -> FieldIter<'_> {
-            FieldIter::new(DATADOG_HEADER_FIELDS.as_ref())
+            FieldIter::new(trace_context_header_fields())
         }
     }
 

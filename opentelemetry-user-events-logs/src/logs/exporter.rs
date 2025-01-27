@@ -4,7 +4,6 @@ use eventheader_dynamic::EventBuilder;
 use std::borrow::Cow;
 use std::collections::HashMap;
 use std::fmt::Debug;
-use std::sync::Arc;
 
 use opentelemetry::{logs::AnyValue, logs::Severity, Key};
 use std::{cell::RefCell, str, time::SystemTime};
@@ -49,7 +48,7 @@ impl ExporterConfig {
 
 /// UserEventsExporter is a log exporter that exports logs in EventHeader format to user_events tracepoint.
 pub struct UserEventsExporter {
-    provider: Arc<eventheader_dynamic::Provider>,
+    provider: eventheader_dynamic::Provider,
     exporter_config: ExporterConfig,
 }
 
@@ -70,7 +69,7 @@ impl UserEventsExporter {
             eventheader_dynamic::Provider::new(provider_name, &options);
         Self::register_keywords(&mut eventheader_provider, &exporter_config);
         UserEventsExporter {
-            provider: Arc::new(eventheader_provider),
+            provider: eventheader_provider,
             exporter_config,
         }
     }

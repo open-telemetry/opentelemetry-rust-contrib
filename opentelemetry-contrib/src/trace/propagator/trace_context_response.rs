@@ -11,19 +11,24 @@
 //! See the [w3c trace-context docs] for more details.
 //!
 //! [w3c trace-context docs]: https://w3c.github.io/trace-context/#traceresponse-header
-use once_cell::sync::Lazy;
+
 use opentelemetry::{
     propagation::{text_map_propagator::FieldIter, Extractor, Injector, TextMapPropagator},
     trace::{SpanContext, SpanId, TraceContextExt, TraceFlags, TraceId, TraceState},
     Context,
 };
+use std::sync::OnceLock;
 
 const SUPPORTED_VERSION: u8 = 0;
 const MAX_VERSION: u8 = 254;
 const TRACERESPONSE_HEADER: &str = "traceresponse";
 
-static TRACE_CONTEXT_HEADER_FIELDS: Lazy<[String; 1]> =
-    Lazy::new(|| [TRACERESPONSE_HEADER.to_owned()]);
+// TODO Replace this with LazyLock when MSRV is 1.80+
+static TRACE_CONTEXT_HEADER_FIELDS: OnceLock<[String; 1]> = OnceLock::new();
+
+fn trace_context_header_fields() -> &'static [String; 1] {
+    TRACE_CONTEXT_HEADER_FIELDS.get_or_init(|| [TRACERESPONSE_HEADER.to_owned()])
+}
 
 /// Propagates trace response using the [W3C TraceContext] format
 ///
@@ -124,7 +129,7 @@ impl TextMapPropagator for TraceContextResponsePropagator {
     }
 
     fn fields(&self) -> FieldIter<'_> {
-        FieldIter::new(TRACE_CONTEXT_HEADER_FIELDS.as_ref())
+        FieldIter::new(trace_context_header_fields())
     }
 }
 
