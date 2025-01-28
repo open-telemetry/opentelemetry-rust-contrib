@@ -56,7 +56,7 @@ static DD_MEASURED_KEY: &str = "_dd.measured";
 ///         .with_agent_endpoint("http://localhost:8126")
 ///         .install_batch(opentelemetry_sdk::runtime::Tokio)?;
 ///     global::set_tracer_provider(provider.clone());
-///     let tracer = global::tracer("opentelemetry-datadog");
+///     let tracer = global::tracer("opentelemetry-datadog-demo");
 ///
 ///     Ok(())
 /// }

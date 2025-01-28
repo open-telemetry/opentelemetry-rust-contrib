@@ -68,7 +68,7 @@ fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync + 'static>> {
         )
         .install_simple()?;
     global::set_tracer_provider(provider.clone());
-    let scope = InstrumentationScope::builder("opentelemetry-datadog")
+    let scope = InstrumentationScope::builder("opentelemetry-datadog-demo")
         .with_version(env!("CARGO_PKG_VERSION"))
         .with_schema_url(semcov::SCHEMA_URL)
         .with_attributes(None)
