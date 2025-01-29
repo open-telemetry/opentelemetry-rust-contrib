@@ -4,6 +4,7 @@ use eventheader_dynamic::EventBuilder;
 use std::borrow::Cow;
 use std::collections::HashMap;
 use std::fmt::Debug;
+use std::sync::Arc;
 
 use opentelemetry::{logs::AnyValue, logs::Severity, Key};
 use std::{cell::RefCell, str, time::SystemTime};
@@ -48,7 +49,6 @@ impl ExporterConfig {
 
 /// UserEventsExporter is a log exporter that exports logs in EventHeader format to user_events tracepoint.
 pub struct UserEventsExporter {
-    provider: eventheader_dynamic::Provider,
     exporter_config: ExporterConfig,
     event_sets: HashMap<(u8, u64), Arc<eventheader_dynamic::EventSet>>,
 }
@@ -70,7 +70,6 @@ impl UserEventsExporter {
             eventheader_dynamic::Provider::new(provider_name, &options);
         let event_sets = Self::register_keywords(&mut eventheader_provider, &exporter_config);
         UserEventsExporter {
-            provider: eventheader_provider,
             exporter_config,
             event_sets,
         }
@@ -344,24 +343,20 @@ impl opentelemetry_sdk::export::logs::LogExporter for UserEventsExporter {
 
     #[cfg(feature = "spec_unstable_logs_enabled")]
     fn event_enabled(&self, level: Severity, _target: &str, name: &str) -> bool {
-        let (found, keyword) = if self.exporter_config.keywords_map.is_empty() {
-            (true, self.exporter_config.default_keyword)
+        let keyword = if self.exporter_config.keywords_map.is_empty() {
+            Some(self.exporter_config.default_keyword)
         } else {
-            // TBD - target is not used as of now for comparison.
-            match self.exporter_config.get_log_keyword(name) {
-                Some(x) => (true, x),
-                _ => (false, 0),
-            }
+            self.exporter_config.get_log_keyword(name)
         };
-        if !found {
-            return false;
+
+        if let Some(keyword) = keyword {
+            if let Some(set) = self
+                .event_sets
+                .get(&(self.get_severity_level(level).as_int().into(), keyword))
+            {
+                return set.enabled();
+            }
         }
-        let es = self
-            .provider
-            .find_set(self.get_severity_level(level), keyword);
-        match es {
-            Some(x) => x.enabled(),
-            _ => false,
-        }
+        false
     }
 }

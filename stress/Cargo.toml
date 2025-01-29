@@ -27,9 +27,9 @@ num-format = "0.4.4"
 sysinfo = { version = "0.32", optional = true }
 eventheader_dynamic = "0.4.0"
 
-opentelemetry-appender-tracing = { workspace = true, features= ["spec_unstable_logs_enabled"] }
-opentelemetry_sdk = { workspace = true, features = ["logs", "spec_unstable_logs_enabled"] }
-opentelemetry-user-events-logs = { path = "../opentelemetry-user-events-logs", features = ["spec_unstable_logs_enabled"]}
+opentelemetry-appender-tracing = { workspace = true}
+opentelemetry_sdk = { workspace = true}
+opentelemetry-user-events-logs = { path = "../opentelemetry-user-events-logs"}
 opentelemetry-etw-logs = { path = "../opentelemetry-etw-logs"}
 tracing = { version = "0.1", default-features = false, features = ["std"] }
 tracing-subscriber = { version = "0.3.0", default-features = false, features = ["registry", "std"] }
