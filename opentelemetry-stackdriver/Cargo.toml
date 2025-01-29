@@ -7,7 +7,7 @@ repository = "https://github.com/open-telemetry/opentelemetry-rust-contrib"
 license = "Apache-2.0"
 edition = "2021"
 exclude = ["/proto"]
-rust-version = "1.65"
+rust-version = "1.71.1"
 
 [dependencies]
 async-trait = "0.1.48"
@@ -19,9 +19,8 @@ opentelemetry_sdk = { workspace = true, features = ["trace"] }
 opentelemetry-semantic-conventions = { workspace = true}
 prost = "0.13"
 prost-types = "0.13"
-thiserror = "1.0.30"
-tonic = { version = "0.12", features = ["gzip", "tls", "transport"] }
-once_cell = { version = "1.19", optional = true }
+thiserror = "2.0"
+tonic = { version = "0.12", default-features = false, features = ["channel", "codegen", "gzip", "prost", "tls"] }
 tracing = { version = "0.1", optional = true }
 
 # Futures
@@ -34,7 +33,7 @@ default = ["gcp-authorizer", "tls-native-roots", "internal-logs"]
 gcp-authorizer = ["dep:gcp_auth"]
 tls-native-roots = ["tonic/tls-roots"]
 tls-webpki-roots = ["tonic/tls-webpki-roots"]
-propagator = ["once_cell"]
+propagator = []
 internal-logs = ["tracing"]
 
 [dev-dependencies]

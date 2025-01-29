@@ -283,7 +283,7 @@ impl DatadogPipelineBuilder {
     }
 
     /// Install the Datadog trace exporter pipeline using a simple span processor.
-    pub fn install_simple(mut self) -> Result<Tracer, TraceError> {
+    pub fn install_simple(mut self) -> Result<(Tracer, TracerProvider), TraceError> {
         let (config, service_name) = self.build_config_and_service_name();
         let exporter = self.build_exporter_with_service_name(service_name)?;
         let mut provider_builder = TracerProvider::builder().with_simple_exporter(exporter);
@@ -295,13 +295,16 @@ impl DatadogPipelineBuilder {
             .with_attributes(None)
             .build();
         let tracer = provider.tracer_with_scope(scope);
-        let _ = global::set_tracer_provider(provider);
-        Ok(tracer)
+        let _ = global::set_tracer_provider(provider.clone());
+        Ok((tracer, provider))
     }
 
     /// Install the Datadog trace exporter pipeline using a batch span processor with the specified
     /// runtime.
-    pub fn install_batch<R: RuntimeChannel>(mut self, runtime: R) -> Result<Tracer, TraceError> {
+    pub fn install_batch<R: RuntimeChannel>(
+        mut self,
+        runtime: R,
+    ) -> Result<(Tracer, TracerProvider), TraceError> {
         let (config, service_name) = self.build_config_and_service_name();
         let exporter = self.build_exporter_with_service_name(service_name)?;
         let mut provider_builder = TracerProvider::builder().with_batch_exporter(exporter, runtime);
@@ -313,8 +316,8 @@ impl DatadogPipelineBuilder {
             .with_attributes(None)
             .build();
         let tracer = provider.tracer_with_scope(scope);
-        let _ = global::set_tracer_provider(provider);
-        Ok(tracer)
+        let _ = global::set_tracer_provider(provider.clone());
+        Ok((tracer, provider))
     }
 
     /// Assign the service name under which to group traces
@@ -397,7 +400,7 @@ fn group_into_traces(spans: &mut [SpanData]) -> Vec<&[SpanData]> {
         return vec![];
     }
 
-    spans.sort_by_key(|x| x.span_context.trace_id().to_bytes());
+    spans.sort_unstable_by_key(|x| x.span_context.trace_id().to_bytes());
 
     let mut traces: Vec<&[SpanData]> = Vec::with_capacity(spans.len());
 
