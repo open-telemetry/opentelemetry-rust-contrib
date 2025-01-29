@@ -4,6 +4,8 @@
 
 - Bump thiserror to 2.0
 - [Breaking] Replace `opentelemetry::global::shutdown_tracer_provider()` with `tracer_provider.shutdown()` (original PR [opentelemetry-rust#2369](https://github.com/open-telemetry/opentelemetry-rust/pull/2369))
+- [Breaking] `DatadogPipelineBuilder::install_simple()` and `DatadogPipelineBuilder::install_batch()` now return `TracerProvider`.
+  Additionally, global tracer provider now needs to be set by the user by calling `global::set_tracer_provider(tracer_provider.clone())` (original PR [opentelemetry-rust#1812](https://github.com/open-telemetry/opentelemetry-rust/pull/1812))
 
 ## v0.15.0
 

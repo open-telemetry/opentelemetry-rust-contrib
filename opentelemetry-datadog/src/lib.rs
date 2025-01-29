@@ -48,7 +48,7 @@
 //!
 //! ```no_run
 //! # fn main() -> Result<(), opentelemetry::trace::TraceError> {
-//! let tracer = opentelemetry_datadog::new_pipeline()
+//! let provider = opentelemetry_datadog::new_pipeline()
 //!     .install_batch(opentelemetry_sdk::runtime::Tokio)?;
 //! # Ok(())
 //! # }
@@ -80,11 +80,12 @@
 //! [`DatadogPipelineBuilder`]: struct.DatadogPipelineBuilder.html
 //!
 //! ```no_run
-//! use opentelemetry::{KeyValue, trace::Tracer};
+//! use opentelemetry::{global, KeyValue, trace::{Tracer, TracerProvider}, InstrumentationScope};
 //! use opentelemetry_sdk::{trace::{self, RandomIdGenerator, Sampler}, Resource};
 //! use opentelemetry_sdk::export::trace::ExportResult;
 //! use opentelemetry_datadog::{new_pipeline, ApiVersion, Error};
 //! use opentelemetry_http::{HttpClient, HttpError};
+//! use opentelemetry_semantic_conventions as semcov;
 //! use async_trait::async_trait;
 //! use bytes::Bytes;
 //! use futures_util::io::AsyncReadExt as _;
@@ -115,7 +116,7 @@
 //!
 //! fn main() -> Result<(), opentelemetry::trace::TraceError> {
 //!     #[allow(deprecated)]
-//!     let (tracer, provider) = new_pipeline()
+//!     let provider = new_pipeline()
 //!         .with_service_name("my_app")
 //!         .with_api_version(ApiVersion::Version05)
 //!         .with_agent_endpoint("http://localhost:8126")
@@ -125,6 +126,14 @@
 //!                 .with_id_generator(RandomIdGenerator::default())
 //!         )
 //!         .install_batch(opentelemetry_sdk::runtime::Tokio)?;
+//!     global::set_tracer_provider(provider.clone());
+//!
+//!     let scope = InstrumentationScope::builder("opentelemetry-datadog")
+//!         .with_version(env!("CARGO_PKG_VERSION"))
+//!         .with_schema_url(semcov::SCHEMA_URL)
+//!         .with_attributes(None)
+//!         .build();
+//!     let tracer = provider.tracer_with_scope(scope);
 //!
 //!     tracer.in_span("doing_work", |cx| {
 //!         // Traced app logic here...

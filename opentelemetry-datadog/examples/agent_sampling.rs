@@ -1,10 +1,11 @@
 use opentelemetry::{
     global,
-    trace::{SamplingResult, Span, TraceContextExt, Tracer},
-    Key, KeyValue, Value,
+    trace::{SamplingResult, Span, TraceContextExt, Tracer, TracerProvider},
+    InstrumentationScope, Key, KeyValue, Value,
 };
 use opentelemetry_datadog::{new_pipeline, ApiVersion, DatadogTraceStateBuilder};
 use opentelemetry_sdk::trace::{self, RandomIdGenerator, ShouldSample};
+use opentelemetry_semantic_conventions as semcov;
 use std::thread;
 use std::time::Duration;
 
@@ -57,7 +58,7 @@ impl ShouldSample for AgentBasedSampler {
 
 fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync + 'static>> {
     #[allow(deprecated)]
-    let (tracer, provider) = new_pipeline()
+    let provider = new_pipeline()
         .with_service_name("agent-sampling-demo")
         .with_api_version(ApiVersion::Version05)
         .with_trace_config(
@@ -66,6 +67,13 @@ fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync + 'static>> {
                 .with_id_generator(RandomIdGenerator::default()),
         )
         .install_simple()?;
+    global::set_tracer_provider(provider.clone());
+    let scope = InstrumentationScope::builder("opentelemetry-datadog-demo")
+        .with_version(env!("CARGO_PKG_VERSION"))
+        .with_schema_url(semcov::SCHEMA_URL)
+        .with_attributes(None)
+        .build();
+    let tracer = provider.tracer_with_scope(scope);
 
     tracer.in_span("foo", |cx| {
         let span = cx.span();
