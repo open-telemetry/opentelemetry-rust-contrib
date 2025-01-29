@@ -117,7 +117,6 @@ impl UserEventsExporter {
 
         for keyword in exporter_config.keywords_map.values() {
             Self::register_events(eventheader_provider, *keyword, &mut event_sets);
-            
         }
         event_sets
     }
