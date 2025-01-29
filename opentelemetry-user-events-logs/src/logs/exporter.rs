@@ -50,7 +50,7 @@ impl ExporterConfig {
 /// UserEventsExporter is a log exporter that exports logs in EventHeader format to user_events tracepoint.
 pub struct UserEventsExporter {
     exporter_config: ExporterConfig,
-    event_sets: HashMap<(u8, u64), Arc<eventheader_dynamic::EventSet>>,
+    event_sets: HashMap<(Level, u64), Arc<eventheader_dynamic::EventSet>>,
 }
 
 const EVENT_ID: &str = "event_id";
@@ -78,7 +78,7 @@ impl UserEventsExporter {
     fn register_events(
         eventheader_provider: &mut eventheader_dynamic::Provider,
         keyword: u64,
-        event_sets: &mut HashMap<(u8, u64), Arc<eventheader_dynamic::EventSet>>,
+        event_sets: &mut HashMap<(Level, u64), Arc<eventheader_dynamic::EventSet>>,
     ) {
         let levels = [
             eventheader::Level::Informational,
@@ -91,7 +91,7 @@ impl UserEventsExporter {
         for &level in levels.iter() {
             eventheader_provider.register_set(level, keyword);
             if let Some(set) = eventheader_provider.find_set(level.as_int().into(), keyword) {
-                event_sets.insert((level.as_int().into(), keyword), set);
+                event_sets.insert((level, keyword), set);
             }
         }
     }
@@ -99,7 +99,7 @@ impl UserEventsExporter {
     fn register_keywords(
         eventheader_provider: &mut eventheader_dynamic::Provider,
         exporter_config: &ExporterConfig,
-    ) -> HashMap<(u8, u64), Arc<eventheader_dynamic::EventSet>> {
+    ) -> HashMap<(Level, u64), Arc<eventheader_dynamic::EventSet>> {
         let mut event_sets = HashMap::new();
         if exporter_config.keywords_map.is_empty() {
             println!(
@@ -168,7 +168,7 @@ impl UserEventsExporter {
     }
 
     #[allow(dead_code)]
-    fn enabled(&self, level: u8, keyword: u64) -> bool {
+    fn enabled(&self, level: Level, keyword: u64) -> bool {
         if let Some(set) = self.event_sets.get(&(level, keyword)) {
             return set.enabled();
         }
