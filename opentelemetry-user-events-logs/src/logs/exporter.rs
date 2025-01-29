@@ -51,6 +51,7 @@ impl ExporterConfig {
 pub struct UserEventsExporter {
     provider: Arc<eventheader_dynamic::Provider>,
     exporter_config: ExporterConfig,
+    event_sets: HashMap<(u8, u64), Arc<eventheader_dynamic::EventSet>>,
 }
 
 const EVENT_ID: &str = "event_id";
@@ -68,14 +69,19 @@ impl UserEventsExporter {
         options = *options.group_name(provider_name);
         let mut eventheader_provider: eventheader_dynamic::Provider =
             eventheader_dynamic::Provider::new(provider_name, &options);
-        Self::register_keywords(&mut eventheader_provider, &exporter_config);
+        let event_sets = Self::register_keywords(&mut eventheader_provider, &exporter_config);
         UserEventsExporter {
             provider: Arc::new(eventheader_provider),
             exporter_config,
+            event_sets,
         }
     }
 
-    fn register_events(eventheader_provider: &mut eventheader_dynamic::Provider, keyword: u64) {
+    fn register_events(
+        eventheader_provider: &mut eventheader_dynamic::Provider,
+        keyword: u64,
+        event_sets: &mut HashMap<(u8, u64), Arc<eventheader_dynamic::EventSet>>,
+    ) {
         let levels = [
             eventheader::Level::Informational,
             eventheader::Level::Verbose,
@@ -86,24 +92,34 @@ impl UserEventsExporter {
 
         for &level in levels.iter() {
             eventheader_provider.register_set(level, keyword);
+            if let Some(set) = eventheader_provider.find_set(level.as_int().into(), keyword) {
+                event_sets.insert((level.as_int().into(), keyword), set);
+            }
         }
     }
 
     fn register_keywords(
         eventheader_provider: &mut eventheader_dynamic::Provider,
         exporter_config: &ExporterConfig,
-    ) {
+    ) -> HashMap<(u8, u64), Arc<eventheader_dynamic::EventSet>> {
+        let mut event_sets = HashMap::new();
         if exporter_config.keywords_map.is_empty() {
             println!(
                 "Register default keyword {}",
                 exporter_config.default_keyword
             );
-            Self::register_events(eventheader_provider, exporter_config.default_keyword);
+            Self::register_events(
+                eventheader_provider,
+                exporter_config.default_keyword,
+                &mut event_sets,
+            );
         }
 
         for keyword in exporter_config.keywords_map.values() {
-            Self::register_events(eventheader_provider, *keyword);
+            Self::register_events(eventheader_provider, *keyword, &mut event_sets);
+            
         }
+        event_sets
     }
 
     fn add_attribute_to_event(&self, eb: &mut EventBuilder, (key, value): (&Key, &AnyValue)) {
@@ -156,11 +172,9 @@ impl UserEventsExporter {
 
     #[allow(dead_code)]
     fn enabled(&self, level: u8, keyword: u64) -> bool {
-        let es = self.provider.find_set(level.into(), keyword);
-        match es {
-            Some(x) => x.enabled(),
-            _ => false,
-        };
+        if let Some(set) = self.event_sets.get(&(level, keyword)) {
+            return set.enabled();
+        }
         false
     }
 
@@ -178,128 +192,134 @@ impl UserEventsExporter {
             .exporter_config
             .get_log_keyword_or_default(instrumentation.name().as_ref());
 
-        if keyword.is_none() {
-            return Ok(());
-        }
+        if let Some(keyword) = keyword {
+            if let Some(log_es) = self.event_sets.get(&(level.as_int().into(), keyword)) {
+                if log_es.enabled() {
+                    EBW.with(|eb| {
+                        let mut eb = eb.borrow_mut();
+                        let event_tags: u32 = 0; // TBD name and event_tag values
+                        eb.reset(instrumentation.name().as_ref(), event_tags as u16);
+                        eb.opcode(Opcode::Info);
 
-        let log_es = if let Some(es) = self
-            .provider
-            .find_set(level.as_int().into(), keyword.unwrap())
-        {
-            es
-        } else {
-            return Ok(());
-        };
-        if log_es.enabled() {
-            EBW.with(|eb| {
-                let mut eb = eb.borrow_mut();
-                let event_tags: u32 = 0; // TBD name and event_tag values
-                eb.reset(instrumentation.name().as_ref(), event_tags as u16);
-                eb.opcode(Opcode::Info);
+                        eb.add_value("__csver__", 0x0401u16, FieldFormat::HexInt, 0);
 
-                eb.add_value("__csver__", 0x0401u16, FieldFormat::HexInt, 0);
-
-                // populate CS PartA
-                let mut cs_a_count = 0;
-                let event_time: SystemTime = log_record
-                    .timestamp
-                    .or(log_record.observed_timestamp)
-                    .unwrap_or_else(SystemTime::now);
-                cs_a_count += 1; // for event_time
-                eb.add_struct("PartA", cs_a_count, 0);
-                {
-                    let time: String = chrono::DateTime::to_rfc3339(
-                        &chrono::DateTime::<chrono::Utc>::from(event_time),
-                    );
-                    eb.add_str("time", time, FieldFormat::Default, 0);
-                }
-                //populate CS PartC
-                let (mut is_event_id, mut event_id) = (false, 0);
-                let (mut is_event_name, mut event_name) = (false, "");
-                let (mut is_part_c_present, mut cs_c_bookmark, mut cs_c_count) = (false, 0, 0);
-
-                for (key, value) in log_record.attributes_iter() {
-                    match (key.as_str(), value) {
-                        (EVENT_ID, AnyValue::Int(value)) => {
-                            is_event_id = true;
-                            event_id = *value;
-                            continue;
+                        // populate CS PartA
+                        let mut cs_a_count = 0;
+                        let event_time: SystemTime = log_record
+                            .timestamp
+                            .or(log_record.observed_timestamp)
+                            .unwrap_or_else(SystemTime::now);
+                        cs_a_count += 1; // for event_time
+                        eb.add_struct("PartA", cs_a_count, 0);
+                        {
+                            let time: String =
+                                chrono::DateTime::to_rfc3339(
+                                    &chrono::DateTime::<chrono::Utc>::from(event_time),
+                                );
+                            eb.add_str("time", time, FieldFormat::Default, 0);
                         }
-                        (EVENT_NAME_PRIMARY, AnyValue::String(value)) => {
-                            is_event_name = true;
-                            event_name = value.as_str();
-                            continue;
-                        }
-                        (EVENT_NAME_SECONDARY, AnyValue::String(value)) => {
-                            if !is_event_name {
-                                event_name = value.as_str();
+                        //populate CS PartC
+                        let (mut is_event_id, mut event_id) = (false, 0);
+                        let (mut is_event_name, mut event_name) = (false, "");
+                        let (mut is_part_c_present, mut cs_c_bookmark, mut cs_c_count) =
+                            (false, 0, 0);
+
+                        for (key, value) in log_record.attributes_iter() {
+                            match (key.as_str(), value) {
+                                (EVENT_ID, AnyValue::Int(value)) => {
+                                    is_event_id = true;
+                                    event_id = *value;
+                                    continue;
+                                }
+                                (EVENT_NAME_PRIMARY, AnyValue::String(value)) => {
+                                    is_event_name = true;
+                                    event_name = value.as_str();
+                                    continue;
+                                }
+                                (EVENT_NAME_SECONDARY, AnyValue::String(value)) => {
+                                    if !is_event_name {
+                                        event_name = value.as_str();
+                                    }
+                                    continue;
+                                }
+                                _ => {
+                                    if !is_part_c_present {
+                                        eb.add_struct_with_bookmark(
+                                            "PartC",
+                                            1,
+                                            0,
+                                            &mut cs_c_bookmark,
+                                        );
+                                        is_part_c_present = true;
+                                    }
+                                    self.add_attribute_to_event(&mut eb, (key, value));
+                                    cs_c_count += 1;
+                                }
                             }
-                            continue;
-                        }
-                        _ => {
-                            if !is_part_c_present {
-                                eb.add_struct_with_bookmark("PartC", 1, 0, &mut cs_c_bookmark);
-                                is_part_c_present = true;
+
+                            if is_part_c_present {
+                                eb.set_struct_field_count(cs_c_bookmark, cs_c_count);
                             }
-                            self.add_attribute_to_event(&mut eb, (key, value));
-                            cs_c_count += 1;
                         }
-                    }
+                        // populate CS PartB
+                        let mut cs_b_bookmark: usize = 0;
+                        let mut cs_b_count = 0;
+                        eb.add_struct_with_bookmark("PartB", 1, 0, &mut cs_b_bookmark);
+                        eb.add_str("_typeName", "Logs", FieldFormat::Default, 0);
+                        cs_b_count += 1;
 
-                    if is_part_c_present {
-                        eb.set_struct_field_count(cs_c_bookmark, cs_c_count);
-                    }
-                }
-                // populate CS PartB
-                let mut cs_b_bookmark: usize = 0;
-                let mut cs_b_count = 0;
-                eb.add_struct_with_bookmark("PartB", 1, 0, &mut cs_b_bookmark);
-                eb.add_str("_typeName", "Logs", FieldFormat::Default, 0);
-                cs_b_count += 1;
+                        if log_record.body.is_some() {
+                            eb.add_str(
+                                "body",
+                                match log_record.body.as_ref().unwrap() {
+                                    AnyValue::Int(value) => value.to_string(),
+                                    AnyValue::String(value) => value.to_string(),
+                                    AnyValue::Boolean(value) => value.to_string(),
+                                    AnyValue::Double(value) => value.to_string(),
+                                    AnyValue::Bytes(value) => {
+                                        String::from_utf8_lossy(value).to_string()
+                                    }
+                                    AnyValue::ListAny(_value) => "".to_string(),
+                                    AnyValue::Map(_value) => "".to_string(),
+                                    &_ => "".to_string(),
+                                },
+                                FieldFormat::Default,
+                                0,
+                            );
+                            cs_b_count += 1;
+                        }
+                        if level != Level::Invalid {
+                            eb.add_value(
+                                "severityNumber",
+                                level.as_int(),
+                                FieldFormat::SignedInt,
+                                0,
+                            );
+                            cs_b_count += 1;
+                        }
+                        if log_record.severity_text.is_some() {
+                            eb.add_str(
+                                "severityText",
+                                log_record.severity_text.as_ref().unwrap(),
+                                FieldFormat::SignedInt,
+                                0,
+                            );
+                            cs_b_count += 1;
+                        }
+                        if is_event_id {
+                            eb.add_value("eventId", event_id, FieldFormat::SignedInt, 0);
+                            cs_b_count += 1;
+                        }
+                        if !event_name.is_empty() {
+                            eb.add_str("name", event_name, FieldFormat::Default, 0);
+                            cs_b_count += 1;
+                        }
+                        eb.set_struct_field_count(cs_b_bookmark, cs_b_count);
 
-                if log_record.body.is_some() {
-                    eb.add_str(
-                        "body",
-                        match log_record.body.as_ref().unwrap() {
-                            AnyValue::Int(value) => value.to_string(),
-                            AnyValue::String(value) => value.to_string(),
-                            AnyValue::Boolean(value) => value.to_string(),
-                            AnyValue::Double(value) => value.to_string(),
-                            AnyValue::Bytes(value) => String::from_utf8_lossy(value).to_string(),
-                            AnyValue::ListAny(_value) => "".to_string(),
-                            AnyValue::Map(_value) => "".to_string(),
-                            &_ => "".to_string(),
-                        },
-                        FieldFormat::Default,
-                        0,
-                    );
-                    cs_b_count += 1;
+                        eb.write(&log_es, None, None);
+                    });
                 }
-                if level != Level::Invalid {
-                    eb.add_value("severityNumber", level.as_int(), FieldFormat::SignedInt, 0);
-                    cs_b_count += 1;
-                }
-                if log_record.severity_text.is_some() {
-                    eb.add_str(
-                        "severityText",
-                        log_record.severity_text.as_ref().unwrap(),
-                        FieldFormat::SignedInt,
-                        0,
-                    );
-                    cs_b_count += 1;
-                }
-                if is_event_id {
-                    eb.add_value("eventId", event_id, FieldFormat::SignedInt, 0);
-                    cs_b_count += 1;
-                }
-                if !event_name.is_empty() {
-                    eb.add_str("name", event_name, FieldFormat::Default, 0);
-                    cs_b_count += 1;
-                }
-                eb.set_struct_field_count(cs_b_bookmark, cs_b_count);
-
-                eb.write(&log_es, None, None);
-            });
+            }
             return Ok(());
         }
         Ok(())
