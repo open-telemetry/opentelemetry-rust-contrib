@@ -97,7 +97,9 @@ impl DatadogExporter {
     ) -> Result<http::Request<Vec<u8>>, TraceError> {
         let traces: Vec<&[SpanData]> = group_into_traces(&mut batch);
         let trace_count = traces.len();
-        let data = self.api_version.encode(
+        let mut buffer = Vec::with_capacity(trace_count * 512);
+        self.api_version.encode(
+            &mut buffer,
             &self.model_config,
             traces,
             &self.mapping,
@@ -114,7 +116,7 @@ impl DatadogExporter {
                 DATADOG_META_TRACER_VERSION_HEADER,
                 env!("CARGO_PKG_VERSION"),
             )
-            .body(data)
+            .body(buffer)
             .map_err::<Error, _>(Into::into)?;
 
         Ok(req)
