@@ -2,6 +2,9 @@
 
 ## vNext
 
+- [Breaking] `JaegerJsonExporter::install_batch()` now returns `TracerProvider`.
+  Additionally, global tracer provider now needs to be set by the user by calling `global::set_tracer_provider(tracer_provider.clone())` (original PR [opentelemetry-rust#1812](https://github.com/open-telemetry/opentelemetry-rust/pull/1812))
+
 ## v0.19.0
 
 - Bump opentelemetry and opentelemetry_sdk versions to 0.27

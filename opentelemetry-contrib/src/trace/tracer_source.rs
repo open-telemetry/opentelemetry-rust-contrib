@@ -1,7 +1,7 @@
 //! Abstracts away details for acquiring a `Tracer` by instrumented libraries.
-use once_cell::sync::OnceCell;
 use opentelemetry::global::BoxedTracer;
 use std::fmt::Debug;
+use std::sync::OnceLock;
 
 /// Holds either a borrowed `BoxedTracer` or a factory that can produce one when
 /// and if needed.
@@ -11,7 +11,7 @@ use std::fmt::Debug;
 #[derive(Debug)]
 pub struct TracerSource<'a> {
     variant: Variant<'a>,
-    tracer: OnceCell<BoxedTracer>,
+    tracer: OnceLock<BoxedTracer>,
 }
 
 enum Variant<'a> {
@@ -24,7 +24,7 @@ impl<'a> TracerSource<'a> {
     pub fn borrowed(tracer: &'a BoxedTracer) -> Self {
         Self {
             variant: Variant::Borrowed(tracer),
-            tracer: OnceCell::new(),
+            tracer: OnceLock::new(),
         }
     }
 
@@ -33,7 +33,7 @@ impl<'a> TracerSource<'a> {
     pub fn lazy(factory: &'a dyn Fn() -> BoxedTracer) -> Self {
         Self {
             variant: Variant::Lazy(factory),
-            tracer: OnceCell::new(),
+            tracer: OnceLock::new(),
         }
     }
 
@@ -47,7 +47,7 @@ impl<'a> TracerSource<'a> {
     }
 }
 
-impl<'a> Debug for Variant<'a> {
+impl Debug for Variant<'_> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         use Variant::*;
         match self {

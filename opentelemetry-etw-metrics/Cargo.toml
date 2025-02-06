@@ -17,10 +17,10 @@ opentelemetry-proto = { workspace = true, features = ["gen-tonic", "metrics"] }
 async-trait = "0.1"
 prost = "0.13"
 tracelogging = "1.2.1"
-tracing = {version = "0.1", optional = true}
-
+tracing = { version = "0.1", optional = true }
 [dev-dependencies]
 tokio = { version = "1.0", features = ["full"] }
+criterion = { workspace = true, features = ["html_reports"] }
 
 [features]
 internal-logs = ["tracing"]
@@ -28,3 +28,7 @@ default = ["internal-logs"]
 
 [package.metadata.cargo-machete]
 ignored = ["tracing"]
+
+[[bench]]
+name = "exporter"
+harness = false
