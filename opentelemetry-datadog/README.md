@@ -1,8 +1,13 @@
+# OpenTelemetry Datadog
+
 ![OpenTelemetry — An observability framework for cloud-native software.][splash]
 
 [splash]: https://raw.githubusercontent.com/open-telemetry/opentelemetry-rust/main/assets/logo-text.png
 
-# OpenTelemetry Datadog
+| Status        |                                            |
+| ------------- |--------------------------------------------|
+| Stability     | beta                                       |
+| Owners        | [Anton Grübel](https://github.com/gruebel) |
 
 Community supported vendor integrations for applications instrumented with [`OpenTelemetry`].
 
