@@ -4,6 +4,11 @@
 
 [splash]: https://raw.githubusercontent.com/open-telemetry/opentelemetry-rust/main/assets/logo-text.png
 
+| Status        |           |
+| ------------- |-----------|
+| Stability     | beta      |
+| Owners        | [Cijo Thomas](https://github.com/cijothomas), [Lalit Kumar Bhasin](https://github.com/lalitb) |
+
 This crate contains a Log Exporter to export logs to Linux
 [user_events](https://docs.kernel.org/trace/user_events.html), which is a
 solution for user process tracing, similar to ETW (Event Tracing for Windows) on

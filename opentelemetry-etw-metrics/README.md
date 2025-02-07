@@ -4,6 +4,11 @@
 
 [splash]: https://raw.githubusercontent.com/open-telemetry/opentelemetry-rust/main/assets/logo-text.png
 
+| Status        |           |
+| ------------- |-----------|
+| Stability     | beta      |
+| Owners        | [Cijo Thomas](https://github.com/cijothomas), [Lalit Kumar Bhasin](https://github.com/lalitb), [Matthew Boddewyn](https://github.com/mattbodd), [Pato Sandaña](https://github.com/psandana)|
+
 This crate contains OpenTelemetry Metrics exporter to
 [ETW (Event Tracing for Windows)](https://learn.microsoft.com/en-us/windows-hardware/drivers/devtest/event-tracing-for-windows--etw-), a Windows solution
 for efficient tracing of kernel or application-defined events, similar to user-events on Linux.
