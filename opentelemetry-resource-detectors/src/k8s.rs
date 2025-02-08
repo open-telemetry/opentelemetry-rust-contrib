@@ -46,7 +46,6 @@ mod tests {
     use super::*;
     use opentelemetry::{Key, Value};
     use std::time::Duration;
-    use temp_env;
 
     #[test]
     fn test_k8s_resource_detector_with_env_vars() {
