@@ -1,24 +1,66 @@
-use opentelemetry::sdk::resource::{Resource, ResourceDetector};
-use opentelemetry_semantic_conventions::resource;
+use opentelemetry::KeyValue;
+use opentelemetry_sdk::resource::{Resource, ResourceDetector};
 use std::env;
+use std::fs::read_to_string;
 use std::time::Duration;
 
-/// A resource detector for Kubernetes environment variables.
+const K8S_NAMESPACE_PATH: &str = "/var/run/secrets/kubernetes.io/serviceaccount/namespace";
+
+/// Detect Kubernetes information.
+///
+/// This resource detector returns the following information:
+///
+/// - Pod name (`k8s.pod.name`)
+/// - Namespace (`k8s.namespace.name`).
 pub struct K8sResourceDetector;
 
 impl ResourceDetector for K8sResourceDetector {
-    /// Detect Kubernetes-related environment variables and return a Resource.
     fn detect(&self, _timeout: Duration) -> Resource {
-        // Attempt to read Kubernetes-specific environment variables.
-        let pod_name = env::var("K8S_POD_NAME").unwrap_or_else(|_| "unknown_pod".to_string());
-        let namespace_name = env::var("K8S_NAMESPACE_NAME").unwrap_or_else(|_| "unknown_namespace".to_string());
-        let node_name = env::var("K8S_NODE_NAME").unwrap_or_else(|_| "unknown_node".to_string());
+        let pod_name = env::var("HOSTNAME").ok();
 
-        // Create a Resource with Kubernetes attributes.
-        Resource::new(vec![
-            resource::K8S_POD_NAME.string(pod_name),
-            resource::K8S_NAMESPACE_NAME.string(namespace_name),
-            resource::K8S_NODE_NAME.string(node_name),
-        ])
+        let namespace = read_to_string(K8S_NAMESPACE_PATH).ok();
+
+        Resource::new(
+            [
+                pod_name.map(|name| {
+                    KeyValue::new(
+                        opentelemetry_semantic_conventions::attribute::K8S_POD_NAME,
+                        name,
+                    )
+                }),
+                namespace.map(|name| {
+                    KeyValue::new(
+                        opentelemetry_semantic_conventions::attribute::K8S_NAMESPACE_NAME,
+                        name,
+                    )
+                }),
+            ]
+            .into_iter()
+            .flatten(),
+        )
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use opentelemetry::{Key, Value};
+    use std::time::Duration;
+    use temp_env;
+
+    #[test]
+    fn test_k8s_resource_detector_with_env_vars() {
+        temp_env::with_vars([("HOSTNAME", Some("test-pod"))], || {
+            let resource = K8sResourceDetector.detect(Duration::from_secs(0));
+
+            assert_eq!(resource.len(), 1);
+
+            assert_eq!(
+                resource.get(Key::from_static_str(
+                    opentelemetry_semantic_conventions::attribute::K8S_POD_NAME
+                )),
+                Some(Value::from("test-pod"))
+            )
+        });
     }
 }
