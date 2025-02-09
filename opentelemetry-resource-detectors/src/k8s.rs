@@ -62,4 +62,14 @@ mod tests {
             )
         });
     }
+
+    #[test]
+    fn test_k8s_resource_detector_with_missing_env_vars() {
+        // make sure no env var is accidentally set
+        temp_env::with_vars_unset(["HOSTNAME"], || {
+            let resource = K8sResourceDetector.detect(Duration::from_secs(0));
+
+            assert_eq!(resource.len(), 0);
+        });
+    }
 }
