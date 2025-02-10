@@ -5,6 +5,8 @@ use crate::propagator::DatadogTraceState;
 use opentelemetry::trace::Status;
 use opentelemetry_sdk::export::trace::SpanData;
 use opentelemetry_sdk::Resource;
+use std::cell::RefCell;
+use std::ops::DerefMut;
 use std::time::SystemTime;
 
 use super::unified_tags::{UnifiedTagField, UnifiedTags};
@@ -25,7 +27,7 @@ const GIT_META_TAGS_COUNT: u32 = if matches!(
 
 // Protocol documentation sourced from https://github.com/DataDog/datadog-agent/blob/c076ea9a1ffbde4c76d35343dbc32aecbbf99cb9/pkg/trace/api/version.go
 //
-// The payload is an array containing exactly 12 elements:
+// The payload is an array containing exactly 2 elements:
 //
 // 	1. An array of all unique strings present in the payload (a dictionary referred to by index).
 // 	2. An array of traces, where each trace is an array of spans. A span is encoded as an array having
@@ -68,7 +70,9 @@ const GIT_META_TAGS_COUNT: u32 = if matches!(
 //
 // 		The dictionary in this case would be []string{""}, having only the empty string at index 0.
 //
-pub(crate) fn encode<S, N, R>(
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn encode<S, N, R, W: std::io::Write>(
+    writer: &mut W,
     model_config: &ModelConfig,
     traces: Vec<&[SpanData]>,
     get_service_name: S,
@@ -76,53 +80,63 @@ pub(crate) fn encode<S, N, R>(
     get_resource: R,
     unified_tags: &UnifiedTags,
     resource: Option<&Resource>,
-) -> Result<Vec<u8>, Error>
+) -> Result<(), Error>
 where
     for<'a> S: Fn(&'a SpanData, &'a ModelConfig) -> &'a str,
     for<'a> N: Fn(&'a SpanData, &'a ModelConfig) -> &'a str,
     for<'a> R: Fn(&'a SpanData, &'a ModelConfig) -> &'a str,
 {
+    thread_local! {
+        static TRACES_BUFFER: RefCell<Vec<u8>> = RefCell::new(Vec::with_capacity(4096));
+    }
     let mut interner = StringInterner::new();
-    let mut encoded_traces = encode_traces(
-        &mut interner,
-        model_config,
-        get_service_name,
-        get_name,
-        get_resource,
-        &traces,
-        unified_tags,
-        resource,
-    )?;
+    TRACES_BUFFER.with(|buffer| {
+        let buffer = &mut buffer.borrow_mut();
+        buffer.clear();
 
-    let mut payload = Vec::with_capacity(traces.len() * 512);
-    rmp::encode::write_array_len(&mut payload, 2)?;
+        encode_traces(
+            buffer.deref_mut(),
+            &mut interner,
+            model_config,
+            get_service_name,
+            get_name,
+            get_resource,
+            &traces,
+            unified_tags,
+            resource,
+        )?;
 
-    interner.write_dictionary(&mut payload)?;
+        rmp::encode::write_array_len(writer, 2)?;
 
-    payload.append(&mut encoded_traces);
+        interner.write_dictionary(writer)?;
 
-    Ok(payload)
+        writer
+            .write_all(buffer)
+            .map_err(|_| Error::MessagePackError)?;
+
+        Ok(())
+    })
 }
 
-fn write_unified_tags<'a>(
-    encoded: &mut Vec<u8>,
+fn write_unified_tags<'a, W: std::io::Write>(
+    writer: &mut W,
     interner: &mut StringInterner<'a>,
     unified_tags: &'a UnifiedTags,
 ) -> Result<(), Error> {
-    write_unified_tag(encoded, interner, &unified_tags.service)?;
-    write_unified_tag(encoded, interner, &unified_tags.env)?;
-    write_unified_tag(encoded, interner, &unified_tags.version)?;
+    write_unified_tag(writer, interner, &unified_tags.service)?;
+    write_unified_tag(writer, interner, &unified_tags.env)?;
+    write_unified_tag(writer, interner, &unified_tags.version)?;
     Ok(())
 }
 
-fn write_unified_tag<'a>(
-    encoded: &mut Vec<u8>,
+fn write_unified_tag<'a, W: std::io::Write>(
+    writer: &mut W,
     interner: &mut StringInterner<'a>,
     tag: &'a UnifiedTagField,
 ) -> Result<(), Error> {
     if let Some(tag_value) = &tag.value {
-        rmp::encode::write_u32(encoded, interner.intern(tag.get_tag_name()))?;
-        rmp::encode::write_u32(encoded, interner.intern(tag_value.as_str().as_ref()))?;
+        rmp::encode::write_u32(writer, interner.intern(tag.get_tag_name()))?;
+        rmp::encode::write_u32(writer, interner.intern(tag_value.as_str().as_ref()))?;
     }
     Ok(())
 }
@@ -150,7 +164,8 @@ fn get_measuring(span: &SpanData) -> f64 {
 }
 
 #[allow(clippy::too_many_arguments)]
-fn encode_traces<'interner, S, N, R>(
+fn encode_traces<'interner, S, N, R, W: std::io::Write>(
+    writer: &mut W,
     interner: &mut StringInterner<'interner>,
     model_config: &'interner ModelConfig,
     get_service_name: S,
@@ -159,17 +174,16 @@ fn encode_traces<'interner, S, N, R>(
     traces: &'interner [&[SpanData]],
     unified_tags: &'interner UnifiedTags,
     resource: Option<&'interner Resource>,
-) -> Result<Vec<u8>, Error>
+) -> Result<(), Error>
 where
     for<'a> S: Fn(&'a SpanData, &'a ModelConfig) -> &'a str,
     for<'a> N: Fn(&'a SpanData, &'a ModelConfig) -> &'a str,
     for<'a> R: Fn(&'a SpanData, &'a ModelConfig) -> &'a str,
 {
-    let mut encoded = Vec::new();
-    rmp::encode::write_array_len(&mut encoded, traces.len() as u32)?;
+    rmp::encode::write_array_len(writer, traces.len() as u32)?;
 
     for trace in traces.iter() {
-        rmp::encode::write_array_len(&mut encoded, trace.len() as u32)?;
+        rmp::encode::write_array_len(writer, trace.len() as u32)?;
 
         for span in trace.iter() {
             // Safe until the year 2262 when Datadog will need to change their API
@@ -194,32 +208,26 @@ where
             }
 
             // Datadog span name is OpenTelemetry component name - see module docs for more information
-            rmp::encode::write_array_len(&mut encoded, SPAN_NUM_ELEMENTS)?;
+            rmp::encode::write_array_len(writer, SPAN_NUM_ELEMENTS)?;
             rmp::encode::write_u32(
-                &mut encoded,
+                writer,
                 interner.intern(get_service_name(span, model_config)),
             )?;
-            rmp::encode::write_u32(&mut encoded, interner.intern(get_name(span, model_config)))?;
-            rmp::encode::write_u32(
-                &mut encoded,
-                interner.intern(get_resource(span, model_config)),
-            )?;
+            rmp::encode::write_u32(writer, interner.intern(get_name(span, model_config)))?;
+            rmp::encode::write_u32(writer, interner.intern(get_resource(span, model_config)))?;
             rmp::encode::write_u64(
-                &mut encoded,
+                writer,
                 u128::from_be_bytes(span.span_context.trace_id().to_bytes()) as u64,
             )?;
             rmp::encode::write_u64(
-                &mut encoded,
+                writer,
                 u64::from_be_bytes(span.span_context.span_id().to_bytes()),
             )?;
-            rmp::encode::write_u64(
-                &mut encoded,
-                u64::from_be_bytes(span.parent_span_id.to_bytes()),
-            )?;
-            rmp::encode::write_i64(&mut encoded, start)?;
-            rmp::encode::write_i64(&mut encoded, duration)?;
+            rmp::encode::write_u64(writer, u64::from_be_bytes(span.parent_span_id.to_bytes()))?;
+            rmp::encode::write_i64(writer, start)?;
+            rmp::encode::write_i64(writer, duration)?;
             rmp::encode::write_i32(
-                &mut encoded,
+                writer,
                 match span.status {
                     Status::Error { .. } => 1,
                     _ => 0,
@@ -227,46 +235,46 @@ where
             )?;
 
             rmp::encode::write_map_len(
-                &mut encoded,
+                writer,
                 (span.attributes.len() + resource.map(|r| r.len()).unwrap_or(0)) as u32
                     + unified_tags.compute_attribute_size()
                     + GIT_META_TAGS_COUNT,
             )?;
             if let Some(resource) = resource {
                 for (key, value) in resource.iter() {
-                    rmp::encode::write_u32(&mut encoded, interner.intern(key.as_str()))?;
-                    rmp::encode::write_u32(&mut encoded, interner.intern_value(value))?;
+                    rmp::encode::write_u32(writer, interner.intern(key.as_str()))?;
+                    rmp::encode::write_u32(writer, interner.intern_value(value))?;
                 }
             }
 
-            write_unified_tags(&mut encoded, interner, unified_tags)?;
+            write_unified_tags(writer, interner, unified_tags)?;
 
             for kv in span.attributes.iter() {
-                rmp::encode::write_u32(&mut encoded, interner.intern(kv.key.as_str()))?;
-                rmp::encode::write_u32(&mut encoded, interner.intern_value(&kv.value))?;
+                rmp::encode::write_u32(writer, interner.intern(kv.key.as_str()))?;
+                rmp::encode::write_u32(writer, interner.intern_value(&kv.value))?;
             }
 
             if let (Some(repository_url), Some(commit_sha)) = (
                 option_env!("DD_GIT_REPOSITORY_URL"),
                 option_env!("DD_GIT_COMMIT_SHA"),
             ) {
-                rmp::encode::write_u32(&mut encoded, interner.intern("git.repository_url"))?;
-                rmp::encode::write_u32(&mut encoded, interner.intern(repository_url))?;
-                rmp::encode::write_u32(&mut encoded, interner.intern("git.commit.sha"))?;
-                rmp::encode::write_u32(&mut encoded, interner.intern(commit_sha))?;
+                rmp::encode::write_u32(writer, interner.intern("git.repository_url"))?;
+                rmp::encode::write_u32(writer, interner.intern(repository_url))?;
+                rmp::encode::write_u32(writer, interner.intern("git.commit.sha"))?;
+                rmp::encode::write_u32(writer, interner.intern(commit_sha))?;
             }
 
-            rmp::encode::write_map_len(&mut encoded, METRICS_LEN)?;
-            rmp::encode::write_u32(&mut encoded, interner.intern(SAMPLING_PRIORITY_KEY))?;
+            rmp::encode::write_map_len(writer, METRICS_LEN)?;
+            rmp::encode::write_u32(writer, interner.intern(SAMPLING_PRIORITY_KEY))?;
             let sampling_priority = get_sampling_priority(span);
-            rmp::encode::write_f64(&mut encoded, sampling_priority)?;
+            rmp::encode::write_f64(writer, sampling_priority)?;
 
-            rmp::encode::write_u32(&mut encoded, interner.intern(DD_MEASURED_KEY))?;
+            rmp::encode::write_u32(writer, interner.intern(DD_MEASURED_KEY))?;
             let measuring = get_measuring(span);
-            rmp::encode::write_f64(&mut encoded, measuring)?;
-            rmp::encode::write_u32(&mut encoded, span_type)?;
+            rmp::encode::write_f64(writer, measuring)?;
+            rmp::encode::write_u32(writer, span_type)?;
         }
     }
 
-    Ok(encoded)
+    Ok(())
 }

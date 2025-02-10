@@ -149,16 +149,18 @@ impl ApiVersion {
         }
     }
 
-    pub(crate) fn encode(
+    pub(crate) fn encode<W: std::io::Write>(
         self,
+        writer: &mut W,
         model_config: &ModelConfig,
         traces: Vec<&[trace::SpanData]>,
         mapping: &Mapping,
         unified_tags: &UnifiedTags,
         resource: Option<&Resource>,
-    ) -> Result<Vec<u8>, Error> {
+    ) -> Result<(), Error> {
         match self {
             Self::Version03 => v03::encode(
+                writer,
                 model_config,
                 traces,
                 |span, config| match &mapping.service_name {
@@ -176,6 +178,7 @@ impl ApiVersion {
                 resource,
             ),
             Self::Version05 => v05::encode(
+                writer,
                 model_config,
                 traces,
                 |span, config| match &mapping.service_name {
@@ -256,13 +259,17 @@ pub(crate) mod tests {
             ..Default::default()
         };
         let resource = Resource::new(vec![KeyValue::new("host.name", "test")]);
-        let encoded = base64::encode(ApiVersion::Version03.encode(
+
+        let mut buffer = Vec::new();
+        ApiVersion::Version03.encode(
+            &mut buffer,
             &model_config,
             traces.iter().map(|x| &x[..]).collect(),
             &Mapping::empty(),
             &UnifiedTags::new(),
             Some(&resource),
-        )?);
+        )?;
+        let encoded = base64::encode(buffer);
 
         assert_eq!(encoded.as_str(), "kZGMpHR5cGWjd2Vip3NlcnZpY2Wsc2VydmljZV9uYW1lpG5hbWWpY29tcG9uZW\
         50qHJlc291cmNlqHJlc291cmNlqHRyYWNlX2lkzwAAAAAAAAAHp3NwYW5faWTPAAAAAAAAAGOpcGFyZW50X2lkzwAAAA\
@@ -286,13 +293,16 @@ pub(crate) mod tests {
         unified_tags.set_version(Some(String::from("test-version")));
         unified_tags.set_service(Some(String::from("test-service")));
 
-        let _encoded = base64::encode(ApiVersion::Version05.encode(
+        let mut buffer = Vec::new();
+        ApiVersion::Version05.encode(
+            &mut buffer,
             &model_config,
             traces.iter().map(|x| &x[..]).collect(),
             &Mapping::empty(),
             &unified_tags,
             Some(&resource),
-        )?);
+        )?;
+        let _encoded = base64::encode(&mut buffer);
 
         // TODO: Need someone to generate the expected result or instructions to do so.
         // assert_eq!(encoded.as_str(), "kp6jd2VirHNlcnZpY2VfbmFtZaljb21wb25lbnSocmVzb3VyY2WpaG9zdC5uYW\
