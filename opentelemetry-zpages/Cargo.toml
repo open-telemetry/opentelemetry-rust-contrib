@@ -24,7 +24,7 @@ with-serde = []
 
 [dependencies]
 opentelemetry = { workspace = true }
-opentelemetry_sdk = { workspace = true, default-features = false, features = ["trace"] }
+opentelemetry_sdk = { workspace = true, default-features = false, features = ["trace", "experimental_async_runtime" ] }
 opentelemetry-proto = { workspace = true, features = ["zpages", "gen-tonic", "with-serde"], default-features = false }
 async-channel = "1.6"
 futures-channel = "0.3"
