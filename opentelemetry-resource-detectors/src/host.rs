@@ -113,16 +113,15 @@ mod tests {
     #[cfg(target_os = "macos")]
     #[test]
     fn test_host_resource_detector_macos() {
-        let resource = HostResourceDetector::default().detect(Duration::from_secs(0));
-        dbg!(&resource);
+        let resource = HostResourceDetector::default().detect();
         assert_eq!(resource.len(), 2);
         assert!(resource
-            .get(Key::from_static_str(
+            .get(&Key::from_static_str(
                 opentelemetry_semantic_conventions::attribute::HOST_ID
             ))
             .is_some());
         assert!(resource
-            .get(Key::from_static_str(
+            .get(&Key::from_static_str(
                 opentelemetry_semantic_conventions::attribute::HOST_ARCH
             ))
             .is_some())
