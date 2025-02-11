@@ -2,11 +2,18 @@
 
 ## vNext
 
+## v0.13.0
+
+### Changed
+
+- Bump msrv to 1.75.0
+- Bump opentelemetry version to 0.28, opentelemetry_sdk version to 0.28
+
 ## v0.12.0
 
 ### Changed
 
-- Bump opentelemetry version to 0.26, opentelemetry_sdk version to 0.27
+- Bump opentelemetry version to 0.27, opentelemetry_sdk version to 0.27
 
 ## v0.11.0
 
