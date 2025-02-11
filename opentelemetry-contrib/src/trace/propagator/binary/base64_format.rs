@@ -9,7 +9,7 @@
 #[cfg(feature = "binary_propagator")]
 use crate::trace::propagator::binary::binary_propagator::BinaryFormat;
 
-use base64::{decode, encode};
+use base64::{engine::general_purpose::STANDARD, Engine};
 use opentelemetry::trace::SpanContext;
 
 /// Used to serialize and deserialize `SpanContext`s to and from a base64
@@ -27,11 +27,11 @@ where
     Format: BinaryFormat,
 {
     fn serialize_into_base64(&self, context: &SpanContext) -> String {
-        encode(self.serialize_into_bytes(context))
+        STANDARD.encode(self.serialize_into_bytes(context))
     }
 
     fn deserialize_from_base64(&self, base64: &str) -> SpanContext {
-        if let Ok(bytes) = decode(base64.as_bytes()) {
+        if let Ok(bytes) = STANDARD.decode(base64.as_bytes()) {
             self.deserialize_from_bytes(&bytes)
         } else {
             SpanContext::empty_context()

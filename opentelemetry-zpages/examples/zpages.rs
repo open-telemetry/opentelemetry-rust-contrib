@@ -69,7 +69,7 @@ async fn handler(
             }
         }
         "/running" => {
-            let span_duration = Duration::from_millis(rand::thread_rng().gen_range(1..6000));
+            let span_duration = Duration::from_millis(rand::rng().random_range(1..6000));
             let mut spans = global::tracer("zpages-test").start("running-spans");
             spans.set_status(Status::Ok);
             tokio::time::sleep(span_duration).await;

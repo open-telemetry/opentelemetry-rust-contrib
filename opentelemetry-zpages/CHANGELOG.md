@@ -2,6 +2,8 @@
 
 ## vNext
 
+- Bump `async-channel` version to 2.3
+
 ## v0.13.0
 
 ### Changed

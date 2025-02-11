@@ -2,6 +2,8 @@
 
 ## vNext
 
+- Bump `base64` version to 0.22
+
 ## v0.20.0
 
 - Bump msrv to 1.75.0
