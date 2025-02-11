@@ -2,11 +2,14 @@
 
 ## vNext
 
+### Changed
+
+- Expose `K8sResourceDetector`, which populates `k8s.pod.name` and `k8s.namespace.name`
+
 ## v0.7.0
 
 ### Changed
 
-- Expose `K8sResourceDetector`, which populates `k8s.pod.name` and `k8s.namespace.name`
 - Bump msrv to 1.75.0
 - Bump opentelemetry and opentelemetry_sdk versions to 0.28
 - Bump opentelemetry-semantic-conventions version to 0.28
