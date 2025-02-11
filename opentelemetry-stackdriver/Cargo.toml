@@ -1,13 +1,13 @@
 [package]
 name = "opentelemetry-stackdriver"
-version = "0.24.0"
+version = "0.25.0"
 description = "A Rust opentelemetry exporter that uploads traces to Google Stackdriver trace."
 documentation = "https://docs.rs/opentelemetry-stackdriver/"
 repository = "https://github.com/open-telemetry/opentelemetry-rust-contrib"
 license = "Apache-2.0"
 edition = "2021"
 exclude = ["/proto"]
-rust-version = "1.71.1"
+rust-version = "1.75.0"
 
 [dependencies]
 async-trait = "0.1.48"

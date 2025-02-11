@@ -1,7 +1,7 @@
 use crate::exporter::model::{Error, SAMPLING_PRIORITY_KEY};
 use crate::exporter::ModelConfig;
 use opentelemetry::trace::Status;
-use opentelemetry_sdk::export::trace::SpanData;
+use opentelemetry_sdk::trace::SpanData;
 use opentelemetry_sdk::Resource;
 use std::time::SystemTime;
 

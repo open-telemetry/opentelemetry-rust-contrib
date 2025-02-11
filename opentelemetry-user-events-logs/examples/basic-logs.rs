@@ -1,20 +1,20 @@
 //! run with `$ cargo run --example basic-logs --all-features
 
 use opentelemetry_appender_tracing::layer;
-use opentelemetry_sdk::logs::LoggerProvider;
+use opentelemetry_sdk::logs::SdkLoggerProvider;
 use opentelemetry_user_events_logs::{ExporterConfig, ReentrantLogProcessor, UserEventsExporter};
 use std::collections::HashMap;
 use tracing::error;
 use tracing_subscriber::prelude::*;
 
-fn init_logger() -> LoggerProvider {
+fn init_logger() -> SdkLoggerProvider {
     let exporter_config = ExporterConfig {
         default_keyword: 1,
         keywords_map: HashMap::new(),
     };
     let exporter = UserEventsExporter::new("test", None, exporter_config);
     let reenterant_processor = ReentrantLogProcessor::new(exporter);
-    LoggerProvider::builder()
+    SdkLoggerProvider::builder()
         .with_log_processor(reenterant_processor)
         .build()
 }

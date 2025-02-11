@@ -7,7 +7,7 @@ use opentelemetry::{
     trace::{Span, Status},
 };
 use opentelemetry_sdk::runtime::Tokio;
-use opentelemetry_sdk::trace::TracerProvider;
+use opentelemetry_sdk::trace::SdkTracerProvider;
 use opentelemetry_zpages::{tracez, TracezError, TracezQuerier, TracezResponse};
 use rand::Rng;
 use std::str::FromStr;
@@ -90,7 +90,7 @@ fn tracez_response_or_server_error(resp: Result<TracezResponse, TracezError>) ->
 #[tokio::main]
 async fn main() {
     let (processor, querier) = tracez(5, Tokio);
-    let provider = TracerProvider::builder()
+    let provider = SdkTracerProvider::builder()
         .with_span_processor(processor)
         .build();
     global::set_tracer_provider(provider);

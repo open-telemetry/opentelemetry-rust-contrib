@@ -10,7 +10,7 @@
 //! ```no_run
 //! use opentelemetry::{global, trace::{Tracer, TracerProvider as _}};
 //! use opentelemetry_aws::trace::XrayPropagator;
-//! use opentelemetry_sdk::trace::TracerProvider;
+//! use opentelemetry_sdk::trace::SdkTracerProvider;
 //! use opentelemetry_stdout::SpanExporter;
 //! use opentelemetry_http::HeaderInjector;
 //!
@@ -18,7 +18,7 @@
 //! async fn main() -> std::result::Result<(), Box<dyn std::error::Error + Send + Sync + 'static>> {
 //!     // Set the global propagator to X-Ray propagator
 //!     global::set_text_map_propagator(XrayPropagator::default());
-//!     let provider = TracerProvider::builder()
+//!     let provider = SdkTracerProvider::builder()
 //!         .with_simple_exporter(SpanExporter::default())
 //!         .build();
 //!     let tracer = provider.tracer("readme_example");

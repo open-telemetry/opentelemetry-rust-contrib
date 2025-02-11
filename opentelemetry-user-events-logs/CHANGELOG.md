@@ -2,6 +2,10 @@
 
 ## vNext
 
+## v0.9.0
+
+- Bump msrv to 1.75.0
+- Bump opentelemetry and opentelemetry_sdk versions to 0.28
 - Renamed  `logs_level_enabled` flag to `spec_unstable_logs_enabled` to be consistent with core repo.
 
 ## v0.8.0

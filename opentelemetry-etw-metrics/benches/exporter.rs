@@ -18,7 +18,7 @@ use opentelemetry_etw_metrics::MetricsExporter;
 
 use opentelemetry_sdk::{
     metrics::{
-        data::{DataPoint, Metric, ResourceMetrics, ScopeMetrics, Sum},
+        data::{Metric, ResourceMetrics, ScopeMetrics, Sum, SumDataPoint},
         exporter::PushMetricExporter,
         Temporality,
     },
@@ -34,10 +34,8 @@ async fn export(exporter: &MetricsExporter, resource_metrics: &mut ResourceMetri
 fn create_resource_metrics() -> ResourceMetrics {
     // Metric does not implement clone so this helper function is used to create a metric
     fn create_metric() -> Metric {
-        let data_point = DataPoint {
+        let data_point = SumDataPoint {
             attributes: vec![KeyValue::new("datapoint key", "datapoint value")],
-            start_time: Some(std::time::SystemTime::now()),
-            time: Some(std::time::SystemTime::now()),
             value: 1.0_f64,
             exemplars: vec![],
         };
@@ -45,6 +43,8 @@ fn create_resource_metrics() -> ResourceMetrics {
         let sum: Sum<f64> = Sum {
             data_points: vec![data_point.clone(); 2_000],
             temporality: Temporality::Delta,
+            start_time: std::time::SystemTime::now(),
+            time: std::time::SystemTime::now(),
             is_monotonic: true,
         };
 
@@ -57,7 +57,9 @@ fn create_resource_metrics() -> ResourceMetrics {
     }
 
     ResourceMetrics {
-        resource: Resource::new(vec![KeyValue::new("service.name", "my-service")]),
+        resource: Resource::builder()
+            .with_attributes(vec![KeyValue::new("service.name", "my-service")])
+            .build(),
         scope_metrics: vec![ScopeMetrics {
             scope: InstrumentationScope::default(),
             metrics: vec![

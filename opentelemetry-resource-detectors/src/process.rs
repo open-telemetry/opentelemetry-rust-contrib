@@ -7,7 +7,6 @@ use opentelemetry_sdk::resource::ResourceDetector;
 use opentelemetry_sdk::Resource;
 use std::env::args_os;
 use std::process::id;
-use std::time::Duration;
 
 /// Detect process information.
 ///
@@ -19,22 +18,24 @@ use std::time::Duration;
 pub struct ProcessResourceDetector;
 
 impl ResourceDetector for ProcessResourceDetector {
-    fn detect(&self, _timeout: Duration) -> Resource {
+    fn detect(&self) -> Resource {
         let arguments = args_os();
         let cmd_arg_val = arguments
             .into_iter()
             .map(|arg| arg.to_string_lossy().into_owned().into())
             .collect::<Vec<StringValue>>();
-        Resource::new(vec![
-            KeyValue::new(
-                opentelemetry_semantic_conventions::attribute::PROCESS_COMMAND_ARGS,
-                Value::Array(cmd_arg_val.into()),
-            ),
-            KeyValue::new(
-                opentelemetry_semantic_conventions::attribute::PROCESS_PID,
-                id() as i64,
-            ),
-        ])
+        Resource::builder_empty()
+            .with_attributes(vec![
+                KeyValue::new(
+                    opentelemetry_semantic_conventions::attribute::PROCESS_COMMAND_ARGS,
+                    Value::Array(cmd_arg_val.into()),
+                ),
+                KeyValue::new(
+                    opentelemetry_semantic_conventions::attribute::PROCESS_PID,
+                    id() as i64,
+                ),
+            ])
+            .build()
     }
 }
 
@@ -44,11 +45,9 @@ mod tests {
     use super::ProcessResourceDetector;
     use opentelemetry_sdk::resource::ResourceDetector;
 
-    use std::time::Duration;
-
     #[test]
     fn test_processor_resource_detector() {
-        let resource = ProcessResourceDetector.detect(Duration::from_secs(0));
+        let resource = ProcessResourceDetector.detect();
         assert_eq!(resource.len(), 2); // we cannot assert on the values because it changes along with runtime.
     }
 }

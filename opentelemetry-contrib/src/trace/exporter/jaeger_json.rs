@@ -5,16 +5,13 @@ use async_trait::async_trait;
 use futures_core::future::BoxFuture;
 use futures_util::FutureExt;
 use opentelemetry::trace::SpanId;
-#[cfg(any(
-    feature = "rt-tokio",
-    feature = "rt-async-std",
-    feature = "rt-tokio-current-thread"
-))]
-use opentelemetry::trace::TraceError;
+#[allow(unused_imports)]
+use opentelemetry_sdk::error::OTelSdkError;
+use opentelemetry_sdk::runtime::RuntimeChannel;
 use opentelemetry_sdk::{
-    export::trace::{ExportResult, SpanData, SpanExporter},
-    runtime::RuntimeChannel,
-    trace::TracerProvider,
+    error::OTelSdkResult,
+    trace::SdkTracerProvider,
+    trace::{SpanData, SpanExporter},
 };
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
@@ -46,16 +43,15 @@ impl<R: JaegerJsonRuntime> JaegerJsonExporter<R> {
     }
 
     /// Install the exporter using the internal provided runtime
-    pub fn install_batch(self) -> TracerProvider {
-        let runtime = self.runtime.clone();
-        TracerProvider::builder()
-            .with_batch_exporter(self, runtime)
+    pub fn install_batch(self) -> SdkTracerProvider {
+        SdkTracerProvider::builder()
+            .with_batch_exporter(self)
             .build()
     }
 }
 
 impl<R: JaegerJsonRuntime> SpanExporter for JaegerJsonExporter<R> {
-    fn export(&mut self, batch: Vec<SpanData>) -> BoxFuture<'static, ExportResult> {
+    fn export(&mut self, batch: Vec<SpanData>) -> BoxFuture<'static, OTelSdkResult> {
         let mut trace_map = HashMap::new();
 
         for span in batch {
@@ -212,36 +208,36 @@ fn opentelemetry_value_to_json(value: &opentelemetry::Value) -> (&str, serde_jso
 #[async_trait]
 pub trait JaegerJsonRuntime: RuntimeChannel + std::fmt::Debug {
     /// Create a new directory if the given path does not exist yet
-    async fn create_dir(&self, path: &Path) -> ExportResult;
+    async fn create_dir(&self, path: &Path) -> OTelSdkResult;
     /// Write the provided content to a new file at the given path
-    async fn write_to_file(&self, path: &Path, content: &[u8]) -> ExportResult;
+    async fn write_to_file(&self, path: &Path, content: &[u8]) -> OTelSdkResult;
 }
 
 #[cfg(feature = "rt-tokio")]
 #[async_trait]
 impl JaegerJsonRuntime for opentelemetry_sdk::runtime::Tokio {
-    async fn create_dir(&self, path: &Path) -> ExportResult {
+    async fn create_dir(&self, path: &Path) -> OTelSdkResult {
         if tokio::fs::metadata(path).await.is_err() {
             tokio::fs::create_dir_all(path)
                 .await
-                .map_err(|e| TraceError::Other(Box::new(e)))?
+                .map_err(|e| OTelSdkError::InternalFailure(format!("{:?}", e)))?
         }
 
         Ok(())
     }
 
-    async fn write_to_file(&self, path: &Path, content: &[u8]) -> ExportResult {
+    async fn write_to_file(&self, path: &Path, content: &[u8]) -> OTelSdkResult {
         use tokio::io::AsyncWriteExt;
 
         let mut file = tokio::fs::File::create(path)
             .await
-            .map_err(|e| TraceError::Other(Box::new(e)))?;
+            .map_err(|e| OTelSdkError::InternalFailure(format!("{:?}", e)))?;
         file.write_all(content)
             .await
-            .map_err(|e| TraceError::Other(Box::new(e)))?;
+            .map_err(|e| OTelSdkError::InternalFailure(format!("{:?}", e)))?;
         file.sync_data()
             .await
-            .map_err(|e| TraceError::Other(Box::new(e)))?;
+            .map_err(|e| OTelSdkError::InternalFailure(format!("{:?}", e)))?;
 
         Ok(())
     }
@@ -250,28 +246,28 @@ impl JaegerJsonRuntime for opentelemetry_sdk::runtime::Tokio {
 #[cfg(feature = "rt-tokio-current-thread")]
 #[async_trait]
 impl JaegerJsonRuntime for opentelemetry_sdk::runtime::TokioCurrentThread {
-    async fn create_dir(&self, path: &Path) -> ExportResult {
+    async fn create_dir(&self, path: &Path) -> OTelSdkResult {
         if tokio::fs::metadata(path).await.is_err() {
             tokio::fs::create_dir_all(path)
                 .await
-                .map_err(|e| TraceError::Other(Box::new(e)))?
+                .map_err(|e| OTelSdkError::InternalFailure(format!("{:?}", e)))?
         }
 
         Ok(())
     }
 
-    async fn write_to_file(&self, path: &Path, content: &[u8]) -> ExportResult {
+    async fn write_to_file(&self, path: &Path, content: &[u8]) -> OTelSdkResult {
         use tokio::io::AsyncWriteExt;
 
         let mut file = tokio::fs::File::create(path)
             .await
-            .map_err(|e| TraceError::Other(Box::new(e)))?;
+            .map_err(|e| OTelSdkError::InternalFailure(format!("{:?}", e)))?;
         file.write_all(content)
             .await
-            .map_err(|e| TraceError::Other(Box::new(e)))?;
+            .map_err(|e| OTelSdkError::InternalFailure(format!("{:?}", e)))?;
         file.sync_data()
             .await
-            .map_err(|e| TraceError::Other(Box::new(e)))?;
+            .map_err(|e| OTelSdkError::InternalFailure(format!("{:?}", e)))?;
 
         Ok(())
     }
@@ -280,27 +276,27 @@ impl JaegerJsonRuntime for opentelemetry_sdk::runtime::TokioCurrentThread {
 #[cfg(feature = "rt-async-std")]
 #[async_trait]
 impl JaegerJsonRuntime for opentelemetry_sdk::runtime::AsyncStd {
-    async fn create_dir(&self, path: &Path) -> ExportResult {
+    async fn create_dir(&self, path: &Path) -> OTelSdkResult {
         if async_std::fs::metadata(path).await.is_err() {
             async_std::fs::create_dir_all(path)
                 .await
-                .map_err(|e| TraceError::Other(Box::new(e)))?;
+                .map_err(|e| OTelSdkError::InternalFailure(format!("{:?}", e)))?;
         }
         Ok(())
     }
 
-    async fn write_to_file(&self, path: &Path, content: &[u8]) -> ExportResult {
+    async fn write_to_file(&self, path: &Path, content: &[u8]) -> OTelSdkResult {
         use async_std::io::WriteExt;
 
         let mut file = async_std::fs::File::create(path)
             .await
-            .map_err(|e| TraceError::Other(Box::new(e)))?;
+            .map_err(|e| OTelSdkError::InternalFailure(format!("{:?}", e)))?;
         file.write_all(content)
             .await
-            .map_err(|e| TraceError::Other(Box::new(e)))?;
+            .map_err(|e| OTelSdkError::InternalFailure(format!("{:?}", e)))?;
         file.sync_data()
             .await
-            .map_err(|e| TraceError::Other(Box::new(e)))?;
+            .map_err(|e| OTelSdkError::InternalFailure(format!("{:?}", e)))?;
 
         Ok(())
     }

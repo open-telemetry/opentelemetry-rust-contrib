@@ -2,19 +2,20 @@
 use opentelemetry::{metrics::MeterProvider as _, KeyValue};
 use opentelemetry_sdk::{
     metrics::{PeriodicReader, SdkMeterProvider},
-    runtime, Resource,
+    Resource,
 };
 use opentelemetry_user_events_metrics::MetricsExporter;
 use std::thread;
 use std::time::Duration;
 
 fn init_metrics(exporter: MetricsExporter) -> SdkMeterProvider {
-    let reader = PeriodicReader::builder(exporter, runtime::Tokio).build();
+    let reader = PeriodicReader::builder(exporter).build();
     SdkMeterProvider::builder()
-        .with_resource(Resource::new(vec![KeyValue::new(
-            "service.name",
-            "metric-demo",
-        )]))
+        .with_resource(
+            Resource::builder_empty()
+                .with_attributes(vec![KeyValue::new("service.name", "metric-demo")])
+                .build(),
+        )
         .with_reader(reader)
         .build()
 }

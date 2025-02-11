@@ -9,15 +9,15 @@ use opentelemetry::{
 };
 use opentelemetry_contrib::trace::propagator::trace_context_response::TraceContextResponsePropagator;
 use opentelemetry_http::{Bytes, HeaderExtractor, HeaderInjector};
-use opentelemetry_sdk::{propagation::TraceContextPropagator, trace::TracerProvider};
+use opentelemetry_sdk::{propagation::TraceContextPropagator, trace::SdkTracerProvider};
 use opentelemetry_stdout::SpanExporter;
 
-fn init_traces() -> Result<TracerProvider, TraceError> {
+fn init_traces() -> Result<SdkTracerProvider, TraceError> {
     global::set_text_map_propagator(TraceContextPropagator::new());
     // Install stdout exporter pipeline to be able to retrieve the collected spans.
     // For the demonstration, use `Sampler::AlwaysOn` sampler to sample all traces. In a production
     // application, use `Sampler::ParentBased` or `Sampler::TraceIdRatioBased` with a desired ratio.
-    Ok(TracerProvider::builder()
+    Ok(SdkTracerProvider::builder()
         .with_simple_exporter(SpanExporter::default())
         .build())
 }
