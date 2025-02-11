@@ -3,7 +3,6 @@ use opentelemetry_sdk::resource::ResourceDetector;
 use opentelemetry_sdk::Resource;
 use opentelemetry_semantic_conventions as semconv;
 use std::env;
-use std::time::Duration;
 
 // For a complete list of reserved environment variables in Lambda, see:
 // https://docs.aws.amazon.com/lambda/latest/dg/configuration-envvars.html
@@ -18,12 +17,12 @@ const AWS_LAMBDA_LOG_GROUP_NAME_ENV_VAR: &str = "AWS_LAMBDA_LOG_GROUP_NAME";
 pub struct LambdaResourceDetector;
 
 impl ResourceDetector for LambdaResourceDetector {
-    fn detect(&self, _: Duration) -> Resource {
+    fn detect(&self) -> Resource {
         let lambda_name = env::var(AWS_LAMBDA_FUNCTION_NAME_ENV_VAR).unwrap_or_default();
         // If no lambda name is provided, it means that
         // we're not on a Lambda environment, so we return empty resource.
         if lambda_name.is_empty() {
-            return Resource::empty();
+            return Resource::builder_empty().build();
         }
 
         let aws_region = env::var(AWS_REGION_ENV_VAR).unwrap_or_default();
@@ -50,7 +49,9 @@ impl ResourceDetector for LambdaResourceDetector {
             ),
         ];
 
-        Resource::new(attributes)
+        Resource::builder_empty()
+            .with_attributes(attributes)
+            .build()
     }
 }
 
@@ -75,26 +76,28 @@ mod tests {
             "/aws/lambda/my-lambda-function",
         );
 
-        let expected = Resource::new([
-            KeyValue::new(semconv::resource::CLOUD_PROVIDER, "aws"),
-            KeyValue::new(semconv::resource::CLOUD_REGION, "eu-west-3"),
-            KeyValue::new(
-                semconv::resource::FAAS_INSTANCE,
-                "2023/01/01/[$LATEST]5d1edb9e525d486696cf01a3503487bc",
-            ),
-            KeyValue::new(semconv::resource::FAAS_NAME, "my-lambda-function"),
-            KeyValue::new(semconv::resource::FAAS_VERSION, "$LATEST"),
-            KeyValue::new(semconv::resource::FAAS_MAX_MEMORY, 128 * 1024 * 1024),
-            KeyValue::new(
-                semconv::resource::AWS_LOG_GROUP_NAMES,
-                Value::Array(Array::from(vec![StringValue::from(
-                    "/aws/lambda/my-lambda-function".to_string(),
-                )])),
-            ),
-        ]);
+        let expected = Resource::builder_empty()
+            .with_attributes([
+                KeyValue::new(semconv::resource::CLOUD_PROVIDER, "aws"),
+                KeyValue::new(semconv::resource::CLOUD_REGION, "eu-west-3"),
+                KeyValue::new(
+                    semconv::resource::FAAS_INSTANCE,
+                    "2023/01/01/[$LATEST]5d1edb9e525d486696cf01a3503487bc",
+                ),
+                KeyValue::new(semconv::resource::FAAS_NAME, "my-lambda-function"),
+                KeyValue::new(semconv::resource::FAAS_VERSION, "$LATEST"),
+                KeyValue::new(semconv::resource::FAAS_MAX_MEMORY, 128 * 1024 * 1024),
+                KeyValue::new(
+                    semconv::resource::AWS_LOG_GROUP_NAMES,
+                    Value::Array(Array::from(vec![StringValue::from(
+                        "/aws/lambda/my-lambda-function".to_string(),
+                    )])),
+                ),
+            ])
+            .build();
 
         let detector = LambdaResourceDetector {};
-        let got = detector.detect(Duration::from_secs(0));
+        let got = detector.detect();
 
         assert_eq!(expected, got);
 
@@ -109,7 +112,7 @@ mod tests {
     #[sealed_test]
     fn test_aws_lambda_detector_returns_empty_if_no_lambda_environment() {
         let detector = LambdaResourceDetector {};
-        let got = detector.detect(Duration::from_secs(0));
-        assert_eq!(Resource::empty(), got);
+        let got = detector.detect();
+        assert_eq!(Resource::builder_empty().build(), got);
     }
 }

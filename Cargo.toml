@@ -13,13 +13,13 @@ resolver = "2"
 debug = 1
 
 [workspace.dependencies]
-opentelemetry = "0.27"
-opentelemetry-appender-tracing = "0.27"
-opentelemetry-http = "0.27"
-opentelemetry-proto = { version = "0.27", default-features = false }
-opentelemetry_sdk = { version = "0.27", default-features = false }
-opentelemetry-stdout = "0.27"
-opentelemetry-semantic-conventions = { version = "0.27", features = [
+opentelemetry = "0.28"
+opentelemetry-appender-tracing = "0.28"
+opentelemetry-http = "0.28"
+opentelemetry-proto = { version = "0.28", default-features = false }
+opentelemetry_sdk = { version = "0.28", default-features = false }
+opentelemetry-stdout = "0.28"
+opentelemetry-semantic-conventions = { version = "0.28", features = [
     "semconv_experimental",
 ] }
 criterion = "0.5"

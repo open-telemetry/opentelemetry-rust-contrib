@@ -3,19 +3,20 @@ use opentelemetry::{global, metrics::MeterProvider as _, KeyValue};
 use opentelemetry_etw_metrics::MetricsExporter;
 use opentelemetry_sdk::{
     metrics::{PeriodicReader, SdkMeterProvider},
-    runtime, Resource,
+    Resource,
 };
 
 const SERVICE_NAME: &str = "service-name";
 
 fn setup_meter_provider() -> SdkMeterProvider {
     let exporter = MetricsExporter::new();
-    let reader = PeriodicReader::builder(exporter, runtime::Tokio).build();
+    let reader = PeriodicReader::builder(exporter).build();
     SdkMeterProvider::builder()
-        .with_resource(Resource::new(vec![KeyValue::new(
-            "service.name",
-            SERVICE_NAME,
-        )]))
+        .with_resource(
+            Resource::builder()
+                .with_attributes(vec![KeyValue::new("service.name", SERVICE_NAME)])
+                .build(),
+        )
         .with_reader(reader)
         .build()
 }

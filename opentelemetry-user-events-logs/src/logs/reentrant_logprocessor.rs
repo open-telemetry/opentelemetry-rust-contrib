@@ -1,9 +1,9 @@
 use std::fmt::Debug;
 
-use opentelemetry_sdk::logs::LogResult;
+use opentelemetry_sdk::error::OTelSdkResult;
 
 #[cfg(feature = "spec_unstable_logs_enabled")]
-use opentelemetry_sdk::export::logs::LogExporter;
+use opentelemetry_sdk::logs::LogExporter;
 
 use crate::logs::exporter::*;
 
@@ -28,7 +28,7 @@ impl ReentrantLogProcessor {
 impl opentelemetry_sdk::logs::LogProcessor for ReentrantLogProcessor {
     fn emit(
         &self,
-        record: &mut opentelemetry_sdk::logs::LogRecord,
+        record: &mut opentelemetry_sdk::logs::SdkLogRecord,
         instrumentation: &opentelemetry::InstrumentationScope,
     ) {
         _ = self.event_exporter.export_log_data(record, instrumentation);
@@ -36,13 +36,13 @@ impl opentelemetry_sdk::logs::LogProcessor for ReentrantLogProcessor {
 
     // This is a no-op as this processor doesn't keep anything
     // in memory to be flushed out.
-    fn force_flush(&self) -> LogResult<()> {
+    fn force_flush(&self) -> OTelSdkResult {
         Ok(())
     }
 
     // This is a no-op no special cleanup is required before
     // shutdown.
-    fn shutdown(&self) -> LogResult<()> {
+    fn shutdown(&self) -> OTelSdkResult {
         Ok(())
     }
 

@@ -5,7 +5,6 @@ use opentelemetry::KeyValue;
 use opentelemetry_sdk::resource::ResourceDetector;
 use opentelemetry_sdk::Resource;
 use std::env::consts::OS;
-use std::time::Duration;
 
 /// Detect runtime operating system information.
 ///
@@ -17,11 +16,13 @@ use std::time::Duration;
 pub struct OsResourceDetector;
 
 impl ResourceDetector for OsResourceDetector {
-    fn detect(&self, _timeout: Duration) -> Resource {
-        Resource::new(vec![KeyValue::new(
-            opentelemetry_semantic_conventions::attribute::OS_TYPE,
-            OS,
-        )])
+    fn detect(&self) -> Resource {
+        Resource::builder_empty()
+            .with_attributes(vec![KeyValue::new(
+                opentelemetry_semantic_conventions::attribute::OS_TYPE,
+                OS,
+            )])
+            .build()
     }
 }
 
@@ -31,14 +32,13 @@ mod tests {
     use super::OsResourceDetector;
     use opentelemetry::{Key, Value};
     use opentelemetry_sdk::resource::ResourceDetector;
-    use std::time::Duration;
 
     #[test]
     fn test_os_resource_detector() {
-        let resource = OsResourceDetector.detect(Duration::from_secs(0));
+        let resource = OsResourceDetector.detect();
         assert_eq!(resource.len(), 1);
         assert_eq!(
-            resource.get(Key::from_static_str(
+            resource.get(&Key::from_static_str(
                 opentelemetry_semantic_conventions::attribute::OS_TYPE
             )),
             Some(Value::from("linux"))

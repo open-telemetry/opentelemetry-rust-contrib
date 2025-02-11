@@ -1,4 +1,3 @@
-use async_trait::async_trait;
 use std::borrow::Cow;
 use std::collections::HashMap;
 use std::fmt::Debug;
@@ -11,6 +10,7 @@ use opentelemetry::{
     logs::{AnyValue, Severity},
     Key,
 };
+use opentelemetry_sdk::error::{OTelSdkError, OTelSdkResult};
 use std::{str, time::SystemTime};
 
 use crate::logs::converters::IntoJson;
@@ -173,10 +173,11 @@ impl ETWExporter {
 
     pub(crate) fn export_log_data(
         &self,
-        log_record: &opentelemetry_sdk::logs::LogRecord,
+        log_record: &opentelemetry_sdk::logs::SdkLogRecord,
         instrumentation: &opentelemetry::InstrumentationScope,
-    ) -> opentelemetry_sdk::export::logs::ExportResult {
-        let level = self.get_severity_level(log_record.severity_number.unwrap_or(Severity::Debug));
+    ) -> opentelemetry_sdk::error::OTelSdkResult {
+        let level =
+            self.get_severity_level(log_record.severity_number().unwrap_or(Severity::Debug));
 
         let keyword = match self
             .exporter_config
@@ -210,19 +211,21 @@ impl ETWExporter {
 
         match result {
             0 => Ok(()),
-            _ => Err(format!("Failed to write event to ETW. ETW reason: {result}").into()),
+            _ => Err(OTelSdkError::InternalFailure(format!(
+                "Failed to write event to ETW. ETW reason: {result}"
+            ))),
         }
     }
 
     fn populate_part_a(
         &self,
         event: &mut tld::EventBuilder,
-        log_record: &opentelemetry_sdk::logs::LogRecord,
+        log_record: &opentelemetry_sdk::logs::SdkLogRecord,
         field_tag: u32,
     ) {
         let event_time: SystemTime = log_record
-            .timestamp
-            .or(log_record.observed_timestamp)
+            .timestamp()
+            .or(log_record.observed_timestamp())
             .unwrap_or_else(SystemTime::now);
 
         const COUNT_TIME: u8 = 1u8;
@@ -237,7 +240,7 @@ impl ETWExporter {
     fn populate_part_b(
         &self,
         event: &mut tld::EventBuilder,
-        log_record: &opentelemetry_sdk::logs::LogRecord,
+        log_record: &opentelemetry_sdk::logs::SdkLogRecord,
         level: tld::Level,
         event_id: Option<i64>,
         event_name: Option<&str>,
@@ -248,8 +251,8 @@ impl ETWExporter {
 
         let field_count = COUNT_TYPE_NAME
             + COUNT_SEVERITY_NUMBER
-            + log_record.body.is_some() as u8
-            + log_record.severity_text.is_some() as u8
+            + log_record.body().is_some() as u8
+            + log_record.severity_text().is_some() as u8
             + event_id.is_some() as u8
             + event_name.is_some() as u8;
 
@@ -259,13 +262,13 @@ impl ETWExporter {
         // Fill fields of PartB struct
         event.add_str8("_typeName", "Logs", tld::OutType::Default, 0);
 
-        if let Some(body) = log_record.body.clone() {
-            add_attribute_to_event(event, &Key::new("body"), &body);
+        if let Some(body) = log_record.body() {
+            add_attribute_to_event(event, &Key::new("body"), body);
         }
 
         event.add_u8("severityNumber", level.as_int(), tld::OutType::Default, 0);
 
-        if let Some(severity_text) = &log_record.severity_text {
+        if let Some(severity_text) = &log_record.severity_text() {
             event.add_str8("severityText", severity_text, tld::OutType::Default, 0);
         }
 
@@ -281,7 +284,7 @@ impl ETWExporter {
     fn populate_part_c<'a>(
         &'a self,
         event: &mut tld::EventBuilder,
-        log_record: &'a opentelemetry_sdk::logs::LogRecord,
+        log_record: &'a opentelemetry_sdk::logs::SdkLogRecord,
         field_tag: u32,
     ) -> (Option<i64>, Option<&'a str>) {
         //populate CS PartC
@@ -337,16 +340,18 @@ impl Debug for ETWExporter {
     }
 }
 
-#[async_trait]
-impl opentelemetry_sdk::export::logs::LogExporter for ETWExporter {
-    async fn export(
-        &mut self,
-        batch: opentelemetry_sdk::export::logs::LogBatch<'_>,
-    ) -> opentelemetry_sdk::logs::LogResult<()> {
-        for (log_record, instrumentation) in batch.iter() {
-            let _ = self.export_log_data(log_record, instrumentation);
+impl opentelemetry_sdk::logs::LogExporter for ETWExporter {
+    #[allow(clippy::manual_async_fn)]
+    fn export(
+        &self,
+        batch: opentelemetry_sdk::logs::LogBatch<'_>,
+    ) -> impl std::future::Future<Output = OTelSdkResult> + Send {
+        async move {
+            for (log_record, instrumentation) in batch.iter() {
+                let _ = self.export_log_data(log_record, instrumentation);
+            }
+            Ok(())
         }
-        Ok(())
     }
 
     #[cfg(feature = "logs_level_enabled")]
@@ -408,7 +413,10 @@ fn add_attribute_to_event(event: &mut tld::EventBuilder, key: &Key, value: &AnyV
 #[cfg(test)]
 mod tests {
     use super::*;
+    use opentelemetry::logs::Logger;
+    use opentelemetry::logs::LoggerProvider;
     use opentelemetry::logs::Severity;
+    use opentelemetry_sdk::logs::SdkLoggerProvider;
 
     #[test]
     fn test_export_log_data() {
@@ -418,7 +426,10 @@ mod tests {
             None,
             ExporterConfig::default(),
         );
-        let record = Default::default();
+        let record = SdkLoggerProvider::builder()
+            .build()
+            .logger("test")
+            .create_log_record();
         let instrumentation = Default::default();
 
         let result = exporter.export_log_data(&record, &instrumentation);
