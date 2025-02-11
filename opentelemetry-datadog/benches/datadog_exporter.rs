@@ -13,8 +13,8 @@ use opentelemetry_sdk::{
     trace::{SpanData, SpanExporter},
     trace::{SpanEvents, SpanLinks},
 };
-use rand::seq::SliceRandom;
-use rand::{rngs::ThreadRng, thread_rng, RngCore};
+use rand::seq::{IndexedRandom, SliceRandom};
+use rand::{rng, rngs::ThreadRng, RngCore};
 
 #[derive(Debug)]
 struct DummyClient;
@@ -179,7 +179,7 @@ fn get_span(trace_id: u128, parent_span_id: u64, span_id: u64, rng: &mut ThreadR
 }
 
 fn generate_traces(number_of_traces: usize, spans_per_trace: usize) -> Vec<SpanData> {
-    let mut rng = thread_rng();
+    let mut rng = rng();
 
     let mut result: Vec<SpanData> = (0..number_of_traces)
         .flat_map(|trace_id| {

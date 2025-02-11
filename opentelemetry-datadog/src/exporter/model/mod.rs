@@ -198,6 +198,7 @@ impl ApiVersion {
 #[cfg(test)]
 pub(crate) mod tests {
     use super::*;
+    use base64::{engine::general_purpose::STANDARD, Engine};
     use opentelemetry::InstrumentationScope;
     use opentelemetry::{
         trace::{SpanContext, SpanId, SpanKind, Status, TraceFlags, TraceId, TraceState},
@@ -256,7 +257,7 @@ pub(crate) mod tests {
         let resource = Resource::builder_empty()
             .with_attribute(KeyValue::new("host.name", "test"))
             .build();
-        let encoded = base64::encode(ApiVersion::Version03.encode(
+        let encoded = STANDARD.encode(ApiVersion::Version03.encode(
             &model_config,
             traces.iter().map(|x| &x[..]).collect(),
             &Mapping::empty(),
@@ -288,7 +289,7 @@ pub(crate) mod tests {
         unified_tags.set_version(Some(String::from("test-version")));
         unified_tags.set_service(Some(String::from("test-service")));
 
-        let _encoded = base64::encode(ApiVersion::Version05.encode(
+        let _encoded = STANDARD.encode(ApiVersion::Version05.encode(
             &model_config,
             traces.iter().map(|x| &x[..]).collect(),
             &Mapping::empty(),

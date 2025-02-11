@@ -43,12 +43,12 @@ ahash = { version = "0.8", optional = true }
 
 [dev-dependencies]
 async-trait = "0.1"
-base64 = "0.13"
+base64 = "0.22"
 bytes = "1"
 futures-util = { version = "0.3", default-features = false, features = ["io"] }
 opentelemetry_sdk = { workspace = true, features = ["trace", "testing"] }
 criterion = "0.5"
-rand = "0.8"
+rand = "0.9"
 hyper = "1"
 hyper-util = { version = "0.1.6", features = ["client", "full"] }
 hyperlocal = "0.9.1"
