@@ -15,7 +15,6 @@ tracelogging = "1.2.1"
 tracelogging_dynamic = "1.2.1"
 opentelemetry = { workspace = true, features = ["logs"] }
 opentelemetry_sdk = { workspace = true, features = ["logs"] }
-async-trait = { version = "0.1" }
 serde_json = "1.0.113"
 
 [dev-dependencies]
