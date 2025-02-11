@@ -31,8 +31,9 @@ use opentelemetry::{
     trace::{SpanId, TraceError},
     Key, KeyValue, Value,
 };
+use opentelemetry_sdk::error::{OTelSdkError, OTelSdkResult};
 use opentelemetry_sdk::{
-    export::trace::{ExportResult, SpanData, SpanExporter},
+    trace::{SpanData, SpanExporter},
     Resource,
 };
 use opentelemetry_semantic_conventions as semconv;
@@ -87,11 +88,11 @@ impl StackDriverExporter {
 }
 
 impl SpanExporter for StackDriverExporter {
-    fn export(&mut self, batch: Vec<SpanData>) -> BoxFuture<'static, ExportResult> {
+    fn export(&mut self, batch: Vec<SpanData>) -> BoxFuture<'static, OTelSdkResult> {
         match self.tx.try_send(batch) {
-            Err(e) => Box::pin(std::future::ready(Err(TraceError::Other(Box::new(
-                e.into_send_error(),
-            ))))),
+            Err(e) => Box::pin(std::future::ready(Err(OTelSdkError::InternalFailure(
+                format!("{:?}", e),
+            )))),
             Ok(()) => {
                 self.pending_count.fetch_add(1, Ordering::Relaxed);
                 Box::pin(std::future::ready(Ok(())))
@@ -99,13 +100,14 @@ impl SpanExporter for StackDriverExporter {
         }
     }
 
-    fn shutdown(&mut self) {
+    fn shutdown(&mut self) -> OTelSdkResult {
         let start = Instant::now();
         while (Instant::now() - start) < self.maximum_shutdown_duration && self.pending_count() > 0
         {
             std::thread::yield_now();
             // Spin for a bit and give the inner export some time to upload, with a timeout.
         }
+        Ok(())
     }
 
     fn set_resource(&mut self, resource: &Resource) {
@@ -890,10 +892,12 @@ mod tests {
         ));
 
         // 	serviceAttribute    = "service.name"
-        let resources = Resource::new([KeyValue::new(
-            semcov::resource::SERVICE_NAME,
-            "Test Service Name",
-        )]);
+        let resources = Resource::builder_empty()
+            .with_attributes([KeyValue::new(
+                semcov::resource::SERVICE_NAME,
+                "Test Service Name",
+            )])
+            .build();
 
         let actual = Attributes::new(attributes, Some(&resources));
         assert_eq!(actual.attribute_map.len(), 8);
@@ -940,10 +944,12 @@ mod tests {
 
     #[test]
     fn test_too_many() {
-        let resources = Resource::new([KeyValue::new(
-            semconv::attribute::USER_AGENT_ORIGINAL,
-            "Test Service Name UA",
-        )]);
+        let resources = Resource::builder_empty()
+            .with_attributes([KeyValue::new(
+                semconv::attribute::USER_AGENT_ORIGINAL,
+                "Test Service Name UA",
+            )])
+            .build();
         let mut attributes = Vec::with_capacity(32);
         for i in 0..32 {
             attributes.push(KeyValue::new(
@@ -972,7 +978,7 @@ mod tests {
 
         //	hostAttribute       = "http.target"
 
-        let resources = Resource::new([]);
+        let resources = Resource::builder_empty().with_attributes([]).build();
         let actual = Attributes::new(attributes, Some(&resources));
         assert_eq!(actual.attribute_map.len(), 1);
         assert_eq!(actual.dropped_attributes_count, 0);
@@ -988,7 +994,7 @@ mod tests {
     fn test_attributes_mapping_dropped_attributes_count() {
         let attributes = vec![KeyValue::new("answer", Value::I64(42)),KeyValue::new("long_attribute_key_dvwmacxpeefbuemoxljmqvldjxmvvihoeqnuqdsyovwgljtnemouidabhkmvsnauwfnaihekcfwhugejboiyfthyhmkpsaxtidlsbwsmirebax", Value::String("Some value".into()))];
 
-        let resources = Resource::new([]);
+        let resources = Resource::builder_empty().with_attributes([]).build();
         let actual = Attributes::new(attributes, Some(&resources));
         assert_eq!(
             actual,

@@ -36,7 +36,8 @@
 //! ## Performance
 //!
 //! For optimal performance, a batch exporter is recommended as the simple exporter will export
-//! each span synchronously on drop. You can enable the [`rt-tokio`], [`rt-tokio-current-thread`]
+//! each span synchronously on drop. The default batch exporter uses a dedicated thread for exprt,
+//! but you can enable the async batch exporter with  [`rt-tokio`], [`rt-tokio-current-thread`]
 //! or [`rt-async-std`] features and specify a runtime on the pipeline to have a batch exporter
 //! configured for you automatically.
 //!
@@ -49,7 +50,7 @@
 //! ```no_run
 //! # fn main() -> Result<(), opentelemetry::trace::TraceError> {
 //! let provider = opentelemetry_datadog::new_pipeline()
-//!     .install_batch(opentelemetry_sdk::runtime::Tokio)?;
+//!     .install_batch()?;
 //! # Ok(())
 //! # }
 //! ```
@@ -82,16 +83,15 @@
 //! ```no_run
 //! use opentelemetry::{global, KeyValue, trace::{Tracer, TracerProvider}, InstrumentationScope};
 //! use opentelemetry_sdk::{trace::{self, RandomIdGenerator, Sampler}, Resource};
-//! use opentelemetry_sdk::export::trace::ExportResult;
 //! use opentelemetry_datadog::{new_pipeline, ApiVersion, Error};
 //! use opentelemetry_http::{HttpClient, HttpError};
 //! use opentelemetry_semantic_conventions as semcov;
 //! use async_trait::async_trait;
 //! use bytes::Bytes;
 //! use futures_util::io::AsyncReadExt as _;
-//! use http::{Request, Response};
-//! use http_body_util::BodyExt;
+//! use http::{Request, Response, StatusCode};
 //! use std::convert::TryInto as _;
+//! use http_body_util::BodyExt;
 //!
 //! // `reqwest` and `surf` are supported through features, if you prefer an
 //! // alternate http client you can add support by implementing `HttpClient` as
@@ -112,9 +112,16 @@
 //!             .status(status)
 //!             .body(body.to_bytes().into())?)
 //!     }
+//!     async fn send_bytes(&self, request: Request<Bytes>) -> Result<Response<Bytes>, HttpError> {
+//!         let (parts, body) = request.into_parts();
+//!         //TODO - Implement a proper client
+//!          Ok(Response::builder()
+//!             .status(StatusCode::OK)
+//!             .body(Bytes::from("Dummy response"))
+//!             .unwrap())
+//!     }
 //! }
 //!
-//! fn main() -> Result<(), opentelemetry::trace::TraceError> {
 //!     #[allow(deprecated)]
 //!     let provider = new_pipeline()
 //!         .with_service_name("my_app")
@@ -125,7 +132,7 @@
 //!                 .with_sampler(Sampler::AlwaysOn)
 //!                 .with_id_generator(RandomIdGenerator::default())
 //!         )
-//!         .install_batch(opentelemetry_sdk::runtime::Tokio)?;
+//!         .install_batch().unwrap();
 //!     global::set_tracer_provider(provider.clone());
 //!
 //!     let scope = InstrumentationScope::builder("opentelemetry-datadog")
@@ -139,10 +146,8 @@
 //!         // Traced app logic here...
 //!     });
 //!
-//!     provider.shutdown()?; // sending remaining spans before exit
+//!     let _ = provider.shutdown(); // sending remaining spans before exit
 //!
-//!     Ok(())
-//! }
 //! ```
 
 mod exporter;

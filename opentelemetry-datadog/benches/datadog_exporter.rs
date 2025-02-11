@@ -1,5 +1,6 @@
 use std::time::{Duration, SystemTime};
 
+use bytes::Bytes;
 use criterion::{black_box, criterion_group, criterion_main, Criterion};
 use http::Request;
 use opentelemetry::{
@@ -9,7 +10,7 @@ use opentelemetry::{
 use opentelemetry_datadog::{new_pipeline, ApiVersion};
 use opentelemetry_http::HttpClient;
 use opentelemetry_sdk::{
-    export::trace::{SpanData, SpanExporter},
+    trace::{SpanData, SpanExporter},
     trace::{SpanEvents, SpanLinks},
 };
 use rand::seq::SliceRandom;
@@ -25,6 +26,15 @@ impl HttpClient for DummyClient {
         _request: Request<Vec<u8>>,
     ) -> Result<http::Response<bytes::Bytes>, opentelemetry_http::HttpError> {
         Ok(http::Response::new("dummy response".into()))
+    }
+    async fn send_bytes(
+        &self,
+        request: Request<Bytes>,
+    ) -> Result<http::Response<Bytes>, opentelemetry_http::HttpError> {
+        Ok(http::Response::builder()
+            .status(200)
+            .body(request.into_body())
+            .unwrap())
     }
 }
 

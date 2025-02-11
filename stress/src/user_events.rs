@@ -23,7 +23,7 @@
 // Threads: 16 - Average Throughput: 297,232 iterations/sec
 
 use opentelemetry_appender_tracing::layer;
-use opentelemetry_sdk::logs::LoggerProvider;
+use opentelemetry_sdk::logs::SdkLoggerProvider;
 use opentelemetry_user_events_logs::{ExporterConfig, ReentrantLogProcessor, UserEventsExporter};
 use std::collections::HashMap;
 use tracing::info;
@@ -31,14 +31,14 @@ use tracing_subscriber::prelude::*;
 mod throughput;
 
 // Function to initialize the logger
-fn init_logger() -> LoggerProvider {
+fn init_logger() -> SdkLoggerProvider {
     let exporter_config = ExporterConfig {
         default_keyword: 1,
         keywords_map: HashMap::new(),
     };
     let exporter = UserEventsExporter::new("testprovider", None, exporter_config);
     let reentrant_processor = ReentrantLogProcessor::new(exporter);
-    LoggerProvider::builder()
+    SdkLoggerProvider::builder()
         .with_log_processor(reentrant_processor)
         .build()
 }

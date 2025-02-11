@@ -3,7 +3,7 @@
 use async_channel::{SendError, Sender};
 use futures_channel::oneshot::{self, Canceled};
 use opentelemetry_proto::tonic::tracez::v1::{ErrorData, LatencyData, RunningData, TracezCounts};
-use opentelemetry_sdk::{export::trace::SpanData, runtime::Runtime};
+use opentelemetry_sdk::{runtime::Runtime, trace::SpanData};
 use serde::ser::SerializeSeq;
 use serde::Serializer;
 use std::fmt::Formatter;
@@ -14,23 +14,23 @@ pub(crate) mod span_processor;
 pub(crate) mod span_queue;
 
 /// Create tracez components. This function will return a [`ZPagesSpanProcessor`] that should be installed
-/// into the [`TracerProvider`] and a [`TracezQuerier`] for http server to access the aggregated
+/// into the [`SdkTracerProvider`] and a [`TracezQuerier`] for http server to access the aggregated
 /// information on spans.
 ///
 /// The `sample_size` config how may spans to sample for each unique span name.
 ///
 /// [`ZPagesSpanProcessor`]: span_processor::ZPagesSpanProcessor
-/// [`TracerProvider`]: opentelemetry_sdk::trace::TracerProvider
+/// [`SdkTracerProvider`]: opentelemetry_sdk::trace::SdkTracerProvider
 ///
 /// ## Example
 /// ```no_run
 /// # use opentelemetry_zpages::tracez;
 /// # use opentelemetry::{global, trace::Tracer};
-/// # use opentelemetry_sdk::{runtime::Tokio, trace::TracerProvider};
+/// # use opentelemetry_sdk::{runtime::Tokio, trace::SdkTracerProvider};
 /// # use std::sync::Arc;
 /// # fn main() {
 ///     let (processor, querier) = tracez(5, Tokio); // sample 5 spans for each unique span name
-///     let provider = TracerProvider::builder()
+///     let provider = SdkTracerProvider::builder()
 ///         .with_span_processor(processor)
 ///         .build();
 ///     global::set_tracer_provider(provider);

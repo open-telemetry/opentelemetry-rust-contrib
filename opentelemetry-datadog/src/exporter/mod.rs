@@ -8,20 +8,20 @@ pub use model::FieldMappingFn;
 use crate::exporter::model::FieldMapping;
 use futures_core::future::BoxFuture;
 use http::{Method, Request, Uri};
+use opentelemetry::Key;
 use opentelemetry::{trace::TraceError, KeyValue};
 use opentelemetry_http::{HttpClient, ResponseExt};
 use opentelemetry_sdk::{
-    export::trace::{ExportResult, SpanData, SpanExporter},
+    error::{OTelSdkError, OTelSdkResult},
     resource::{ResourceDetector, SdkProvidedResourceDetector},
-    runtime::RuntimeChannel,
-    trace::{Config, TracerProvider},
+    trace::{Config, SdkTracerProvider},
+    trace::{SpanData, SpanExporter},
     Resource,
 };
 use opentelemetry_semantic_conventions as semcov;
 use std::borrow::Cow;
 use std::fmt::{Debug, Formatter};
 use std::sync::Arc;
-use std::time::Duration;
 use url::Url;
 
 use self::model::unified_tags::UnifiedTags;
@@ -94,16 +94,19 @@ impl DatadogExporter {
     fn build_request(
         &self,
         mut batch: Vec<SpanData>,
-    ) -> Result<http::Request<Vec<u8>>, TraceError> {
+    ) -> Result<http::Request<Vec<u8>>, OTelSdkError> {
         let traces: Vec<&[SpanData]> = group_into_traces(&mut batch);
         let trace_count = traces.len();
-        let data = self.api_version.encode(
-            &self.model_config,
-            traces,
-            &self.mapping,
-            &self.unified_tags,
-            self.resource.as_ref(),
-        )?;
+        let data = self
+            .api_version
+            .encode(
+                &self.model_config,
+                traces,
+                &self.mapping,
+                &self.unified_tags,
+                self.resource.as_ref(),
+            )
+            .map_err(|e| OTelSdkError::InternalFailure(format!("{:?}", e)))?;
         let req = Request::builder()
             .method(Method::POST)
             .uri(self.request_url.clone())
@@ -115,9 +118,8 @@ impl DatadogExporter {
                 env!("CARGO_PKG_VERSION"),
             )
             .body(data)
-            .map_err::<Error, _>(Into::into)?;
-
-        Ok(req)
+            .map_err(|e| OTelSdkError::InternalFailure(format!("{:?}", e)));
+        Ok(req)?
     }
 }
 
@@ -214,28 +216,32 @@ impl DatadogPipelineBuilder {
         let service_name = self.unified_tags.service();
         if let Some(service_name) = service_name {
             let config = if let Some(mut cfg) = self.trace_config.take() {
-                cfg.resource = Cow::Owned(Resource::new(
-                    cfg.resource
-                        .iter()
-                        .filter(|(k, _v)| k.as_str() != semcov::resource::SERVICE_NAME)
-                        .map(|(k, v)| KeyValue::new(k.clone(), v.clone())),
-                ));
+                cfg.resource = Cow::Owned(
+                    Resource::builder()
+                        .with_attributes(
+                            cfg.resource
+                                .iter()
+                                .filter(|(k, _v)| k.as_str() != semcov::resource::SERVICE_NAME)
+                                .map(|(k, v)| KeyValue::new(k.clone(), v.clone())),
+                        )
+                        .build(),
+                );
                 cfg
             } else {
                 let mut cfg = Config::default();
-                cfg.resource = Cow::Owned(Resource::empty());
+                cfg.resource = Cow::Owned(Resource::builder_empty().build());
                 cfg
             };
             (config, service_name)
         } else {
             let service_name = SdkProvidedResourceDetector
-                .detect(Duration::from_secs(0))
-                .get(semcov::resource::SERVICE_NAME.into())
+                .detect()
+                .get(&Key::new(semcov::resource::SERVICE_NAME))
                 .unwrap()
                 .to_string();
             let mut cfg = Config::default();
             // use a empty resource to prevent TracerProvider to assign a service name.
-            cfg.resource = Cow::Owned(Resource::empty());
+            cfg.resource = Cow::Owned(Resource::builder_empty().build());
             (cfg, service_name)
         }
     }
@@ -281,10 +287,10 @@ impl DatadogPipelineBuilder {
     }
 
     /// Install the Datadog trace exporter pipeline using a simple span processor.
-    pub fn install_simple(mut self) -> Result<TracerProvider, TraceError> {
+    pub fn install_simple(mut self) -> Result<SdkTracerProvider, TraceError> {
         let (config, service_name) = self.build_config_and_service_name();
         let exporter = self.build_exporter_with_service_name(service_name)?;
-        Ok(TracerProvider::builder()
+        Ok(SdkTracerProvider::builder()
             .with_simple_exporter(exporter)
             .with_resource(config.resource.into_owned())
             .build())
@@ -292,14 +298,11 @@ impl DatadogPipelineBuilder {
 
     /// Install the Datadog trace exporter pipeline using a batch span processor with the specified
     /// runtime.
-    pub fn install_batch<R: RuntimeChannel>(
-        mut self,
-        runtime: R,
-    ) -> Result<TracerProvider, TraceError> {
+    pub fn install_batch(mut self) -> Result<SdkTracerProvider, TraceError> {
         let (config, service_name) = self.build_config_and_service_name();
         let exporter = self.build_exporter_with_service_name(service_name)?;
-        Ok(TracerProvider::builder()
-            .with_batch_exporter(exporter, runtime)
+        Ok(SdkTracerProvider::builder()
+            .with_batch_exporter(exporter)
             .with_resource(config.resource.into_owned())
             .build())
     }
@@ -405,14 +408,23 @@ fn group_into_traces(spans: &mut [SpanData]) -> Vec<&[SpanData]> {
 async fn send_request(
     client: Arc<dyn HttpClient>,
     request: http::Request<Vec<u8>>,
-) -> ExportResult {
-    let _ = client.send(request).await?.error_for_status()?;
+) -> OTelSdkResult {
+    #[allow(deprecated)]
+    let response = client
+        .send(request)
+        .await
+        .map_err(|e| OTelSdkError::InternalFailure(format!("HTTP request failed: {}", e)))?;
+
+    response
+        .error_for_status()
+        .map_err(|e| OTelSdkError::InternalFailure(format!("HTTP response error: {}", e)))?;
+
     Ok(())
 }
 
 impl SpanExporter for DatadogExporter {
     /// Export spans to datadog-agent
-    fn export(&mut self, batch: Vec<SpanData>) -> BoxFuture<'static, ExportResult> {
+    fn export(&mut self, batch: Vec<SpanData>) -> BoxFuture<'static, OTelSdkResult> {
         let request = match self.build_request(batch) {
             Ok(req) => req,
             Err(err) => return Box::pin(std::future::ready(Err(err))),
@@ -444,18 +456,13 @@ fn mapping_debug(f: &Option<FieldMapping>) -> String {
     .to_string()
 }
 
-impl opentelemetry::trace::ExportError for model::Error {
-    fn exporter_name(&self) -> &'static str {
-        "DatadogExporter"
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::ApiVersion::Version05;
 
     use crate::exporter::model::tests::get_span;
+    use bytes::Bytes;
 
     #[test]
     fn test_out_of_order_group() {
@@ -513,6 +520,15 @@ mod tests {
         ) -> Result<http::Response<bytes::Bytes>, opentelemetry_http::HttpError> {
             Ok(http::Response::new("dummy response".into()))
         }
+        async fn send_bytes(
+            &self,
+            request: Request<Bytes>,
+        ) -> Result<http::Response<Bytes>, opentelemetry_http::HttpError> {
+            Ok(http::Response::builder()
+                .status(200)
+                .body(request.into_body())
+                .unwrap())
+        }
     }
 
     #[test]
@@ -537,7 +553,7 @@ mod tests {
         new_pipeline()
             .with_service_name("test_service")
             .with_http_client(DummyClient)
-            .install_batch(opentelemetry_sdk::runtime::AsyncStd {})
+            .install_batch()
             .unwrap();
     }
 }

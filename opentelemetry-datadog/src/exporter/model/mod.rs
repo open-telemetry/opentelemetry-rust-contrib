@@ -1,10 +1,8 @@
 use crate::exporter::ModelConfig;
 use http::uri;
+use opentelemetry::trace::ExportError;
 use opentelemetry_sdk::{
-    export::{
-        trace::{self, SpanData},
-        ExportError,
-    },
+    trace::{self, SpanData},
     Resource,
 };
 use std::fmt::Debug;
@@ -54,7 +52,7 @@ static DD_MEASURED_KEY: &str = "_dd.measured";
 ///         // the custom mapping below will change the all spans' name to datadog spans
 ///         .with_name_mapping(|span, model_config|{"datadog spans"})
 ///         .with_agent_endpoint("http://localhost:8126")
-///         .install_batch(opentelemetry_sdk::runtime::Tokio)?;
+///         .install_batch()?;
 ///     global::set_tracer_provider(provider.clone());
 ///     let tracer = global::tracer("opentelemetry-datadog-demo");
 ///
@@ -255,7 +253,9 @@ pub(crate) mod tests {
             service_name: "service_name".to_string(),
             ..Default::default()
         };
-        let resource = Resource::new(vec![KeyValue::new("host.name", "test")]);
+        let resource = Resource::builder_empty()
+            .with_attribute(KeyValue::new("host.name", "test"))
+            .build();
         let encoded = base64::encode(ApiVersion::Version03.encode(
             &model_config,
             traces.iter().map(|x| &x[..]).collect(),
@@ -279,7 +279,9 @@ pub(crate) mod tests {
             service_name: "service_name".to_string(),
             ..Default::default()
         };
-        let resource = Resource::new(vec![KeyValue::new("host.name", "test")]);
+        let resource = Resource::builder()
+            .with_attribute(KeyValue::new("host.name", "test"))
+            .build();
 
         let mut unified_tags = UnifiedTags::new();
         unified_tags.set_env(Some(String::from("test-env")));

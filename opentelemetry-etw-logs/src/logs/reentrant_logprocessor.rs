@@ -1,11 +1,11 @@
 use std::fmt::Debug;
 
 use opentelemetry::InstrumentationScope;
-use opentelemetry_sdk::logs::LogRecord;
-use opentelemetry_sdk::logs::LogResult;
+use opentelemetry_sdk::error::OTelSdkResult;
+use opentelemetry_sdk::logs::SdkLogRecord;
 
 #[cfg(feature = "logs_level_enabled")]
-use opentelemetry_sdk::export::logs::LogExporter;
+use opentelemetry_sdk::logs::LogExporter;
 
 use crate::logs::exporter::ExporterConfig;
 use crate::logs::exporter::*;
@@ -33,19 +33,19 @@ impl ReentrantLogProcessor {
 }
 
 impl opentelemetry_sdk::logs::LogProcessor for ReentrantLogProcessor {
-    fn emit(&self, data: &mut LogRecord, instrumentation: &InstrumentationScope) {
+    fn emit(&self, data: &mut SdkLogRecord, instrumentation: &InstrumentationScope) {
         _ = self.event_exporter.export_log_data(data, instrumentation);
     }
 
     // This is a no-op as this processor doesn't keep anything
     // in memory to be flushed out.
-    fn force_flush(&self) -> LogResult<()> {
+    fn force_flush(&self) -> OTelSdkResult {
         Ok(())
     }
 
     // This is a no-op no special cleanup is required before
     // shutdown.
-    fn shutdown(&self) -> LogResult<()> {
+    fn shutdown(&self) -> OTelSdkResult {
         Ok(())
     }
 
@@ -63,7 +63,10 @@ impl opentelemetry_sdk::logs::LogProcessor for ReentrantLogProcessor {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use opentelemetry::logs::Logger;
+    use opentelemetry::logs::LoggerProvider;
     use opentelemetry_sdk::logs::LogProcessor;
+    use opentelemetry_sdk::logs::SdkLoggerProvider;
 
     #[test]
     fn test_shutdown() {
@@ -98,7 +101,10 @@ mod tests {
             ExporterConfig::default(),
         );
 
-        let mut record = Default::default();
+        let mut record = SdkLoggerProvider::builder()
+            .build()
+            .logger("test")
+            .create_log_record();
         let instrumentation = Default::default();
         processor.emit(&mut record, &instrumentation);
     }

@@ -8,7 +8,7 @@ use async_channel::Receiver;
 use futures_util::StreamExt as _;
 use opentelemetry::trace::Status;
 use opentelemetry_proto::tonic::tracez::v1::TracezCounts;
-use opentelemetry_sdk::export::trace::SpanData;
+use opentelemetry_sdk::trace::SpanData;
 use std::collections::HashMap;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
@@ -198,7 +198,7 @@ mod tests {
         TracezMessage,
     };
     use opentelemetry::trace::{SpanContext, SpanId, Status, TraceFlags, TraceId, TraceState};
-    use opentelemetry_sdk::{export::trace::SpanData, testing::trace::new_test_export_span_data};
+    use opentelemetry_sdk::{testing::trace::new_test_export_span_data, trace::SpanData};
     use std::borrow::Cow;
     use std::cmp::min;
     use std::time::{Duration, SystemTime};

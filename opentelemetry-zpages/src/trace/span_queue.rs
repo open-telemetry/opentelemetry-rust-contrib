@@ -1,7 +1,7 @@
 //! # Span Queue
 
 use opentelemetry::trace::SpanContext;
-use opentelemetry_sdk::export::trace::SpanData;
+use opentelemetry_sdk::trace::SpanData;
 use std::collections::HashMap;
 
 /// This queue maintains an ordered list of elements, Elements are
