@@ -33,6 +33,7 @@
         "codecov",
         "deque",
         "Dirkjan",
+        "errno",
         "hasher",
         "isahc",
         "Isobel",
@@ -51,6 +52,7 @@
         "reqwest",
         "rustc",
         "Tescher",
+        "tracepoint",
         "Zhongyang",
         "zipkin"
     ],

@@ -91,13 +91,11 @@ pub unsafe fn register(trace_point: Pin<&ehi::TracepointState>) -> i32 {
     match result {
         Ok(value) => {
             if value == 0 {
-                // Temporary print as a measure for quick testing
-                // will be replaced with proper logging mechanism
                 otel_info!(name: "TracePointRegistered", reason = "Tracepoint registered successfully.");
             } else if value == 95 {
-                otel_error!(name: "TracePointRegisterError", reason = "Trace/debug file systems are not mounted.");
+                otel_error!(name: "TracePointRegisterError", reason = "Trace/debug file systems are not mounted. Metrics will not be exported.");
             } else if value == 13 {
-                otel_error!(name: "TracePointRegisterError", reason = "Insufficient permissions. You need read/write/execute permissions to user_events tracing directory.");
+                otel_error!(name: "TracePointRegisterError", reason = "Insufficient permissions. You need read/write/execute permissions to user_events tracing directory. Metrics will not be exported.");
             }
             value
         }
@@ -105,7 +103,7 @@ pub unsafe fn register(trace_point: Pin<&ehi::TracepointState>) -> i32 {
         Err(err) => {
             otel_error!(
                 name: "TracePointRegisterError",
-                reason = "Tracepoint failed to register.",
+                reason = "Tracepoint failed to register. Metrics will not be exported.",
                 error = format!("{:?}", err)
             );
             -1
