@@ -115,8 +115,7 @@ impl PushMetricExporter for MetricsExporter {
             // TODO - This can flood the logs if the tracepoint is disabled for long periods of time
             otel_warn!(name: "TracepointDisabled", message = "Tracepoint is disabled, skipping export");
             return Ok(());
-        }
-        else {
+        } else {
             let mut errors = Vec::new();
 
             for scope_metric in &metrics.scope_metrics {

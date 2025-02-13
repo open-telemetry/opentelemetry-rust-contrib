@@ -5,9 +5,9 @@ use opentelemetry_sdk::{
     Resource,
 };
 use opentelemetry_user_events_metrics::MetricsExporter;
-use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt, EnvFilter, Layer};
 use std::thread;
 use std::time::Duration;
+use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt, EnvFilter, Layer};
 
 fn init_metrics(exporter: MetricsExporter) -> SdkMeterProvider {
     let reader = PeriodicReader::builder(exporter).build();
@@ -32,9 +32,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .with_thread_names(true)
         .with_filter(filter_fmt);
 
-    tracing_subscriber::registry()
-        .with(fmt_layer)
-        .init();
+    tracing_subscriber::registry().with(fmt_layer).init();
 
     let exporter = opentelemetry_user_events_metrics::MetricsExporter::new();
     let meter_provider = init_metrics(exporter);
