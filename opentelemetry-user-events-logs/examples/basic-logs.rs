@@ -28,10 +28,12 @@ fn main() {
     let fmt_layer = tracing_subscriber::fmt::layer()
         .with_thread_names(true)
         .with_filter(filter_fmt);
-    tracing_subscriber::registry().with(fmt_layer).init();
     let logger_provider = init_logger();
-    let layer = layer::OpenTelemetryTracingBridge::new(&logger_provider);
-    tracing_subscriber::registry().with(layer).init();
+    let otel_layer = layer::OpenTelemetryTracingBridge::new(&logger_provider);
+    tracing_subscriber::registry()
+        .with(fmt_layer)
+        .with(otel_layer)
+        .init();
 
     // event_id is passed as an attribute now, there is nothing in metadata where a
     // numeric id can be stored.
