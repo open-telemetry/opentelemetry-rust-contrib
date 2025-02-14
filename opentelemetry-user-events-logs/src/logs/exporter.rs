@@ -1,10 +1,10 @@
 use async_trait::async_trait;
 use eventheader::{FieldFormat, Level, Opcode};
 use eventheader_dynamic::EventBuilder;
+use opentelemetry::otel_debug;
 use std::borrow::Cow;
 use std::collections::HashMap;
 use std::fmt::Debug;
-use opentelemetry::otel_debug;
 
 use opentelemetry::{logs::AnyValue, logs::Severity, Key};
 use std::{cell::RefCell, str, time::SystemTime};
@@ -64,12 +64,11 @@ impl UserEventsExporter {
         _provider_group: ProviderGroup,
         exporter_config: ExporterConfig,
     ) -> Self {
-        let mut options = eventheader_dynamic::Provider::new_options();
-        options = *options.group_name(provider_name);
+        let options = eventheader_dynamic::Provider::new_options();
         let mut eventheader_provider: eventheader_dynamic::Provider =
             eventheader_dynamic::Provider::new(provider_name, &options);
         Self::register_keywords(&mut eventheader_provider, &exporter_config);
-        otel_debug!(name: "UserEventsExporter.Created", config = format!("{:?}", exporter_config), provider_name = provider_name, provider_group = "None");
+        otel_debug!(name: "UserEventsExporter.Created", config = format!("{:?}", exporter_config), provider_name = provider_name, provider_group = format!("{:?}", options));
         UserEventsExporter {
             provider: eventheader_provider,
             exporter_config,
@@ -190,6 +189,7 @@ impl UserEventsExporter {
         log_record: &opentelemetry_sdk::logs::LogRecord,
         instrumentation: &opentelemetry::InstrumentationScope,
     ) -> opentelemetry_sdk::export::logs::ExportResult {
+        //TODO - should we log (otel_debug) each event?
         let mut level: Level = Level::Invalid;
         if log_record.severity_number.is_some() {
             level = self.get_severity_level(log_record.severity_number.unwrap());
@@ -200,6 +200,12 @@ impl UserEventsExporter {
             .get_log_keyword_or_default(instrumentation.name().as_ref());
 
         if keyword.is_none() {
+            otel_debug!(
+                name: "UserEventsExporter.KeywordNotFound",
+                log_record_name = format!("{:?}", log_record.event_name),
+                instrumentation_name = format!("{:?}", instrumentation.name()),
+                keyword = self.exporter_config.default_keyword,
+            );
             return Ok(());
         }
 
@@ -209,6 +215,11 @@ impl UserEventsExporter {
         {
             es
         } else {
+            otel_debug!(
+                name: "UserEventsExporter.EventSetNotFound",
+                level = level.as_int(),
+                keyword = keyword.unwrap(),
+            );
             return Ok(());
         };
         if log_es.enabled() {
@@ -322,6 +333,12 @@ impl UserEventsExporter {
                 eb.write(&log_es, None, None);
             });
             return Ok(());
+        } else {
+            otel_debug!(
+                name: "UserEventsExporter.EventSetNotEnabled",
+                level = level.as_int(),
+                keyword = keyword.unwrap(),
+            );
         }
         Ok(())
     }
