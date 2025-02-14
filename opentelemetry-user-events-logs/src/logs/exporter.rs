@@ -90,7 +90,25 @@ impl UserEventsExporter {
                 level = level.as_int(),
                 keyword = keyword,
             );
-            eventheader_provider.register_set(level, keyword);
+            let event_set = eventheader_provider.register_set(level, keyword);
+            match event_set.errno() {
+                0 => {
+                    otel_debug!(name: "UserEventsExporter.RegisteredEvent",  event_set = format!("{:?}", event_set));
+                }
+                95 => {
+                    otel_debug!(name: "UserEventsExporter.TraceFSNotMounted", event_set = format!("{:?}", event_set));
+                }
+                13 => {
+                    otel_debug!(name: "UserEventsExporter.PermissionDenied", event_set = format!("{:?}", event_set));
+                }
+
+                _ => {
+                    otel_debug!(
+                        name: "UserEventsExporter.FailedToRegisterEvent",
+                        event_set = format!("{:?}", event_set)
+                    );
+                }
+            }
             let event_set = eventheader_provider.find_set(level.as_int().into(), keyword);
             if let Some(set) = event_set {
                 otel_debug!(name: "UserEventsExporter.RegisteredEvent", set = format!("{:?}", set));
@@ -330,7 +348,10 @@ impl UserEventsExporter {
                 }
                 eb.set_struct_field_count(cs_b_bookmark, cs_b_count);
 
-                eb.write(&log_es, None, None);
+                let result = eb.write(&log_es, None, None);
+                if result > 0 {
+                    otel_debug!(name: "UserEventsExporter.WriteFailed", error = result);
+                }
             });
             return Ok(());
         } else {
