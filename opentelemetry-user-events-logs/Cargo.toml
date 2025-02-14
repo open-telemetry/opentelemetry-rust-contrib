@@ -22,8 +22,13 @@ opentelemetry-appender-tracing = { workspace = true }
 tracing = { version = "0.1", default-features = false, features = ["std"] }
 tracing-core = "0.1.31"
 tracing-subscriber = { version = "0.3.0", default-features = false, features = ["registry", "std"] }
-microbench = "0.5"
+criterion = "0.4" # Add the Criterion crate for benchmarking
 
 [features]
 spec_unstable_logs_enabled = ["opentelemetry/spec_unstable_logs_enabled", "opentelemetry_sdk/spec_unstable_logs_enabled", "opentelemetry-appender-tracing/spec_unstable_logs_enabled"]
 default = ["spec_unstable_logs_enabled"]
+
+[[bench]]
+name = "benchmark"
+harness = false
+
