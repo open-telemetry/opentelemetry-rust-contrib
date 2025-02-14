@@ -4,6 +4,7 @@ use eventheader_dynamic::EventBuilder;
 use std::borrow::Cow;
 use std::collections::HashMap;
 use std::fmt::Debug;
+use opentelemetry::otel_debug;
 
 use opentelemetry::{logs::AnyValue, logs::Severity, Key};
 use std::{cell::RefCell, str, time::SystemTime};
@@ -68,6 +69,7 @@ impl UserEventsExporter {
         let mut eventheader_provider: eventheader_dynamic::Provider =
             eventheader_dynamic::Provider::new(provider_name, &options);
         Self::register_keywords(&mut eventheader_provider, &exporter_config);
+        otel_debug!(name: "UserEventsExporter.Created", config = format!("{:?}", exporter_config), provider_name = provider_name, provider_group = "None");
         UserEventsExporter {
             provider: eventheader_provider,
             exporter_config,
@@ -84,7 +86,23 @@ impl UserEventsExporter {
         ];
 
         for &level in levels.iter() {
+            otel_debug!(
+                name: "UserEventsExporter.RegisterEvent",
+                level = level.as_int(),
+                keyword = keyword,
+            );
             eventheader_provider.register_set(level, keyword);
+            let event_set = eventheader_provider.find_set(level.as_int().into(), keyword);
+            if let Some(set) = event_set {
+                otel_debug!(name: "UserEventsExporter.RegisteredEvent", set = format!("{:?}", set));
+                println!("Successfully registered set: {:?}", set);
+            } else {
+                otel_debug!(
+                    name: "UserEventsExporter.FailedToRegisterEvent",
+                    level = level.as_int(),
+                    keyword = keyword,
+                );
+            }
         }
     }
 
@@ -93,14 +111,18 @@ impl UserEventsExporter {
         exporter_config: &ExporterConfig,
     ) {
         if exporter_config.keywords_map.is_empty() {
-            println!(
-                "Register default keyword {}",
-                exporter_config.default_keyword
+            otel_debug!(
+                name: "UserEventsExporter.RegisterDefaultKeyword",
+                default_keyword = exporter_config.default_keyword,
             );
             Self::register_events(eventheader_provider, exporter_config.default_keyword);
         }
 
         for keyword in exporter_config.keywords_map.values() {
+            otel_debug!(
+                name: "UserEventsExporter.RegisterKeyword",
+                keyword = *keyword,
+            );
             Self::register_events(eventheader_provider, *keyword);
         }
     }
