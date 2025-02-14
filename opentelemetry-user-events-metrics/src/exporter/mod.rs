@@ -115,9 +115,7 @@ impl PushMetricExporter for MetricsExporter {
             // TODO - This can flood the logs if the tracepoint is disabled for long periods of time
             otel_warn!(name: "TracepointDisabled", message = "Tracepoint is disabled, skipping export");
             return Ok(());
-        }
-
-        if self.trace_point.enabled() {
+        } else {
             let mut errors = Vec::new();
 
             for scope_metric in &metrics.scope_metrics {
@@ -466,7 +464,7 @@ impl PushMetricExporter for MetricsExporter {
     }
 
     fn shutdown(&self) -> OTelSdkResult {
-        // TracepointState automatically unregisters when dropped
+        // TracepointState automatically deregisters when dropped
         // https://github.com/microsoft/LinuxTracepoints-Rust/blob/main/eventheader/src/native.rs#L618
         Ok(())
     }
