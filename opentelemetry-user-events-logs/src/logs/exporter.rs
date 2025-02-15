@@ -220,7 +220,7 @@ impl UserEventsExporter {
         if keyword.is_none() {
             otel_debug!(
                 name: "UserEventsExporter.KeywordNotFound",
-                log_record_name = format!("{:?}", log_record.event_name),
+                log_record_name = format!("{:?}", log_record.event_name()),
                 instrumentation_name = format!("{:?}", instrumentation.name()),
                 keyword = self.exporter_config.default_keyword,
             );
