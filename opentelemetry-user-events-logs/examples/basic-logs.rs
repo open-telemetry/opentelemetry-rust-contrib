@@ -4,6 +4,9 @@ use opentelemetry_appender_tracing::layer;
 use opentelemetry_sdk::logs::SdkLoggerProvider;
 use opentelemetry_user_events_logs::{ExporterConfig, ReentrantLogProcessor, UserEventsExporter};
 use std::collections::HashMap;
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::Arc;
+use std::{thread, time::Duration};
 use tracing::error;
 use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt, EnvFilter, Layer};
 
@@ -29,8 +32,8 @@ fn main() {
     let otel_layer = layer::OpenTelemetryTracingBridge::new(&logger_provider);
     let otel_layer = otel_layer.with_filter(filter_otel);
 
-    let filter_otel = EnvFilter::new("info").add_directive("opentelemetry=debug".parse().unwrap());
-    let fmt_layer = tracing_subscriber::fmt::layer().with_filter(filter_otel);
+    let filter_fmt = EnvFilter::new("info").add_directive("opentelemetry=debug".parse().unwrap());
+    let fmt_layer = tracing_subscriber::fmt::layer().with_filter(filter_fmt);
 
     tracing_subscriber::registry()
         .with(otel_layer)
@@ -39,11 +42,24 @@ fn main() {
 
     // event_id is passed as an attribute now, there is nothing in metadata where a
     // numeric id can be stored.
-    error!(
-        name: "my-event-name",
-        event_id = 20,
-        user_name = "otel user",
-        user_email = "otel@opentelemetry.io"
-    );
+    // run in a loop to ensure that tracepoints are not removed from kernel fs
+
+    let running = Arc::new(AtomicBool::new(true));
+    let r = running.clone();
+
+    ctrlc::set_handler(move || {
+        r.store(false, Ordering::SeqCst);
+    })
+    .expect("Error setting Ctrl-C handler");
+
+    while running.load(Ordering::SeqCst) {
+        error!(
+            name = "my-event-name",
+            event_id = 20,
+            user_name = "otel user",
+            user_email = "otel@opentelemetry.io"
+        );
+        thread::sleep(Duration::from_secs(1));
+    }
     let _ = logger_provider.shutdown();
 }

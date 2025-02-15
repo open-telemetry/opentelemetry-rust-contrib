@@ -6,7 +6,7 @@ use std::collections::HashMap;
 use std::fmt::Debug;
 
 use opentelemetry::{logs::AnyValue, logs::Severity, Key};
-use opentelemetry_sdk::error::OTelSdkResult;
+use opentelemetry_sdk::error::{OTelSdkError, OTelSdkResult};
 use std::{cell::RefCell, str, time::SystemTime};
 
 /// Provider group associated with the user_events exporter
@@ -241,7 +241,7 @@ impl UserEventsExporter {
             return Ok(());
         };
         if log_es.enabled() {
-            EBW.with(|eb| {
+            let res = EBW.with(|eb| {
                 let mut eb = eb.borrow_mut();
                 let event_tags: u32 = 0; // TBD name and event_tag values
                 eb.reset(instrumentation.name().as_ref(), event_tags as u16);
@@ -350,10 +350,18 @@ impl UserEventsExporter {
 
                 let result = eb.write(&log_es, None, None);
                 if result > 0 {
-                    otel_debug!(name: "UserEventsExporter.WriteFailed", error = result);
+                    return Err(OTelSdkError::InternalFailure(
+                        "Failed to write event to user_events tracepoint".into(),
+                    ));
                 }
+                Ok(())
             });
-            return Ok(());
+            if let Err(e) = res {
+                otel_debug!(name: "UserEventsExporter.WriteFailed", error = format!("{:?}", e));
+                return Err(OTelSdkError::InternalFailure(
+                    "Failed to write event to user_events tracepoint".into(),
+                ));
+            }
         } else {
             otel_debug!(
                 name: "UserEventsExporter.EventSetNotEnabled",
@@ -403,8 +411,25 @@ impl opentelemetry_sdk::logs::LogExporter for UserEventsExporter {
             .provider
             .find_set(self.get_severity_level(level), keyword);
         match es {
-            Some(x) => x.enabled(),
-            _ => false,
+            Some(x) => {
+                let enabled = x.enabled();
+                if !enabled {
+                    otel_debug!(
+                        name: "UserEventsExporter.EventNotEnabled",
+                        level = format!("{:?}",level),
+                        keyword = keyword,
+                    );
+                }
+                enabled
+            }
+            _ => {
+                otel_debug!(
+                    name: "UserEventsExporter.EventSetNotFound",
+                    level = format!("{:?}",level),
+                    keyword = keyword,
+                );
+                false
+            }
         }
     }
 }
