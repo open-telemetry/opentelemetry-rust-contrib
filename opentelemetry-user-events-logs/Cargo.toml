@@ -19,7 +19,7 @@ chrono = { version = "0.4", default-features = false, features = ["std"] }
 tracing = { version = "0.1", optional = true }
 
 [dev-dependencies]
-opentelemetry-appender-tracing = { workspace = true, default-features = false }
+opentelemetry-appender-tracing = { workspace = true }
 tracing = { version = "0.1", default-features = false, features = ["std"] }
 tracing-core = "0.1.31"
 tracing-subscriber = { version = "0.3.0", default-features = false, features = ["env-filter", "fmt", "registry", "std"] }

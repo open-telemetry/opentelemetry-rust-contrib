@@ -68,7 +68,7 @@ impl UserEventsExporter {
         let mut eventheader_provider: eventheader_dynamic::Provider =
             eventheader_dynamic::Provider::new(provider_name, &options);
         Self::register_keywords(&mut eventheader_provider, &exporter_config);
-        otel_debug!(name: "UserEventsExporter.Created", config = format!("{:?}", exporter_config), provider_name = provider_name, provider_group = format!("{:?}", options));
+        otel_debug!(name: "UserEvents.Created", config = format!("{:?}", exporter_config), provider_name = provider_name, provider_group = format!("{:?}", options));
         UserEventsExporter {
             provider: eventheader_provider,
             exporter_config,
@@ -86,36 +86,36 @@ impl UserEventsExporter {
 
         for &level in levels.iter() {
             otel_debug!(
-                name: "UserEventsExporter.RegisterEvent",
+                name: "UserEvents.RegisterEvent",
                 level = level.as_int(),
                 keyword = keyword,
             );
             let event_set = eventheader_provider.register_set(level, keyword);
             match event_set.errno() {
                 0 => {
-                    otel_debug!(name: "UserEventsExporter.RegisteredEvent",  event_set = format!("{:?}", event_set));
+                    otel_debug!(name: "UserEvents.RegisteredEvent",  event_set = format!("{:?}", event_set));
                 }
                 95 => {
-                    otel_debug!(name: "UserEventsExporter.TraceFSNotMounted", event_set = format!("{:?}", event_set));
+                    otel_debug!(name: "UserEvents.TraceFSNotMounted", event_set = format!("{:?}", event_set));
                 }
                 13 => {
-                    otel_debug!(name: "UserEventsExporter.PermissionDenied", event_set = format!("{:?}", event_set));
+                    otel_debug!(name: "UserEvents.PermissionDenied", event_set = format!("{:?}", event_set));
                 }
 
                 _ => {
                     otel_debug!(
-                        name: "UserEventsExporter.FailedToRegisterEvent",
+                        name: "UserEvents.FailedToRegisterEvent",
                         event_set = format!("{:?}", event_set)
                     );
                 }
             }
             let event_set = eventheader_provider.find_set(level.as_int().into(), keyword);
             if let Some(set) = event_set {
-                otel_debug!(name: "UserEventsExporter.RegisteredEvent", set = format!("{:?}", set));
+                otel_debug!(name: "UserEvents.RegisteredEvent", set = format!("{:?}", set));
                 println!("Successfully registered set: {:?}", set);
             } else {
                 otel_debug!(
-                    name: "UserEventsExporter.FailedToRegisterEvent",
+                    name: "UserEvents.FailedToRegisterEvent",
                     level = level.as_int(),
                     keyword = keyword,
                 );
@@ -129,7 +129,7 @@ impl UserEventsExporter {
     ) {
         if exporter_config.keywords_map.is_empty() {
             otel_debug!(
-                name: "UserEventsExporter.RegisterDefaultKeyword",
+                name: "UserEvents.RegisterDefaultKeyword",
                 default_keyword = exporter_config.default_keyword,
             );
             Self::register_events(eventheader_provider, exporter_config.default_keyword);
@@ -137,7 +137,7 @@ impl UserEventsExporter {
 
         for keyword in exporter_config.keywords_map.values() {
             otel_debug!(
-                name: "UserEventsExporter.RegisterKeyword",
+                name: "UserEvents.RegisterKeyword",
                 keyword = *keyword,
             );
             Self::register_events(eventheader_provider, *keyword);
@@ -219,7 +219,7 @@ impl UserEventsExporter {
 
         if keyword.is_none() {
             otel_debug!(
-                name: "UserEventsExporter.KeywordNotFound",
+                name: "UserEvents.KeywordNotFound",
                 log_record_name = format!("{:?}", log_record.event_name()),
                 instrumentation_name = format!("{:?}", instrumentation.name()),
                 keyword = self.exporter_config.default_keyword,
@@ -234,7 +234,7 @@ impl UserEventsExporter {
             es
         } else {
             otel_debug!(
-                name: "UserEventsExporter.EventSetNotFound",
+                name: "UserEvents.EventSetNotFound",
                 level = level.as_int(),
                 keyword = keyword.unwrap(),
             );
@@ -357,14 +357,14 @@ impl UserEventsExporter {
                 Ok(())
             });
             if let Err(e) = res {
-                otel_debug!(name: "UserEventsExporter.WriteFailed", error = format!("{:?}", e));
+                otel_debug!(name: "UserEvents.WriteFailed", error = format!("{:?}", e));
                 return Err(OTelSdkError::InternalFailure(
                     "Failed to write event to user_events tracepoint".into(),
                 ));
             }
         } else {
             otel_debug!(
-                name: "UserEventsExporter.EventSetNotEnabled",
+                name: "UserEvents.EventSetNotEnabled",
                 level = level.as_int(),
                 keyword = keyword.unwrap(),
             );
@@ -415,7 +415,7 @@ impl opentelemetry_sdk::logs::LogExporter for UserEventsExporter {
                 let enabled = x.enabled();
                 if !enabled {
                     otel_debug!(
-                        name: "UserEventsExporter.EventNotEnabled",
+                        name: "UserEvents.EventNotEnabled",
                         level = format!("{:?}",level),
                         keyword = keyword,
                     );
@@ -424,7 +424,7 @@ impl opentelemetry_sdk::logs::LogExporter for UserEventsExporter {
             }
             _ => {
                 otel_debug!(
-                    name: "UserEventsExporter.EventSetNotFound",
+                    name: "UserEvents.EventSetNotFound",
                     level = format!("{:?}",level),
                     keyword = keyword,
                 );
