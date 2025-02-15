@@ -1,5 +1,7 @@
 use async_trait::async_trait;
+use opentelemetry::{otel_debug, otel_warn};
 use opentelemetry_proto::tonic::collector::metrics::v1::ExportMetricsServiceRequest;
+use opentelemetry_sdk::error::{OTelSdkError, OTelSdkResult};
 use opentelemetry_sdk::metrics::data;
 use opentelemetry_sdk::metrics::exporter::PushMetricExporter;
 use opentelemetry_sdk::metrics::{
@@ -8,9 +10,6 @@ use opentelemetry_sdk::metrics::{
     },
     Temporality,
 };
-use opentelemetry_sdk::metrics::{MetricError, MetricResult};
-
-use opentelemetry::{otel_debug, otel_warn};
 
 use crate::tracepoint;
 use eventheader::_internal as ehi;
@@ -54,7 +53,7 @@ impl MetricsExporter {
         resource_metric: &ResourceMetrics,
         metric_name: &str,
         metric_type: &str,
-    ) -> MetricResult<()> {
+    ) -> OTelSdkResult {
         // Allocate a local buffer for each write operation
         // TODO: Investigate if this can be optimized to avoid reallocation or
         // allocate a fixed buffer size for all writes
@@ -80,7 +79,7 @@ impl MetricsExporter {
                     metric_name = metric_name,
                     metric_type = metric_type,
                     size = byte_array.len());
-                return Err(MetricError::Other(err.to_string()));
+                return Err(OTelSdkError::InternalFailure(err.to_string()));
             }
         }
 
@@ -93,7 +92,7 @@ impl MetricsExporter {
                 metric_type = metric_type,
                 size = byte_array.len()
             );
-            return Err(MetricError::Other(
+            return Err(OTelSdkError::InternalFailure(
                 "Event size exceeds maximum allowed limit".into(),
             ));
         }
@@ -110,15 +109,13 @@ impl MetricsExporter {
 
 #[async_trait]
 impl PushMetricExporter for MetricsExporter {
-    async fn export(&self, metrics: &mut ResourceMetrics) -> MetricResult<()> {
+    async fn export(&self, metrics: &mut ResourceMetrics) -> OTelSdkResult {
         otel_debug!(name: "ExportStart", message = "Starting metrics export");
         if !self.trace_point.enabled() {
             // TODO - This can flood the logs if the tracepoint is disabled for long periods of time
             otel_warn!(name: "TracepointDisabled", message = "Tracepoint is disabled, skipping export");
             return Ok(());
-        }
-
-        if self.trace_point.enabled() {
+        } else {
             let mut errors = Vec::new();
 
             for scope_metric in &metrics.scope_metrics {
@@ -137,6 +134,8 @@ impl PushMetricExporter for MetricsExporter {
                                         unit: metric.unit.clone(),
                                         data: Box::new(data::Histogram {
                                             temporality: histogram.temporality,
+                                            start_time: histogram.start_time,
+                                            time: histogram.time,
                                             data_points: vec![data_point.clone()],
                                         }),
                                     }],
@@ -162,6 +161,8 @@ impl PushMetricExporter for MetricsExporter {
                                         unit: metric.unit.clone(),
                                         data: Box::new(data::Histogram {
                                             temporality: histogram.temporality,
+                                            start_time: histogram.start_time,
+                                            time: histogram.time,
                                             data_points: vec![data_point.clone()],
                                         }),
                                     }],
@@ -187,6 +188,8 @@ impl PushMetricExporter for MetricsExporter {
                                         unit: metric.unit.clone(),
                                         data: Box::new(data::Gauge {
                                             data_points: vec![data_point.clone()],
+                                            start_time: gauge.start_time,
+                                            time: gauge.time,
                                         }),
                                     }],
                                 }],
@@ -211,6 +214,8 @@ impl PushMetricExporter for MetricsExporter {
                                         unit: metric.unit.clone(),
                                         data: Box::new(data::Gauge {
                                             data_points: vec![data_point.clone()],
+                                            start_time: gauge.start_time,
+                                            time: gauge.time,
                                         }),
                                     }],
                                 }],
@@ -235,6 +240,8 @@ impl PushMetricExporter for MetricsExporter {
                                         unit: metric.unit.clone(),
                                         data: Box::new(data::Gauge {
                                             data_points: vec![data_point.clone()],
+                                            start_time: gauge.start_time,
+                                            time: gauge.time,
                                         }),
                                     }],
                                 }],
@@ -261,6 +268,8 @@ impl PushMetricExporter for MetricsExporter {
                                             temporality: sum.temporality,
                                             data_points: vec![data_point.clone()],
                                             is_monotonic: sum.is_monotonic,
+                                            start_time: sum.start_time,
+                                            time: sum.time,
                                         }),
                                     }],
                                 }],
@@ -285,6 +294,8 @@ impl PushMetricExporter for MetricsExporter {
                                             temporality: sum.temporality,
                                             data_points: vec![data_point.clone()],
                                             is_monotonic: sum.is_monotonic,
+                                            start_time: sum.start_time,
+                                            time: sum.time,
                                         }),
                                     }],
                                 }],
@@ -309,6 +320,8 @@ impl PushMetricExporter for MetricsExporter {
                                             temporality: sum.temporality,
                                             data_points: vec![data_point.clone()],
                                             is_monotonic: sum.is_monotonic,
+                                            start_time: sum.start_time,
+                                            time: sum.time,
                                         }),
                                     }],
                                 }],
@@ -333,11 +346,11 @@ impl PushMetricExporter for MetricsExporter {
                                         unit: metric.unit.clone(),
                                         data: Box::new(data::ExponentialHistogram {
                                             temporality: exp_hist.temporality,
+                                            start_time: exp_hist.start_time,
+                                            time: exp_hist.time,
                                             data_points: vec![ExponentialHistogramDataPoint {
                                                 attributes: data_point.attributes.clone(),
                                                 count: data_point.count,
-                                                start_time: data_point.start_time,
-                                                time: data_point.time,
                                                 min: data_point.min,
                                                 max: data_point.max,
                                                 sum: data_point.sum,
@@ -386,11 +399,11 @@ impl PushMetricExporter for MetricsExporter {
                                         unit: metric.unit.clone(),
                                         data: Box::new(data::ExponentialHistogram {
                                             temporality: exp_hist.temporality,
+                                            start_time: exp_hist.start_time,
+                                            time: exp_hist.time,
                                             data_points: vec![ExponentialHistogramDataPoint {
                                                 attributes: data_point.attributes.clone(),
                                                 count: data_point.count,
-                                                start_time: data_point.start_time,
-                                                time: data_point.time,
                                                 min: data_point.min,
                                                 max: data_point.max,
                                                 sum: data_point.sum,
@@ -436,7 +449,7 @@ impl PushMetricExporter for MetricsExporter {
                     errors.len(),
                     errors.join("; ")
                 );
-                return Err(MetricError::Other(error_message));
+                return Err(OTelSdkError::InternalFailure(error_message));
             }
         }
         Ok(())
@@ -446,12 +459,12 @@ impl PushMetricExporter for MetricsExporter {
         Temporality::Delta
     }
 
-    async fn force_flush(&self) -> MetricResult<()> {
+    async fn force_flush(&self) -> OTelSdkResult {
         Ok(()) // In this implementation, flush does nothing
     }
 
-    fn shutdown(&self) -> MetricResult<()> {
-        // TracepointState automatically unregisters when dropped
+    fn shutdown(&self) -> OTelSdkResult {
+        // TracepointState automatically deregisters when dropped
         // https://github.com/microsoft/LinuxTracepoints-Rust/blob/main/eventheader/src/native.rs#L618
         Ok(())
     }

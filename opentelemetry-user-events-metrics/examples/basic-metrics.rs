@@ -2,19 +2,21 @@
 use opentelemetry::{metrics::MeterProvider as _, KeyValue};
 use opentelemetry_sdk::{
     metrics::{PeriodicReader, SdkMeterProvider},
-    runtime, Resource,
+    Resource,
 };
 use opentelemetry_user_events_metrics::MetricsExporter;
 use std::thread;
 use std::time::Duration;
+use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt, EnvFilter, Layer};
 
 fn init_metrics(exporter: MetricsExporter) -> SdkMeterProvider {
-    let reader = PeriodicReader::builder(exporter, runtime::Tokio).build();
+    let reader = PeriodicReader::builder(exporter).build();
     SdkMeterProvider::builder()
-        .with_resource(Resource::new(vec![KeyValue::new(
-            "service.name",
-            "metric-demo",
-        )]))
+        .with_resource(
+            Resource::builder_empty()
+                .with_attributes(vec![KeyValue::new("service.name", "metric-demo")])
+                .build(),
+        )
         .with_reader(reader)
         .build()
 }
@@ -22,6 +24,16 @@ fn init_metrics(exporter: MetricsExporter) -> SdkMeterProvider {
 #[tokio::main]
 #[allow(unused_must_use)]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
+    // Create a new tracing::Fmt layer to print the logs to stdout. It has a
+    // default filter of `info` level and above, and `debug` and above for logs
+    // from OpenTelemetry crates. The filter levels can be customized as needed.
+    let filter_fmt = EnvFilter::new("info").add_directive("opentelemetry=debug".parse().unwrap());
+    let fmt_layer = tracing_subscriber::fmt::layer()
+        .with_thread_names(true)
+        .with_filter(filter_fmt);
+
+    tracing_subscriber::registry().with(fmt_layer).init();
+
     let exporter = opentelemetry_user_events_metrics::MetricsExporter::new();
     let meter_provider = init_metrics(exporter);
 

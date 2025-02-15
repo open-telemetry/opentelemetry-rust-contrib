@@ -4,6 +4,10 @@
 
 ### Changed
 
+## v0.25.0
+
+- Bump msrv to 1.75.0
+- Update to opentelemetry v0.28.0, opentelemetry_sdk v0.28.0, opentelemetry-semantic-conventions v0.28.0
 - Remove `server` feature from tonic dependency
 - Bump thiserror to 2.0
 

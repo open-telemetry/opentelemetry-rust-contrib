@@ -10,8 +10,9 @@ use opentelemetry_proto::tonic::{
         Sum as TonicSum, Summary as TonicSummary,
     },
 };
+use opentelemetry_sdk::error::{OTelSdkError, OTelSdkResult};
 use opentelemetry_sdk::metrics::{
-    data::ResourceMetrics, exporter::PushMetricExporter, MetricError, MetricResult, Temporality,
+    data::ResourceMetrics, exporter::PushMetricExporter, Temporality,
 };
 
 use std::fmt::{Debug, Formatter};
@@ -44,7 +45,7 @@ impl Debug for MetricsExporter {
 fn emit_export_metric_service_request(
     export_metric_service_request: &ExportMetricsServiceRequest,
     encoding_buffer: &mut Vec<u8>,
-) -> MetricResult<()> {
+) -> OTelSdkResult {
     if (export_metric_service_request.encoded_len()) > etw::MAX_EVENT_SIZE {
         otel_warn!(name: "MetricExportFailedDueToMaxSizeLimit", size = export_metric_service_request.encoded_len(), max_size = etw::MAX_EVENT_SIZE);
     } else {
@@ -55,7 +56,7 @@ fn emit_export_metric_service_request(
 
         export_metric_service_request
             .encode(encoding_buffer)
-            .map_err(|err| MetricError::Other(err.to_string()))?;
+            .map_err(|err| OTelSdkError::InternalFailure(err.to_string()))?;
 
         let result = etw::write(encoding_buffer);
         // TODO: Better logging/internal metrics needed here for non-failure
@@ -72,7 +73,7 @@ fn emit_export_metric_service_request(
 
 #[async_trait]
 impl PushMetricExporter for MetricsExporter {
-    async fn export(&self, metrics: &mut ResourceMetrics) -> MetricResult<()> {
+    async fn export(&self, metrics: &mut ResourceMetrics) -> OTelSdkResult {
         let schema_url: String = metrics
             .resource
             .schema_url()
@@ -191,11 +192,11 @@ impl PushMetricExporter for MetricsExporter {
         Ok(())
     }
 
-    async fn force_flush(&self) -> MetricResult<()> {
+    async fn force_flush(&self) -> OTelSdkResult {
         Ok(())
     }
 
-    fn shutdown(&self) -> MetricResult<()> {
+    fn shutdown(&self) -> OTelSdkResult {
         etw::unregister();
 
         Ok(())
@@ -211,7 +212,7 @@ mod tests {
     use opentelemetry::{metrics::MeterProvider as _, KeyValue};
     use opentelemetry_sdk::{
         metrics::{PeriodicReader, SdkMeterProvider},
-        runtime, Resource,
+        Resource,
     };
 
     use crate::etw;
@@ -219,12 +220,13 @@ mod tests {
     #[tokio::test(flavor = "multi_thread")]
     async fn emit_metrics_that_combined_exceed_etw_max_event_size() {
         let exporter = super::MetricsExporter::new();
-        let reader = PeriodicReader::builder(exporter, runtime::Tokio).build();
+        let reader = PeriodicReader::builder(exporter).build();
         let meter_provider = SdkMeterProvider::builder()
-            .with_resource(Resource::new(vec![KeyValue::new(
-                "service.name",
-                "service-name",
-            )]))
+            .with_resource(
+                Resource::builder()
+                    .with_attributes(vec![KeyValue::new("service.name", "service-name")])
+                    .build(),
+            )
             .with_reader(reader)
             .build();
 

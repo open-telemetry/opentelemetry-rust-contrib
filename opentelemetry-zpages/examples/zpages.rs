@@ -7,7 +7,7 @@ use opentelemetry::{
     trace::{Span, Status},
 };
 use opentelemetry_sdk::runtime::Tokio;
-use opentelemetry_sdk::trace::TracerProvider;
+use opentelemetry_sdk::trace::SdkTracerProvider;
 use opentelemetry_zpages::{tracez, TracezError, TracezQuerier, TracezResponse};
 use rand::Rng;
 use std::str::FromStr;
@@ -69,7 +69,7 @@ async fn handler(
             }
         }
         "/running" => {
-            let span_duration = Duration::from_millis(rand::thread_rng().gen_range(1..6000));
+            let span_duration = Duration::from_millis(rand::rng().random_range(1..6000));
             let mut spans = global::tracer("zpages-test").start("running-spans");
             spans.set_status(Status::Ok);
             tokio::time::sleep(span_duration).await;
@@ -90,7 +90,7 @@ fn tracez_response_or_server_error(resp: Result<TracezResponse, TracezError>) ->
 #[tokio::main]
 async fn main() {
     let (processor, querier) = tracez(5, Tokio);
-    let provider = TracerProvider::builder()
+    let provider = SdkTracerProvider::builder()
         .with_span_processor(processor)
         .build();
     global::set_tracer_provider(provider);

@@ -1,6 +1,6 @@
 [package]
 name = "opentelemetry-zpages"
-version = "0.12.0"
+version = "0.13.0"
 description = "ZPages implementation for OpenTelemetry"
 homepage = "https://github.com/open-telemetry/opentelemetry-rust-contrib/tree/main/opentelemetry-zpages"
 repository = "https://github.com/open-telemetry/opentelemetry-rust-contrib/tree/main/opentelemetry-zpages"
@@ -13,7 +13,7 @@ categories = [
 keywords = ["opentelemetry", "zipkin", "tracing", "async"]
 license = "Apache-2.0"
 edition = "2021"
-rust-version = "1.71.1"
+rust-version = "1.75.0"
 
 [package.metadata.docs.rs]
 all-features = true
@@ -24,9 +24,9 @@ with-serde = []
 
 [dependencies]
 opentelemetry = { workspace = true }
-opentelemetry_sdk = { workspace = true, default-features = false, features = ["trace"] }
+opentelemetry_sdk = { workspace = true, default-features = false, features = ["trace", "experimental_async_runtime" ] }
 opentelemetry-proto = { workspace = true, features = ["zpages", "gen-tonic", "with-serde"], default-features = false }
-async-channel = "1.6"
+async-channel = "2.3"
 futures-channel = "0.3"
 futures-util = { version = "0.3", default-features = false, features = ["std"] }
 serde = "1.0"
@@ -35,7 +35,7 @@ serde_json = "1.0"
 [dev-dependencies]
 tokio = { version = "1.0", features = ["macros", "rt"] }
 opentelemetry_sdk = { workspace = true, features = ["trace", "testing"] }
-rand = "0.8"
+rand = "0.9"
 hyper = { version = "0.14", features = ["full"] }
 
 [[example]]

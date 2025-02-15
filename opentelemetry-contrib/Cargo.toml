@@ -1,6 +1,6 @@
 [package]
 name = "opentelemetry-contrib"
-version = "0.19.0"
+version = "0.20.0"
 description = "Rust contrib repo for OpenTelemetry"
 homepage = "https://github.com/open-telemetry/opentelemetry-rust-contrib/tree/main/opentelemetry-contrib"
 repository = "https://github.com/open-telemetry/opentelemetry-rust-contrib/tree/main/opentelemetry-contrib"
@@ -12,7 +12,7 @@ categories = [
 keywords = ["opentelemetry", "tracing"]
 license = "Apache-2.0"
 edition = "2021"
-rust-version = "1.70.0"
+rust-version = "1.75.0"
 
 [package.metadata.docs.rs]
 all-features = true
@@ -31,7 +31,7 @@ rt-async-std = ["async-std", "opentelemetry_sdk/rt-async-std"]
 [dependencies]
 async-std = { version = "1.10", optional = true }
 async-trait = { version = "0.1", optional = true }
-base64 = { version = "0.13", optional = true }
+base64 = { version = "0.22", optional = true }
 futures-core = { version = "0.3", optional = true }
 futures-util = { version = "0.3", optional = true, default-features = false }
 opentelemetry = { workspace = true }
@@ -40,7 +40,6 @@ serde_json = { version = "1", optional = true }
 tokio = { version = "1.0", features = ["fs", "io-util"], optional = true }
 
 [dev-dependencies]
-base64 = "0.13"
 criterion = { version = "0.5", features = ["html_reports"] }
 futures-util = { version = "0.3", default-features = false, features = ["std"] }
 opentelemetry_sdk = { workspace = true, features = ["trace", "testing"] }

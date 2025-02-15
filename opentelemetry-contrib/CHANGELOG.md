@@ -2,6 +2,13 @@
 
 ## vNext
 
+- Bump `base64` version to 0.22
+
+## v0.20.0
+
+- Bump msrv to 1.75.0
+- Bump opentelemetry and opentelemetry_sdk versions to 0.28
+- Bump opentelemetry-semantic-conventions version to 0.28
 - [Breaking] `JaegerJsonExporter::install_batch()` now returns `TracerProvider`.
   Additionally, global tracer provider now needs to be set by the user by calling `global::set_tracer_provider(tracer_provider.clone())` (original PR [opentelemetry-rust#1812](https://github.com/open-telemetry/opentelemetry-rust/pull/1812))
 

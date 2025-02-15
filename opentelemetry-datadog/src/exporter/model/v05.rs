@@ -3,7 +3,7 @@ use crate::exporter::model::{DD_MEASURED_KEY, SAMPLING_PRIORITY_KEY};
 use crate::exporter::{Error, ModelConfig};
 use crate::propagator::DatadogTraceState;
 use opentelemetry::trace::Status;
-use opentelemetry_sdk::export::trace::SpanData;
+use opentelemetry_sdk::trace::SpanData;
 use opentelemetry_sdk::Resource;
 use std::time::SystemTime;
 

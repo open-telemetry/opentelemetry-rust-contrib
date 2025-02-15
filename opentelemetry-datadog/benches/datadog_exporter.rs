@@ -1,5 +1,6 @@
 use std::time::{Duration, SystemTime};
 
+use bytes::Bytes;
 use criterion::{black_box, criterion_group, criterion_main, Criterion};
 use http::Request;
 use opentelemetry::{
@@ -9,11 +10,11 @@ use opentelemetry::{
 use opentelemetry_datadog::{new_pipeline, ApiVersion};
 use opentelemetry_http::HttpClient;
 use opentelemetry_sdk::{
-    export::trace::{SpanData, SpanExporter},
+    trace::{SpanData, SpanExporter},
     trace::{SpanEvents, SpanLinks},
 };
-use rand::seq::SliceRandom;
-use rand::{rngs::ThreadRng, thread_rng, RngCore};
+use rand::seq::{IndexedRandom, SliceRandom};
+use rand::{rng, rngs::ThreadRng, RngCore};
 
 #[derive(Debug)]
 struct DummyClient;
@@ -25,6 +26,15 @@ impl HttpClient for DummyClient {
         _request: Request<Vec<u8>>,
     ) -> Result<http::Response<bytes::Bytes>, opentelemetry_http::HttpError> {
         Ok(http::Response::new("dummy response".into()))
+    }
+    async fn send_bytes(
+        &self,
+        request: Request<Bytes>,
+    ) -> Result<http::Response<Bytes>, opentelemetry_http::HttpError> {
+        Ok(http::Response::builder()
+            .status(200)
+            .body(request.into_body())
+            .unwrap())
     }
 }
 
@@ -169,7 +179,7 @@ fn get_span(trace_id: u128, parent_span_id: u64, span_id: u64, rng: &mut ThreadR
 }
 
 fn generate_traces(number_of_traces: usize, spans_per_trace: usize) -> Vec<SpanData> {
-    let mut rng = thread_rng();
+    let mut rng = rng();
 
     let mut result: Vec<SpanData> = (0..number_of_traces)
         .flat_map(|trace_id| {

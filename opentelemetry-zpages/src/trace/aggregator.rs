@@ -8,8 +8,9 @@ use async_channel::Receiver;
 use futures_util::StreamExt as _;
 use opentelemetry::trace::Status;
 use opentelemetry_proto::tonic::tracez::v1::TracezCounts;
-use opentelemetry_sdk::export::trace::SpanData;
+use opentelemetry_sdk::trace::SpanData;
 use std::collections::HashMap;
+use std::pin::Pin;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 const LATENCY_BUCKET: [Duration; 9] = [
@@ -29,7 +30,7 @@ const LATENCY_BUCKET_COUNT: usize = 9;
 /// requested.
 #[derive(Debug)]
 pub(crate) struct SpanAggregator {
-    receiver: Receiver<TracezMessage>,
+    receiver: Pin<Box<Receiver<TracezMessage>>>,
     summaries: HashMap<String, SpanSummary>,
     sample_size: usize,
 }
@@ -38,7 +39,7 @@ impl SpanAggregator {
     /// Create a span aggregator
     pub(crate) fn new(receiver: Receiver<TracezMessage>, sample_size: usize) -> SpanAggregator {
         SpanAggregator {
-            receiver,
+            receiver: Box::pin(receiver),
             summaries: HashMap::new(),
             sample_size,
         }
@@ -198,7 +199,7 @@ mod tests {
         TracezMessage,
     };
     use opentelemetry::trace::{SpanContext, SpanId, Status, TraceFlags, TraceId, TraceState};
-    use opentelemetry_sdk::{export::trace::SpanData, testing::trace::new_test_export_span_data};
+    use opentelemetry_sdk::{testing::trace::new_test_export_span_data, trace::SpanData};
     use std::borrow::Cow;
     use std::cmp::min;
     use std::time::{Duration, SystemTime};

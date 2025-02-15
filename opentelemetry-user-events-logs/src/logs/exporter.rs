@@ -1,4 +1,3 @@
-use async_trait::async_trait;
 use eventheader::{FieldFormat, Level, Opcode};
 use eventheader_dynamic::EventBuilder;
 use opentelemetry::otel_debug;
@@ -7,6 +6,7 @@ use std::collections::HashMap;
 use std::fmt::Debug;
 
 use opentelemetry::{logs::AnyValue, logs::Severity, Key};
+use opentelemetry_sdk::error::OTelSdkResult;
 use std::{cell::RefCell, str, time::SystemTime};
 
 /// Provider group associated with the user_events exporter
@@ -204,13 +204,13 @@ impl UserEventsExporter {
 
     pub(crate) fn export_log_data(
         &self,
-        log_record: &opentelemetry_sdk::logs::LogRecord,
+        log_record: &opentelemetry_sdk::logs::SdkLogRecord,
         instrumentation: &opentelemetry::InstrumentationScope,
-    ) -> opentelemetry_sdk::export::logs::ExportResult {
+    ) -> opentelemetry_sdk::error::OTelSdkResult {
         //TODO - should we log (otel_debug) each event?
         let mut level: Level = Level::Invalid;
-        if log_record.severity_number.is_some() {
-            level = self.get_severity_level(log_record.severity_number.unwrap());
+        if log_record.severity_number().is_some() {
+            level = self.get_severity_level(log_record.severity_number().unwrap());
         }
 
         let keyword = self
@@ -252,8 +252,8 @@ impl UserEventsExporter {
                 // populate CS PartA
                 let mut cs_a_count = 0;
                 let event_time: SystemTime = log_record
-                    .timestamp
-                    .or(log_record.observed_timestamp)
+                    .timestamp()
+                    .or(log_record.observed_timestamp())
                     .unwrap_or_else(SystemTime::now);
                 cs_a_count += 1; // for event_time
                 eb.add_struct("PartA", cs_a_count, 0);
@@ -307,10 +307,10 @@ impl UserEventsExporter {
                 eb.add_str("_typeName", "Logs", FieldFormat::Default, 0);
                 cs_b_count += 1;
 
-                if log_record.body.is_some() {
+                if log_record.body().is_some() {
                     eb.add_str(
                         "body",
-                        match log_record.body.as_ref().unwrap() {
+                        match log_record.body().as_ref().unwrap() {
                             AnyValue::Int(value) => value.to_string(),
                             AnyValue::String(value) => value.to_string(),
                             AnyValue::Boolean(value) => value.to_string(),
@@ -329,10 +329,10 @@ impl UserEventsExporter {
                     eb.add_value("severityNumber", level.as_int(), FieldFormat::SignedInt, 0);
                     cs_b_count += 1;
                 }
-                if log_record.severity_text.is_some() {
+                if log_record.severity_text().is_some() {
                     eb.add_str(
                         "severityText",
-                        log_record.severity_text.as_ref().unwrap(),
+                        log_record.severity_text().as_ref().unwrap(),
                         FieldFormat::SignedInt,
                         0,
                     );
@@ -371,16 +371,18 @@ impl Debug for UserEventsExporter {
     }
 }
 
-#[async_trait]
-impl opentelemetry_sdk::export::logs::LogExporter for UserEventsExporter {
-    async fn export(
-        &mut self,
-        batch: opentelemetry_sdk::export::logs::LogBatch<'_>,
-    ) -> opentelemetry_sdk::logs::LogResult<()> {
-        for (record, instrumentation) in batch.iter() {
-            let _ = self.export_log_data(record, instrumentation);
+impl opentelemetry_sdk::logs::LogExporter for UserEventsExporter {
+    #[allow(clippy::manual_async_fn)]
+    fn export(
+        &self,
+        batch: opentelemetry_sdk::logs::LogBatch<'_>,
+    ) -> impl std::future::Future<Output = OTelSdkResult> + Send {
+        async move {
+            for (record, instrumentation) in batch.iter() {
+                let _ = self.export_log_data(record, instrumentation);
+            }
+            Ok(())
         }
-        Ok(())
     }
 
     #[cfg(feature = "spec_unstable_logs_enabled")]

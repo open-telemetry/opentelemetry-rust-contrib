@@ -6,9 +6,10 @@
 //! [`SpanAggregator`]:../struct.SpanAggregator.html
 use crate::trace::TracezMessage;
 use async_channel::Sender;
-use opentelemetry::{trace::TraceResult, Context};
+use opentelemetry::Context;
 use opentelemetry_sdk::{
-    export::trace::SpanData,
+    error::OTelSdkResult,
+    trace::SpanData,
     trace::{Span, SpanProcessor},
 };
 use std::fmt::Formatter;
@@ -48,12 +49,12 @@ impl SpanProcessor for ZPagesSpanProcessor {
         let _ = self.tx.try_send(TracezMessage::SpanEnd(span));
     }
 
-    fn force_flush(&self) -> TraceResult<()> {
+    fn force_flush(&self) -> OTelSdkResult {
         // do nothing
         Ok(())
     }
 
-    fn shutdown(&self) -> TraceResult<()> {
+    fn shutdown(&self) -> OTelSdkResult {
         // do nothing
         Ok(())
     }

@@ -2,6 +2,11 @@
 
 ## vNext
 
+## v0.16.0
+
+- Bump mvrv to 1.75.0
+- Bump opentelemetry and opentelemetry_sdk versions to 0.28
+- Bump opentelemetry-http and opentelemetry-semantic-conventions versions to 0.28
 - Bump thiserror to 2.0
 - [Breaking] Replace `opentelemetry::global::shutdown_tracer_provider()` with `tracer_provider.shutdown()` (original PR [opentelemetry-rust#2369](https://github.com/open-telemetry/opentelemetry-rust/pull/2369))
 - [Breaking] `DatadogPipelineBuilder::install_simple()` and `DatadogPipelineBuilder::install_batch()` now return `TracerProvider`.
