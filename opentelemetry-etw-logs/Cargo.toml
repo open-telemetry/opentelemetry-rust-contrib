@@ -37,3 +37,6 @@ default = ["logs_level_enabled"]
 [[example]]
 name = "basic"
 path = "examples/basic.rs"
+
+[lints]
+workspace = true

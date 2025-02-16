@@ -25,3 +25,6 @@ opentelemetry_sdk = { workspace = true }
 opentelemetry-http = { workspace = true }
 opentelemetry-contrib = { path = "../../opentelemetry-contrib" }
 opentelemetry-stdout = { workspace = true, features = ["trace"] }
+
+[lints]
+workspace = true

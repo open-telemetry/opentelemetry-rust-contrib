@@ -39,3 +39,6 @@ stats = ["sysinfo"]
 
 [profile.release]
 debug = true
+
+[lints]
+workspace = true

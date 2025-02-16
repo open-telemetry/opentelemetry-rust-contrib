@@ -10,9 +10,8 @@ cargo_feature() {
 }
 
 if rustup component add clippy; then
-  cargo clippy --all-targets --all-features -- \
-    `# Exit with a nonzero code if there are clippy warnings` \
-    -Dwarnings
+  # Exit with a nonzero code if there are clippy warnings
+  cargo clippy --workspace --all-targets --all-features -- -Dwarnings
 
   cargo_feature opentelemetry-aws "default"
 
@@ -30,11 +29,10 @@ if rustup component add clippy; then
   cargo_feature opentelemetry-contrib "rt-tokio-current-thread"
   cargo_feature opentelemetry-contrib "rt-async-std"
 
-# TODO: Can re-enable once back in the workspace.
-#  cargo_feature opentelemetry-stackdriver "default"
-#  cargo_feature opentelemetry-stackdriver "yup-authorizer"
-#  cargo_feature opentelemetry-stackdriver "tls-native-roots"
-#  cargo_feature opentelemetry-stackdriver "tls-webpki-roots"
+  cargo_feature opentelemetry-stackdriver "default"
+  cargo_feature opentelemetry-stackdriver "gcp-authorizer"
+  cargo_feature opentelemetry-stackdriver "tls-native-roots"
+  cargo_feature opentelemetry-stackdriver "tls-webpki-roots"
 
   cargo_feature opentelemetry-user-events-logs "default"
   cargo_feature opentelemetry-user-events-logs "spec_unstable_logs_enabled"
