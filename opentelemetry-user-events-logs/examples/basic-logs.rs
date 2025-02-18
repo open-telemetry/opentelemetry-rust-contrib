@@ -11,6 +11,10 @@ use tracing::error;
 use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt, EnvFilter, Layer};
 
 fn init_logger() -> SdkLoggerProvider {
+    let filter_fmt = EnvFilter::new("info").add_directive("opentelemetry=debug".parse().unwrap());
+    let fmt_layer = tracing_subscriber::fmt::layer().with_filter(filter_fmt);
+    let _guard = tracing_subscriber::registry().with(fmt_layer).set_default(); // Temporary subscriber active for this function
+
     let exporter_config = ExporterConfig {
         default_keyword: 1,
         keywords_map: HashMap::new(),

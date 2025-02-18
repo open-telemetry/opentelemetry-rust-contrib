@@ -29,4 +29,4 @@ ctrlc = "3.4"
 [features]
 spec_unstable_logs_enabled = ["opentelemetry/spec_unstable_logs_enabled", "opentelemetry_sdk/spec_unstable_logs_enabled", "opentelemetry-appender-tracing/spec_unstable_logs_enabled"]
 internal-logs = ["tracing", "opentelemetry/internal-logs", "opentelemetry_sdk/internal-logs"]
-default = []
+default = ["internal-logs"]
