@@ -84,6 +84,8 @@ impl UserEventsExporter {
             eventheader::Level::CriticalError,
         ];
 
+        let mut perf_command = String::from("perf record");
+
         for &level in levels.iter() {
             otel_debug!(
                 name: "UserEvents.RegisterEvent",
@@ -112,7 +114,14 @@ impl UserEventsExporter {
             let event_set = eventheader_provider.find_set(level.as_int().into(), keyword);
             if let Some(set) = event_set {
                 otel_debug!(name: "UserEvents.RegisteredEvent", set = format!("{:?}", set));
-                println!("Successfully registered set: {:?}", set);
+                // Generate and log the `perf record` command for registered event
+                let event_spec = format!(
+                    " -e {}_L{}_K{}",
+                    eventheader_provider.name(),
+                    level.as_int(),
+                    keyword
+                );
+                perf_command.push_str(&event_spec);
             } else {
                 otel_debug!(
                     name: "UserEvents.FailedToRegisterEvent",
@@ -120,6 +129,10 @@ impl UserEventsExporter {
                     keyword = keyword,
                 );
             }
+        }
+        if perf_command != "perf record" {
+            println!("To listen to events, run: {}", perf_command);
+            otel_debug!(name: "UserEvents.PerfCommand", command = perf_command);
         }
     }
 
