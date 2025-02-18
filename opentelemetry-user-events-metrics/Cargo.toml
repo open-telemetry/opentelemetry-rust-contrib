@@ -29,3 +29,6 @@ default = ["internal-logs"]
 
 [package.metadata.cargo-machete]
 ignored = ["tracing"]
+
+[lints]
+workspace = true
