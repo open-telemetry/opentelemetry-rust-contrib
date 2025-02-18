@@ -116,7 +116,7 @@ impl UserEventsExporter {
                 otel_debug!(name: "UserEvents.RegisteredEvent", set = format!("{:?}", set));
                 // Generate and log the `perf record` command for registered event
                 let event_spec = format!(
-                    " -e {}_L{}K{}",
+                    " -e user_events:{}_L{}K{}",
                     eventheader_provider.name(),
                     level.as_int(),
                     keyword
