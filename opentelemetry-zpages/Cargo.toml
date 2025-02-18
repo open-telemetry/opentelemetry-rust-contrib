@@ -41,3 +41,6 @@ hyper = { version = "0.14", features = ["full"] }
 [[example]]
 name = "zpages"
 path = "examples/zpages.rs"
+
+[lints]
+workspace = true

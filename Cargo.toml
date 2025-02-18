@@ -23,3 +23,6 @@ opentelemetry-semantic-conventions = { version = "0.28", features = [
     "semconv_experimental",
 ] }
 criterion = "0.5"
+
+[workspace.lints.clippy]
+all = { level = "warn", priority = 1 }

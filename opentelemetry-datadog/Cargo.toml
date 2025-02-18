@@ -66,3 +66,6 @@ path = "examples/datadog.rs"
 name = "agent_sampling"
 path = "examples/agent_sampling.rs"
 required-features = ["agent-sampling"]
+
+[lints]
+workspace = true

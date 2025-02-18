@@ -32,3 +32,6 @@ ignored = ["tracing"]
 [[bench]]
 name = "exporter"
 harness = false
+
+[lints]
+workspace = true

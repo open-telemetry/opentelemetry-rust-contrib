@@ -51,3 +51,6 @@ pprof = { version = "0.13", features = ["flamegraph", "criterion"] }
 name = "new_span"
 harness = false
 required-features = ["api"]
+
+[lints]
+workspace = true
