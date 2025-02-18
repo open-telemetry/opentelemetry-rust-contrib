@@ -1,11 +1,12 @@
 use eventheader::{FieldFormat, Level, Opcode};
 use eventheader_dynamic::EventBuilder;
+use opentelemetry::otel_debug;
 use std::borrow::Cow;
 use std::collections::HashMap;
 use std::fmt::Debug;
 
 use opentelemetry::{logs::AnyValue, logs::Severity, Key};
-use opentelemetry_sdk::error::OTelSdkResult;
+use opentelemetry_sdk::error::{OTelSdkError, OTelSdkResult};
 use std::{cell::RefCell, str, time::SystemTime};
 
 /// Provider group associated with the user_events exporter
@@ -63,11 +64,11 @@ impl UserEventsExporter {
         _provider_group: ProviderGroup,
         exporter_config: ExporterConfig,
     ) -> Self {
-        let mut options = eventheader_dynamic::Provider::new_options();
-        options = *options.group_name(provider_name);
+        let options = eventheader_dynamic::Provider::new_options();
         let mut eventheader_provider: eventheader_dynamic::Provider =
             eventheader_dynamic::Provider::new(provider_name, &options);
         Self::register_keywords(&mut eventheader_provider, &exporter_config);
+        otel_debug!(name: "UserEvents.Created", config = format!("{:?}", exporter_config), provider_name = provider_name, provider_group = format!("{:?}", options));
         UserEventsExporter {
             provider: eventheader_provider,
             exporter_config,
@@ -83,8 +84,55 @@ impl UserEventsExporter {
             eventheader::Level::CriticalError,
         ];
 
+        let mut perf_command = String::from("perf record");
+
         for &level in levels.iter() {
-            eventheader_provider.register_set(level, keyword);
+            otel_debug!(
+                name: "UserEvents.RegisterEvent",
+                level = level.as_int(),
+                keyword = keyword,
+            );
+            let event_set = eventheader_provider.register_set(level, keyword);
+            match event_set.errno() {
+                0 => {
+                    otel_debug!(name: "UserEvents.RegisteredEvent",  event_set = format!("{:?}", event_set));
+                }
+                95 => {
+                    otel_debug!(name: "UserEvents.TraceFSNotMounted", event_set = format!("{:?}", event_set));
+                }
+                13 => {
+                    otel_debug!(name: "UserEvents.PermissionDenied", event_set = format!("{:?}", event_set));
+                }
+
+                _ => {
+                    otel_debug!(
+                        name: "UserEvents.FailedToRegisterEvent",
+                        event_set = format!("{:?}", event_set)
+                    );
+                }
+            }
+            let event_set = eventheader_provider.find_set(level.as_int().into(), keyword);
+            if let Some(set) = event_set {
+                otel_debug!(name: "UserEvents.RegisteredEvent", set = format!("{:?}", set));
+                // Generate and log the `perf record` command for registered event
+                let event_spec = format!(
+                    " -e user_events:{}_L{}K{}",
+                    eventheader_provider.name(),
+                    level.as_int(),
+                    keyword
+                );
+                perf_command.push_str(&event_spec);
+            } else {
+                otel_debug!(
+                    name: "UserEvents.FailedToRegisterEvent",
+                    level = level.as_int(),
+                    keyword = keyword,
+                );
+            }
+        }
+        if perf_command != "perf record" {
+            println!("To listen to events, run: {}", perf_command);
+            otel_debug!(name: "UserEvents.PerfCommand", command = perf_command);
         }
     }
 
@@ -93,14 +141,18 @@ impl UserEventsExporter {
         exporter_config: &ExporterConfig,
     ) {
         if exporter_config.keywords_map.is_empty() {
-            println!(
-                "Register default keyword {}",
-                exporter_config.default_keyword
+            otel_debug!(
+                name: "UserEvents.RegisterDefaultKeyword",
+                default_keyword = exporter_config.default_keyword,
             );
             Self::register_events(eventheader_provider, exporter_config.default_keyword);
         }
 
         for keyword in exporter_config.keywords_map.values() {
+            otel_debug!(
+                name: "UserEvents.RegisterKeyword",
+                keyword = *keyword,
+            );
             Self::register_events(eventheader_provider, *keyword);
         }
     }
@@ -168,6 +220,7 @@ impl UserEventsExporter {
         log_record: &opentelemetry_sdk::logs::SdkLogRecord,
         instrumentation: &opentelemetry::InstrumentationScope,
     ) -> opentelemetry_sdk::error::OTelSdkResult {
+        //TODO - should we log (otel_debug) each event?
         let mut level: Level = Level::Invalid;
         if log_record.severity_number().is_some() {
             level = self.get_severity_level(log_record.severity_number().unwrap());
@@ -178,6 +231,12 @@ impl UserEventsExporter {
             .get_log_keyword_or_default(instrumentation.name().as_ref());
 
         if keyword.is_none() {
+            otel_debug!(
+                name: "UserEvents.KeywordNotFound",
+                log_record_name = format!("{:?}", log_record.event_name()),
+                instrumentation_name = format!("{:?}", instrumentation.name()),
+                keyword = self.exporter_config.default_keyword,
+            );
             return Ok(());
         }
 
@@ -187,10 +246,15 @@ impl UserEventsExporter {
         {
             es
         } else {
+            otel_debug!(
+                name: "UserEvents.EventSetNotFound",
+                level = level.as_int(),
+                keyword = keyword.unwrap(),
+            );
             return Ok(());
         };
         if log_es.enabled() {
-            EBW.with(|eb| {
+            let res = EBW.with(|eb| {
                 let mut eb = eb.borrow_mut();
                 let event_tags: u32 = 0; // TBD name and event_tag values
                 eb.reset(instrumentation.name().as_ref(), event_tags as u16);
@@ -297,9 +361,26 @@ impl UserEventsExporter {
                 }
                 eb.set_struct_field_count(cs_b_bookmark, cs_b_count);
 
-                eb.write(&log_es, None, None);
+                let result = eb.write(&log_es, None, None);
+                if result > 0 {
+                    return Err(OTelSdkError::InternalFailure(
+                        "Failed to write event to user_events tracepoint".into(),
+                    ));
+                }
+                Ok(())
             });
-            return Ok(());
+            if let Err(e) = res {
+                otel_debug!(name: "UserEvents.WriteFailed", error = format!("{:?}", e));
+                return Err(OTelSdkError::InternalFailure(
+                    "Failed to write event to user_events tracepoint".into(),
+                ));
+            }
+        } else {
+            otel_debug!(
+                name: "UserEvents.EventSetNotEnabled",
+                level = level.as_int(),
+                keyword = keyword.unwrap(),
+            );
         }
         Ok(())
     }
@@ -343,8 +424,25 @@ impl opentelemetry_sdk::logs::LogExporter for UserEventsExporter {
             .provider
             .find_set(self.get_severity_level(level), keyword);
         match es {
-            Some(x) => x.enabled(),
-            _ => false,
+            Some(x) => {
+                let enabled = x.enabled();
+                if !enabled {
+                    otel_debug!(
+                        name: "UserEvents.EventNotEnabled",
+                        level = format!("{:?}",level),
+                        keyword = keyword,
+                    );
+                }
+                enabled
+            }
+            _ => {
+                otel_debug!(
+                    name: "UserEvents.EventSetNotFound",
+                    level = format!("{:?}",level),
+                    keyword = keyword,
+                );
+                false
+            }
         }
     }
 }
