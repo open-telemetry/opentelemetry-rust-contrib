@@ -2,6 +2,8 @@
 
 ## vNext
 
+## v0.10.0
+
 - Removed provider group from being appended to the tracepoint name.
   For example, tracepoint `myprovider_L2K1Gmyprovider` becomes `myprovider_L2K1`.
 - Added the `with_user_event_exporter` trait method to `LoggerProviderBuilder`.
