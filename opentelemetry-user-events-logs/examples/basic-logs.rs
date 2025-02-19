@@ -2,8 +2,7 @@
 
 use opentelemetry_appender_tracing::layer;
 use opentelemetry_sdk::logs::SdkLoggerProvider;
-use opentelemetry_user_events_logs::{ExporterConfig, ReentrantLogProcessor, UserEventsExporter};
-use std::collections::HashMap;
+use opentelemetry_user_events_logs::UserEventsLoggerProviderBuilderExt;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use std::{thread, time::Duration};
@@ -15,14 +14,8 @@ fn init_logger() -> SdkLoggerProvider {
     let fmt_layer = tracing_subscriber::fmt::layer().with_filter(filter_fmt);
     let _guard = tracing_subscriber::registry().with(fmt_layer).set_default(); // Temporary subscriber active for this function
 
-    let exporter_config = ExporterConfig {
-        default_keyword: 1,
-        keywords_map: HashMap::new(),
-    };
-    let exporter = UserEventsExporter::new("test", None, exporter_config);
-    let reenterant_processor = ReentrantLogProcessor::new(exporter);
     SdkLoggerProvider::builder()
-        .with_log_processor(reenterant_processor)
+        .with_user_event_exporter("my-provider")
         .build()
 }
 

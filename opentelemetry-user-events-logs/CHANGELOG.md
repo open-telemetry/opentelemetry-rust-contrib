@@ -2,6 +2,18 @@
 
 ## vNext
 
+- Removed provider group from being appended to the tracepoint name.
+  For example, tracepoint `myprovider_L2K1Gmyprovider` becomes `myprovider_L2K1`.
+- Added the `with_user_event_exporter` trait method to `LoggerProviderBuilder`.
+  This is now the only way to add a user-events exporter. The following line
+  will add a user-events exporter using the given provider name:
+
+  ```rust
+  SdkLoggerProvider::builder().with_user_event_exporter("my-provider").build();
+  ```
+
+- Removed `opentelemetry_user_events_logs::{ExporterConfig, ReentrantLogProcessor, UserEventsExporter}` from the public API. Ability to customize Provider Group, Keyword will be added future.
+
 ## v0.9.0
 
 - Bump msrv to 1.75.0
