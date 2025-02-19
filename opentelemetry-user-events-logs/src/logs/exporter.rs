@@ -38,11 +38,11 @@ impl ExporterConfig {
         self.keywords_map.get(name).copied()
     }
 
-    pub(crate) fn get_log_keyword_or_default(&self, name: &str) -> Option<u64> {
+    pub(crate) fn get_log_keyword_or_default(&self, name: &str) -> u64 {
         if self.keywords_map.is_empty() {
-            Some(self.default_keyword)
+            self.default_keyword
         } else {
-            self.get_log_keyword(name)
+            self.get_log_keyword(name).unwrap_or(self.default_keyword)
         }
     }
 }
@@ -228,31 +228,21 @@ impl UserEventsExporter {
             .exporter_config
             .get_log_keyword_or_default(instrumentation.name().as_ref());
 
-        if keyword.is_none() {
-            otel_debug!(
-                name: "UserEvents.KeywordNotFound",
-                log_record_name = format!("{:?}", log_record.event_name()),
-                instrumentation_name = format!("{:?}", instrumentation.name()),
-                keyword = self.exporter_config.default_keyword,
-            );
-            return Ok(());
-        }
-
-        let log_es = if let Some(es) = self
-            .provider
-            .find_set(level.as_int().into(), keyword.unwrap())
-        {
+        let log_es = if let Some(es) = self.provider.find_set(level.as_int().into(), keyword) {
             es
         } else {
             otel_debug!(
                 name: "UserEvents.EventSetNotFound",
                 level = level.as_int(),
-                keyword = keyword.unwrap(),
+                keyword = keyword,
             );
-            return Ok(());
+            return Err(OTelSdkError::InternalFailure(format!(
+                "EventSet not found for level: {:?} and keyword: {}",
+                level, keyword
+            )));
         };
         if log_es.enabled() {
-            let res = EBW.with(|eb| {
+            let _res = EBW.with(|eb| {
                 let mut eb = eb.borrow_mut();
                 let event_tags: u32 = 0; // TBD name and event_tag values
                 eb.reset(instrumentation.name().as_ref(), event_tags as u16);
@@ -336,7 +326,7 @@ impl UserEventsExporter {
                     eb.add_str(
                         "severityText",
                         log_record.severity_text().as_ref().unwrap(),
-                        FieldFormat::SignedInt,
+                        FieldFormat::Default,
                         0,
                     );
                     cs_b_count += 1;
@@ -352,27 +342,28 @@ impl UserEventsExporter {
                 eb.set_struct_field_count(cs_b_bookmark, cs_b_count);
 
                 let result = eb.write(&log_es, None, None);
+
                 if result > 0 {
-                    return Err(OTelSdkError::InternalFailure(
-                        "Failed to write event to user_events tracepoint".into(),
-                    ));
+                    Err(OTelSdkError::InternalFailure(format!(
+                        "Failed to write event to user_events tracepoint with result code: {}",
+                        result
+                    )))
+                } else {
+                    Ok(())
                 }
-                Ok(())
             });
-            if let Err(e) = res {
-                otel_debug!(name: "UserEvents.WriteFailed", error = format!("{:?}", e));
-                return Err(OTelSdkError::InternalFailure(
-                    "Failed to write event to user_events tracepoint".into(),
-                ));
-            }
+            Ok(())
         } else {
             otel_debug!(
                 name: "UserEvents.EventSetNotEnabled",
                 level = level.as_int(),
-                keyword = keyword.unwrap(),
+                keyword = keyword,
             );
+
+            // Return success when the event is not enabled
+            // as this is not an error condition.
+            Ok(())
         }
-        Ok(())
     }
 }
 
