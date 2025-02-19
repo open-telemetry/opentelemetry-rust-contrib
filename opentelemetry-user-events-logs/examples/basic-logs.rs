@@ -15,7 +15,7 @@ fn init_logger() -> SdkLoggerProvider {
     let _guard = tracing_subscriber::registry().with(fmt_layer).set_default(); // Temporary subscriber active for this function
 
     SdkLoggerProvider::builder()
-        .with_user_event_exporter("my-provider")
+        .with_user_event_exporter("myprovider")
         .build()
 }
 
