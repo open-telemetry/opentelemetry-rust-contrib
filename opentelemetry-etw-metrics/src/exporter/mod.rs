@@ -49,10 +49,8 @@ fn emit_export_metric_service_request(
     if (export_metric_service_request.encoded_len()) > etw::MAX_EVENT_SIZE {
         otel_warn!(name: "MetricExportFailedDueToMaxSizeLimit", size = export_metric_service_request.encoded_len(), max_size = etw::MAX_EVENT_SIZE);
     } else {
-        encoding_buffer.resize_with(
-            export_metric_service_request.encoded_len(),
-            Default::default,
-        );
+        // `encoding_buffer` is assumed to be reused, so ensure it is empty before using it for encoding
+        encoding_buffer.clear();
 
         export_metric_service_request
             .encode(encoding_buffer)
