@@ -6,7 +6,7 @@ use opentelemetry_user_events_logs::UserEventsLoggerProviderBuilderExt;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use std::{thread, time::Duration};
-use tracing::warn;
+use tracing::error;
 use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt, EnvFilter, Layer};
 
 fn init_logger() -> SdkLoggerProvider {
@@ -29,12 +29,12 @@ fn main() {
     let otel_layer = layer::OpenTelemetryTracingBridge::new(&logger_provider);
     let otel_layer = otel_layer.with_filter(filter_otel);
 
-    let filter_fmt = EnvFilter::new("error").add_directive("opentelemetry=debug".parse().unwrap()).add_directive("my-target=error".parse().unwrap());
+    let filter_fmt = EnvFilter::new("info").add_directive("opentelemetry=debug".parse().unwrap());
     let fmt_layer = tracing_subscriber::fmt::layer().with_filter(filter_fmt);
 
     tracing_subscriber::registry()
-    .with(fmt_layer)
-       .with(otel_layer)
+        .with(otel_layer)
+        .with(fmt_layer)
         .init();
 
     // event_id is passed as an attribute now, there is nothing in metadata where a
@@ -50,12 +50,12 @@ fn main() {
     .expect("Error setting Ctrl-C handler");
 
     while running.load(Ordering::SeqCst) {
-        warn!(
+        error!(
             name: "my-event-name",
             target: "my-target",
             event_id = 20,
             user_name = "otel user",
-            user_email = "a".repeat(65000)
+            user_email = "otel@opentelemetry.io"
         );
         thread::sleep(Duration::from_secs(1));
     }
