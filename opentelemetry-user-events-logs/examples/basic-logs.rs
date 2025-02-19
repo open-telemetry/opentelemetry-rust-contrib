@@ -6,7 +6,7 @@ use opentelemetry_user_events_logs::UserEventsLoggerProviderBuilderExt;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use std::{thread, time::Duration};
-use tracing::warn;
+use tracing::error;
 use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt, EnvFilter, Layer};
 
 fn init_logger() -> SdkLoggerProvider {
@@ -29,7 +29,7 @@ fn main() {
     let otel_layer = layer::OpenTelemetryTracingBridge::new(&logger_provider);
     let otel_layer = otel_layer.with_filter(filter_otel);
 
-    let filter_fmt = EnvFilter::new("error").add_directive("opentelemetry=debug".parse().unwrap());
+    let filter_fmt = EnvFilter::new("error").add_directive("opentelemetry=debug".parse().unwrap()).add_directive("my-target=off".parse().unwrap());
     let fmt_layer = tracing_subscriber::fmt::layer().with_filter(filter_fmt);
 
     tracing_subscriber::registry()
@@ -50,7 +50,7 @@ fn main() {
     .expect("Error setting Ctrl-C handler");
 
     while running.load(Ordering::SeqCst) {
-        warn!(
+        error!(
             name: "my-event-name",
             target: "my-target",
             event_id = 20,
