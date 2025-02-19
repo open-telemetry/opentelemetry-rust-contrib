@@ -157,6 +157,7 @@ impl UserEventsExporter {
 
     fn add_attribute_to_event(&self, eb: &mut EventBuilder, (key, value): (&Key, &AnyValue)) {
         let field_name = key.as_str();
+        println!("adding field: {}", field_name);
         match value.to_owned() {
             AnyValue::Boolean(b) => {
                 eb.add_value(field_name, b, FieldFormat::Boolean, 0);
