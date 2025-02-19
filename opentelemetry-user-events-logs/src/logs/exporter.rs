@@ -345,7 +345,7 @@ impl UserEventsExporter {
                 if result > 0 {
                     // Specially log the case where there is no listener and size exceeding.
                     if result == 9 {
-                        otel_debug!(name: "UserEvents.EventWriteFailed", result = result, reason = "No listener");
+                        otel_debug!(name: "UserEvents.EventWriteFailed", result = result, reason = "No listener. This can occur when there was a listener but it was removed before the event was written");
                     } else if result == 34 {
                         // Info level for size exceeding.
                         otel_info!(name: "UserEvents.EventWriteFailed", result = result, reason = "Total payload size exceeded 64KB limit");
