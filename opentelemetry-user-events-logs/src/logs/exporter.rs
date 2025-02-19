@@ -54,8 +54,6 @@ pub struct UserEventsExporter {
 }
 
 const EVENT_ID: &str = "event_id";
-const EVENT_NAME_PRIMARY: &str = "event_name";
-const EVENT_NAME_SECONDARY: &str = "name";
 
 impl UserEventsExporter {
     /// Create instance of the exporter
@@ -260,7 +258,7 @@ impl UserEventsExporter {
                 eb.reset(instrumentation.name().as_ref(), event_tags as u16);
                 eb.opcode(Opcode::Info);
 
-                eb.add_value("__csver__", 0x0401u16, FieldFormat::HexInt, 0);
+                eb.add_value("__csver__", 0x0400u16, FieldFormat::HexInt, 0);
 
                 // populate CS PartA
                 let mut cs_a_count = 0;
@@ -278,7 +276,6 @@ impl UserEventsExporter {
                 }
                 //populate CS PartC
                 let (mut is_event_id, mut event_id) = (false, 0);
-                let (mut is_event_name, mut event_name) = (false, "");
                 let (mut is_part_c_present, mut cs_c_bookmark, mut cs_c_count) = (false, 0, 0);
 
                 for (key, value) in log_record.attributes_iter() {
@@ -288,31 +285,24 @@ impl UserEventsExporter {
                             event_id = *value;
                             continue;
                         }
-                        (EVENT_NAME_PRIMARY, AnyValue::String(value)) => {
-                            is_event_name = true;
-                            event_name = value.as_str();
-                            continue;
-                        }
-                        (EVENT_NAME_SECONDARY, AnyValue::String(value)) => {
-                            if !is_event_name {
-                                event_name = value.as_str();
-                            }
-                            continue;
-                        }
                         _ => {
                             if !is_part_c_present {
                                 eb.add_struct_with_bookmark("PartC", 1, 0, &mut cs_c_bookmark);
                                 is_part_c_present = true;
                             }
                             self.add_attribute_to_event(&mut eb, (key, value));
+                            // TODO: This is buggy and incorrectly increments the count
+                            // even when the attribute is not added to PartC.
+                            // This can occur when the attribute is not a primitive type.
                             cs_c_count += 1;
                         }
                     }
-
-                    if is_part_c_present {
-                        eb.set_struct_field_count(cs_c_bookmark, cs_c_count);
-                    }
                 }
+
+                if is_part_c_present {
+                    eb.set_struct_field_count(cs_c_bookmark, cs_c_count);
+                }
+
                 // populate CS PartB
                 let mut cs_b_bookmark: usize = 0;
                 let mut cs_b_count = 0;
@@ -355,7 +345,7 @@ impl UserEventsExporter {
                     eb.add_value("eventId", event_id, FieldFormat::SignedInt, 0);
                     cs_b_count += 1;
                 }
-                if !event_name.is_empty() {
+                if let Some(event_name) = log_record.event_name() {
                     eb.add_str("name", event_name, FieldFormat::Default, 0);
                     cs_b_count += 1;
                 }

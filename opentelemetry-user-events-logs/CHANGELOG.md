@@ -13,6 +13,8 @@
   ```
 
 - Removed `opentelemetry_user_events_logs::{ExporterConfig, ReentrantLogProcessor, UserEventsExporter}` from the public API. Ability to customize Provider Group, Keyword will be added future.
+- `log_record.event_name()` is used to populate EventName. Previous behavior of populating EventName from specially named attributes is removed.
+- Fix CommonSchema version to `0x0400` instead of `0x0401`
 
 ## v0.9.0
 
