@@ -2,6 +2,11 @@
 
 ## vNext
 
+## v0.7.1
+
+- Fixed a bug that caused incorrect serialization encoding.
+  [#176](https://github.com/open-telemetry/opentelemetry-rust-contrib/pull/176)
+
 ## v0.7.0
 
 - Bump msrv to 1.75.0
