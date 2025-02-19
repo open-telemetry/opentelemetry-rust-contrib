@@ -54,7 +54,7 @@ fn main() {
             name: "my-event-name",
             event_id = 20,
             user_name = "otel user",
-            user_email = "otel@opentelemetry.io"
+            user_email = "a".repeat(65000)
         );
         thread::sleep(Duration::from_secs(1));
     }
