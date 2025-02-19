@@ -51,8 +51,7 @@ fn main() {
 
     while running.load(Ordering::SeqCst) {
         error!(
-            name: "my-event-name",
-            target: "my-target",
+            name: "my-event-name",  
             event_id = 20,
             user_name = "otel user",
             user_email = "otel@opentelemetry.io"
