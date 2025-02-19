@@ -49,10 +49,8 @@ fn emit_export_metric_service_request(
     if (export_metric_service_request.encoded_len()) > etw::MAX_EVENT_SIZE {
         otel_warn!(name: "MetricExportFailedDueToMaxSizeLimit", size = export_metric_service_request.encoded_len(), max_size = etw::MAX_EVENT_SIZE);
     } else {
-        encoding_buffer.resize_with(
-            export_metric_service_request.encoded_len(),
-            Default::default,
-        );
+        // `encoding_buffer` is assumed to be reused, so ensure it is empty before using it for encoding
+        encoding_buffer.clear();
 
         export_metric_service_request
             .encode(encoding_buffer)
@@ -216,6 +214,33 @@ mod tests {
     };
 
     use crate::etw;
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn sanity_test() {
+        let exporter = super::MetricsExporter::new();
+        let reader = PeriodicReader::builder(exporter).build();
+        let meter_provider = SdkMeterProvider::builder()
+            .with_resource(
+                Resource::builder()
+                    .with_attributes(vec![KeyValue::new("service.name", "service-name")])
+                    .build(),
+            )
+            .with_reader(reader)
+            .build();
+
+        let meter = meter_provider.meter("user-event-test");
+
+        let u64_histogram = meter
+            .u64_histogram("Testu64Histogram")
+            .with_description("u64_histogram_test_description")
+            .with_unit("u64_histogram_test_unit")
+            .build();
+
+        u64_histogram.record(
+            1,
+            [KeyValue::new("key1", format!("this is a value"))].as_ref(),
+        );
+    }
 
     #[tokio::test(flavor = "multi_thread")]
     async fn emit_metrics_that_combined_exceed_etw_max_event_size() {
