@@ -168,6 +168,7 @@ impl UserEventsExporter {
                 eb.add_value(field_name, f, FieldFormat::Float, 0);
             }
             AnyValue::String(s) => {
+                println!("{}: {}", field_name, s);
                 eb.add_str(field_name, s.to_string(), FieldFormat::Default, 0);
             }
             _ => (),
@@ -342,6 +343,7 @@ impl UserEventsExporter {
                 eb.set_struct_field_count(cs_b_bookmark, cs_b_count);
 
                 let result = eb.write(&log_es, None, None);
+                
                 if result > 0 {
                     return Err(OTelSdkError::InternalFailure(format!(
                         "Failed to write event to user_events tracepoint with result code: {}",
