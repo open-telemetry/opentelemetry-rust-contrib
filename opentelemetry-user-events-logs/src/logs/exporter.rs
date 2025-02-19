@@ -1,6 +1,6 @@
 use eventheader::{FieldFormat, Level, Opcode};
 use eventheader_dynamic::EventBuilder;
-use opentelemetry::otel_debug;
+use opentelemetry::{otel_debug, otel_info};
 use std::borrow::Cow;
 use std::collections::HashMap;
 use std::fmt::Debug;
@@ -342,8 +342,17 @@ impl UserEventsExporter {
                 eb.set_struct_field_count(cs_b_bookmark, cs_b_count);
 
                 let result = eb.write(&log_es, None, None);
-
                 if result > 0 {
+                    // Specially log the case where there is no listener and size exceeding.
+                    if result == 9 {
+                        otel_debug!(name: "UserEvents.EventWriteFailed", result = result, reason = "No listener");
+                    } else if result == 34 {
+                        // Info level for size exceeding.
+                        otel_info!(name: "UserEvents.EventWriteFailed", result = result, reason = "Total payload size exceeded 64KB limit");
+                    } else {
+                        // For all other cases, log the error code.
+                        otel_debug!(name: "UserEvents.EventWriteFailed", result = result);
+                    }
                     Err(OTelSdkError::InternalFailure(format!(
                         "Failed to write event to user_events tracepoint with result code: {}",
                         result
