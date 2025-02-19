@@ -52,6 +52,7 @@ fn main() {
     while running.load(Ordering::SeqCst) {
         warn!(
             name: "my-event-name",
+            target: "my-target",
             event_id = 20,
             user_name = "otel user",
             user_email = "a".repeat(65000)
