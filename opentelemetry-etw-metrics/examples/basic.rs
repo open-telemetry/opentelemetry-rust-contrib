@@ -5,6 +5,7 @@ use opentelemetry_sdk::{
     metrics::{PeriodicReader, SdkMeterProvider},
     Resource,
 };
+use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt, EnvFilter, Layer};
 
 const SERVICE_NAME: &str = "service-name";
 
@@ -22,7 +23,14 @@ fn setup_meter_provider() -> SdkMeterProvider {
 }
 
 #[tokio::main]
-async fn main() -> Result<(), Box<dyn std::error::Error>> {
+async fn main() {
+    // Enable tracing::fmt layer for viewing internal logs
+    let filter_fmt = EnvFilter::new("info").add_directive("opentelemetry=debug".parse().unwrap());
+    let fmt_layer = tracing_subscriber::fmt::layer()
+        .with_thread_names(true)
+        .with_filter(filter_fmt);
+
+    tracing_subscriber::registry().with(fmt_layer).init();
     let meter_provider = setup_meter_provider();
     global::set_meter_provider(meter_provider.clone());
 
@@ -35,53 +43,48 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     c.add(
         1.0,
-        [
+        &[
             KeyValue::new("name", "apple"),
             KeyValue::new("color", "red"),
-        ]
-        .as_ref(),
+        ],
     );
     c.add(
         2.0,
-        [
+        &[
             KeyValue::new("name", "lemon"),
             KeyValue::new("color", "yellow"),
-        ]
-        .as_ref(),
+        ],
     );
     c.add(
         1.0,
-        [
+        &[
             KeyValue::new("name", "lemon"),
             KeyValue::new("color", "yellow"),
-        ]
-        .as_ref(),
+        ],
     );
     c.add(
         2.0,
-        [
+        &[
             KeyValue::new("name", "apple"),
             KeyValue::new("color", "green"),
-        ]
-        .as_ref(),
+        ],
     );
     c.add(
         5.0,
-        [
+        &[
             KeyValue::new("name", "apple"),
             KeyValue::new("color", "red"),
-        ]
-        .as_ref(),
+        ],
     );
     c.add(
         4.0,
-        [
+        &[
             KeyValue::new("name", "lemon"),
             KeyValue::new("color", "yellow"),
-        ]
-        .as_ref(),
+        ],
     );
 
-    meter_provider.shutdown()?;
-    Ok(())
+    if let Err(e) = meter_provider.shutdown() {
+        println!("Error shutting down meter provider: {:?}", e);
+    }
 }
