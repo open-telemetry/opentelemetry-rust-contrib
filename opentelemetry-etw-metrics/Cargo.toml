@@ -21,6 +21,7 @@ tracing = { version = "0.1", optional = true }
 [dev-dependencies]
 tokio = { version = "1.0", features = ["full"] }
 criterion = { workspace = true, features = ["html_reports"] }
+tracing-subscriber = { version = "0.3", features = ["env-filter","registry", "std", "fmt"] }
 
 [features]
 internal-logs = ["tracing", "opentelemetry/internal-logs", "opentelemetry_sdk/internal-logs", "opentelemetry-proto/internal-logs"]
