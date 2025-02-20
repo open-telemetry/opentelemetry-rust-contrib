@@ -21,7 +21,7 @@ impl ReentrantLogProcessor {
     /// constructor
     pub fn new(
         provider_name: &str,
-        event_name: String,
+        event_name: &str,
         provider_group: ProviderGroup,
         exporter_config: ExporterConfig,
     ) -> Self {
@@ -72,7 +72,7 @@ mod tests {
     fn test_shutdown() {
         let processor = ReentrantLogProcessor::new(
             "test-provider-name",
-            "test-event-name".into(),
+            "test-event-name",
             None,
             ExporterConfig::default(),
         );
@@ -84,7 +84,7 @@ mod tests {
     fn test_force_flush() {
         let processor = ReentrantLogProcessor::new(
             "test-provider-name",
-            "test-event-name".into(),
+            "test-event-name",
             None,
             ExporterConfig::default(),
         );
@@ -96,7 +96,7 @@ mod tests {
     fn test_emit() {
         let processor = ReentrantLogProcessor::new(
             "test-provider-name",
-            "test-event-name".into(),
+            "test-event-name",
             None,
             ExporterConfig::default(),
         );

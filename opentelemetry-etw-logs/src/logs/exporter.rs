@@ -78,7 +78,7 @@ fn enabled_callback(
 impl ETWExporter {
     pub(crate) fn new(
         provider_name: &str,
-        event_name: String,
+        event_name: &str,
         _provider_group: ProviderGroup,
         exporter_config: ExporterConfig,
     ) -> Self {
@@ -98,7 +98,7 @@ impl ETWExporter {
         ETWExporter {
             provider,
             exporter_config,
-            event_name,
+            event_name: event_name.to_string(),
         }
     }
 
@@ -422,7 +422,7 @@ mod tests {
     fn test_export_log_data() {
         let exporter = ETWExporter::new(
             "test-provider-name",
-            "test-event-name".to_string(),
+            "test-event-name",
             None,
             ExporterConfig::default(),
         );
@@ -440,7 +440,7 @@ mod tests {
     fn test_get_severity_level() {
         let exporter = ETWExporter::new(
             "test-provider-name",
-            "test-event-name".to_string(),
+            "test-event-name",
             None,
             ExporterConfig::default(),
         );
