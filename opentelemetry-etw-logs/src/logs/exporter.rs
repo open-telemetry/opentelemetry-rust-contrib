@@ -161,13 +161,7 @@ impl ETWExporter {
         }
     }
 
-    #[allow(dead_code)]
-    fn enabled(&self, level: u8, keyword: u64) -> bool {
-        // TODO: Use internal enabled check. Meaning of enable differs from OpenTelemetry and ETW.
-        // OpenTelemetry wants to know if level+keyword combination is enabled for the Provider.
-        // ETW tells if level+keyword combination is being actively listened. Not all systems actively
-        // listens for ETW events, but they do it on samples.
-        // This may be fixed by applying the OpenTelemetry logic in the callback function.
+    fn enabled(&self, level: tld::Level, keyword: u64) -> bool {
         self.provider.enabled(level.into(), keyword)
     }
 
@@ -187,7 +181,9 @@ impl ETWExporter {
             _ => return Ok(()),
         };
 
-        if !self.provider.enabled(level.as_int().into(), keyword) {
+        // On unit tests, we skip this check to be able to test the exporter as no provider is active.
+        #[cfg(not(test))]
+        if !self.enabled(level, keyword) {
             return Ok(());
         };
 
@@ -366,8 +362,7 @@ impl opentelemetry_sdk::logs::LogExporter for ETWExporter {
         if keyword.is_none() {
             return false;
         }
-        self.provider
-            .enabled(self.get_severity_level(level), keyword.unwrap())
+        self.enabled(self.get_severity_level(level), keyword.unwrap())
     }
 }
 
