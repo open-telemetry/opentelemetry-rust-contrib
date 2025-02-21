@@ -12,6 +12,10 @@
 
 - Removed `opentelemetry_etw_logs::{ExporterConfig, ReentrantLogProcessor, ETWExporter}` from the public API. Ability to customize Provider Group, Keyword will be added future.
 
+- Hardcoded `event_enabled` internal method to be true on unit test, improving test coverage.
+
+- Improved test coverage.
+
 ## v0.7.0
 
 - Bump msrv to 1.75.0
