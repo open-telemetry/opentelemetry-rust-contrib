@@ -356,20 +356,18 @@ impl opentelemetry_sdk::logs::LogExporter for ETWExporter {
 
     #[cfg(feature = "logs_level_enabled")]
     fn event_enabled(&self, level: Severity, _target: &str, name: &str) -> bool {
-        let (found, keyword) = if self.exporter_config.keywords_map.is_empty() {
-            (true, self.exporter_config.default_keyword)
+        let keyword = if self.exporter_config.keywords_map.is_empty() {
+            Some(self.exporter_config.default_keyword)
         } else {
             // TBD - target is not used as of now for comparison.
-            match self.exporter_config.get_log_keyword(name) {
-                Some(x) => (true, x),
-                _ => (false, 0),
-            }
+            self.exporter_config.get_log_keyword(name)
         };
-        if !found {
+
+        if keyword.is_none() {
             return false;
         }
         self.provider
-            .enabled(self.get_severity_level(level), keyword)
+            .enabled(self.get_severity_level(level), keyword.unwrap())
     }
 }
 
