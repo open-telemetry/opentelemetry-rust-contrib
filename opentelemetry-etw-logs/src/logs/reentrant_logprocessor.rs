@@ -109,7 +109,6 @@ mod tests {
         processor.emit(&mut record, &instrumentation);
     }
 
-    
     #[test]
     fn test_event_enabled() {
         let processor = ReentrantLogProcessor::new(
@@ -120,8 +119,17 @@ mod tests {
         );
 
         // Unit test should return false as there is no ETW session listening for the event
-        assert_eq!(processor.event_enabled(opentelemetry::logs::Severity::Info, "test", "test"), false);
-        assert_eq!(processor.event_enabled(opentelemetry::logs::Severity::Debug, "test", "test"), false);
-        assert_eq!(processor.event_enabled(opentelemetry::logs::Severity::Error, "test", "test"), false);
+        assert_eq!(
+            processor.event_enabled(opentelemetry::logs::Severity::Info, "test", "test"),
+            false
+        );
+        assert_eq!(
+            processor.event_enabled(opentelemetry::logs::Severity::Debug, "test", "test"),
+            false
+        );
+        assert_eq!(
+            processor.event_enabled(opentelemetry::logs::Severity::Error, "test", "test"),
+            false
+        );
     }
 }

@@ -162,7 +162,7 @@ impl ETWExporter {
     }
 
     fn enabled(&self, level: tld::Level, keyword: u64) -> bool {
-        self.provider.enabled(level.into(), keyword)
+        self.provider.enabled(level, keyword)
     }
 
     pub(crate) fn export_log_data(
