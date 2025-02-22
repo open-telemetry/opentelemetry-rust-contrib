@@ -1,11 +1,9 @@
 //! # Jaeger JSON file Exporter
 //!
 
-use async_trait::async_trait;
 use futures_core::future::BoxFuture;
 use futures_util::FutureExt;
 use opentelemetry::trace::SpanId;
-#[allow(unused_imports)]
 use opentelemetry_sdk::error::OTelSdkError;
 use opentelemetry_sdk::runtime::RuntimeChannel;
 use opentelemetry_sdk::{
@@ -205,16 +203,18 @@ fn opentelemetry_value_to_json(value: &opentelemetry::Value) -> (&str, serde_jso
 /// Jaeger Json Runtime is an extension to [`RuntimeChannel`].
 ///
 /// [`RuntimeChannel`]: opentelemetry_sdk::runtime::RuntimeChannel
-#[async_trait]
 pub trait JaegerJsonRuntime: RuntimeChannel + std::fmt::Debug {
     /// Create a new directory if the given path does not exist yet
-    async fn create_dir(&self, path: &Path) -> OTelSdkResult;
+    fn create_dir(&self, path: &Path) -> impl std::future::Future<Output = OTelSdkResult> + Send;
     /// Write the provided content to a new file at the given path
-    async fn write_to_file(&self, path: &Path, content: &[u8]) -> OTelSdkResult;
+    fn write_to_file(
+        &self,
+        path: &Path,
+        content: &[u8],
+    ) -> impl std::future::Future<Output = OTelSdkResult> + Send;
 }
 
 #[cfg(feature = "rt-tokio")]
-#[async_trait]
 impl JaegerJsonRuntime for opentelemetry_sdk::runtime::Tokio {
     async fn create_dir(&self, path: &Path) -> OTelSdkResult {
         if tokio::fs::metadata(path).await.is_err() {
@@ -244,7 +244,6 @@ impl JaegerJsonRuntime for opentelemetry_sdk::runtime::Tokio {
 }
 
 #[cfg(feature = "rt-tokio-current-thread")]
-#[async_trait]
 impl JaegerJsonRuntime for opentelemetry_sdk::runtime::TokioCurrentThread {
     async fn create_dir(&self, path: &Path) -> OTelSdkResult {
         if tokio::fs::metadata(path).await.is_err() {
@@ -274,7 +273,6 @@ impl JaegerJsonRuntime for opentelemetry_sdk::runtime::TokioCurrentThread {
 }
 
 #[cfg(feature = "rt-async-std")]
-#[async_trait]
 impl JaegerJsonRuntime for opentelemetry_sdk::runtime::AsyncStd {
     async fn create_dir(&self, path: &Path) -> OTelSdkResult {
         if async_std::fs::metadata(path).await.is_err() {

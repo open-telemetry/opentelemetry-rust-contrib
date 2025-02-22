@@ -16,7 +16,7 @@ use std::process::Command;
 ///
 /// This resource detector returns the following information:
 ///
-/// - [`host.id from non-containerized systems`]: https://opentelemetry.io/docs/specs/semconv/resource/host/#collecting-hostid-from-non-containerized-systems
+/// - [`host.id from non-containerized systems`](https://opentelemetry.io/docs/specs/semconv/resource/host/#collecting-hostid-from-non-containerized-systems)
 /// - Host architecture (host.arch).
 pub struct HostResourceDetector {
     host_id_detect: fn() -> Option<String>,
