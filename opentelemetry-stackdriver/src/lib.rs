@@ -23,7 +23,6 @@ use std::{
     time::{Duration, Instant},
 };
 
-use async_trait::async_trait;
 use futures_core::future::BoxFuture;
 use futures_util::stream::StreamExt;
 use opentelemetry::{
@@ -442,7 +441,6 @@ impl GcpAuthorizer {
 }
 
 #[cfg(feature = "gcp-authorizer")]
-#[async_trait]
 impl Authorizer for GcpAuthorizer {
     type Error = Error;
 
@@ -470,16 +468,15 @@ impl Authorizer for GcpAuthorizer {
     }
 }
 
-#[async_trait]
 pub trait Authorizer: Sync + Send + 'static {
     type Error: std::error::Error + fmt::Debug + Send + Sync;
 
     fn project_id(&self) -> &str;
-    async fn authorize<T: Send + Sync>(
+    fn authorize<T: Send + Sync>(
         &self,
         request: &mut Request<T>,
         scopes: &[&str],
-    ) -> Result<(), Self::Error>;
+    ) -> impl Future<Output = Result<(), Self::Error>> + Send;
 }
 
 impl From<Value> for AttributeValue {

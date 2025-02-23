@@ -33,6 +33,7 @@ pub fn register() {
 }
 
 /// Write an event to the ETW provider.
+#[allow(clippy::repr_packed_without_abi)]
 pub fn write(buffer: &[u8]) -> u32 {
     tracelogging::write_event!(
         PROVIDER,
