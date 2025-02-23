@@ -4,6 +4,7 @@
 use futures_core::future::BoxFuture;
 use futures_util::FutureExt;
 use opentelemetry::trace::SpanId;
+#[allow(unused_imports)]
 use opentelemetry_sdk::error::OTelSdkError;
 use opentelemetry_sdk::runtime::RuntimeChannel;
 use opentelemetry_sdk::{
