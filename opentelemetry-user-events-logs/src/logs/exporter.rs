@@ -157,18 +157,18 @@ impl UserEventsExporter {
 
     fn add_attribute_to_event(&self, eb: &mut EventBuilder, (key, value): (&Key, &AnyValue)) {
         let field_name = key.as_str();
-        match value.to_owned() {
+        match value {
             AnyValue::Boolean(b) => {
-                eb.add_value(field_name, b, FieldFormat::Boolean, 0);
+                eb.add_value(field_name, *b, FieldFormat::Boolean, 0);
             }
             AnyValue::Int(i) => {
-                eb.add_value(field_name, i, FieldFormat::SignedInt, 0);
+                eb.add_value(field_name, *i, FieldFormat::SignedInt, 0);
             }
             AnyValue::Double(f) => {
-                eb.add_value(field_name, f, FieldFormat::Float, 0);
+                eb.add_value(field_name, *f, FieldFormat::Float, 0);
             }
             AnyValue::String(s) => {
-                eb.add_str(field_name, s.to_string(), FieldFormat::Default, 0);
+                eb.add_str(field_name, s.as_str(), FieldFormat::Default, 0);
             }
             _ => (),
         }
