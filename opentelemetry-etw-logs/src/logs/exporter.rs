@@ -78,7 +78,7 @@ fn enabled_callback(
 impl ETWExporter {
     pub(crate) fn new(
         provider_name: &str,
-        event_name: String,
+        event_name: &str,
         _provider_group: ProviderGroup,
         exporter_config: ExporterConfig,
     ) -> Self {
@@ -98,7 +98,7 @@ impl ETWExporter {
         ETWExporter {
             provider,
             exporter_config,
-            event_name,
+            event_name: event_name.to_string(),
         }
     }
 
@@ -161,14 +161,8 @@ impl ETWExporter {
         }
     }
 
-    #[allow(dead_code)]
-    fn enabled(&self, level: u8, keyword: u64) -> bool {
-        // TODO: Use internal enabled check. Meaning of enable differs from OpenTelemetry and ETW.
-        // OpenTelemetry wants to know if level+keyword combination is enabled for the Provider.
-        // ETW tells if level+keyword combination is being actively listened. Not all systems actively
-        // listens for ETW events, but they do it on samples.
-        // This may be fixed by applying the OpenTelemetry logic in the callback function.
-        self.provider.enabled(level.into(), keyword)
+    fn enabled(&self, level: tld::Level, keyword: u64) -> bool {
+        self.provider.enabled(level, keyword)
     }
 
     pub(crate) fn export_log_data(
@@ -187,7 +181,9 @@ impl ETWExporter {
             _ => return Ok(()),
         };
 
-        if !self.provider.enabled(level.as_int().into(), keyword) {
+        // On unit tests, we skip this check to be able to test the exporter as no provider is active.
+        #[cfg(not(test))]
+        if !self.enabled(level, keyword) {
             return Ok(());
         };
 
@@ -356,20 +352,17 @@ impl opentelemetry_sdk::logs::LogExporter for ETWExporter {
 
     #[cfg(feature = "logs_level_enabled")]
     fn event_enabled(&self, level: Severity, _target: &str, name: &str) -> bool {
-        let (found, keyword) = if self.exporter_config.keywords_map.is_empty() {
-            (true, self.exporter_config.default_keyword)
+        let keyword = if self.exporter_config.keywords_map.is_empty() {
+            Some(self.exporter_config.default_keyword)
         } else {
             // TBD - target is not used as of now for comparison.
-            match self.exporter_config.get_log_keyword(name) {
-                Some(x) => (true, x),
-                _ => (false, 0),
-            }
+            self.exporter_config.get_log_keyword(name)
         };
-        if !found {
+
+        if keyword.is_none() {
             return false;
         }
-        self.provider
-            .enabled(self.get_severity_level(level), keyword)
+        self.enabled(self.get_severity_level(level), keyword.unwrap())
     }
 }
 
@@ -422,7 +415,7 @@ mod tests {
     fn test_export_log_data() {
         let exporter = ETWExporter::new(
             "test-provider-name",
-            "test-event-name".to_string(),
+            "test-event-name",
             None,
             ExporterConfig::default(),
         );
@@ -440,7 +433,7 @@ mod tests {
     fn test_get_severity_level() {
         let exporter = ETWExporter::new(
             "test-provider-name",
-            "test-event-name".to_string(),
+            "test-event-name",
             None,
             ExporterConfig::default(),
         );

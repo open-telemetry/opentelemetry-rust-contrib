@@ -2,6 +2,20 @@
 
 ## vNext
 
+- Added the `with_etw_exporter` trait method to `LoggerProviderBuilder`.
+  This is now the only way to add an ETW exporter. The following line
+  will add an ETW exporter using the given provider name:
+
+  ```rust
+  SdkLoggerProvider::builder().with_etw_exporter("my-provider").build();
+  ```
+
+- Removed `opentelemetry_etw_logs::{ExporterConfig, ReentrantLogProcessor, ETWExporter}` from the public API. Ability to customize Provider Group, Keyword will be added future.
+
+- Hardcoded `event_enabled` internal method to be true on unit test, improving test coverage.
+
+- Improved test coverage.
+
 ## v0.7.0
 
 - Bump msrv to 1.75.0
