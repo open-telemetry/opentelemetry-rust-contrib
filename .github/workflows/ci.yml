@@ -8,14 +8,29 @@ on:
     - main
     paths-ignore:
     - '**.md'
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
 jobs:
   test:
     strategy:
       matrix:
+        # test both stable and beta versions of Rust on ubuntu-latest
+        os: [ubuntu-latest]
         rust: [stable, beta]
-    runs-on: ubuntu-latest
+        # test only stable version of Rust on Windows and MacOS
+        include:
+          - rust: stable
+            os: windows-latest
+          - rust: stable
+            os: macos-latest
+          - rust: stable
+            os: ubuntu-22.04-arm
+    runs-on: ${{ matrix.os }}
+    continue-on-error: ${{ matrix.rust == 'beta' }}
     steps:
     - name: Free disk space
+      if: ${{ matrix.os == 'ubuntu-latest'}}
       run: |
         df -h
         sudo rm -rf /usr/local/lib/android
@@ -29,9 +44,16 @@ jobs:
         toolchain: ${{ matrix.rust }}
         components: rustfmt
         profile: minimal
-    - uses: arduino/setup-protoc@v1
+    - uses: arduino/setup-protoc@v3
+      with:
+        repo-token: ${{ secrets.GITHUB_TOKEN }}
     - name: Test
-      run: ./scripts/test.sh
+      if: ${{ matrix.os == 'ubuntu-latest'}}
+      run: bash ./scripts/test.sh
+    - name: Test
+      if: ${{ matrix.os == 'windows-latest'}}
+      run: .\scripts\test.ps1
+      shell: pwsh
   lint:
     runs-on: ubuntu-latest
     steps:
