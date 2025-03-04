@@ -248,7 +248,7 @@ impl UserEventsExporter {
                 eb.reset(instrumentation.name().as_ref(), event_tags as u16);
                 eb.opcode(Opcode::Info);
 
-                eb.add_value("__csver__", 0x0400u16, FieldFormat::HexInt, 0);
+                eb.add_value("__csver__", 1024, FieldFormat::UnsignedInt, 0); // 0x400 in hex
 
                 // populate CS PartA
                 let mut cs_a_count = 0;
@@ -297,7 +297,7 @@ impl UserEventsExporter {
                 let mut cs_b_bookmark: usize = 0;
                 let mut cs_b_count = 0;
                 eb.add_struct_with_bookmark("PartB", 1, 0, &mut cs_b_bookmark);
-                eb.add_str("_typeName", "Logs", FieldFormat::Default, 0);
+                eb.add_str("_typeName", "Log", FieldFormat::Default, 0);
                 cs_b_count += 1;
 
                 if log_record.body().is_some() {
