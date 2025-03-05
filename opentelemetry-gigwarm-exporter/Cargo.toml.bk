@@ -1,0 +1,6 @@
+[workspace]
+members = [
+    "gigwarm-uploader",
+    "gigwarm-uploader-ffi",
+    "opentelemetry-gigwarm-exporter"
+]

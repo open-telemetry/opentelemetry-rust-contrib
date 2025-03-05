@@ -1,9 +1,22 @@
 [workspace]
 members = [
-    "opentelemetry-*",
+    "opentelemetry-aws",
+    "opentelemetry-contrib",
+    "opentelemetry-datadog",
+    "opentelemetry-etw-logs",
+    "opentelemetry-etw-metrics",
+    "opentelemetry-resource-detectors",
+    "opentelemetry-stackdriver",
+    "opentelemetry-user-events-logs",
+    "opentelemetry-user-events-metrics",
+    "opentelemetry-zpages",
+    "opentelemetry-gigwarm-exporter/gigwarm-uploader",
+    "opentelemetry-gigwarm-exporter/gigwarm-uploader-ffi",
+    "opentelemetry-gigwarm-exporter/opentelemetry-gigwarm-exporter",
     "examples/*",
     "stress",
 ]
+
 resolver = "2"
 
 [profile.bench]
