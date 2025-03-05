@@ -4,4 +4,8 @@ version = "0.1.0"
 edition = "2021"
 
 [dependencies]
-
+chrono = { version = "0.4", default-features = false, features = ["std"] }
+opentelemetry = { workspace = true, features = ["logs"] }
+opentelemetry_sdk = { workspace = true, default-features = false, features = ["logs"] }
+opentelemetry-proto = {workspace = true, default-features = false, features = ["logs"]}
+gigwarm-uploader = {path = "../gigwarm-uploader/", version = "0.1.0"}
