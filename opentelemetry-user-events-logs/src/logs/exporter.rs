@@ -71,6 +71,12 @@ impl UserEventsExporter {
                     );
                 }
             }
+
+            // Always push the event set to the vector irrespective of whether
+            // there is a listener or not as listeners can be added later. In
+            // the event of failed registrations also, EventSet is pushed to the
+            // vector, but it'll not be enabled.
+            // This also ensures we can use the level as index to the Vec.
             event_sets.push(event_set);
         }
         event_sets
@@ -142,6 +148,8 @@ impl UserEventsExporter {
         let event_set = match self.event_sets.get(level.as_int() as usize) {
             Some(event_set) => event_set,
             None => {
+                // This is considered Error as we cannot find the EventSet.
+                // If an EventSet is found, but not enabled, it is not an error.
                 return Err(OTelSdkError::InternalFailure(format!(
                     "Failed to get event set for level: {}",
                     level.as_int()
