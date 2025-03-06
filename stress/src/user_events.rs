@@ -11,11 +11,11 @@
 //!
 // Conf - AMD EPYC 7763 64-Core Processor 2.44 GHz, 64GB RAM, Cores:8 , Logical processors: 16
 // Stress Test Results (user_events disabled)
-// Threads: 1 - Average Throughput: 42,086,520 iterations/sec
-// Threads: 5 - Average Throughput: 35,767,375 iterations/sec
-// Threads: 10 - Average Throughput: 29,189,340 iterations/sec
-// Threads: 16 - Average Throughput: 19,579,138 iterations/sec
-
+// Threads: 1 - Average Throughput: 43 iterations/sec
+// Threads: 5 - Average Throughput: 185M iterations/sec
+// Threads: 10 - Average Throughput: 250M iterations/sec
+// Threads: 16 - Average Throughput: 320M iterations/sec
+// TODO :Fill this after running the test with enabled.
 // Stress Test Results (user_events enabled)
 // Threads: 1 - Average Throughput: 285,692 iterations/sec
 // Threads: 5 - Average Throughput: 392,906 iterations/sec
