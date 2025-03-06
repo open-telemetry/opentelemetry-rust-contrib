@@ -25,7 +25,7 @@
 use opentelemetry_appender_tracing::layer;
 use opentelemetry_sdk::logs::SdkLoggerProvider;
 use opentelemetry_user_events_logs::UserEventsLoggerProviderBuilderExt;
-use tracing::info;
+use tracing::error;
 use tracing_subscriber::{prelude::*, EnvFilter};
 mod throughput;
 
@@ -38,7 +38,7 @@ fn init_logger() -> SdkLoggerProvider {
 
 // Function that performs the logging task
 fn log_event_task() {
-    info!(
+    error!(
         name = "my-event-name",
         event_id = 20,
         user_name = "otel user",

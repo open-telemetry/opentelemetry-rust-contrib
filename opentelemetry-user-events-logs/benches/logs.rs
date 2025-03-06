@@ -22,8 +22,6 @@ use opentelemetry_appender_tracing::layer as tracing_layer;
 use opentelemetry_sdk::logs::SdkLoggerProvider;
 use opentelemetry_sdk::Resource;
 use opentelemetry_user_events_logs::UserEventsLoggerProviderBuilderExt;
-#[cfg(target_os = "linux")]
-use pprof::criterion::{Output, PProfProfiler};
 use tracing::error;
 use tracing_subscriber::prelude::*;
 use tracing_subscriber::Registry;
@@ -74,13 +72,6 @@ fn criterion_benchmark(c: &mut Criterion) {
     benchmark_with_ot_layer(c, "User_Event_6_Attributes", 6)
 }
 
-#[cfg(target_os = "linux")]
-criterion_group! {
-    name = benches;
-    config = Criterion::default().with_profiler(PProfProfiler::new(100, Output::Flamegraph(None)));
-    targets = criterion_benchmark
-}
-#[cfg(target_os = "macos")]
 criterion_group! {
     name = benches;
     config = Criterion::default();
