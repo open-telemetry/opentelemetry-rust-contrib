@@ -35,6 +35,8 @@ impl UserEventsExporter {
         eventheader_provider: &mut eventheader_dynamic::Provider,
     ) -> Vec<Arc<EventSet>> {
         let keyword: u64 = 1;
+        // Levels are added in the same order as their int representation,
+        // to ensure that the index of the Vec matches the int representation.
         let levels = [
             eventheader::Level::CriticalError,
             eventheader::Level::Error,
@@ -43,7 +45,11 @@ impl UserEventsExporter {
             eventheader::Level::Verbose,
         ];
 
-        let mut event_sets = Vec::with_capacity(5);
+        let mut event_sets = Vec::with_capacity(6);
+        // Push a dummy EventSet to position 0
+        // This is done so that EventSets can be retrieved using
+        // level as index to the Vec.
+        event_sets.push(Arc::new(EventSet::new_unregistered()));
 
         for &level in levels.iter() {
             let event_set = eventheader_provider.register_set(level, keyword);
@@ -131,7 +137,9 @@ impl UserEventsExporter {
             ));
         };
 
-        let event_set = match self.event_sets.get(level.as_int() as usize - 1) {
+        // EventSets are stored in the same order as their int representation,
+        // so we can use the level as index to the Vec.
+        let event_set = match self.event_sets.get(level.as_int() as usize) {
             Some(event_set) => event_set,
             None => {
                 return Err(OTelSdkError::InternalFailure(format!(
@@ -309,9 +317,10 @@ impl opentelemetry_sdk::logs::LogExporter for UserEventsExporter {
 
     #[cfg(feature = "spec_unstable_logs_enabled")]
     fn event_enabled(&self, level: Severity, _target: &str, _name: &str) -> bool {
+        // EventSets are stored in the same order as their int representation,
+        // so we can use the level as index to the Vec.
         let level = self.get_severity_level(level);
-        let event_set_index = level.as_int() as usize - 1;
-        match self.event_sets.get(event_set_index) {
+        match self.event_sets.get(level.as_int() as usize) {
             Some(event_set) => event_set.enabled(),
             None => false,
         }

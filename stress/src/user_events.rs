@@ -2,16 +2,16 @@
 //!
 //! IMPORTANT:
 //!     To test with `user_events` enabled, perform the following step before running the test:
-//!     - Add `1` to `/sys/kernel/debug/tracing/events/user_events/testprovider_L4K1Gtestprovider/enable`:
-//!         `echo 1 > /sys/kernel/debug/tracing/events/user_events/testprovider_L4K1Gtestprovider/enable`
+//!     - Add `1` to `/sys/kernel/debug/tracing/events/user_events/provider_name_L4K1/enable`:
+//!         `echo 1 > /sys/kernel/debug/tracing/events/user_events/provider_name_L4K1/enable`
 //!     To test with `user_events` disabled, perform the following step:
-//!     - Add `0` to `/sys/kernel/debug/tracing/events/user_events/testprovider_L4K1Gtestprovider/enable`:
-//!         `echo 0 > /sys/kernel/debug/tracing/events/user_events/testprovider_L4K1Gtestprovider/enable`
+//!     - Add `0` to `/sys/kernel/debug/tracing/events/user_events/provider_name_L4K1/enable`:
+//!         `echo 0 > /sys/kernel/debug/tracing/events/user_events/provider_name_L4K1/enable`
 //!
 //!
 // Conf - AMD EPYC 7763 64-Core Processor 2.44 GHz, 64GB RAM, Cores:8 , Logical processors: 16
 // Stress Test Results (user_events disabled)
-// Threads: 1 - Average Throughput: 43 iterations/sec
+// Threads: 1 - Average Throughput: 43M iterations/sec
 // Threads: 5 - Average Throughput: 185M iterations/sec
 // Threads: 10 - Average Throughput: 250M iterations/sec
 // Threads: 16 - Average Throughput: 320M iterations/sec
