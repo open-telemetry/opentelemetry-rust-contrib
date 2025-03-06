@@ -130,7 +130,7 @@ impl UserEventsExporter {
             level = self.get_severity_level(log_record.severity_number().unwrap());
         }
 
-        let event_set = match self.event_sets.get(level.as_int() as usize + 1) {
+        let event_set = match self.event_sets.get(level.as_int() as usize - 1) {
             Some(event_set) => event_set,
             None => {
                 return Err(OTelSdkError::InternalFailure(format!(
@@ -299,7 +299,12 @@ impl opentelemetry_sdk::logs::LogExporter for UserEventsExporter {
         }
         
         let level = self.get_severity_level(level);
-        match self.event_sets.get(level.as_int() as usize + 1) {
+        let event_set_index = level.as_int() as usize - 1;
+        otel_debug!(
+            name: "UserEvents.EventEnabled",
+            event_set_index = event_set_index,
+        );
+        match self.event_sets.get(event_set_index) {
             Some(event_set) => event_set.enabled(),
             None => false,
         }
