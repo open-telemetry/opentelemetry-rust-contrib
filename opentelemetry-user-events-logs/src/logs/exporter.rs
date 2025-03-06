@@ -1,8 +1,8 @@
 use eventheader::{FieldFormat, Level, Opcode};
 use eventheader_dynamic::{EventBuilder, EventSet, Provider};
 use opentelemetry::{otel_debug, otel_info};
-use std::fmt::Debug;
 use std::sync::Arc;
+use std::{fmt::Debug, sync::Mutex};
 
 use opentelemetry::{logs::AnyValue, logs::Severity, Key};
 use opentelemetry_sdk::error::{OTelSdkError, OTelSdkResult};
@@ -12,7 +12,7 @@ thread_local! { static EBW: RefCell<EventBuilder> = RefCell::new(EventBuilder::n
 
 /// UserEventsExporter is a log exporter that exports logs in EventHeader format to user_events tracepoint.
 pub struct UserEventsExporter {
-    provider: Provider,
+    provider: Mutex<Provider>,
     event_sets: Vec<Arc<EventSet>>,
 }
 
@@ -26,7 +26,7 @@ impl UserEventsExporter {
         let event_sets = Self::register_events(&mut eventheader_provider);
         otel_debug!(name: "UserEvents.Created", provider_name = provider_name);
         UserEventsExporter {
-            provider: eventheader_provider,
+            provider: Mutex::new(eventheader_provider),
             event_sets,
         }
     }
@@ -144,6 +144,11 @@ impl UserEventsExporter {
         if event_set.enabled() {
             let _res = EBW.with(|eb| {
                 let mut eb = eb.borrow_mut();
+                // EventBuilder doc suggests that event name should not be
+                // reused for events with different schema. 
+                // In well-behaved application, event-name should be unique
+                // for each event.
+                // TODO: What if the event name is not provided? "Log" is used as default.
                 eb.reset(log_record.event_name().unwrap_or("Log"), 0);
                 eb.opcode(Opcode::Info);
 
@@ -286,6 +291,20 @@ impl opentelemetry_sdk::logs::LogExporter for UserEventsExporter {
             let _ = self.export_log_data(record, instrumentation);
         }
         Ok(())
+    }
+
+    fn shutdown(&mut self) -> OTelSdkResult {
+        // The explicit unregister() is done in shutdown()
+        // as it may not be possible to unregister during Drop
+        // as Loggers are typically *not* dropped.
+        if let Ok(mut provider) = self.provider.lock() {
+            provider.unregister();
+            Ok(())
+        } else {
+            return Err(OTelSdkError::InternalFailure(
+                "Failed to acquire lock on provider".to_string(),
+            ));
+        }
     }
 
     #[cfg(feature = "spec_unstable_logs_enabled")]
