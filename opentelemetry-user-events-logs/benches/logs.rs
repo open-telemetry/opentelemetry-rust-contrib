@@ -4,6 +4,7 @@
 
     Hardware: Apple M4 Pro
     Total Number of Cores:	10
+    (Inside multipass vm running Ubuntu 22.04)
     // When no listener
     | Test                        | Average time|
     |-----------------------------|-------------|
@@ -11,11 +12,18 @@
     | User_Event_6_Attributes     | 10 ns       |
 
     // When listener is enabled
+    // Run below to enable
+    //  echo 1 | sudo tee /sys/kernel/debug/tracing/events/user_events/myprovider_L2K1/enable
+    // Run below to disable
+    //  echo 0 | sudo tee /sys/kernel/debug/tracing/events/user_events/myprovider_L2K1/enable
     | Test                        | Average time|
     |-----------------------------|-------------|
-    | User_Event_4_Attributes     | 10 ns       |
-    | User_Event_6_Attributes     | 10 ns       |
+    | User_Event_4_Attributes     | 617 ns      |
+    | User_Event_6_Attributes     | 715 ns      |
 */
+
+// running the following from the current directory
+// sudo -E ~/.cargo/bin/cargo bench --bench logs --all-features
 
 use criterion::{criterion_group, criterion_main, Criterion};
 use opentelemetry_appender_tracing::layer as tracing_layer;

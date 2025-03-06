@@ -3,10 +3,10 @@
 //! IMPORTANT:
 //!     To test with `user_events` enabled, perform the following step before running the test:
 //!     - Add `1` to `/sys/kernel/debug/tracing/events/user_events/myprovider_L4K1/enable`:
-//!         `echo 1 > /sys/kernel/debug/tracing/events/user_events/myprovider_L4K1/enable`
+//!         echo 1 | sudo tee /sys/kernel/debug/tracing/events/user_events/myprovider_L2K1/enable
 //!     To test with `user_events` disabled, perform the following step:
 //!     - Add `0` to `/sys/kernel/debug/tracing/events/user_events/myprovider_L4K1/enable`:
-//!         `echo 0 > /sys/kernel/debug/tracing/events/user_events/myprovider_L4K1/enable`
+//!         echo 0 | sudo tee /sys/kernel/debug/tracing/events/user_events/myprovider_L2K1/enable
 //!
 //!
 // Conf - AMD EPYC 7763 64-Core Processor 2.44 GHz, 64GB RAM, Cores:8 , Logical processors: 16
@@ -15,12 +15,15 @@
 // Threads: 5 - Average Throughput: 185M iterations/sec
 // Threads: 10 - Average Throughput: 250M iterations/sec
 // Threads: 16 - Average Throughput: 320M iterations/sec
-// TODO :Fill this after running the test with enabled.
+
+// Hardware: Apple M4 Pro
+// Total Number of Cores:	10
+// (Inside multipass vm running Ubuntu 22.04)
 // Stress Test Results (user_events enabled)
-// Threads: 1 - Average Throughput: 285,692 iterations/sec
-// Threads: 5 - Average Throughput: 392,906 iterations/sec
-// Threads: 10 - Average Throughput:    349,334 iterations/sec
-// Threads: 16 - Average Throughput: 297,232 iterations/sec
+// Threads: 1 - Average Throughput: TODO
+// Threads: 5 - Average Throughput: TODO
+// Threads: 10 - Average Throughput: 1.7 M iterations/sec
+// Threads: 16 - Average Throughput: TODO
 
 use opentelemetry_appender_tracing::layer;
 use opentelemetry_sdk::logs::SdkLoggerProvider;
