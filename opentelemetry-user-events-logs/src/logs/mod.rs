@@ -20,7 +20,6 @@ pub trait UserEventsLoggerProviderBuilderExt {
     /// - `myprovider_L2K1`
     /// - `myprovider_L1K1`
     ///
-    /// Note that the `EventKeyword` is currently hardcoded to be `1`.
     fn with_user_event_exporter(self, provider_name: &str) -> Self;
 }
 

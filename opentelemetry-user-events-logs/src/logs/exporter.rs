@@ -3,7 +3,6 @@ use eventheader_dynamic::{EventBuilder, EventSet, Provider};
 use opentelemetry::{otel_debug, otel_info};
 use std::fmt::Debug;
 use std::sync::Arc;
-use tracing::event;
 
 use opentelemetry::{logs::AnyValue, logs::Severity, Key};
 use opentelemetry_sdk::error::{OTelSdkError, OTelSdkResult};
@@ -122,13 +121,15 @@ impl UserEventsExporter {
     pub(crate) fn export_log_data(
         &self,
         log_record: &opentelemetry_sdk::logs::SdkLogRecord,
-        instrumentation: &opentelemetry::InstrumentationScope,
+        _instrumentation: &opentelemetry::InstrumentationScope,
     ) -> opentelemetry_sdk::error::OTelSdkResult {
-        //TODO - should we log (otel_debug) each event?
-        let mut level: Level = Level::Invalid;
-        if log_record.severity_number().is_some() {
-            level = self.get_severity_level(log_record.severity_number().unwrap());
-        }
+        let level = if let Some(otel_severity) = log_record.severity_number() {
+            self.get_severity_level(otel_severity)
+        } else {
+            return Err(OTelSdkError::InternalFailure(
+                "Severity number is required for user-events exporter".to_string(),
+            ));
+        };
 
         let event_set = match self.event_sets.get(level.as_int() as usize - 1) {
             Some(event_set) => event_set,
@@ -143,8 +144,7 @@ impl UserEventsExporter {
         if event_set.enabled() {
             let _res = EBW.with(|eb| {
                 let mut eb = eb.borrow_mut();
-                let event_tags: u32 = 0; // TBD name and event_tag values
-                eb.reset(instrumentation.name().as_ref(), event_tags as u16);
+                eb.reset(log_record.event_name().unwrap_or("Log"), 0);
                 eb.opcode(Opcode::Info);
 
                 eb.add_value("__csver__", 1024, FieldFormat::UnsignedInt, 0); // 0x400 in hex
@@ -289,7 +289,7 @@ impl opentelemetry_sdk::logs::LogExporter for UserEventsExporter {
     }
 
     #[cfg(feature = "spec_unstable_logs_enabled")]
-    fn event_enabled(&self, level: Severity, _target: &str, _name: &str) -> bool {        
+    fn event_enabled(&self, level: Severity, _target: &str, _name: &str) -> bool {
         let level = self.get_severity_level(level);
         let event_set_index = level.as_int() as usize - 1;
         match self.event_sets.get(event_set_index) {
