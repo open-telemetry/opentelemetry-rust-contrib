@@ -32,7 +32,7 @@ opentelemetry_sdk = { workspace = true, features = ["logs", "spec_unstable_logs_
 opentelemetry-user-events-logs = { path = "../opentelemetry-user-events-logs", features = ["spec_unstable_logs_enabled"]}
 opentelemetry-etw-logs = { path = "../opentelemetry-etw-logs"}
 tracing = { version = "0.1", default-features = false, features = ["std"] }
-tracing-subscriber = { version = "0.3.0", default-features = false, features = ["registry", "std"] }
+tracing-subscriber = { version = "0.3.0", default-features = false, features = ["env-filter","registry", "std"] }
 
 [features]
 stats = ["sysinfo"]

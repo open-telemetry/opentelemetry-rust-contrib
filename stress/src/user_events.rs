@@ -26,7 +26,7 @@ use opentelemetry_appender_tracing::layer;
 use opentelemetry_sdk::logs::SdkLoggerProvider;
 use opentelemetry_user_events_logs::UserEventsLoggerProviderBuilderExt;
 use tracing::info;
-use tracing_subscriber::prelude::*;
+use tracing_subscriber::{prelude::*, EnvFilter};
 mod throughput;
 
 // Function to initialize the logger
@@ -49,7 +49,9 @@ fn log_event_task() {
 fn main() {
     // Initialize the logger
     let logger_provider = init_logger();
+    let filter_otel = EnvFilter::new("info").add_directive("opentelemetry=off".parse().unwrap());
     let layer = layer::OpenTelemetryTracingBridge::new(&logger_provider);
+    let layer = layer.with_filter(filter_otel);
     tracing_subscriber::registry().with(layer).init();
 
     // Use the provided stress test framework

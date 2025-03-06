@@ -383,17 +383,11 @@ impl Debug for UserEventsExporter {
 }
 
 impl opentelemetry_sdk::logs::LogExporter for UserEventsExporter {
-    #[allow(clippy::manual_async_fn)]
-    fn export(
-        &self,
-        batch: opentelemetry_sdk::logs::LogBatch<'_>,
-    ) -> impl std::future::Future<Output = OTelSdkResult> + Send {
-        async move {
-            for (record, instrumentation) in batch.iter() {
-                let _ = self.export_log_data(record, instrumentation);
-            }
-            Ok(())
+    async fn export(&self, batch: opentelemetry_sdk::logs::LogBatch<'_>) -> OTelSdkResult {
+        for (record, instrumentation) in batch.iter() {
+            let _ = self.export_log_data(record, instrumentation);
         }
+        Ok(())
     }
 
     #[cfg(feature = "spec_unstable_logs_enabled")]

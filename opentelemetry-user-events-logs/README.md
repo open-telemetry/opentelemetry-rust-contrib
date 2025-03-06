@@ -16,13 +16,15 @@ Windows. It builds on top of the Linux Tracepoints, and so allows user processes
 to create events and trace data that can be viewed via existing tools like
 ftrace and perf.
 
-This kernel feature is supported started in Linux kernel 5.18 onwards. The feature enables
- - A faster path for tracing from user mode application utilizing kernel mode memory address space. 
- - User processes can now export telemetry events only when it is useful i.e, when the registered set of tracepoint events are enabled.
+This kernel feature is supported started in Linux kernel 6.4 onwards. The feature enables
 
- This user_events exporter enables applications to use OpenTelemetry API to capture the telemetry events, and write to user_events subsystem. From user_events, the events can be
-  - Captured by the agents running locally, and listening for specific events withing user_events subsystem.
-  - Or real-time monitoring using local Linux tool like [perf](https://perf.wiki.kernel.org/index.php/Main_Page) or ftrace.
+- A faster path for tracing from user mode application utilizing kernel mode memory address space.
+- User processes can now export telemetry events only when it is useful i.e, when the registered set of tracepoint events are enabled.
+
+This user_events exporter enables applications to use OpenTelemetry API to capture the telemetry events, and write to user_events subsystem. From user_events, the events can be
+
+- Captured by the agents running locally, and listening for specific events withing user_events subsystem.
+- Or real-time monitoring using local Linux tool like [perf](https://perf.wiki.kernel.org/index.php/Main_Page) or ftrace.
 
 [![Crates.io: opentelemetry-user-events-logs](https://img.shields.io/crates/v/opentelemetry-user-events-logs.svg)](https://crates.io/crates/opentelemetry-user-events-logs)
 [![Documentation](https://docs.rs/opentelemetry-user-events-logs/badge.svg)](https://docs.rs/opentelemetry-user-events-logs)
