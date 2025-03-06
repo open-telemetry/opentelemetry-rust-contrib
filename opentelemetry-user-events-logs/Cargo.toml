@@ -25,11 +25,17 @@ tracing = { version = "0.1", default-features = false, features = ["std"] }
 tracing-core = "0.1.31"
 tracing-subscriber = { version = "0.3.0", default-features = false, features = ["env-filter", "fmt", "registry", "std"] }
 ctrlc = "3.4"
+criterion = "0.5"
 
 [features]
 spec_unstable_logs_enabled = ["opentelemetry/spec_unstable_logs_enabled", "opentelemetry_sdk/spec_unstable_logs_enabled", "opentelemetry-appender-tracing/spec_unstable_logs_enabled"]
 internal-logs = ["tracing", "opentelemetry/internal-logs", "opentelemetry_sdk/internal-logs"]
 default = ["internal-logs"]
+
+[[bench]]
+name = "logs"
+harness = false
+required-features = ["spec_unstable_logs_enabled"]
 
 [lints]
 workspace = true
