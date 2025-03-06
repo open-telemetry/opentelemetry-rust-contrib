@@ -1,79 +1,41 @@
 use eventheader::{FieldFormat, Level, Opcode};
-use eventheader_dynamic::EventBuilder;
+use eventheader_dynamic::{EventBuilder, EventSet, Provider};
 use opentelemetry::{otel_debug, otel_info};
-use std::borrow::Cow;
-use std::collections::HashMap;
 use std::fmt::Debug;
+use std::sync::Arc;
+use tracing::event;
 
 use opentelemetry::{logs::AnyValue, logs::Severity, Key};
 use opentelemetry_sdk::error::{OTelSdkError, OTelSdkResult};
 use std::{cell::RefCell, str, time::SystemTime};
 
-/// Provider group associated with the user_events exporter
-pub type ProviderGroup = Option<Cow<'static, str>>;
-
 thread_local! { static EBW: RefCell<EventBuilder> = RefCell::new(EventBuilder::new());}
-
-/// Exporter config
-#[derive(Debug)]
-pub struct ExporterConfig {
-    /// keyword associated with user_events name
-    /// These should be mapped to logger_name as of now.
-    pub keywords_map: HashMap<String, u64>,
-    /// default keyword if map is not defined.
-    pub default_keyword: u64,
-}
-
-impl Default for ExporterConfig {
-    fn default() -> Self {
-        ExporterConfig {
-            keywords_map: HashMap::new(),
-            default_keyword: 1,
-        }
-    }
-}
-
-impl ExporterConfig {
-    pub(crate) fn get_log_keyword(&self, name: &str) -> Option<u64> {
-        self.keywords_map.get(name).copied()
-    }
-
-    pub(crate) fn get_log_keyword_or_default(&self, name: &str) -> u64 {
-        if self.keywords_map.is_empty() {
-            self.default_keyword
-        } else {
-            self.get_log_keyword(name).unwrap_or(self.default_keyword)
-        }
-    }
-}
 
 /// UserEventsExporter is a log exporter that exports logs in EventHeader format to user_events tracepoint.
 pub struct UserEventsExporter {
-    provider: eventheader_dynamic::Provider,
-    exporter_config: ExporterConfig,
+    provider: Provider,
+    event_sets: Vec<Arc<EventSet>>,
 }
 
 const EVENT_ID: &str = "event_id";
 
 impl UserEventsExporter {
     /// Create instance of the exporter
-    pub fn new(
-        provider_name: &str,
-        _provider_group: ProviderGroup,
-        exporter_config: ExporterConfig,
-    ) -> Self {
-        let options = eventheader_dynamic::Provider::new_options();
-        let mut eventheader_provider: eventheader_dynamic::Provider =
-            eventheader_dynamic::Provider::new(provider_name, &options);
-        Self::register_keywords(&mut eventheader_provider, &exporter_config);
-        otel_debug!(name: "UserEvents.Created", config = format!("{:?}", exporter_config), provider_name = provider_name, provider_group = format!("{:?}", options));
+    pub fn new(provider_name: &str) -> Self {
+        let mut eventheader_provider: Provider =
+            Provider::new(provider_name, &Provider::new_options());
+        let event_sets = Self::register_events(&mut eventheader_provider);
+        otel_debug!(name: "UserEvents.Created", provider_name = provider_name);
         UserEventsExporter {
             provider: eventheader_provider,
-            exporter_config,
+            event_sets,
         }
     }
 
-    fn register_events(eventheader_provider: &mut eventheader_dynamic::Provider, keyword: u64) {
+    fn register_events(
+        eventheader_provider: &mut eventheader_dynamic::Provider,
+    ) -> Vec<Arc<EventSet>> {
+        let keyword: u64 = 1;
         let levels = [
             eventheader::Level::Informational,
             eventheader::Level::Verbose,
@@ -82,7 +44,7 @@ impl UserEventsExporter {
             eventheader::Level::CriticalError,
         ];
 
-        let mut perf_command = String::from("perf record");
+        let mut event_sets = Vec::with_capacity(5);
 
         for &level in levels.iter() {
             otel_debug!(
@@ -109,50 +71,9 @@ impl UserEventsExporter {
                     );
                 }
             }
-            let event_set = eventheader_provider.find_set(level.as_int().into(), keyword);
-            if let Some(set) = event_set {
-                otel_debug!(name: "UserEvents.RegisteredEvent", set = format!("{:?}", set));
-                // Generate and log the `perf record` command for registered event
-                let event_spec = format!(
-                    " -e user_events:{}_L{}K{}",
-                    eventheader_provider.name(),
-                    level.as_int(),
-                    keyword
-                );
-                perf_command.push_str(&event_spec);
-            } else {
-                otel_debug!(
-                    name: "UserEvents.FailedToRegisterEvent",
-                    level = level.as_int(),
-                    keyword = keyword,
-                );
-            }
+            event_sets.push(event_set);
         }
-        if perf_command != "perf record" {
-            println!("To listen to events, run: {}", perf_command);
-            otel_debug!(name: "UserEvents.PerfCommand", command = perf_command);
-        }
-    }
-
-    fn register_keywords(
-        eventheader_provider: &mut eventheader_dynamic::Provider,
-        exporter_config: &ExporterConfig,
-    ) {
-        if exporter_config.keywords_map.is_empty() {
-            otel_debug!(
-                name: "UserEvents.RegisterDefaultKeyword",
-                default_keyword = exporter_config.default_keyword,
-            );
-            Self::register_events(eventheader_provider, exporter_config.default_keyword);
-        }
-
-        for keyword in exporter_config.keywords_map.values() {
-            otel_debug!(
-                name: "UserEvents.RegisterKeyword",
-                keyword = *keyword,
-            );
-            Self::register_events(eventheader_provider, *keyword);
-        }
+        event_sets
     }
 
     fn add_attribute_to_event(&self, eb: &mut EventBuilder, (key, value): (&Key, &AnyValue)) {
@@ -224,24 +145,17 @@ impl UserEventsExporter {
             level = self.get_severity_level(log_record.severity_number().unwrap());
         }
 
-        let keyword = self
-            .exporter_config
-            .get_log_keyword_or_default(instrumentation.name().as_ref());
-
-        let log_es = if let Some(es) = self.provider.find_set(level.as_int().into(), keyword) {
-            es
-        } else {
-            otel_debug!(
-                name: "UserEvents.EventSetNotFound",
-                level = level.as_int(),
-                keyword = keyword,
-            );
-            return Err(OTelSdkError::InternalFailure(format!(
-                "EventSet not found for level: {:?} and keyword: {}",
-                level, keyword
-            )));
+        let event_set = match self.event_sets.get(level.as_int() as usize) {
+            Some(event_set) => event_set,
+            None => {
+                return Err(OTelSdkError::InternalFailure(format!(
+                    "Failed to get event set for level: {}",
+                    level.as_int()
+                )))
+            }
         };
-        if log_es.enabled() {
+
+        if event_set.enabled() {
             let _res = EBW.with(|eb| {
                 let mut eb = eb.borrow_mut();
                 let event_tags: u32 = 0; // TBD name and event_tag values
@@ -341,7 +255,7 @@ impl UserEventsExporter {
                 }
                 eb.set_struct_field_count(cs_b_bookmark, cs_b_count);
 
-                let result = eb.write(&log_es, None, None);
+                let result = eb.write(event_set, None, None);
                 if result > 0 {
                     // Specially log the case where there is no listener and size exceeding.
                     if result == 9 {
@@ -365,8 +279,7 @@ impl UserEventsExporter {
         } else {
             otel_debug!(
                 name: "UserEvents.EventSetNotEnabled",
-                level = level.as_int(),
-                keyword = keyword,
+                level = level.as_int()
             );
 
             // Return success when the event is not enabled
@@ -391,42 +304,12 @@ impl opentelemetry_sdk::logs::LogExporter for UserEventsExporter {
     }
 
     #[cfg(feature = "spec_unstable_logs_enabled")]
-    fn event_enabled(&self, level: Severity, _target: &str, name: &str) -> bool {
-        let (found, keyword) = if self.exporter_config.keywords_map.is_empty() {
-            (true, self.exporter_config.default_keyword)
-        } else {
-            // TBD - target is not used as of now for comparison.
-            match self.exporter_config.get_log_keyword(name) {
-                Some(x) => (true, x),
-                _ => (false, 0),
-            }
-        };
-        if !found {
-            return false;
-        }
-        let es = self
-            .provider
-            .find_set(self.get_severity_level(level), keyword);
-        match es {
-            Some(x) => {
-                let enabled = x.enabled();
-                if !enabled {
-                    otel_debug!(
-                        name: "UserEvents.EventNotEnabled",
-                        level = format!("{:?}",level),
-                        keyword = keyword,
-                    );
-                }
-                enabled
-            }
-            _ => {
-                otel_debug!(
-                    name: "UserEvents.EventSetNotFound",
-                    level = format!("{:?}",level),
-                    keyword = keyword,
-                );
-                false
-            }
+    fn event_enabled(&self, level: Severity, _target: &str, _name: &str) -> bool {
+        let level = self.get_severity_level(level);
+
+        match self.event_sets.get(level.as_int() as usize) {
+            Some(event_set) => event_set.enabled(),
+            None => false,
         }
     }
 }
