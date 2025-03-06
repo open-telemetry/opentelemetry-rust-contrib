@@ -47,11 +47,6 @@ impl UserEventsExporter {
         let mut event_sets = Vec::with_capacity(5);
 
         for &level in levels.iter() {
-            otel_debug!(
-                name: "UserEvents.RegisterEvent",
-                level = level.as_int(),
-                keyword = keyword,
-            );
             let event_set = eventheader_provider.register_set(level, keyword);
             match event_set.errno() {
                 0 => {
@@ -295,13 +290,15 @@ impl opentelemetry_sdk::logs::LogExporter for UserEventsExporter {
 
     #[cfg(feature = "spec_unstable_logs_enabled")]
     fn event_enabled(&self, level: Severity, _target: &str, _name: &str) -> bool {
-        let level = self.get_severity_level(level);
-        otel_debug!(
+        for (i, event_set) in self.event_sets.iter().enumerate() {
+            otel_debug!(
             name: "UserEvents.EventEnabled",
-            level = level.as_int(),
-            event_set = self.event_sets.get(level.as_int() as usize).unwrap().enabled(),
-        );
-
+            iteration = i,
+            event_set = event_set.enabled(),
+            );
+        }
+        
+        let level = self.get_severity_level(level);
         match self.event_sets.get(level.as_int() as usize + 1) {
             Some(event_set) => event_set.enabled(),
             None => false,
