@@ -153,7 +153,7 @@ impl UserEventsExporter {
                 return Err(OTelSdkError::InternalFailure(format!(
                     "Failed to get event set for level: {}",
                     level.as_int()
-                )))
+                )));
             }
         };
 
