@@ -37,11 +37,11 @@ impl UserEventsExporter {
     ) -> Vec<Arc<EventSet>> {
         let keyword: u64 = 1;
         let levels = [
+            eventheader::Level::CriticalError,
+            eventheader::Level::Error,
+            eventheader::Level::Warning,
             eventheader::Level::Informational,
             eventheader::Level::Verbose,
-            eventheader::Level::Warning,
-            eventheader::Level::Error,
-            eventheader::Level::CriticalError,
         ];
 
         let mut event_sets = Vec::with_capacity(5);
@@ -135,7 +135,7 @@ impl UserEventsExporter {
             level = self.get_severity_level(log_record.severity_number().unwrap());
         }
 
-        let event_set = match self.event_sets.get(level.as_int() as usize) {
+        let event_set = match self.event_sets.get(level.as_int() as usize + 1) {
             Some(event_set) => event_set,
             None => {
                 return Err(OTelSdkError::InternalFailure(format!(
@@ -302,7 +302,7 @@ impl opentelemetry_sdk::logs::LogExporter for UserEventsExporter {
             event_set = self.event_sets.get(level.as_int() as usize).unwrap().enabled(),
         );
 
-        match self.event_sets.get(level.as_int() as usize) {
+        match self.event_sets.get(level.as_int() as usize + 1) {
             Some(event_set) => event_set.enabled(),
             None => false,
         }
