@@ -64,7 +64,7 @@ This directory contains `cloud-init.yaml`, a configuration file to set up an Ubu
     ubuntu@my-test-vm:~$ $ sudo ~/opentelemetry-rust-contrib/target/debug/examples/basic-metrics
     Tracepoint registered successfully.
     ```
-
+ q
 5. Terminate perf capture (Ctrl+C) after some time. It should show something like
 
     ```bash

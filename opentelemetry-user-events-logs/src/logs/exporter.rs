@@ -124,16 +124,6 @@ impl UserEventsExporter {
         }
     }
 
-    #[allow(dead_code)]
-    fn enabled(&self, level: u8, keyword: u64) -> bool {
-        let es = self.provider.find_set(level.into(), keyword);
-        match es {
-            Some(x) => x.enabled(),
-            _ => false,
-        };
-        false
-    }
-
     pub(crate) fn export_log_data(
         &self,
         log_record: &opentelemetry_sdk::logs::SdkLogRecord,
@@ -306,6 +296,11 @@ impl opentelemetry_sdk::logs::LogExporter for UserEventsExporter {
     #[cfg(feature = "spec_unstable_logs_enabled")]
     fn event_enabled(&self, level: Severity, _target: &str, _name: &str) -> bool {
         let level = self.get_severity_level(level);
+        otel_debug!(
+            name: "UserEvents.EventEnabled",
+            level = level.as_int(),
+            event_set = self.event_sets.get(level.as_int() as usize).unwrap().enabled(),
+        );
 
         match self.event_sets.get(level.as_int() as usize) {
             Some(event_set) => event_set.enabled(),
