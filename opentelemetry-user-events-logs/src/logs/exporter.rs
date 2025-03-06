@@ -289,21 +289,9 @@ impl opentelemetry_sdk::logs::LogExporter for UserEventsExporter {
     }
 
     #[cfg(feature = "spec_unstable_logs_enabled")]
-    fn event_enabled(&self, level: Severity, _target: &str, _name: &str) -> bool {
-        for (i, event_set) in self.event_sets.iter().enumerate() {
-            otel_debug!(
-            name: "UserEvents.EventEnabled",
-            iteration = i,
-            event_set = event_set.enabled(),
-            );
-        }
-        
+    fn event_enabled(&self, level: Severity, _target: &str, _name: &str) -> bool {        
         let level = self.get_severity_level(level);
         let event_set_index = level.as_int() as usize - 1;
-        otel_debug!(
-            name: "UserEvents.EventEnabled",
-            event_set_index = event_set_index,
-        );
         match self.event_sets.get(event_set_index) {
             Some(event_set) => event_set.enabled(),
             None => false,
