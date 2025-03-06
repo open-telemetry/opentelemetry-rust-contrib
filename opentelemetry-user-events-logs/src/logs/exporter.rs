@@ -301,9 +301,9 @@ impl opentelemetry_sdk::logs::LogExporter for UserEventsExporter {
             provider.unregister();
             Ok(())
         } else {
-            return Err(OTelSdkError::InternalFailure(
+            Err(OTelSdkError::InternalFailure(
                 "Failed to acquire lock on provider".to_string(),
-            ));
+            ))
         }
     }
 
