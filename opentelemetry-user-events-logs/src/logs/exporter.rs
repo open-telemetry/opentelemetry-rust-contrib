@@ -165,6 +165,7 @@ impl UserEventsExporter {
                 // In well-behaved application, event-name should be unique
                 // for each event.
                 // TODO: What if the event name is not provided? "Log" is used as default.
+                // TODO: Should event_tag be non-zero?
                 eb.reset(log_record.event_name().unwrap_or("Log"), 0);
                 eb.opcode(Opcode::Info);
 
