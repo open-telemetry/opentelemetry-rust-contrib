@@ -55,6 +55,14 @@ mod tests {
             user_email = "otel.user@opentelemtry.com"
         );
 
+        std::thread::sleep(std::time::Duration::from_millis(500));
+        error!(
+            name: "my-event-name",
+            event_id = 20,
+            user_name = "otel user",
+            user_email = "otel.user@opentelemtry.com"
+        );
+
         // Add a small delay to ensure the event is captured
         std::thread::sleep(std::time::Duration::from_millis(500));
 
