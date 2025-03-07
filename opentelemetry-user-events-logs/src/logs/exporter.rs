@@ -11,7 +11,7 @@ use std::{cell::RefCell, str, time::SystemTime};
 thread_local! { static EBW: RefCell<EventBuilder> = RefCell::new(EventBuilder::new());}
 
 /// UserEventsExporter is a log exporter that exports logs in EventHeader format to user_events tracepoint.
-pub struct UserEventsExporter {
+pub(crate) struct UserEventsExporter {
     provider: Mutex<Provider>,
     event_sets: Vec<Arc<EventSet>>,
 }
@@ -20,7 +20,7 @@ const EVENT_ID: &str = "event_id";
 
 impl UserEventsExporter {
     /// Create instance of the exporter
-    pub fn new(provider_name: &str) -> Self {
+    pub(crate) fn new(provider_name: &str) -> Self {
         let mut eventheader_provider: Provider =
             Provider::new(provider_name, &Provider::new_options());
         let event_sets = Self::register_events(&mut eventheader_provider);
@@ -101,7 +101,7 @@ impl UserEventsExporter {
         }
     }
 
-    fn get_severity_level(&self, severity: Severity) -> Level {
+    const fn get_severity_level(severity: Severity) -> Level {
         match severity {
             Severity::Debug
             | Severity::Debug2
@@ -136,7 +136,7 @@ impl UserEventsExporter {
         _instrumentation: &opentelemetry::InstrumentationScope,
     ) -> opentelemetry_sdk::error::OTelSdkResult {
         let level = if let Some(otel_severity) = log_record.severity_number() {
-            self.get_severity_level(otel_severity)
+            Self::get_severity_level(otel_severity)
         } else {
             return Err(OTelSdkError::InternalFailure(
                 "Severity number is required for user-events exporter".to_string(),
@@ -328,7 +328,7 @@ impl opentelemetry_sdk::logs::LogExporter for UserEventsExporter {
     fn event_enabled(&self, level: Severity, _target: &str, _name: &str) -> bool {
         // EventSets are stored in the same order as their int representation,
         // so we can use the level as index to the Vec.
-        let level = self.get_severity_level(level);
+        let level = Self::get_severity_level(level);
         match self.event_sets.get(level.as_int() as usize) {
             Some(event_set) => event_set.enabled(),
             None => false,
