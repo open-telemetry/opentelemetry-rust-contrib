@@ -28,7 +28,8 @@ mod tests {
         // sudo -E ~/.cargo/bin/cargo test integration -- --nocapture --ignored
 
         // Basic check if user_events are available
-        check_user_events_available().expect("Kernel does not support user_events. Verify your distribution/kernel supports user_events: https://docs.kernel.org/trace/user_events.html.");
+        let user_event_status = check_user_events_available().expect("Kernel does not support user_events. Verify your distribution/kernel supports user_events: https://docs.kernel.org/trace/user_events.html.");
+        println!("User events status: {}", user_event_status);
 
         let logger_provider = LoggerProviderBuilder::default()
             .with_user_event_exporter("myprovider")
