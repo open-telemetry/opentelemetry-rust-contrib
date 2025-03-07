@@ -76,14 +76,6 @@ mod tests {
         let formatted_output = format!(r#"{}"#, json_content.trim());
         println!("Formatted output: {}", formatted_output);
 
-        /*
-                Example output:
-        {
-        "./perf.data": [
-          { "n": "myprovider:my-event-name", "__csver__": 1024, "PartA": { "time": "2025-03-07T05:11:29.871690902+00:00" }, "PartC": { "user_name": "otel user", "user_email": "otel.user@opentelemetry.com" }, "PartB": { "_typeName": "Log", "severityNumber": 2, "severityText": "ERROR", "eventId": 20, "name": "my-event-name" }, "meta": { "time": 40453.962811799, "cpu": 5, "pid": 19247, "tid": 19248, "level": 2, "keyword": "0x1" } } ]
-        }
-
-                 */
         let json_value: Value = from_str(&formatted_output).expect("Failed to parse JSON");
 
         // The JSON has a structure like: { "./perf.data": [ {event1}, {event2}, ... ] }
@@ -199,7 +191,22 @@ mod tests {
             );
         }
 
+        // Convert the output to a String
+        let raw_output = String::from_utf8_lossy(&decode_output.stdout).to_string();
+        
+        // Remove any Byte Order Mark (BOM) characters
+        // UTF-8 BOM is EF BB BF (in hex)
+        let cleaned_output = if raw_output.starts_with('\u{FEFF}') {
+            // Skip the BOM character
+            raw_output[3..].to_string()
+        } else {
+            raw_output
+        };
+        
+        // Also trim any other invisible whitespace characters just to be safe
+        let trimmed_output = cleaned_output.trim().to_string();
+
         // Convert the output to a String and return it
-        Ok(String::from_utf8_lossy(&decode_output.stdout).to_string())
+        Ok(trimmed_output)
     }
 }
