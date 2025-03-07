@@ -36,6 +36,8 @@ impl<T: LogExporter> opentelemetry_sdk::logs::LogProcessor for ReentrantLogProce
 
     // Nothing to shutdown
     fn shutdown(&self) -> OTelSdkResult {
+        // TODO: Actually invoke shutdown on the exporter
+        // This cannot be done today as it requires mutable reference to exporter.
         Ok(())
     }
 

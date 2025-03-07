@@ -13,6 +13,7 @@ thread_local! { static EBW: RefCell<EventBuilder> = RefCell::new(EventBuilder::n
 /// UserEventsExporter is a log exporter that exports logs in EventHeader format to user_events tracepoint.
 pub(crate) struct UserEventsExporter {
     provider: Mutex<Provider>,
+    name: String,
     event_sets: Vec<Arc<EventSet>>,
 }
 
@@ -20,15 +21,30 @@ const EVENT_ID: &str = "event_id";
 
 impl UserEventsExporter {
     /// Create instance of the exporter
-    pub(crate) fn new(provider_name: &str) -> Self {
+    pub(crate) fn new(provider_name: &str) -> Result<Self, String> {
+        // Validate provider_name
+        if provider_name.len() >= 234 {
+            return Err("Provider name must be less than 234 characters.".to_string());
+        }
+        if !provider_name
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || c == '_')
+        {
+            return Err(
+                "Provider name must contain only ASCII letters, digits, and '_'.".to_string(),
+            );
+        }
+
         let mut eventheader_provider: Provider =
             Provider::new(provider_name, &Provider::new_options());
         let event_sets = Self::register_events(&mut eventheader_provider);
         otel_debug!(name: "UserEvents.Created", provider_name = provider_name);
-        UserEventsExporter {
+        let name = eventheader_provider.name().to_string();
+        Ok(UserEventsExporter {
             provider: Mutex::new(eventheader_provider),
+            name,
             event_sets,
-        }
+        })
     }
 
     fn register_events(
@@ -298,7 +314,7 @@ impl UserEventsExporter {
 
 impl Debug for UserEventsExporter {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.write_str("user_events log exporter")
+        write!(f, "user_events log exporter (provider: {})", self.name)
     }
 }
 
@@ -332,6 +348,98 @@ impl opentelemetry_sdk::logs::LogExporter for UserEventsExporter {
         match self.event_sets.get(level.as_int() as usize) {
             Some(event_set) => event_set.enabled(),
             None => false,
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    #[test]
+    fn exporter_debug() {
+        let exporter = UserEventsExporter::new("test_provider");
+        assert_eq!(
+            format!("{:?}", exporter.expect("Failed to create exporter")),
+            "user_events log exporter (provider: test_provider)"
+        );
+    }
+
+    #[test]
+    fn valid_provider_name() {
+        let valid_names = vec![
+            "ValidName",
+            "valid_name",
+            "Valid123",
+            "valid_123",
+            "_valid_name",
+            "VALID_NAME",
+        ];
+
+        for valid_name in valid_names {
+            let result = UserEventsExporter::new(valid_name);
+            assert!(
+                result.is_ok(),
+                "Expected '{}' to be valid, but it was rejected",
+                valid_name
+            );
+        }
+    }
+
+    #[test]
+    fn provider_name_too_long() {
+        let long_name = "a".repeat(234);
+        let result = UserEventsExporter::new(&long_name);
+        assert!(result.is_err());
+        assert_eq!(
+            result.err().unwrap(),
+            "Provider name must be less than 234 characters.".to_string()
+        );
+    }
+
+    #[test]
+    fn provider_name_contains_invalid_characters() {
+        // Define a vector of invalid provider names to test
+        let invalid_names = vec![
+            "Invalid Name",  // space
+            "Invalid:Name",  // colon
+            "Invalid\0Name", // null character
+            "Invalid-Name",  // hyphen
+            "InvalidName!",  // exclamation mark
+            "InvalidName@",  // at symbol
+            "Invalid+Name",  // plus
+            "Invalid&Name",  // ampersand
+            "Invalid#Name",  // hash
+            "Invalid%Name",  // percent
+            "Invalid/Name",  // slash
+            "Invalid\\Name", // backslash
+            "Invalid=Name",  // equals
+            "Invalid?Name",  // question mark
+            "Invalid;Name",  // semicolon
+            "Invalid,Name",  // comma
+        ];
+
+        // Expected error message
+        let expected_error =
+            "Provider name must contain only ASCII letters, digits, and '_'.".to_string();
+
+        // Test each invalid name
+        for invalid_name in invalid_names {
+            let result = UserEventsExporter::new(invalid_name);
+
+            // Assert that the result is an error
+            assert!(
+                result.is_err(),
+                "Expected '{}' to be invalid, but it was accepted",
+                invalid_name
+            );
+
+            // Assert that the error message is as expected
+            assert_eq!(
+                result.err().unwrap(),
+                expected_error,
+                "Wrong error message for invalid name: '{}'",
+                invalid_name
+            );
         }
     }
 }
