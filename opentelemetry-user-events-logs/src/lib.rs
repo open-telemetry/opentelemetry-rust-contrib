@@ -82,18 +82,23 @@ mod tests {
         // Additional assertions to verify the captured event contains the expected data
         // The JSON output might contain brackets at the beginning and end,
         // and might have multiple events. We need to handle both cases.
-        let json_value: Value = if json_content.trim().starts_with('[') {
-            // It's an array of events
-            from_str(&json_content).expect("Failed to parse JSON array")
-        } else {
-            // It's a single event or needs to be wrapped
-            from_str(&format!("[{}]", json_content)).expect("Failed to parse JSON object")
-        };
+        // Parse the JSON output - it's an object with file path as key and array of events as value
+        let json_value: Value = from_str(&json_content).expect("Failed to parse JSON");
 
-        // Get the event from the array (even if there's only one)
-        let events = json_value.as_array().expect("JSON is not an array");
+        // The JSON has a structure like: { "./perf.data": [ {event1}, {event2}, ... ] }
+        // Get the events array
+        let perf_data_key = json_value
+            .as_object()
+            .expect("JSON is not an object")
+            .keys()
+            .find(|k| k.contains("perf.data"))
+            .expect("No perf.data key found in JSON");
 
-        // Find our specific event - it should be the only one or at least one of them
+        let events = json_value[perf_data_key]
+            .as_array()
+            .expect("Events for perf.data is not an array");
+
+        // Find our specific event
         let event = events
             .iter()
             .find(|e| {
