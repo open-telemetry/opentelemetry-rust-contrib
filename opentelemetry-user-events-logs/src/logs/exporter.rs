@@ -13,6 +13,7 @@ thread_local! { static EBW: RefCell<EventBuilder> = RefCell::new(EventBuilder::n
 /// UserEventsExporter is a log exporter that exports logs in EventHeader format to user_events tracepoint.
 pub struct UserEventsExporter {
     provider: Mutex<Provider>,
+    name: String,
     event_sets: Vec<Arc<EventSet>>,
 }
 
@@ -20,15 +21,36 @@ const EVENT_ID: &str = "event_id";
 
 impl UserEventsExporter {
     /// Create instance of the exporter
-    pub fn new(provider_name: &str) -> Self {
+    pub fn new(provider_name: &str) -> Result<Self, String> {
+        // Validate provider_name
+        if provider_name.len() >= 234 {
+            return Err("Provider name must be less than 234 characters.".to_string());
+        }
+        if provider_name.contains('\0')
+            || provider_name.contains(' ')
+            || provider_name.contains(':')
+        {
+            return Err("Provider name must not contain '\\0', ' ', or ':'.".to_string());
+        }
+        if !provider_name
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || c == '_')
+        {
+            return Err(
+                "Provider name must contain only ASCII letters, digits, and '_'.".to_string(),
+            );
+        }
+
         let mut eventheader_provider: Provider =
             Provider::new(provider_name, &Provider::new_options());
         let event_sets = Self::register_events(&mut eventheader_provider);
         otel_debug!(name: "UserEvents.Created", provider_name = provider_name);
-        UserEventsExporter {
+        let name = eventheader_provider.name().to_string();
+        Ok(UserEventsExporter {
             provider: Mutex::new(eventheader_provider),
+            name,
             event_sets,
-        }
+        })
     }
 
     fn register_events(
@@ -298,7 +320,7 @@ impl UserEventsExporter {
 
 impl Debug for UserEventsExporter {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.write_str("user_events log exporter")
+        write!(f, "user_events log exporter (provider: {})", self.name)
     }
 }
 
@@ -333,5 +355,76 @@ impl opentelemetry_sdk::logs::LogExporter for UserEventsExporter {
             Some(event_set) => event_set.enabled(),
             None => false,
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    #[test]
+    fn exporter_debug() {
+        let exporter = UserEventsExporter::new("test_provider");
+        assert_eq!(
+            format!("{:?}", exporter.expect("Failed to create exporter")),
+            "user_events log exporter (provider: test_provider)"
+        );
+    }
+
+    #[test]
+    fn valid_provider_name() {
+        let result = UserEventsExporter::new("MyCompany_MyComponent");
+        assert!(result.is_ok());
+    }
+
+    #[test]
+    fn provider_name_too_long() {
+        let long_name = "a".repeat(234);
+        let result = UserEventsExporter::new(&long_name);
+        assert!(result.is_err());
+        assert_eq!(
+            result.err().unwrap(),
+            "Provider name must be less than 234 characters.".to_string()
+        );
+    }
+
+    #[test]
+    fn provider_name_contains_invalid_characters() {
+        let result = UserEventsExporter::new("Invalid Name");
+        assert!(result.is_err());
+        assert_eq!(
+            result.err().unwrap(),
+            "Provider name must not contain '\\0', ' ', or ':'.".to_string()
+        );
+
+        let result = UserEventsExporter::new("Invalid:Name");
+        assert!(result.is_err());
+        assert_eq!(
+            result.err().unwrap(),
+            "Provider name must not contain '\\0', ' ', or ':'.".to_string()
+        );
+
+        let result = UserEventsExporter::new("Invalid\0Name");
+        assert!(result.is_err());
+        assert_eq!(
+            result.err().unwrap(),
+            "Provider name must not contain '\\0', ' ', or ':'.".to_string()
+        );
+    }
+
+    #[test]
+    fn provider_name_contains_non_ascii_characters() {
+        let result = UserEventsExporter::new("InvalidName!");
+        assert!(result.is_err());
+        assert_eq!(
+            result.err().unwrap(),
+            "Provider name must contain only ASCII letters, digits, and '_'.".to_string()
+        );
+
+        let result = UserEventsExporter::new("InvalidName@");
+        assert!(result.is_err());
+        assert_eq!(
+            result.err().unwrap(),
+            "Provider name must contain only ASCII letters, digits, and '_'.".to_string()
+        );
     }
 }

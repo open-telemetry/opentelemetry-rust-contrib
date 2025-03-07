@@ -39,16 +39,6 @@ fn init_logger() -> SdkLoggerProvider {
         .build()
 }
 
-// Function that performs the logging task
-fn log_event_task() {
-    error!(
-        name = "my-event-name",
-        event_id = 20,
-        user_name = "otel user",
-        user_email = "otel@opentelemetry.io"
-    );
-}
-
 fn main() {
     // Initialize the logger
     let logger_provider = init_logger();
@@ -60,7 +50,12 @@ fn main() {
     // Use the provided stress test framework
     println!("Starting stress test for UserEventsExporter...");
     throughput::test_throughput(|| {
-        log_event_task();
+        error!(
+            name : "my-event-name",
+            event_id = 20,
+            user_name = "otel user",
+            user_email = "otel@opentelemetry.io"
+        );
     });
     println!("Stress test completed.");
 }

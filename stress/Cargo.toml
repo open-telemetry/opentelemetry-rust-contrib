@@ -5,11 +5,6 @@ edition = "2021"
 publish = false
 
 [[bin]]
-name = "eventheader"
-path = "src/eventheader.rs"
-doc = false
-
-[[bin]]
 name = "user_events"
 path = "src/user_events.rs"
 doc = false
