@@ -21,7 +21,7 @@ const EVENT_ID: &str = "event_id";
 
 impl UserEventsExporter {
     /// Create instance of the exporter
-    pub fn new(provider_name: &str) -> Result<Self, String> {
+    pub (crate) fn new(provider_name: &str) -> Result<Self, String> {
         // Validate provider_name
         if provider_name.len() >= 234 {
             return Err("Provider name must be less than 234 characters.".to_string());
