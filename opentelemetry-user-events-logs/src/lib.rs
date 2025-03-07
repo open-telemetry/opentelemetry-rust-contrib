@@ -20,22 +20,47 @@ mod tests {
     #[test]
     fn integration_test_basic() {
         check_user_events_available().expect("Kernel does not support user_events. Verify your distribution/kernel supports user_events: https://docs.kernel.org/trace/user_events.html.");
+
         let logger_provider = LoggerProviderBuilder::default()
             .with_user_event_exporter("myprovider")
             .build();
+
         let filter_otel =
             EnvFilter::new("info").add_directive("opentelemetry=off".parse().unwrap());
         let otel_layer = layer::OpenTelemetryTracingBridge::new(&logger_provider);
         let otel_layer = otel_layer.with_filter(filter_otel);
-
         let subscriber = tracing_subscriber::registry().with(otel_layer);
         let _guard = tracing::subscriber::set_default(subscriber);
 
+        // Start perf recording in a separate thread
+        let perf_thread =
+            std::thread::spawn(|| run_perf_and_decode(5, "user_events:myprovider_L2K1"));
+
+        // Give a little time for perf to start recording
+        std::thread::sleep(std::time::Duration::from_millis(500));
+
+        // Execute the code that should generate the events we want to capture
         error!(
             name: "my-event-name",
             event_id = 20,
             user_name = "otel user",
-            user_email = "otel.user@opentelemtry.com");
+            user_email = "otel.user@opentelemtry.com"
+        );
+
+        // Add a small delay to ensure the event is captured
+        std::thread::sleep(std::time::Duration::from_millis(500));
+
+        // Wait for the perf thread to complete and get the results
+        let result = perf_thread.join().expect("Perf thread panicked");
+
+        assert!(result.is_ok());
+        let json_content = result.unwrap();
+        assert!(!json_content.is_empty());
+
+        // Additional assertions to verify the captured event contains the expected data
+        assert!(json_content.contains("my-event-name"));
+        assert!(json_content.contains("event_id"));
+        assert!(json_content.contains("otel user"));
     }
 
     fn check_user_events_available() -> Result<(), String> {
@@ -53,5 +78,54 @@ mod tests {
                 String::from_utf8_lossy(&output.stderr)
             ))
         }
+    }
+
+    pub fn run_perf_and_decode(duration_secs: u64, event: &str) -> std::io::Result<String> {
+        // Run perf record with timeout
+        let perf_status = Command::new("sudo")
+            .args([
+                "timeout",
+                "-s",
+                "SIGINT",
+                &duration_secs.to_string(),
+                "perf",
+                "record",
+                "-e",
+                event,
+            ])
+            .status()?;
+
+        if !perf_status.success() {
+            // Check if it's the expected signal termination (SIGINT from timeout)
+            // timeout sends SIGINT, which will cause a non-zero exit code (130 typically)
+            if !matches!(perf_status.code(), Some(124) | Some(130) | Some(143)) {
+                panic!(
+                    "perf record failed with exit code: {:?}",
+                    perf_status.code()
+                );
+            }
+        }
+
+        // Make the perf.data file world-readable
+        let chmod_status = Command::new("sudo")
+            .args(["chmod", "uog+r", "./perf.data"])
+            .status()?;
+
+        if !chmod_status.success() {
+            panic!("chmod failed with exit code: {:?}", chmod_status.code());
+        }
+
+        // Decode the performance data and return it directly
+        let decode_output = Command::new("perf-decode").args(["./perf.data"]).output()?;
+
+        if !decode_output.status.success() {
+            panic!(
+                "perf-decode failed with exit code: {:?}",
+                decode_output.status.code()
+            );
+        }
+
+        // Convert the output to a String and return it
+        Ok(String::from_utf8_lossy(&decode_output.stdout).to_string())
     }
 }
