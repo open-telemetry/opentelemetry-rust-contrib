@@ -27,13 +27,13 @@ impl UserEventsExporter {
             return Err("Provider name must be less than 234 characters.".to_string());
         }
         if !provider_name
-        .chars()
-        .all(|c| c.is_ascii_alphanumeric() || c == '_')
-    {
-        return Err(
-            "Provider name must contain only ASCII letters, digits, and '_'.".to_string(),
-        );
-    }
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || c == '_')
+        {
+            return Err(
+                "Provider name must contain only ASCII letters, digits, and '_'.".to_string(),
+            );
+        }
 
         let mut eventheader_provider: Provider =
             Provider::new(provider_name, &Provider::new_options());
