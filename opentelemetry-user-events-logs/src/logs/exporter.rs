@@ -301,6 +301,7 @@ impl UserEventsExporter {
             });
             Ok(())
         } else {
+            println!("EserEventExporter: EventSet not enabled");
             otel_debug!(
                 name: "UserEvents.EventSetNotEnabled",
                 level = level.as_int()
