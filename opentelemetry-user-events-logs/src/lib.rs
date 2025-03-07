@@ -55,6 +55,7 @@ mod tests {
         std::thread::sleep(std::time::Duration::from_millis(2000));
 
         // Execute the code that should generate the events we want to capture
+        println!("Generating event1");
         error!(
             name: "my-event-name",
             event_id = 20,
@@ -63,12 +64,15 @@ mod tests {
         );
 
         std::thread::sleep(std::time::Duration::from_millis(500));
+        println!("Generating event1");
         error!(
             name: "my-event-name",
             event_id = 20,
             user_name = "otel user",
             user_email = "otel.user@opentelemtry.com"
         );
+
+        println!("Generating events completed");
 
         // Add a small delay to ensure the event is captured
         std::thread::sleep(std::time::Duration::from_millis(500));
