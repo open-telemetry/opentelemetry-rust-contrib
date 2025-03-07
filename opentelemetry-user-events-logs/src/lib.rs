@@ -45,7 +45,7 @@ mod tests {
             std::thread::spawn(|| run_perf_and_decode(5, "user_events:myprovider_L2K1"));
 
         // Give a little time for perf to start recording
-        std::thread::sleep(std::time::Duration::from_millis(500));
+        std::thread::sleep(std::time::Duration::from_millis(2000));
 
         // Execute the code that should generate the events we want to capture
         error!(
