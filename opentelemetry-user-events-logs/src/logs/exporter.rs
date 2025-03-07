@@ -366,8 +366,23 @@ mod tests {
 
     #[test]
     fn valid_provider_name() {
-        let result = UserEventsExporter::new("MyCompany_MyComponent");
-        assert!(result.is_ok());
+        let valid_names = vec![
+            "ValidName",
+            "valid_name",
+            "Valid123",
+            "valid_123",
+            "_valid_name",
+            "VALID_NAME",
+        ];
+
+        for valid_name in valid_names {
+            let result = UserEventsExporter::new(valid_name);
+            assert!(
+                result.is_ok(),
+                "Expected '{}' to be valid, but it was rejected",
+                valid_name
+            );
+        }
     }
 
     #[test]
@@ -383,49 +398,48 @@ mod tests {
 
     #[test]
     fn provider_name_contains_invalid_characters() {
-        let result = UserEventsExporter::new("Invalid Name");
-        assert!(result.is_err());
-        assert_eq!(
-            result.err().unwrap(),
-            "Provider name must contain only ASCII letters, digits, and '_'.".to_string()
-        );
+        // Define a vector of invalid provider names to test
+        let invalid_names = vec![
+            "Invalid Name",  // space
+            "Invalid:Name",  // colon
+            "Invalid\0Name", // null character
+            "Invalid-Name",  // hyphen
+            "InvalidName!",  // exclamation mark
+            "InvalidName@",  // at symbol
+            "Invalid+Name",  // plus
+            "Invalid&Name",  // ampersand
+            "Invalid#Name",  // hash
+            "Invalid%Name",  // percent
+            "Invalid/Name",  // slash
+            "Invalid\\Name", // backslash
+            "Invalid=Name",  // equals
+            "Invalid?Name",  // question mark
+            "Invalid;Name",  // semicolon
+            "Invalid,Name",  // comma
+        ];
 
-        let result = UserEventsExporter::new("Invalid:Name");
-        assert!(result.is_err());
-        assert_eq!(
-            result.err().unwrap(),
-            "Provider name must contain only ASCII letters, digits, and '_'.".to_string()
-        );
+        // Expected error message
+        let expected_error =
+            "Provider name must contain only ASCII letters, digits, and '_'.".to_string();
 
-        let result = UserEventsExporter::new("Invalid\0Name");
-        assert!(result.is_err());
-        assert_eq!(
-            result.err().unwrap(),
-            "Provider name must contain only ASCII letters, digits, and '_'.".to_string()
-        );
+        // Test each invalid name
+        for invalid_name in invalid_names {
+            let result = UserEventsExporter::new(invalid_name);
 
-        let result = UserEventsExporter::new("Invalid-Name");
-        assert!(result.is_err());
-        assert_eq!(
-            result.err().unwrap(),
-            "Provider name must contain only ASCII letters, digits, and '_'.".to_string()
-        );
-    }
+            // Assert that the result is an error
+            assert!(
+                result.is_err(),
+                "Expected '{}' to be invalid, but it was accepted",
+                invalid_name
+            );
 
-    #[test]
-    fn provider_name_contains_non_ascii_characters() {
-        let result = UserEventsExporter::new("InvalidName!");
-        assert!(result.is_err());
-        assert_eq!(
-            result.err().unwrap(),
-            "Provider name must contain only ASCII letters, digits, and '_'.".to_string()
-        );
-
-        let result = UserEventsExporter::new("InvalidName@");
-        assert!(result.is_err());
-        assert_eq!(
-            result.err().unwrap(),
-            "Provider name must contain only ASCII letters, digits, and '_'.".to_string()
-        );
+            // Assert that the error message is as expected
+            assert_eq!(
+                result.err().unwrap(),
+                expected_error,
+                "Wrong error message for invalid name: '{}'",
+                invalid_name
+            );
+        }
     }
 }
