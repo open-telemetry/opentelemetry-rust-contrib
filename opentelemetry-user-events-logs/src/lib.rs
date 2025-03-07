@@ -27,6 +27,13 @@ mod tests {
             .with_user_event_exporter("myprovider")
             .build();
 
+        let user_event_status = check_user_events_available().expect("Kernel does not support user_events. Verify your distribution/kernel supports user_events: https://docs.kernel.org/trace/user_events.html.");
+        assert!(user_event_status.contains("myprovider_L1K1"));
+        assert!(user_event_status.contains("myprovider_L2K1"));
+        assert!(user_event_status.contains("myprovider_L3K1"));
+        assert!(user_event_status.contains("myprovider_L4K1"));
+        assert!(user_event_status.contains("myprovider_L5K1"));
+
         let filter_otel =
             EnvFilter::new("info").add_directive("opentelemetry=off".parse().unwrap());
         let otel_layer = layer::OpenTelemetryTracingBridge::new(&logger_provider);
@@ -48,15 +55,13 @@ mod tests {
         // Give a little time for perf to start recording
         std::thread::sleep(std::time::Duration::from_millis(2000));
 
-        // check_user_events_available().expect("Kernel does not support user_events. Verify your distribution/kernel supports user_events: https://docs.kernel.org/trace/user_events.html.");
-
         // ACT
         error!(
             name: "my-event-name",
             target: "my-target",
             event_id = 20,
             user_name = "otel user",
-            user_email = "otel.user@opentelemtry.com"
+            user_email = "otel.user@opentelemetry.com"
         );
 
         // Wait for the perf thread to complete and get the results
@@ -75,7 +80,7 @@ mod tests {
         assert!(json_content.contains("otel.user@opentelemetry.com"));
     }
 
-    fn check_user_events_available() -> Result<(), String> {
+    fn check_user_events_available() -> Result<String, String> {
         let output = Command::new("sudo")
             .arg("cat")
             .arg("/sys/kernel/tracing/user_events_status")
@@ -84,8 +89,7 @@ mod tests {
 
         if output.status.success() {
             let status = String::from_utf8_lossy(&output.stdout);
-            info!(name = "UserEvent Status", "User events status: {}", status);
-            Ok(())
+            Ok(status.to_string())
         } else {
             Err(format!(
                 "Command executed with failing error code: {}",
