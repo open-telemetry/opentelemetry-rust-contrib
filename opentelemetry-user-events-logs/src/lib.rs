@@ -72,9 +72,9 @@ mod tests {
         let json_content = result.unwrap();
         assert!(!json_content.is_empty());
 
-        println!("Decoded perf data: {}", json_content);
+        // println!("Decoded perf data: {}", json_content);
         let formatted_output = format!(r#"{}"#, json_content.trim());
-        println!("Formatted output: {}", formatted_output);
+        // println!("Formatted output: {}", formatted_output);
 
         let json_value: Value = from_str(&formatted_output).expect("Failed to parse JSON");
 
