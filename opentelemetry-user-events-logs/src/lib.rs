@@ -29,7 +29,7 @@ mod tests {
 
         // Basic check if user_events are available
         let user_event_status = check_user_events_available().expect("Kernel does not support user_events. Verify your distribution/kernel supports user_events: https://docs.kernel.org/trace/user_events.html.");
-        println!("User events status: {}", user_event_status);
+        println!("User events status at start: {}", user_event_status);
 
         let logger_provider = LoggerProviderBuilder::default()
             .with_user_event_exporter("myprovider")
@@ -39,6 +39,7 @@ mod tests {
         // following providername_level_k1 format
         // Validate that the TracePoints are created.
         let user_event_status = check_user_events_available().expect("Kernel does not support user_events. Verify your distribution/kernel supports user_events: https://docs.kernel.org/trace/user_events.html.");
+        println!("User events status after provider creation: {}", user_event_status);
         assert!(user_event_status.contains("myprovider_L1K1"));
         assert!(user_event_status.contains("myprovider_L2K1"));
         assert!(user_event_status.contains("myprovider_L3K1"));
