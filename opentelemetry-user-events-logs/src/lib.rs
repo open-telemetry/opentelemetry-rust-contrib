@@ -36,6 +36,7 @@ mod tests {
         // This is important because the tracepoints are created in the kernel
         // and it takes a little time for them to be available
         std::thread::sleep(std::time::Duration::from_millis(2000));
+        check_user_events_available().expect("Kernel does not support user_events. Verify your distribution/kernel supports user_events: https://docs.kernel.org/trace/user_events.html.");
 
         // Start perf recording in a separate thread
         let perf_thread =
