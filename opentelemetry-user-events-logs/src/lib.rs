@@ -205,9 +205,9 @@ mod tests {
 
         // Remove any Byte Order Mark (BOM) characters
         // UTF-8 BOM is EF BB BF (in hex)
-        let cleaned_output = if raw_output.starts_with('\u{FEFF}') {
+        let cleaned_output = if let Some(stripped) = raw_output.strip_prefix('\u{FEFF}') {
             // Skip the BOM character
-            raw_output[3..].to_string()
+            stripped.to_string()
         } else {
             raw_output
         };
