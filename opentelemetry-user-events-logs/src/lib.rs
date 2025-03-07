@@ -76,7 +76,11 @@ mod tests {
 
         /*
         Example output:
-         { "n": "myprovider:my-event-name", "__csver__": 1024, "PartA": { "time": "2025-03-07T05:02:35.838954949+00:00" }, "PartC": { "user_name": "otel user", "user_email": "otel.user@opentelemetry.com" }, "PartB": { "_typeName": "Log", "severityNumber": 2, "severityText": "ERROR", "eventId": 20, "name": "my-event-name" }, "meta": { "time": 39919.929650336, "cpu": 7, "pid": 18411, "tid": 18412, "level": 2, "keyword": "0x1" } } ]}
+{
+"./perf.data": [
+  { "n": "myprovider:my-event-name", "__csver__": 1024, "PartA": { "time": "2025-03-07T05:11:29.871690902+00:00" }, "PartC": { "user_name": "otel user", "user_email": "otel.user@opentelemetry.com" }, "PartB": { "_typeName": "Log", "severityNumber": 2, "severityText": "ERROR", "eventId": 20, "name": "my-event-name" }, "meta": { "time": 40453.962811799, "cpu": 5, "pid": 19247, "tid": 19248, "level": 2, "keyword": "0x1" } } ]
+}
+
          */
 
         // Additional assertions to verify the captured event contains the expected data
