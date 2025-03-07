@@ -105,6 +105,7 @@ mod tests {
 
     pub fn run_perf_and_decode(duration_secs: u64, event: &str) -> std::io::Result<String> {
         // Run perf record with timeout
+        println!("Running perf record for {} seconds...", duration_secs);
         let perf_status = Command::new("sudo")
             .args([
                 "timeout",
@@ -129,8 +130,7 @@ mod tests {
             }
         }
 
-        // sleep 5 seconds
-        std::thread::sleep(std::time::Duration::from_secs(5));
+        println!("Perf record completed.");
 
         // Make the perf.data file world-readable
         let chmod_status = Command::new("sudo")
