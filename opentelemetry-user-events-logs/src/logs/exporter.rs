@@ -348,8 +348,14 @@ impl opentelemetry_sdk::logs::LogExporter for UserEventsExporter {
         // so we can use the level as index to the Vec.
         let level = Self::get_severity_level(level);
         match self.event_sets.get(level.as_int() as usize) {
-            Some(event_set) => event_set.enabled(),
-            None => false,
+            Some(event_set) => {
+                println!("User-Event Enabled? EventSet found: {:?}", event_set);
+                event_set.enabled()
+            }
+            None => {
+                println!("User-Event Enabled? EventSet not found");
+                false
+            }
         }
     }
 }
