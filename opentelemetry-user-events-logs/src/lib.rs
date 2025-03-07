@@ -50,8 +50,7 @@ mod tests {
 
         // check_user_events_available().expect("Kernel does not support user_events. Verify your distribution/kernel supports user_events: https://docs.kernel.org/trace/user_events.html.");
 
-        // Execute the code that should generate the events we want to capture
-        println!("Generating event1");
+        // ACT
         error!(
             name: "my-event-name",
             target: "my-target",
@@ -59,21 +58,6 @@ mod tests {
             user_name = "otel user",
             user_email = "otel.user@opentelemtry.com"
         );
-
-        std::thread::sleep(std::time::Duration::from_millis(500));
-        println!("Generating event1");
-        error!(
-            name: "my-event-name",
-            target: "my-target",
-            event_id = 20,
-            user_name = "otel user",
-            user_email = "otel.user@opentelemetry.com"
-        );
-
-        println!("Generating events completed");
-
-        // Add a small delay to ensure the event is captured
-        std::thread::sleep(std::time::Duration::from_millis(500));
 
         // Wait for the perf thread to complete and get the results
         let result = perf_thread.join().expect("Perf thread panicked");
