@@ -279,6 +279,7 @@ impl UserEventsExporter {
                 eb.set_struct_field_count(cs_b_bookmark, cs_b_count);
 
                 let result = eb.write(event_set, None, None);
+                println!("User-Event Exporte Write: {}", result);
                 if result > 0 {
                     // Specially log the case where there is no listener and size exceeding.
                     if result == 9 {

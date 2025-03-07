@@ -58,21 +58,21 @@ mod tests {
 
         // Execute the code that should generate the events we want to capture
         println!("Generating event1");
-        // error!(
-        //     name: "my-event-name",
-        //     event_id = 20,
-        //     user_name = "otel user",
-        //     user_email = "otel.user@opentelemtry.com"
-        // );
+        error!(
+            name: "my-event-name",
+            event_id = 20,
+            user_name = "otel user",
+            user_email = "otel.user@opentelemtry.com"
+        );
 
         std::thread::sleep(std::time::Duration::from_millis(500));
         println!("Generating event1");
-        // error!(
-        //     name: "my-event-name",
-        //     event_id = 20,
-        //     user_name = "otel user",
-        //     user_email = "otel.user@opentelemtry.com"
-        // );
+        error!(
+            name: "my-event-name",
+            event_id = 20,
+            user_name = "otel user",
+            user_email = "otel.user@opentelemtry.com"
+        );
 
         println!("Generating events completed");
 
