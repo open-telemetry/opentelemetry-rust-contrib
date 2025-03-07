@@ -33,7 +33,7 @@ mod tests {
         let otel_layer = otel_layer.with_filter(filter_otel);
 
         let filter_fmt =
-            EnvFilter::new("info").add_directive("opentelemetry=debug".parse().unwrap());
+            EnvFilter::new("debug").add_directive("opentelemetry=debug".parse().unwrap());
         let fmt_layer = tracing_subscriber::fmt::layer().with_filter(filter_fmt);
 
         let subscriber = tracing_subscriber::registry()
@@ -45,7 +45,7 @@ mod tests {
         // This is important because the tracepoints are created in the kernel
         // and it takes a little time for them to be available
         std::thread::sleep(std::time::Duration::from_millis(2000));
-        check_user_events_available().expect("Kernel does not support user_events. Verify your distribution/kernel supports user_events: https://docs.kernel.org/trace/user_events.html.");
+
 
         // Start perf recording in a separate thread
         let perf_thread =
@@ -53,6 +53,8 @@ mod tests {
 
         // Give a little time for perf to start recording
         std::thread::sleep(std::time::Duration::from_millis(2000));
+
+        check_user_events_available().expect("Kernel does not support user_events. Verify your distribution/kernel supports user_events: https://docs.kernel.org/trace/user_events.html.");
 
         // Execute the code that should generate the events we want to capture
         println!("Generating event1");
