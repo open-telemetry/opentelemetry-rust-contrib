@@ -14,7 +14,7 @@ mod tests {
     use opentelemetry_appender_tracing::layer;
     use opentelemetry_sdk::logs::LoggerProviderBuilder;
     use std::process::Command;
-    use tracing::error;
+    use tracing::{error, info};
     use tracing_subscriber::{layer::SubscriberExt, EnvFilter, Layer};
 
     #[test]
@@ -103,7 +103,7 @@ mod tests {
 
         if output.status.success() {
             let status = String::from_utf8_lossy(&output.stdout);
-            println!("User events status: {}", status);
+            info!(name = "UserEvent Status", "User events status: {}", status);
             Ok(())
         } else {
             Err(format!(
