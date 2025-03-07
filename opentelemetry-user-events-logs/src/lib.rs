@@ -31,7 +31,14 @@ mod tests {
             EnvFilter::new("info").add_directive("opentelemetry=off".parse().unwrap());
         let otel_layer = layer::OpenTelemetryTracingBridge::new(&logger_provider);
         let otel_layer = otel_layer.with_filter(filter_otel);
-        let subscriber = tracing_subscriber::registry().with(otel_layer);
+
+        let filter_fmt =
+            EnvFilter::new("info").add_directive("opentelemetry=debug".parse().unwrap());
+        let fmt_layer = tracing_subscriber::fmt::layer().with_filter(filter_fmt);
+
+        let subscriber = tracing_subscriber::registry()
+            .with(otel_layer)
+            .with(fmt_layer);
         let _guard = tracing::subscriber::set_default(subscriber);
 
         // Give sometime for the tracepoints to be created
@@ -90,10 +97,7 @@ mod tests {
 
         if output.status.success() {
             let status = String::from_utf8_lossy(&output.stdout);
-            println!(
-                "User events status: {}",
-                status
-            );
+            println!("User events status: {}", status);
             Ok(())
         } else {
             Err(format!(
