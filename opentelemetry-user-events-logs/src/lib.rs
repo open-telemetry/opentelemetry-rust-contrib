@@ -76,6 +76,11 @@ mod tests {
             .map_err(|e| format!("Failed to execute command: {}", e))?;
 
         if output.status.success() {
+            let status = String::from_utf8_lossy(&output.stdout);
+            println!(
+                "User events status: {}",
+                status
+            );
             Ok(())
         } else {
             Err(format!(
