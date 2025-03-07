@@ -9,7 +9,6 @@
 - Added validation for the provider name in `with_user_event_exporter(provider_name)`.
   The provider name must:
   - Be less than 234 characters.
-  - Not contain the characters `'\0'`, `' '`, or `':'`.
   - Contain only ASCII letters, digits, and the underscore (`'_'`) character.
 
 ## v0.10.0
