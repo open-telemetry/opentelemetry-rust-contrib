@@ -129,6 +129,9 @@ mod tests {
             }
         }
 
+        // sleep 5 seconds
+        std::thread::sleep(std::time::Duration::from_secs(5));
+
         // Make the perf.data file world-readable
         let chmod_status = Command::new("sudo")
             .args(["chmod", "uog+r", "./perf.data"])
