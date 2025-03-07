@@ -16,11 +16,9 @@ doc = false
 
 [dependencies]
 ctrlc = "3.2.5"
-lazy_static = "1.4.0"
 num_cpus = "1.15.0"
 num-format = "0.4.4"
 sysinfo = { version = "0.32", optional = true }
-eventheader_dynamic = "0.4.0"
 
 opentelemetry-appender-tracing = { workspace = true, features= ["spec_unstable_logs_enabled"] }
 opentelemetry_sdk = { workspace = true, features = ["logs", "spec_unstable_logs_enabled"] }
