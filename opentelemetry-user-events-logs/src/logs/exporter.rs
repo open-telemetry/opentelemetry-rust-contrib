@@ -279,7 +279,6 @@ impl UserEventsExporter {
                 eb.set_struct_field_count(cs_b_bookmark, cs_b_count);
 
                 let result = eb.write(event_set, None, None);
-                println!("User-Event Exporte Write: {}", result);
                 if result > 0 {
                     // Specially log the case where there is no listener and size exceeding.
                     if result == 9 {
@@ -301,7 +300,6 @@ impl UserEventsExporter {
             });
             Ok(())
         } else {
-            println!("EserEventExporter: EventSet not enabled");
             otel_debug!(
                 name: "UserEvents.EventSetNotEnabled",
                 level = level.as_int()
@@ -348,14 +346,8 @@ impl opentelemetry_sdk::logs::LogExporter for UserEventsExporter {
         // so we can use the level as index to the Vec.
         let level = Self::get_severity_level(level);
         match self.event_sets.get(level.as_int() as usize) {
-            Some(event_set) => {
-                println!("User-Event Enabled? EventSet found: {:?}", event_set);
-                event_set.enabled()
-            }
-            None => {
-                println!("User-Event Enabled? EventSet not found");
-                false
-            }
+            Some(event_set) => event_set.enabled(),
+            None => false,
         }
     }
 }

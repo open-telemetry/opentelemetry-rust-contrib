@@ -41,11 +41,6 @@ mod tests {
             .with(fmt_layer);
         let _guard = tracing::subscriber::set_default(subscriber);
 
-        // Give sometime for the tracepoints to be created
-        // This is important because the tracepoints are created in the kernel
-        // and it takes a little time for them to be available
-        std::thread::sleep(std::time::Duration::from_millis(2000));
-
         // Start perf recording in a separate thread
         let perf_thread =
             std::thread::spawn(|| run_perf_and_decode(5, "user_events:myprovider_L2K1"));
@@ -53,7 +48,7 @@ mod tests {
         // Give a little time for perf to start recording
         std::thread::sleep(std::time::Duration::from_millis(2000));
 
-        check_user_events_available().expect("Kernel does not support user_events. Verify your distribution/kernel supports user_events: https://docs.kernel.org/trace/user_events.html.");
+        // check_user_events_available().expect("Kernel does not support user_events. Verify your distribution/kernel supports user_events: https://docs.kernel.org/trace/user_events.html.");
 
         // Execute the code that should generate the events we want to capture
         println!("Generating event1");
@@ -72,7 +67,7 @@ mod tests {
             target: "my-target",
             event_id = 20,
             user_name = "otel user",
-            user_email = "otel.user@opentelemtry.com"
+            user_email = "otel.user@opentelemetry.com"
         );
 
         println!("Generating events completed");
@@ -91,8 +86,9 @@ mod tests {
 
         // Additional assertions to verify the captured event contains the expected data
         assert!(json_content.contains("my-event-name"));
-        assert!(json_content.contains("event_id"));
+        assert!(json_content.contains("eventId"));
         assert!(json_content.contains("otel user"));
+        assert!(json_content.contains("otel.user@opentelemetry.com"));
     }
 
     fn check_user_events_available() -> Result<(), String> {
@@ -116,7 +112,6 @@ mod tests {
 
     pub fn run_perf_and_decode(duration_secs: u64, event: &str) -> std::io::Result<String> {
         // Run perf record with timeout
-        println!("Running perf record for {} seconds...", duration_secs);
         let perf_status = Command::new("sudo")
             .args([
                 "timeout",
@@ -140,8 +135,6 @@ mod tests {
                 );
             }
         }
-
-        println!("Perf record completed.");
 
         // Make the perf.data file world-readable
         let chmod_status = Command::new("sudo")
