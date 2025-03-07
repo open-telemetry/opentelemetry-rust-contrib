@@ -18,6 +18,10 @@ mod tests {
     use tracing::error;
     use tracing_subscriber::{layer::SubscriberExt, EnvFilter, Layer};
 
+    // Ignore as this cannot be run in Github CI due to lack of 
+    // required Kernel. Uncomment to run locally in a supported environment
+    
+    #[ignore]
     #[test]
     fn integration_test_basic() {
         // Run using the below command
