@@ -22,12 +22,17 @@ mod tests {
     fn integration_test_basic() {
         // Run using the below command
         // sudo -E ~/.cargo/bin/cargo test integration -- --nocapture
+
+        // Basic check if user_events are available
         check_user_events_available().expect("Kernel does not support user_events. Verify your distribution/kernel supports user_events: https://docs.kernel.org/trace/user_events.html.");
 
         let logger_provider = LoggerProviderBuilder::default()
             .with_user_event_exporter("myprovider")
             .build();
 
+        // Once provider with user_event exporter is created, it should create the TracePoints
+        // following providername_level_k1 format
+        // Validate that the TracePoints are created.
         let user_event_status = check_user_events_available().expect("Kernel does not support user_events. Verify your distribution/kernel supports user_events: https://docs.kernel.org/trace/user_events.html.");
         assert!(user_event_status.contains("myprovider_L1K1"));
         assert!(user_event_status.contains("myprovider_L2K1"));
@@ -39,22 +44,15 @@ mod tests {
             EnvFilter::new("info").add_directive("opentelemetry=off".parse().unwrap());
         let otel_layer = layer::OpenTelemetryTracingBridge::new(&logger_provider);
         let otel_layer = otel_layer.with_filter(filter_otel);
-
-        let filter_fmt =
-            EnvFilter::new("debug").add_directive("opentelemetry=debug".parse().unwrap());
-        let fmt_layer = tracing_subscriber::fmt::layer().with_filter(filter_fmt);
-
-        let subscriber = tracing_subscriber::registry()
-            .with(otel_layer)
-            .with(fmt_layer);
+        let subscriber = tracing_subscriber::registry().with(otel_layer);
         let _guard = tracing::subscriber::set_default(subscriber);
 
-        // Start perf recording in a separate thread
+        // Start perf recording in a separate thread and emit logs in parallel.
         let perf_thread =
             std::thread::spawn(|| run_perf_and_decode(5, "user_events:myprovider_L2K1"));
 
         // Give a little time for perf to start recording
-        std::thread::sleep(std::time::Duration::from_millis(2000));
+        std::thread::sleep(std::time::Duration::from_millis(1000));
 
         // ACT
         error!(
@@ -72,14 +70,16 @@ mod tests {
         let json_content = result.unwrap();
         assert!(!json_content.is_empty());
 
-        // println!("Decoded perf data: {}", json_content);
         let formatted_output = format!(r#"{}"#, json_content.trim());
-        // println!("Formatted output: {}", formatted_output);
+        /*
+                // Sample output from perf-decode
+                {
+        "./perf.data": [
+          { "n": "myprovider:my-event-name", "__csver__": 1024, "PartA": { "time": "2025-03-07T16:31:28.279214367+00:00" }, "PartC": { "user_name": "otel user", "user_email": "otel.user@opentelemetry.com" }, "PartB": { "_typeName": "Log", "severityNumber": 2, "severityText": "ERROR", "eventId": 20, "name": "my-event-name" }, "meta": { "time": 81252.403220286, "cpu": 4, "pid": 21084, "tid": 21085, "level": 2, "keyword": "0x1" } } ]
+        }
+                 */
 
         let json_value: Value = from_str(&formatted_output).expect("Failed to parse JSON");
-
-        // The JSON has a structure like: { "./perf.data": [ {event1}, {event2}, ... ] }
-        // Get the events array
         let perf_data_key = json_value
             .as_object()
             .expect("JSON is not an object")
@@ -91,7 +91,7 @@ mod tests {
             .as_array()
             .expect("Events for perf.data is not an array");
 
-        // Find our specific event
+        // Find the specific event. Its named providername:eventname format.
         let event = events
             .iter()
             .find(|e| {
@@ -109,6 +109,7 @@ mod tests {
 
         // Validate PartA
         let part_a = &event["PartA"];
+        // Only check if the time field exists, not the actual value
         assert!(part_a.get("time").is_some(), "PartA.time is missing");
 
         // Validate PartB
@@ -147,7 +148,7 @@ mod tests {
     }
 
     pub fn run_perf_and_decode(duration_secs: u64, event: &str) -> std::io::Result<String> {
-        // Run perf record with timeout
+        // Run perf record for duration_secs seconds
         let perf_status = Command::new("sudo")
             .args([
                 "timeout",
@@ -172,7 +173,7 @@ mod tests {
             }
         }
 
-        // Make the perf.data file world-readable
+        // Change permissions on perf.data (which is the default file perf records to) to allow reading
         let chmod_status = Command::new("sudo")
             .args(["chmod", "uog+r", "./perf.data"])
             .status()?;
@@ -182,6 +183,10 @@ mod tests {
         }
 
         // Decode the performance data and return it directly
+        // Note: This tool must be installed on the machine
+        // git clone https://github.com/microsoft/LinuxTracepoints &&
+        // cd LinuxTracepoints && mkdir build && cd build && cmake .. && make &&
+        // sudo cp bin/perf-decode /usr/local/bin &&
         let decode_output = Command::new("perf-decode").args(["./perf.data"]).output()?;
 
         if !decode_output.status.success() {
@@ -193,7 +198,7 @@ mod tests {
 
         // Convert the output to a String
         let raw_output = String::from_utf8_lossy(&decode_output.stdout).to_string();
-        
+
         // Remove any Byte Order Mark (BOM) characters
         // UTF-8 BOM is EF BB BF (in hex)
         let cleaned_output = if raw_output.starts_with('\u{FEFF}') {
@@ -202,11 +207,10 @@ mod tests {
         } else {
             raw_output
         };
-        
-        // Also trim any other invisible whitespace characters just to be safe
+
+        // Trim the output to remove any leading/trailing whitespace
         let trimmed_output = cleaned_output.trim().to_string();
 
-        // Convert the output to a String and return it
         Ok(trimmed_output)
     }
 }
