@@ -19,6 +19,8 @@ mod tests {
 
     #[test]
     fn integration_test_basic() {
+        // Run using
+        // sudo -E ~/.cargo/bin/cargo test integration -- --nocapture
         check_user_events_available().expect("Kernel does not support user_events. Verify your distribution/kernel supports user_events: https://docs.kernel.org/trace/user_events.html.");
 
         let logger_provider = LoggerProviderBuilder::default()
@@ -62,6 +64,8 @@ mod tests {
         assert!(result.is_ok());
         let json_content = result.unwrap();
         assert!(!json_content.is_empty());
+
+        println!("Decoded perf data: {}", json_content);
 
         // Additional assertions to verify the captured event contains the expected data
         assert!(json_content.contains("my-event-name"));
