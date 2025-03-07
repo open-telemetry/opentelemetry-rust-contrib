@@ -32,6 +32,11 @@ mod tests {
         let subscriber = tracing_subscriber::registry().with(otel_layer);
         let _guard = tracing::subscriber::set_default(subscriber);
 
+        // Give sometime for the tracepoints to be created
+        // This is important because the tracepoints are created in the kernel
+        // and it takes a little time for them to be available
+        std::thread::sleep(std::time::Duration::from_millis(2000));
+
         // Start perf recording in a separate thread
         let perf_thread =
             std::thread::spawn(|| run_perf_and_decode(5, "user_events:myprovider_L2K1"));
