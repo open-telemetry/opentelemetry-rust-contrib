@@ -74,7 +74,7 @@ mod tests {
         let json_content = result.unwrap();
         assert!(!json_content.is_empty());
 
-        let formatted_output = format!(r#"{}"#, json_content.trim());
+        let formatted_output = json_content.trim().to_string();
         /*
                 // Sample output from perf-decode
                 {
