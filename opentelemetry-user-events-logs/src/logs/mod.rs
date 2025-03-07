@@ -12,7 +12,6 @@ pub trait UserEventsLoggerProviderBuilderExt {
     ///
     /// The provider name must:
     /// - Be less than 234 characters.
-    /// - Not contain the characters `'\0'`, `' '`, or `':'`.
     /// - Contain only ASCII letters, digits, and the underscore (`'_'`) character.
     /// - Be short, human-readable, and unique enough to avoid conflicts with other provider names.
     /// - Typically include a company name and a component name, e.g., "MyCompany_MyComponent".
