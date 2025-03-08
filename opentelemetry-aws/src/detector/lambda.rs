@@ -59,54 +59,51 @@ impl ResourceDetector for LambdaResourceDetector {
 mod tests {
     use super::*;
     use sealed_test::prelude::*;
-    use std::env::{remove_var, set_var};
 
     #[sealed_test]
     fn test_aws_lambda_detector() {
-        set_var(AWS_LAMBDA_FUNCTION_NAME_ENV_VAR, "my-lambda-function");
-        set_var(AWS_REGION_ENV_VAR, "eu-west-3");
-        set_var(AWS_LAMBDA_FUNCTION_VERSION_ENV_VAR, "$LATEST");
-        set_var(
-            AWS_LAMBDA_LOG_STREAM_NAME_ENV_VAR,
-            "2023/01/01/[$LATEST]5d1edb9e525d486696cf01a3503487bc",
-        );
-        set_var(AWS_LAMBDA_MEMORY_LIMIT_ENV_VAR, "128");
-        set_var(
-            AWS_LAMBDA_LOG_GROUP_NAME_ENV_VAR,
-            "/aws/lambda/my-lambda-function",
-        );
-
-        let expected = Resource::builder_empty()
-            .with_attributes([
-                KeyValue::new(semconv::resource::CLOUD_PROVIDER, "aws"),
-                KeyValue::new(semconv::resource::CLOUD_REGION, "eu-west-3"),
-                KeyValue::new(
-                    semconv::resource::FAAS_INSTANCE,
-                    "2023/01/01/[$LATEST]5d1edb9e525d486696cf01a3503487bc",
+        temp_env::with_vars(
+            [
+                (AWS_LAMBDA_FUNCTION_NAME_ENV_VAR, Some("my-lambda-function")),
+                (AWS_REGION_ENV_VAR, Some("eu-west-3")),
+                (AWS_LAMBDA_FUNCTION_VERSION_ENV_VAR, Some("$LATEST")),
+                (
+                    AWS_LAMBDA_LOG_STREAM_NAME_ENV_VAR,
+                    Some("2023/01/01/[$LATEST]5d1edb9e525d486696cf01a3503487bc"),
                 ),
-                KeyValue::new(semconv::resource::FAAS_NAME, "my-lambda-function"),
-                KeyValue::new(semconv::resource::FAAS_VERSION, "$LATEST"),
-                KeyValue::new(semconv::resource::FAAS_MAX_MEMORY, 128 * 1024 * 1024),
-                KeyValue::new(
-                    semconv::resource::AWS_LOG_GROUP_NAMES,
-                    Value::Array(Array::from(vec![StringValue::from(
-                        "/aws/lambda/my-lambda-function".to_string(),
-                    )])),
+                (AWS_LAMBDA_MEMORY_LIMIT_ENV_VAR, Some("128")),
+                (
+                    AWS_LAMBDA_LOG_GROUP_NAME_ENV_VAR,
+                    Some("/aws/lambda/my-lambda-function"),
                 ),
-            ])
-            .build();
+            ],
+            || {
+                let expected = Resource::builder_empty()
+                    .with_attributes([
+                        KeyValue::new(semconv::resource::CLOUD_PROVIDER, "aws"),
+                        KeyValue::new(semconv::resource::CLOUD_REGION, "eu-west-3"),
+                        KeyValue::new(
+                            semconv::resource::FAAS_INSTANCE,
+                            "2023/01/01/[$LATEST]5d1edb9e525d486696cf01a3503487bc",
+                        ),
+                        KeyValue::new(semconv::resource::FAAS_NAME, "my-lambda-function"),
+                        KeyValue::new(semconv::resource::FAAS_VERSION, "$LATEST"),
+                        KeyValue::new(semconv::resource::FAAS_MAX_MEMORY, 128 * 1024 * 1024),
+                        KeyValue::new(
+                            semconv::resource::AWS_LOG_GROUP_NAMES,
+                            Value::Array(Array::from(vec![StringValue::from(
+                                "/aws/lambda/my-lambda-function".to_string(),
+                            )])),
+                        ),
+                    ])
+                    .build();
 
-        let detector = LambdaResourceDetector {};
-        let got = detector.detect();
+                let detector = LambdaResourceDetector {};
+                let got = detector.detect();
 
-        assert_eq!(expected, got);
-
-        remove_var(AWS_LAMBDA_FUNCTION_NAME_ENV_VAR);
-        remove_var(AWS_REGION_ENV_VAR);
-        remove_var(AWS_LAMBDA_FUNCTION_VERSION_ENV_VAR);
-        remove_var(AWS_LAMBDA_LOG_STREAM_NAME_ENV_VAR);
-        remove_var(AWS_LAMBDA_MEMORY_LIMIT_ENV_VAR);
-        remove_var(AWS_LAMBDA_LOG_GROUP_NAME_ENV_VAR);
+                assert_eq!(expected, got);
+            },
+        );
     }
 
     #[sealed_test]
