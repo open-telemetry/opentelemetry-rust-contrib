@@ -144,3 +144,19 @@ jobs:
           tool: cargo-machete
       - name: cargo machete
         run: cargo machete
+  cargo-workspace-lints:
+    continue-on-error: true
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: true
+      - uses: actions-rs/toolchain@v1
+        with:
+          toolchain: stable
+          override: true
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-workspace-lints
+      - name: cargo workspace-lints
+        run: cargo workspace-lints
