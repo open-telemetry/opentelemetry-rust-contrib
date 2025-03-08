@@ -251,11 +251,11 @@ mod tests {
 
         // Validate trace_id and span_id
         assert_eq!(
-            part_a_ext_dt["trace_id"].as_str().unwrap(),
+            part_a_ext_dt["traceId"].as_str().unwrap(),
             format!("{:x}", trace_id_expected)
         );
         assert_eq!(
-            part_a_ext_dt["span_id"].as_str().unwrap(),
+            part_a_ext_dt["spanId"].as_str().unwrap(),
             format!("{:x}", span_id_expected)
         );
 
