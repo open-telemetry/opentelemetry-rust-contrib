@@ -58,8 +58,9 @@ impl ResourceDetector for LambdaResourceDetector {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use sealed_test::prelude::*;
 
-    #[test]
+    #[sealed_test]
     fn test_aws_lambda_detector() {
         temp_env::with_vars(
             [
@@ -105,7 +106,7 @@ mod tests {
         );
     }
 
-    #[test]
+    #[sealed_test]
     fn test_aws_lambda_detector_returns_empty_if_no_lambda_environment() {
         let detector = LambdaResourceDetector {};
         let got = detector.detect();
