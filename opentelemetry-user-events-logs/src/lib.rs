@@ -214,7 +214,6 @@ mod tests {
                  */
 
         let json_value: Value = from_str(&formatted_output).expect("Failed to parse JSON");
-        println!("json_value: {:?}", json_value);
         let perf_data_key = json_value
             .as_object()
             .expect("JSON is not an object")
