@@ -15,3 +15,5 @@ cargo test --manifest-path=opentelemetry-user-events-logs/Cargo.toml --all-featu
 cargo test --manifest-path=opentelemetry-user-events-metrics/Cargo.toml --all-features
 
 cargo test --manifest-path=opentelemetry-resource-detectors/Cargo.toml --all-features
+
+sudo -E ~/.cargo/bin/cargo test --manifest-path=opentelemetry-user-events-logs/Cargo.toml -- --nocapture --ignored
