@@ -49,6 +49,11 @@ Open a pull request against the main
 [opentelemetry-rust-contrib](https://github.com/open-telemetry/opentelemetry-rust-contrib)
 repo.
 
+Your pull request should be named according to the
+[conventional commits](https://www.conventionalcommits.org/en/v1.0.0/) standard. This ensures that
+when the PR is squashed into `main`, the resulting commit message is consistent and makes it easier
+for us to generate a changelog  standard.
+
 > **Note**
 > It is recommended to run [pre-commit script](precommit.sh) from the root of
 the repo to catch any issues locally.
