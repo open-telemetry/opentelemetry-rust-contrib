@@ -53,6 +53,7 @@ hyper = "1"
 hyper-util = { version = "0.1.6", features = ["client", "full"] }
 hyperlocal = "0.9.1"
 http-body-util = "0.1.2"
+temp-env = "0.3"
 
 [[bench]]
 name = "datadog_exporter"
