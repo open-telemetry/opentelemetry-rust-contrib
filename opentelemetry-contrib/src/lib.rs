@@ -30,4 +30,9 @@
 )]
 #![cfg_attr(test, deny(warnings))]
 
+#[cfg(feature = "macros")]
+pub extern crate opentelemetry;
+#[cfg(feature = "macros")]
+pub extern crate opentelemetry_macros;
+
 pub mod trace;
