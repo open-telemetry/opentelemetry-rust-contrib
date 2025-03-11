@@ -68,7 +68,9 @@ jobs:
       with:
         toolchain: stable
         components: rustfmt, clippy
-    - uses: arduino/setup-protoc@v1
+    - uses: arduino/setup-protoc@v3
+      with:
+          repo-token: ${{ secrets.GITHUB_TOKEN }}
     - uses: actions-rs/cargo@v1
       with:
         command: fmt
@@ -120,7 +122,9 @@ jobs:
           toolchain: nightly
           components: rustfmt
           override: true
-      - uses: arduino/setup-protoc@v1
+      - uses: arduino/setup-protoc@v3
+        with:
+            repo-token: ${{ secrets.GITHUB_TOKEN }}
       - name: doc
         run: cargo doc --no-deps --all-features
         env:
@@ -138,7 +142,9 @@ jobs:
           toolchain: stable
           components: rustfmt,llvm-tools-preview
           override: true
-      - uses: arduino/setup-protoc@v1
+      - uses: arduino/setup-protoc@v3
+        with:
+            repo-token: ${{ secrets.GITHUB_TOKEN }}
       - name: cargo install cargo-llvm-cov
         uses: taiki-e/install-action@cargo-llvm-cov
       - name: cargo generate-lockfile
@@ -166,3 +172,19 @@ jobs:
           tool: cargo-machete
       - name: cargo machete
         run: cargo machete
+  cargo-workspace-lints:
+    continue-on-error: true
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: true
+      - uses: actions-rs/toolchain@v1
+        with:
+          toolchain: stable
+          override: true
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-workspace-lints
+      - name: cargo workspace-lints
+        run: cargo workspace-lints

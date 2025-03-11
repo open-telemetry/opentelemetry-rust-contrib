@@ -1,48 +1,43 @@
 use std::fmt::Debug;
 
-use opentelemetry_sdk::error::OTelSdkResult;
-
-#[cfg(feature = "spec_unstable_logs_enabled")]
+use opentelemetry::InstrumentationScope;
 use opentelemetry_sdk::logs::LogExporter;
-
-use crate::logs::exporter::*;
+use opentelemetry_sdk::{
+    error::OTelSdkResult,
+    logs::{LogBatch, SdkLogRecord},
+};
 
 /// This export processor exports without synchronization.
 /// This is currently only used in users_event exporter, where we know
 /// that the underlying exporter is safe under concurrent calls
 
 #[derive(Debug)]
-pub struct ReentrantLogProcessor {
-    event_exporter: UserEventsExporter,
+pub struct ReentrantLogProcessor<T: LogExporter> {
+    exporter: T,
 }
 
-impl ReentrantLogProcessor {
+impl<T: LogExporter> ReentrantLogProcessor<T> {
     /// constructor that accepts an exporter instance
-    pub fn new(exporter: UserEventsExporter) -> Self {
-        ReentrantLogProcessor {
-            event_exporter: exporter,
-        }
+    pub fn new(exporter: T) -> Self {
+        ReentrantLogProcessor { exporter }
     }
 }
 
-impl opentelemetry_sdk::logs::LogProcessor for ReentrantLogProcessor {
-    fn emit(
-        &self,
-        record: &mut opentelemetry_sdk::logs::SdkLogRecord,
-        instrumentation: &opentelemetry::InstrumentationScope,
-    ) {
-        _ = self.event_exporter.export_log_data(record, instrumentation);
+impl<T: LogExporter> opentelemetry_sdk::logs::LogProcessor for ReentrantLogProcessor<T> {
+    fn emit(&self, record: &mut SdkLogRecord, scope: &InstrumentationScope) {
+        let log_tuple = &[(record as &SdkLogRecord, scope)];
+        let _ = futures_executor::block_on(self.exporter.export(LogBatch::new(log_tuple)));
     }
 
-    // This is a no-op as this processor doesn't keep anything
-    // in memory to be flushed out.
+    // Nothing to flush
     fn force_flush(&self) -> OTelSdkResult {
         Ok(())
     }
 
-    // This is a no-op no special cleanup is required before
-    // shutdown.
+    // Nothing to shutdown
     fn shutdown(&self) -> OTelSdkResult {
+        // TODO: Actually invoke shutdown on the exporter
+        // This cannot be done today as it requires mutable reference to exporter.
         Ok(())
     }
 
@@ -53,6 +48,6 @@ impl opentelemetry_sdk::logs::LogProcessor for ReentrantLogProcessor {
         target: &str,
         name: &str,
     ) -> bool {
-        self.event_exporter.event_enabled(level, target, name)
+        self.exporter.event_enabled(level, target, name)
     }
 }

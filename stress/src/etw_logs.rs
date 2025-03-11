@@ -43,23 +43,18 @@ fn init_logger() -> SdkLoggerProvider {
         .build()
 }
 
-// Function that performs the logging task
-fn log_event_task() {
-    info!(
-        name = "my-event-name",
-        event_id = 20,
-        user_name = "otel user",
-        user_email = "otel@opentelemetry.io"
-    );
-}
-
 fn main() {
     let logger_provider = init_logger();
     let layer = layer::OpenTelemetryTracingBridge::new(&logger_provider);
     tracing_subscriber::registry().with(layer).init();
 
     throughput::test_throughput(|| {
-        log_event_task();
+        info!(
+            name : "my-event-name",
+            event_id = 20,
+            user_name = "otel user",
+            user_email = "otel@opentelemetry.io"
+        );
     });
 
     println!("Stress test completed.");

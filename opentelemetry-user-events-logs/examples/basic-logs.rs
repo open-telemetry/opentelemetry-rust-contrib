@@ -20,15 +20,16 @@ fn init_logger() -> SdkLoggerProvider {
 }
 
 fn main() {
-    // Example with tracing appender.
-    // Create a new tracing::Fmt layer to print the logs to stdout. It has a
-    // default filter of `info` level and above, and `debug` and above for logs
-    // from OpenTelemetry crates. The filter levels can be customized as needed.
+    // OpenTelemetry layer with a filter to ensure OTel's own logs are not fed back into
+    // the OpenTelemetry pipeline.
     let filter_otel = EnvFilter::new("info").add_directive("opentelemetry=off".parse().unwrap());
     let logger_provider = init_logger();
     let otel_layer = layer::OpenTelemetryTracingBridge::new(&logger_provider);
     let otel_layer = otel_layer.with_filter(filter_otel);
 
+    // Create a new tracing::Fmt layer to print the logs to stdout. It has a
+    // default filter of `info` level and above, and `debug` and above for logs
+    // from OpenTelemetry crates. The filter levels can be customized as needed.
     let filter_fmt = EnvFilter::new("info").add_directive("opentelemetry=debug".parse().unwrap());
     let fmt_layer = tracing_subscriber::fmt::layer().with_filter(filter_fmt);
 
@@ -37,8 +38,6 @@ fn main() {
         .with(fmt_layer)
         .init();
 
-    // event_id is passed as an attribute now, there is nothing in metadata where a
-    // numeric id can be stored.
     // run in a loop to ensure that tracepoints are not removed from kernel fs
 
     let running = Arc::new(AtomicBool::new(true));
@@ -50,6 +49,8 @@ fn main() {
     .expect("Error setting Ctrl-C handler");
 
     while running.load(Ordering::SeqCst) {
+        // event_id is passed as an attribute now, there is nothing in metadata where a
+        // numeric id can be stored.
         error!(
             name: "my-event-name",
             event_id = 20,
