@@ -1,10 +1,12 @@
 $ErrorActionPreference = "Stop"
 
-cargo_feature() {
-    echo "checking $1 with features $2"
-    cargo clippy --manifest-path=$1/Cargo.toml --all-targets --features "$2" --no-default-features -- \
-    `# Exit with a nonzero code if there are clippy warnings` \
-    -Dwarnings
+function cargo_feature {
+    param (
+        $crate,
+        $features
+    )
+    Write-Host "checking '$crate' with features '$features'"
+    cargo clippy --manifest-path=$crate/Cargo.toml --all-targets --features "$features" --no-default-features -- -Dwarnings    
 }
 
 # Exit with a nonzero code if there are clippy warnings
