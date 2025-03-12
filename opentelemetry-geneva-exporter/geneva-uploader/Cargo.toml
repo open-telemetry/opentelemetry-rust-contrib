@@ -1,0 +1,7 @@
+[package]
+name = "geneva-uploader"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+opentelemetry-proto = {workspace = true, default-features = false, features = ["logs"]}
