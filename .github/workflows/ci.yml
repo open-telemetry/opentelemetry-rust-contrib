@@ -112,7 +112,7 @@ jobs:
         run: bash ./scripts/msrv.sh ${{ matrix.rust }}
       - name: Check MSRV for all crates (Windows)
         if: ${{ matrix.os == 'windows-latest'}}
-        run: bash ./scripts/msrv.ps1 ${{ matrix.rust }}
+        run: ./scripts/msrv.ps1 ${{ matrix.rust }}
   cargo-deny:
     runs-on: ubuntu-latest
     continue-on-error: true # Prevent sudden announcement of a new advisory from failing ci
