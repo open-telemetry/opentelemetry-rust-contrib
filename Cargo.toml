@@ -1,6 +1,6 @@
 [workspace]
 members = [
-    "opentelemetry-aws",
+    "opentelemetry-*",
     "examples/*",
     "stress",
 ]
