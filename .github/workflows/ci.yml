@@ -88,7 +88,7 @@ jobs:
         rust: ["1.75.0"]
         os: [
           ubuntu-latest,
-          windows-latest # Disabled due bug in `cargo-msrv` on Windows( https://github.com/foresterre/cargo-msrv/issues/1102 )
+          # windows-latest # Disabled due bug in `cargo-msrv` on Windows( https://github.com/foresterre/cargo-msrv/issues/1102 )
         ]
     runs-on: ${{ matrix.os }}
     continue-on-error: true
