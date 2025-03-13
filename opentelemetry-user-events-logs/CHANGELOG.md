@@ -10,6 +10,7 @@
   The provider name must:
   - Be less than 234 characters.
   - Contain only ASCII letters, digits, and the underscore (`'_'`) character.
+- Added support for TraceId,SpanId
 
 ## v0.10.0
 
