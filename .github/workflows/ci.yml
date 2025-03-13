@@ -86,7 +86,11 @@ jobs:
     strategy:
       matrix:
         rust: ["1.75.0"]
-    runs-on: ubuntu-latest
+        os: [
+          ubuntu-latest,
+          windows-latest # Disabled due bug in `cargo-msrv` on Windows( https://github.com/foresterre/cargo-msrv/issues/1102 )
+        ]
+    runs-on: ${{ matrix.os }}
     continue-on-error: true
     steps:
       - uses: actions/checkout@v4
@@ -100,10 +104,15 @@ jobs:
       - uses: taiki-e/install-action@v2
         with:
           tool: cargo-msrv
-      - name: Patch dependencies versions
+      - name: Patch dependencies versions (Unix)
+        if: ${{ matrix.os != 'windows-latest'}}
         run: bash ./scripts/patch_dependencies.sh
-      - name: Check MSRV for all crates
+      - name: Check MSRV for all crates (Unix)
+        if: ${{ matrix.os != 'windows-latest'}}
         run: bash ./scripts/msrv.sh ${{ matrix.rust }}
+      - name: Check MSRV for all crates (Windows)
+        if: ${{ matrix.os != 'windows-latest'}}
+        run: bash ./scripts/msrv.ps1 ${{ matrix.rust }}
   cargo-deny:
     runs-on: ubuntu-latest
     continue-on-error: true # Prevent sudden announcement of a new advisory from failing ci
