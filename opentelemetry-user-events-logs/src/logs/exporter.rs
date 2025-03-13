@@ -1,95 +1,73 @@
 use eventheader::{FieldFormat, Level, Opcode};
-use eventheader_dynamic::EventBuilder;
+use eventheader_dynamic::{EventBuilder, EventSet, Provider};
 use opentelemetry::{otel_debug, otel_info};
-use std::borrow::Cow;
-use std::collections::HashMap;
-use std::fmt::Debug;
+use std::sync::Arc;
+use std::{fmt::Debug, sync::Mutex};
 
 use opentelemetry::{logs::AnyValue, logs::Severity, Key};
 use opentelemetry_sdk::error::{OTelSdkError, OTelSdkResult};
 use std::{cell::RefCell, str, time::SystemTime};
 
-/// Provider group associated with the user_events exporter
-pub type ProviderGroup = Option<Cow<'static, str>>;
-
 thread_local! { static EBW: RefCell<EventBuilder> = RefCell::new(EventBuilder::new());}
 
-/// Exporter config
-#[derive(Debug)]
-pub struct ExporterConfig {
-    /// keyword associated with user_events name
-    /// These should be mapped to logger_name as of now.
-    pub keywords_map: HashMap<String, u64>,
-    /// default keyword if map is not defined.
-    pub default_keyword: u64,
-}
-
-impl Default for ExporterConfig {
-    fn default() -> Self {
-        ExporterConfig {
-            keywords_map: HashMap::new(),
-            default_keyword: 1,
-        }
-    }
-}
-
-impl ExporterConfig {
-    pub(crate) fn get_log_keyword(&self, name: &str) -> Option<u64> {
-        self.keywords_map.get(name).copied()
-    }
-
-    pub(crate) fn get_log_keyword_or_default(&self, name: &str) -> u64 {
-        if self.keywords_map.is_empty() {
-            self.default_keyword
-        } else {
-            self.get_log_keyword(name).unwrap_or(self.default_keyword)
-        }
-    }
-}
-
 /// UserEventsExporter is a log exporter that exports logs in EventHeader format to user_events tracepoint.
-pub struct UserEventsExporter {
-    provider: eventheader_dynamic::Provider,
-    exporter_config: ExporterConfig,
+pub(crate) struct UserEventsExporter {
+    provider: Mutex<Provider>,
+    name: String,
+    event_sets: Vec<Arc<EventSet>>,
 }
 
 const EVENT_ID: &str = "event_id";
 
 impl UserEventsExporter {
     /// Create instance of the exporter
-    pub fn new(
-        provider_name: &str,
-        _provider_group: ProviderGroup,
-        exporter_config: ExporterConfig,
-    ) -> Self {
-        let options = eventheader_dynamic::Provider::new_options();
-        let mut eventheader_provider: eventheader_dynamic::Provider =
-            eventheader_dynamic::Provider::new(provider_name, &options);
-        Self::register_keywords(&mut eventheader_provider, &exporter_config);
-        otel_debug!(name: "UserEvents.Created", config = format!("{:?}", exporter_config), provider_name = provider_name, provider_group = format!("{:?}", options));
-        UserEventsExporter {
-            provider: eventheader_provider,
-            exporter_config,
+    pub(crate) fn new(provider_name: &str) -> Result<Self, String> {
+        // Validate provider_name
+        if provider_name.len() >= 234 {
+            return Err("Provider name must be less than 234 characters.".to_string());
         }
+        if !provider_name
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || c == '_')
+        {
+            return Err(
+                "Provider name must contain only ASCII letters, digits, and '_'.".to_string(),
+            );
+        }
+
+        let mut eventheader_provider: Provider =
+            Provider::new(provider_name, &Provider::new_options());
+        let event_sets = Self::register_events(&mut eventheader_provider);
+        otel_debug!(name: "UserEvents.Created", provider_name = provider_name);
+        let name = eventheader_provider.name().to_string();
+        Ok(UserEventsExporter {
+            provider: Mutex::new(eventheader_provider),
+            name,
+            event_sets,
+        })
     }
 
-    fn register_events(eventheader_provider: &mut eventheader_dynamic::Provider, keyword: u64) {
+    fn register_events(
+        eventheader_provider: &mut eventheader_dynamic::Provider,
+    ) -> Vec<Arc<EventSet>> {
+        let keyword: u64 = 1;
+        // Levels are added in the same order as their int representation,
+        // to ensure that the index of the Vec matches the int representation.
         let levels = [
+            eventheader::Level::CriticalError,
+            eventheader::Level::Error,
+            eventheader::Level::Warning,
             eventheader::Level::Informational,
             eventheader::Level::Verbose,
-            eventheader::Level::Warning,
-            eventheader::Level::Error,
-            eventheader::Level::CriticalError,
         ];
 
-        let mut perf_command = String::from("perf record");
+        let mut event_sets = Vec::with_capacity(6);
+        // Push a dummy EventSet to position 0
+        // This is done so that EventSets can be retrieved using
+        // level as index to the Vec.
+        event_sets.push(Arc::new(EventSet::new_unregistered()));
 
         for &level in levels.iter() {
-            otel_debug!(
-                name: "UserEvents.RegisterEvent",
-                level = level.as_int(),
-                keyword = keyword,
-            );
             let event_set = eventheader_provider.register_set(level, keyword);
             match event_set.errno() {
                 0 => {
@@ -109,72 +87,37 @@ impl UserEventsExporter {
                     );
                 }
             }
-            let event_set = eventheader_provider.find_set(level.as_int().into(), keyword);
-            if let Some(set) = event_set {
-                otel_debug!(name: "UserEvents.RegisteredEvent", set = format!("{:?}", set));
-                // Generate and log the `perf record` command for registered event
-                let event_spec = format!(
-                    " -e user_events:{}_L{}K{}",
-                    eventheader_provider.name(),
-                    level.as_int(),
-                    keyword
-                );
-                perf_command.push_str(&event_spec);
-            } else {
-                otel_debug!(
-                    name: "UserEvents.FailedToRegisterEvent",
-                    level = level.as_int(),
-                    keyword = keyword,
-                );
-            }
-        }
-        if perf_command != "perf record" {
-            println!("To listen to events, run: {}", perf_command);
-            otel_debug!(name: "UserEvents.PerfCommand", command = perf_command);
-        }
-    }
 
-    fn register_keywords(
-        eventheader_provider: &mut eventheader_dynamic::Provider,
-        exporter_config: &ExporterConfig,
-    ) {
-        if exporter_config.keywords_map.is_empty() {
-            otel_debug!(
-                name: "UserEvents.RegisterDefaultKeyword",
-                default_keyword = exporter_config.default_keyword,
-            );
-            Self::register_events(eventheader_provider, exporter_config.default_keyword);
+            // Always push the event set to the vector irrespective of whether
+            // there is a listener or not as listeners can be added later. In
+            // the event of failed registrations also, EventSet is pushed to the
+            // vector, but it'll not be enabled.
+            // This also ensures we can use the level as index to the Vec.
+            event_sets.push(event_set);
         }
-
-        for keyword in exporter_config.keywords_map.values() {
-            otel_debug!(
-                name: "UserEvents.RegisterKeyword",
-                keyword = *keyword,
-            );
-            Self::register_events(eventheader_provider, *keyword);
-        }
+        event_sets
     }
 
     fn add_attribute_to_event(&self, eb: &mut EventBuilder, (key, value): (&Key, &AnyValue)) {
         let field_name = key.as_str();
-        match value.to_owned() {
+        match value {
             AnyValue::Boolean(b) => {
-                eb.add_value(field_name, b, FieldFormat::Boolean, 0);
+                eb.add_value(field_name, *b, FieldFormat::Boolean, 0);
             }
             AnyValue::Int(i) => {
-                eb.add_value(field_name, i, FieldFormat::SignedInt, 0);
+                eb.add_value(field_name, *i, FieldFormat::SignedInt, 0);
             }
             AnyValue::Double(f) => {
-                eb.add_value(field_name, f, FieldFormat::Float, 0);
+                eb.add_value(field_name, *f, FieldFormat::Float, 0);
             }
             AnyValue::String(s) => {
-                eb.add_str(field_name, s.to_string(), FieldFormat::Default, 0);
+                eb.add_str(field_name, s.as_str(), FieldFormat::Default, 0);
             }
             _ => (),
         }
     }
 
-    fn get_severity_level(&self, severity: Severity) -> Level {
+    const fn get_severity_level(severity: Severity) -> Level {
         match severity {
             Severity::Debug
             | Severity::Debug2
@@ -203,52 +146,46 @@ impl UserEventsExporter {
         }
     }
 
-    #[allow(dead_code)]
-    fn enabled(&self, level: u8, keyword: u64) -> bool {
-        let es = self.provider.find_set(level.into(), keyword);
-        match es {
-            Some(x) => x.enabled(),
-            _ => false,
-        };
-        false
-    }
-
     pub(crate) fn export_log_data(
         &self,
         log_record: &opentelemetry_sdk::logs::SdkLogRecord,
-        instrumentation: &opentelemetry::InstrumentationScope,
+        _instrumentation: &opentelemetry::InstrumentationScope,
     ) -> opentelemetry_sdk::error::OTelSdkResult {
-        //TODO - should we log (otel_debug) each event?
-        let mut level: Level = Level::Invalid;
-        if log_record.severity_number().is_some() {
-            level = self.get_severity_level(log_record.severity_number().unwrap());
-        }
-
-        let keyword = self
-            .exporter_config
-            .get_log_keyword_or_default(instrumentation.name().as_ref());
-
-        let log_es = if let Some(es) = self.provider.find_set(level.as_int().into(), keyword) {
-            es
+        let level = if let Some(otel_severity) = log_record.severity_number() {
+            Self::get_severity_level(otel_severity)
         } else {
-            otel_debug!(
-                name: "UserEvents.EventSetNotFound",
-                level = level.as_int(),
-                keyword = keyword,
-            );
-            return Err(OTelSdkError::InternalFailure(format!(
-                "EventSet not found for level: {:?} and keyword: {}",
-                level, keyword
-            )));
+            return Err(OTelSdkError::InternalFailure(
+                "Severity number is required for user-events exporter".to_string(),
+            ));
         };
-        if log_es.enabled() {
+
+        // EventSets are stored in the same order as their int representation,
+        // so we can use the level as index to the Vec.
+        let event_set = match self.event_sets.get(level.as_int() as usize) {
+            Some(event_set) => event_set,
+            None => {
+                // This is considered Error as we cannot find the EventSet.
+                // If an EventSet is found, but not enabled, it is not an error.
+                return Err(OTelSdkError::InternalFailure(format!(
+                    "Failed to get event set for level: {}",
+                    level.as_int()
+                )));
+            }
+        };
+
+        if event_set.enabled() {
             let _res = EBW.with(|eb| {
                 let mut eb = eb.borrow_mut();
-                let event_tags: u32 = 0; // TBD name and event_tag values
-                eb.reset(instrumentation.name().as_ref(), event_tags as u16);
+                // EventBuilder doc suggests that event name should not be
+                // reused for events with different schema. 
+                // In well-behaved application, event-name should be unique
+                // for each event.
+                // TODO: What if the event name is not provided? "Log" is used as default.
+                // TODO: Should event_tag be non-zero?
+                eb.reset(log_record.event_name().unwrap_or("Log"), 0);
                 eb.opcode(Opcode::Info);
 
-                eb.add_value("__csver__", 0x0400u16, FieldFormat::HexInt, 0);
+                eb.add_value("__csver__", 1024, FieldFormat::UnsignedInt, 0); // 0x400 in hex
 
                 // populate CS PartA
                 let mut cs_a_count = 0;
@@ -256,14 +193,24 @@ impl UserEventsExporter {
                     .timestamp()
                     .or(log_record.observed_timestamp())
                     .unwrap_or_else(SystemTime::now);
+                let time: String = chrono::DateTime::to_rfc3339(
+                    &chrono::DateTime::<chrono::Utc>::from(event_time),
+                );
                 cs_a_count += 1; // for event_time
-                eb.add_struct("PartA", cs_a_count, 0);
-                {
-                    let time: String = chrono::DateTime::to_rfc3339(
-                        &chrono::DateTime::<chrono::Utc>::from(event_time),
-                    );
-                    eb.add_str("time", time, FieldFormat::Default, 0);
+
+                if let Some(trace_context) = log_record.trace_context() {
+                    cs_a_count += 1; // for ext_dt
+                    eb.add_struct("PartA", cs_a_count, 0);
+                    eb.add_struct("ext_dt", 2, 0);
+                    eb.add_str("traceId", trace_context.trace_id.to_string(), FieldFormat::Default, 0);
+                    eb.add_str("spanId", trace_context.span_id.to_string(), FieldFormat::Default, 0);
                 }
+                else {
+                    eb.add_struct("PartA", cs_a_count, 0);
+                }
+
+                eb.add_str("time", time, FieldFormat::Default, 0);
+
                 //populate CS PartC
                 let (mut is_event_id, mut event_id) = (false, 0);
                 let (mut is_part_c_present, mut cs_c_bookmark, mut cs_c_count) = (false, 0, 0);
@@ -297,7 +244,7 @@ impl UserEventsExporter {
                 let mut cs_b_bookmark: usize = 0;
                 let mut cs_b_count = 0;
                 eb.add_struct_with_bookmark("PartB", 1, 0, &mut cs_b_bookmark);
-                eb.add_str("_typeName", "Logs", FieldFormat::Default, 0);
+                eb.add_str("_typeName", "Log", FieldFormat::Default, 0);
                 cs_b_count += 1;
 
                 if log_record.body().is_some() {
@@ -341,7 +288,7 @@ impl UserEventsExporter {
                 }
                 eb.set_struct_field_count(cs_b_bookmark, cs_b_count);
 
-                let result = eb.write(&log_es, None, None);
+                let result = eb.write(event_set, None, None);
                 if result > 0 {
                     // Specially log the case where there is no listener and size exceeding.
                     if result == 9 {
@@ -365,8 +312,7 @@ impl UserEventsExporter {
         } else {
             otel_debug!(
                 name: "UserEvents.EventSetNotEnabled",
-                level = level.as_int(),
-                keyword = keyword,
+                level = level.as_int()
             );
 
             // Return success when the event is not enabled
@@ -378,61 +324,132 @@ impl UserEventsExporter {
 
 impl Debug for UserEventsExporter {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.write_str("user_events log exporter")
+        write!(f, "user_events log exporter (provider: {})", self.name)
     }
 }
 
 impl opentelemetry_sdk::logs::LogExporter for UserEventsExporter {
-    #[allow(clippy::manual_async_fn)]
-    fn export(
-        &self,
-        batch: opentelemetry_sdk::logs::LogBatch<'_>,
-    ) -> impl std::future::Future<Output = OTelSdkResult> + Send {
-        async move {
-            for (record, instrumentation) in batch.iter() {
-                let _ = self.export_log_data(record, instrumentation);
-            }
+    async fn export(&self, batch: opentelemetry_sdk::logs::LogBatch<'_>) -> OTelSdkResult {
+        for (record, instrumentation) in batch.iter() {
+            let _ = self.export_log_data(record, instrumentation);
+        }
+        Ok(())
+    }
+
+    fn shutdown(&mut self) -> OTelSdkResult {
+        // The explicit unregister() is done in shutdown()
+        // as it may not be possible to unregister during Drop
+        // as Loggers are typically *not* dropped.
+        if let Ok(mut provider) = self.provider.lock() {
+            provider.unregister();
             Ok(())
+        } else {
+            Err(OTelSdkError::InternalFailure(
+                "Failed to acquire lock on provider".to_string(),
+            ))
         }
     }
 
     #[cfg(feature = "spec_unstable_logs_enabled")]
-    fn event_enabled(&self, level: Severity, _target: &str, name: &str) -> bool {
-        let (found, keyword) = if self.exporter_config.keywords_map.is_empty() {
-            (true, self.exporter_config.default_keyword)
-        } else {
-            // TBD - target is not used as of now for comparison.
-            match self.exporter_config.get_log_keyword(name) {
-                Some(x) => (true, x),
-                _ => (false, 0),
-            }
-        };
-        if !found {
-            return false;
+    fn event_enabled(&self, level: Severity, _target: &str, _name: &str) -> bool {
+        // EventSets are stored in the same order as their int representation,
+        // so we can use the level as index to the Vec.
+        let level = Self::get_severity_level(level);
+        match self.event_sets.get(level.as_int() as usize) {
+            Some(event_set) => event_set.enabled(),
+            None => false,
         }
-        let es = self
-            .provider
-            .find_set(self.get_severity_level(level), keyword);
-        match es {
-            Some(x) => {
-                let enabled = x.enabled();
-                if !enabled {
-                    otel_debug!(
-                        name: "UserEvents.EventNotEnabled",
-                        level = format!("{:?}",level),
-                        keyword = keyword,
-                    );
-                }
-                enabled
-            }
-            _ => {
-                otel_debug!(
-                    name: "UserEvents.EventSetNotFound",
-                    level = format!("{:?}",level),
-                    keyword = keyword,
-                );
-                false
-            }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    #[test]
+    fn exporter_debug() {
+        let exporter = UserEventsExporter::new("test_provider");
+        assert_eq!(
+            format!("{:?}", exporter.expect("Failed to create exporter")),
+            "user_events log exporter (provider: test_provider)"
+        );
+    }
+
+    #[test]
+    fn valid_provider_name() {
+        let valid_names = vec![
+            "ValidName",
+            "valid_name",
+            "Valid123",
+            "valid_123",
+            "_valid_name",
+            "VALID_NAME",
+        ];
+
+        for valid_name in valid_names {
+            let result = UserEventsExporter::new(valid_name);
+            assert!(
+                result.is_ok(),
+                "Expected '{}' to be valid, but it was rejected",
+                valid_name
+            );
+        }
+    }
+
+    #[test]
+    fn provider_name_too_long() {
+        let long_name = "a".repeat(234);
+        let result = UserEventsExporter::new(&long_name);
+        assert!(result.is_err());
+        assert_eq!(
+            result.err().unwrap(),
+            "Provider name must be less than 234 characters.".to_string()
+        );
+    }
+
+    #[test]
+    fn provider_name_contains_invalid_characters() {
+        // Define a vector of invalid provider names to test
+        let invalid_names = vec![
+            "Invalid Name",  // space
+            "Invalid:Name",  // colon
+            "Invalid\0Name", // null character
+            "Invalid-Name",  // hyphen
+            "InvalidName!",  // exclamation mark
+            "InvalidName@",  // at symbol
+            "Invalid+Name",  // plus
+            "Invalid&Name",  // ampersand
+            "Invalid#Name",  // hash
+            "Invalid%Name",  // percent
+            "Invalid/Name",  // slash
+            "Invalid\\Name", // backslash
+            "Invalid=Name",  // equals
+            "Invalid?Name",  // question mark
+            "Invalid;Name",  // semicolon
+            "Invalid,Name",  // comma
+        ];
+
+        // Expected error message
+        let expected_error =
+            "Provider name must contain only ASCII letters, digits, and '_'.".to_string();
+
+        // Test each invalid name
+        for invalid_name in invalid_names {
+            let result = UserEventsExporter::new(invalid_name);
+
+            // Assert that the result is an error
+            assert!(
+                result.is_err(),
+                "Expected '{}' to be invalid, but it was accepted",
+                invalid_name
+            );
+
+            // Assert that the error message is as expected
+            assert_eq!(
+                result.err().unwrap(),
+                expected_error,
+                "Wrong error message for invalid name: '{}'",
+                invalid_name
+            );
         }
     }
 }
