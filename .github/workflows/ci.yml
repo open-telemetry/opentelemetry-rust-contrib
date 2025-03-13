@@ -111,7 +111,7 @@ jobs:
         if: ${{ matrix.os != 'windows-latest'}}
         run: bash ./scripts/msrv.sh ${{ matrix.rust }}
       - name: Check MSRV for all crates (Windows)
-        if: ${{ matrix.os != 'windows-latest'}}
+        if: ${{ matrix.os == 'windows-latest'}}
         run: bash ./scripts/msrv.ps1 ${{ matrix.rust }}
   cargo-deny:
     runs-on: ubuntu-latest
