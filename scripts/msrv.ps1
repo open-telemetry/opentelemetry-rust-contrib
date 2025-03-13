@@ -39,7 +39,7 @@ if ($LASTEXITCODE -ne 0) {
 }
 
 # Extract the exact installed rust version string
-$installed_version = $(rustup toolchain list | Select-String -pattern 1.75.0)
+$installed_version = $(rustup toolchain list | Select-String -pattern 1.75.0).ToString().Split(" ")[0]
 
 # Read the configuration file and get the packages for the specified version
 $packages = $(Get-Content "$CONFIG_FILE" | ConvertFrom-Json )."$RUST_VERSION"
