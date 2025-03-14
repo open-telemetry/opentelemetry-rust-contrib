@@ -22,8 +22,7 @@ const EVENT_ID: &str = "event_id";
 const EVENT_NAME_PRIMARY: &str = "event_name";
 const EVENT_NAME_SECONDARY: &str = "name";
 
-// TODO: Implement callback
-fn enabled_callback(
+fn enabled_callback_noop(
     _source_id: &tld::Guid,
     _event_control_code: u32,
     _level: tld::Level,
@@ -32,6 +31,7 @@ fn enabled_callback(
     _filter_data: usize,
     _callback_context: usize,
 ) {
+    // Unused callback.
 }
 
 impl ETWExporter {
@@ -39,8 +39,8 @@ impl ETWExporter {
 
     pub(crate) fn new(provider_name: &str, event_name: &str) -> Self {
         let mut options = tld::Provider::options();
-        // TODO: Implement callback
-        options.callback(enabled_callback, 0x0);
+
+        options.callback(enabled_callback_noop, 0x0);
         let provider = Arc::pin(tld::Provider::new(provider_name, &options));
         // SAFETY: tracelogging (ETW) enables an ETW callback into the provider when `register()` is called.
         // This might crash if the provider is dropped without calling unregister before.
@@ -55,22 +55,6 @@ impl ETWExporter {
             event_name: event_name.to_string(),
         }
     }
-
-    // TODO: enable keywords on callback
-    // fn register_events(provider: &mut tld::Provider, keyword: u64) {
-    //     let levels = [
-    //         tld::Level::Verbose,
-    //         tld::Level::Informational,
-    //         tld::Level::Warning,
-    //         tld::Level::Error,
-    //         tld::Level::Critical,
-    //         tld::Level::LogAlways,
-    //     ];
-
-    //     for &level in levels.iter() {
-    //         // provider.register_set(level, keyword);
-    //     }
-    // }
 
     fn get_severity_level(&self, severity: Severity) -> tld::Level {
         match severity {
