@@ -28,7 +28,7 @@ mod throughput;
 // Function to initialize the logger
 fn init_logger() -> SdkLoggerProvider {
     SdkLoggerProvider::builder()
-        .with_etw_exporter("provider-name", "event-name")
+        .with_etw_exporter("provider-name")
         .build()
 }
 

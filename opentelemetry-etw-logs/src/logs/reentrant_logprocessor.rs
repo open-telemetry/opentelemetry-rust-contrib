@@ -15,8 +15,8 @@ pub struct ReentrantLogProcessor {
 
 impl ReentrantLogProcessor {
     /// constructor
-    pub fn new(provider_name: &str, event_name: &str) -> Self {
-        let exporter = ETWExporter::new(provider_name, event_name);
+    pub fn new(provider_name: &str) -> Self {
+        let exporter = ETWExporter::new(provider_name);
         ReentrantLogProcessor {
             event_exporter: exporter,
         }
@@ -63,21 +63,21 @@ mod tests {
 
     #[test]
     fn test_shutdown() {
-        let processor = ReentrantLogProcessor::new("test-provider-name", "test-event-name");
+        let processor = ReentrantLogProcessor::new("test-provider-name");
 
         assert!(processor.shutdown().is_ok());
     }
 
     #[test]
     fn test_force_flush() {
-        let processor = ReentrantLogProcessor::new("test-provider-name", "test-event-name");
+        let processor = ReentrantLogProcessor::new("test-provider-name");
 
         assert!(processor.force_flush().is_ok());
     }
 
     #[test]
     fn test_emit() {
-        let processor = ReentrantLogProcessor::new("test-provider-name", "test-event-name");
+        let processor = ReentrantLogProcessor::new("test-provider-name");
 
         let mut record = SdkLoggerProvider::builder()
             .build()
@@ -90,7 +90,7 @@ mod tests {
     #[test]
     #[cfg(feature = "spec_unstable_logs_enabled")]
     fn test_event_enabled() {
-        let processor = ReentrantLogProcessor::new("test-provider-name", "test-event-name");
+        let processor = ReentrantLogProcessor::new("test-provider-name");
 
         // Unit test are forced to return true as there is no ETW session listening for the event
         assert!(processor.event_enabled(opentelemetry::logs::Severity::Info, "test", "test"));

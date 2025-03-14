@@ -7,14 +7,16 @@
   will add an ETW exporter using the given provider name:
 
   ```rust
-  SdkLoggerProvider::builder().with_etw_exporter("my-provider").build();
+  SdkLoggerProvider::builder().with_etw_exporter("provider-name").build();
   ```
 
-- Removed `opentelemetry_etw_logs::{ExporterConfig, ReentrantLogProcessor, ETWExporter}` from the public API. Ability to customize Provider Group, Keyword will be added future.
+  Event name now will be inferred from the `LogRecord` being emitted. If no name is given, it defaults to `Log`.
 
-- Hardcoded `event_enabled` internal method to be true on unit test, improving test coverage.
+- Removed `opentelemetry_etw_logs::{ExporterConfig, ReentrantLogProcessor, ETWExporter}` from the public API. Ability to customize Provider Group or Keyword may be added in the future.
 
-- Improved test coverage.
+- Hardcoded `event_enabled` internal method to be true on unit test, helping improving test coverage.
+
+- Improved test coverage further.
 
 ## v0.7.0
 

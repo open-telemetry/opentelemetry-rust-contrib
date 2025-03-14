@@ -46,7 +46,7 @@ use tracing_subscriber::prelude::*;
 
 fn init_logger() -> SdkLoggerProvider {
     SdkLoggerProvider::builder()
-        .with_etw_exporter("provider-name", "event-name")
+        .with_etw_exporter("provider-name")
         .build()
 }
 

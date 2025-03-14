@@ -6,12 +6,12 @@ pub trait ETWLoggerProviderBuilderExt {
     /// Adds an ETW exporter to the logger provider builder with the given provider name and event_name.
     ///
     /// Note that the `EventKeyword` is currently hardcoded to be `1`.
-    fn with_etw_exporter(self, provider_name: &str, event_name: &str) -> Self;
+    fn with_etw_exporter(self, provider_name: &str) -> Self;
 }
 
 impl ETWLoggerProviderBuilderExt for LoggerProviderBuilder {
-    fn with_etw_exporter(self, provider_name: &str, event_name: &str) -> Self {
-        let reenterant_processor = ReentrantLogProcessor::new(provider_name, event_name);
+    fn with_etw_exporter(self, provider_name: &str) -> Self {
+        let reenterant_processor = ReentrantLogProcessor::new(provider_name);
         self.with_log_processor(reenterant_processor)
     }
 }
@@ -27,7 +27,7 @@ mod tests {
     #[test]
     fn with_etw_exporter_trait() {
         let logger_provider = SdkLoggerProvider::builder()
-            .with_etw_exporter("provider-name", "event-name")
+            .with_etw_exporter("provider-name")
             .build();
 
         let layer = layer::OpenTelemetryTracingBridge::new(&logger_provider);

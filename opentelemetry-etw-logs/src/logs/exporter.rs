@@ -15,7 +15,6 @@ use crate::logs::converters::IntoJson;
 
 pub(crate) struct ETWExporter {
     provider: Pin<Arc<tld::Provider>>,
-    event_name: String,
 }
 
 const EVENT_ID: &str = "event_id";
@@ -37,7 +36,7 @@ fn enabled_callback_noop(
 impl ETWExporter {
     const KEYWORD: u64 = 1;
 
-    pub(crate) fn new(provider_name: &str, event_name: &str) -> Self {
+    pub(crate) fn new(provider_name: &str) -> Self {
         let mut options = tld::Provider::options();
 
         options.callback(enabled_callback_noop, 0x0);
@@ -50,10 +49,7 @@ impl ETWExporter {
             provider.as_ref().register();
         }
 
-        ETWExporter {
-            provider,
-            event_name: event_name.to_string(),
-        }
+        ETWExporter { provider }
     }
 
     fn get_severity_level(&self, severity: Severity) -> tld::Level {
@@ -112,7 +108,12 @@ impl ETWExporter {
         let mut event = tld::EventBuilder::new();
 
         // reset
-        event.reset(&self.event_name, level, Self::KEYWORD, event_tags);
+        event.reset(
+            self.get_event_name(log_record),
+            level,
+            Self::KEYWORD,
+            event_tags,
+        );
 
         event.add_u16("__csver__", 0x0401u16, tld::OutType::Hex, field_tag);
 
@@ -131,6 +132,10 @@ impl ETWExporter {
                 "Failed to write event to ETW. ETW reason: {result}"
             ))),
         }
+    }
+
+    fn get_event_name(&self, log_record: &opentelemetry_sdk::logs::SdkLogRecord) -> &str {
+        log_record.event_name().unwrap_or("Log")
     }
 
     fn populate_part_a(
@@ -323,7 +328,7 @@ mod tests {
 
     #[test]
     fn test_export_log_data() {
-        let exporter = ETWExporter::new("test-provider-name", "test-event-name");
+        let exporter = ETWExporter::new("test-provider-name");
         let record = SdkLoggerProvider::builder()
             .build()
             .logger("test")
@@ -336,7 +341,7 @@ mod tests {
 
     #[test]
     fn test_get_severity_level() {
-        let exporter = ETWExporter::new("test-provider-name", "test-event-name");
+        let exporter = ETWExporter::new("test-provider-name");
 
         let result = exporter.get_severity_level(Severity::Debug);
         assert_eq!(result, tld::Level::Verbose);
