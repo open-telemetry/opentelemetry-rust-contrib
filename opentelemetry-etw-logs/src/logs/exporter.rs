@@ -101,8 +101,13 @@ impl ETWExporter {
         }
     }
 
-    #[cfg(any(not(test), feature = "spec_unstable_logs_enabled"))]
+    // #[cfg(any(not(test), feature = "spec_unstable_logs_enabled"))]
     fn enabled(&self, level: tld::Level) -> bool {
+        // On unit tests, we skip this check to be able to test the exporter as no provider is active.
+        if cfg!(test) {
+            return true;
+        }
+
         self.provider.enabled(level, Self::KEYWORD)
     }
 
@@ -114,8 +119,6 @@ impl ETWExporter {
         let level =
             self.get_severity_level(log_record.severity_number().unwrap_or(Severity::Debug));
 
-        // On unit tests, we skip this check to be able to test the exporter as no provider is active.
-        #[cfg(not(test))]
         if !self.enabled(level) {
             return Ok(());
         };

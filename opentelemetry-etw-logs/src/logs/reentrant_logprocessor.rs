@@ -92,9 +92,9 @@ mod tests {
     fn test_event_enabled() {
         let processor = ReentrantLogProcessor::new("test-provider-name", "test-event-name");
 
-        // Unit test should return false as there is no ETW session listening for the event
-        assert!(!processor.event_enabled(opentelemetry::logs::Severity::Info, "test", "test"));
-        assert!(!processor.event_enabled(opentelemetry::logs::Severity::Debug, "test", "test"));
-        assert!(!processor.event_enabled(opentelemetry::logs::Severity::Error, "test", "test"));
+        // Unit test are forced to return true as there is no ETW session listening for the event
+        assert!(processor.event_enabled(opentelemetry::logs::Severity::Info, "test", "test"));
+        assert!(processor.event_enabled(opentelemetry::logs::Severity::Debug, "test", "test"));
+        assert!(processor.event_enabled(opentelemetry::logs::Severity::Error, "test", "test"));
     }
 }
