@@ -5,14 +5,14 @@
 //! run with `$ cargo run --example basic --all-features
 //!
 //! To view the telemetry emitted to ETW you can use [`logman`](https://learn.microsoft.com/windows-server/administration/windows-commands/logman) along with `perfview`. `logman` will listen to ETW
-//! events from the given provider (on this example, `my-provider-name`) and store them in a `.etl` file.
+//! events from the given provider (on this example, `provider-name`) and store them in a `.etl` file.
 //! [`perfview`](https://github.com/microsoft/perfview) will allow you to visualize the events.
 //!
 //! Instructions using Powershell:
 //!
-//! 1. Get the ETW Session Guid for the given provider (on this example `my-provider-name`):
+//! 1. Get the ETW Session Guid for the given provider (on this example `provider-name`):
 //!   ```
-//!   $EtwSessionGuid = (new-object System.Diagnostics.Tracing.EventSource("my-provider-name")).Guid.ToString()`
+//!   $EtwSessionGuid = (new-object System.Diagnostics.Tracing.EventSource("provider-name")).Guid.ToString()`
 //!   ```
 //! 1. Start Logman session:
 //!   ```
@@ -34,30 +34,19 @@
 //!    a. Open PerfView.
 //!    a. Go the location of the `.etl` file: `OtelETWExampleBasic.log_000001.etl` and open it.
 //!    a. Double-click `Events` in the left-panel.
-//!    a. Double-click the `my-provider-name/my-event-name` in the left-panel.
+//!    a. Double-click the `provider-name/event-name` in the left-panel.
 //!    a. You should see the events in the right-panel.
 //!
 
 use opentelemetry_appender_tracing::layer;
-use opentelemetry_etw_logs::{ExporterConfig, ReentrantLogProcessor};
+use opentelemetry_etw_logs::ETWLoggerProviderBuilderExt;
 use opentelemetry_sdk::logs::SdkLoggerProvider;
-use std::collections::HashMap;
 use tracing::error;
 use tracing_subscriber::prelude::*;
 
 fn init_logger() -> SdkLoggerProvider {
-    let exporter_config = ExporterConfig {
-        default_keyword: 1,
-        keywords_map: HashMap::new(),
-    };
-    let reenterant_processor = ReentrantLogProcessor::new(
-        "my-provider-name",
-        "my-event-name".into(),
-        None,
-        exporter_config,
-    );
     SdkLoggerProvider::builder()
-        .with_log_processor(reenterant_processor)
+        .with_etw_exporter("provider-name")
         .build()
 }
 
@@ -68,7 +57,7 @@ fn main() {
     tracing_subscriber::registry().with(layer).init();
 
     error!(
-        name: "my-event-name",
+        name: "event-name",
         event_id = 20,
         user_name = "otel user",
         user_email = "otel@opentelemetry.io"
