@@ -14,6 +14,10 @@
 
 - Removed `opentelemetry_etw_logs::{ExporterConfig, ReentrantLogProcessor, ETWExporter}` from the public API. Ability to customize Provider Group or Keyword may be added in the future.
 
+- Renamed `logs_level_enabled` feature to `spec_unstable_logs_enabled` to match `opentelemetry` features.
+
+- `default` feature does not enable `spec_unstable_logs_enabled` anymore.
+
 - Hardcoded `event_enabled` internal method to be true on unit test, helping improving test coverage.
 
 - Improved test coverage further.

@@ -4,8 +4,6 @@ use opentelemetry_sdk::logs::LoggerProviderBuilder;
 /// Extension trait for adding a ETW exporter to the logger provider builder.
 pub trait ETWLoggerProviderBuilderExt {
     /// Adds an ETW exporter to the logger provider builder with the given provider name and event_name.
-    ///
-    /// Note that the `EventKeyword` is currently hardcoded to be `1`.
     fn with_etw_exporter(self, provider_name: &str) -> Self;
 }
 
