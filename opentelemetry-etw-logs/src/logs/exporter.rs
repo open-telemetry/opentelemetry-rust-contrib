@@ -474,7 +474,15 @@ mod tests {
 
     #[test]
     fn test_callback_noop() {
-        enabled_callback_noop(&tld::Guid::from_name("provider-name"), 0, tld::Level::Verbose, 0, 0, 0, 0);
+        enabled_callback_noop(
+            &tld::Guid::from_name("provider-name"),
+            0,
+            tld::Level::Verbose,
+            0,
+            0,
+            0,
+            0,
+        );
     }
 
     fn new_etw_exporter() -> ETWExporter {
