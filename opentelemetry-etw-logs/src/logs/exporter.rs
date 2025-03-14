@@ -1,5 +1,3 @@
-use std::borrow::Cow;
-use std::collections::HashMap;
 use std::fmt::Debug;
 use std::pin::Pin;
 use std::sync::Arc;
@@ -15,46 +13,8 @@ use std::{str, time::SystemTime};
 
 use crate::logs::converters::IntoJson;
 
-/// Provider group associated with the ETW exporter
-pub type ProviderGroup = Option<Cow<'static, str>>;
-
-// thread_local! { static EBW: RefCell<EventBuilder> = RefCell::new(EventBuilder::new());}
-
-/// Exporter config
-#[derive(Debug)]
-pub struct ExporterConfig {
-    /// keyword associated with ETW name
-    /// These should be mapped to logger_name as of now.
-    pub keywords_map: HashMap<String, u64>,
-    /// default keyword if map is not defined.
-    pub default_keyword: u64,
-}
-
-impl Default for ExporterConfig {
-    fn default() -> Self {
-        ExporterConfig {
-            keywords_map: HashMap::new(),
-            default_keyword: 1,
-        }
-    }
-}
-
-impl ExporterConfig {
-    pub(crate) fn get_log_keyword(&self, name: &str) -> Option<u64> {
-        self.keywords_map.get(name).copied()
-    }
-
-    pub(crate) fn get_log_keyword_or_default(&self, name: &str) -> Option<u64> {
-        if self.keywords_map.is_empty() {
-            Some(self.default_keyword)
-        } else {
-            self.get_log_keyword(name)
-        }
-    }
-}
 pub(crate) struct ETWExporter {
     provider: Pin<Arc<tld::Provider>>,
-    exporter_config: ExporterConfig,
     event_name: String,
 }
 
@@ -74,14 +34,10 @@ fn enabled_callback(
 ) {
 }
 
-//TBD - How to configure provider name and provider group
 impl ETWExporter {
-    pub(crate) fn new(
-        provider_name: &str,
-        event_name: &str,
-        _provider_group: ProviderGroup,
-        exporter_config: ExporterConfig,
-    ) -> Self {
+    const KEYWORD: u64 = 1;
+
+    pub(crate) fn new(provider_name: &str, event_name: &str) -> Self {
         let mut options = tld::Provider::options();
         // TODO: Implement callback
         options.callback(enabled_callback, 0x0);
@@ -93,11 +49,9 @@ impl ETWExporter {
         unsafe {
             provider.as_ref().register();
         }
-        // TODO: enable keywords on callback
-        // Self::register_keywords(&mut provider, &exporter_config);
+
         ETWExporter {
             provider,
-            exporter_config,
             event_name: event_name.to_string(),
         }
     }
@@ -115,20 +69,6 @@ impl ETWExporter {
 
     //     for &level in levels.iter() {
     //         // provider.register_set(level, keyword);
-    //     }
-    // }
-
-    // fn register_keywords(provider: &mut tld::Provider, exporter_config: &ExporterConfig) {
-    //     if exporter_config.keywords_map.is_empty() {
-    //         println!(
-    //             "Register default keyword {}",
-    //             exporter_config.default_keyword
-    //         );
-    //         Self::register_events(provider, exporter_config.default_keyword);
-    //     }
-
-    //     for keyword in exporter_config.keywords_map.values() {
-    //         Self::register_events(provider, *keyword);
     //     }
     // }
 
@@ -161,29 +101,22 @@ impl ETWExporter {
         }
     }
 
-    fn enabled(&self, level: tld::Level, keyword: u64) -> bool {
-        self.provider.enabled(level, keyword)
+    #[cfg(any(not(test), feature = "spec_unstable_logs_enabled"))]
+    fn enabled(&self, level: tld::Level) -> bool {
+        self.provider.enabled(level, Self::KEYWORD)
     }
 
     pub(crate) fn export_log_data(
         &self,
         log_record: &opentelemetry_sdk::logs::SdkLogRecord,
-        instrumentation: &opentelemetry::InstrumentationScope,
+        _instrumentation: &opentelemetry::InstrumentationScope,
     ) -> opentelemetry_sdk::error::OTelSdkResult {
         let level =
             self.get_severity_level(log_record.severity_number().unwrap_or(Severity::Debug));
 
-        let keyword = match self
-            .exporter_config
-            .get_log_keyword_or_default(instrumentation.name().as_ref())
-        {
-            Some(keyword) => keyword,
-            _ => return Ok(()),
-        };
-
         // On unit tests, we skip this check to be able to test the exporter as no provider is active.
         #[cfg(not(test))]
-        if !self.enabled(level, keyword) {
+        if !self.enabled(level) {
             return Ok(());
         };
 
@@ -192,7 +125,7 @@ impl ETWExporter {
         let mut event = tld::EventBuilder::new();
 
         // reset
-        event.reset(&self.event_name, level, keyword, event_tags);
+        event.reset(&self.event_name, level, Self::KEYWORD, event_tags);
 
         event.add_u16("__csver__", 0x0401u16, tld::OutType::Hex, field_tag);
 
@@ -350,19 +283,9 @@ impl opentelemetry_sdk::logs::LogExporter for ETWExporter {
         }
     }
 
-    #[cfg(feature = "logs_level_enabled")]
-    fn event_enabled(&self, level: Severity, _target: &str, name: &str) -> bool {
-        let keyword = if self.exporter_config.keywords_map.is_empty() {
-            Some(self.exporter_config.default_keyword)
-        } else {
-            // TBD - target is not used as of now for comparison.
-            self.exporter_config.get_log_keyword(name)
-        };
-
-        if keyword.is_none() {
-            return false;
-        }
-        self.enabled(self.get_severity_level(level), keyword.unwrap())
+    #[cfg(feature = "spec_unstable_logs_enabled")]
+    fn event_enabled(&self, level: Severity, _target: &str, _name: &str) -> bool {
+        self.enabled(self.get_severity_level(level))
     }
 }
 
@@ -413,12 +336,7 @@ mod tests {
 
     #[test]
     fn test_export_log_data() {
-        let exporter = ETWExporter::new(
-            "test-provider-name",
-            "test-event-name",
-            None,
-            ExporterConfig::default(),
-        );
+        let exporter = ETWExporter::new("test-provider-name", "test-event-name");
         let record = SdkLoggerProvider::builder()
             .build()
             .logger("test")
@@ -431,12 +349,7 @@ mod tests {
 
     #[test]
     fn test_get_severity_level() {
-        let exporter = ETWExporter::new(
-            "test-provider-name",
-            "test-event-name",
-            None,
-            ExporterConfig::default(),
-        );
+        let exporter = ETWExporter::new("test-provider-name", "test-event-name");
 
         let result = exporter.get_severity_level(Severity::Debug);
         assert_eq!(result, tld::Level::Verbose);

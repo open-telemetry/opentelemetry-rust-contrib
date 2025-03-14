@@ -4,10 +4,6 @@ use opentelemetry::InstrumentationScope;
 use opentelemetry_sdk::error::OTelSdkResult;
 use opentelemetry_sdk::logs::SdkLogRecord;
 
-#[cfg(feature = "logs_level_enabled")]
-use opentelemetry_sdk::logs::LogExporter;
-
-use crate::logs::exporter::ExporterConfig;
 use crate::logs::exporter::*;
 
 /// Thread-safe LogProcessor for exporting logs to ETW.
@@ -19,13 +15,8 @@ pub struct ReentrantLogProcessor {
 
 impl ReentrantLogProcessor {
     /// constructor
-    pub fn new(
-        provider_name: &str,
-        event_name: &str,
-        provider_group: ProviderGroup,
-        exporter_config: ExporterConfig,
-    ) -> Self {
-        let exporter = ETWExporter::new(provider_name, event_name, provider_group, exporter_config);
+    pub fn new(provider_name: &str, event_name: &str) -> Self {
+        let exporter = ETWExporter::new(provider_name, event_name);
         ReentrantLogProcessor {
             event_exporter: exporter,
         }
@@ -49,13 +40,15 @@ impl opentelemetry_sdk::logs::LogProcessor for ReentrantLogProcessor {
         Ok(())
     }
 
-    #[cfg(feature = "logs_level_enabled")]
+    #[cfg(feature = "spec_unstable_logs_enabled")]
     fn event_enabled(
         &self,
         level: opentelemetry::logs::Severity,
         target: &str,
         name: &str,
     ) -> bool {
+        use opentelemetry_sdk::logs::LogExporter;
+
         self.event_exporter.event_enabled(level, target, name)
     }
 }
@@ -70,36 +63,21 @@ mod tests {
 
     #[test]
     fn test_shutdown() {
-        let processor = ReentrantLogProcessor::new(
-            "test-provider-name",
-            "test-event-name",
-            None,
-            ExporterConfig::default(),
-        );
+        let processor = ReentrantLogProcessor::new("test-provider-name", "test-event-name");
 
         assert!(processor.shutdown().is_ok());
     }
 
     #[test]
     fn test_force_flush() {
-        let processor = ReentrantLogProcessor::new(
-            "test-provider-name",
-            "test-event-name",
-            None,
-            ExporterConfig::default(),
-        );
+        let processor = ReentrantLogProcessor::new("test-provider-name", "test-event-name");
 
         assert!(processor.force_flush().is_ok());
     }
 
     #[test]
     fn test_emit() {
-        let processor = ReentrantLogProcessor::new(
-            "test-provider-name",
-            "test-event-name",
-            None,
-            ExporterConfig::default(),
-        );
+        let processor = ReentrantLogProcessor::new("test-provider-name", "test-event-name");
 
         let mut record = SdkLoggerProvider::builder()
             .build()
@@ -110,13 +88,9 @@ mod tests {
     }
 
     #[test]
+    #[cfg(feature = "spec_unstable_logs_enabled")]
     fn test_event_enabled() {
-        let processor = ReentrantLogProcessor::new(
-            "test-provider-name",
-            "test-event-name",
-            None,
-            ExporterConfig::default(),
-        );
+        let processor = ReentrantLogProcessor::new("test-provider-name", "test-event-name");
 
         // Unit test should return false as there is no ETW session listening for the event
         assert!(!processor.event_enabled(opentelemetry::logs::Severity::Info, "test", "test"));

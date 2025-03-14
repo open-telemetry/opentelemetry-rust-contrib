@@ -28,11 +28,11 @@ tracing-subscriber = { version = "0.3.0", default-features = false, features = [
 microbench = "0.5"
 
 [features]
-logs_level_enabled = [
+spec_unstable_logs_enabled = [
     "opentelemetry/spec_unstable_logs_enabled",
     "opentelemetry_sdk/spec_unstable_logs_enabled",
 ]
-default = ["logs_level_enabled"]
+default = []
 
 [[example]]
 name = "basic"

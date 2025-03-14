@@ -1,6 +1,3 @@
-use std::collections::HashMap;
-
-use crate::logs::exporter::ExporterConfig;
 use crate::logs::reentrant_logprocessor::ReentrantLogProcessor;
 use opentelemetry_sdk::logs::LoggerProviderBuilder;
 
@@ -14,12 +11,7 @@ pub trait ETWLoggerProviderBuilderExt {
 
 impl ETWLoggerProviderBuilderExt for LoggerProviderBuilder {
     fn with_etw_exporter(self, provider_name: &str, event_name: &str) -> Self {
-        let exporter_config = ExporterConfig {
-            default_keyword: 1,
-            keywords_map: HashMap::new(),
-        };
-        let reenterant_processor =
-            ReentrantLogProcessor::new(provider_name, event_name, None, exporter_config);
+        let reenterant_processor = ReentrantLogProcessor::new(provider_name, event_name);
         self.with_log_processor(reenterant_processor)
     }
 }
