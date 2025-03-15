@@ -4,6 +4,11 @@
 
 [splash]: https://raw.githubusercontent.com/open-telemetry/opentelemetry-rust/main/assets/logo-text.png
 
+| Status        |           |
+| ------------- |-----------|
+| Stability     | beta      |
+| Owners        | [Jonathan Lee](https://github.com/jj22ee), [Mengyi Zhou (bjrara)](https://github.com/bjrara), [Michael He](https://github.com/yiyuan-he)|
+
 Additional types for exporting [`OpenTelemetry`] data to AWS.
 
 [![Crates.io: opentelemetry-aws](https://img.shields.io/crates/v/opentelemetry-aws.svg)](https://crates.io/crates/opentelemetry-aws)
