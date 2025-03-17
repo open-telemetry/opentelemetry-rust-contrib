@@ -193,14 +193,24 @@ impl UserEventsExporter {
                     .timestamp()
                     .or(log_record.observed_timestamp())
                     .unwrap_or_else(SystemTime::now);
+                let time: String = chrono::DateTime::to_rfc3339(
+                    &chrono::DateTime::<chrono::Utc>::from(event_time),
+                );
                 cs_a_count += 1; // for event_time
-                eb.add_struct("PartA", cs_a_count, 0);
-                {
-                    let time: String = chrono::DateTime::to_rfc3339(
-                        &chrono::DateTime::<chrono::Utc>::from(event_time),
-                    );
-                    eb.add_str("time", time, FieldFormat::Default, 0);
+
+                if let Some(trace_context) = log_record.trace_context() {
+                    cs_a_count += 1; // for ext_dt
+                    eb.add_struct("PartA", cs_a_count, 0);
+                    eb.add_struct("ext_dt", 2, 0);
+                    eb.add_str("traceId", trace_context.trace_id.to_string(), FieldFormat::Default, 0);
+                    eb.add_str("spanId", trace_context.span_id.to_string(), FieldFormat::Default, 0);
                 }
+                else {
+                    eb.add_struct("PartA", cs_a_count, 0);
+                }
+
+                eb.add_str("time", time, FieldFormat::Default, 0);
+
                 //populate CS PartC
                 let (mut is_event_id, mut event_id) = (false, 0);
                 let (mut is_part_c_present, mut cs_c_bookmark, mut cs_c_count) = (false, 0, 0);
