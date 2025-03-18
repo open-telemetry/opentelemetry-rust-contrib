@@ -1,9 +1,0 @@
-[package]
-name = "opentelemetry-gigwarm-exporter"
-version = "0.1.0"
-edition = "2021"
-
-[dependencies]
-opentelemetry_sdk = { workspace = true, default-features = false, features = ["logs"] }
-opentelemetry-proto = {workspace = true, default-features = false, features = ["logs"]}
-gigwarm-uploader = {path = "../gigwarm-uploader/", version = "0.1.0"}
