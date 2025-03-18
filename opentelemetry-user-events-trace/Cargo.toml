@@ -16,7 +16,6 @@ eventheader_dynamic = "0.4.0"
 opentelemetry = { workspace = true, features = ["trace"] }
 opentelemetry_sdk = { workspace = true, features = ["trace"] }
 chrono = { version = "0.4", default-features = false, features = ["std"] }
-tracing = { version = "0.1", optional = true }
 futures-executor = "0.3"
 futures-util = "0.3"
 
@@ -28,10 +27,6 @@ tracing-subscriber = { version = "0.3.0", default-features = false, features = [
 ctrlc = "3.4"
 criterion = "0.5"
 serde_json = "1.0.140"
-
-[features]
-internal-logs = ["tracing", "opentelemetry/internal-logs", "opentelemetry_sdk/internal-logs"]
-default = ["internal-logs"]
 
 [lints]
 workspace = true

@@ -3,6 +3,6 @@
 
 #![warn(missing_debug_implementations, missing_docs)]
 
-mod traces;
+mod trace;
 
-pub use traces::*;
+pub use trace::*;
