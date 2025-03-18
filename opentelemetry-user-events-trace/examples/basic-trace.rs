@@ -12,10 +12,6 @@ use std::{thread, time::Duration};
 use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt, EnvFilter, Layer};
 
 fn init_tracer() -> SdkTracerProvider {
-    let filter_fmt = EnvFilter::new("info").add_directive("opentelemetry=debug".parse().unwrap());
-    let fmt_layer = tracing_subscriber::fmt::layer().with_filter(filter_fmt);
-    let _guard = tracing_subscriber::registry().with(fmt_layer).set_default(); // Temporary subscriber active for this function
-
     let provider = SdkTracerProvider::builder()
         .with_user_event_exporter("myprovider")
         .build();
@@ -24,8 +20,11 @@ fn init_tracer() -> SdkTracerProvider {
 }
 
 fn main() {
-    // OpenTelemetry layer with a filter to ensure OTel's own logs are not fed back into
-    // the OpenTelemetry pipeline.
+    let filter_fmt = EnvFilter::new("info").add_directive("opentelemetry=debug".parse().unwrap());
+    let fmt_layer = tracing_subscriber::fmt::layer().with_filter(filter_fmt);
+    tracing_subscriber::registry().with(fmt_layer).init(); // Temporary subscriber active for this function
+                                                           // OpenTelemetry layer with a filter to ensure OTel's own logs are not fed back into
+                                                           // the OpenTelemetry pipeline.
     let tracer_provider = init_tracer();
     let tracer = global::tracer("user-events-tracer");
     // run in a loop to ensure that tracepoints are not removed from kernel fs
