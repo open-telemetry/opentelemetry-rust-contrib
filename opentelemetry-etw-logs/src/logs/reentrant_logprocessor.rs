@@ -1,8 +1,8 @@
 use std::fmt::Debug;
 
 use opentelemetry::InstrumentationScope;
+use opentelemetry_sdk::logs::{LogBatch, LogExporter, SdkLogRecord};
 use opentelemetry_sdk::error::OTelSdkResult;
-use opentelemetry_sdk::logs::SdkLogRecord;
 
 use crate::logs::exporter::*;
 
@@ -25,7 +25,8 @@ impl ReentrantLogProcessor {
 
 impl opentelemetry_sdk::logs::LogProcessor for ReentrantLogProcessor {
     fn emit(&self, data: &mut SdkLogRecord, instrumentation: &InstrumentationScope) {
-        _ = self.event_exporter.export_log_data(data, instrumentation);
+        let log_tuple = &[(data as &SdkLogRecord, instrumentation)];
+        let _ = futures_executor::block_on(self.event_exporter.export(LogBatch::new(log_tuple)));
     }
 
     // This is a no-op as this processor doesn't keep anything
