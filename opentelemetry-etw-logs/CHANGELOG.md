@@ -18,8 +18,6 @@
 
 - `default` feature does not enable `spec_unstable_logs_enabled` anymore.
 
-- Hardcoded `event_enabled` internal method to be true on unit test, helping improving test coverage.
-
 ## v0.7.0
 
 - Bump msrv to 1.75.0
