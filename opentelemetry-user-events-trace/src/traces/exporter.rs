@@ -94,7 +94,7 @@ impl UserEventsSpanExporter {
     }
 
     pub(crate) fn export_span(&self, span: &SpanData) -> OTelSdkResult {
-        let level = Level::Informational;
+        let level = Level::Informational; //TODO which level/tracepoint to use?
         let event_set = self
             .event_sets
             .get(level.as_int() as usize)
