@@ -1,4 +1,4 @@
-//! run with `$ cargo run --example basic-trace --all-features
+//! run with `$ cargo run --example basic-trace --all-features`
 
 use opentelemetry::global;
 use opentelemetry::trace::Span;
@@ -42,7 +42,7 @@ fn main() {
         // numeric id can be stored.
         let mut span = tracer
             .span_builder("my-event-name")
-            .with_attributes(vec![opentelemetry::KeyValue::new("my-key", "my-value")])
+            .with_attributes([opentelemetry::KeyValue::new("my-key", "my-value")])
             .start(&tracer);
         span.end();
         thread::sleep(Duration::from_secs(1));

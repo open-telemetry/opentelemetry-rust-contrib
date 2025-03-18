@@ -3,23 +3,24 @@ use eventheader::{FieldFormat, Level, Opcode};
 use eventheader_dynamic::{EventBuilder, EventSet, Provider};
 use opentelemetry::trace::SpanKind;
 use opentelemetry::trace::Status;
+use opentelemetry::{Key, KeyValue, Value};
 use opentelemetry_sdk::error::{OTelSdkError, OTelSdkResult};
 use opentelemetry_sdk::trace::SpanData;
 use std::{
     fmt::Debug,
     sync::{Arc, Mutex},
-}; // Add at the top if not already imported
+};
 
 /// UserEventsSpanExporter exports spans in EventHeader format to user_events tracepoint.
 pub(crate) struct UserEventsSpanExporter {
     provider: Mutex<Provider>,
     name: String,
-    event_sets: Vec<Arc<EventSet>>,
+    event_set: Arc<EventSet>,
 }
 
 impl Debug for UserEventsSpanExporter {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "user_events log exporter (provider: {})", self.name)
+        write!(f, "user_events span exporter (provider: {})", self.name)
     }
 }
 
@@ -28,6 +29,7 @@ use opentelemetry_sdk::trace::SpanExporter;
 
 impl SpanExporter for UserEventsSpanExporter {
     fn export(&mut self, batch: Vec<SpanData>) -> BoxFuture<'static, OTelSdkResult> {
+        // Using try_for_each is safe here as we do not expect the batch to have more than one span.
         let result = batch.iter().try_for_each(|span| self.export_span(span));
 
         Box::pin(async move { result })
@@ -64,43 +66,38 @@ impl UserEventsSpanExporter {
         }
 
         let mut eventheader_provider = Provider::new(provider_name, &Provider::new_options());
-        let event_sets = Self::register_events(&mut eventheader_provider);
+        let keyword = 1;
+        let event_set = eventheader_provider.register_set(Level::Informational, keyword);
         let name = eventheader_provider.name().to_string();
 
         Ok(UserEventsSpanExporter {
             provider: Mutex::new(eventheader_provider),
             name,
-            event_sets,
+            event_set,
         })
     }
 
-    fn register_events(eventheader_provider: &mut Provider) -> Vec<Arc<EventSet>> {
-        let keyword: u64 = 1;
-        let levels = [
-            Level::CriticalError,
-            Level::Error,
-            Level::Warning,
-            Level::Informational,
-            Level::Verbose,
-        ];
-
-        let mut event_sets = vec![Arc::new(EventSet::new_unregistered())];
-
-        for &level in levels.iter() {
-            let event_set = eventheader_provider.register_set(level, keyword);
-            event_sets.push(event_set);
+    fn add_attribute_to_event(&self, eb: &mut EventBuilder, kv: &KeyValue) {
+        let field_name = kv.key.as_str();
+        match &kv.value {
+            Value::Bool(b) => {
+                eb.add_value(field_name, *b, FieldFormat::Boolean, 0);
+            }
+            Value::I64(i) => {
+                eb.add_value(field_name, *i, FieldFormat::SignedInt, 0);
+            }
+            Value::F64(f) => {
+                eb.add_value(field_name, *f, FieldFormat::Float, 0);
+            }
+            Value::String(s) => {
+                eb.add_str(field_name, s.as_str(), FieldFormat::Default, 0);
+            }
+            _ => (),
         }
-        event_sets
     }
 
     pub(crate) fn export_span(&self, span: &SpanData) -> OTelSdkResult {
-        let level = Level::Informational; //TODO which level/tracepoint to use?
-        let event_set = self
-            .event_sets
-            .get(level.as_int() as usize)
-            .ok_or_else(|| OTelSdkError::InternalFailure("Failed to get event set".to_string()))?;
-
-        if event_set.enabled() {
+        if self.event_set.enabled() {
             let mut eb = EventBuilder::new();
             eb.reset("Span", 0);
             eb.opcode(Opcode::Info);
@@ -154,15 +151,10 @@ impl UserEventsSpanExporter {
             );
             eb.add_struct("PartC", span.attributes.len() as u8, 0);
             for kv in span.attributes.iter() {
-                eb.add_str(
-                    kv.key.as_str(),
-                    kv.value.to_string(),
-                    FieldFormat::Default,
-                    0,
-                );
+                self.add_attribute_to_event(&mut eb, kv);
             }
 
-            let result = eb.write(event_set, None, None);
+            let result = eb.write(&*self.event_set, None, None);
             if result > 0 {
                 return Err(OTelSdkError::InternalFailure(format!(
                     "Failed to write span event: result code {}",
