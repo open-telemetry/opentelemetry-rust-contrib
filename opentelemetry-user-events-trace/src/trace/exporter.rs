@@ -3,7 +3,7 @@ use eventheader::{FieldFormat, Level, Opcode};
 use eventheader_dynamic::{EventBuilder, EventSet, Provider};
 use opentelemetry::trace::SpanKind;
 use opentelemetry::trace::Status;
-use opentelemetry::{Key, KeyValue, Value};
+use opentelemetry::{KeyValue, Value};
 use opentelemetry_sdk::error::{OTelSdkError, OTelSdkResult};
 use opentelemetry_sdk::trace::SpanData;
 use std::{
