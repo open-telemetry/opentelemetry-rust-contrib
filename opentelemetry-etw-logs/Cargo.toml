@@ -16,9 +16,11 @@ tracelogging_dynamic = "1.2.1"
 opentelemetry = { workspace = true, features = ["logs"] }
 opentelemetry_sdk = { workspace = true, features = ["logs"] }
 serde_json = "1.0.113"
+futures-executor = "0.3.31"
 
 [dev-dependencies]
 opentelemetry-appender-tracing = { workspace = true }
+tokio = { version = "1.0", features = ["full"] }
 tracing = { version = "0.1", default-features = false, features = ["std"] }
 tracing-core = "0.1.31"
 tracing-subscriber = { version = "0.3.0", default-features = false, features = [
@@ -28,11 +30,11 @@ tracing-subscriber = { version = "0.3.0", default-features = false, features = [
 microbench = "0.5"
 
 [features]
-logs_level_enabled = [
+spec_unstable_logs_enabled = [
     "opentelemetry/spec_unstable_logs_enabled",
     "opentelemetry_sdk/spec_unstable_logs_enabled",
 ]
-default = ["logs_level_enabled"]
+default = []
 
 [[example]]
 name = "basic"
