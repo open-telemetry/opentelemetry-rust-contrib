@@ -38,7 +38,7 @@ impl SpanExporter for UserEventsSpanExporter {
     fn shutdown(&mut self) -> OTelSdkResult {
         // The explicit unregister() is done in shutdown()
         // as it may not be possible to unregister during Drop
-        // as Loggers are typically *not* dropped.
+        // as `Tracers` are typically *not* dropped.
         if let Ok(mut provider) = self.provider.lock() {
             provider.unregister();
             Ok(())
@@ -154,7 +154,7 @@ impl UserEventsSpanExporter {
                 self.add_attribute_to_event(&mut eb, kv);
             }
 
-            let result = eb.write(&*self.event_set, None, None);
+            let result = eb.write(&self.event_set, None, None);
             if result > 0 {
                 return Err(OTelSdkError::InternalFailure(format!(
                     "Failed to write span event: result code {}",
