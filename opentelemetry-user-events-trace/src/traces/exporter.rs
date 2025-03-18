@@ -136,7 +136,7 @@ impl UserEventsSpanExporter {
             eb.add_str("startTime", datetime.to_rfc3339(), FieldFormat::Default, 0);
             eb.add_value(
                 "success",
-                span.status == Status::Ok, // Convert Status::Ok to a boolean
+                matches!(span.status, Status::Ok | Status::Unset), // Check for Ok or Unset
                 FieldFormat::Boolean,
                 0,
             );
