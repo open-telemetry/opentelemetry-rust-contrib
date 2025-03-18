@@ -1,8 +1,8 @@
 use std::fmt::Debug;
 
 use opentelemetry::InstrumentationScope;
-use opentelemetry_sdk::logs::{LogBatch, LogExporter, SdkLogRecord};
 use opentelemetry_sdk::error::OTelSdkResult;
+use opentelemetry_sdk::logs::{LogBatch, LogExporter, SdkLogRecord};
 
 use crate::logs::exporter::*;
 
