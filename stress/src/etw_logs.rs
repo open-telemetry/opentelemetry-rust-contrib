@@ -39,7 +39,7 @@ fn main() {
 
     throughput::test_throughput(|| {
         info!(
-            name = "event-name",
+            name : "event-name",
             event_id = 20,
             user_name = "otel user",
             user_email = "otel@opentelemetry.io"

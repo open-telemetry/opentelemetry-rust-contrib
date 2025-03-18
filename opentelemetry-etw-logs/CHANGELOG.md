@@ -20,8 +20,6 @@
 
 - Hardcoded `event_enabled` internal method to be true on unit test, helping improving test coverage.
 
-- Improved test coverage further.
-
 ## v0.7.0
 
 - Bump msrv to 1.75.0
