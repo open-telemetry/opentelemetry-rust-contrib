@@ -16,7 +16,7 @@ cargo clippy --workspace --all-targets --all-features -- -Dwarnings
 if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
 cargo_feature opentelemetry-etw-logs "default"
-cargo_feature opentelemetry-etw-logs "logs_level_enabled"
+cargo_feature opentelemetry-etw-logs "spec_unstable_logs_enabled"
 
 cargo_feature opentelemetry-etw-metrics ""
 
