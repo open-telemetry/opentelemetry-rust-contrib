@@ -151,7 +151,7 @@ impl UserEventsSpanExporter {
                 FieldFormat::UnsignedInt,
                 0,
             );
-            if span.attributes.len() > 0 {
+            if !span.attributes.is_empty() {
                 eb.add_struct("PartC", span.attributes.len() as u8, 0);
                 for kv in span.attributes.iter() {
                     self.add_attribute_to_event(&mut eb, kv);
