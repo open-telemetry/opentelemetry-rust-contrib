@@ -1,9 +1,22 @@
 [workspace]
 members = [
-    "opentelemetry-*",
+    "opentelemetry-aws",
+    "opentelemetry-contrib",
+    "opentelemetry-datadog",
+    "opentelemetry-etw-logs",
+    "opentelemetry-etw-metrics",
+    "opentelemetry-resource-detectors",
+    "opentelemetry-stackdriver",
+    "opentelemetry-user-events-logs",
+    "opentelemetry-user-events-metrics",
+    "opentelemetry-zpages",
+    "opentelemetry-exporter-geneva/geneva-uploader",
+    "opentelemetry-exporter-geneva/geneva-uploader-ffi",
+    "opentelemetry-exporter-geneva/opentelemetry-exporter-geneva",
     "examples/*",
     "stress",
 ]
+
 resolver = "2"
 
 [profile.bench]
