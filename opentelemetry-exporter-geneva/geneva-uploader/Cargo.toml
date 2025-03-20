@@ -5,6 +5,3 @@ edition = "2021"
 
 [dependencies]
 opentelemetry-proto = {workspace = true, default-features = false, features = ["logs"]}
-
-[lints]
-workspace = true
