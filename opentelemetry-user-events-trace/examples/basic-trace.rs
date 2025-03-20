@@ -1,4 +1,6 @@
 //! run with `$ cargo run --example basic-trace`
+//! to listen for events, as root:
+//! $perf record -e user_events:myprovider_L4K1
 
 use opentelemetry::global;
 use opentelemetry::trace::Span;
