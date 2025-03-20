@@ -10,4 +10,4 @@ The repository contains the following sub-crates:
 
 - **[geneva-uploader](geneva-uploader/)**: Core uploader responsible for sending telemetry data to the Geneva backend.
 - **[geneva-uploader-ffi](geneva-uploader-ffi/)**: FFI (Foreign Function Interface) layer for integrating with other languages.
-- **[opentelemetry-geneva-exporter](opentelemetry-geneva-exporter/)**: OpenTelemetry-compliant exporter for Geneva
+- **[opentelemetry-exporter-geneva](opentelemetry-exporter-geneva/)**: OpenTelemetry-compliant exporter for Geneva

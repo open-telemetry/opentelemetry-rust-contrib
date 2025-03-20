@@ -10,9 +10,9 @@ members = [
     "opentelemetry-user-events-logs",
     "opentelemetry-user-events-metrics",
     "opentelemetry-zpages",
-    "opentelemetry-geneva-exporter/geneva-uploader",
-    "opentelemetry-geneva-exporter/geneva-uploader-ffi",
-    "opentelemetry-geneva-exporter/opentelemetry-geneva-exporter",
+    "opentelemetry-exporter-geneva/geneva-uploader",
+    "opentelemetry-exporter-geneva/geneva-uploader-ffi",
+    "opentelemetry-exporter-geneva/opentelemetry-exporter-geneva",
     "examples/*",
     "stress",
 ]

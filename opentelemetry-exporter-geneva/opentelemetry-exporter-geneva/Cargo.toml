@@ -1,5 +1,5 @@
 [package]
-name = "opentelemetry-geneva-exporter"
+name = "opentelemetry-exporter-geneva"
 version = "0.1.0"
 edition = "2021"
 
