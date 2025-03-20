@@ -12,6 +12,7 @@ use opentelemetry_sdk::{error::OTelSdkResult, trace::SpanData};
 
 #[derive(Debug)]
 pub struct ReentrantSpanProcessor<T: SpanExporter> {
+    // TODO - Mutex would be removed in future, once Exporter::export does not require mutable reference.
     exporter: Arc<Mutex<T>>,
 }
 

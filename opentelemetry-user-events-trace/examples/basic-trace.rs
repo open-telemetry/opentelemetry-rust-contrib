@@ -1,4 +1,4 @@
-//! run with `$ cargo run --example basic-trace --all-features`
+//! run with `$ cargo run --example basic-trace`
 
 use opentelemetry::global;
 use opentelemetry::trace::Span;
@@ -22,9 +22,7 @@ fn init_tracer() -> SdkTracerProvider {
 fn main() {
     let filter_fmt = EnvFilter::new("info").add_directive("opentelemetry=debug".parse().unwrap());
     let fmt_layer = tracing_subscriber::fmt::layer().with_filter(filter_fmt);
-    tracing_subscriber::registry().with(fmt_layer).init(); // Temporary subscriber active for this function
-                                                           // OpenTelemetry layer with a filter to ensure OTel's own logs are not fed back into
-                                                           // the OpenTelemetry pipeline.
+    tracing_subscriber::registry().with(fmt_layer).init();
     let tracer_provider = init_tracer();
     let tracer = global::tracer("user-events-tracer");
     // run in a loop to ensure that tracepoints are not removed from kernel fs
@@ -38,8 +36,6 @@ fn main() {
     .expect("Error setting Ctrl-C handler");
 
     while running.load(Ordering::SeqCst) {
-        // event_id is passed as an attribute now, there is nothing in metadata where a
-        // numeric id can be stored.
         let mut span = tracer
             .span_builder("my-event-name")
             .with_attributes([opentelemetry::KeyValue::new("my-key", "my-value")])
@@ -47,5 +43,9 @@ fn main() {
         span.end();
         thread::sleep(Duration::from_secs(1));
     }
-    let _ = tracer_provider.shutdown();
+
+    let status = tracer_provider.shutdown();
+    if let Err(e) = status {
+        println!("Error shutting down: {:?}", e);
+    }
 }

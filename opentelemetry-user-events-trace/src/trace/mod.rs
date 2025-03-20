@@ -22,16 +22,13 @@ pub trait UserEventsTracerProviderBuilderExt {
     /// level and keyword (currently hardcoded to `1`) in the following format:
     /// `ProviderName + '_' + 'L' + EventLevel + 'K' + EventKeyword`
     ///
+    /// The EventLevel is always 4 (Informational) for Spans and the EventKeyword is always 1.
     /// For example, if "myprovider" is the provider name, the following tracepoint names are created:
-    /// - `myprovider_L5K1`
     /// - `myprovider_L4K1`
-    /// - `myprovider_L3K1`
-    /// - `myprovider_L2K1`
-    /// - `myprovider_L1K1`
     ///
     /// perf tool can be used to record events from the tracepoints.
-    /// For example, the following will capture level 2 (Error) and 3 (Warning) events:
-    /// perf record -e user_events:myprovider_L2K1,user_events:myprovider_L3K1
+    /// For example, the following will capture events from the tracepoint created above:
+    /// perf record -e user_events:myprovider_L4K1
     fn with_user_event_exporter(self, provider_name: &str) -> Self;
 }
 
