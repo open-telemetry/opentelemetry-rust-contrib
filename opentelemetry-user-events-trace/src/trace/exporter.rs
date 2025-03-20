@@ -94,6 +94,7 @@ impl UserEventsSpanExporter {
             Value::String(s) => {
                 eb.add_str(field_name, s.as_str(), FieldFormat::Default, 0);
             }
+            // TODO - Array of values
             _ => (),
         }
     }
@@ -124,10 +125,10 @@ impl UserEventsSpanExporter {
             eb.add_struct("PartB", 6, 0); // _typeName, name, parentId, startTime, success, kind
             eb.add_str("_typeName", "Span", FieldFormat::Default, 0);
             eb.add_str("name", span.name.as_ref(), FieldFormat::Default, 0);
-            // Parent span id should be empty/not-emitted for root spans.
             let parent_span_id_str = if span.parent_span_id != opentelemetry::SpanId::INVALID {
                 span.parent_span_id.to_string()
             } else {
+                // TODO - Not to emit for root span
                 "".to_string()
             };
             eb.add_str("parentId", parent_span_id_str, FieldFormat::Default, 0);
