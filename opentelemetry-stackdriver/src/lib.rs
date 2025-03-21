@@ -761,22 +761,6 @@ pub enum MonitoredResource {
         version_id: Option<String>,
         zone: Option<String>,
     },
-    Global {
-        project_id: String,
-    },
-    GenericNode {
-        project_id: String,
-        location: Option<String>,
-        namespace: Option<String>,
-        node_id: Option<String>,
-    },
-    GenericTask {
-        project_id: String,
-        location: Option<String>,
-        namespace: Option<String>,
-        job: Option<String>,
-        task_id: Option<String>,
-    },
     CloudFunction {
         project_id: String,
         function_name: Option<String>,
@@ -806,6 +790,22 @@ pub enum MonitoredResource {
         namespace_name: Option<String>,
         pod_name: Option<String>,
         container_name: Option<String>,
+    },
+    GenericNode {
+        project_id: String,
+        location: Option<String>,
+        namespace: Option<String>,
+        node_id: Option<String>,
+    },
+    GenericTask {
+        project_id: String,
+        location: Option<String>,
+        namespace: Option<String>,
+        job: Option<String>,
+        task_id: Option<String>,
+    },
+    Global {
+        project_id: String,
     },
 }
 
