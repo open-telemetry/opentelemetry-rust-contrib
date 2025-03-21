@@ -1,7 +1,7 @@
 use std::fmt::Debug;
 use std::pin::Pin;
 use std::sync::Arc;
-use tracelogging::win_filetime_from_systemtime;
+
 use tracelogging_dynamic as tld;
 
 use opentelemetry::{
@@ -9,9 +9,11 @@ use opentelemetry::{
     Key,
 };
 use opentelemetry_sdk::error::{OTelSdkError, OTelSdkResult};
-use std::{str, time::SystemTime};
+use std::str;
 
 use crate::logs::converters::IntoJson;
+
+mod part_a;
 
 pub(crate) struct ETWExporter {
     provider: Pin<Arc<tld::Provider>>,
@@ -116,7 +118,7 @@ impl ETWExporter {
 
         event.add_u16("__csver__", 0x0401u16, tld::OutType::Hex, field_tag);
 
-        self.populate_part_a(&mut event, log_record, field_tag);
+        part_a::populate_part_a(&mut event, log_record, field_tag);
 
         let (event_id, event_name) = self.populate_part_c(&mut event, log_record, field_tag);
 
@@ -135,26 +137,6 @@ impl ETWExporter {
 
     fn get_event_name(&self, log_record: &opentelemetry_sdk::logs::SdkLogRecord) -> &str {
         log_record.event_name().unwrap_or("Log")
-    }
-
-    fn populate_part_a(
-        &self,
-        event: &mut tld::EventBuilder,
-        log_record: &opentelemetry_sdk::logs::SdkLogRecord,
-        field_tag: u32,
-    ) {
-        let event_time: SystemTime = log_record
-            .timestamp()
-            .or(log_record.observed_timestamp())
-            .unwrap_or_else(SystemTime::now);
-
-        const COUNT_TIME: u8 = 1u8;
-        const PART_A_COUNT: u8 = COUNT_TIME;
-        event.add_struct("PartA", PART_A_COUNT, field_tag);
-        {
-            let timestamp = win_filetime_from_systemtime!(event_time);
-            event.add_filetime("time", timestamp, tld::OutType::Default, field_tag);
-        }
     }
 
     fn populate_part_b(
