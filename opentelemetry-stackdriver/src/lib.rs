@@ -551,6 +551,46 @@ impl From<LogContext> for InternalLogContext {
     fn from(cx: LogContext) -> Self {
         let mut labels = HashMap::default();
         let resource = match cx.resource {
+            MonitoredResource::AppEngine {
+                project_id,
+                module_id,
+                version_id,
+                zone,
+            } => {
+                labels.insert("project_id".to_string(), project_id);
+                if let Some(module_id) = module_id {
+                    labels.insert("module_id".to_string(), module_id);
+                }
+                if let Some(version_id) = version_id {
+                    labels.insert("version_id".to_string(), version_id);
+                }
+                if let Some(zone) = zone {
+                    labels.insert("zone".to_string(), zone);
+                }
+
+                proto::api::MonitoredResource {
+                    r#type: "gae_app".to_owned(),
+                    labels,
+                }
+            }
+            MonitoredResource::CloudFunction {
+                project_id,
+                function_name,
+                region,
+            } => {
+                labels.insert("project_id".to_string(), project_id);
+                if let Some(function_name) = function_name {
+                    labels.insert("function_name".to_string(), function_name);
+                }
+                if let Some(region) = region {
+                    labels.insert("region".to_string(), region);
+                }
+
+                proto::api::MonitoredResource {
+                    r#type: "cloud_function".to_owned(),
+                    labels,
+                }
+            }
             MonitoredResource::CloudRunJob {
                 project_id,
                 job_name,
@@ -595,6 +635,26 @@ impl From<LogContext> for InternalLogContext {
                     labels,
                 }
             }
+
+            MonitoredResource::ComputeEngine {
+                project_id,
+                instance_id,
+                zone,
+            } => {
+                labels.insert("project_id".to_string(), project_id);
+                if let Some(instance_id) = instance_id {
+                    labels.insert("instance_id".to_string(), instance_id);
+                }
+                if let Some(zone) = zone {
+                    labels.insert("zone".to_string(), zone);
+                }
+
+                proto::api::MonitoredResource {
+                    r#type: "gce_instance".to_owned(),
+                    labels,
+                }
+            }
+
             MonitoredResource::GenericNode {
                 project_id,
                 location,
@@ -650,6 +710,36 @@ impl From<LogContext> for InternalLogContext {
                     labels,
                 }
             }
+            MonitoredResource::KubernetesEngine {
+                project_id,
+                cluster_name,
+                location,
+                pod_name,
+                namespace_name,
+                container_name,
+            } => {
+                labels.insert("project_id".to_string(), project_id);
+                if let Some(cluster_name) = cluster_name {
+                    labels.insert("cluster_name".to_string(), cluster_name);
+                }
+                if let Some(location) = location {
+                    labels.insert("location".to_string(), location);
+                }
+                if let Some(pod_name) = pod_name {
+                    labels.insert("pod_name".to_string(), pod_name);
+                }
+                if let Some(namespace_name) = namespace_name {
+                    labels.insert("namespace_name".to_string(), namespace_name);
+                }
+                if let Some(container_name) = container_name {
+                    labels.insert("container_name".to_string(), container_name);
+                }
+
+                proto::api::MonitoredResource {
+                    r#type: "k8s_container".to_owned(),
+                    labels,
+                }
+            }
         };
 
         Self {
@@ -665,6 +755,12 @@ impl From<LogContext> for InternalLogContext {
 /// Please submit an issue or pull request if you want to use a resource type not listed here.
 #[derive(Clone)]
 pub enum MonitoredResource {
+    AppEngine {
+        project_id: String,
+        module_id: Option<String>,
+        version_id: Option<String>,
+        zone: Option<String>,
+    },
     Global {
         project_id: String,
     },
@@ -681,6 +777,11 @@ pub enum MonitoredResource {
         job: Option<String>,
         task_id: Option<String>,
     },
+    CloudFunction {
+        project_id: String,
+        function_name: Option<String>,
+        region: Option<String>,
+    },
     CloudRunJob {
         project_id: String,
         job_name: Option<String>,
@@ -692,6 +793,19 @@ pub enum MonitoredResource {
         revision_name: Option<String>,
         location: Option<String>,
         configuration_name: Option<String>,
+    },
+    ComputeEngine {
+        project_id: String,
+        instance_id: Option<String>,
+        zone: Option<String>,
+    },
+    KubernetesEngine {
+        project_id: String,
+        location: Option<String>,
+        cluster_name: Option<String>,
+        namespace_name: Option<String>,
+        pod_name: Option<String>,
+        container_name: Option<String>,
     },
 }
 
