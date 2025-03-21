@@ -37,22 +37,12 @@ mod tests {
             user_name = "otel user",
             user_email = "otel@opentelemetry.io"
         );
-    }
 
-    #[test]
-    fn with_etw_exporter_trait_span() {
         use opentelemetry::trace::{Tracer, TracerProvider};
         let tracer_provider = opentelemetry_sdk::trace::SdkTracerProvider::builder()
             .with_sampler(opentelemetry_sdk::trace::Sampler::AlwaysOn)
             .build();
         let tracer = tracer_provider.tracer("test-tracer");
-
-        let logger_provider = SdkLoggerProvider::builder()
-            .with_etw_exporter("provider-name")
-            .build();
-
-        let layer = layer::OpenTelemetryTracingBridge::new(&logger_provider);
-        tracing_subscriber::registry().with(layer).init();
 
         tracer.in_span("test-span", |_cx| {
             // logging is done inside span context.
