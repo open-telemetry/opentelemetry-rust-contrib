@@ -19,6 +19,8 @@
 - `default` feature does not enable `spec_unstable_logs_enabled` anymore.
 - Bump opentelemetry and opentelemetry_sdk versions to 0.29
 
+- Added support for TraceId,SpanId
+
 ## v0.7.0
 
 - Bump msrv to 1.75.0
