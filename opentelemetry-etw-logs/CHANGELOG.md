@@ -18,6 +18,8 @@
 
 - `default` feature does not enable `spec_unstable_logs_enabled` anymore.
 
+- Added support for TraceId,SpanId
+
 ## v0.7.0
 
 - Bump msrv to 1.75.0
