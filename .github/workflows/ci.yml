@@ -39,11 +39,11 @@ jobs:
     - uses: actions/checkout@v4
       with:
         submodules: true
-    - uses: actions-rs/toolchain@v1
+    - uses: dtolnay/rust-toolchain@master
       with:
         toolchain: ${{ matrix.rust }}
-        components: rustfmt
-        profile: minimal
+    - name: "Set rustup profile"
+      run: rustup set profile minimal
     - uses: arduino/setup-protoc@v3
       with:
         repo-token: ${{ secrets.GITHUB_TOKEN }}
@@ -64,17 +64,15 @@ jobs:
     - uses: actions/checkout@v4
       with:
         submodules: true
-    - uses: actions-rs/toolchain@v1
+    - uses: dtolnay/rust-toolchain@master
       with:
         toolchain: stable
-        components: rustfmt, clippy
+        components: rustfmt,clippy
     - uses: arduino/setup-protoc@v3
       with:
           repo-token: ${{ secrets.GITHUB_TOKEN }}
-    - uses: actions-rs/cargo@v1
-      with:
-        command: fmt
-        args: --all -- --check
+    - name: Format
+      run: cargo fmt --all -- --check
     - name: Lint (Windows)
       if: ${{ matrix.os == 'windows-latest'}}
       run: ./scripts/lint.ps1
@@ -97,10 +95,9 @@ jobs:
         with:
           submodules: true
       - name: Set up Rust ${{ matrix.rust }}
-        uses: actions-rs/toolchain@v1
+        uses: dtolnay/rust-toolchain@master
         with:
           toolchain: ${{ matrix.rust }}
-          override: true
       - uses: taiki-e/install-action@v2
         with:
           tool: cargo-msrv
@@ -126,11 +123,9 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: actions-rs/toolchain@v1
+      - uses: dtolnay/rust-toolchain@master
         with:
-          toolchain: nightly
-          components: rustfmt
-          override: true
+          toolchain: stable
       - uses: arduino/setup-protoc@v3
         with:
             repo-token: ${{ secrets.GITHUB_TOKEN }}
@@ -146,11 +141,10 @@ jobs:
       - uses: actions/checkout@v4
         with:
           submodules: true
-      - uses: actions-rs/toolchain@v1
+      - uses: dtolnay/rust-toolchain@master
         with:
           toolchain: stable
-          components: rustfmt,llvm-tools-preview
-          override: true
+          components: llvm-tools-preview
       - uses: arduino/setup-protoc@v3
         with:
             repo-token: ${{ secrets.GITHUB_TOKEN }}
@@ -172,10 +166,9 @@ jobs:
       - uses: actions/checkout@v4
         with:
           submodules: true
-      - uses: actions-rs/toolchain@v1
+      - uses: dtolnay/rust-toolchain@master
         with:
           toolchain: stable
-          override: true
       - uses: taiki-e/install-action@v2
         with:
           tool: cargo-machete
@@ -188,10 +181,9 @@ jobs:
       - uses: actions/checkout@v4
         with:
           submodules: true
-      - uses: actions-rs/toolchain@v1
+      - uses: dtolnay/rust-toolchain@master
         with:
           toolchain: stable
-          override: true
       - uses: taiki-e/install-action@v2
         with:
           tool: cargo-workspace-lints
