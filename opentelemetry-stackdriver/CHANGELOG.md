@@ -6,6 +6,9 @@
 
 ### Changed
 
+- Added support for `MonitoredResource::CloudFunction`, `MonitoredResource::AppEngine`,
+  `MonitoredResource::ComputeEngine`, and `MonitoredResource::KubernetesEngine`
+
 ## v0.25.0
 
 - Bump msrv to 1.75.0
