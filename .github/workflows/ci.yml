@@ -42,6 +42,7 @@ jobs:
     - uses: dtolnay/rust-toolchain@master
       with:
         toolchain: ${{ matrix.rust }}
+        components: rustfmt
     - name: "Set rustup profile"
       run: rustup set profile minimal
     - uses: arduino/setup-protoc@v3
