@@ -310,11 +310,6 @@ impl UserEventsExporter {
             });
             Ok(())
         } else {
-            otel_debug!(
-                name: "UserEvents.EventSetNotEnabled",
-                level = level.as_int()
-            );
-
             // Return success when the event is not enabled
             // as this is not an error condition.
             Ok(())
