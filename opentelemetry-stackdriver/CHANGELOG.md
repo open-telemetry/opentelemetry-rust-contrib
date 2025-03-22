@@ -2,6 +2,8 @@
 
 ## vNext
 
+- Update gRPC schemas
+
 ### Changed
 
 - Added support for `MonitoredResource::CloudFunction`, `MonitoredResource::AppEngine`,
