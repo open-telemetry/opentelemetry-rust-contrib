@@ -26,7 +26,6 @@ binary_propagator = []
 jaeger_json_exporter = ["opentelemetry_sdk", "serde_json", "futures-core", "futures-util"]
 rt-tokio = ["tokio", "opentelemetry_sdk/rt-tokio"]
 rt-tokio-current-thread = ["tokio", "opentelemetry_sdk/rt-tokio-current-thread"]
-rt-async-std = ["async-std", "opentelemetry_sdk/rt-async-std"]
 
 [dependencies]
 async-std = { version = "1.10", optional = true }

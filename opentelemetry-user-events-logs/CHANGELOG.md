@@ -11,6 +11,7 @@
   - Be less than 234 characters.
   - Contain only ASCII letters, digits, and the underscore (`'_'`) character.
 - Added support for TraceId,SpanId
+- Bump opentelemetry and opentelemetry_sdk versions to 0.29
 
 ## v0.10.0
 

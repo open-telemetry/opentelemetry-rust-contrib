@@ -26,7 +26,6 @@ cargo_feature opentelemetry-contrib "binary_propagator"
 cargo_feature opentelemetry-contrib "jaeger_json_exporter"
 cargo_feature opentelemetry-contrib "rt-tokio"
 cargo_feature opentelemetry-contrib "rt-tokio-current-thread"
-cargo_feature opentelemetry-contrib "rt-async-std"
 
 cargo_feature opentelemetry-stackdriver "default"
 cargo_feature opentelemetry-stackdriver "gcp-authorizer"

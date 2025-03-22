@@ -275,7 +275,7 @@ impl opentelemetry_sdk::logs::LogExporter for ETWExporter {
     }
 
     #[cfg(feature = "spec_unstable_logs_enabled")]
-    fn event_enabled(&self, level: Severity, _target: &str, _name: &str) -> bool {
+    fn event_enabled(&self, level: Severity, _target: &str, _name: Option<&str>) -> bool {
         self.enabled(self.get_severity_level(level))
     }
 }
