@@ -5,6 +5,8 @@
 ### Changed
 
 - Expose `K8sResourceDetector`, which populates `k8s.pod.name` and `k8s.namespace.name`
+- Bump opentelemetry and opentelemetry_sdk versions to 0.29
+- Bump opentelemetry-semantic-conventions version to 0.29
 
 ## v0.7.0
 

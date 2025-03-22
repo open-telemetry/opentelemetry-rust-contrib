@@ -8,6 +8,7 @@ members = [
     "opentelemetry-resource-detectors",
     "opentelemetry-stackdriver",
     "opentelemetry-user-events-logs",
+    "opentelemetry-user-events-trace",
     "opentelemetry-user-events-metrics",
     "opentelemetry-zpages",
     "opentelemetry-exporter-geneva/geneva-uploader",
@@ -26,13 +27,13 @@ resolver = "2"
 debug = 1
 
 [workspace.dependencies]
-opentelemetry = "0.28"
-opentelemetry-appender-tracing = "0.28"
-opentelemetry-http = "0.28"
-opentelemetry-proto = { version = "0.28", default-features = false }
-opentelemetry_sdk = { version = "0.28", default-features = false }
-opentelemetry-stdout = "0.28"
-opentelemetry-semantic-conventions = { version = "0.28", features = [
+opentelemetry = "0.29"
+opentelemetry-appender-tracing = "0.29"
+opentelemetry-http = "0.29"
+opentelemetry-proto = { version = "0.29", default-features = false }
+opentelemetry_sdk = { version = "0.29", default-features = false }
+opentelemetry-stdout = "0.29"
+opentelemetry-semantic-conventions = { version = "0.29", features = [
     "semconv_experimental",
 ] }
 criterion = "0.5"

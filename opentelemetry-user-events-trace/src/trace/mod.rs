@@ -40,7 +40,7 @@ impl UserEventsTracerProviderBuilderExt for TracerProviderBuilder {
                 self.with_span_processor(reentrant_processor)
             }
             Err(e) => {
-                otel_warn!(name: "User_Events.Exporter.CreationFailed", reason = e);
+                otel_warn!(name: "User_Events.Exporter.CreationFailed", reason = &e);
                 self
             }
         }

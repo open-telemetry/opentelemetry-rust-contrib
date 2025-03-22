@@ -25,15 +25,12 @@ impl Debug for UserEventsSpanExporter {
     }
 }
 
-use futures_util::future::BoxFuture;
 use opentelemetry_sdk::trace::SpanExporter;
 
 impl SpanExporter for UserEventsSpanExporter {
-    fn export(&mut self, batch: Vec<SpanData>) -> BoxFuture<'static, OTelSdkResult> {
+    async fn export(&self, batch: Vec<SpanData>) -> OTelSdkResult {
         // Using try_for_each is safe here as we do not expect the batch to have more than one span.
-        let result = batch.iter().try_for_each(|span| self.export_span(span));
-
-        Box::pin(async move { result })
+        batch.iter().try_for_each(|span| self.export_span(span))
     }
 
     fn shutdown(&mut self) -> OTelSdkResult {

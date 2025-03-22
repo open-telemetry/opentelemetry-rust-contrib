@@ -1,4 +1,3 @@
-use async_trait::async_trait;
 use opentelemetry::{otel_debug, otel_warn};
 use opentelemetry_proto::tonic::collector::metrics::v1::ExportMetricsServiceRequest;
 use opentelemetry_sdk::error::{OTelSdkError, OTelSdkResult};
@@ -107,7 +106,6 @@ impl MetricsExporter {
     }
 }
 
-#[async_trait]
 impl PushMetricExporter for MetricsExporter {
     async fn export(&self, metrics: &mut ResourceMetrics) -> OTelSdkResult {
         otel_debug!(name: "ExportStart", message = "Starting metrics export");
@@ -459,7 +457,7 @@ impl PushMetricExporter for MetricsExporter {
         Temporality::Delta
     }
 
-    async fn force_flush(&self) -> OTelSdkResult {
+    fn force_flush(&self) -> OTelSdkResult {
         Ok(()) // In this implementation, flush does nothing
     }
 

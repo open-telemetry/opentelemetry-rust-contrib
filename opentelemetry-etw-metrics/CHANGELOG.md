@@ -2,6 +2,9 @@
 
 ## vNext
 
+- Bump opentelemetry and opentelemetry_sdk versions to 0.29
+- Bump opentelemetry-proto version to 0.29
+
 ## v0.7.1
 
 - Fixed a bug that caused incorrect serialization encoding.

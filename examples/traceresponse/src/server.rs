@@ -2,7 +2,6 @@ use http_body_util::{combinators::BoxBody, BodyExt, Full};
 use hyper::{body::Incoming, service::service_fn, Request, Response};
 use hyper_util::rt::{TokioExecutor, TokioIo};
 use hyper_util::server::conn::auto::Builder;
-use opentelemetry::trace::TraceError;
 use opentelemetry::{
     global,
     propagation::TextMapPropagator,
@@ -45,20 +44,20 @@ async fn handle(
     Ok(res)
 }
 
-fn init_traces() -> Result<SdkTracerProvider, TraceError> {
+fn init_traces() -> SdkTracerProvider {
     global::set_text_map_propagator(TraceContextPropagator::new());
 
     // Install stdout exporter pipeline to be able to retrieve the collected spans.
     // For the demonstration, use `Sampler::AlwaysOn` sampler to sample all traces. In a production
     // application, use `Sampler::ParentBased` or `Sampler::TraceIdRatioBased` with a desired ratio.
-    Ok(SdkTracerProvider::builder()
+    SdkTracerProvider::builder()
         .with_simple_exporter(SpanExporter::default())
-        .build())
+        .build()
 }
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync + 'static>> {
-    let tracer_provider = init_traces()?;
+    let tracer_provider = init_traces();
     global::set_tracer_provider(tracer_provider.clone());
 
     let addr = SocketAddr::from(([127, 0, 0, 1], 3000));

@@ -17,7 +17,6 @@ use opentelemetry_sdk::metrics::{
 
 use std::fmt::{Debug, Formatter};
 
-use async_trait::async_trait;
 use prost::Message;
 
 pub struct MetricsExporter {}
@@ -69,7 +68,6 @@ fn emit_export_metric_service_request(
     Ok(())
 }
 
-#[async_trait]
 impl PushMetricExporter for MetricsExporter {
     async fn export(&self, metrics: &mut ResourceMetrics) -> OTelSdkResult {
         let schema_url: String = metrics
@@ -190,7 +188,7 @@ impl PushMetricExporter for MetricsExporter {
         Ok(())
     }
 
-    async fn force_flush(&self) -> OTelSdkResult {
+    fn force_flush(&self) -> OTelSdkResult {
         Ok(())
     }
 

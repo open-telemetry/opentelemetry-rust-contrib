@@ -2,6 +2,9 @@
 
 ## vNext
 
+- Bump opentelemetry and opentelemetry_sdk versions to 0.29
+- Bump opentelemetry-proto version to 0.29
+
 ## v0.9.0
 
 - Bump msrv to 1.75.0
