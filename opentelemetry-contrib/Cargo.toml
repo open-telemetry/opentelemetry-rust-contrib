@@ -23,15 +23,12 @@ api = []
 default = []
 base64_format = ["base64", "binary_propagator"]
 binary_propagator = []
-jaeger_json_exporter = ["opentelemetry_sdk", "serde_json", "futures-core", "futures-util"]
+jaeger_json_exporter = ["opentelemetry_sdk", "serde_json"]
 rt-tokio = ["tokio", "opentelemetry_sdk/rt-tokio"]
 rt-tokio-current-thread = ["tokio", "opentelemetry_sdk/rt-tokio-current-thread"]
 
 [dependencies]
-async-std = { version = "1.10", optional = true }
 base64 = { version = "0.22", optional = true }
-futures-core = { version = "0.3", optional = true }
-futures-util = { version = "0.3", optional = true, default-features = false }
 opentelemetry = { workspace = true }
 opentelemetry_sdk = { workspace = true, optional = true }
 serde_json = { version = "1", optional = true }
