@@ -2,6 +2,8 @@
 
 ## vNext
 
+- Update gRPC schemas
+
 ### Changed
 
 ## v0.25.0
