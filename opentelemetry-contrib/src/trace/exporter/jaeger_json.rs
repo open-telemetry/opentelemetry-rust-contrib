@@ -84,22 +84,22 @@ impl<R: JaegerJsonRuntime> SpanExporter for JaegerJsonExporter<R> {
 
         runtime.create_dir(&out_path).await?;
 
-            let file_name = out_path.join(format!(
-                "{}-{}.json",
-                file_prefix,
-                SystemTime::now()
-                    .duration_since(SystemTime::UNIX_EPOCH)
-                    .expect("This does not fail")
-                    .as_secs()
-            ));
-            runtime
-                .write_to_file(
-                    &file_name,
-                    &serde_json::to_vec(&json).expect("This is a valid json value"),
-                )
-                .await?;
+        let file_name = out_path.join(format!(
+            "{}-{}.json",
+            file_prefix,
+            SystemTime::now()
+                .duration_since(SystemTime::UNIX_EPOCH)
+                .expect("This does not fail")
+                .as_secs()
+        ));
+        runtime
+            .write_to_file(
+                &file_name,
+                &serde_json::to_vec(&json).expect("This is a valid json value"),
+            )
+            .await?;
 
-            Ok(())
+        Ok(())
     }
 }
 
@@ -266,4 +266,3 @@ impl JaegerJsonRuntime for opentelemetry_sdk::runtime::TokioCurrentThread {
         Ok(())
     }
 }
-

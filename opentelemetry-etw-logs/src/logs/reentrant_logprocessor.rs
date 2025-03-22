@@ -95,7 +95,15 @@ mod tests {
 
         // Unit test are forced to return true as there is no ETW session listening for the event
         assert!(processor.event_enabled(opentelemetry::logs::Severity::Info, "test", Some("test")));
-        assert!(processor.event_enabled(opentelemetry::logs::Severity::Debug, "test", Some("test")));
-        assert!(processor.event_enabled(opentelemetry::logs::Severity::Error, "test", Some("test")));
+        assert!(processor.event_enabled(
+            opentelemetry::logs::Severity::Debug,
+            "test",
+            Some("test")
+        ));
+        assert!(processor.event_enabled(
+            opentelemetry::logs::Severity::Error,
+            "test",
+            Some("test")
+        ));
     }
 }
