@@ -27,7 +27,9 @@ internal-logs = ["tracing"]
 [dependencies]
 opentelemetry = { version = "0.28" }
 opentelemetry_sdk = { version = "0.28", optional = true }
-opentelemetry-semantic-conventions = { version = "0.28", optional = true }
+opentelemetry-semantic-conventions = { version = "0.29", optional = true, features = [
+    "semconv_experimental",
+] }
 tracing = {version = "0.1", optional = true}
 
 [dev-dependencies]
