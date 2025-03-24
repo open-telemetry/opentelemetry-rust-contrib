@@ -4,24 +4,18 @@ use std::sync::Arc;
 
 use tracelogging_dynamic as tld;
 
-use opentelemetry::{
-    logs::{AnyValue, Severity},
-    Key,
-};
+use opentelemetry::logs::Severity;
 use opentelemetry_sdk::error::{OTelSdkError, OTelSdkResult};
 use std::str;
 
-use crate::logs::converters::IntoJson;
-
 mod part_a;
+mod part_b;
+mod part_c;
+mod common;
 
 pub(crate) struct ETWExporter {
     provider: Pin<Arc<tld::Provider>>,
 }
-
-const EVENT_ID: &str = "event_id";
-const EVENT_NAME_PRIMARY: &str = "event_name";
-const EVENT_NAME_SECONDARY: &str = "name";
 
 fn enabled_callback_noop(
     _source_id: &tld::Guid,
@@ -120,9 +114,9 @@ impl ETWExporter {
 
         part_a::populate_part_a(&mut event, log_record, field_tag);
 
-        let (event_id, event_name) = self.populate_part_c(&mut event, log_record, field_tag);
+        let (event_id, event_name) = part_c::populate_part_c(&mut event, log_record, field_tag);
 
-        self.populate_part_b(&mut event, log_record, level, event_id, event_name);
+        part_b::populate_part_b(&mut event, log_record, level, event_id, event_name);
 
         // Write event to ETW
         let result = event.write(&self.provider, None, None);
@@ -139,101 +133,7 @@ impl ETWExporter {
         log_record.event_name().unwrap_or("Log")
     }
 
-    fn populate_part_b(
-        &self,
-        event: &mut tld::EventBuilder,
-        log_record: &opentelemetry_sdk::logs::SdkLogRecord,
-        level: tld::Level,
-        event_id: Option<i64>,
-        event_name: Option<&str>,
-    ) {
-        // Count fields in PartB
-        const COUNT_TYPE_NAME: u8 = 1u8;
-        const COUNT_SEVERITY_NUMBER: u8 = 1u8;
-
-        let field_count = COUNT_TYPE_NAME
-            + COUNT_SEVERITY_NUMBER
-            + log_record.body().is_some() as u8
-            + log_record.severity_text().is_some() as u8
-            + event_id.is_some() as u8
-            + event_name.is_some() as u8;
-
-        // Create PartB struct
-        event.add_struct("PartB", field_count, 0);
-
-        // Fill fields of PartB struct
-        event.add_str8("_typeName", "Logs", tld::OutType::Default, 0);
-
-        if let Some(body) = log_record.body() {
-            add_attribute_to_event(event, &Key::new("body"), body);
-        }
-
-        event.add_u8("severityNumber", level.as_int(), tld::OutType::Default, 0);
-
-        if let Some(severity_text) = &log_record.severity_text() {
-            event.add_str8("severityText", severity_text, tld::OutType::Default, 0);
-        }
-
-        if let Some(event_id) = event_id {
-            event.add_i64("eventId", event_id, tld::OutType::Default, 0);
-        }
-
-        if let Some(event_name) = event_name {
-            event.add_str8("name", event_name, tld::OutType::Default, 0);
-        }
-    }
-
-    fn populate_part_c<'a>(
-        &'a self,
-        event: &mut tld::EventBuilder,
-        log_record: &'a opentelemetry_sdk::logs::SdkLogRecord,
-        field_tag: u32,
-    ) -> (Option<i64>, Option<&'a str>) {
-        //populate CS PartC
-        let mut event_id: Option<i64> = None;
-        let mut event_name: Option<&str> = None;
-
-        let mut cs_c_count = 0;
-        for (key, value) in log_record.attributes_iter() {
-            // find if we have PartC and its information
-            match (key.as_str(), &value) {
-                (EVENT_ID, AnyValue::Int(value)) => {
-                    event_id = Some(*value);
-                    continue;
-                }
-                (EVENT_NAME_PRIMARY, AnyValue::String(value)) => {
-                    event_name = Some(value.as_str());
-                    continue;
-                }
-                (EVENT_NAME_SECONDARY, AnyValue::String(value)) => {
-                    if event_name.is_none() {
-                        event_name = Some(value.as_str());
-                    }
-                    continue;
-                }
-                _ => {
-                    cs_c_count += 1;
-                }
-            }
-        }
-
-        // If there are additional PartC attributes, add them to the event
-        if cs_c_count > 0 {
-            event.add_struct("PartC", cs_c_count, field_tag);
-
-            for (key, value) in log_record.attributes_iter() {
-                match (key.as_str(), &value) {
-                    (EVENT_ID, _) | (EVENT_NAME_PRIMARY, _) | (EVENT_NAME_SECONDARY, _) => {
-                        continue;
-                    }
-                    _ => {
-                        add_attribute_to_event(event, key, value);
-                    }
-                }
-            }
-        }
-        (event_id, event_name)
-    }
+    
 }
 
 impl Debug for ETWExporter {
@@ -262,46 +162,11 @@ impl opentelemetry_sdk::logs::LogExporter for ETWExporter {
     }
 }
 
-fn add_attribute_to_event(event: &mut tld::EventBuilder, key: &Key, value: &AnyValue) {
-    match value {
-        AnyValue::Boolean(b) => {
-            event.add_bool32(key.as_str(), *b as i32, tld::OutType::Default, 0);
-        }
-        AnyValue::Int(i) => {
-            event.add_i64(key.as_str(), *i, tld::OutType::Default, 0);
-        }
-        AnyValue::Double(f) => {
-            event.add_f64(key.as_str(), *f, tld::OutType::Default, 0);
-        }
-        AnyValue::String(s) => {
-            event.add_str8(key.as_str(), s.as_str(), tld::OutType::Default, 0);
-        }
-        AnyValue::Bytes(b) => {
-            event.add_binaryc(key.as_str(), b.as_slice(), tld::OutType::Default, 0);
-        }
-        AnyValue::ListAny(l) => {
-            event.add_str8(
-                key.as_str(),
-                l.as_json_value().to_string(),
-                tld::OutType::Json,
-                0,
-            );
-        }
-        AnyValue::Map(m) => {
-            event.add_str8(
-                key.as_str(),
-                m.as_json_value().to_string(),
-                tld::OutType::Json,
-                0,
-            );
-        }
-        &_ => {}
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
+    use opentelemetry::Key;
+    use opentelemetry::logs::AnyValue;
     use opentelemetry::logs::Logger;
     use opentelemetry::logs::LoggerProvider;
     use opentelemetry::logs::Severity;
@@ -373,9 +238,9 @@ mod tests {
 
         let mut log_record = new_sdk_log_record();
 
-        log_record.add_attribute(EVENT_ID, 20);
-        log_record.add_attribute(EVENT_NAME_PRIMARY, "event-name");
-        log_record.add_attribute(EVENT_NAME_SECONDARY, "event-name");
+        log_record.add_attribute(common::EVENT_ID, 20);
+        log_record.add_attribute(common::EVENT_NAME_PRIMARY, "event-name");
+        log_record.add_attribute(common::EVENT_NAME_SECONDARY, "event-name");
 
         let exporter = new_etw_exporter();
         let instrumentation = new_instrumentation_scope();
@@ -389,8 +254,8 @@ mod tests {
         use opentelemetry::logs::LogRecord;
 
         let mut log_record = new_sdk_log_record();
-        log_record.add_attribute(EVENT_ID, 20);
-        log_record.add_attribute(EVENT_NAME_SECONDARY, "event-name");
+        log_record.add_attribute(common::EVENT_ID, 20);
+        log_record.add_attribute(common::EVENT_NAME_SECONDARY, "event-name");
 
         let exporter = new_etw_exporter();
         let instrumentation = new_instrumentation_scope();
