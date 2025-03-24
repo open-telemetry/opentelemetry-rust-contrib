@@ -17,7 +17,10 @@
 - Renamed `logs_level_enabled` feature to `spec_unstable_logs_enabled` to match `opentelemetry` features.
 
 - `default` feature does not enable `spec_unstable_logs_enabled` anymore.
+
 - Bump opentelemetry and opentelemetry_sdk versions to 0.29
+
+- Added support for TraceId,SpanId
 
 ## v0.7.0
 
