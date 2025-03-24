@@ -12,45 +12,24 @@
 // Threads: 5 - Average Throughput: 2.7M iterations/sec
 // Threads: 10 - Average Throughput: 4.1M iterations/sec
 // Threads: 16 - Average Throughput: 5M iterations/sec
-// $EtwSessionGuid = (new-object System.Diagnostics.Tracing.EventSource("my-provider-name")).Guid.ToString()`
+// $EtwSessionGuid = (new-object System.Diagnostics.Tracing.EventSource("provider-name")).Guid.ToString()`
 // logman create trace OtelETWExampleBasic -o OtelETWExampleBasic.log -p "{$EtwSessionGuid}" -f bincirc -max 1000
 // logman start OtelETWExampleBasic
 // RUN test here...
 // logman stop OtelETWExampleBasic
 
 use opentelemetry_appender_tracing::layer;
-use opentelemetry_etw_logs::{ExporterConfig, ReentrantLogProcessor};
+use opentelemetry_etw_logs::ETWLoggerProviderBuilderExt;
 use opentelemetry_sdk::logs::SdkLoggerProvider;
-use std::collections::HashMap;
 use tracing::info;
 use tracing_subscriber::prelude::*;
 mod throughput;
 
 // Function to initialize the logger
 fn init_logger() -> SdkLoggerProvider {
-    let exporter_config = ExporterConfig {
-        default_keyword: 1,
-        keywords_map: HashMap::new(),
-    };
-    let reenterant_processor = ReentrantLogProcessor::new(
-        "my-provider-name",
-        "my-event-name".into(),
-        None,
-        exporter_config,
-    );
     SdkLoggerProvider::builder()
-        .with_log_processor(reenterant_processor)
+        .with_etw_exporter("provider-name")
         .build()
-}
-
-// Function that performs the logging task
-fn log_event_task() {
-    info!(
-        name = "my-event-name",
-        event_id = 20,
-        user_name = "otel user",
-        user_email = "otel@opentelemetry.io"
-    );
 }
 
 fn main() {
@@ -59,7 +38,12 @@ fn main() {
     tracing_subscriber::registry().with(layer).init();
 
     throughput::test_throughput(|| {
-        log_event_task();
+        info!(
+            name : "event-name",
+            event_id = 20,
+            user_name = "otel user",
+            user_email = "otel@opentelemetry.io"
+        );
     });
 
     println!("Stress test completed.");

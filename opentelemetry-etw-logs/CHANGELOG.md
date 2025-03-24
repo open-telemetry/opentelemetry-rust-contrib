@@ -2,6 +2,22 @@
 
 ## vNext
 
+- Added the `with_etw_exporter` trait method to `LoggerProviderBuilder`.
+  This is now the only way to add an ETW exporter. The following line
+  will add an ETW exporter using the given provider name:
+
+  ```rust
+  SdkLoggerProvider::builder().with_etw_exporter("provider-name").build();
+  ```
+
+  Event name now will be inferred from the `LogRecord` being emitted. If no name is given, it defaults to `Log`.
+
+- Removed `opentelemetry_etw_logs::{ExporterConfig, ReentrantLogProcessor, ETWExporter}` from the public API. Ability to customize Provider Group or Keyword may be added in the future.
+
+- Renamed `logs_level_enabled` feature to `spec_unstable_logs_enabled` to match `opentelemetry` features.
+
+- `default` feature does not enable `spec_unstable_logs_enabled` anymore.
+
 ## v0.7.0
 
 - Bump msrv to 1.75.0

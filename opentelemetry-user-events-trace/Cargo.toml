@@ -1,0 +1,42 @@
+[package]
+name = "opentelemetry-user-events-trace"
+description = "OpenTelemetry-Rust exporter to user_events"
+version = "0.10.0"
+edition = "2021"
+homepage = "https://github.com/open-telemetry/opentelemetry-rust-contrib/tree/main/opentelemetry-user-events-traces"
+repository = "https://github.com/open-telemetry/opentelemetry-rust-contrib/tree/main/opentelemetry-user-events-traces"
+readme = "README.md"
+rust-version = "1.75.0"
+keywords = ["opentelemetry", "log", "trace", "user_events"]
+license = "Apache-2.0"
+
+[dependencies]
+eventheader = "0.4.0"
+eventheader_dynamic = "0.4.0"
+opentelemetry = { workspace = true, features = ["trace"] }
+opentelemetry_sdk = { workspace = true, features = ["trace"] }
+chrono = { version = "0.4", default-features = false, features = ["std"] }
+tracing = { version = "0.1", optional = true }
+futures-executor = "0.3"
+futures-util = "0.3"
+
+[dev-dependencies]
+opentelemetry_sdk = { workspace = true, features = ["trace"]}
+tracing = { version = "0.1", default-features = false, features = ["std"] }
+tracing-core = "0.1.31"
+tracing-subscriber = { version = "0.3.0", default-features = false, features = ["env-filter", "fmt", "registry", "std"] }
+ctrlc = "3.4"
+criterion = "0.5"
+serde_json = "1.0.140"
+
+[features]
+internal-logs = ["tracing", "opentelemetry/internal-logs", "opentelemetry_sdk/internal-logs"]
+default = ["internal-logs"]
+
+[lints]
+workspace = true
+
+# machete seems to failing for tracing which is optional dependency and enabled by default. 
+# So, ignoring it for now.
+[package.metadata.cargo-machete]
+ignored = ["tracing"]

@@ -8,14 +8,29 @@ on:
     - main
     paths-ignore:
     - '**.md'
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
 jobs:
   test:
     strategy:
       matrix:
+        # test both stable and beta versions of Rust on ubuntu-latest
+        os: [ubuntu-latest]
         rust: [stable, beta]
-    runs-on: ubuntu-latest
+        # test only stable version of Rust on Windows and MacOS
+        include:
+          - rust: stable
+            os: windows-latest
+          - rust: stable
+            os: macos-latest
+          - rust: stable
+            os: ubuntu-22.04-arm
+    runs-on: ${{ matrix.os }}
+    continue-on-error: ${{ matrix.rust == 'beta' }}
     steps:
     - name: Free disk space
+      if: ${{ matrix.os == 'ubuntu-latest'}}
       run: |
         df -h
         sudo rm -rf /usr/local/lib/android
@@ -24,54 +39,78 @@ jobs:
     - uses: actions/checkout@v4
       with:
         submodules: true
-    - uses: actions-rs/toolchain@v1
+    - uses: dtolnay/rust-toolchain@master
       with:
         toolchain: ${{ matrix.rust }}
         components: rustfmt
-        profile: minimal
-    - uses: arduino/setup-protoc@v1
-    - name: Test
-      run: ./scripts/test.sh
+    - name: "Set rustup profile"
+      run: rustup set profile minimal
+    - uses: arduino/setup-protoc@v3
+      with:
+        repo-token: ${{ secrets.GITHUB_TOKEN }}
+    - name: Test (Windows)
+      if: ${{ matrix.os == 'windows-latest'}}
+      run: ./scripts/test.ps1
+      shell: pwsh
+    - name: Test (Unix)
+      if: ${{ matrix.os != 'windows-latest'}}
+      run: bash ./scripts/test.sh
   lint:
-    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        # clippy must be run in every OS to lint platform-specific code 
+        os: [ubuntu-latest, windows-latest, macos-latest, ubuntu-22.04-arm]
+    runs-on: ${{ matrix.os }}
     steps:
     - uses: actions/checkout@v4
       with:
         submodules: true
-    - uses: actions-rs/toolchain@v1
+    - uses: dtolnay/rust-toolchain@master
       with:
         toolchain: stable
-        components: rustfmt
-        profile: minimal
-    - uses: arduino/setup-protoc@v1
-    - uses: actions-rs/cargo@v1
+        components: rustfmt,clippy
+    - uses: arduino/setup-protoc@v3
       with:
-        command: fmt
-        args: --all -- --check
-    - name: Lint
+          repo-token: ${{ secrets.GITHUB_TOKEN }}
+    - name: Format
+      run: cargo fmt --all -- --check
+    - name: Lint (Windows)
+      if: ${{ matrix.os == 'windows-latest'}}
+      run: ./scripts/lint.ps1
+      shell: pwsh
+    - name: Lint (Unix)
+      if: ${{ matrix.os != 'windows-latest'}}
       run: ./scripts/lint.sh
   msrv:
     strategy:
       matrix:
         rust: ["1.75.0"]
-    runs-on: ubuntu-latest
+        os: [
+          ubuntu-latest,
+          # windows-latest # Disabled due bug in `cargo-msrv` on Windows( https://github.com/foresterre/cargo-msrv/issues/1102 )
+        ]
+    runs-on: ${{ matrix.os }}
     continue-on-error: true
     steps:
       - uses: actions/checkout@v4
         with:
           submodules: true
       - name: Set up Rust ${{ matrix.rust }}
-        uses: actions-rs/toolchain@v1
+        uses: dtolnay/rust-toolchain@master
         with:
           toolchain: ${{ matrix.rust }}
-          override: true
       - uses: taiki-e/install-action@v2
         with:
           tool: cargo-msrv
-      - name: Patch dependencies versions
+      - name: Patch dependencies versions (Unix)
+        if: ${{ matrix.os != 'windows-latest'}}
         run: bash ./scripts/patch_dependencies.sh
-      - name: Check MSRV for all crates
+      - name: Check MSRV for all crates (Unix)
+        if: ${{ matrix.os != 'windows-latest'}}
         run: bash ./scripts/msrv.sh ${{ matrix.rust }}
+      - name: Check MSRV for all crates (Windows)
+        if: ${{ matrix.os == 'windows-latest'}}
+        run: ./scripts/msrv.ps1 ${{ matrix.rust }}
   cargo-deny:
     runs-on: ubuntu-latest
     continue-on-error: true # Prevent sudden announcement of a new advisory from failing ci
@@ -85,12 +124,12 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: actions-rs/toolchain@v1
+      - uses: dtolnay/rust-toolchain@master
         with:
-          toolchain: nightly
-          components: rustfmt
-          override: true
-      - uses: arduino/setup-protoc@v1
+          toolchain: stable
+      - uses: arduino/setup-protoc@v3
+        with:
+            repo-token: ${{ secrets.GITHUB_TOKEN }}
       - name: doc
         run: cargo doc --no-deps --all-features
         env:
@@ -103,12 +142,13 @@ jobs:
       - uses: actions/checkout@v4
         with:
           submodules: true
-      - uses: actions-rs/toolchain@v1
+      - uses: dtolnay/rust-toolchain@master
         with:
           toolchain: stable
-          components: rustfmt,llvm-tools-preview
-          override: true
-      - uses: arduino/setup-protoc@v1
+          components: llvm-tools-preview
+      - uses: arduino/setup-protoc@v3
+        with:
+            repo-token: ${{ secrets.GITHUB_TOKEN }}
       - name: cargo install cargo-llvm-cov
         uses: taiki-e/install-action@cargo-llvm-cov
       - name: cargo generate-lockfile
@@ -127,12 +167,26 @@ jobs:
       - uses: actions/checkout@v4
         with:
           submodules: true
-      - uses: actions-rs/toolchain@v1
+      - uses: dtolnay/rust-toolchain@master
         with:
           toolchain: stable
-          override: true
       - uses: taiki-e/install-action@v2
         with:
           tool: cargo-machete
       - name: cargo machete
         run: cargo machete
+  cargo-workspace-lints:
+    continue-on-error: true
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: true
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: stable
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-workspace-lints
+      - name: cargo workspace-lints
+        run: cargo workspace-lints

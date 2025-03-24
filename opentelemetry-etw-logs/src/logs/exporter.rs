@@ -1,5 +1,3 @@
-use std::borrow::Cow;
-use std::collections::HashMap;
 use std::fmt::Debug;
 use std::pin::Pin;
 use std::sync::Arc;
@@ -15,55 +13,15 @@ use std::{str, time::SystemTime};
 
 use crate::logs::converters::IntoJson;
 
-/// Provider group associated with the ETW exporter
-pub type ProviderGroup = Option<Cow<'static, str>>;
-
-// thread_local! { static EBW: RefCell<EventBuilder> = RefCell::new(EventBuilder::new());}
-
-/// Exporter config
-#[derive(Debug)]
-pub struct ExporterConfig {
-    /// keyword associated with ETW name
-    /// These should be mapped to logger_name as of now.
-    pub keywords_map: HashMap<String, u64>,
-    /// default keyword if map is not defined.
-    pub default_keyword: u64,
-}
-
-impl Default for ExporterConfig {
-    fn default() -> Self {
-        ExporterConfig {
-            keywords_map: HashMap::new(),
-            default_keyword: 1,
-        }
-    }
-}
-
-impl ExporterConfig {
-    pub(crate) fn get_log_keyword(&self, name: &str) -> Option<u64> {
-        self.keywords_map.get(name).copied()
-    }
-
-    pub(crate) fn get_log_keyword_or_default(&self, name: &str) -> Option<u64> {
-        if self.keywords_map.is_empty() {
-            Some(self.default_keyword)
-        } else {
-            self.get_log_keyword(name)
-        }
-    }
-}
 pub(crate) struct ETWExporter {
     provider: Pin<Arc<tld::Provider>>,
-    exporter_config: ExporterConfig,
-    event_name: String,
 }
 
 const EVENT_ID: &str = "event_id";
 const EVENT_NAME_PRIMARY: &str = "event_name";
 const EVENT_NAME_SECONDARY: &str = "name";
 
-// TODO: Implement callback
-fn enabled_callback(
+fn enabled_callback_noop(
     _source_id: &tld::Guid,
     _event_control_code: u32,
     _level: tld::Level,
@@ -72,19 +30,16 @@ fn enabled_callback(
     _filter_data: usize,
     _callback_context: usize,
 ) {
+    // Unused callback.
 }
 
-//TBD - How to configure provider name and provider group
 impl ETWExporter {
-    pub(crate) fn new(
-        provider_name: &str,
-        event_name: String,
-        _provider_group: ProviderGroup,
-        exporter_config: ExporterConfig,
-    ) -> Self {
+    const KEYWORD: u64 = 1;
+
+    pub(crate) fn new(provider_name: &str) -> Self {
         let mut options = tld::Provider::options();
-        // TODO: Implement callback
-        options.callback(enabled_callback, 0x0);
+
+        options.callback(enabled_callback_noop, 0x0);
         let provider = Arc::pin(tld::Provider::new(provider_name, &options));
         // SAFETY: tracelogging (ETW) enables an ETW callback into the provider when `register()` is called.
         // This might crash if the provider is dropped without calling unregister before.
@@ -93,44 +48,9 @@ impl ETWExporter {
         unsafe {
             provider.as_ref().register();
         }
-        // TODO: enable keywords on callback
-        // Self::register_keywords(&mut provider, &exporter_config);
-        ETWExporter {
-            provider,
-            exporter_config,
-            event_name,
-        }
+
+        ETWExporter { provider }
     }
-
-    // TODO: enable keywords on callback
-    // fn register_events(provider: &mut tld::Provider, keyword: u64) {
-    //     let levels = [
-    //         tld::Level::Verbose,
-    //         tld::Level::Informational,
-    //         tld::Level::Warning,
-    //         tld::Level::Error,
-    //         tld::Level::Critical,
-    //         tld::Level::LogAlways,
-    //     ];
-
-    //     for &level in levels.iter() {
-    //         // provider.register_set(level, keyword);
-    //     }
-    // }
-
-    // fn register_keywords(provider: &mut tld::Provider, exporter_config: &ExporterConfig) {
-    //     if exporter_config.keywords_map.is_empty() {
-    //         println!(
-    //             "Register default keyword {}",
-    //             exporter_config.default_keyword
-    //         );
-    //         Self::register_events(provider, exporter_config.default_keyword);
-    //     }
-
-    //     for keyword in exporter_config.keywords_map.values() {
-    //         Self::register_events(provider, *keyword);
-    //     }
-    // }
 
     fn get_severity_level(&self, severity: Severity) -> tld::Level {
         match severity {
@@ -161,33 +81,24 @@ impl ETWExporter {
         }
     }
 
-    #[allow(dead_code)]
-    fn enabled(&self, level: u8, keyword: u64) -> bool {
-        // TODO: Use internal enabled check. Meaning of enable differs from OpenTelemetry and ETW.
-        // OpenTelemetry wants to know if level+keyword combination is enabled for the Provider.
-        // ETW tells if level+keyword combination is being actively listened. Not all systems actively
-        // listens for ETW events, but they do it on samples.
-        // This may be fixed by applying the OpenTelemetry logic in the callback function.
-        self.provider.enabled(level.into(), keyword)
+    fn enabled(&self, level: tld::Level) -> bool {
+        // On unit tests, we skip this check to be able to test the exporter as no provider is active.
+        if cfg!(test) {
+            return true;
+        }
+
+        self.provider.enabled(level, Self::KEYWORD)
     }
 
     pub(crate) fn export_log_data(
         &self,
         log_record: &opentelemetry_sdk::logs::SdkLogRecord,
-        instrumentation: &opentelemetry::InstrumentationScope,
+        _instrumentation: &opentelemetry::InstrumentationScope,
     ) -> opentelemetry_sdk::error::OTelSdkResult {
         let level =
             self.get_severity_level(log_record.severity_number().unwrap_or(Severity::Debug));
 
-        let keyword = match self
-            .exporter_config
-            .get_log_keyword_or_default(instrumentation.name().as_ref())
-        {
-            Some(keyword) => keyword,
-            _ => return Ok(()),
-        };
-
-        if !self.provider.enabled(level.as_int().into(), keyword) {
+        if !self.enabled(level) {
             return Ok(());
         };
 
@@ -196,7 +107,12 @@ impl ETWExporter {
         let mut event = tld::EventBuilder::new();
 
         // reset
-        event.reset(&self.event_name, level, keyword, event_tags);
+        event.reset(
+            self.get_event_name(log_record),
+            level,
+            Self::KEYWORD,
+            event_tags,
+        );
 
         event.add_u16("__csver__", 0x0401u16, tld::OutType::Hex, field_tag);
 
@@ -215,6 +131,10 @@ impl ETWExporter {
                 "Failed to write event to ETW. ETW reason: {result}"
             ))),
         }
+    }
+
+    fn get_event_name(&self, log_record: &opentelemetry_sdk::logs::SdkLogRecord) -> &str {
+        log_record.event_name().unwrap_or("Log")
     }
 
     fn populate_part_a(
@@ -354,22 +274,9 @@ impl opentelemetry_sdk::logs::LogExporter for ETWExporter {
         }
     }
 
-    #[cfg(feature = "logs_level_enabled")]
-    fn event_enabled(&self, level: Severity, _target: &str, name: &str) -> bool {
-        let (found, keyword) = if self.exporter_config.keywords_map.is_empty() {
-            (true, self.exporter_config.default_keyword)
-        } else {
-            // TBD - target is not used as of now for comparison.
-            match self.exporter_config.get_log_keyword(name) {
-                Some(x) => (true, x),
-                _ => (false, 0),
-            }
-        };
-        if !found {
-            return false;
-        }
-        self.provider
-            .enabled(self.get_severity_level(level), keyword)
+    #[cfg(feature = "spec_unstable_logs_enabled")]
+    fn event_enabled(&self, level: Severity, _target: &str, _name: &str) -> bool {
+        self.enabled(self.get_severity_level(level))
     }
 }
 
@@ -420,17 +327,9 @@ mod tests {
 
     #[test]
     fn test_export_log_data() {
-        let exporter = ETWExporter::new(
-            "test-provider-name",
-            "test-event-name".to_string(),
-            None,
-            ExporterConfig::default(),
-        );
-        let record = SdkLoggerProvider::builder()
-            .build()
-            .logger("test")
-            .create_log_record();
-        let instrumentation = Default::default();
+        let record = new_sdk_log_record();
+        let exporter = new_etw_exporter();
+        let instrumentation = new_instrumentation_scope();
 
         let result = exporter.export_log_data(&record, &instrumentation);
         assert!(result.is_ok());
@@ -438,12 +337,7 @@ mod tests {
 
     #[test]
     fn test_get_severity_level() {
-        let exporter = ETWExporter::new(
-            "test-provider-name",
-            "test-event-name".to_string(),
-            None,
-            ExporterConfig::default(),
-        );
+        let exporter = new_etw_exporter();
 
         let result = exporter.get_severity_level(Severity::Debug);
         assert_eq!(result, tld::Level::Verbose);
@@ -459,5 +353,149 @@ mod tests {
 
         let result = exporter.get_severity_level(Severity::Warn);
         assert_eq!(result, tld::Level::Warning);
+    }
+
+    #[test]
+    fn test_body() {
+        use opentelemetry::logs::LogRecord;
+
+        let mut log_record = new_sdk_log_record();
+
+        log_record.set_body("body".into());
+
+        let exporter = new_etw_exporter();
+        let instrumentation = new_instrumentation_scope();
+        let result = exporter.export_log_data(&log_record, &instrumentation);
+
+        assert!(result.is_ok());
+    }
+
+    #[test]
+    fn test_event_name() {
+        use opentelemetry::logs::LogRecord;
+
+        let mut log_record = new_sdk_log_record();
+
+        log_record.set_event_name("event-name");
+
+        let exporter = new_etw_exporter();
+        let instrumentation = new_instrumentation_scope();
+        let result = exporter.export_log_data(&log_record, &instrumentation);
+
+        assert!(result.is_ok());
+    }
+
+    #[test]
+    fn test_special_attributes() {
+        use opentelemetry::logs::LogRecord;
+
+        let mut log_record = new_sdk_log_record();
+
+        log_record.add_attribute(EVENT_ID, 20);
+        log_record.add_attribute(EVENT_NAME_PRIMARY, "event-name");
+        log_record.add_attribute(EVENT_NAME_SECONDARY, "event-name");
+
+        let exporter = new_etw_exporter();
+        let instrumentation = new_instrumentation_scope();
+        let result = exporter.export_log_data(&log_record, &instrumentation);
+
+        assert!(result.is_ok());
+    }
+
+    #[test]
+    fn test_special_attributes_missing_event_name_primary() {
+        use opentelemetry::logs::LogRecord;
+
+        let mut log_record = new_sdk_log_record();
+        log_record.add_attribute(EVENT_ID, 20);
+        log_record.add_attribute(EVENT_NAME_SECONDARY, "event-name");
+
+        let exporter = new_etw_exporter();
+        let instrumentation = new_instrumentation_scope();
+        let result = exporter.export_log_data(&log_record, &instrumentation);
+
+        assert!(result.is_ok());
+    }
+
+    #[test]
+    fn test_attributes() {
+        use opentelemetry::logs::LogRecord;
+        use std::collections::HashMap;
+
+        let mut log_record = new_sdk_log_record();
+
+        log_record.add_attribute("string", "value");
+        log_record.add_attribute("int", 20);
+        log_record.add_attribute("double", 1.5);
+        log_record.add_attribute("boolean", true);
+
+        log_record.add_attribute(
+            "list",
+            AnyValue::ListAny(Box::new(vec![AnyValue::Int(1), AnyValue::Int(2)])),
+        );
+
+        let mut map_attribute = HashMap::new();
+        map_attribute.insert(Key::new("key"), AnyValue::Int(1));
+        log_record.add_attribute("map", AnyValue::Map(Box::new(map_attribute)));
+
+        log_record.add_attribute("bytes", AnyValue::Bytes(Box::new(vec![0u8, 1u8, 2u8, 3u8])));
+
+        let exporter = new_etw_exporter();
+        let instrumentation = new_instrumentation_scope();
+        let result = exporter.export_log_data(&log_record, &instrumentation);
+
+        assert!(result.is_ok());
+    }
+
+    #[test]
+    fn test_debug() {
+        let exporter = new_etw_exporter();
+        let result = format!("{:?}", exporter);
+        assert_eq!(result, "ETW log exporter");
+    }
+
+    #[tokio::test]
+    async fn test_export() {
+        use opentelemetry_sdk::logs::LogBatch;
+        use opentelemetry_sdk::logs::LogExporter;
+
+        let log_record = new_sdk_log_record();
+        let instrumentation = new_instrumentation_scope();
+
+        let records = [(&log_record, &instrumentation)];
+        let batch = LogBatch::new(&records);
+
+        let exporter = new_etw_exporter();
+        let result = exporter.export(batch);
+
+        assert!(result.await.is_ok());
+    }
+
+    #[test]
+    fn test_callback_noop() {
+        enabled_callback_noop(
+            &tld::Guid::from_name("provider-name"),
+            0,
+            tld::Level::Verbose,
+            0,
+            0,
+            0,
+            0,
+        );
+    }
+
+    fn new_etw_exporter() -> ETWExporter {
+        ETWExporter::new("test-provider-name")
+    }
+
+    fn new_instrumentation_scope() -> opentelemetry::InstrumentationScope {
+        opentelemetry::InstrumentationScope::default()
+    }
+
+    fn new_sdk_log_record() -> opentelemetry_sdk::logs::SdkLogRecord {
+        SdkLoggerProvider::builder()
+            .build()
+            .logger("test")
+            .create_log_record()
     }
 }

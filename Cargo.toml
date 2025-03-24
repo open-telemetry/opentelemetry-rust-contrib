@@ -1,9 +1,22 @@
 [workspace]
 members = [
-    "opentelemetry-*",
+    "opentelemetry-aws",
+    "opentelemetry-contrib",
+    "opentelemetry-datadog",
+    "opentelemetry-etw-logs",
+    "opentelemetry-etw-metrics",
+    "opentelemetry-resource-detectors",
+    "opentelemetry-stackdriver",
+    "opentelemetry-user-events-logs",
+    "opentelemetry-user-events-metrics",
+    "opentelemetry-zpages",
+    "opentelemetry-exporter-geneva/geneva-uploader",
+    "opentelemetry-exporter-geneva/geneva-uploader-ffi",
+    "opentelemetry-exporter-geneva/opentelemetry-exporter-geneva",
     "examples/*",
     "stress",
 ]
+
 resolver = "2"
 
 [profile.bench]
@@ -23,6 +36,12 @@ opentelemetry-semantic-conventions = { version = "0.28", features = [
     "semconv_experimental",
 ] }
 criterion = "0.5"
+
+[workspace.lints.rust]
+rust_2024_compatibility = { level = "warn", priority = -1 }
+# No need to enable those, because it is either unnecessary or results in ugly syntax
+if_let_rescope = "allow"
+tail_expr_drop_order = "allow"
 
 [workspace.lints.clippy]
 all = { level = "warn", priority = 1 }
