@@ -48,7 +48,7 @@ impl<T: LogExporter> opentelemetry_sdk::logs::LogProcessor for ReentrantLogProce
         &self,
         level: opentelemetry::logs::Severity,
         target: &str,
-        name: &str,
+        name: Option<&str>,
     ) -> bool {
         self.exporter.event_enabled(level, target, name)
     }

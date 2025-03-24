@@ -46,7 +46,7 @@ impl opentelemetry_sdk::logs::LogProcessor for ReentrantLogProcessor {
         &self,
         level: opentelemetry::logs::Severity,
         target: &str,
-        name: &str,
+        name: Option<&str>,
     ) -> bool {
         use opentelemetry_sdk::logs::LogExporter;
 
@@ -94,8 +94,16 @@ mod tests {
         let processor = ReentrantLogProcessor::new("test-provider-name");
 
         // Unit test are forced to return true as there is no ETW session listening for the event
-        assert!(processor.event_enabled(opentelemetry::logs::Severity::Info, "test", "test"));
-        assert!(processor.event_enabled(opentelemetry::logs::Severity::Debug, "test", "test"));
-        assert!(processor.event_enabled(opentelemetry::logs::Severity::Error, "test", "test"));
+        assert!(processor.event_enabled(opentelemetry::logs::Severity::Info, "test", Some("test")));
+        assert!(processor.event_enabled(
+            opentelemetry::logs::Severity::Debug,
+            "test",
+            Some("test")
+        ));
+        assert!(processor.event_enabled(
+            opentelemetry::logs::Severity::Error,
+            "test",
+            Some("test")
+        ));
     }
 }
