@@ -43,3 +43,23 @@ pub fn populate_part_b(
         event.add_str8("name", event_name, tld::OutType::Default, 0);
     }
 }
+
+#[cfg(test)]
+mod test {
+  use super::super::common::test_utils;
+
+    #[test]
+    fn test_body() {
+        use opentelemetry::logs::LogRecord;
+
+        let mut log_record = test_utils::new_sdk_log_record();
+
+        log_record.set_body("body".into());
+
+        let exporter = test_utils::new_etw_exporter();
+        let instrumentation = test_utils::new_instrumentation_scope();
+        let result = exporter.export_log_data(&log_record, &instrumentation);
+
+        assert!(result.is_ok());
+    }
+}

@@ -165,18 +165,13 @@ impl opentelemetry_sdk::logs::LogExporter for ETWExporter {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use opentelemetry::Key;
-    use opentelemetry::logs::AnyValue;
-    use opentelemetry::logs::Logger;
-    use opentelemetry::logs::LoggerProvider;
     use opentelemetry::logs::Severity;
-    use opentelemetry_sdk::logs::SdkLoggerProvider;
 
     #[test]
     fn test_export_log_data() {
-        let record = new_sdk_log_record();
-        let exporter = new_etw_exporter();
-        let instrumentation = new_instrumentation_scope();
+        let record = common::test_utils::new_sdk_log_record();
+        let exporter = common::test_utils::new_etw_exporter();
+        let instrumentation = common::test_utils::new_instrumentation_scope();
 
         let result = exporter.export_log_data(&record, &instrumentation);
         assert!(result.is_ok());
@@ -184,7 +179,7 @@ mod tests {
 
     #[test]
     fn test_get_severity_level() {
-        let exporter = new_etw_exporter();
+        let exporter = common::test_utils::new_etw_exporter();
 
         let result = exporter.get_severity_level(Severity::Debug);
         assert_eq!(result, tld::Level::Verbose);
@@ -203,92 +198,15 @@ mod tests {
     }
 
     #[test]
-    fn test_body() {
-        use opentelemetry::logs::LogRecord;
-
-        let mut log_record = new_sdk_log_record();
-
-        log_record.set_body("body".into());
-
-        let exporter = new_etw_exporter();
-        let instrumentation = new_instrumentation_scope();
-        let result = exporter.export_log_data(&log_record, &instrumentation);
-
-        assert!(result.is_ok());
-    }
-
-    #[test]
     fn test_event_name() {
         use opentelemetry::logs::LogRecord;
 
-        let mut log_record = new_sdk_log_record();
+        let mut log_record = common::test_utils::new_sdk_log_record();
 
         log_record.set_event_name("event-name");
 
-        let exporter = new_etw_exporter();
-        let instrumentation = new_instrumentation_scope();
-        let result = exporter.export_log_data(&log_record, &instrumentation);
-
-        assert!(result.is_ok());
-    }
-
-    #[test]
-    fn test_special_attributes() {
-        use opentelemetry::logs::LogRecord;
-
-        let mut log_record = new_sdk_log_record();
-
-        log_record.add_attribute(common::EVENT_ID, 20);
-        log_record.add_attribute(common::EVENT_NAME_PRIMARY, "event-name");
-        log_record.add_attribute(common::EVENT_NAME_SECONDARY, "event-name");
-
-        let exporter = new_etw_exporter();
-        let instrumentation = new_instrumentation_scope();
-        let result = exporter.export_log_data(&log_record, &instrumentation);
-
-        assert!(result.is_ok());
-    }
-
-    #[test]
-    fn test_special_attributes_missing_event_name_primary() {
-        use opentelemetry::logs::LogRecord;
-
-        let mut log_record = new_sdk_log_record();
-        log_record.add_attribute(common::EVENT_ID, 20);
-        log_record.add_attribute(common::EVENT_NAME_SECONDARY, "event-name");
-
-        let exporter = new_etw_exporter();
-        let instrumentation = new_instrumentation_scope();
-        let result = exporter.export_log_data(&log_record, &instrumentation);
-
-        assert!(result.is_ok());
-    }
-
-    #[test]
-    fn test_attributes() {
-        use opentelemetry::logs::LogRecord;
-        use std::collections::HashMap;
-
-        let mut log_record = new_sdk_log_record();
-
-        log_record.add_attribute("string", "value");
-        log_record.add_attribute("int", 20);
-        log_record.add_attribute("double", 1.5);
-        log_record.add_attribute("boolean", true);
-
-        log_record.add_attribute(
-            "list",
-            AnyValue::ListAny(Box::new(vec![AnyValue::Int(1), AnyValue::Int(2)])),
-        );
-
-        let mut map_attribute = HashMap::new();
-        map_attribute.insert(Key::new("key"), AnyValue::Int(1));
-        log_record.add_attribute("map", AnyValue::Map(Box::new(map_attribute)));
-
-        log_record.add_attribute("bytes", AnyValue::Bytes(Box::new(vec![0u8, 1u8, 2u8, 3u8])));
-
-        let exporter = new_etw_exporter();
-        let instrumentation = new_instrumentation_scope();
+        let exporter = common::test_utils::new_etw_exporter();
+        let instrumentation = common::test_utils::new_instrumentation_scope();
         let result = exporter.export_log_data(&log_record, &instrumentation);
 
         assert!(result.is_ok());
@@ -296,7 +214,7 @@ mod tests {
 
     #[test]
     fn test_debug() {
-        let exporter = new_etw_exporter();
+        let exporter = common::test_utils::new_etw_exporter();
         let result = format!("{:?}", exporter);
         assert_eq!(result, "ETW log exporter");
     }
@@ -306,13 +224,13 @@ mod tests {
         use opentelemetry_sdk::logs::LogBatch;
         use opentelemetry_sdk::logs::LogExporter;
 
-        let log_record = new_sdk_log_record();
-        let instrumentation = new_instrumentation_scope();
+        let log_record = common::test_utils::new_sdk_log_record();
+        let instrumentation = common::test_utils::new_instrumentation_scope();
 
         let records = [(&log_record, &instrumentation)];
         let batch = LogBatch::new(&records);
 
-        let exporter = new_etw_exporter();
+        let exporter = common::test_utils::new_etw_exporter();
         let result = exporter.export(batch);
 
         assert!(result.await.is_ok());
@@ -329,20 +247,5 @@ mod tests {
             0,
             0,
         );
-    }
-
-    fn new_etw_exporter() -> ETWExporter {
-        ETWExporter::new("test-provider-name")
-    }
-
-    fn new_instrumentation_scope() -> opentelemetry::InstrumentationScope {
-        opentelemetry::InstrumentationScope::default()
-    }
-
-    fn new_sdk_log_record() -> opentelemetry_sdk::logs::SdkLogRecord {
-        SdkLoggerProvider::builder()
-            .build()
-            .logger("test")
-            .create_log_record()
     }
 }

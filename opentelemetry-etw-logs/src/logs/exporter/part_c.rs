@@ -1,7 +1,9 @@
 use opentelemetry::logs::AnyValue;
 use tracelogging_dynamic as tld;
 
-use super::common::{EVENT_ID, EVENT_NAME_PRIMARY, EVENT_NAME_SECONDARY};
+pub const EVENT_ID: &str = "event_id";
+pub const EVENT_NAME_PRIMARY: &str = "event_name";
+pub const EVENT_NAME_SECONDARY: &str = "name";
 
 pub fn populate_part_c<'a>(
     event: &mut tld::EventBuilder,
@@ -52,4 +54,74 @@ pub fn populate_part_c<'a>(
         }
     }
     (event_id, event_name)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::super::common::test_utils;
+    use super::{EVENT_ID, EVENT_NAME_PRIMARY, EVENT_NAME_SECONDARY};
+    use opentelemetry::logs::AnyValue;
+    use opentelemetry::Key;
+
+    #[test]
+    fn test_attributes() {
+        use opentelemetry::logs::LogRecord;
+        use std::collections::HashMap;
+
+        let mut log_record = test_utils::new_sdk_log_record();
+
+        log_record.add_attribute("string", "value");
+        log_record.add_attribute("int", 20);
+        log_record.add_attribute("double", 1.5);
+        log_record.add_attribute("boolean", true);
+
+        log_record.add_attribute(
+            "list",
+            AnyValue::ListAny(Box::new(vec![AnyValue::Int(1), AnyValue::Int(2)])),
+        );
+
+        let mut map_attribute = HashMap::new();
+        map_attribute.insert(Key::new("key"), AnyValue::Int(1));
+        log_record.add_attribute("map", AnyValue::Map(Box::new(map_attribute)));
+
+        log_record.add_attribute("bytes", AnyValue::Bytes(Box::new(vec![0u8, 1u8, 2u8, 3u8])));
+
+        let exporter = test_utils::new_etw_exporter();
+        let instrumentation = test_utils::new_instrumentation_scope();
+        let result = exporter.export_log_data(&log_record, &instrumentation);
+
+        assert!(result.is_ok());
+    }
+
+    #[test]
+    fn test_special_attributes() {
+        use opentelemetry::logs::LogRecord;
+
+        let mut log_record = test_utils::new_sdk_log_record();
+
+        log_record.add_attribute(EVENT_ID, 20);
+        log_record.add_attribute(EVENT_NAME_PRIMARY, "event-name");
+        log_record.add_attribute(EVENT_NAME_SECONDARY, "event-name");
+
+        let exporter = test_utils::new_etw_exporter();
+        let instrumentation = test_utils::new_instrumentation_scope();
+        let result = exporter.export_log_data(&log_record, &instrumentation);
+
+        assert!(result.is_ok());
+    }
+
+    #[test]
+    fn test_special_attributes_missing_event_name_primary() {
+        use opentelemetry::logs::LogRecord;
+
+        let mut log_record = test_utils::new_sdk_log_record();
+        log_record.add_attribute(EVENT_ID, 20);
+        log_record.add_attribute(EVENT_NAME_SECONDARY, "event-name");
+
+        let exporter = test_utils::new_etw_exporter();
+        let instrumentation = test_utils::new_instrumentation_scope();
+        let result = exporter.export_log_data(&log_record, &instrumentation);
+
+        assert!(result.is_ok());
+    }
 }

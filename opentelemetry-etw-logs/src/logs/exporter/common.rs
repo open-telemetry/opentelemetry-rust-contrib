@@ -2,10 +2,6 @@ use crate::logs::converters::IntoJson;
 use opentelemetry::{logs::AnyValue, Key};
 use tracelogging_dynamic as tld;
 
-pub const EVENT_ID: &str = "event_id";
-pub const EVENT_NAME_PRIMARY: &str = "event_name";
-pub const EVENT_NAME_SECONDARY: &str = "name";
-
 pub fn add_attribute_to_event(event: &mut tld::EventBuilder, key: &Key, value: &AnyValue) {
     match value {
         AnyValue::Boolean(b) => {
@@ -40,5 +36,29 @@ pub fn add_attribute_to_event(event: &mut tld::EventBuilder, key: &Key, value: &
             );
         }
         &_ => {}
+    }
+}
+
+#[cfg(test)]
+pub mod test_utils {
+    use opentelemetry::logs::Logger;
+    use opentelemetry::logs::LoggerProvider;
+    use opentelemetry_sdk::logs::SdkLoggerProvider;
+
+    use super::super::ETWExporter;
+
+    pub fn new_etw_exporter() -> ETWExporter {
+        ETWExporter::new("test-provider-name")
+    }
+
+    pub fn new_instrumentation_scope() -> opentelemetry::InstrumentationScope {
+        opentelemetry::InstrumentationScope::default()
+    }
+
+    pub fn new_sdk_log_record() -> opentelemetry_sdk::logs::SdkLogRecord {
+        SdkLoggerProvider::builder()
+            .build()
+            .logger("test")
+            .create_log_record()
     }
 }
