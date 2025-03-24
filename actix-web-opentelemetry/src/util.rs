@@ -4,10 +4,13 @@ use actix_web::{
     http::{Method, Version},
 };
 use opentelemetry::{KeyValue, Value};
-use opentelemetry_semantic_conventions::trace::{
-    CLIENT_ADDRESS, NETWORK_PEER_ADDRESS, MESSAGING_MESSAGE_BODY_SIZE, HTTP_REQUEST_METHOD, HTTP_ROUTE,
-    NETWORK_PROTOCOL_VERSION, SERVER_ADDRESS, SERVER_PORT, URL_PATH, URL_QUERY, URL_SCHEME,
-    USER_AGENT_ORIGINAL,
+use opentelemetry_semantic_conventions::{
+    attribute::MESSAGING_MESSAGE_BODY_SIZE,
+    trace::{
+        CLIENT_ADDRESS, HTTP_REQUEST_METHOD, HTTP_ROUTE, NETWORK_PEER_ADDRESS,
+        NETWORK_PROTOCOL_VERSION, SERVER_ADDRESS, SERVER_PORT, URL_PATH, URL_QUERY, URL_SCHEME,
+        USER_AGENT_ORIGINAL,
+    },
 };
 
 #[cfg(feature = "awc")]
