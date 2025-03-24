@@ -310,11 +310,6 @@ impl UserEventsExporter {
             });
             Ok(())
         } else {
-            otel_debug!(
-                name: "UserEvents.EventSetNotEnabled",
-                level = level.as_int()
-            );
-
             // Return success when the event is not enabled
             // as this is not an error condition.
             Ok(())
@@ -336,7 +331,7 @@ impl opentelemetry_sdk::logs::LogExporter for UserEventsExporter {
         Ok(())
     }
 
-    fn shutdown(&mut self) -> OTelSdkResult {
+    fn shutdown(&self) -> OTelSdkResult {
         // The explicit unregister() is done in shutdown()
         // as it may not be possible to unregister during Drop
         // as Loggers are typically *not* dropped.
@@ -351,7 +346,7 @@ impl opentelemetry_sdk::logs::LogExporter for UserEventsExporter {
     }
 
     #[cfg(feature = "spec_unstable_logs_enabled")]
-    fn event_enabled(&self, level: Severity, _target: &str, _name: &str) -> bool {
+    fn event_enabled(&self, level: Severity, _target: &str, _name: Option<&str>) -> bool {
         // EventSets are stored in the same order as their int representation,
         // so we can use the level as index to the Vec.
         let level = Self::get_severity_level(level);

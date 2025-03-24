@@ -1,8 +1,5 @@
 //! # Jaeger JSON file Exporter
 //!
-
-use futures_core::future::BoxFuture;
-use futures_util::FutureExt;
 use opentelemetry::trace::SpanId;
 #[allow(unused_imports)]
 use opentelemetry_sdk::error::OTelSdkError;
@@ -50,7 +47,7 @@ impl<R: JaegerJsonRuntime> JaegerJsonExporter<R> {
 }
 
 impl<R: JaegerJsonRuntime> SpanExporter for JaegerJsonExporter<R> {
-    fn export(&mut self, batch: Vec<SpanData>) -> BoxFuture<'static, OTelSdkResult> {
+    async fn export(&self, batch: Vec<SpanData>) -> OTelSdkResult {
         let mut trace_map = HashMap::new();
 
         for span in batch {
@@ -85,27 +82,24 @@ impl<R: JaegerJsonRuntime> SpanExporter for JaegerJsonExporter<R> {
         let out_path = self.out_path.clone();
         let file_prefix = self.file_prefix.clone();
 
-        async move {
-            runtime.create_dir(&out_path).await?;
+        runtime.create_dir(&out_path).await?;
 
-            let file_name = out_path.join(format!(
-                "{}-{}.json",
-                file_prefix,
-                SystemTime::now()
-                    .duration_since(SystemTime::UNIX_EPOCH)
-                    .expect("This does not fail")
-                    .as_secs()
-            ));
-            runtime
-                .write_to_file(
-                    &file_name,
-                    &serde_json::to_vec(&json).expect("This is a valid json value"),
-                )
-                .await?;
+        let file_name = out_path.join(format!(
+            "{}-{}.json",
+            file_prefix,
+            SystemTime::now()
+                .duration_since(SystemTime::UNIX_EPOCH)
+                .expect("This does not fail")
+                .as_secs()
+        ));
+        runtime
+            .write_to_file(
+                &file_name,
+                &serde_json::to_vec(&json).expect("This is a valid json value"),
+            )
+            .await?;
 
-            Ok(())
-        }
-        .boxed()
+        Ok(())
     }
 }
 
@@ -260,34 +254,6 @@ impl JaegerJsonRuntime for opentelemetry_sdk::runtime::TokioCurrentThread {
         use tokio::io::AsyncWriteExt;
 
         let mut file = tokio::fs::File::create(path)
-            .await
-            .map_err(|e| OTelSdkError::InternalFailure(format!("{:?}", e)))?;
-        file.write_all(content)
-            .await
-            .map_err(|e| OTelSdkError::InternalFailure(format!("{:?}", e)))?;
-        file.sync_data()
-            .await
-            .map_err(|e| OTelSdkError::InternalFailure(format!("{:?}", e)))?;
-
-        Ok(())
-    }
-}
-
-#[cfg(feature = "rt-async-std")]
-impl JaegerJsonRuntime for opentelemetry_sdk::runtime::AsyncStd {
-    async fn create_dir(&self, path: &Path) -> OTelSdkResult {
-        if async_std::fs::metadata(path).await.is_err() {
-            async_std::fs::create_dir_all(path)
-                .await
-                .map_err(|e| OTelSdkError::InternalFailure(format!("{:?}", e)))?;
-        }
-        Ok(())
-    }
-
-    async fn write_to_file(&self, path: &Path, content: &[u8]) -> OTelSdkResult {
-        use async_std::io::WriteExt;
-
-        let mut file = async_std::fs::File::create(path)
             .await
             .map_err(|e| OTelSdkError::InternalFailure(format!("{:?}", e)))?;
         file.write_all(content)
