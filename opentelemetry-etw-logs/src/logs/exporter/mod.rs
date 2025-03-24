@@ -8,10 +8,10 @@ use opentelemetry::logs::Severity;
 use opentelemetry_sdk::error::{OTelSdkError, OTelSdkResult};
 use std::str;
 
+mod common;
 mod part_a;
 mod part_b;
 mod part_c;
-mod common;
 
 pub(crate) struct ETWExporter {
     provider: Pin<Arc<tld::Provider>>,
@@ -132,8 +132,6 @@ impl ETWExporter {
     fn get_event_name(&self, log_record: &opentelemetry_sdk::logs::SdkLogRecord) -> &str {
         log_record.event_name().unwrap_or("Log")
     }
-
-    
 }
 
 impl Debug for ETWExporter {

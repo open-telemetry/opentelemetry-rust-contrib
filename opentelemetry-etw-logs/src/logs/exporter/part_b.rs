@@ -46,7 +46,7 @@ pub fn populate_part_b(
 
 #[cfg(test)]
 mod test {
-  use super::super::common::test_utils;
+    use super::super::common::test_utils;
 
     #[test]
     fn test_body() {
