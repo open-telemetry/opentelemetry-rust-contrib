@@ -14,6 +14,7 @@ mod tests {
     use opentelemetry::trace::Tracer;
     use opentelemetry::trace::{TraceContextExt, TracerProvider};
     use opentelemetry_appender_tracing::layer;
+    use opentelemetry_sdk::Resource;
     use opentelemetry_sdk::{
         logs::LoggerProviderBuilder,
         trace::{Sampler, SdkTracerProvider},
@@ -36,6 +37,7 @@ mod tests {
         check_user_events_available().expect("Kernel does not support user_events. Verify your distribution/kernel supports user_events: https://docs.kernel.org/trace/user_events.html.");
 
         let logger_provider = LoggerProviderBuilder::default()
+            .with_resource(Resource::builder().with_service_name("myrolename").build())
             .with_user_event_exporter("myprovider")
             .build();
 
@@ -120,6 +122,11 @@ mod tests {
         let part_a = &event["PartA"];
         // Only check if the time field exists, not the actual value
         assert!(part_a.get("time").is_some(), "PartA.time is missing");
+
+        let part_a_ext_cloud = part_a.get("ext_cloud").expect("PartA.ext_cloud is missing");
+
+        // Validate role
+        assert_eq!(part_a_ext_cloud["role"].as_str().unwrap(), "myrolename");
 
         // Validate PartB
         let part_b = &event["PartB"];
