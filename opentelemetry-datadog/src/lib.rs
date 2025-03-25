@@ -48,7 +48,7 @@
 //! ```
 //!
 //! ```no_run
-//! # fn main() -> Result<(), opentelemetry::trace::TraceError> {
+//! # fn main() -> Result<(), opentelemetry_sdk::trace::TraceError> {
 //! let provider = opentelemetry_datadog::new_pipeline()
 //!     .install_batch()?;
 //! # Ok(())
@@ -122,16 +122,15 @@
 //!     }
 //! }
 //!
-//!     #[allow(deprecated)]
+//!     let mut config = trace::Config::default();
+//!     config.sampler = Box::new(Sampler::AlwaysOn);
+//!     config.id_generator = Box::new(RandomIdGenerator::default());
+//!
 //!     let provider = new_pipeline()
 //!         .with_service_name("my_app")
 //!         .with_api_version(ApiVersion::Version05)
 //!         .with_agent_endpoint("http://localhost:8126")
-//!         .with_trace_config(
-//!             trace::config()
-//!                 .with_sampler(Sampler::AlwaysOn)
-//!                 .with_id_generator(RandomIdGenerator::default())
-//!         )
+//!         .with_trace_config(config)
 //!         .install_batch().unwrap();
 //!     global::set_tracer_provider(provider.clone());
 //!

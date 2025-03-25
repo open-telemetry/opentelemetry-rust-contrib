@@ -57,15 +57,14 @@ impl ShouldSample for AgentBasedSampler {
 }
 
 fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync + 'static>> {
-    #[allow(deprecated)]
+    let mut config = trace::Config::default();
+    config.sampler = Box::new(AgentBasedSampler);
+    config.id_generator = Box::new(RandomIdGenerator::default());
+
     let provider = new_pipeline()
         .with_service_name("agent-sampling-demo")
         .with_api_version(ApiVersion::Version05)
-        .with_trace_config(
-            trace::Config::default()
-                .with_sampler(AgentBasedSampler)
-                .with_id_generator(RandomIdGenerator::default()),
-        )
+        .with_trace_config(config)
         .install_simple()?;
     global::set_tracer_provider(provider.clone());
     let scope = InstrumentationScope::builder("opentelemetry-datadog-demo")
