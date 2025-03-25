@@ -37,5 +37,21 @@ mod tests {
             user_name = "otel user",
             user_email = "otel@opentelemetry.io"
         );
+
+        use opentelemetry::trace::{Tracer, TracerProvider};
+        let tracer_provider = opentelemetry_sdk::trace::SdkTracerProvider::builder()
+            .with_sampler(opentelemetry_sdk::trace::Sampler::AlwaysOn)
+            .build();
+        let tracer = tracer_provider.tracer("test-tracer");
+
+        tracer.in_span("test-span", |_cx| {
+            // logging is done inside span context.
+            error!(
+                name: "event-name",
+                event_id = 20,
+                user_name = "otel user",
+                user_email = "otel@opentelemetry.io"
+            );
+        });
     }
 }

@@ -2,6 +2,8 @@
 
 ## vNext
 
+## v0.11.0
+
 - Fixed contention in `event_enabled()` check and `export()` path, by caching the
   EventSets, addressing
   [159](https://github.com/open-telemetry/opentelemetry-rust-contrib/issues/159)
@@ -11,6 +13,7 @@
   - Be less than 234 characters.
   - Contain only ASCII letters, digits, and the underscore (`'_'`) character.
 - Added support for TraceId,SpanId
+- Bump opentelemetry and opentelemetry_sdk versions to 0.29
 
 ## v0.10.0
 

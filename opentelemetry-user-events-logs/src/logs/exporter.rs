@@ -113,6 +113,7 @@ impl UserEventsExporter {
             AnyValue::String(s) => {
                 eb.add_str(field_name, s.as_str(), FieldFormat::Default, 0);
             }
+            // TODO: Handle other types. Arrays are required in Trace for storing Links.
             _ => (),
         }
     }
@@ -201,6 +202,7 @@ impl UserEventsExporter {
                 if let Some(trace_context) = log_record.trace_context() {
                     cs_a_count += 1; // for ext_dt
                     eb.add_struct("PartA", cs_a_count, 0);
+                    // TODO: Flattened structure might be faster
                     eb.add_struct("ext_dt", 2, 0);
                     eb.add_str("traceId", trace_context.trace_id.to_string(), FieldFormat::Default, 0);
                     eb.add_str("spanId", trace_context.span_id.to_string(), FieldFormat::Default, 0);
@@ -209,9 +211,13 @@ impl UserEventsExporter {
                     eb.add_struct("PartA", cs_a_count, 0);
                 }
 
+                // TODO: If there is no fields in PartA, should the PartA struct itself be not added?
+
+                // TODO: Check if we can remove this as it is automatically added by EventBuilder
                 eb.add_str("time", time, FieldFormat::Default, 0);
 
                 //populate CS PartC
+                // TODO: See if should hold on to this, and add PartB first then PartC
                 let (mut is_event_id, mut event_id) = (false, 0);
                 let (mut is_part_c_present, mut cs_c_bookmark, mut cs_c_count) = (false, 0, 0);
 
@@ -250,12 +256,14 @@ impl UserEventsExporter {
                 if log_record.body().is_some() {
                     eb.add_str(
                         "body",
+                        // TODO: Use proper type instead of String always.
                         match log_record.body().as_ref().unwrap() {
                             AnyValue::Int(value) => value.to_string(),
                             AnyValue::String(value) => value.to_string(),
                             AnyValue::Boolean(value) => value.to_string(),
                             AnyValue::Double(value) => value.to_string(),
                             AnyValue::Bytes(value) => String::from_utf8_lossy(value).to_string(),
+                            // TODO: Handle complex types using serde_json
                             AnyValue::ListAny(_value) => "".to_string(),
                             AnyValue::Map(_value) => "".to_string(),
                             &_ => "".to_string(),
@@ -282,6 +290,9 @@ impl UserEventsExporter {
                     eb.add_value("eventId", event_id, FieldFormat::SignedInt, 0);
                     cs_b_count += 1;
                 }
+                // TODO: eventname is already added to header.
+                // Should we add it again?
+                // Or should we use Target?
                 if let Some(event_name) = log_record.event_name() {
                     eb.add_str("name", event_name, FieldFormat::Default, 0);
                     cs_b_count += 1;
@@ -310,11 +321,6 @@ impl UserEventsExporter {
             });
             Ok(())
         } else {
-            otel_debug!(
-                name: "UserEvents.EventSetNotEnabled",
-                level = level.as_int()
-            );
-
             // Return success when the event is not enabled
             // as this is not an error condition.
             Ok(())
@@ -336,7 +342,7 @@ impl opentelemetry_sdk::logs::LogExporter for UserEventsExporter {
         Ok(())
     }
 
-    fn shutdown(&mut self) -> OTelSdkResult {
+    fn shutdown(&self) -> OTelSdkResult {
         // The explicit unregister() is done in shutdown()
         // as it may not be possible to unregister during Drop
         // as Loggers are typically *not* dropped.
@@ -351,7 +357,7 @@ impl opentelemetry_sdk::logs::LogExporter for UserEventsExporter {
     }
 
     #[cfg(feature = "spec_unstable_logs_enabled")]
-    fn event_enabled(&self, level: Severity, _target: &str, _name: &str) -> bool {
+    fn event_enabled(&self, level: Severity, _target: &str, _name: Option<&str>) -> bool {
         // EventSets are stored in the same order as their int representation,
         // so we can use the level as index to the Vec.
         let level = Self::get_severity_level(level);
