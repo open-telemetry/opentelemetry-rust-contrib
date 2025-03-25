@@ -2,6 +2,8 @@
 
 ## vNext
 
+## v0.17.0
+
 ### Changed
 - Bump opentelemetry and opentelemetry_sdk versions to 0.29.0
   - Breaking change in the way XrayIdGenerator is configured:
