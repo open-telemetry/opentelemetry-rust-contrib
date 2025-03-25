@@ -327,9 +327,9 @@ impl UserEventsExporter {
 
                 let result = eb.write(event_set, None, None);
                 if result > 0 {
-                    // Specially treat the case where there is no listener and size exceeding.
+                    // Specially treat the case where there is no listener or payload size exceeds the limit.
                     if result == 9 {
-                        Err(OTelSdkError::InternalFailure("Failed to write event to user_events tracepoint as there is no listener. This can occur when there was a listener when we started serializing event, but it was removed before the event was written".to_string()))
+                        Err(OTelSdkError::InternalFailure("Failed to write event to user_events tracepoint as there is no listener. This can occur if there was a listener when we started serializing the event, but it was removed before the event was written".to_string()))
                     } else if result == 34 {
                         Err(OTelSdkError::InternalFailure("Failed to write event to user_events tracepoint as total payload size exceeded 64KB limit".to_string()))
                     } else {
