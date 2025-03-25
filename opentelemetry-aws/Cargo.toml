@@ -25,17 +25,17 @@ detector-aws-lambda = ["dep:opentelemetry-semantic-conventions"]
 internal-logs = ["tracing"]
 
 [dependencies]
-opentelemetry = { version = "0.29" }
-opentelemetry_sdk = { version = "0.29", optional = true }
-opentelemetry-semantic-conventions = { version = "0.29", optional = true, features = [
+opentelemetry = { workspace = true }
+opentelemetry_sdk = { workspace = true, optional = true }
+opentelemetry-semantic-conventions = { workspace = true, optional = true, features = [
     "semconv_experimental",
 ] }
 tracing = {version = "0.1", optional = true}
 
 [dev-dependencies]
-opentelemetry_sdk = { version = "0.29", features = ["testing"] }
-opentelemetry-http = { version = "0.29" }
-opentelemetry-stdout = { version = "0.29", features = ["trace"] }
+opentelemetry_sdk = { workspace = true, features = ["testing"] }
+opentelemetry-http = { workspace = true }
+opentelemetry-stdout = { workspace = true, features = ["trace"] }
 hyper = { version = "1.4.1" }
 tokio = { version = "1.0", features = ["macros", "rt"] }
 sealed_test = "1.1"
