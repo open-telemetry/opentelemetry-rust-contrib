@@ -327,20 +327,18 @@ impl UserEventsExporter {
 
                 let result = eb.write(event_set, None, None);
                 if result > 0 {
-                    // Specially log the case where there is no listener and size exceeding.
+                    // Specially treat the case where there is no listener and size exceeding.
                     if result == 9 {
-                        otel_debug!(name: "UserEvents.EventWriteFailed", result = result, reason = "No listener. This can occur when there was a listener but it was removed before the event was written");
+                        Err(OTelSdkError::InternalFailure("Failed to write event to user_events tracepoint as there is no listener. This can occur when there was a listener when we started serializing event, but it was removed before the event was written".to_string()))
                     } else if result == 34 {
-                        // Info level for size exceeding.
-                        otel_info!(name: "UserEvents.EventWriteFailed", result = result, reason = "Total payload size exceeded 64KB limit");
+                        Err(OTelSdkError::InternalFailure("Failed to write event to user_events tracepoint as total payload size exceeded 64KB limit".to_string()))
                     } else {
-                        // For all other cases, log the error code.
-                        otel_debug!(name: "UserEvents.EventWriteFailed", result = result);
+                        // For all other cases, return failure and include the result code.
+                        Err(OTelSdkError::InternalFailure(format!(
+                            "Failed to write event to user_events tracepoint with result code: {}",
+                            result
+                        )))
                     }
-                    Err(OTelSdkError::InternalFailure(format!(
-                        "Failed to write event to user_events tracepoint with result code: {}",
-                        result
-                    )))
                 } else {
                     Ok(())
                 }
@@ -362,10 +360,12 @@ impl Debug for UserEventsExporter {
 
 impl opentelemetry_sdk::logs::LogExporter for UserEventsExporter {
     async fn export(&self, batch: opentelemetry_sdk::logs::LogBatch<'_>) -> OTelSdkResult {
+        let mut res = Ok(());
         for (record, instrumentation) in batch.iter() {
-            let _ = self.export_log_data(record, instrumentation);
+            // no, res is not overwritten as the batch will only have one item
+            res = self.export_log_data(record, instrumentation);
         }
-        Ok(())
+        res
     }
 
     fn shutdown(&self) -> OTelSdkResult {

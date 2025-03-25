@@ -29,6 +29,7 @@ impl<T: LogExporter> opentelemetry_sdk::logs::LogProcessor for ReentrantLogProce
         let log_tuple = &[(record as &SdkLogRecord, scope)];
         // TODO: Using futures_executor::block_on can make the code non reentrant safe
         // if that crate starts emitting logs that are bridged to OTel.
+        // TODO: How to log if export() returns Err? Maybe a metric?
         let _ = futures_executor::block_on(self.exporter.export(LogBatch::new(log_tuple)));
     }
 
