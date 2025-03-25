@@ -4,24 +4,26 @@ use std::sync::Arc;
 
 use tracelogging_dynamic as tld;
 
-use opentelemetry::{
-    logs::{AnyValue, Severity},
-    Key,
-};
+use opentelemetry::logs::Severity;
+use opentelemetry::Key;
 use opentelemetry_sdk::error::{OTelSdkError, OTelSdkResult};
 use std::str;
 
-use crate::logs::converters::IntoJson;
-
+mod common;
 mod part_a;
+mod part_b;
+mod part_c;
+
+#[derive(Default)]
+struct Resource {
+    pub cloud_role: Option<String>,
+    pub cloud_role_instance: Option<String>,
+}
 
 pub(crate) struct ETWExporter {
     provider: Pin<Arc<tld::Provider>>,
+    resource: Resource,
 }
-
-const EVENT_ID: &str = "event_id";
-const EVENT_NAME_PRIMARY: &str = "event_name";
-const EVENT_NAME_SECONDARY: &str = "name";
 
 fn enabled_callback_noop(
     _source_id: &tld::Guid,
@@ -51,35 +53,9 @@ impl ETWExporter {
             provider.as_ref().register();
         }
 
-        ETWExporter { provider }
-    }
-
-    fn get_severity_level(&self, severity: Severity) -> tld::Level {
-        match severity {
-            Severity::Debug
-            | Severity::Debug2
-            | Severity::Debug3
-            | Severity::Debug4
-            | Severity::Trace
-            | Severity::Trace2
-            | Severity::Trace3
-            | Severity::Trace4 => tld::Level::Verbose,
-
-            Severity::Info | Severity::Info2 | Severity::Info3 | Severity::Info4 => {
-                tld::Level::Informational
-            }
-
-            Severity::Error | Severity::Error2 | Severity::Error3 | Severity::Error4 => {
-                tld::Level::Error
-            }
-
-            Severity::Fatal | Severity::Fatal2 | Severity::Fatal3 | Severity::Fatal4 => {
-                tld::Level::Critical
-            }
-
-            Severity::Warn | Severity::Warn2 | Severity::Warn3 | Severity::Warn4 => {
-                tld::Level::Warning
-            }
+        ETWExporter {
+            provider,
+            resource: Default::default(),
         }
     }
 
@@ -97,8 +73,8 @@ impl ETWExporter {
         log_record: &opentelemetry_sdk::logs::SdkLogRecord,
         _instrumentation: &opentelemetry::InstrumentationScope,
     ) -> opentelemetry_sdk::error::OTelSdkResult {
-        let level =
-            self.get_severity_level(log_record.severity_number().unwrap_or(Severity::Debug));
+        let otel_level = log_record.severity_number().unwrap_or(Severity::Debug);
+        let level = common::convert_severity_to_level(otel_level);
 
         if !self.enabled(level) {
             return Ok(());
@@ -110,7 +86,7 @@ impl ETWExporter {
 
         // reset
         event.reset(
-            self.get_event_name(log_record),
+            common::get_event_name(log_record),
             level,
             Self::KEYWORD,
             event_tags,
@@ -118,11 +94,11 @@ impl ETWExporter {
 
         event.add_u16("__csver__", 0x0401u16, tld::OutType::Hex, field_tag);
 
-        part_a::populate_part_a(&mut event, log_record, field_tag);
+        part_a::populate_part_a(&mut event, &self.resource, log_record, field_tag);
 
-        let (event_id, event_name) = self.populate_part_c(&mut event, log_record, field_tag);
+        let event_id = part_c::populate_part_c(&mut event, log_record, field_tag);
 
-        self.populate_part_b(&mut event, log_record, level, event_id, event_name);
+        part_b::populate_part_b(&mut event, log_record, otel_level, event_id);
 
         // Write event to ETW
         let result = event.write(&self.provider, None, None);
@@ -133,106 +109,6 @@ impl ETWExporter {
                 "Failed to write event to ETW. ETW reason: {result}"
             ))),
         }
-    }
-
-    fn get_event_name(&self, log_record: &opentelemetry_sdk::logs::SdkLogRecord) -> &str {
-        log_record.event_name().unwrap_or("Log")
-    }
-
-    fn populate_part_b(
-        &self,
-        event: &mut tld::EventBuilder,
-        log_record: &opentelemetry_sdk::logs::SdkLogRecord,
-        level: tld::Level,
-        event_id: Option<i64>,
-        event_name: Option<&str>,
-    ) {
-        // Count fields in PartB
-        const COUNT_TYPE_NAME: u8 = 1u8;
-        const COUNT_SEVERITY_NUMBER: u8 = 1u8;
-
-        let field_count = COUNT_TYPE_NAME
-            + COUNT_SEVERITY_NUMBER
-            + log_record.body().is_some() as u8
-            + log_record.severity_text().is_some() as u8
-            + event_id.is_some() as u8
-            + event_name.is_some() as u8;
-
-        // Create PartB struct
-        event.add_struct("PartB", field_count, 0);
-
-        // Fill fields of PartB struct
-        event.add_str8("_typeName", "Logs", tld::OutType::Default, 0);
-
-        if let Some(body) = log_record.body() {
-            add_attribute_to_event(event, &Key::new("body"), body);
-        }
-
-        event.add_u8("severityNumber", level.as_int(), tld::OutType::Default, 0);
-
-        if let Some(severity_text) = &log_record.severity_text() {
-            event.add_str8("severityText", severity_text, tld::OutType::Default, 0);
-        }
-
-        if let Some(event_id) = event_id {
-            event.add_i64("eventId", event_id, tld::OutType::Default, 0);
-        }
-
-        if let Some(event_name) = event_name {
-            event.add_str8("name", event_name, tld::OutType::Default, 0);
-        }
-    }
-
-    fn populate_part_c<'a>(
-        &'a self,
-        event: &mut tld::EventBuilder,
-        log_record: &'a opentelemetry_sdk::logs::SdkLogRecord,
-        field_tag: u32,
-    ) -> (Option<i64>, Option<&'a str>) {
-        //populate CS PartC
-        let mut event_id: Option<i64> = None;
-        let mut event_name: Option<&str> = None;
-
-        let mut cs_c_count = 0;
-        for (key, value) in log_record.attributes_iter() {
-            // find if we have PartC and its information
-            match (key.as_str(), &value) {
-                (EVENT_ID, AnyValue::Int(value)) => {
-                    event_id = Some(*value);
-                    continue;
-                }
-                (EVENT_NAME_PRIMARY, AnyValue::String(value)) => {
-                    event_name = Some(value.as_str());
-                    continue;
-                }
-                (EVENT_NAME_SECONDARY, AnyValue::String(value)) => {
-                    if event_name.is_none() {
-                        event_name = Some(value.as_str());
-                    }
-                    continue;
-                }
-                _ => {
-                    cs_c_count += 1;
-                }
-            }
-        }
-
-        // If there are additional PartC attributes, add them to the event
-        if cs_c_count > 0 {
-            event.add_struct("PartC", cs_c_count, field_tag);
-
-            for (key, value) in log_record.attributes_iter() {
-                match (key.as_str(), &value) {
-                    (EVENT_ID, _) | (EVENT_NAME_PRIMARY, _) | (EVENT_NAME_SECONDARY, _) => {
-                        continue;
-                    }
-                    _ => {
-                        add_attribute_to_event(event, key, value);
-                    }
-                }
-            }
-        }
-        (event_id, event_name)
     }
 }
 
@@ -258,97 +134,32 @@ impl opentelemetry_sdk::logs::LogExporter for ETWExporter {
 
     #[cfg(feature = "spec_unstable_logs_enabled")]
     fn event_enabled(&self, level: Severity, _target: &str, _name: Option<&str>) -> bool {
-        self.enabled(self.get_severity_level(level))
+        self.enabled(common::convert_severity_to_level(level))
     }
-}
 
-fn add_attribute_to_event(event: &mut tld::EventBuilder, key: &Key, value: &AnyValue) {
-    match value {
-        AnyValue::Boolean(b) => {
-            event.add_bool32(key.as_str(), *b as i32, tld::OutType::Default, 0);
-        }
-        AnyValue::Int(i) => {
-            event.add_i64(key.as_str(), *i, tld::OutType::Default, 0);
-        }
-        AnyValue::Double(f) => {
-            event.add_f64(key.as_str(), *f, tld::OutType::Default, 0);
-        }
-        AnyValue::String(s) => {
-            event.add_str8(key.as_str(), s.as_str(), tld::OutType::Default, 0);
-        }
-        AnyValue::Bytes(b) => {
-            event.add_binaryc(key.as_str(), b.as_slice(), tld::OutType::Default, 0);
-        }
-        AnyValue::ListAny(l) => {
-            event.add_str8(
-                key.as_str(),
-                l.as_json_value().to_string(),
-                tld::OutType::Json,
-                0,
-            );
-        }
-        AnyValue::Map(m) => {
-            event.add_str8(
-                key.as_str(),
-                m.as_json_value().to_string(),
-                tld::OutType::Json,
-                0,
-            );
-        }
-        &_ => {}
+    fn set_resource(&mut self, resource: &opentelemetry_sdk::Resource) {
+        self.resource.cloud_role = resource
+            .get(&Key::from_static_str("service.name"))
+            .map(|v| v.to_string());
+        self.resource.cloud_role_instance = resource
+            .get(&Key::from_static_str("service.instance.id"))
+            .map(|v| v.to_string());
     }
 }
 
 #[cfg(test)]
 mod tests {
+    use opentelemetry_sdk::logs::LogExporter;
+
     use super::*;
-    use opentelemetry::logs::Logger;
-    use opentelemetry::logs::LoggerProvider;
-    use opentelemetry::logs::Severity;
-    use opentelemetry_sdk::logs::SdkLoggerProvider;
 
     #[test]
     fn test_export_log_data() {
-        let record = new_sdk_log_record();
-        let exporter = new_etw_exporter();
-        let instrumentation = new_instrumentation_scope();
+        let record = common::test_utils::new_sdk_log_record();
+        let exporter = common::test_utils::new_etw_exporter();
+        let instrumentation = common::test_utils::new_instrumentation_scope();
 
         let result = exporter.export_log_data(&record, &instrumentation);
-        assert!(result.is_ok());
-    }
-
-    #[test]
-    fn test_get_severity_level() {
-        let exporter = new_etw_exporter();
-
-        let result = exporter.get_severity_level(Severity::Debug);
-        assert_eq!(result, tld::Level::Verbose);
-
-        let result = exporter.get_severity_level(Severity::Info);
-        assert_eq!(result, tld::Level::Informational);
-
-        let result = exporter.get_severity_level(Severity::Error);
-        assert_eq!(result, tld::Level::Error);
-
-        let result = exporter.get_severity_level(Severity::Fatal);
-        assert_eq!(result, tld::Level::Critical);
-
-        let result = exporter.get_severity_level(Severity::Warn);
-        assert_eq!(result, tld::Level::Warning);
-    }
-
-    #[test]
-    fn test_body() {
-        use opentelemetry::logs::LogRecord;
-
-        let mut log_record = new_sdk_log_record();
-
-        log_record.set_body("body".into());
-
-        let exporter = new_etw_exporter();
-        let instrumentation = new_instrumentation_scope();
-        let result = exporter.export_log_data(&log_record, &instrumentation);
-
         assert!(result.is_ok());
     }
 
@@ -356,74 +167,36 @@ mod tests {
     fn test_event_name() {
         use opentelemetry::logs::LogRecord;
 
-        let mut log_record = new_sdk_log_record();
+        let mut log_record = common::test_utils::new_sdk_log_record();
 
         log_record.set_event_name("event-name");
 
-        let exporter = new_etw_exporter();
-        let instrumentation = new_instrumentation_scope();
+        let exporter = common::test_utils::new_etw_exporter();
+        let instrumentation = common::test_utils::new_instrumentation_scope();
         let result = exporter.export_log_data(&log_record, &instrumentation);
 
         assert!(result.is_ok());
     }
 
     #[test]
-    fn test_special_attributes() {
+    fn test_event_resources() {
         use opentelemetry::logs::LogRecord;
+        use opentelemetry::KeyValue;
 
-        let mut log_record = new_sdk_log_record();
+        let mut log_record = common::test_utils::new_sdk_log_record();
 
-        log_record.add_attribute(EVENT_ID, 20);
-        log_record.add_attribute(EVENT_NAME_PRIMARY, "event-name");
-        log_record.add_attribute(EVENT_NAME_SECONDARY, "event-name");
+        log_record.set_event_name("event-name");
 
-        let exporter = new_etw_exporter();
-        let instrumentation = new_instrumentation_scope();
-        let result = exporter.export_log_data(&log_record, &instrumentation);
-
-        assert!(result.is_ok());
-    }
-
-    #[test]
-    fn test_special_attributes_missing_event_name_primary() {
-        use opentelemetry::logs::LogRecord;
-
-        let mut log_record = new_sdk_log_record();
-        log_record.add_attribute(EVENT_ID, 20);
-        log_record.add_attribute(EVENT_NAME_SECONDARY, "event-name");
-
-        let exporter = new_etw_exporter();
-        let instrumentation = new_instrumentation_scope();
-        let result = exporter.export_log_data(&log_record, &instrumentation);
-
-        assert!(result.is_ok());
-    }
-
-    #[test]
-    fn test_attributes() {
-        use opentelemetry::logs::LogRecord;
-        use std::collections::HashMap;
-
-        let mut log_record = new_sdk_log_record();
-
-        log_record.add_attribute("string", "value");
-        log_record.add_attribute("int", 20);
-        log_record.add_attribute("double", 1.5);
-        log_record.add_attribute("boolean", true);
-
-        log_record.add_attribute(
-            "list",
-            AnyValue::ListAny(Box::new(vec![AnyValue::Int(1), AnyValue::Int(2)])),
+        let mut exporter = common::test_utils::new_etw_exporter();
+        exporter.set_resource(
+            &opentelemetry_sdk::Resource::builder()
+                .with_attributes([
+                    KeyValue::new("service.name", "cloud-role-name"),
+                    KeyValue::new("service.instance.id", "cloud-role-instance"),
+                ])
+                .build(),
         );
-
-        let mut map_attribute = HashMap::new();
-        map_attribute.insert(Key::new("key"), AnyValue::Int(1));
-        log_record.add_attribute("map", AnyValue::Map(Box::new(map_attribute)));
-
-        log_record.add_attribute("bytes", AnyValue::Bytes(Box::new(vec![0u8, 1u8, 2u8, 3u8])));
-
-        let exporter = new_etw_exporter();
-        let instrumentation = new_instrumentation_scope();
+        let instrumentation = common::test_utils::new_instrumentation_scope();
         let result = exporter.export_log_data(&log_record, &instrumentation);
 
         assert!(result.is_ok());
@@ -431,7 +204,7 @@ mod tests {
 
     #[test]
     fn test_debug() {
-        let exporter = new_etw_exporter();
+        let exporter = common::test_utils::new_etw_exporter();
         let result = format!("{:?}", exporter);
         assert_eq!(result, "ETW log exporter");
     }
@@ -441,13 +214,13 @@ mod tests {
         use opentelemetry_sdk::logs::LogBatch;
         use opentelemetry_sdk::logs::LogExporter;
 
-        let log_record = new_sdk_log_record();
-        let instrumentation = new_instrumentation_scope();
+        let log_record = common::test_utils::new_sdk_log_record();
+        let instrumentation = common::test_utils::new_instrumentation_scope();
 
         let records = [(&log_record, &instrumentation)];
         let batch = LogBatch::new(&records);
 
-        let exporter = new_etw_exporter();
+        let exporter = common::test_utils::new_etw_exporter();
         let result = exporter.export(batch);
 
         assert!(result.await.is_ok());
@@ -464,20 +237,5 @@ mod tests {
             0,
             0,
         );
-    }
-
-    fn new_etw_exporter() -> ETWExporter {
-        ETWExporter::new("test-provider-name")
-    }
-
-    fn new_instrumentation_scope() -> opentelemetry::InstrumentationScope {
-        opentelemetry::InstrumentationScope::default()
-    }
-
-    fn new_sdk_log_record() -> opentelemetry_sdk::logs::SdkLogRecord {
-        SdkLoggerProvider::builder()
-            .build()
-            .logger("test")
-            .create_log_record()
     }
 }

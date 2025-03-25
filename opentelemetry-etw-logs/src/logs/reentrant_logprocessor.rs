@@ -3,6 +3,7 @@ use std::fmt::Debug;
 use opentelemetry::InstrumentationScope;
 use opentelemetry_sdk::error::OTelSdkResult;
 use opentelemetry_sdk::logs::{LogBatch, LogExporter, SdkLogRecord};
+use opentelemetry_sdk::Resource;
 
 use crate::logs::exporter::*;
 
@@ -51,6 +52,10 @@ impl opentelemetry_sdk::logs::LogProcessor for ReentrantLogProcessor {
         use opentelemetry_sdk::logs::LogExporter;
 
         self.event_exporter.event_enabled(level, target, name)
+    }
+
+    fn set_resource(&mut self, resource: &Resource) {
+        self.event_exporter.set_resource(resource);
     }
 }
 
