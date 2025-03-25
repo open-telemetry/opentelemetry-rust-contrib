@@ -1,10 +1,10 @@
-use opentelemetry::Key;
+use opentelemetry::{logs::Severity, Key};
 use tracelogging_dynamic as tld;
 
 pub fn populate_part_b(
     event: &mut tld::EventBuilder,
     log_record: &opentelemetry_sdk::logs::SdkLogRecord,
-    level: tld::Level,
+    level: Severity,
     event_id: Option<i64>,
     event_name: Option<&str>,
 ) {
@@ -29,7 +29,7 @@ pub fn populate_part_b(
         super::common::add_attribute_to_event(event, &Key::new("body"), body);
     }
 
-    event.add_u8("severityNumber", level.as_int(), tld::OutType::Default, 0); // TODO: use int16
+    event.add_i16("severityNumber", level as i16, tld::OutType::Default, 0); // TODO: use int16
 
     if let Some(severity_text) = &log_record.severity_text() {
         event.add_str8("severityText", severity_text, tld::OutType::Default, 0);

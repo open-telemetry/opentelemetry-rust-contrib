@@ -91,8 +91,8 @@ impl ETWExporter {
         log_record: &opentelemetry_sdk::logs::SdkLogRecord,
         _instrumentation: &opentelemetry::InstrumentationScope,
     ) -> opentelemetry_sdk::error::OTelSdkResult {
-        let level =
-            self.get_severity_level(log_record.severity_number().unwrap_or(Severity::Debug));
+        let original_level = log_record.severity_number().unwrap_or(Severity::Debug);
+        let level = self.get_severity_level(original_level);
 
         if !self.enabled(level) {
             return Ok(());
@@ -116,7 +116,7 @@ impl ETWExporter {
 
         let (event_id, event_name) = part_c::populate_part_c(&mut event, log_record, field_tag);
 
-        part_b::populate_part_b(&mut event, log_record, level, event_id, event_name);
+        part_b::populate_part_b(&mut event, log_record, original_level, event_id, event_name);
 
         // Write event to ETW
         let result = event.write(&self.provider, None, None);
