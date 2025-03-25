@@ -66,3 +66,6 @@ opentelemetry-stdout = { workspace = true, features = ["trace", "metrics"] }
 [package.metadata.docs.rs]
 all-features = true
 rustdoc-args = ["--cfg", "docsrs"]
+
+[lints]
+workspace = true
