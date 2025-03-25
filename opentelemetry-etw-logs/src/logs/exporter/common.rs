@@ -42,7 +42,7 @@ pub fn add_attribute_to_event(event: &mut tld::EventBuilder, key: &Key, value: &
     }
 }
 
-pub fn convert_severity_to_level(severity: Severity) -> tld::Level {
+pub const fn convert_severity_to_level(severity: Severity) -> tld::Level {
     match severity {
         Severity::Debug
         | Severity::Debug2
