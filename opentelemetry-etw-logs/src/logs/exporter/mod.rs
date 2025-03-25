@@ -5,6 +5,7 @@ use std::sync::Arc;
 use tracelogging_dynamic as tld;
 
 use opentelemetry::logs::Severity;
+use opentelemetry::Key;
 use opentelemetry_sdk::error::{OTelSdkError, OTelSdkResult};
 use std::str;
 
@@ -13,8 +14,15 @@ mod part_a;
 mod part_b;
 mod part_c;
 
+#[derive(Default)]
+struct Resource {
+    pub cloud_role: Option<String>,
+    pub cloud_role_instance: Option<String>,
+}
+
 pub(crate) struct ETWExporter {
     provider: Pin<Arc<tld::Provider>>,
+    resource: Resource,
 }
 
 fn enabled_callback_noop(
@@ -45,7 +53,10 @@ impl ETWExporter {
             provider.as_ref().register();
         }
 
-        ETWExporter { provider }
+        ETWExporter {
+            provider,
+            resource: Default::default(),
+        }
     }
 
     fn get_severity_level(&self, severity: Severity) -> tld::Level {
@@ -157,6 +168,15 @@ impl opentelemetry_sdk::logs::LogExporter for ETWExporter {
     #[cfg(feature = "spec_unstable_logs_enabled")]
     fn event_enabled(&self, level: Severity, _target: &str, _name: Option<&str>) -> bool {
         self.enabled(self.get_severity_level(level))
+    }
+
+    fn set_resource(&mut self, resource: &opentelemetry_sdk::Resource) {
+        self.resource.cloud_role = resource
+            .get(&Key::from_static_str("service.name"))
+            .map(|v| v.to_string());
+        self.resource.cloud_role_instance = resource
+            .get(&Key::from_static_str("service.instance.id"))
+            .map(|v| v.to_string());
     }
 }
 
