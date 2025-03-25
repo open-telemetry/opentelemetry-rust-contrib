@@ -6,15 +6,13 @@ pub use model::Error;
 pub use model::FieldMappingFn;
 
 use crate::exporter::model::FieldMapping;
-use futures_core::future::BoxFuture;
 use http::{Method, Request, Uri};
-use opentelemetry::Key;
-use opentelemetry::{trace::TraceError, KeyValue};
+use opentelemetry::{Key, KeyValue};
 use opentelemetry_http::{HttpClient, ResponseExt};
 use opentelemetry_sdk::{
     error::{OTelSdkError, OTelSdkResult},
     resource::{ResourceDetector, SdkProvidedResourceDetector},
-    trace::{Config, SdkTracerProvider},
+    trace::{Config, SdkTracerProvider, TraceError},
     trace::{SpanData, SpanExporter},
     Resource,
 };
@@ -424,14 +422,14 @@ async fn send_request(
 
 impl SpanExporter for DatadogExporter {
     /// Export spans to datadog-agent
-    fn export(&mut self, batch: Vec<SpanData>) -> BoxFuture<'static, OTelSdkResult> {
+    async fn export(&self, batch: Vec<SpanData>) -> OTelSdkResult {
         let request = match self.build_request(batch) {
             Ok(req) => req,
-            Err(err) => return Box::pin(std::future::ready(Err(err))),
+            Err(err) => return Err(err),
         };
 
         let client = self.client.clone();
-        Box::pin(send_request(client, request))
+        send_request(client, request).await
     }
     fn set_resource(&mut self, resource: &Resource) {
         self.resource = Some(resource.clone());

@@ -1,9 +1,8 @@
 use crate::exporter::ModelConfig;
 use http::uri;
-use opentelemetry::trace::ExportError;
 use opentelemetry_sdk::{
     trace::{self, SpanData},
-    Resource,
+    ExportError, Resource,
 };
 use std::fmt::Debug;
 use url::ParseError;
@@ -45,7 +44,7 @@ static DD_MEASURED_KEY: &str = "_dd.measured";
 /// use opentelemetry::global;
 /// use opentelemetry_datadog::{ApiVersion, new_pipeline};
 ///
-/// fn main() -> Result<(), opentelemetry::trace::TraceError> {
+/// fn main() -> Result<(), opentelemetry_sdk::trace::TraceError> {
 ///     let provider = new_pipeline()
 ///         .with_service_name("my_app")
 ///         .with_api_version(ApiVersion::Version05)
