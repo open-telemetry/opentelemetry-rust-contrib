@@ -6,7 +6,6 @@ pub fn populate_part_b(
     log_record: &opentelemetry_sdk::logs::SdkLogRecord,
     level: Severity,
     event_id: Option<i64>,
-    event_name: Option<&str>,
 ) {
     // Count fields in PartB
     const COUNT_TYPE_NAME: u8 = 1u8;
@@ -17,7 +16,7 @@ pub fn populate_part_b(
         + log_record.body().is_some() as u8
         + log_record.severity_text().is_some() as u8
         + event_id.is_some() as u8
-        + event_name.is_some() as u8;
+        + log_record.event_name().is_some() as u8;
 
     // Create PartB struct
     event.add_struct("PartB", field_count, 0);
@@ -39,7 +38,7 @@ pub fn populate_part_b(
         event.add_i64("eventId", event_id, tld::OutType::Default, 0);
     }
 
-    if let Some(event_name) = event_name {
+    if let Some(event_name) = log_record.event_name() {
         event.add_str8("name", event_name, tld::OutType::Default, 0);
     }
 }

@@ -96,9 +96,9 @@ impl ETWExporter {
 
         part_a::populate_part_a(&mut event, &self.resource, log_record, field_tag);
 
-        let (event_id, event_name) = part_c::populate_part_c(&mut event, log_record, field_tag);
+        let event_id = part_c::populate_part_c(&mut event, log_record, field_tag);
 
-        part_b::populate_part_b(&mut event, log_record, otel_level, event_id, event_name);
+        part_b::populate_part_b(&mut event, log_record, otel_level, event_id);
 
         // Write event to ETW
         let result = event.write(&self.provider, None, None);

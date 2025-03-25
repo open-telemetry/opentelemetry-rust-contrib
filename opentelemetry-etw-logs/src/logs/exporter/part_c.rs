@@ -2,17 +2,14 @@ use opentelemetry::logs::AnyValue;
 use tracelogging_dynamic as tld;
 
 pub const EVENT_ID: &str = "event_id";
-pub const EVENT_NAME_PRIMARY: &str = "event_name";
-pub const EVENT_NAME_SECONDARY: &str = "name";
 
-pub fn populate_part_c<'a>(
+pub fn populate_part_c(
     event: &mut tld::EventBuilder,
-    log_record: &'a opentelemetry_sdk::logs::SdkLogRecord,
+    log_record: &opentelemetry_sdk::logs::SdkLogRecord,
     field_tag: u32,
-) -> (Option<i64>, Option<&'a str>) {
+) -> Option<i64> {
     //populate CS PartC
     let mut event_id: Option<i64> = None;
-    let mut event_name: Option<&str> = None;
 
     let mut cs_c_count = 0;
     for (key, value) in log_record.attributes_iter() {
@@ -20,16 +17,6 @@ pub fn populate_part_c<'a>(
         match (key.as_str(), &value) {
             (EVENT_ID, AnyValue::Int(value)) => {
                 event_id = Some(*value);
-                continue;
-            }
-            (EVENT_NAME_PRIMARY, AnyValue::String(value)) => {
-                event_name = Some(value.as_str());
-                continue;
-            }
-            (EVENT_NAME_SECONDARY, AnyValue::String(value)) => {
-                if event_name.is_none() {
-                    event_name = Some(value.as_str());
-                }
                 continue;
             }
             _ => {
@@ -44,7 +31,7 @@ pub fn populate_part_c<'a>(
 
         for (key, value) in log_record.attributes_iter() {
             match (key.as_str(), &value) {
-                (EVENT_ID, _) | (EVENT_NAME_PRIMARY, _) | (EVENT_NAME_SECONDARY, _) => {
+                (EVENT_ID, _) => {
                     continue;
                 }
                 _ => {
@@ -53,13 +40,13 @@ pub fn populate_part_c<'a>(
             }
         }
     }
-    (event_id, event_name)
+    event_id
 }
 
 #[cfg(test)]
 mod tests {
     use super::super::common::test_utils;
-    use super::{EVENT_ID, EVENT_NAME_PRIMARY, EVENT_NAME_SECONDARY};
+    use super::EVENT_ID;
     use opentelemetry::logs::AnyValue;
     use opentelemetry::Key;
 
@@ -100,23 +87,6 @@ mod tests {
         let mut log_record = test_utils::new_sdk_log_record();
 
         log_record.add_attribute(EVENT_ID, 20);
-        log_record.add_attribute(EVENT_NAME_PRIMARY, "event-name");
-        log_record.add_attribute(EVENT_NAME_SECONDARY, "event-name");
-
-        let exporter = test_utils::new_etw_exporter();
-        let instrumentation = test_utils::new_instrumentation_scope();
-        let result = exporter.export_log_data(&log_record, &instrumentation);
-
-        assert!(result.is_ok());
-    }
-
-    #[test]
-    fn test_special_attributes_missing_event_name_primary() {
-        use opentelemetry::logs::LogRecord;
-
-        let mut log_record = test_utils::new_sdk_log_record();
-        log_record.add_attribute(EVENT_ID, 20);
-        log_record.add_attribute(EVENT_NAME_SECONDARY, "event-name");
 
         let exporter = test_utils::new_etw_exporter();
         let instrumentation = test_utils::new_instrumentation_scope();
