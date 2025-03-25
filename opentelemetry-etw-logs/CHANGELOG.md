@@ -22,6 +22,8 @@
 
 - Added support for TraceId,SpanId
 
+- Added support for populating cloud `role` and `roleInstance` from Resource's `service.name` and `service.instance.id` attributes respectively.
+
 ## v0.7.0
 
 - Bump msrv to 1.75.0
