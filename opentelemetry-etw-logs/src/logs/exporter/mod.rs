@@ -94,7 +94,7 @@ impl ETWExporter {
 
         event.add_u16("__csver__", 0x0401u16, tld::OutType::Hex, field_tag);
 
-        part_a::populate_part_a(&mut event, log_record, field_tag);
+        part_a::populate_part_a(&mut event, &self.resource, log_record, field_tag);
 
         let (event_id, event_name) = part_c::populate_part_c(&mut event, log_record, field_tag);
 
@@ -149,6 +149,8 @@ impl opentelemetry_sdk::logs::LogExporter for ETWExporter {
 
 #[cfg(test)]
 mod tests {
+    use opentelemetry_sdk::logs::LogExporter;
+
     use super::*;
 
     #[test]
@@ -170,6 +172,27 @@ mod tests {
         log_record.set_event_name("event-name");
 
         let exporter = common::test_utils::new_etw_exporter();
+        let instrumentation = common::test_utils::new_instrumentation_scope();
+        let result = exporter.export_log_data(&log_record, &instrumentation);
+
+        assert!(result.is_ok());
+    }
+
+    #[test]
+    fn test_event_resources() {
+        use opentelemetry::logs::LogRecord;
+        use opentelemetry::KeyValue;
+
+        let mut log_record = common::test_utils::new_sdk_log_record();
+
+        log_record.set_event_name("event-name");
+
+        let mut exporter = common::test_utils::new_etw_exporter();
+        exporter.set_resource(
+            &opentelemetry_sdk::Resource::builder()
+                .with_attributes([KeyValue::new("service.name", "cloud-role-name"), KeyValue::new("service.instance.id", "cloud-role-instance")])
+                .build(),
+        );
         let instrumentation = common::test_utils::new_instrumentation_scope();
         let result = exporter.export_log_data(&log_record, &instrumentation);
 

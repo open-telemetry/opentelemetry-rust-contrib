@@ -5,34 +5,44 @@ use tracelogging_dynamic as tld;
 
 pub fn populate_part_a(
     event: &mut tld::EventBuilder,
+    resource: &super::Resource,
     log_record: &opentelemetry_sdk::logs::SdkLogRecord,
     field_tag: u32,
 ) {
     if let Some(trace_context) = log_record.trace_context() {
-        populate_part_a_from_context(event, trace_context, field_tag);
+        populate_part_a_from_context(event, resource, trace_context, field_tag);
     } else {
-        populate_part_a_from_record(event, field_tag);
+        populate_part_a_from_record(event, resource, field_tag);
     }
 
     populate_time(event, log_record, field_tag);
 }
 
-fn populate_part_a_from_record(event: &mut tld::EventBuilder, field_tag: u32) {
+fn populate_part_a_from_record(
+    event: &mut tld::EventBuilder,
+    resource: &super::Resource,
+    field_tag: u32,
+) {
     const COUNT_TIME: u8 = 1u8;
-    const PART_A_COUNT: u8 = COUNT_TIME;
-    event.add_struct("PartA", PART_A_COUNT, field_tag);
+
+    let field_count = COUNT_TIME + resource_count(resource);
+
+    event.add_struct("PartA", field_count, field_tag);
+
+    populate_resource(resource, event, field_tag);
 }
 
 fn populate_part_a_from_context(
     event: &mut tld::EventBuilder,
+    resource: &super::Resource,
     trace_context: &TraceContext,
     field_tag: u32,
 ) {
     const COUNT_TIME: u8 = 1u8;
     const COUNT_EXT_DT: u8 = 1u8;
-    const PART_A_COUNT: u8 = COUNT_TIME + COUNT_EXT_DT;
+    let field_count = COUNT_TIME + COUNT_EXT_DT + resource_count(resource);
 
-    event.add_struct("PartA", PART_A_COUNT, field_tag);
+    event.add_struct("PartA", field_count, field_tag);
 
     const EXT_DT_COUNT: u8 = 2u8;
     event.add_struct("ext_dt", EXT_DT_COUNT, field_tag);
@@ -48,6 +58,27 @@ fn populate_part_a_from_context(
         tld::OutType::Default,
         field_tag,
     );
+
+    populate_resource(resource, event, field_tag);
+}
+
+fn resource_count(resource: &super::Resource) -> u8 {
+    resource.cloud_role.is_some() as u8 + resource.cloud_role_instance.is_some() as u8
+}
+
+fn populate_resource(resource: &super::Resource, event: &mut tld::EventBuilder, field_tag: u32) {
+    if let Some(cloud_role) = &resource.cloud_role {
+        event.add_str8("role", cloud_role, tld::OutType::Default, field_tag);
+    }
+
+    if let Some(cloud_role_instance) = &resource.cloud_role_instance {
+        event.add_str8(
+            "roleInstance",
+            cloud_role_instance,
+            tld::OutType::Default,
+            field_tag,
+        );
+    }
 }
 
 fn populate_time(
