@@ -15,6 +15,7 @@ tracelogging = "1.2.1"
 tracelogging_dynamic = "1.2.1"
 opentelemetry = { workspace = true, features = ["logs"] }
 opentelemetry_sdk = { workspace = true, features = ["logs"] }
+# TODO: Make json optional
 serde_json = "1.0.113"
 futures-executor = "0.3.31"
 
