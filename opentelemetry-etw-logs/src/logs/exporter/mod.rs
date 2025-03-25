@@ -190,7 +190,10 @@ mod tests {
         let mut exporter = common::test_utils::new_etw_exporter();
         exporter.set_resource(
             &opentelemetry_sdk::Resource::builder()
-                .with_attributes([KeyValue::new("service.name", "cloud-role-name"), KeyValue::new("service.instance.id", "cloud-role-instance")])
+                .with_attributes([
+                    KeyValue::new("service.name", "cloud-role-name"),
+                    KeyValue::new("service.instance.id", "cloud-role-instance"),
+                ])
                 .build(),
         );
         let instrumentation = common::test_utils::new_instrumentation_scope();

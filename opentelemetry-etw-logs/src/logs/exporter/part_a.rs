@@ -25,7 +25,7 @@ fn populate_part_a_from_record(
 ) {
     const COUNT_TIME: u8 = 1u8;
 
-    let field_count = COUNT_TIME + resource_count(resource);
+    let field_count = COUNT_TIME + get_resource_count(resource);
 
     event.add_struct("PartA", field_count, field_tag);
 
@@ -40,7 +40,7 @@ fn populate_part_a_from_context(
 ) {
     const COUNT_TIME: u8 = 1u8;
     const COUNT_EXT_DT: u8 = 1u8;
-    let field_count = COUNT_TIME + COUNT_EXT_DT + resource_count(resource);
+    let field_count = COUNT_TIME + COUNT_EXT_DT + get_resource_count(resource);
 
     event.add_struct("PartA", field_count, field_tag);
 
@@ -62,7 +62,7 @@ fn populate_part_a_from_context(
     populate_resource(resource, event, field_tag);
 }
 
-fn resource_count(resource: &super::Resource) -> u8 {
+fn get_resource_count(resource: &super::Resource) -> u8 {
     resource.cloud_role.is_some() as u8 + resource.cloud_role_instance.is_some() as u8
 }
 
