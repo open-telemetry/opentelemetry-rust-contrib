@@ -212,7 +212,7 @@ where
             service,
             metrics: self.metrics.clone(),
             route_formatter: self.route_formatter.clone(),
-            metric_attrs_from_req: self.metric_attrs_from_req.clone(),
+            metric_attrs_from_req: self.metric_attrs_from_req,
         };
 
         future::ok(service)
