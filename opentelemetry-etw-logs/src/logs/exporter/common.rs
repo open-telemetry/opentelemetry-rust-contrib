@@ -1,5 +1,8 @@
 use crate::logs::converters::IntoJson;
-use opentelemetry::{logs::AnyValue, Key};
+use opentelemetry::{
+    logs::{AnyValue, Severity},
+    Key,
+};
 use tracelogging_dynamic as tld;
 
 pub fn add_attribute_to_event(event: &mut tld::EventBuilder, key: &Key, value: &AnyValue) {
@@ -39,6 +42,37 @@ pub fn add_attribute_to_event(event: &mut tld::EventBuilder, key: &Key, value: &
     }
 }
 
+pub fn convert_severity_to_level(severity: Severity) -> tld::Level {
+    match severity {
+        Severity::Debug
+        | Severity::Debug2
+        | Severity::Debug3
+        | Severity::Debug4
+        | Severity::Trace
+        | Severity::Trace2
+        | Severity::Trace3
+        | Severity::Trace4 => tld::Level::Verbose,
+
+        Severity::Info | Severity::Info2 | Severity::Info3 | Severity::Info4 => {
+            tld::Level::Informational
+        }
+
+        Severity::Error | Severity::Error2 | Severity::Error3 | Severity::Error4 => {
+            tld::Level::Error
+        }
+
+        Severity::Fatal | Severity::Fatal2 | Severity::Fatal3 | Severity::Fatal4 => {
+            tld::Level::Critical
+        }
+
+        Severity::Warn | Severity::Warn2 | Severity::Warn3 | Severity::Warn4 => tld::Level::Warning,
+    }
+}
+
+pub fn get_event_name(log_record: &opentelemetry_sdk::logs::SdkLogRecord) -> &str {
+    log_record.event_name().unwrap_or("Log")
+}
+
 #[cfg(test)]
 pub mod test_utils {
     use opentelemetry::logs::Logger;
@@ -61,4 +95,36 @@ pub mod test_utils {
             .logger("test")
             .create_log_record()
     }
+}
+
+#[test]
+fn test_get_severity_level() {
+    let result = convert_severity_to_level(Severity::Debug);
+    assert_eq!(result, tld::Level::Verbose);
+
+    let result = convert_severity_to_level(Severity::Info);
+    assert_eq!(result, tld::Level::Informational);
+
+    let result = convert_severity_to_level(Severity::Error);
+    assert_eq!(result, tld::Level::Error);
+
+    let result = convert_severity_to_level(Severity::Fatal);
+    assert_eq!(result, tld::Level::Critical);
+
+    let result = convert_severity_to_level(Severity::Warn);
+    assert_eq!(result, tld::Level::Warning);
+}
+
+#[test]
+fn test_get_event_name() {
+    use opentelemetry::logs::LogRecord;
+
+    let mut log_record = test_utils::new_sdk_log_record();
+
+    let result = get_event_name(&log_record);
+    assert_eq!(result, "Log");
+
+    log_record.set_event_name("event-name");
+    let result = get_event_name(&log_record);
+    assert_eq!(result, "event-name");
 }

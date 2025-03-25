@@ -59,35 +59,6 @@ impl ETWExporter {
         }
     }
 
-    fn get_severity_level(&self, severity: Severity) -> tld::Level {
-        match severity {
-            Severity::Debug
-            | Severity::Debug2
-            | Severity::Debug3
-            | Severity::Debug4
-            | Severity::Trace
-            | Severity::Trace2
-            | Severity::Trace3
-            | Severity::Trace4 => tld::Level::Verbose,
-
-            Severity::Info | Severity::Info2 | Severity::Info3 | Severity::Info4 => {
-                tld::Level::Informational
-            }
-
-            Severity::Error | Severity::Error2 | Severity::Error3 | Severity::Error4 => {
-                tld::Level::Error
-            }
-
-            Severity::Fatal | Severity::Fatal2 | Severity::Fatal3 | Severity::Fatal4 => {
-                tld::Level::Critical
-            }
-
-            Severity::Warn | Severity::Warn2 | Severity::Warn3 | Severity::Warn4 => {
-                tld::Level::Warning
-            }
-        }
-    }
-
     fn enabled(&self, level: tld::Level) -> bool {
         // On unit tests, we skip this check to be able to test the exporter as no provider is active.
         if cfg!(test) {
@@ -103,7 +74,7 @@ impl ETWExporter {
         _instrumentation: &opentelemetry::InstrumentationScope,
     ) -> opentelemetry_sdk::error::OTelSdkResult {
         let otel_level = log_record.severity_number().unwrap_or(Severity::Debug);
-        let level = self.get_severity_level(otel_level);
+        let level = common::convert_severity_to_level(otel_level);
 
         if !self.enabled(level) {
             return Ok(());
@@ -115,7 +86,7 @@ impl ETWExporter {
 
         // reset
         event.reset(
-            self.get_event_name(log_record),
+            common::get_event_name(log_record),
             level,
             Self::KEYWORD,
             event_tags,
@@ -140,9 +111,7 @@ impl ETWExporter {
         }
     }
 
-    fn get_event_name(&self, log_record: &opentelemetry_sdk::logs::SdkLogRecord) -> &str {
-        log_record.event_name().unwrap_or("Log")
-    }
+
 }
 
 impl Debug for ETWExporter {
@@ -167,7 +136,7 @@ impl opentelemetry_sdk::logs::LogExporter for ETWExporter {
 
     #[cfg(feature = "spec_unstable_logs_enabled")]
     fn event_enabled(&self, level: Severity, _target: &str, _name: Option<&str>) -> bool {
-        self.enabled(self.get_severity_level(level))
+        self.enabled(common::convert_severity_to_level(level))
     }
 
     fn set_resource(&mut self, resource: &opentelemetry_sdk::Resource) {
@@ -183,7 +152,6 @@ impl opentelemetry_sdk::logs::LogExporter for ETWExporter {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use opentelemetry::logs::Severity;
 
     #[test]
     fn test_export_log_data() {
@@ -193,26 +161,6 @@ mod tests {
 
         let result = exporter.export_log_data(&record, &instrumentation);
         assert!(result.is_ok());
-    }
-
-    #[test]
-    fn test_get_severity_level() {
-        let exporter = common::test_utils::new_etw_exporter();
-
-        let result = exporter.get_severity_level(Severity::Debug);
-        assert_eq!(result, tld::Level::Verbose);
-
-        let result = exporter.get_severity_level(Severity::Info);
-        assert_eq!(result, tld::Level::Informational);
-
-        let result = exporter.get_severity_level(Severity::Error);
-        assert_eq!(result, tld::Level::Error);
-
-        let result = exporter.get_severity_level(Severity::Fatal);
-        assert_eq!(result, tld::Level::Critical);
-
-        let result = exporter.get_severity_level(Severity::Warn);
-        assert_eq!(result, tld::Level::Warning);
     }
 
     #[test]
