@@ -30,7 +30,7 @@ impl<T: SpanExporter> opentelemetry_sdk::trace::SpanProcessor for ReentrantSpanP
     }
 
     fn on_end(&self, span: SpanData) {
-        if let Ok(mut exporter) = self.exporter.lock() {
+        if let Ok(exporter) = self.exporter.lock() {
             let _ = futures_executor::block_on(exporter.export(vec![span]));
         }
     }

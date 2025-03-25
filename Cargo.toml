@@ -9,6 +9,7 @@ members = [
     "opentelemetry-resource-detectors",
     "opentelemetry-stackdriver",
     "opentelemetry-user-events-logs",
+    "opentelemetry-user-events-trace",
     "opentelemetry-user-events-metrics",
     "opentelemetry-zpages",
     "opentelemetry-exporter-geneva/geneva-uploader",

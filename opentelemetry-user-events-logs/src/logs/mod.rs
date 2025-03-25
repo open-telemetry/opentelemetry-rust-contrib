@@ -43,7 +43,7 @@ impl UserEventsLoggerProviderBuilderExt for LoggerProviderBuilder {
                 self.with_log_processor(reenterant_processor)
             }
             Err(e) => {
-                otel_warn!(name: "User_Events.Exporter.CreationFailed", reason = e);
+                otel_warn!(name: "User_Events.Exporter.CreationFailed", reason = &e);
                 self
             }
         }
