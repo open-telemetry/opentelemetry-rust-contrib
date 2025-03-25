@@ -2,6 +2,9 @@
 
 ## vNext
 
+- Added support for Populating Cloud RoleName, RoleInstance from Resource's
+  "service.name" and "service.instance.id" attributes respectively.
+
 ## v0.11.0
 
 - Fixed contention in `event_enabled()` check and `export()` path, by caching the

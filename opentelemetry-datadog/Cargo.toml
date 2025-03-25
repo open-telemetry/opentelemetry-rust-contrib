@@ -26,17 +26,16 @@ intern-std = []
 
 [dependencies]
 indexmap = "2.0"
-opentelemetry = { version = "0.28" }
-opentelemetry_sdk = { version = "0.28", features = ["trace"] }
-opentelemetry-http = { version = "0.28" }
-opentelemetry-semantic-conventions = { version = "0.28" }
+opentelemetry = { workspace = true }
+opentelemetry_sdk = { workspace = true, features = ["trace"] }
+opentelemetry-http = { workspace = true }
+opentelemetry-semantic-conventions = { workspace = true }
 rmp = "0.8"
 url = "2.2"
 reqwest = { version = "0.12", default-features = false, optional = true }
 surf = { version = "2.0", default-features = false, optional = true }
 thiserror = "2.0"
 http = "1"
-futures-core = "0.3"
 ryu = "1"
 itoa = "1"
 ahash = { version = "0.8", optional = true }
@@ -46,7 +45,7 @@ async-trait = "0.1"
 base64 = "0.22"
 bytes = "1"
 futures-util = { version = "0.3", default-features = false, features = ["io"] }
-opentelemetry_sdk = { version = "0.28", features = ["trace", "testing"] }
+opentelemetry_sdk = { workspace = true, features = ["trace", "testing"] }
 criterion = "0.5"
 rand = "0.9"
 hyper = "1"
