@@ -110,8 +110,6 @@ impl ETWExporter {
             ))),
         }
     }
-
-
 }
 
 impl Debug for ETWExporter {
