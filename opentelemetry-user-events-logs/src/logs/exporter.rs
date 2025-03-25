@@ -1,6 +1,7 @@
 use eventheader::{FieldFormat, Level, Opcode};
 use eventheader_dynamic::{EventBuilder, EventSet, Provider};
 use opentelemetry::{otel_debug, otel_info};
+use opentelemetry_sdk::Resource;
 use std::sync::Arc;
 use std::{fmt::Debug, sync::Mutex};
 
@@ -15,6 +16,8 @@ pub(crate) struct UserEventsExporter {
     provider: Mutex<Provider>,
     name: String,
     event_sets: Vec<Arc<EventSet>>,
+    cloud_role: Option<String>,
+    cloud_role_instance: Option<String>,
 }
 
 const EVENT_ID: &str = "event_id";
@@ -44,6 +47,8 @@ impl UserEventsExporter {
             provider: Mutex::new(eventheader_provider),
             name,
             event_sets,
+            cloud_role: None,
+            cloud_role_instance: None,
         })
     }
 
@@ -190,6 +195,9 @@ impl UserEventsExporter {
 
                 // populate CS PartA
                 let mut cs_a_count = 0;
+                let mut cs_a_bookmark: usize = 0;
+                eb.add_struct_with_bookmark("PartA", 2, 0, &mut cs_a_bookmark);
+
                 let event_time: SystemTime = log_record
                     .timestamp()
                     .or(log_record.observed_timestamp())
@@ -197,24 +205,43 @@ impl UserEventsExporter {
                 let time: String = chrono::DateTime::to_rfc3339(
                     &chrono::DateTime::<chrono::Utc>::from(event_time),
                 );
+
                 cs_a_count += 1; // for event_time
+                // Add time to PartA
+                eb.add_str("time", time, FieldFormat::Default, 0);
 
                 if let Some(trace_context) = log_record.trace_context() {
                     cs_a_count += 1; // for ext_dt
-                    eb.add_struct("PartA", cs_a_count, 0);
                     // TODO: Flattened structure might be faster
                     eb.add_struct("ext_dt", 2, 0);
                     eb.add_str("traceId", trace_context.trace_id.to_string(), FieldFormat::Default, 0);
                     eb.add_str("spanId", trace_context.span_id.to_string(), FieldFormat::Default, 0);
                 }
-                else {
-                    eb.add_struct("PartA", cs_a_count, 0);
+
+                let mut cloud_ext_count = 0;
+                if self.cloud_role.is_some()
+                {
+                    cloud_ext_count += 1;
+                }
+                if self.cloud_role_instance.is_some()
+                {
+                    cloud_ext_count += 1;
                 }
 
-                // TODO: If there is no fields in PartA, should the PartA struct itself be not added?
+                if cloud_ext_count > 0 {
+                    cs_a_count += 1; // for ext_cloud
+                    eb.add_struct("ext_cloud", cloud_ext_count, 0);
 
-                // TODO: Check if we can remove this as it is automatically added by EventBuilder
-                eb.add_str("time", time, FieldFormat::Default, 0);
+                    if let Some(cloud_role) = &self.cloud_role {
+                        eb.add_str("role", cloud_role, FieldFormat::Default, 0);
+                    }
+
+                    if let Some(cloud_role_instance) = &self.cloud_role_instance {
+                        eb.add_str("roleInstance", cloud_role_instance, FieldFormat::Default, 0);
+                    }
+                }
+
+                eb.set_struct_field_count(cs_a_bookmark, cs_a_count);
 
                 //populate CS PartC
                 // TODO: See if should hold on to this, and add PartB first then PartC
@@ -365,6 +392,15 @@ impl opentelemetry_sdk::logs::LogExporter for UserEventsExporter {
             Some(event_set) => event_set.enabled(),
             None => false,
         }
+    }
+
+    fn set_resource(&mut self, resource: &Resource) {
+        self.cloud_role = resource
+            .get(&Key::from_static_str("service.name"))
+            .map(|v| v.to_string());
+        self.cloud_role_instance = resource
+            .get(&Key::from_static_str("service.instance.id"))
+            .map(|v| v.to_string());
     }
 }
 
