@@ -24,7 +24,7 @@
 
 - Added support for populating cloud `role` and `roleInstance` from Resource's `service.name` and `service.instance.id` attributes respectively.
 
-- Exporter now unregister the Etw provider on `shutdown()`.
+- Exporter now unregisters the Etw provider on `shutdown()`.
 
 ## v0.7.0
 
