@@ -2,6 +2,12 @@
 
 ## vNext
 
+### Changed
+- Bump opentelemetry and opentelemetry_sdk versions to 0.29.0
+  - Updated imports for `TraceError` which moved from `opentelemetry::trace::TraceError` to `opentelemetry_sdk::trace::TraceError`
+  - Fixed issue with moved value in error handling for `TraceStateError`
+  - Updated XrayIdGenerator doctest to use the new API for configuring the IdGenerator
+
 ## v0.16.0
 
 - Bump msrv to 1.75.0
