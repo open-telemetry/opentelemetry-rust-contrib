@@ -360,12 +360,11 @@ impl Debug for UserEventsExporter {
 
 impl opentelemetry_sdk::logs::LogExporter for UserEventsExporter {
     async fn export(&self, batch: opentelemetry_sdk::logs::LogBatch<'_>) -> OTelSdkResult {
-        let mut res = Ok(());
-        for (record, instrumentation) in batch.iter() {
-            // no, res is not overwritten as the batch will only have one item
-            res = self.export_log_data(record, instrumentation);
-        }
-        res
+        let (record, instrumentation) = batch
+            .iter()
+            .next()
+            .expect("batch is expected to have one and only one record");
+        self.export_log_data(record, instrumentation)
     }
 
     fn shutdown(&self) -> OTelSdkResult {
