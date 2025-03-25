@@ -157,13 +157,12 @@ impl UserEventsExporter {
         log_record: &opentelemetry_sdk::logs::SdkLogRecord,
         _instrumentation: &opentelemetry::InstrumentationScope,
     ) -> opentelemetry_sdk::error::OTelSdkResult {
-        let level = if let Some(otel_severity) = log_record.severity_number() {
-            Self::get_severity_level(otel_severity)
-        } else {
-            return Err(OTelSdkError::InternalFailure(
+        let otel_severity = log_record
+            .severity_number()
+            .ok_or(OTelSdkError::InternalFailure(
                 "Severity number is required for user-events exporter".to_string(),
-            ));
-        };
+            ))?;
+        let level = Self::get_severity_level(otel_severity);
 
         // EventSets are stored in the same order as their int representation,
         // so we can use the level as index to the Vec.
@@ -301,7 +300,7 @@ impl UserEventsExporter {
                     cs_b_count += 1;
                 }
                 if level != Level::Invalid {
-                    eb.add_value("severityNumber", level.as_int(), FieldFormat::SignedInt, 0);
+                    eb.add_value("severityNumber", otel_severity as i16, FieldFormat::SignedInt, 0);
                     cs_b_count += 1;
                 }
                 if log_record.severity_text().is_some() {
