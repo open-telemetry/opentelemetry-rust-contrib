@@ -1,7 +1,7 @@
 [package]
 name = "actix-web-opentelemetry"
 version = "0.22.0"
-description = "OpenTelemetry integration for Actix Web apps"
+description = "Deprecated: 0.22.0 is the last release for this crate. Use opentelemetry-instrumentation-actix-web instead"
 homepage = "https://github.com/open-telemetry/opentelemetry-rust-contrib/tree/main/actix-web-opentelemetry"
 repository = "https://github.com/open-telemetry/opentelemetry-rust-contrib/tree/main/actix-web-opentelemetry"
 readme = "README.md"
@@ -35,9 +35,7 @@ awc = { version = "3.0", optional = true, default-features = false, features = [
 futures-util = { version = "0.3", default-features = false, features = [
   "alloc",
 ] }
-opentelemetry = { workspace = true, features = [
-  "trace",
-] }
+opentelemetry = { workspace = true, features = ["trace"] }
 opentelemetry-prometheus = { version = "0.29", optional = true }
 opentelemetry-semantic-conventions = { workspace = true, features = [
   "semconv_experimental",
