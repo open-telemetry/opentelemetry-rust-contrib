@@ -1,6 +1,6 @@
 use eventheader::{FieldFormat, Level, Opcode};
 use eventheader_dynamic::{EventBuilder, EventSet, Provider};
-use opentelemetry::{otel_debug, otel_info};
+use opentelemetry::otel_debug;
 use opentelemetry_sdk::Resource;
 use std::sync::Arc;
 use std::{fmt::Debug, sync::Mutex};
