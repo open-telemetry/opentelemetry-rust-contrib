@@ -120,12 +120,11 @@ impl Debug for ETWExporter {
 
 impl opentelemetry_sdk::logs::LogExporter for ETWExporter {
     async fn export(&self, batch: opentelemetry_sdk::logs::LogBatch<'_>) -> OTelSdkResult {
-        let mut res = Ok(());
-        for (log_record, instrumentation) in batch.iter() {
-            // no, res is not overwritten as the batch will only have one item
-            res = self.export_log_data(log_record, instrumentation);
-        }
-        res
+        let (record, instrumentation) = batch
+            .iter()
+            .next()
+            .expect("batch is expected to have one and only one record");
+        self.export_log_data(record, instrumentation)
     }
 
     #[cfg(feature = "spec_unstable_logs_enabled")]
