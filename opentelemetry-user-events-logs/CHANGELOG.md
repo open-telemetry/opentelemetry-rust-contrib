@@ -6,6 +6,7 @@
   "service.name" and "service.instance.id" attributes respectively.
 - Make exporter reentrant-safe by removing logs that could be bridged back
   to itself.
+- Exporter now unregisters the Tracepoint on `shutdown()`.
 
 ## v0.11.0
 
