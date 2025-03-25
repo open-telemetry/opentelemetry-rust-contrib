@@ -1,6 +1,7 @@
 use eventheader::{FieldFormat, Level, Opcode};
 use eventheader_dynamic::{EventBuilder, EventSet, Provider};
 use opentelemetry::{otel_debug, otel_info};
+use opentelemetry_sdk::Resource;
 use std::sync::Arc;
 use std::{fmt::Debug, sync::Mutex};
 
@@ -15,6 +16,8 @@ pub(crate) struct UserEventsExporter {
     provider: Mutex<Provider>,
     name: String,
     event_sets: Vec<Arc<EventSet>>,
+    cloud_role: Option<String>,
+    cloud_role_instance: Option<String>,
 }
 
 const EVENT_ID: &str = "event_id";
@@ -44,6 +47,8 @@ impl UserEventsExporter {
             provider: Mutex::new(eventheader_provider),
             name,
             event_sets,
+            cloud_role: None,
+            cloud_role_instance: None,
         })
     }
 
@@ -152,6 +157,12 @@ impl UserEventsExporter {
         log_record: &opentelemetry_sdk::logs::SdkLogRecord,
         _instrumentation: &opentelemetry::InstrumentationScope,
     ) -> opentelemetry_sdk::error::OTelSdkResult {
+        if let Some(cloud_role) = &self.cloud_role {
+            println!("Role {}", cloud_role);
+        }
+        if let Some(cloud_role_instance) = &self.cloud_role_instance {
+            println!("Role instance {}", cloud_role_instance);
+        }
         let level = if let Some(otel_severity) = log_record.severity_number() {
             Self::get_severity_level(otel_severity)
         } else {
@@ -199,22 +210,44 @@ impl UserEventsExporter {
                 );
                 cs_a_count += 1; // for event_time
 
-                if let Some(trace_context) = log_record.trace_context() {
+                // Count ext_dt in PartA if trace context present
+                let has_trace_context = log_record.trace_context().is_some();
+                if has_trace_context {
                     cs_a_count += 1; // for ext_dt
-                    eb.add_struct("PartA", cs_a_count, 0);
+                }
+
+                // Count ext_cloud in PartA if cloud_role or cloud_role_instance present
+                let has_cloud_info = self.cloud_role.is_some() || self.cloud_role_instance.is_some();
+                if has_cloud_info {
+                    cs_a_count += 1; // for ext_cloud
+                }
+
+                eb.add_struct("PartA", cs_a_count, 0);
+
+                // Add time to PartA
+                eb.add_str("time", time, FieldFormat::Default, 0);
+
+                // Add trace info to PartA if present
+                if let Some(trace_context) = log_record.trace_context() {
                     // TODO: Flattened structure might be faster
                     eb.add_struct("ext_dt", 2, 0);
                     eb.add_str("traceId", trace_context.trace_id.to_string(), FieldFormat::Default, 0);
                     eb.add_str("spanId", trace_context.span_id.to_string(), FieldFormat::Default, 0);
                 }
-                else {
-                    eb.add_struct("PartA", cs_a_count, 0);
+
+                // Add cloud info to PartA if present
+                if has_cloud_info {
+                    let cloud_field_count = self.cloud_role.is_some() as u8 + self.cloud_role_instance.is_some() as u8;
+                    eb.add_struct("ext_cloud", cloud_field_count, 0);
+
+                    if let Some(cloud_role) = &self.cloud_role {
+                        eb.add_str("role", cloud_role, FieldFormat::Default, 0);
+                    }
+
+                    if let Some(cloud_role_instance) = &self.cloud_role_instance {
+                        eb.add_str("roleInstance", cloud_role_instance, FieldFormat::Default, 0);
+                    }
                 }
-
-                // TODO: If there is no fields in PartA, should the PartA struct itself be not added?
-
-                // TODO: Check if we can remove this as it is automatically added by EventBuilder
-                eb.add_str("time", time, FieldFormat::Default, 0);
 
                 //populate CS PartC
                 // TODO: See if should hold on to this, and add PartB first then PartC
@@ -365,6 +398,15 @@ impl opentelemetry_sdk::logs::LogExporter for UserEventsExporter {
             Some(event_set) => event_set.enabled(),
             None => false,
         }
+    }
+
+    fn set_resource(&mut self, resource: &Resource) {
+        self.cloud_role = resource
+            .get(&Key::from_static_str("service.name"))
+            .map(|v| v.to_string());
+        self.cloud_role_instance = resource
+            .get(&Key::from_static_str("service.instance.id"))
+            .map(|v| v.to_string());
     }
 }
 
