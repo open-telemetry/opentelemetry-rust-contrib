@@ -1,5 +1,6 @@
 [workspace]
 members = [
+    "actix-web-opentelemetry",
     "opentelemetry-aws",
     "opentelemetry-contrib",
     "opentelemetry-datadog",
