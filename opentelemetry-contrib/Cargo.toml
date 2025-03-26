@@ -40,7 +40,7 @@ futures-util = { version = "0.3", default-features = false, features = ["std"] }
 opentelemetry_sdk = { workspace = true, features = ["trace", "testing"] }
 
 [target.'cfg(not(target_os = "windows"))'.dev-dependencies]
-pprof = { version = "0.13", features = ["flamegraph", "criterion"] }
+pprof = { version = "0.14", features = ["flamegraph", "criterion"] }
 
 [[bench]]
 name = "new_span"
