@@ -119,16 +119,13 @@ impl Debug for ETWExporter {
 }
 
 impl opentelemetry_sdk::logs::LogExporter for ETWExporter {
-    #[allow(clippy::manual_async_fn)]
-    fn export(
-        &self,
-        batch: opentelemetry_sdk::logs::LogBatch<'_>,
-    ) -> impl std::future::Future<Output = OTelSdkResult> + Send {
-        async move {
-            for (log_record, instrumentation) in batch.iter() {
-                let _ = self.export_log_data(log_record, instrumentation);
-            }
-            Ok(())
+    async fn export(&self, batch: opentelemetry_sdk::logs::LogBatch<'_>) -> OTelSdkResult {
+        if let Some((record, instrumentation)) = batch.iter().next() {
+            self.export_log_data(record, instrumentation)
+        } else {
+            Err(OTelSdkError::InternalFailure(
+                "Batch is expected to have one and only one record, but none was found".to_string(),
+            ))
         }
     }
 
@@ -144,6 +141,16 @@ impl opentelemetry_sdk::logs::LogExporter for ETWExporter {
         self.resource.cloud_role_instance = resource
             .get(&Key::from_static_str("service.instance.id"))
             .map(|v| v.to_string());
+    }
+
+    fn shutdown(&self) -> OTelSdkResult {
+        let res = self.provider.as_ref().unregister();
+        if res != 0 {
+            return Err(OTelSdkError::InternalFailure(format!(
+                "Failed to unregister provider. Win32 error: {res}"
+            )));
+        }
+        Ok(())
     }
 }
 

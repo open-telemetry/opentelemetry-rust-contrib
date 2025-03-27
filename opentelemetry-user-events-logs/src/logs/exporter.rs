@@ -360,13 +360,7 @@ impl Debug for UserEventsExporter {
 
 impl opentelemetry_sdk::logs::LogExporter for UserEventsExporter {
     async fn export(&self, batch: opentelemetry_sdk::logs::LogBatch<'_>) -> OTelSdkResult {
-        let mut iter = batch.iter();
-        if let Some((record, instrumentation)) = iter.next() {
-            if iter.next().is_some() {
-                return Err(OTelSdkError::InternalFailure(
-                    "Batch is expected to have one and only one record, but more than one was found. No item is exported.".to_string(),
-                ));
-            }
+        if let Some((record, instrumentation)) = batch.iter().next() {
             self.export_log_data(record, instrumentation)
         } else {
             Err(OTelSdkError::InternalFailure(
