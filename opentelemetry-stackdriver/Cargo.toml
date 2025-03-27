@@ -13,11 +13,9 @@ rust-version = "1.75.0"
 gcp_auth = { version = "0.12", optional = true }
 hex = "0.4"
 http = "1"
-opentelemetry = {version = "0.28"}
-opentelemetry_sdk = { version = "0.28", features = ["trace"] }
-opentelemetry-semantic-conventions = { version = "0.28", features = [
-    "semconv_experimental",
-]}
+opentelemetry = { workspace = true }
+opentelemetry_sdk = { workspace = true, features = ["trace"] }
+opentelemetry-semantic-conventions = { workspace = true }
 prost = "0.13"
 prost-types = "0.13"
 thiserror = "2.0"
@@ -44,7 +42,7 @@ tokio = "1"
 tonic-build = "0.12"
 walkdir = "2.3.2"
 futures-util = { version = "0.3", default-features = false }
-opentelemetry = { version = "0.28", features = ["testing"] }
+opentelemetry = { workspace = true, features = ["testing"] }
 
 [package.metadata.cargo-machete]
 ignored = ["tracing"]

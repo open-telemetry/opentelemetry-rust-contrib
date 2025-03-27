@@ -8,6 +8,7 @@
 
 - Added support for `MonitoredResource::CloudFunction`, `MonitoredResource::AppEngine`,
   `MonitoredResource::ComputeEngine`, and `MonitoredResource::KubernetesEngine`
+- Update to opentelemetry v0.29.0, opentelemetry_sdk v0.29.0, opentelemetry-semantic-conventions v0.29.0
 
 ## v0.25.0
 
