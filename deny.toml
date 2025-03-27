@@ -1,11 +1,5 @@
 [graph]
 exclude=[
-    "actix-http",
-    "actix-http-tracing",
-    "actix-udp",
-    "actix-udp-example",
-    "tracing-grpc",
-    "http",
     "protobuf" # actix-web-opentelemetry depends on prometheus should try to remove it
 ]
 
