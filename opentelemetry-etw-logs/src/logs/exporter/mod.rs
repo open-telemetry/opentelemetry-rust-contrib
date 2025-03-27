@@ -120,11 +120,13 @@ impl Debug for ETWExporter {
 
 impl opentelemetry_sdk::logs::LogExporter for ETWExporter {
     async fn export(&self, batch: opentelemetry_sdk::logs::LogBatch<'_>) -> OTelSdkResult {
-        let (record, instrumentation) = batch
-            .iter()
-            .next()
-            .expect("batch is expected to have one and only one record");
-        self.export_log_data(record, instrumentation)
+        if let Some((record, instrumentation)) = batch.iter().next() {
+            self.export_log_data(record, instrumentation)
+        } else {
+            Err(OTelSdkError::InternalFailure(
+                "Batch is expected to have one and only one record, but none was found".to_string(),
+            ))
+        }
     }
 
     #[cfg(feature = "spec_unstable_logs_enabled")]
