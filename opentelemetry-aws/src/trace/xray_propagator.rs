@@ -41,7 +41,7 @@
 use opentelemetry::{
     otel_error,
     propagation::{text_map_propagator::FieldIter, Extractor, Injector, TextMapPropagator},
-    trace::{SpanContext, SpanId, TraceContextExt, TraceError, TraceFlags, TraceId, TraceState},
+    trace::{SpanContext, SpanId, TraceContextExt, TraceFlags, TraceId, TraceState},
     Context,
 };
 use std::borrow::Cow;
@@ -144,7 +144,7 @@ pub fn span_context_from_str(value: &str) -> Option<SpanContext> {
             ))
         }
         Err(trace_state_err) => {
-            otel_error!(name: "SpanContextFromStr", error = format!("{:?}", TraceError::Other(Box::new(trace_state_err))));
+            otel_error!(name: "SpanContextFromStr", error = format!("{:?}", trace_state_err));
             None //todo: assign an error type instead of using None
         }
     }
