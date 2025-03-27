@@ -4,6 +4,10 @@
 
 - Added support for Populating Cloud RoleName, RoleInstance from Resource's
   "service.name" and "service.instance.id" attributes respectively.
+- Make exporter reentrant-safe by removing logs that could be bridged back
+  to itself.
+- Exporter now unregisters the `Provider` on `shutdown()`.
+  [#221](https://github.com/open-telemetry/opentelemetry-rust-contrib/pull/221)
 
 ## v0.11.0
 

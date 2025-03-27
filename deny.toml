@@ -1,14 +1,9 @@
+[graph]
 exclude=[
-    "actix-http",
-    "actix-http-tracing",
-    "actix-udp",
-    "actix-udp-example",
-    "tracing-grpc",
-    "http"
+    "protobuf" # actix-web-opentelemetry depends on prometheus should try to remove it
 ]
 
 [licenses]
-unlicensed = "deny"
 allow = [
     "MIT",
     "Apache-2.0",
@@ -30,9 +25,7 @@ license-files = [
 
 [advisories]
 ignore = [
-    # unsoundness in indirect dependencies without a safe upgrade below
-    "RUSTSEC-2021-0145",
-    "RUSTSEC-2019-0036"
+    "RUSTSEC-2024-0408" # pprof bumped in a separate PR
 ]
-unmaintained = "allow"
+unmaintained = "none"
 yanked = "allow"

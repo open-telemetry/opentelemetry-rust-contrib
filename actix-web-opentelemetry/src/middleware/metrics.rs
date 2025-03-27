@@ -77,12 +77,14 @@ impl Metrics {
     }
 }
 
+type MetricsAttrsFromReqFn = fn(&dev::ServiceRequest, Cow<'static, str>) -> Vec<KeyValue>;
+
 /// Builder for [RequestMetrics]
 #[derive(Clone, Debug, Default)]
 pub struct RequestMetricsBuilder {
     route_formatter: Option<Arc<dyn RouteFormatter + Send + Sync + 'static>>,
     meter: Option<Meter>,
-    metric_attrs_from_req: Option<fn(&dev::ServiceRequest, Cow<'static, str>) -> Vec<KeyValue>>,
+    metric_attrs_from_req: Option<MetricsAttrsFromReqFn>,
 }
 
 impl RequestMetricsBuilder {
@@ -210,7 +212,7 @@ where
             service,
             metrics: self.metrics.clone(),
             route_formatter: self.route_formatter.clone(),
-            metric_attrs_from_req: self.metric_attrs_from_req.clone(),
+            metric_attrs_from_req: self.metric_attrs_from_req,
         };
 
         future::ok(service)
