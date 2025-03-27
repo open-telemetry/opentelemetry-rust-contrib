@@ -24,6 +24,10 @@
 
 - Added support for populating cloud `role` and `roleInstance` from Resource's `service.name` and `service.instance.id` attributes respectively.
 
+- `_typeName` field uses "Log" instead of "Logs".
+- Exporter now unregisters the Etw provider on `shutdown()`.
+  [#222](https://github.com/open-telemetry/opentelemetry-rust-contrib/pull/222)
+
 ## v0.7.0
 
 - Bump msrv to 1.75.0
