@@ -22,7 +22,7 @@ pub fn populate_part_b(
     event.add_struct("PartB", field_count, 0);
 
     // Fill fields of PartB struct
-    event.add_str8("_typeName", "Logs", tld::OutType::Default, 0);
+    event.add_str8("_typeName", "Log", tld::OutType::Default, 0);
 
     if let Some(body) = log_record.body() {
         super::common::add_attribute_to_event(event, &Key::new("body"), body);

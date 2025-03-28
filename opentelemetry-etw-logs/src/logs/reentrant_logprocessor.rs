@@ -27,6 +27,7 @@ impl ReentrantLogProcessor {
 impl opentelemetry_sdk::logs::LogProcessor for ReentrantLogProcessor {
     fn emit(&self, data: &mut SdkLogRecord, instrumentation: &InstrumentationScope) {
         let log_tuple = &[(data as &SdkLogRecord, instrumentation)];
+        // TODO: How to log if export() returns Err? Maybe a metric? or eprintln?
         let _ = futures_executor::block_on(self.event_exporter.export(LogBatch::new(log_tuple)));
     }
 
@@ -36,10 +37,8 @@ impl opentelemetry_sdk::logs::LogProcessor for ReentrantLogProcessor {
         Ok(())
     }
 
-    // This is a no-op no special cleanup is required before
-    // shutdown.
     fn shutdown(&self) -> OTelSdkResult {
-        Ok(())
+        self.event_exporter.shutdown()
     }
 
     #[cfg(feature = "spec_unstable_logs_enabled")]
