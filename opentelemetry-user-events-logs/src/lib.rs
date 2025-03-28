@@ -27,13 +27,10 @@
 //! - **Monitored in Real-Time**: Events can be monitored in real-time using
 //!   Linux tools like `perf` or `ftrace`.
 //!
-//! ## Prerequisites
+//! ## Prerequisite
 //!
 //! - **Linux Kernel Version**: Requires Linux kernel 6.4 or later with
 //!   `user_events` support enabled to use the exporter.
-//! - **Tools**: Tools like `perf` or `ftrace` are also needed for
-//!   listening to and decoding the exported events. These tools are used by
-//!   agents or monitoring systems, not by the exporter itself.
 //!
 //! ## Synchronous Export
 //!
@@ -68,6 +65,16 @@
 //! ```
 //!
 //! This will create a logger provider with the `user_events` exporter enabled.
+//!
+//! ## Listening to Exported Events
+//!
+//! Tools like `perf` or `ftrace` can be used to listen to the exported events.
+//!
+//! - **Using `perf`**: For instance, the following command can be used to
+//!   record events of severity `Error` and `Warning`:
+//!   ```bash
+//!   perf record -e user_events:myprovider_L2K1,user_events:myprovider_L3K1
+//!   ```
 
 #![warn(missing_debug_implementations, missing_docs)]
 
