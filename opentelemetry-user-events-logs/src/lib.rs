@@ -214,7 +214,7 @@ mod tests {
             part_c["user_email"].as_str().unwrap(),
             "otel.user@opentelemetry.com"
         );
-        assert_eq!(part_c["bool_field"].as_bool().unwrap(), true);
+        assert!(part_c["bool_field"].as_bool().unwrap());
         assert_eq!(part_c["double_field"].as_f64().unwrap(), 1.0);
     }
 
