@@ -341,7 +341,7 @@ mod tests {
         // Validate PartB
         let part_b = &event["PartB"];
         assert_eq!(part_b["_typeName"].as_str().unwrap(), "Log");
-        assert_eq!(part_b["severityNumber"].as_i64().unwrap(), 2);
+        assert_eq!(part_b["severityNumber"].as_i64().unwrap(), 17);
         assert_eq!(part_b["severityText"].as_str().unwrap(), "ERROR");
         assert_eq!(part_b["eventId"].as_i64().unwrap(), 20);
         assert_eq!(part_b["name"].as_str().unwrap(), "my-event-name");
