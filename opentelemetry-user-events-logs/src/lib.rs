@@ -1,5 +1,72 @@
-//! The user_events exporter will enable applications to use OpenTelemetry API
-//! to capture the telemetry events, and write to user_events subsystem.
+//! # OpenTelemetry User Events Exporter for Logs
+//!
+//! This crate provides a log exporter for exporting logs to the Linux
+//! [user_events](https://docs.kernel.org/trace/user_events.html) subsystem. The
+//! `user_events` subsystem is a Linux kernel feature introduced in version 6.4,
+//! designed for efficient user process tracing. It is conceptually similar to
+//! Event Tracing for Windows (ETW) on Windows and leverages Linux Tracepoints
+//! to enable user processes to create traceable events and data. These events
+//! can be analyzed using existing tools like `ftrace` and `perf`.
+//!
+//! ## Key Features of `user_events`
+//!
+//! - **Efficient Tracing Path**: Provides a faster path for tracing from
+//!   user-mode applications by utilizing kernel-mode memory address space.
+//! - **Selective Event Export**: User processes can export telemetry events
+//!   only when they are useful, i.e., when the registered set of tracepoint
+//!   events are enabled.
+//!
+//! ## Purpose of This Exporter
+//!
+//! The `user_events` exporter enables applications to use the OpenTelemetry API
+//! to capture telemetry events and write them to the `user_events` subsystem.
+//! Once written, these events can be:
+//!
+//! - **Captured by Local Agents**: Agents running locally can listen for
+//!   specific events within the `user_events` subsystem.
+//! - **Monitored in Real-Time**: Events can be monitored in real-time using
+//!   Linux tools like `perf` or `ftrace`.
+//!
+//! ## Prerequisites
+//!
+//! - **Linux Kernel Version**: Requires Linux kernel 6.4 or later with
+//!   `user_events` support enabled.
+//! - **Tools**: Tools like `perf` or `ftrace` must be installed for decoding
+//!   and analyzing the exported events.
+//!
+//! ## Synchronous Export
+//!
+//! This exporter writes telemetry events to the `user_events` subsystem
+//! synchronously, without any buffering or batching. Each event is immediately
+//! exported, ensuring that no telemetry is lost in the event the application
+//! crashes.
+//!
+//! ## Example Use Case
+//!
+//! Applications can use this exporter to:
+//!
+//! - Emit logs to the `user_events` subsystem.
+//! - Enable local agents or monitoring tools to capture and analyze these
+//!   events for debugging or performance monitoring.
+//!
+//! For more details on the `user_events` subsystem, refer to the [official
+//! documentation](https://docs.kernel.org/trace/user_events.html).
+//!
+//! ## Getting Started
+//!
+//! To use the `user_events` exporter, you can set up a logger provider as follows:
+//!
+//! ```rust
+//! use opentelemetry_sdk::logs::LoggerProviderBuilder;
+//! use opentelemetry_user_events_logs::UserEventsLoggerProviderBuilderExt;
+//!
+//! let logger_provider = LoggerProviderBuilder::default()
+//!     .with_user_event_exporter("myprovider")
+//!     .build();
+//!
+//! ```
+//!
+//! This will create a logger provider with the `user_events` exporter enabled.
 
 #![warn(missing_debug_implementations, missing_docs)]
 

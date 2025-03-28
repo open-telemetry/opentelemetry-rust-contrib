@@ -30,15 +30,16 @@ impl<T: LogExporter> opentelemetry_sdk::logs::LogProcessor for ReentrantLogProce
         // TODO: Using futures_executor::block_on can make the code non reentrant safe
         // if that crate starts emitting logs that are bridged to OTel.
         // TODO: How to log if export() returns Err? Maybe a metric?
+        // Alternately, we can enter a SuppressionContext and log the error
+        // if the result is an error (one upstream ships SuppressionContext).
         let _ = futures_executor::block_on(self.exporter.export(LogBatch::new(log_tuple)));
     }
 
-    // Nothing to flush
+    // Nothing to flush as this processor does not buffer
     fn force_flush(&self) -> OTelSdkResult {
         Ok(())
     }
 
-    // Nothing to shutdown
     fn shutdown(&self) -> OTelSdkResult {
         self.exporter.shutdown()
     }

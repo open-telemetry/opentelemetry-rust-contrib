@@ -1,6 +1,6 @@
-use eventheader::{FieldFormat, Level, Opcode};
+use eventheader::{FieldFormat, Level};
 use eventheader_dynamic::{EventBuilder, EventSet, Provider};
-use opentelemetry::otel_debug;
+use opentelemetry::{otel_debug, otel_info};
 use opentelemetry_sdk::Resource;
 use std::sync::Arc;
 use std::{fmt::Debug, sync::Mutex};
@@ -76,18 +76,18 @@ impl UserEventsExporter {
             let event_set = eventheader_provider.register_set(level, keyword);
             match event_set.errno() {
                 0 => {
-                    otel_debug!(name: "UserEvents.RegisteredEvent",  event_set = format!("{:?}", event_set));
+                    otel_debug!(name: "UserEvents.RegisteredTracePoint",  event_set = format!("{:?}", event_set));
                 }
                 95 => {
-                    otel_debug!(name: "UserEvents.TraceFSNotMounted", event_set = format!("{:?}", event_set));
+                    otel_info!(name: "UserEvents.TraceFSNotMounted", event_set = format!("{:?}", event_set));
                 }
                 13 => {
-                    otel_debug!(name: "UserEvents.PermissionDenied", event_set = format!("{:?}", event_set));
+                    otel_info!(name: "UserEvents.PermissionDenied", event_set = format!("{:?}", event_set));
                 }
 
                 _ => {
-                    otel_debug!(
-                        name: "UserEvents.FailedToRegisterEvent",
+                    otel_info!(
+                        name: "UserEvents.FailedToRegisterTracePoint",
                         event_set = format!("{:?}", event_set)
                     );
                 }
@@ -103,23 +103,31 @@ impl UserEventsExporter {
         event_sets
     }
 
-    fn add_attribute_to_event(&self, eb: &mut EventBuilder, (key, value): (&Key, &AnyValue)) {
+    fn add_attribute_to_event(
+        &self,
+        eb: &mut EventBuilder,
+        (key, value): (&Key, &AnyValue),
+    ) -> bool {
         let field_name = key.as_str();
         match value {
             AnyValue::Boolean(b) => {
                 eb.add_value(field_name, *b, FieldFormat::Boolean, 0);
+                true
             }
             AnyValue::Int(i) => {
                 eb.add_value(field_name, *i, FieldFormat::SignedInt, 0);
+                true
             }
             AnyValue::Double(f) => {
                 eb.add_value(field_name, *f, FieldFormat::Float, 0);
+                true
             }
             AnyValue::String(s) => {
                 eb.add_str(field_name, s.as_str(), FieldFormat::Default, 0);
+                true
             }
             // TODO: Handle other types. Arrays are required in Trace for storing Links.
-            _ => (),
+            _ => false,
         }
     }
 
@@ -188,7 +196,6 @@ impl UserEventsExporter {
                 // TODO: What if the event name is not provided? "Log" is used as default.
                 // TODO: Should event_tag be non-zero?
                 eb.reset(log_record.event_name().unwrap_or("Log"), 0);
-                eb.opcode(Opcode::Info);
 
                 eb.add_value("__csver__", 1024, FieldFormat::UnsignedInt, 0); // 0x400 in hex
 
@@ -259,11 +266,10 @@ impl UserEventsExporter {
                                 eb.add_struct_with_bookmark("PartC", 1, 0, &mut cs_c_bookmark);
                                 is_part_c_present = true;
                             }
-                            self.add_attribute_to_event(&mut eb, (key, value));
-                            // TODO: This is buggy and incorrectly increments the count
-                            // even when the attribute is not added to PartC.
-                            // This can occur when the attribute is not a primitive type.
-                            cs_c_count += 1;
+                            if self.add_attribute_to_event(&mut eb, (key, value))
+                            {
+                                cs_c_count += 1;
+                            }
                         }
                     }
                 }
@@ -279,30 +285,31 @@ impl UserEventsExporter {
                 eb.add_str("_typeName", "Log", FieldFormat::Default, 0);
                 cs_b_count += 1;
 
-                if log_record.body().is_some() {
-                    eb.add_str(
-                        "body",
-                        // TODO: Use proper type instead of String always.
-                        match log_record.body().as_ref().unwrap() {
-                            AnyValue::Int(value) => value.to_string(),
-                            AnyValue::String(value) => value.to_string(),
-                            AnyValue::Boolean(value) => value.to_string(),
-                            AnyValue::Double(value) => value.to_string(),
-                            AnyValue::Bytes(value) => String::from_utf8_lossy(value).to_string(),
-                            // TODO: Handle complex types using serde_json
-                            AnyValue::ListAny(_value) => "".to_string(),
-                            AnyValue::Map(_value) => "".to_string(),
-                            &_ => "".to_string(),
-                        },
-                        FieldFormat::Default,
-                        0,
-                    );
+                if let Some(body) = log_record.body() {
+                    match body {
+                        AnyValue::String(value) => {
+                            eb.add_str("body", value.as_str(), FieldFormat::Default, 0);
+                        }
+                        AnyValue::Int(value) => {
+                            eb.add_value("body", *value, FieldFormat::SignedInt, 0);
+                        }
+                        AnyValue::Boolean(value) => {
+                            eb.add_value("body", *value, FieldFormat::Boolean, 0);
+                        }
+                        AnyValue::Double(value) => {
+                            eb.add_value("body", *value, FieldFormat::Float, 0);
+                        }
+                        &_ => {
+                            // TODO: Handle other types using json instead of empty string
+                            eb.add_str("body", "", FieldFormat::Default, 0);
+                        }
+                    }
                     cs_b_count += 1;
                 }
-                if level != Level::Invalid {
-                    eb.add_value("severityNumber", otel_severity as i16, FieldFormat::SignedInt, 0);
-                    cs_b_count += 1;
-                }
+
+                eb.add_value("severityNumber", otel_severity as i16, FieldFormat::SignedInt, 0);
+                cs_b_count += 1;
+
                 if log_record.severity_text().is_some() {
                     eb.add_str(
                         "severityText",
@@ -354,7 +361,7 @@ impl UserEventsExporter {
 
 impl Debug for UserEventsExporter {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "user_events log exporter (provider: {})", self.name)
+        write!(f, "user_events log exporter (provider name: {})", self.name)
     }
 }
 
@@ -412,7 +419,7 @@ mod tests {
         let exporter = UserEventsExporter::new("test_provider");
         assert_eq!(
             format!("{:?}", exporter.expect("Failed to create exporter")),
-            "user_events log exporter (provider: test_provider)"
+            "user_events log exporter (provider name: test_provider)"
         );
     }
 
