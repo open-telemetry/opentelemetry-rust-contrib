@@ -23,7 +23,6 @@ tonic = { version = "0.12", default-features = false, features = ["channel", "co
 tracing = { version = "0.1", optional = true }
 
 # Futures
-futures-core = "0.3"
 futures-util = { version = "0.3", default-features = false, features = ["alloc"] }
 futures-channel = { version = "0.3", default-features = false, features = ["std"] }
 
