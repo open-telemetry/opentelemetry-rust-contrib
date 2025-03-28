@@ -29,11 +29,11 @@ pub trait UserEventsTracerProviderBuilderExt {
     /// perf tool can be used to record events from the tracepoints.
     /// For example, the following will capture events from the tracepoint created above:
     /// perf record -e user_events:myprovider_L4K1
-    fn with_user_event_exporter(self, provider_name: &str) -> Self;
+    fn with_user_events_exporter(self, provider_name: &str) -> Self;
 }
 
 impl UserEventsTracerProviderBuilderExt for TracerProviderBuilder {
-    fn with_user_event_exporter(self, provider_name: &str) -> Self {
+    fn with_user_events_exporter(self, provider_name: &str) -> Self {
         match UserEventsSpanExporter::new(provider_name) {
             Ok(exporter) => {
                 let reentrant_processor = ReentrantSpanProcessor::new(exporter);

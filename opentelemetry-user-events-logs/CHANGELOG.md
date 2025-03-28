@@ -6,15 +6,18 @@
   "service.name" and "service.instance.id" attributes respectively.
 - Make exporter reentrant-safe by removing logs that could be bridged back
   to itself.
+- Export SeverityNumber from OTel Severity, not EventHeader severity. (They move
+  in opposite direction)
 - Exporter now unregisters the `Provider` on `shutdown()`.
   [#221](https://github.com/open-telemetry/opentelemetry-rust-contrib/pull/221)
+- `with_user_event_exporter` method on `LoggerProviderBuilder` renamed to
+  `with_user_events_exporter`.
 
 ## v0.11.0
 
 - Fixed contention in `event_enabled()` check and `export()` path, by caching the
   EventSets, addressing
   [159](https://github.com/open-telemetry/opentelemetry-rust-contrib/issues/159)
-- //TODO:(actually do this after upstream release) Shutdown now de-registers all the EventSets created
 - Added validation for the provider name in `with_user_event_exporter(provider_name)`.
   The provider name must:
   - Be less than 234 characters.

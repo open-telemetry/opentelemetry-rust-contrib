@@ -15,7 +15,7 @@ use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt, EnvFilte
 
 fn init_tracer() -> SdkTracerProvider {
     let provider = SdkTracerProvider::builder()
-        .with_user_event_exporter("myprovider")
+        .with_user_events_exporter("myprovider")
         .build();
     global::set_tracer_provider(provider.clone());
     provider
