@@ -23,13 +23,8 @@ use std::{
     time::{Duration, Instant},
 };
 
-use futures_core::future::BoxFuture;
 use futures_util::stream::StreamExt;
-use opentelemetry::{
-    otel_error,
-    trace::{SpanId, TraceError},
-    Key, KeyValue, Value,
-};
+use opentelemetry::{otel_error, trace::SpanId, Key, KeyValue, Value};
 use opentelemetry_sdk::error::{OTelSdkError, OTelSdkResult};
 use opentelemetry_sdk::{
     trace::{SpanData, SpanExporter},
@@ -87,14 +82,12 @@ impl StackDriverExporter {
 }
 
 impl SpanExporter for StackDriverExporter {
-    fn export(&mut self, batch: Vec<SpanData>) -> BoxFuture<'static, OTelSdkResult> {
-        match self.tx.try_send(batch) {
-            Err(e) => Box::pin(std::future::ready(Err(OTelSdkError::InternalFailure(
-                format!("{:?}", e),
-            )))),
+    async fn export(&self, batch: Vec<SpanData>) -> OTelSdkResult {
+        match self.tx.clone().try_send(batch) {
+            Err(e) => Err(OTelSdkError::InternalFailure(format!("{:?}", e))),
             Ok(()) => {
                 self.pending_count.fetch_add(1, Ordering::Relaxed);
-                Box::pin(std::future::ready(Ok(())))
+                Ok(())
             }
         }
     }
@@ -378,9 +371,9 @@ where
 
         self.pending_count.fetch_sub(1, Ordering::Relaxed);
         if let Err(e) = self.authorizer.authorize(&mut req, &self.scopes).await {
-            otel_error!(name: "ExportAuthorizeError", error = format!("{:?}", TraceError::from(Error::Authorizer(e.into()))));
+            otel_error!(name: "ExportAuthorizeError", error = format!("{:?}", e));
         } else if let Err(e) = self.trace_client.batch_write_spans(req).await {
-            otel_error!(name: "ExportTransportError", error = format!("{:?}", TraceError::from(Error::Transport(e.into()))));
+            otel_error!(name: "ExportTransportError", error = format!("{:?}", e));
         }
 
         let client = match &mut self.log_client {
@@ -402,9 +395,9 @@ where
         });
 
         if let Err(e) = self.authorizer.authorize(&mut req, &self.scopes).await {
-            otel_error!(name: "ExportAuthorizeError", error = format!("{:?}", TraceError::from(Error::Authorizer(e.into()))));
+            otel_error!(name: "ExportAuthorizeError", error = format!("{:?}", e));
         } else if let Err(e) = client.client.write_log_entries(req).await {
-            otel_error!(name: "ExportTransportError", error = format!("{:?}", TraceError::from(Error::Transport(e.into()))));
+            otel_error!(name: "ExportTransportError", error =  format!("{:?}", e));
         }
     }
 }
@@ -515,7 +508,7 @@ pub enum Error {
     Transport(#[source] Box<dyn std::error::Error + Send + Sync>),
 }
 
-impl opentelemetry::trace::ExportError for Error {
+impl opentelemetry_sdk::ExportError for Error {
     fn exporter_name(&self) -> &'static str {
         "stackdriver"
     }
