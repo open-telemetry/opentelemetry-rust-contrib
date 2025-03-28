@@ -32,18 +32,18 @@ pub trait UserEventsLoggerProviderBuilderExt {
     /// perf tool can be used to record events from the tracepoints.
     /// For example the following will capture level 2 (Error) and 3(Warning) events:
     /// perf record -e user_events:myprovider_L2K1,user_events:myprovider_L3K1
-    fn with_user_event_exporter(self, provider_name: &str) -> Self;
+    fn with_user_events_exporter(self, provider_name: &str) -> Self;
 }
 
 impl UserEventsLoggerProviderBuilderExt for LoggerProviderBuilder {
-    fn with_user_event_exporter(self, provider_name: &str) -> Self {
+    fn with_user_events_exporter(self, provider_name: &str) -> Self {
         match UserEventsExporter::new(provider_name) {
             Ok(exporter) => {
                 let reenterant_processor = ReentrantLogProcessor::new(exporter);
                 self.with_log_processor(reenterant_processor)
             }
             Err(e) => {
-                otel_warn!(name: "User_Events.Exporter.CreationFailed", reason = e);
+                otel_warn!(name: "User_Events.Exporter.CreationFailed", reason = &e);
                 self
             }
         }

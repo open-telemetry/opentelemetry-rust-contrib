@@ -23,13 +23,8 @@ use std::{
     time::{Duration, Instant},
 };
 
-use futures_core::future::BoxFuture;
 use futures_util::stream::StreamExt;
-use opentelemetry::{
-    otel_error,
-    trace::{SpanId, TraceError},
-    Key, KeyValue, Value,
-};
+use opentelemetry::{otel_error, trace::SpanId, Key, KeyValue, Value};
 use opentelemetry_sdk::error::{OTelSdkError, OTelSdkResult};
 use opentelemetry_sdk::{
     trace::{SpanData, SpanExporter},
@@ -87,14 +82,12 @@ impl StackDriverExporter {
 }
 
 impl SpanExporter for StackDriverExporter {
-    fn export(&mut self, batch: Vec<SpanData>) -> BoxFuture<'static, OTelSdkResult> {
-        match self.tx.try_send(batch) {
-            Err(e) => Box::pin(std::future::ready(Err(OTelSdkError::InternalFailure(
-                format!("{:?}", e),
-            )))),
+    async fn export(&self, batch: Vec<SpanData>) -> OTelSdkResult {
+        match self.tx.clone().try_send(batch) {
+            Err(e) => Err(OTelSdkError::InternalFailure(format!("{:?}", e))),
             Ok(()) => {
                 self.pending_count.fetch_add(1, Ordering::Relaxed);
-                Box::pin(std::future::ready(Ok(())))
+                Ok(())
             }
         }
     }
@@ -378,9 +371,9 @@ where
 
         self.pending_count.fetch_sub(1, Ordering::Relaxed);
         if let Err(e) = self.authorizer.authorize(&mut req, &self.scopes).await {
-            otel_error!(name: "ExportAuthorizeError", error = format!("{:?}", TraceError::from(Error::Authorizer(e.into()))));
+            otel_error!(name: "ExportAuthorizeError", error = format!("{:?}", e));
         } else if let Err(e) = self.trace_client.batch_write_spans(req).await {
-            otel_error!(name: "ExportTransportError", error = format!("{:?}", TraceError::from(Error::Transport(e.into()))));
+            otel_error!(name: "ExportTransportError", error = format!("{:?}", e));
         }
 
         let client = match &mut self.log_client {
@@ -402,9 +395,9 @@ where
         });
 
         if let Err(e) = self.authorizer.authorize(&mut req, &self.scopes).await {
-            otel_error!(name: "ExportAuthorizeError", error = format!("{:?}", TraceError::from(Error::Authorizer(e.into()))));
+            otel_error!(name: "ExportAuthorizeError", error = format!("{:?}", e));
         } else if let Err(e) = client.client.write_log_entries(req).await {
-            otel_error!(name: "ExportTransportError", error = format!("{:?}", TraceError::from(Error::Transport(e.into()))));
+            otel_error!(name: "ExportTransportError", error =  format!("{:?}", e));
         }
     }
 }
@@ -515,7 +508,7 @@ pub enum Error {
     Transport(#[source] Box<dyn std::error::Error + Send + Sync>),
 }
 
-impl opentelemetry::trace::ExportError for Error {
+impl opentelemetry_sdk::ExportError for Error {
     fn exporter_name(&self) -> &'static str {
         "stackdriver"
     }
@@ -551,6 +544,46 @@ impl From<LogContext> for InternalLogContext {
     fn from(cx: LogContext) -> Self {
         let mut labels = HashMap::default();
         let resource = match cx.resource {
+            MonitoredResource::AppEngine {
+                project_id,
+                module_id,
+                version_id,
+                zone,
+            } => {
+                labels.insert("project_id".to_string(), project_id);
+                if let Some(module_id) = module_id {
+                    labels.insert("module_id".to_string(), module_id);
+                }
+                if let Some(version_id) = version_id {
+                    labels.insert("version_id".to_string(), version_id);
+                }
+                if let Some(zone) = zone {
+                    labels.insert("zone".to_string(), zone);
+                }
+
+                proto::api::MonitoredResource {
+                    r#type: "gae_app".to_owned(),
+                    labels,
+                }
+            }
+            MonitoredResource::CloudFunction {
+                project_id,
+                function_name,
+                region,
+            } => {
+                labels.insert("project_id".to_string(), project_id);
+                if let Some(function_name) = function_name {
+                    labels.insert("function_name".to_string(), function_name);
+                }
+                if let Some(region) = region {
+                    labels.insert("region".to_string(), region);
+                }
+
+                proto::api::MonitoredResource {
+                    r#type: "cloud_function".to_owned(),
+                    labels,
+                }
+            }
             MonitoredResource::CloudRunJob {
                 project_id,
                 job_name,
@@ -595,6 +628,26 @@ impl From<LogContext> for InternalLogContext {
                     labels,
                 }
             }
+
+            MonitoredResource::ComputeEngine {
+                project_id,
+                instance_id,
+                zone,
+            } => {
+                labels.insert("project_id".to_string(), project_id);
+                if let Some(instance_id) = instance_id {
+                    labels.insert("instance_id".to_string(), instance_id);
+                }
+                if let Some(zone) = zone {
+                    labels.insert("zone".to_string(), zone);
+                }
+
+                proto::api::MonitoredResource {
+                    r#type: "gce_instance".to_owned(),
+                    labels,
+                }
+            }
+
             MonitoredResource::GenericNode {
                 project_id,
                 location,
@@ -650,6 +703,36 @@ impl From<LogContext> for InternalLogContext {
                     labels,
                 }
             }
+            MonitoredResource::KubernetesEngine {
+                project_id,
+                cluster_name,
+                location,
+                pod_name,
+                namespace_name,
+                container_name,
+            } => {
+                labels.insert("project_id".to_string(), project_id);
+                if let Some(cluster_name) = cluster_name {
+                    labels.insert("cluster_name".to_string(), cluster_name);
+                }
+                if let Some(location) = location {
+                    labels.insert("location".to_string(), location);
+                }
+                if let Some(pod_name) = pod_name {
+                    labels.insert("pod_name".to_string(), pod_name);
+                }
+                if let Some(namespace_name) = namespace_name {
+                    labels.insert("namespace_name".to_string(), namespace_name);
+                }
+                if let Some(container_name) = container_name {
+                    labels.insert("container_name".to_string(), container_name);
+                }
+
+                proto::api::MonitoredResource {
+                    r#type: "k8s_container".to_owned(),
+                    labels,
+                }
+            }
         };
 
         Self {
@@ -665,8 +748,41 @@ impl From<LogContext> for InternalLogContext {
 /// Please submit an issue or pull request if you want to use a resource type not listed here.
 #[derive(Clone)]
 pub enum MonitoredResource {
-    Global {
+    AppEngine {
         project_id: String,
+        module_id: Option<String>,
+        version_id: Option<String>,
+        zone: Option<String>,
+    },
+    CloudFunction {
+        project_id: String,
+        function_name: Option<String>,
+        region: Option<String>,
+    },
+    CloudRunJob {
+        project_id: String,
+        job_name: Option<String>,
+        location: Option<String>,
+    },
+    CloudRunRevision {
+        project_id: String,
+        service_name: Option<String>,
+        revision_name: Option<String>,
+        location: Option<String>,
+        configuration_name: Option<String>,
+    },
+    ComputeEngine {
+        project_id: String,
+        instance_id: Option<String>,
+        zone: Option<String>,
+    },
+    KubernetesEngine {
+        project_id: String,
+        location: Option<String>,
+        cluster_name: Option<String>,
+        namespace_name: Option<String>,
+        pod_name: Option<String>,
+        container_name: Option<String>,
     },
     GenericNode {
         project_id: String,
@@ -681,17 +797,8 @@ pub enum MonitoredResource {
         job: Option<String>,
         task_id: Option<String>,
     },
-    CloudRunJob {
+    Global {
         project_id: String,
-        job_name: Option<String>,
-        location: Option<String>,
-    },
-    CloudRunRevision {
-        project_id: String,
-        service_name: Option<String>,
-        revision_name: Option<String>,
-        location: Option<String>,
-        configuration_name: Option<String>,
     },
 }
 

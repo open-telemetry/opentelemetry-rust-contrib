@@ -2,7 +2,14 @@
 
 ## vNext
 
+- Update gRPC schemas
+
 ### Changed
+
+- Added support for `MonitoredResource::CloudFunction`, `MonitoredResource::AppEngine`,
+  `MonitoredResource::ComputeEngine`, and `MonitoredResource::KubernetesEngine`
+- Update to opentelemetry v0.29.0, opentelemetry_sdk v0.29.0, opentelemetry-semantic-conventions v0.29.0
+- Drop `futures-core` from dependencies
 
 ## v0.25.0
 

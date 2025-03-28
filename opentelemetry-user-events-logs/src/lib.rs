@@ -1,5 +1,80 @@
-//! The user_events exporter will enable applications to use OpenTelemetry API
-//! to capture the telemetry events, and write to user_events subsystem.
+//! # OpenTelemetry User Events Exporter for Logs
+//!
+//! This crate provides a log exporter for exporting logs to the Linux
+//! [user_events](https://docs.kernel.org/trace/user_events.html) subsystem. The
+//! `user_events` subsystem is a Linux kernel feature introduced in version 6.4,
+//! designed for efficient user process tracing. It is conceptually similar to
+//! Event Tracing for Windows (ETW) on Windows and leverages Linux Tracepoints
+//! to enable user processes to create traceable events and data. These events
+//! can be analyzed using existing tools like `ftrace` and `perf`.
+//!
+//! ## Key Features of `user_events`
+//!
+//! - **Efficient Tracing Path**: Provides a faster path for tracing from
+//!   user-mode applications by utilizing kernel-mode memory address space.
+//! - **Selective Event Export**: Allows user processes to export telemetry
+//!   events only when they are actively needed, i.e., when the corresponding
+//!   tracepoint events are enabled.
+//!
+//! ## Purpose of this Exporter
+//!
+//! The `user_events` exporter enables applications to use the OpenTelemetry API
+//! to capture telemetry events and write them to the `user_events` subsystem.
+//! Once written, these events can be:
+//!
+//! - **Captured by Local Agents**: Agents running locally can listen for
+//!   specific events within the `user_events` subsystem.
+//! - **Monitored in Real-Time**: Events can be monitored in real-time using
+//!   Linux tools like `perf` or `ftrace`.
+//!
+//! ## Prerequisite
+//!
+//! - **Linux Kernel Version**: Requires Linux kernel 6.4 or later with
+//!   `user_events` support enabled to use the exporter.
+//!
+//! ## Synchronous Export
+//!
+//! This exporter writes telemetry events to the `user_events` subsystem
+//! synchronously, without any buffering or batching. The exporter is
+//! non-blocking, and each event is immediately exported, ensuring that no
+//! telemetry is lost in the event the application crashes.
+//!
+//! ## Example Use Case
+//!
+//! Applications can use this exporter to:
+//!
+//! - Emit logs to the `user_events` subsystem.
+//! - Enable local agents or monitoring tools to capture and analyze these
+//!   events for debugging or performance monitoring.
+//!
+//! For more details on the `user_events` subsystem, refer to the [official
+//! documentation](https://docs.kernel.org/trace/user_events.html).
+//!
+//! ## Getting Started
+//!
+//! To use the `user_events` exporter, you can set up a logger provider as follows:
+//!
+//! ```rust
+//! use opentelemetry_sdk::logs::LoggerProviderBuilder;
+//! use opentelemetry_user_events_logs::UserEventsLoggerProviderBuilderExt;
+//!
+//! let logger_provider = LoggerProviderBuilder::default()
+//!     .with_user_events_exporter("myprovider")
+//!     .build();
+//!
+//! ```
+//!
+//! This will create a logger provider with the `user_events` exporter enabled.
+//!
+//! ## Listening to Exported Events
+//!
+//! Tools like `perf` or `ftrace` can be used to listen to the exported events.
+//!
+//! - **Using `perf`**: For instance, the following command can be used to
+//!   record events of severity `Error` and `Warning`:
+//!   ```bash
+//!   perf record -e user_events:myprovider_L2K1,user_events:myprovider_L3K1
+//!   ```
 
 #![warn(missing_debug_implementations, missing_docs)]
 
@@ -14,6 +89,7 @@ mod tests {
     use opentelemetry::trace::Tracer;
     use opentelemetry::trace::{TraceContextExt, TracerProvider};
     use opentelemetry_appender_tracing::layer;
+    use opentelemetry_sdk::Resource;
     use opentelemetry_sdk::{
         logs::LoggerProviderBuilder,
         trace::{Sampler, SdkTracerProvider},
@@ -37,7 +113,8 @@ mod tests {
         println!("User events status at start: {}", user_event_status);
 
         let logger_provider = LoggerProviderBuilder::default()
-            .with_user_event_exporter("myprovider")
+            .with_resource(Resource::builder().with_service_name("myrolename").build())
+            .with_user_events_exporter("myprovider")
             .build();
 
         // Once provider with user_event exporter is created, it should create the TracePoints
@@ -70,8 +147,11 @@ mod tests {
             name: "my-event-name",
             target: "my-target",
             event_id = 20,
+            bool_field = true,
+            double_field = 1.0,
             user_name = "otel user",
-            user_email = "otel.user@opentelemetry.com"
+            user_email = "otel.user@opentelemetry.com",
+            message = "This is a test message",
         );
 
         // Wait for the perf thread to complete and get the results
@@ -123,13 +203,19 @@ mod tests {
         // Only check if the time field exists, not the actual value
         assert!(part_a.get("time").is_some(), "PartA.time is missing");
 
+        let part_a_ext_cloud = part_a.get("ext_cloud").expect("PartA.ext_cloud is missing");
+
+        // Validate role
+        assert_eq!(part_a_ext_cloud["role"].as_str().unwrap(), "myrolename");
+
         // Validate PartB
         let part_b = &event["PartB"];
         assert_eq!(part_b["_typeName"].as_str().unwrap(), "Log");
-        assert_eq!(part_b["severityNumber"].as_i64().unwrap(), 2);
+        assert_eq!(part_b["severityNumber"].as_i64().unwrap(), 17);
         assert_eq!(part_b["severityText"].as_str().unwrap(), "ERROR");
         assert_eq!(part_b["eventId"].as_i64().unwrap(), 20);
         assert_eq!(part_b["name"].as_str().unwrap(), "my-event-name");
+        assert_eq!(part_b["body"].as_str().unwrap(), "This is a test message");
 
         // Validate PartC
         let part_c = &event["PartC"];
@@ -138,6 +224,8 @@ mod tests {
             part_c["user_email"].as_str().unwrap(),
             "otel.user@opentelemetry.com"
         );
+        assert!(part_c["bool_field"].as_bool().unwrap());
+        assert_eq!(part_c["double_field"].as_f64().unwrap(), 1.0);
     }
 
     #[ignore]
@@ -156,7 +244,7 @@ mod tests {
         let tracer = tracer_provider.tracer("test-tracer");
 
         let logger_provider = LoggerProviderBuilder::default()
-            .with_user_event_exporter("myprovider")
+            .with_user_events_exporter("myprovider")
             .build();
 
         // Once provider with user_event exporter is created, it should create the TracePoints
@@ -263,7 +351,7 @@ mod tests {
         // Validate PartB
         let part_b = &event["PartB"];
         assert_eq!(part_b["_typeName"].as_str().unwrap(), "Log");
-        assert_eq!(part_b["severityNumber"].as_i64().unwrap(), 2);
+        assert_eq!(part_b["severityNumber"].as_i64().unwrap(), 17);
         assert_eq!(part_b["severityText"].as_str().unwrap(), "ERROR");
         assert_eq!(part_b["eventId"].as_i64().unwrap(), 20);
         assert_eq!(part_b["name"].as_str().unwrap(), "my-event-name");

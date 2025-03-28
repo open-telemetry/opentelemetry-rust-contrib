@@ -1,0 +1,13 @@
+[package]
+name = "opentelemetry-exporter-geneva"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+opentelemetry_sdk = { workspace = true, default-features = false, features = ["logs"] }
+opentelemetry-proto = {workspace = true, default-features = false, features = ["logs"]}
+geneva-uploader = {path = "../geneva-uploader/", version = "0.1.0"}
+
+
+[lints]
+workspace = true

@@ -2,12 +2,9 @@ use std::fmt::Debug;
 
 use opentelemetry::InstrumentationScope;
 use opentelemetry_sdk::error::OTelSdkResult;
-use opentelemetry_sdk::logs::SdkLogRecord;
+use opentelemetry_sdk::logs::{LogBatch, LogExporter, SdkLogRecord};
+use opentelemetry_sdk::Resource;
 
-#[cfg(feature = "logs_level_enabled")]
-use opentelemetry_sdk::logs::LogExporter;
-
-use crate::logs::exporter::ExporterConfig;
 use crate::logs::exporter::*;
 
 /// Thread-safe LogProcessor for exporting logs to ETW.
@@ -19,13 +16,8 @@ pub struct ReentrantLogProcessor {
 
 impl ReentrantLogProcessor {
     /// constructor
-    pub fn new(
-        provider_name: &str,
-        event_name: String,
-        provider_group: ProviderGroup,
-        exporter_config: ExporterConfig,
-    ) -> Self {
-        let exporter = ETWExporter::new(provider_name, event_name, provider_group, exporter_config);
+    pub fn new(provider_name: &str) -> Self {
+        let exporter = ETWExporter::new(provider_name);
         ReentrantLogProcessor {
             event_exporter: exporter,
         }
@@ -34,7 +26,9 @@ impl ReentrantLogProcessor {
 
 impl opentelemetry_sdk::logs::LogProcessor for ReentrantLogProcessor {
     fn emit(&self, data: &mut SdkLogRecord, instrumentation: &InstrumentationScope) {
-        _ = self.event_exporter.export_log_data(data, instrumentation);
+        let log_tuple = &[(data as &SdkLogRecord, instrumentation)];
+        // TODO: How to log if export() returns Err? Maybe a metric? or eprintln?
+        let _ = futures_executor::block_on(self.event_exporter.export(LogBatch::new(log_tuple)));
     }
 
     // This is a no-op as this processor doesn't keep anything
@@ -43,20 +37,24 @@ impl opentelemetry_sdk::logs::LogProcessor for ReentrantLogProcessor {
         Ok(())
     }
 
-    // This is a no-op no special cleanup is required before
-    // shutdown.
     fn shutdown(&self) -> OTelSdkResult {
-        Ok(())
+        self.event_exporter.shutdown()
     }
 
-    #[cfg(feature = "logs_level_enabled")]
+    #[cfg(feature = "spec_unstable_logs_enabled")]
     fn event_enabled(
         &self,
         level: opentelemetry::logs::Severity,
         target: &str,
-        name: &str,
+        name: Option<&str>,
     ) -> bool {
+        use opentelemetry_sdk::logs::LogExporter;
+
         self.event_exporter.event_enabled(level, target, name)
+    }
+
+    fn set_resource(&mut self, resource: &Resource) {
+        self.event_exporter.set_resource(resource);
     }
 }
 
@@ -70,36 +68,21 @@ mod tests {
 
     #[test]
     fn test_shutdown() {
-        let processor = ReentrantLogProcessor::new(
-            "test-provider-name",
-            "test-event-name".into(),
-            None,
-            ExporterConfig::default(),
-        );
+        let processor = ReentrantLogProcessor::new("test-provider-name");
 
         assert!(processor.shutdown().is_ok());
     }
 
     #[test]
     fn test_force_flush() {
-        let processor = ReentrantLogProcessor::new(
-            "test-provider-name",
-            "test-event-name".into(),
-            None,
-            ExporterConfig::default(),
-        );
+        let processor = ReentrantLogProcessor::new("test-provider-name");
 
         assert!(processor.force_flush().is_ok());
     }
 
     #[test]
     fn test_emit() {
-        let processor = ReentrantLogProcessor::new(
-            "test-provider-name",
-            "test-event-name".into(),
-            None,
-            ExporterConfig::default(),
-        );
+        let processor = ReentrantLogProcessor::new("test-provider-name");
 
         let mut record = SdkLoggerProvider::builder()
             .build()
@@ -107,5 +90,24 @@ mod tests {
             .create_log_record();
         let instrumentation = Default::default();
         processor.emit(&mut record, &instrumentation);
+    }
+
+    #[test]
+    #[cfg(feature = "spec_unstable_logs_enabled")]
+    fn test_event_enabled() {
+        let processor = ReentrantLogProcessor::new("test-provider-name");
+
+        // Unit test are forced to return true as there is no ETW session listening for the event
+        assert!(processor.event_enabled(opentelemetry::logs::Severity::Info, "test", Some("test")));
+        assert!(processor.event_enabled(
+            opentelemetry::logs::Severity::Debug,
+            "test",
+            Some("test")
+        ));
+        assert!(processor.event_enabled(
+            opentelemetry::logs::Severity::Error,
+            "test",
+            Some("test")
+        ));
     }
 }

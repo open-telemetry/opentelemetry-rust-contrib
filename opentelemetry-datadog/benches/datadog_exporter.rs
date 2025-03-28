@@ -196,7 +196,7 @@ fn generate_traces(number_of_traces: usize, spans_per_trace: usize) -> Vec<SpanD
 }
 
 fn criterion_benchmark(c: &mut Criterion) {
-    let mut exporter = new_pipeline()
+    let exporter = new_pipeline()
         .with_service_name("trace-demo")
         .with_api_version(ApiVersion::Version05)
         .with_http_client(DummyClient)

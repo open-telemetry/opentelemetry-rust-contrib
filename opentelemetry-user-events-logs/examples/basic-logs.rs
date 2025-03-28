@@ -15,7 +15,7 @@ fn init_logger() -> SdkLoggerProvider {
     let _guard = tracing_subscriber::registry().with(fmt_layer).set_default(); // Temporary subscriber active for this function
 
     SdkLoggerProvider::builder()
-        .with_user_event_exporter("myprovider")
+        .with_user_events_exporter("myprovider")
         .build()
 }
 
@@ -55,7 +55,8 @@ fn main() {
             name: "my-event-name",
             event_id = 20,
             user_name = "otel user",
-            user_email = "otel@opentelemetry.io"
+            user_email = "otel@opentelemetry.io",
+            message = "This is a test message",
         );
         thread::sleep(Duration::from_secs(1));
     }

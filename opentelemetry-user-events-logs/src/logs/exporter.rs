@@ -1,6 +1,7 @@
-use eventheader::{FieldFormat, Level, Opcode};
+use eventheader::{FieldFormat, Level};
 use eventheader_dynamic::{EventBuilder, EventSet, Provider};
 use opentelemetry::{otel_debug, otel_info};
+use opentelemetry_sdk::Resource;
 use std::sync::Arc;
 use std::{fmt::Debug, sync::Mutex};
 
@@ -15,6 +16,8 @@ pub(crate) struct UserEventsExporter {
     provider: Mutex<Provider>,
     name: String,
     event_sets: Vec<Arc<EventSet>>,
+    cloud_role: Option<String>,
+    cloud_role_instance: Option<String>,
 }
 
 const EVENT_ID: &str = "event_id";
@@ -44,6 +47,8 @@ impl UserEventsExporter {
             provider: Mutex::new(eventheader_provider),
             name,
             event_sets,
+            cloud_role: None,
+            cloud_role_instance: None,
         })
     }
 
@@ -71,18 +76,18 @@ impl UserEventsExporter {
             let event_set = eventheader_provider.register_set(level, keyword);
             match event_set.errno() {
                 0 => {
-                    otel_debug!(name: "UserEvents.RegisteredEvent",  event_set = format!("{:?}", event_set));
+                    otel_debug!(name: "UserEvents.RegisteredTracePoint",  event_set = format!("{:?}", event_set));
                 }
                 95 => {
-                    otel_debug!(name: "UserEvents.TraceFSNotMounted", event_set = format!("{:?}", event_set));
+                    otel_info!(name: "UserEvents.TraceFSNotMounted", event_set = format!("{:?}", event_set));
                 }
                 13 => {
-                    otel_debug!(name: "UserEvents.PermissionDenied", event_set = format!("{:?}", event_set));
+                    otel_info!(name: "UserEvents.PermissionDenied", event_set = format!("{:?}", event_set));
                 }
 
                 _ => {
-                    otel_debug!(
-                        name: "UserEvents.FailedToRegisterEvent",
+                    otel_info!(
+                        name: "UserEvents.FailedToRegisterTracePoint",
                         event_set = format!("{:?}", event_set)
                     );
                 }
@@ -113,7 +118,11 @@ impl UserEventsExporter {
             AnyValue::String(s) => {
                 eb.add_str(field_name, s.as_str(), FieldFormat::Default, 0);
             }
-            _ => (),
+            // For unsupported types, add the key with an empty string as the value.
+            // TODO: Add support for complex types with json serialization in future.
+            _ => {
+                eb.add_str(field_name, "", FieldFormat::Default, 0);
+            }
         }
     }
 
@@ -151,13 +160,12 @@ impl UserEventsExporter {
         log_record: &opentelemetry_sdk::logs::SdkLogRecord,
         _instrumentation: &opentelemetry::InstrumentationScope,
     ) -> opentelemetry_sdk::error::OTelSdkResult {
-        let level = if let Some(otel_severity) = log_record.severity_number() {
-            Self::get_severity_level(otel_severity)
-        } else {
-            return Err(OTelSdkError::InternalFailure(
+        let otel_severity = log_record
+            .severity_number()
+            .ok_or(OTelSdkError::InternalFailure(
                 "Severity number is required for user-events exporter".to_string(),
-            ));
-        };
+            ))?;
+        let level = Self::get_severity_level(otel_severity);
 
         // EventSets are stored in the same order as their int representation,
         // so we can use the level as index to the Vec.
@@ -183,12 +191,14 @@ impl UserEventsExporter {
                 // TODO: What if the event name is not provided? "Log" is used as default.
                 // TODO: Should event_tag be non-zero?
                 eb.reset(log_record.event_name().unwrap_or("Log"), 0);
-                eb.opcode(Opcode::Info);
 
                 eb.add_value("__csver__", 1024, FieldFormat::UnsignedInt, 0); // 0x400 in hex
 
                 // populate CS PartA
                 let mut cs_a_count = 0;
+                let mut cs_a_bookmark: usize = 0;
+                eb.add_struct_with_bookmark("PartA", 2, 0, &mut cs_a_bookmark);
+
                 let event_time: SystemTime = log_record
                     .timestamp()
                     .or(log_record.observed_timestamp())
@@ -196,22 +206,46 @@ impl UserEventsExporter {
                 let time: String = chrono::DateTime::to_rfc3339(
                     &chrono::DateTime::<chrono::Utc>::from(event_time),
                 );
+
                 cs_a_count += 1; // for event_time
+                // Add time to PartA
+                eb.add_str("time", time, FieldFormat::Default, 0);
 
                 if let Some(trace_context) = log_record.trace_context() {
                     cs_a_count += 1; // for ext_dt
-                    eb.add_struct("PartA", cs_a_count, 0);
+                    // TODO: Flattened structure might be faster
                     eb.add_struct("ext_dt", 2, 0);
                     eb.add_str("traceId", trace_context.trace_id.to_string(), FieldFormat::Default, 0);
                     eb.add_str("spanId", trace_context.span_id.to_string(), FieldFormat::Default, 0);
                 }
-                else {
-                    eb.add_struct("PartA", cs_a_count, 0);
+
+                let mut cloud_ext_count = 0;
+                if self.cloud_role.is_some()
+                {
+                    cloud_ext_count += 1;
+                }
+                if self.cloud_role_instance.is_some()
+                {
+                    cloud_ext_count += 1;
                 }
 
-                eb.add_str("time", time, FieldFormat::Default, 0);
+                if cloud_ext_count > 0 {
+                    cs_a_count += 1; // for ext_cloud
+                    eb.add_struct("ext_cloud", cloud_ext_count, 0);
+
+                    if let Some(cloud_role) = &self.cloud_role {
+                        eb.add_str("role", cloud_role, FieldFormat::Default, 0);
+                    }
+
+                    if let Some(cloud_role_instance) = &self.cloud_role_instance {
+                        eb.add_str("roleInstance", cloud_role_instance, FieldFormat::Default, 0);
+                    }
+                }
+
+                eb.set_struct_field_count(cs_a_bookmark, cs_a_count);
 
                 //populate CS PartC
+                // TODO: See if should hold on to this, and add PartB first then PartC
                 let (mut is_event_id, mut event_id) = (false, 0);
                 let (mut is_part_c_present, mut cs_c_bookmark, mut cs_c_count) = (false, 0, 0);
 
@@ -228,9 +262,6 @@ impl UserEventsExporter {
                                 is_part_c_present = true;
                             }
                             self.add_attribute_to_event(&mut eb, (key, value));
-                            // TODO: This is buggy and incorrectly increments the count
-                            // even when the attribute is not added to PartC.
-                            // This can occur when the attribute is not a primitive type.
                             cs_c_count += 1;
                         }
                     }
@@ -247,28 +278,31 @@ impl UserEventsExporter {
                 eb.add_str("_typeName", "Log", FieldFormat::Default, 0);
                 cs_b_count += 1;
 
-                if log_record.body().is_some() {
-                    eb.add_str(
-                        "body",
-                        match log_record.body().as_ref().unwrap() {
-                            AnyValue::Int(value) => value.to_string(),
-                            AnyValue::String(value) => value.to_string(),
-                            AnyValue::Boolean(value) => value.to_string(),
-                            AnyValue::Double(value) => value.to_string(),
-                            AnyValue::Bytes(value) => String::from_utf8_lossy(value).to_string(),
-                            AnyValue::ListAny(_value) => "".to_string(),
-                            AnyValue::Map(_value) => "".to_string(),
-                            &_ => "".to_string(),
-                        },
-                        FieldFormat::Default,
-                        0,
-                    );
+                if let Some(body) = log_record.body() {
+                    match body {
+                        AnyValue::String(value) => {
+                            eb.add_str("body", value.as_str(), FieldFormat::Default, 0);
+                        }
+                        AnyValue::Int(value) => {
+                            eb.add_value("body", *value, FieldFormat::SignedInt, 0);
+                        }
+                        AnyValue::Boolean(value) => {
+                            eb.add_value("body", *value, FieldFormat::Boolean, 0);
+                        }
+                        AnyValue::Double(value) => {
+                            eb.add_value("body", *value, FieldFormat::Float, 0);
+                        }
+                        &_ => {
+                            // TODO: Handle other types using json instead of empty string
+                            eb.add_str("body", "", FieldFormat::Default, 0);
+                        }
+                    }
                     cs_b_count += 1;
                 }
-                if level != Level::Invalid {
-                    eb.add_value("severityNumber", level.as_int(), FieldFormat::SignedInt, 0);
-                    cs_b_count += 1;
-                }
+
+                eb.add_value("severityNumber", otel_severity as i16, FieldFormat::SignedInt, 0);
+                cs_b_count += 1;
+
                 if log_record.severity_text().is_some() {
                     eb.add_str(
                         "severityText",
@@ -282,6 +316,9 @@ impl UserEventsExporter {
                     eb.add_value("eventId", event_id, FieldFormat::SignedInt, 0);
                     cs_b_count += 1;
                 }
+                // TODO: eventname is already added to header.
+                // Should we add it again?
+                // Or should we use Target?
                 if let Some(event_name) = log_record.event_name() {
                     eb.add_str("name", event_name, FieldFormat::Default, 0);
                     cs_b_count += 1;
@@ -290,31 +327,24 @@ impl UserEventsExporter {
 
                 let result = eb.write(event_set, None, None);
                 if result > 0 {
-                    // Specially log the case where there is no listener and size exceeding.
+                    // Specially treat the case where there is no listener or payload size exceeds the limit.
                     if result == 9 {
-                        otel_debug!(name: "UserEvents.EventWriteFailed", result = result, reason = "No listener. This can occur when there was a listener but it was removed before the event was written");
+                        Err(OTelSdkError::InternalFailure("Failed to write event to user_events tracepoint as there is no listener. This can occur if there was a listener when we started serializing the event, but it was removed before the event was written".to_string()))
                     } else if result == 34 {
-                        // Info level for size exceeding.
-                        otel_info!(name: "UserEvents.EventWriteFailed", result = result, reason = "Total payload size exceeded 64KB limit");
+                        Err(OTelSdkError::InternalFailure("Failed to write event to user_events tracepoint as total payload size exceeded 64KB limit".to_string()))
                     } else {
-                        // For all other cases, log the error code.
-                        otel_debug!(name: "UserEvents.EventWriteFailed", result = result);
+                        // For all other cases, return failure and include the result code.
+                        Err(OTelSdkError::InternalFailure(format!(
+                            "Failed to write event to user_events tracepoint with result code: {}",
+                            result
+                        )))
                     }
-                    Err(OTelSdkError::InternalFailure(format!(
-                        "Failed to write event to user_events tracepoint with result code: {}",
-                        result
-                    )))
                 } else {
                     Ok(())
                 }
             });
             Ok(())
         } else {
-            otel_debug!(
-                name: "UserEvents.EventSetNotEnabled",
-                level = level.as_int()
-            );
-
             // Return success when the event is not enabled
             // as this is not an error condition.
             Ok(())
@@ -324,19 +354,22 @@ impl UserEventsExporter {
 
 impl Debug for UserEventsExporter {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "user_events log exporter (provider: {})", self.name)
+        write!(f, "user_events log exporter (provider name: {})", self.name)
     }
 }
 
 impl opentelemetry_sdk::logs::LogExporter for UserEventsExporter {
     async fn export(&self, batch: opentelemetry_sdk::logs::LogBatch<'_>) -> OTelSdkResult {
-        for (record, instrumentation) in batch.iter() {
-            let _ = self.export_log_data(record, instrumentation);
+        if let Some((record, instrumentation)) = batch.iter().next() {
+            self.export_log_data(record, instrumentation)
+        } else {
+            Err(OTelSdkError::InternalFailure(
+                "Batch is expected to have one and only one record, but none was found".to_string(),
+            ))
         }
-        Ok(())
     }
 
-    fn shutdown(&mut self) -> OTelSdkResult {
+    fn shutdown(&self) -> OTelSdkResult {
         // The explicit unregister() is done in shutdown()
         // as it may not be possible to unregister during Drop
         // as Loggers are typically *not* dropped.
@@ -351,7 +384,7 @@ impl opentelemetry_sdk::logs::LogExporter for UserEventsExporter {
     }
 
     #[cfg(feature = "spec_unstable_logs_enabled")]
-    fn event_enabled(&self, level: Severity, _target: &str, _name: &str) -> bool {
+    fn event_enabled(&self, level: Severity, _target: &str, _name: Option<&str>) -> bool {
         // EventSets are stored in the same order as their int representation,
         // so we can use the level as index to the Vec.
         let level = Self::get_severity_level(level);
@@ -359,6 +392,15 @@ impl opentelemetry_sdk::logs::LogExporter for UserEventsExporter {
             Some(event_set) => event_set.enabled(),
             None => false,
         }
+    }
+
+    fn set_resource(&mut self, resource: &Resource) {
+        self.cloud_role = resource
+            .get(&Key::from_static_str("service.name"))
+            .map(|v| v.to_string());
+        self.cloud_role_instance = resource
+            .get(&Key::from_static_str("service.instance.id"))
+            .map(|v| v.to_string());
     }
 }
 
@@ -370,7 +412,7 @@ mod tests {
         let exporter = UserEventsExporter::new("test_provider");
         assert_eq!(
             format!("{:?}", exporter.expect("Failed to create exporter")),
-            "user_events log exporter (provider: test_provider)"
+            "user_events log exporter (provider name: test_provider)"
         );
     }
 

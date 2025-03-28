@@ -13,9 +13,9 @@ rust-version = "1.75.0"
 gcp_auth = { version = "0.12", optional = true }
 hex = "0.4"
 http = "1"
-opentelemetry = {workspace = true}
+opentelemetry = { workspace = true }
 opentelemetry_sdk = { workspace = true, features = ["trace"] }
-opentelemetry-semantic-conventions = { workspace = true}
+opentelemetry-semantic-conventions = { workspace = true }
 prost = "0.13"
 prost-types = "0.13"
 thiserror = "2.0"
@@ -23,7 +23,6 @@ tonic = { version = "0.12", default-features = false, features = ["channel", "co
 tracing = { version = "0.1", optional = true }
 
 # Futures
-futures-core = "0.3"
 futures-util = { version = "0.3", default-features = false, features = ["alloc"] }
 futures-channel = { version = "0.3", default-features = false, features = ["std"] }
 

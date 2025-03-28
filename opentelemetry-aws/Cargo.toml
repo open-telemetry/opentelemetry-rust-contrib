@@ -1,6 +1,6 @@
 [package]
 name = "opentelemetry-aws"
-version = "0.16.0"
+version = "0.17.0"
 description = "AWS exporters and propagators for OpenTelemetry"
 homepage = "https://github.com/open-telemetry/opentelemetry-rust-contrib/tree/main/opentelemetry-aws"
 repository = "https://github.com/open-telemetry/opentelemetry-rust-contrib/tree/main/opentelemetry-aws"
@@ -27,7 +27,9 @@ internal-logs = ["tracing"]
 [dependencies]
 opentelemetry = { workspace = true }
 opentelemetry_sdk = { workspace = true, optional = true }
-opentelemetry-semantic-conventions = { workspace = true, optional = true }
+opentelemetry-semantic-conventions = { workspace = true, optional = true, features = [
+    "semconv_experimental",
+] }
 tracing = {version = "0.1", optional = true}
 
 [dev-dependencies]

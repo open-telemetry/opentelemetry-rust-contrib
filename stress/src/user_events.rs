@@ -24,6 +24,12 @@
 // Threads: 5 - Average Throughput: TODO
 // Threads: 10 - Average Throughput: 1.7 M iterations/sec
 // Threads: 16 - Average Throughput: TODO
+//
+// Stress Test Results (user_events disabled)
+// Threads: 1 - Average Throughput: TODO
+// Threads: 5 - Average Throughput: TODO
+// Threads: 10 - Average Throughput: 1.1 B iterations/sec
+// Threads: 16 - Average Throughput: TODO
 
 use opentelemetry_appender_tracing::layer;
 use opentelemetry_sdk::logs::SdkLoggerProvider;
@@ -35,7 +41,7 @@ mod throughput;
 // Function to initialize the logger
 fn init_logger() -> SdkLoggerProvider {
     SdkLoggerProvider::builder()
-        .with_user_event_exporter("myprovider")
+        .with_user_events_exporter("myprovider")
         .build()
 }
 

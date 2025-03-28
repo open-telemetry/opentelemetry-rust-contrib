@@ -8,8 +8,8 @@
     // When no listener
     | Test                        | Average time|
     |-----------------------------|-------------|
-    | User_Event_4_Attributes     | 10 ns       |
-    | User_Event_6_Attributes     | 10 ns       |
+    | User_Event_4_Attributes     | 8 ns        |
+    | User_Event_6_Attributes     | 8 ns        |
 
     // When listener is enabled
     // Run below to enable
@@ -18,8 +18,8 @@
     //  echo 0 | sudo tee /sys/kernel/debug/tracing/events/user_events/myprovider_L2K1/enable
     | Test                        | Average time|
     |-----------------------------|-------------|
-    | User_Event_4_Attributes     | 617 ns      |
-    | User_Event_6_Attributes     | 715 ns      |
+    | User_Event_4_Attributes     | 530 ns      |
+    | User_Event_6_Attributes     | 586 ns      |
 */
 
 // running the following from the current directory
@@ -41,7 +41,7 @@ fn benchmark_with_ot_layer(c: &mut Criterion, name: &str, num_attributes: usize)
                 .with_service_name("benchmark")
                 .build(),
         )
-        .with_user_event_exporter("myprovider")
+        .with_user_events_exporter("myprovider")
         .build();
     let ot_layer = tracing_layer::OpenTelemetryTracingBridge::new(&provider);
     let subscriber = Registry::default().with(ot_layer);
