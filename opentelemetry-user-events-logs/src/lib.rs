@@ -12,11 +12,11 @@
 //!
 //! - **Efficient Tracing Path**: Provides a faster path for tracing from
 //!   user-mode applications by utilizing kernel-mode memory address space.
-//! - **Selective Event Export**: User processes can export telemetry events
-//!   only when they are useful, i.e., when the registered set of tracepoint
-//!   events are enabled.
+//! - **Selective Event Export**: Allows user processes to export telemetry
+//!   events only when they are actively needed, i.e., when the corresponding
+//!   tracepoint events are enabled.
 //!
-//! ## Purpose of This Exporter
+//! ## Purpose of this Exporter
 //!
 //! The `user_events` exporter enables applications to use the OpenTelemetry API
 //! to capture telemetry events and write them to the `user_events` subsystem.
@@ -30,16 +30,17 @@
 //! ## Prerequisites
 //!
 //! - **Linux Kernel Version**: Requires Linux kernel 6.4 or later with
-//!   `user_events` support enabled.
-//! - **Tools**: Tools like `perf` or `ftrace` must be installed for decoding
-//!   and analyzing the exported events.
+//!   `user_events` support enabled to use the exporter.
+//! - **Tools**: Tools like `perf` or `ftrace` are also needed for
+//!   listening to and decoding the exported events. These tools are used by
+//!   agents or monitoring systems, not by the exporter itself.
 //!
 //! ## Synchronous Export
 //!
 //! This exporter writes telemetry events to the `user_events` subsystem
-//! synchronously, without any buffering or batching. Each event is immediately
-//! exported, ensuring that no telemetry is lost in the event the application
-//! crashes.
+//! synchronously, without any buffering or batching. The exporter is
+//! non-blocking, and each event is immediately exported, ensuring that no
+//! telemetry is lost in the event the application crashes.
 //!
 //! ## Example Use Case
 //!

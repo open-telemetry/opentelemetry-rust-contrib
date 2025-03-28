@@ -103,31 +103,26 @@ impl UserEventsExporter {
         event_sets
     }
 
-    fn add_attribute_to_event(
-        &self,
-        eb: &mut EventBuilder,
-        (key, value): (&Key, &AnyValue),
-    ) -> bool {
+    fn add_attribute_to_event(&self, eb: &mut EventBuilder, (key, value): (&Key, &AnyValue)) {
         let field_name = key.as_str();
         match value {
             AnyValue::Boolean(b) => {
                 eb.add_value(field_name, *b, FieldFormat::Boolean, 0);
-                true
             }
             AnyValue::Int(i) => {
                 eb.add_value(field_name, *i, FieldFormat::SignedInt, 0);
-                true
             }
             AnyValue::Double(f) => {
                 eb.add_value(field_name, *f, FieldFormat::Float, 0);
-                true
             }
             AnyValue::String(s) => {
                 eb.add_str(field_name, s.as_str(), FieldFormat::Default, 0);
-                true
             }
-            // TODO: Handle other types. Arrays are required in Trace for storing Links.
-            _ => false,
+            // For unsupported types, add the key with an empty string as the value.
+            // TODO: Add support for complex types with json serialization in future.
+            _ => {
+                eb.add_str(field_name, "", FieldFormat::Default, 0);
+            }
         }
     }
 
@@ -266,10 +261,8 @@ impl UserEventsExporter {
                                 eb.add_struct_with_bookmark("PartC", 1, 0, &mut cs_c_bookmark);
                                 is_part_c_present = true;
                             }
-                            if self.add_attribute_to_event(&mut eb, (key, value))
-                            {
-                                cs_c_count += 1;
-                            }
+                            self.add_attribute_to_event(&mut eb, (key, value));
+                            cs_c_count += 1;
                         }
                     }
                 }

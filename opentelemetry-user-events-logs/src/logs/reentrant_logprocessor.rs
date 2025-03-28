@@ -31,7 +31,7 @@ impl<T: LogExporter> opentelemetry_sdk::logs::LogProcessor for ReentrantLogProce
         // if that crate starts emitting logs that are bridged to OTel.
         // TODO: How to log if export() returns Err? Maybe a metric?
         // Alternately, we can enter a SuppressionContext and log the error
-        // if the result is an error (one upstream ships SuppressionContext).
+        // if the result is an error (once upstream ships SuppressionContext).
         let _ = futures_executor::block_on(self.exporter.export(LogBatch::new(log_tuple)));
     }
 
