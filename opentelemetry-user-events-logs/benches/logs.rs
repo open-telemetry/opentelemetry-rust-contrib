@@ -8,8 +8,8 @@
     // When no listener
     | Test                        | Average time|
     |-----------------------------|-------------|
-    | User_Event_4_Attributes     | 10 ns       |
-    | User_Event_6_Attributes     | 10 ns       |
+    | User_Event_4_Attributes     | 8 ns        |
+    | User_Event_6_Attributes     | 8 ns        |
 
     // When listener is enabled
     // Run below to enable
@@ -18,9 +18,9 @@
     //  echo 0 | sudo tee /sys/kernel/debug/tracing/events/user_events/myprovider_L2K1/enable
     | Test                        | Average time|
     |-----------------------------|-------------|
-    | User_Event_4_Attributes     | 617 ns      |
-    | User_Event_6_Attributes     | 715 ns      |
-*/
+    | User_Event_4_Attributes     | 530 ns      |
+    | User_Event_6_Attributes     | 586 ns      |
+*/  
 
 // running the following from the current directory
 // sudo -E ~/.cargo/bin/cargo bench --bench logs --all-features
