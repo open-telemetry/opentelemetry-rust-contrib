@@ -6,6 +6,8 @@
   "service.name" and "service.instance.id" attributes respectively.
 - Make exporter reentrant-safe by removing logs that could be bridged back
   to itself.
+- Export SeverityNumber from OTel Severity, not EventHeader severity. (They move
+  in opposite direction)
 - Exporter now unregisters the `Provider` on `shutdown()`.
   [#221](https://github.com/open-telemetry/opentelemetry-rust-contrib/pull/221)
 

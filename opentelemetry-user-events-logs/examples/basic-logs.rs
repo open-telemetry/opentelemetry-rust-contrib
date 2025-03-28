@@ -3,6 +3,7 @@
 use opentelemetry_appender_tracing::layer;
 use opentelemetry_sdk::logs::SdkLoggerProvider;
 use opentelemetry_user_events_logs::UserEventsLoggerProviderBuilderExt;
+use tracing_subscriber::field::display::Messages;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use std::{thread, time::Duration};
@@ -55,7 +56,8 @@ fn main() {
             name: "my-event-name",
             event_id = 20,
             user_name = "otel user",
-            user_email = "otel@opentelemetry.io"
+            user_email = "otel@opentelemetry.io",
+            message = "This is a test message",
         );
         thread::sleep(Duration::from_secs(1));
     }
