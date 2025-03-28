@@ -109,7 +109,8 @@ mod tests {
         // sudo -E ~/.cargo/bin/cargo test integration_test_basic -- --nocapture --ignored
 
         // Basic check if user_events are available
-        check_user_events_available().expect("Kernel does not support user_events. Verify your distribution/kernel supports user_events: https://docs.kernel.org/trace/user_events.html.");
+        let user_event_status = check_user_events_available().expect("Kernel does not support user_events. Verify your distribution/kernel supports user_events: https://docs.kernel.org/trace/user_events.html.");
+        println!("User events status at start: {}", user_event_status);
 
         let logger_provider = LoggerProviderBuilder::default()
             .with_resource(Resource::builder().with_service_name("myrolename").build())
@@ -120,6 +121,7 @@ mod tests {
         // following providername_level_k1 format
         // Validate that the TracePoints are created.
         let user_event_status = check_user_events_available().expect("Kernel does not support user_events. Verify your distribution/kernel supports user_events: https://docs.kernel.org/trace/user_events.html.");
+        println!("User events status after provider creation: {}", user_event_status);
         assert!(user_event_status.contains("myprovider_L1K1"));
         assert!(user_event_status.contains("myprovider_L2K1"));
         assert!(user_event_status.contains("myprovider_L3K1"));
