@@ -137,8 +137,11 @@ mod tests {
             name: "my-event-name",
             target: "my-target",
             event_id = 20,
+            bool_field = true,
+            double_field = 1.0,
             user_name = "otel user",
-            user_email = "otel.user@opentelemetry.com"
+            user_email = "otel.user@opentelemetry.com",
+            message = "This is a test message",
         );
 
         // Wait for the perf thread to complete and get the results
@@ -202,6 +205,7 @@ mod tests {
         assert_eq!(part_b["severityText"].as_str().unwrap(), "ERROR");
         assert_eq!(part_b["eventId"].as_i64().unwrap(), 20);
         assert_eq!(part_b["name"].as_str().unwrap(), "my-event-name");
+        assert_eq!(part_b["body"].as_str().unwrap(), "This is a test message");
 
         // Validate PartC
         let part_c = &event["PartC"];
@@ -210,6 +214,8 @@ mod tests {
             part_c["user_email"].as_str().unwrap(),
             "otel.user@opentelemetry.com"
         );
+        assert_eq!(part_c["bool_field"].as_bool().unwrap(), true);
+        assert_eq!(part_c["double_field"].as_f64().unwrap(), 1.0);
     }
 
     #[ignore]
