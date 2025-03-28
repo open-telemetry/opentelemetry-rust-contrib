@@ -10,6 +10,8 @@
   in opposite direction)
 - Exporter now unregisters the `Provider` on `shutdown()`.
   [#221](https://github.com/open-telemetry/opentelemetry-rust-contrib/pull/221)
+- `with_user_event_exporter` method on `LoggerProviderBuilder` renamed to
+  `with_user_events_exporter`.
 
 ## v0.11.0
 

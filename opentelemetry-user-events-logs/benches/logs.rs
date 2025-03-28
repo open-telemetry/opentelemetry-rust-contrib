@@ -41,7 +41,7 @@ fn benchmark_with_ot_layer(c: &mut Criterion, name: &str, num_attributes: usize)
                 .with_service_name("benchmark")
                 .build(),
         )
-        .with_user_event_exporter("myprovider")
+        .with_user_events_exporter("myprovider")
         .build();
     let ot_layer = tracing_layer::OpenTelemetryTracingBridge::new(&provider);
     let subscriber = Registry::default().with(ot_layer);

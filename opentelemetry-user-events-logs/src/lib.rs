@@ -61,7 +61,7 @@
 //! use opentelemetry_user_events_logs::UserEventsLoggerProviderBuilderExt;
 //!
 //! let logger_provider = LoggerProviderBuilder::default()
-//!     .with_user_event_exporter("myprovider")
+//!     .with_user_events_exporter("myprovider")
 //!     .build();
 //!
 //! ```
@@ -105,7 +105,7 @@ mod tests {
 
         let logger_provider = LoggerProviderBuilder::default()
             .with_resource(Resource::builder().with_service_name("myrolename").build())
-            .with_user_event_exporter("myprovider")
+            .with_user_events_exporter("myprovider")
             .build();
 
         // Once provider with user_event exporter is created, it should create the TracePoints
@@ -234,7 +234,7 @@ mod tests {
         let tracer = tracer_provider.tracer("test-tracer");
 
         let logger_provider = LoggerProviderBuilder::default()
-            .with_user_event_exporter("myprovider")
+            .with_user_events_exporter("myprovider")
             .build();
 
         // Once provider with user_event exporter is created, it should create the TracePoints
