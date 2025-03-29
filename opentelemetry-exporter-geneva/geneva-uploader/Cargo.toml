@@ -16,5 +16,11 @@ rustls-native-certs = "0.8"  # Use the latest compatible version
 native-tls = "0.2" 
 thiserror = "2.0"
 
+[dev-dependencies]
+rcgen = "0.13"
+openssl = "0.10"
+tempfile = "3.5"
+wiremock = "0.6"
+
 [lints]
 workspace = true

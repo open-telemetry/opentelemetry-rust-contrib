@@ -83,11 +83,14 @@ impl GenevaConfigClient {
     #[allow(dead_code)]
     pub(crate) async fn new(config: GenevaConfigClientConfig) -> Result<Self> {
         let mut client_builder = Client::builder()
+            // TODO: Remove this before stable. Used for testing with self-signed certs
             .danger_accept_invalid_certs(true)
             .http1_only()
             .timeout(Duration::from_secs(30));
 
         match &config.auth_method {
+            // TODO: Certificate auth would be removed in favor of managed identity.,
+            // This is for testing, so we can use self-signed certs, and password in plain text.
             AuthMethod::Certificate { path, password } => {
                 let p12_bytes = fs::read(path)?;
                 let identity = Identity::from_pkcs12(&p12_bytes, password)?;
