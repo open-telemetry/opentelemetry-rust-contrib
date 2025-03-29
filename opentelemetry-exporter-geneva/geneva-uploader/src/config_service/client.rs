@@ -24,7 +24,6 @@ use std::fs;
 ///
 /// Windows (PowerShell):
 /// openssl pkcs12 -export -in cert.pem -inkey key.pem -out client.p12 -name "alias"
-
 #[allow(dead_code)]
 #[derive(Clone)]
 pub enum AuthMethod {
