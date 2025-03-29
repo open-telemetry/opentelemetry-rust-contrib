@@ -6,7 +6,6 @@ mod tests {
     use openssl::{pkcs12::Pkcs12, pkey::PKey, x509::X509};
     use rcgen::generate_simple_self_signed;
     use std::io::Write;
-    use std::path::PathBuf;
     use tempfile::NamedTempFile;
     use wiremock::matchers::{method, path};
     use wiremock::{Mock, MockServer, ResponseTemplate};
@@ -28,7 +27,7 @@ mod tests {
         assert!(matches!(config.auth_method, AuthMethod::ManagedIdentity));
     }
 
-    fn generate_self_signed_p12() -> (PathBuf, String) {
+    fn generate_self_signed_p12() -> (NamedTempFile, String) {
         let password = "test".to_string();
 
         // This returns a CertifiedKey, not a Certificate
@@ -49,14 +48,15 @@ mod tests {
             .unwrap()
             .to_der()
             .unwrap();
-
+        println!("PKCS#12 size: {}", pkcs12.len());
         let mut file = NamedTempFile::new().unwrap();
         file.write_all(&pkcs12).unwrap();
+        println!("Temp file path: {:?}", file.path());
+        println!("Temp file name: {:?}", file.path().file_name());
 
-        (file.into_temp_path().to_path_buf(), password)
+        (file, password)
     }
 
-    #[ignore = "fix me"]
     #[tokio::test]
     async fn test_get_ingestion_info_mocked() {
         let mock_server = MockServer::start().await;
@@ -76,7 +76,7 @@ mod tests {
             .mount(&mock_server)
             .await;
 
-        let (temp_p12_path, password) = generate_self_signed_p12();
+        let (temp_p12_file, password) = generate_self_signed_p12();
 
         let config = GenevaConfigClientConfig {
             endpoint: mock_server.uri(),
@@ -86,7 +86,7 @@ mod tests {
             region: "mockregion".into(),
             config_major_version: 1,
             auth_method: AuthMethod::Certificate {
-                path: temp_p12_path.to_string_lossy().to_string(),
+                path: temp_p12_file.path().to_string_lossy().to_string(),
                 password,
             },
         };
@@ -96,5 +96,125 @@ mod tests {
 
         assert_eq!(result.endpoint, "https://mock.ingestion.endpoint");
         assert_eq!(result.auth_token, "mock-token");
+    }
+
+    #[tokio::test]
+    async fn test_error_handling_with_non_success_status() {
+        let mock_server = MockServer::start().await;
+
+        Mock::given(method("GET"))
+            .and(path(
+                "/api/agent/v3/mockenv/mockacct/MonitoringStorageKeys/",
+            ))
+            .respond_with(ResponseTemplate::new(403).set_body_string("Forbidden"))
+            .mount(&mock_server)
+            .await;
+
+        let (temp_p12_file, password) = generate_self_signed_p12();
+
+        let config = GenevaConfigClientConfig {
+            endpoint: mock_server.uri(),
+            environment: "mockenv".into(),
+            account: "mockacct".into(),
+            namespace: "mockns".into(),
+            region: "mockregion".into(),
+            config_major_version: 1,
+            auth_method: AuthMethod::Certificate {
+                path: temp_p12_file.path().to_string_lossy().to_string(),
+                password,
+            },
+        };
+
+        let client = GenevaConfigClient::new(config).await.unwrap();
+        let result = client.get_ingestion_info().await;
+
+        assert!(result.is_err());
+        match result {
+            Err(err) => match err {
+                crate::config_service::client::GenevaConfigClientError::RequestFailed {
+                    status,
+                    ..
+                } => {
+                    assert_eq!(status, 403);
+                }
+                _ => panic!("Expected RequestFailed error, got: {:?}", err),
+            },
+            _ => panic!("Expected error, got success"),
+        }
+    }
+    #[tokio::test]
+    async fn test_missing_ingestion_gateway_info() {
+        let mock_server = MockServer::start().await;
+
+        // Response without IngestionGatewayInfo
+        let mock_response = serde_json::json!({
+            "SomeOtherField": "value"
+        });
+
+        Mock::given(method("GET"))
+            .and(path(
+                "/api/agent/v3/mockenv/mockacct/MonitoringStorageKeys/",
+            ))
+            .respond_with(ResponseTemplate::new(200).set_body_json(mock_response))
+            .mount(&mock_server)
+            .await;
+
+        let (temp_p12_file, password) = generate_self_signed_p12();
+
+        let config = GenevaConfigClientConfig {
+            endpoint: mock_server.uri(),
+            environment: "mockenv".into(),
+            account: "mockacct".into(),
+            namespace: "mockns".into(),
+            region: "mockregion".into(),
+            config_major_version: 1,
+            auth_method: AuthMethod::Certificate {
+                path: temp_p12_file.path().to_string_lossy().to_string(),
+                password,
+            },
+        };
+
+        let client = GenevaConfigClient::new(config).await.unwrap();
+        let result = client.get_ingestion_info().await;
+
+        assert!(result.is_err());
+        match result {
+            Err(err) => match err {
+                crate::config_service::client::GenevaConfigClientError::AuthInfoNotFound(_) => {
+                    // Test passed
+                }
+                _ => panic!("Expected AuthInfoNotFound error, got: {:?}", err),
+            },
+            _ => panic!("Expected error, got success"),
+        }
+    }
+
+    #[tokio::test]
+    async fn test_invalid_certificate_path() {
+        let config = GenevaConfigClientConfig {
+            endpoint: "https://example.com".to_string(),
+            environment: "env".to_string(),
+            account: "acct".to_string(),
+            namespace: "ns".to_string(),
+            region: "region".to_string(),
+            config_major_version: 1,
+            auth_method: AuthMethod::Certificate {
+                path: "/nonexistent/path.p12".to_string(),
+                password: "test".to_string(),
+            },
+        };
+
+        let result = GenevaConfigClient::new(config).await;
+
+        assert!(result.is_err());
+        match result {
+            Err(err) => match err {
+                crate::config_service::client::GenevaConfigClientError::Io(_) => {
+                    // Test passed
+                }
+                _ => panic!("Expected Io error, got: {:?}", err),
+            },
+            _ => panic!("Expected error, got success"),
+        }
     }
 }
