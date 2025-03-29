@@ -4,7 +4,16 @@ version = "0.1.0"
 edition = "2021"
 
 [dependencies]
-opentelemetry-proto = {workspace = true, default-features = false, features = ["logs"]}
+opentelemetry-proto = {workspace = true, default-features = false, features = ["logs", "tonic"]}
+base64 = "0.22"
+tokio = { version = "1", features = ["full"] }
+serde = { version = "1.0", features = ["derive"] }
+serde_json = { version = "1.0", features = ["raw_value"] }
+uuid = { version = "1.0", features = ["serde"] }
+# TODO - support both native-tls and rustls
+reqwest = { version = "0.12", features = ["native-tls", "native-tls-alpn"]}
+rustls-native-certs = "0.8.0"  # Use the latest compatible version
+
 
 [lints]
 workspace = true
