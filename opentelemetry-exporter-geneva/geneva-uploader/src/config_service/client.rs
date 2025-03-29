@@ -1,12 +1,11 @@
 // Geneva Config Client with TLS (P12) and TODO: Managed Identity support
 
 use base64::{engine::general_purpose, Engine as _};
-use reqwest::{header, Client};
-use serde::{Deserialize, Serialize};
+use reqwest::Client;
+use serde::Deserialize;
 use serde_json::Value;
-use std::error::Error;
-use std::{collections::HashMap, time::Duration};
-use tokio::time::sleep;
+use std::time::Duration;
+use thiserror::Error;
 use uuid::Uuid;
 
 use native_tls::{Identity, Protocol, TlsConnector};
@@ -26,23 +25,35 @@ use std::fs;
 /// Windows (PowerShell):
 /// openssl pkcs12 -export -in cert.pem -inkey key.pem -out client.p12 -name "alias"
 
+#[allow(dead_code)]
 #[derive(Clone)]
 pub enum AuthMethod {
     Certificate { path: String, password: String },
     ManagedIdentity, // TODO: Add support for managed identity auth
 }
 
-#[derive(Debug)]
+#[derive(Debug, Error)]
 pub enum GenevaConfigClientError {
-    Http(reqwest::Error),
+    #[error("HTTP error: {0}")]
+    Http(#[from] reqwest::Error),
+    #[error("Certificate error: {0}")]
     Certificate(String),
+    #[error("Missing Auth Info: {0}")]
     AuthInfoNotFound(String),
+    #[error("Request failed with status {status}: {message}")]
     RequestFailed { status: u16, message: String },
-    MaxRetriesExceeded { attempts: u32, message: String },
+    #[error("IO error: {0}")]
+    Io(#[from] std::io::Error),
+    #[error("TLS error: {0}")]
+    Tls(#[from] native_tls::Error),
+    #[error("JSON error: {0}")]
+    SerdeJson(#[from] serde_json::Error),
 }
 
+#[allow(dead_code)]
 pub type Result<T> = std::result::Result<T, GenevaConfigClientError>;
 
+#[allow(dead_code)]
 #[derive(Clone)]
 pub struct GenevaConfigClientConfig {
     pub endpoint: String,
@@ -54,20 +65,23 @@ pub struct GenevaConfigClientConfig {
     pub auth_method: AuthMethod, // agent_identity and agent_version are hardcoded for now
 }
 
+#[allow(dead_code)]
 #[derive(Debug, Clone, Deserialize)]
-pub struct IngestionGatewayInfo {
-    pub endpoint: String,
+pub(crate) struct IngestionGatewayInfo {
+    pub(crate) endpoint: String,
     #[serde(rename = "AuthToken")]
-    pub auth_token: String,
+    pub(crate) auth_token: String,
 }
 
-pub struct GenevaConfigClient {
+#[allow(dead_code)]
+pub(crate) struct GenevaConfigClient {
     config: GenevaConfigClientConfig,
     http_client: Client,
 }
 
 impl GenevaConfigClient {
-    pub async fn new(config: GenevaConfigClientConfig) -> Result<Self> {
+    #[allow(dead_code)]
+    pub(crate) async fn new(config: GenevaConfigClientConfig) -> Result<Self> {
         let mut client_builder = Client::builder()
             .danger_accept_invalid_certs(true)
             .http1_only()
@@ -101,32 +115,8 @@ impl GenevaConfigClient {
         })
     }
 
-    pub async fn get_ingestion_info_with_retry(
-        &self,
-        max_retries: u32,
-        retry_delay_seconds: u64,
-    ) -> Result<IngestionGatewayInfo> {
-        let mut attempt = 0;
-
-        loop {
-            attempt += 1;
-            match self.get_ingestion_info().await {
-                Ok(response) => return Ok(response),
-                Err(e) if attempt <= max_retries => {
-                    eprintln!("Attempt {} failed: {}", attempt, e);
-                    sleep(Duration::from_secs(retry_delay_seconds)).await;
-                }
-                Err(e) => {
-                    return Err(GenevaConfigClientError::MaxRetriesExceeded {
-                        attempts: attempt,
-                        message: e.to_string(),
-                    });
-                }
-            }
-        }
-    }
-
-    async fn get_ingestion_info(&self) -> Result<IngestionGatewayInfo> {
+    #[allow(dead_code)]
+    pub(crate) async fn get_ingestion_info(&self) -> Result<IngestionGatewayInfo> {
         let agent_identity = "GenevaUploader"; // TODO make this configurable
         let agent_version = "0.1"; // TODO make this configurable
         let identity = format!(

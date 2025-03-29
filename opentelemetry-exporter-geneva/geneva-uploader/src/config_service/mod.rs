@@ -1,5 +1,5 @@
 mod client;
 
-pub use client::{
-    GenevaConfigClient, GenevaConfigClientConfig, GenevaConfigClientError, IngestionGatewayInfo,
-};
+//pub use client::{
+//    AuthMethod, GenevaConfigClient, GenevaConfigClientConfig, GenevaConfigClientError, IngestionGatewayInfo,
+//};
