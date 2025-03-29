@@ -41,13 +41,17 @@ mod tests {
         let x509 = X509::from_der(&cert_der).unwrap();
         let pkey = PKey::private_key_from_der(&key_der).unwrap();
 
-        #[allow(deprecated)] // TODO - remove the .build deprecated method
-        // Build PKCS#12
+        // Build PKCS#12 - fixed builder usage to match OpenSSL version
+        // Remove deprecated .build() method
         let pkcs12 = Pkcs12::builder()
-            .build(&password, "alias", &pkey, &x509)
+            .name("alias")
+            .pkey(&pkey)
+            .cert(&x509)
+            .build2(&password)
             .unwrap()
             .to_der()
             .unwrap();
+
         println!("PKCS#12 size: {}", pkcs12.len());
         let mut file = NamedTempFile::new().unwrap();
         file.write_all(&pkcs12).unwrap();
