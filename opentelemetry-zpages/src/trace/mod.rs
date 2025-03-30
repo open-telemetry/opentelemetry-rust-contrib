@@ -39,6 +39,7 @@ pub(crate) mod span_queue;
 /// # }
 ///
 /// ```
+#[deprecated(note = "This crate is deprecated and no longer maintained.")]
 pub fn tracez<R: Runtime>(
     sample_size: usize,
     runtime: R,
