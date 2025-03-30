@@ -226,4 +226,77 @@ mod tests {
             _ => panic!("Expected error, got success"),
         }
     }
+
+    // To run this test, set the following environment variables:
+    // For Linux:
+    // ```bash
+    // export GENEVA_ENDPOINT="https://your-geneva-endpoint.com"
+    // export GENEVA_ENVIRONMENT="production"
+    // export GENEVA_ACCOUNT="your-account"
+    // export GENEVA_NAMESPACE="your-namespace"
+    // export GENEVA_REGION="your-region"
+    // export GENEVA_CONFIG_MAJOR_VERSION="config-version"
+    // export GENEVA_CERT_PATH="/path/to/your/certificate.p12"
+    // export GENEVA_CERT_PASSWORD="your-certificate-password" // Empty string if no password
+    // cargo test test_get_ingestion_info_real_server -- --ignored
+    // ```
+    use std::env;
+    #[tokio::test]
+    #[ignore] // This test is ignored by default to prevent running in CI pipelines
+    async fn test_get_ingestion_info_real_server() {
+        // Read configuration from environment variables
+        let endpoint =
+            env::var("GENEVA_ENDPOINT").expect("GENEVA_ENDPOINT environment variable must be set");
+        let environment = env::var("GENEVA_ENVIRONMENT")
+            .expect("GENEVA_ENVIRONMENT environment variable must be set");
+        let account =
+            env::var("GENEVA_ACCOUNT").expect("GENEVA_ACCOUNT environment variable must be set");
+        let namespace = env::var("GENEVA_NAMESPACE")
+            .expect("GENEVA_NAMESPACE environment variable must be set");
+        let region =
+            env::var("GENEVA_REGION").expect("GENEVA_REGION environment variable must be set");
+        let cert_path = env::var("GENEVA_CERT_PATH")
+            .expect("GENEVA_CERT_PATH environment variable must be set");
+        let cert_password = env::var("GENEVA_CERT_PASSWORD")
+            .expect("GENEVA_CERT_PASSWORD environment variable must be set");
+        let config_major_version = env::var("GENEVA_CONFIG_MAJOR_VERSION")
+            .expect("GENEVA_CONFIG_MAJOR_VERSION environment variable must be set")
+            .parse::<u32>() // Convert string to u32
+            .expect("GENEVA_CONFIG_MAJOR_VERSION must be a valid unsigned integer");
+
+        let config = GenevaConfigClientConfig {
+            endpoint,
+            environment,
+            account,
+            namespace,
+            region,
+            config_major_version,
+            auth_method: AuthMethod::Certificate {
+                path: cert_path,
+                password: cert_password,
+            },
+        };
+
+        println!("Connecting to real Geneva Config service...");
+        let client = GenevaConfigClient::new(config)
+            .await
+            .expect("Failed to create client");
+
+        println!("Fetching ingestion info...");
+        let result = client
+            .get_ingestion_info()
+            .await
+            .expect("Failed to get ingestion info");
+
+        // Validate the response contains expected fields
+        assert!(!result.endpoint.is_empty(), "Endpoint should not be empty");
+        assert!(
+            !result.auth_token.is_empty(),
+            "Auth token should not be empty"
+        );
+
+        println!("Successfully connected to real server");
+        println!("Endpoint: {}", result.endpoint);
+        println!("Auth token length: {}", result.auth_token.len());
+    }
 }

@@ -114,6 +114,7 @@ pub struct GenevaConfigClientConfig {
 #[allow(dead_code)]
 #[derive(Debug, Clone, Deserialize)]
 pub(crate) struct IngestionGatewayInfo {
+    #[serde(rename = "Endpoint")]
     pub(crate) endpoint: String,
     #[serde(rename = "AuthToken")]
     pub(crate) auth_token: String,
