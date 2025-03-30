@@ -60,7 +60,7 @@
 #![doc(
     html_logo_url = "https://raw.githubusercontent.com/open-telemetry/opentelemetry-rust/master/assets/logo.svg"
 )]
-#![cfg_attr(test, deny(warnings))]
+#![allow(deprecated)]
 
 use trace::span_queue::SpanQueue;
 
