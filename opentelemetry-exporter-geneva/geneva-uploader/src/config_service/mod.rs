@@ -61,6 +61,7 @@ mod tests {
         (file, password)
     }
 
+    #[cfg_attr(target_os = "macos", ignore)] // cert generated not compatible with macOS
     #[tokio::test]
     async fn test_get_ingestion_info_mocked() {
         let mock_server = MockServer::start().await;
@@ -102,6 +103,7 @@ mod tests {
         assert_eq!(result.auth_token, "mock-token");
     }
 
+    #[cfg_attr(target_os = "macos", ignore)] // cert generated not compatible with macOS
     #[tokio::test]
     async fn test_error_handling_with_non_success_status() {
         let mock_server = MockServer::start().await;
@@ -146,6 +148,8 @@ mod tests {
             _ => panic!("Expected error, got success"),
         }
     }
+
+    #[cfg_attr(target_os = "macos", ignore)] // cert generated not compatible with macOS
     #[tokio::test]
     async fn test_missing_ingestion_gateway_info() {
         let mock_server = MockServer::start().await;
@@ -193,6 +197,7 @@ mod tests {
         }
     }
 
+    #[cfg_attr(target_os = "macos", ignore)] // cert generated not compatible with macOS
     #[tokio::test]
     async fn test_invalid_certificate_path() {
         let config = GenevaConfigClientConfig {
