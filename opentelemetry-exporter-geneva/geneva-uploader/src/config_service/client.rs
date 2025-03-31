@@ -8,7 +8,7 @@ use std::time::Duration;
 use thiserror::Error;
 use uuid::Uuid;
 
-use native_tls::{Identity, Protocol, TlsConnector};
+use native_tls::{Identity, Protocol};
 use std::fs;
 
 /// Authentication methods for the Geneva Config Client.
@@ -146,10 +146,10 @@ impl GenevaConfigClient {
     #[allow(dead_code)]
     pub(crate) async fn new(config: GenevaConfigClientConfig) -> Result<Self> {
         let mut client_builder = Client::builder()
-            // TODO: Remove this before stable. Used for testing with self-signed certs
-            .danger_accept_invalid_certs(true)
             .http1_only()
-            .timeout(Duration::from_secs(30));
+            .timeout(Duration::from_secs(30))
+            .pool_idle_timeout(Duration::from_secs(90))
+            .pool_max_idle_per_host(16);
 
         match &config.auth_method {
             // TODO: Certificate auth would be removed in favor of managed identity.,
@@ -160,13 +160,9 @@ impl GenevaConfigClient {
                 let p12_bytes = fs::read(path)?;
                 println!("PKCS#12 size: {}", p12_bytes.len());
                 let identity = Identity::from_pkcs12(&p12_bytes, password)?;
-                let tls_connector = TlsConnector::builder()
-                    .identity(identity)
-                    .min_protocol_version(Some(Protocol::Tlsv12))
-                    .max_protocol_version(Some(Protocol::Tlsv12)) // TODO: Add support for TLS 1.3
-                    .danger_accept_invalid_certs(true)
-                    .build()?;
-
+                let tls_connector =
+                    configure_tls_connector(native_tls::TlsConnector::builder(), identity)
+                        .build()?;
                 client_builder = client_builder.use_preconfigured_tls(tls_connector);
             }
             AuthMethod::ManagedIdentity => {
@@ -238,26 +234,34 @@ impl GenevaConfigClient {
 
         let encoded_identity = general_purpose::STANDARD.encode(&identity);
         let version_str = format!("Ver{}v0", self.config.config_major_version);
-        // TODO - fetch it during startup once.
-        let os_type = std::env::consts::OS
-            .replace("macos", "Darwin")
-            .replace("windows", "Windows")
-            .replace("linux", "Linux");
 
-        let mut url = format!(
-            "{}/api/agent/v3/{}/{}/MonitoringStorageKeys/?Namespace={}&Region={}&Identity={}&OSType={}&ConfigMajorVersion={}",
-            self.config.endpoint.trim_end_matches('/'),
-            self.config.environment,
-            self.config.account,
-            self.config.namespace,
-            self.config.region,
-            encoded_identity,
-            os_type,
-            version_str
-        );
-
-        let tag_id = Uuid::new_v4().to_string();
-        url.push_str(&format!("&TagId={}", tag_id));
+        // Construct the following URL:
+        // https://<endpoint>/api/agent/v3/<environment>/<account>/MonitoringStorageKeys/
+        //   ?Namespace=<namespace>
+        //   &Region=<region>
+        //   &Identity=<base64-encoded identity>
+        //   &OSType=<os_type>
+        //   &ConfigMajorVersion=Ver<major_version>v0
+        //   &TagId=<uuid>
+        let endpoint = self.config.endpoint.trim_end_matches('/');
+        let mut url = String::with_capacity(endpoint.len() + 200); // Pre-allocate with reasonable capacity
+        url.push_str(endpoint);
+        url.push_str("/api/agent/v3/");
+        url.push_str(&self.config.environment);
+        url.push('/');
+        url.push_str(&self.config.account);
+        url.push_str("/MonitoringStorageKeys/?Namespace=");
+        url.push_str(&self.config.namespace);
+        url.push_str("&Region=");
+        url.push_str(&self.config.region);
+        url.push_str("&Identity=");
+        url.push_str(&encoded_identity);
+        url.push_str("&OSType=");
+        url.push_str(get_os_type());
+        url.push_str("&ConfigMajorVersion=");
+        url.push_str(&version_str);
+        url.push_str("&TagId=");
+        url.push_str(&Uuid::new_v4().to_string());
 
         let req_id = Uuid::new_v4().to_string();
         // TODO: Make tag_id, agent_identity, and agent_version configurable instead of hardcoded/default
@@ -295,4 +299,40 @@ impl GenevaConfigClient {
             })
         }
     }
+}
+
+#[inline]
+fn get_os_type() -> &'static str {
+    match std::env::consts::OS {
+        "macos" => "Darwin",
+        "windows" => "Windows",
+        "linux" => "Linux",
+        other => other,
+    }
+}
+
+#[cfg(feature = "self_signed_certs")]
+fn configure_tls_connector(
+    mut builder: native_tls::TlsConnectorBuilder,
+    identity: native_tls::Identity,
+) -> native_tls::TlsConnectorBuilder {
+    eprintln!("WARNING: Self-signed certificates will be accepted. This should only be used in development!");
+    builder
+        .identity(identity)
+        .min_protocol_version(Some(Protocol::Tlsv12))
+        .max_protocol_version(Some(Protocol::Tlsv12))
+        .danger_accept_invalid_certs(true);
+    builder
+}
+
+#[cfg(not(feature = "self_signed_certs"))]
+fn configure_tls_connector(
+    mut builder: native_tls::TlsConnectorBuilder,
+    identity: native_tls::Identity,
+) -> native_tls::TlsConnectorBuilder {
+    builder
+        .identity(identity)
+        .min_protocol_version(Some(Protocol::Tlsv12))
+        .max_protocol_version(Some(Protocol::Tlsv12));
+    builder
 }

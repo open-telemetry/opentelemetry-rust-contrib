@@ -68,7 +68,7 @@ mod tests {
 
         let mock_response = serde_json::json!({
             "IngestionGatewayInfo": {
-                "endpoint": "https://mock.ingestion.endpoint",
+                "Endpoint": "https://mock.ingestion.endpoint",
                 "AuthToken": "mock-token"
             }
         });
@@ -287,7 +287,6 @@ mod tests {
             .get_ingestion_info()
             .await
             .expect("Failed to get ingestion info");
-
         // Validate the response contains expected fields
         assert!(!result.endpoint.is_empty(), "Endpoint should not be empty");
         assert!(
