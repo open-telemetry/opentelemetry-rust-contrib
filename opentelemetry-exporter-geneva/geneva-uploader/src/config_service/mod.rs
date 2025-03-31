@@ -72,7 +72,8 @@ mod tests {
             "IngestionGatewayInfo": {
                 "Endpoint": "https://mock.ingestion.endpoint",
                 "AuthToken": "mock-token"
-            }
+            },
+            "TagId": "mock-tag-id"
         });
 
         Mock::given(method("GET"))
