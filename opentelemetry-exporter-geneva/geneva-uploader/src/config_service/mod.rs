@@ -71,6 +71,23 @@ mod tests {
                 "Endpoint": "https://mock.ingestion.endpoint",
                 "AuthToken": "mock-token"
             },
+            "StorageAccountKeys": [
+                {
+                    "AccountMonikerName": "test-moniker-audit-primary",
+                    "AccountGroupName": "test-group-audit-primary",
+                    "IsPrimaryMoniker": true
+                },
+                {
+                    "AccountMonikerName": "test-moniker-security-primary",
+                    "AccountGroupName": "test-group-security-primary",
+                    "IsPrimaryMoniker": true
+                },
+                {
+                    "AccountMonikerName": "test-moniker-diag-primary", //this should have diag
+                    "AccountGroupName": "test-group-diag-primary",
+                    "IsPrimaryMoniker": true
+                }
+            ],
             "TagId": "mock-tag-id"
         });
 
@@ -98,10 +115,13 @@ mod tests {
         };
 
         let client = GenevaConfigClient::new(config).await.unwrap();
-        let result = client.get_ingestion_info().await.unwrap();
+        let (ingestion_info, moniker_info) = client.get_ingestion_info().await.unwrap();
 
-        assert_eq!(result.endpoint, "https://mock.ingestion.endpoint");
-        assert_eq!(result.auth_token, "mock-token");
+        assert_eq!(ingestion_info.endpoint, "https://mock.ingestion.endpoint");
+        assert_eq!(ingestion_info.auth_token, "mock-token");
+
+        assert_eq!(moniker_info.name, "test-moniker-diag-primary");
+        assert_eq!(moniker_info.account_group, "test-group-diag-primary");
     }
 
     #[cfg_attr(target_os = "macos", ignore)] // cert generated not compatible with macOS
@@ -283,19 +303,28 @@ mod tests {
             .expect("Failed to create client");
 
         println!("Fetching ingestion info...");
-        let result = client
+        let (ingestion_info, moniker) = client
             .get_ingestion_info()
             .await
             .expect("Failed to get ingestion info");
         // Validate the response contains expected fields
-        assert!(!result.endpoint.is_empty(), "Endpoint should not be empty");
         assert!(
-            !result.auth_token.is_empty(),
+            !ingestion_info.endpoint.is_empty(),
+            "Endpoint should not be empty"
+        );
+        assert!(
+            !ingestion_info.auth_token.is_empty(),
             "Auth token should not be empty"
+        );
+        assert!(!moniker.name.is_empty(), "Moniker name should not be empty");
+        assert!(
+            !moniker.account_group.is_empty(),
+            "Moniker account group should not be empty"
         );
 
         println!("Successfully connected to real server");
-        println!("Endpoint: {}", result.endpoint);
-        println!("Auth token length: {}", result.auth_token.len());
+        println!("Endpoint: {}", ingestion_info.endpoint);
+        println!("Auth token length: {}", ingestion_info.auth_token.len());
+        println!("Moniker name: {}", moniker.name);
     }
 }

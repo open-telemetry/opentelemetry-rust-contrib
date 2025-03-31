@@ -67,6 +67,8 @@ pub enum GenevaConfigClientError {
     Tls(#[from] native_tls::Error),
     #[error("JSON error: {0}")]
     SerdeJson(#[from] serde_json::Error),
+    #[error("Moniker not found: {0}")]
+    MonikerNotFound(String),
     //#[error("Mismatched TagId. Sent: {sent}, Received: {received}")]
     //MismatchedTagId { sent: String, received: String },
 }
@@ -122,12 +124,39 @@ pub(crate) struct IngestionGatewayInfo {
 }
 
 #[allow(dead_code)]
+#[derive(Debug, Clone)]
+pub(crate) struct MonikerInfo {
+    pub name: String,
+    pub account_group: String,
+}
+
+#[allow(dead_code)]
+#[derive(Debug, Deserialize)]
+struct StorageAccountKey {
+    #[serde(rename = "AccountMonikerName")]
+    account_moniker_name: String,
+    #[serde(rename = "AccountGroupName")]
+    account_group_name: String,
+    #[serde(rename = "IsPrimaryMoniker")]
+    is_primary_moniker: bool,
+}
+
+#[allow(dead_code)]
 #[derive(Debug, Clone, Deserialize)]
 struct GenevaResponse {
     #[serde(rename = "IngestionGatewayInfo")]
     ingestion_gateway_info: IngestionGatewayInfo,
     #[serde(rename = "TagId")]
     tag_id: String,
+}
+
+#[allow(dead_code)]
+#[derive(Debug, Deserialize)]
+struct ExtendedGenevaResponse {
+    #[serde(rename = "IngestionGatewayInfo")]
+    ingestion_gateway_info: IngestionGatewayInfo,
+    #[serde(rename = "StorageAccountKeys")]
+    storage_account_keys: Vec<StorageAccountKey>,
 }
 
 #[allow(dead_code)]
@@ -224,7 +253,7 @@ impl GenevaConfigClient {
     /// Uses mutual TLS (mTLS) with client certificate authentication
     ///
     /// # Returns
-    /// * `Result<IngestionGatewayInfo>` - Ingestion gateway information or an error
+    /// * `Result<IngestionGatewayInfo, MonikerInfo>` - Ingestion gateway information, with storage monikers or an error
     ///
     /// # Errors
     /// * `GenevaConfigClientError::Http` - If the HTTP request fails
@@ -232,7 +261,7 @@ impl GenevaConfigClient {
     /// * `GenevaConfigClientError::AuthInfoNotFound` - If the response doesn't contain ingestion info
     /// * `GenevaConfigClientError::SerdeJson` - If JSON parsing fails
     #[allow(dead_code)]
-    pub(crate) async fn get_ingestion_info(&self) -> Result<IngestionGatewayInfo> {
+    pub(crate) async fn get_ingestion_info(&self) -> Result<(IngestionGatewayInfo, MonikerInfo)> {
         let agent_identity = "GenevaUploader"; // TODO make this configurable
         let agent_version = "0.1"; // TODO make this configurable
         let identity = format!(
@@ -292,25 +321,26 @@ impl GenevaConfigClient {
         let body = response.text().await?;
 
         if status.is_success() {
-            match serde_json::from_str::<GenevaResponse>(&body) {
-                Ok(response) => {
-                    // Validate TagId matches
-                    /*if response.tag_id != tag_id {
-                        return Err(GenevaConfigClientError::MismatchedTagId {
-                            sent: tag_id,
-                            received: response.tag_id,
-                        });
-                    }*/
-                    Ok(response.ingestion_gateway_info)
+            let parsed = match serde_json::from_str::<ExtendedGenevaResponse>(&body) {
+                Ok(response) => response,
+                Err(_e) => {
+                    return Err(GenevaConfigClientError::AuthInfoNotFound(
+                        "No primary diag moniker found in storage accounts".to_string(),
+                    ));
                 }
-                Err(e) => {
-                    // Reponse parsing failed.
-                    Err(GenevaConfigClientError::AuthInfoNotFound(format!(
-                        "IngestionGatewayInfo not found in response: {}",
-                        e
-                    )))
+            };
+            for account in &parsed.storage_account_keys {
+                if account.is_primary_moniker && account.account_moniker_name.contains("diag") {
+                    let moniker_info = MonikerInfo {
+                        name: account.account_moniker_name.clone(),
+                        account_group: account.account_group_name.clone(),
+                    };
+                    return Ok((parsed.ingestion_gateway_info, moniker_info));
                 }
             }
+            Err(GenevaConfigClientError::MonikerNotFound(
+                "No primary diag moniker found in storage accounts".to_string(),
+            ))
         } else {
             Err(GenevaConfigClientError::RequestFailed {
                 status: status.as_u16(),
