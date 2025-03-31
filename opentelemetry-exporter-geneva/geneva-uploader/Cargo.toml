@@ -6,7 +6,6 @@ edition = "2021"
 [dependencies]
 opentelemetry-proto = {workspace = true, default-features = false, features = ["logs", "gen-tonic-messages"]}
 base64 = "0.22"
-tokio = { version = "1", features = ["full"] }
 serde = { version = "1.0", features = ["derive"] }
 serde_json = { version = "1.0", features = ["raw_value"] }
 uuid = { version = "1.0", features = ["v4"] }
@@ -20,6 +19,7 @@ self_signed_certs = [] # Empty by default for security
 default = ["self_signed_certs"] # TODO - remove this feature before release
 
 [dev-dependencies]
+tokio = { version = "1", features = ["full"] }
 rcgen = "0.13"
 openssl = "0.10"
 tempfile = "3.5"
