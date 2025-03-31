@@ -3,7 +3,6 @@
 use base64::{engine::general_purpose, Engine as _};
 use reqwest::Client;
 use serde::Deserialize;
-use serde_json::Value;
 use std::time::Duration;
 use thiserror::Error;
 use uuid::Uuid;
@@ -68,6 +67,8 @@ pub enum GenevaConfigClientError {
     Tls(#[from] native_tls::Error),
     #[error("JSON error: {0}")]
     SerdeJson(#[from] serde_json::Error),
+    //#[error("Mismatched TagId. Sent: {sent}, Received: {received}")]
+    //MismatchedTagId { sent: String, received: String },
 }
 
 #[allow(dead_code)]
@@ -118,6 +119,15 @@ pub(crate) struct IngestionGatewayInfo {
     pub(crate) endpoint: String,
     #[serde(rename = "AuthToken")]
     pub(crate) auth_token: String,
+}
+
+#[allow(dead_code)]
+#[derive(Debug, Clone, Deserialize)]
+struct GenevaResponse {
+    #[serde(rename = "IngestionGatewayInfo")]
+    ingestion_gateway_info: IngestionGatewayInfo,
+    #[serde(rename = "TagId")]
+    tag_id: String,
 }
 
 #[allow(dead_code)]
@@ -242,6 +252,7 @@ impl GenevaConfigClient {
         //   &ConfigMajorVersion=Ver<major_version>v0
         //   &TagId=<uuid>
         let endpoint = self.config.endpoint.trim_end_matches('/');
+        let tag_id = Uuid::new_v4().to_string(); //TODO - uuid is  costly, check if counter is enough?
         let mut url = String::with_capacity(endpoint.len() + 200); // Pre-allocate with reasonable capacity
         url.push_str(endpoint);
         url.push_str("/api/agent/v3/");
@@ -259,7 +270,7 @@ impl GenevaConfigClient {
         url.push_str("&ConfigMajorVersion=");
         url.push_str(&version_str);
         url.push_str("&TagId=");
-        url.push_str(&Uuid::new_v4().to_string());
+        url.push_str(&tag_id);
 
         let req_id = Uuid::new_v4().to_string();
         // TODO: Make tag_id, agent_identity, and agent_version configurable instead of hardcoded/default
@@ -281,14 +292,24 @@ impl GenevaConfigClient {
         let body = response.text().await?;
 
         if status.is_success() {
-            let response_json: Value = serde_json::from_str(&body)?;
-            if let Some(info) = response_json.get("IngestionGatewayInfo") {
-                let parsed: IngestionGatewayInfo = serde_json::from_value(info.clone())?;
-                Ok(parsed)
-            } else {
-                Err(GenevaConfigClientError::AuthInfoNotFound(
-                    "IngestionGatewayInfo not found in response".into(),
-                ))
+            match serde_json::from_str::<GenevaResponse>(&body) {
+                Ok(response) => {
+                    // Validate TagId matches
+                    /*if response.tag_id != tag_id {
+                        return Err(GenevaConfigClientError::MismatchedTagId {
+                            sent: tag_id,
+                            received: response.tag_id,
+                        });
+                    }*/
+                    Ok(response.ingestion_gateway_info)
+                }
+                Err(e) => {
+                    // Reponse parsing failed.
+                    Err(GenevaConfigClientError::AuthInfoNotFound(format!(
+                        "IngestionGatewayInfo not found in response: {}",
+                        e
+                    )))
+                }
             }
         } else {
             Err(GenevaConfigClientError::RequestFailed {
