@@ -48,12 +48,6 @@ jobs:
     - uses: arduino/setup-protoc@v3
       with:
         repo-token: ${{ secrets.GITHUB_TOKEN }}
-    - name: Setup vcpkg (Windows)
-      if: ${{ matrix.os == 'windows-latest' }}
-      shell: pwsh
-      run: |
-          echo "VCPKG_ROOT=$env:VCPKG_INSTALLATION_ROOT" | Out-File -FilePath $env:GITHUB_ENV -Append
-          vcpkg install openssl:x64-windows-static-md
     - name: Test (Windows)
       if: ${{ matrix.os == 'windows-latest'}}
       run: ./scripts/test.ps1
