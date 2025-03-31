@@ -155,10 +155,8 @@ impl GenevaConfigClient {
             // TODO: Certificate auth would be removed in favor of managed identity.,
             // This is for testing, so we can use self-signed certs, and password in plain text.
             AuthMethod::Certificate { path, password } => {
-                println!("Using certificate auth with path: {}", path);
                 // Read the PKCS#12 file
                 let p12_bytes = fs::read(path)?;
-                println!("PKCS#12 size: {}", p12_bytes.len());
                 let identity = Identity::from_pkcs12(&p12_bytes, password)?;
                 let tls_connector =
                     configure_tls_connector(native_tls::TlsConnector::builder(), identity)
