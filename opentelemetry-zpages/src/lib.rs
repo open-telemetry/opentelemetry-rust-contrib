@@ -1,5 +1,7 @@
 //! ZPages implementation for Opentelemetry
 //!
+//! **This crate is deprecated and no longer maintained.**
+//!
 //! # Overview
 //! zPages are an in-process alternative to external exporters. When included,
 //! they collect and aggregate tracing and metrics information in the
@@ -58,7 +60,7 @@
 #![doc(
     html_logo_url = "https://raw.githubusercontent.com/open-telemetry/opentelemetry-rust/master/assets/logo.svg"
 )]
-#![cfg_attr(test, deny(warnings))]
+#![allow(deprecated)]
 
 use trace::span_queue::SpanQueue;
 

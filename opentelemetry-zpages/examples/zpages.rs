@@ -1,3 +1,4 @@
+#![allow(deprecated)]
 use hyper::http::{Request, Response};
 use hyper::service::{make_service_fn, service_fn};
 use hyper::{Body, Server};

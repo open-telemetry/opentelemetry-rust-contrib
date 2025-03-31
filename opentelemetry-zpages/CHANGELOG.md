@@ -1,6 +1,6 @@
 # Changelog
 
-## vNext
+## v0.14.0 (DEPRECATED)
 
 - Bump `async-channel` version to 2.3
 - Bump opentelemetry and opentelemetry_sdk versions to 0.29

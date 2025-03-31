@@ -1,7 +1,7 @@
 [package]
 name = "opentelemetry-zpages"
-version = "0.13.0"
-description = "ZPages implementation for OpenTelemetry"
+version = "0.14.0+deprecated"
+description = "[DEPRECATED] ZPages implementation for OpenTelemetry"
 homepage = "https://github.com/open-telemetry/opentelemetry-rust-contrib/tree/main/opentelemetry-zpages"
 repository = "https://github.com/open-telemetry/opentelemetry-rust-contrib/tree/main/opentelemetry-zpages"
 readme = "README.md"
