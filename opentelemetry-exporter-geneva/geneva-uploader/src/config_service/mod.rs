@@ -27,8 +27,6 @@ mod tests {
         assert!(matches!(config.auth_method, AuthMethod::ManagedIdentity));
     }
 
-    #[cfg(not(target_os = "windows"))] // TODO - Fix this for windows - Create cert in a different way (without openssl, or else install openssl)
-                                       // Generate a self-signed certificate and save it to a temporary file
     fn generate_self_signed_p12() -> (NamedTempFile, String) {
         let password = "test".to_string();
 
@@ -63,7 +61,7 @@ mod tests {
         (file, password)
     }
 
-    #[cfg_attr(any(target_os = "macos", target_os = "windows"), ignore)] // cert generated not compatible with macOS, requires OpenSSL on Windows
+    #[cfg_attr(target_os = "macos", ignore)] // cert generated not compatible with macOS
     #[tokio::test]
     async fn test_get_ingestion_info_mocked() {
         let mock_server = MockServer::start().await;
@@ -106,7 +104,7 @@ mod tests {
         assert_eq!(result.auth_token, "mock-token");
     }
 
-    #[cfg_attr(any(target_os = "macos", target_os = "windows"), ignore)] // cert generated not compatible with macOS, requires OpenSSL on Windows
+    #[cfg_attr(target_os = "macos", ignore)] // cert generated not compatible with macOS
     #[tokio::test]
     async fn test_error_handling_with_non_success_status() {
         let mock_server = MockServer::start().await;
@@ -152,7 +150,7 @@ mod tests {
         }
     }
 
-    #[cfg_attr(any(target_os = "macos", target_os = "windows"), ignore)] // cert generated not compatible with macOS, requires OpenSSL on Windows
+    #[cfg_attr(target_os = "macos", ignore)] // cert generated not compatible with macOS
     #[tokio::test]
     async fn test_missing_ingestion_gateway_info() {
         let mock_server = MockServer::start().await;
@@ -200,7 +198,7 @@ mod tests {
         }
     }
 
-    #[cfg_attr(any(target_os = "macos", target_os = "windows"), ignore)] // cert generated not compatible with macOS, requires OpenSSL on Windows
+    #[cfg_attr(target_os = "macos", ignore)] // cert generated not compatible with macOS
     #[tokio::test]
     async fn test_invalid_certificate_path() {
         let config = GenevaConfigClientConfig {
