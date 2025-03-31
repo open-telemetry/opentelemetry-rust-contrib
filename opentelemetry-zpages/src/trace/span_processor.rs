@@ -19,6 +19,7 @@ use std::fmt::Formatter;
 ///
 /// ZPagesSpanProcessor employs a `SpanAggregator` running as another task to aggregate the spans
 /// using the name of spans.
+#[deprecated(note = "This crate is deprecated and no longer maintained.")]
 pub struct ZPagesSpanProcessor {
     tx: Sender<TracezMessage>,
 }

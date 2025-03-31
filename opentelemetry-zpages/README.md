@@ -1,5 +1,8 @@
 # OpenTelemetry ZPages
 
+> [!WARNING]  
+> **This crate is deprecated and no longer maintained.**
+
 ![OpenTelemetry — An observability framework for cloud-native software.][splash]
 
 [splash]: https://raw.githubusercontent.com/open-telemetry/opentelemetry-rust/master/assets/logo-text.png
