@@ -92,5 +92,6 @@ fn populate_time(
         .unwrap_or_else(SystemTime::now);
 
     let timestamp = win_filetime_from_systemtime!(event_time);
+    // TODO: time should be string
     event.add_filetime("time", timestamp, tld::OutType::Default, field_tag);
 }
