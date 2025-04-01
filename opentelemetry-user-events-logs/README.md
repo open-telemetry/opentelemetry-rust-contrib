@@ -46,3 +46,7 @@ management, and export of telemetry. A major goal of OpenTelemetry is that you
 can easily instrument your applications or systems, no matter their language,
 infrastructure, or runtime environment. Crucially, the storage and visualization
 of telemetry is intentionally left to other tools.
+
+[Prometheus]: https://prometheus.io
+[Jaeger]: https://www.jaegertracing.io
+
