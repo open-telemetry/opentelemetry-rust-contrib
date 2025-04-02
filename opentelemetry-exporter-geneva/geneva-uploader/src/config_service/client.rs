@@ -148,27 +148,23 @@ struct StorageAccountKey {
 }
 
 #[allow(dead_code)]
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Deserialize)]
 struct GenevaResponse {
     #[serde(rename = "IngestionGatewayInfo")]
     ingestion_gateway_info: IngestionGatewayInfo,
-    #[serde(rename = "TagId")]
-    tag_id: String,
-}
-
-#[allow(dead_code)]
-#[derive(Debug, Deserialize)]
-struct ExtendedGenevaResponse {
-    #[serde(rename = "IngestionGatewayInfo")]
-    ingestion_gateway_info: IngestionGatewayInfo,
-    #[serde(rename = "StorageAccountKeys")]
+    // Make storage_account_keys optional since it might not be present in all responses
+    #[serde(rename = "StorageAccountKeys", default)]
     storage_account_keys: Vec<StorageAccountKey>,
+    // Keep tag_id as it might be used for validation
+    #[serde(rename = "TagId", default)]
+    tag_id: Option<String>,
 }
 
 #[allow(dead_code)]
 struct CachedAuthData {
-    token_info: Option<IngestionGatewayInfo>,
-    moniker_info: Option<MonikerInfo>,
+    // Store the complete token and moniker info
+    auth_info: Option<(IngestionGatewayInfo, MonikerInfo)>,
+    // Store expiry separately for quick access
     token_expiry: Option<DateTime<Utc>>,
 }
 
@@ -229,8 +225,7 @@ impl GenevaConfigClient {
             config,
             http_client,
             cached_data: RwLock::new(CachedAuthData {
-                token_info: None,
-                moniker_info: None,
+                auth_info: None,
                 token_expiry: None,
             }),
         })
@@ -310,13 +305,9 @@ impl GenevaConfigClient {
                 GenevaConfigClientError::InternalError("RwLock poisoned".to_string())
             })?;
 
-            if let (Some(token_info), Some(moniker_info), Some(expiry)) = (
-                &cached_data.token_info,
-                &cached_data.moniker_info,
-                cached_data.token_expiry,
-            ) {
+            if let (Some(info), Some(expiry)) = (&cached_data.auth_info, cached_data.token_expiry) {
                 if !self.is_token_expired(expiry) {
-                    return Ok((token_info.clone(), moniker_info.clone()));
+                    return Ok(info.clone());
                 }
             }
         }
@@ -339,17 +330,14 @@ impl GenevaConfigClient {
             {
                 if new_expiry <= existing_expiry {
                     // Another thread already got a newer token, use cached data
-                    if let (Some(token), Some(moniker)) =
-                        (&cached_data.token_info, &cached_data.moniker_info)
-                    {
-                        return Ok((token.clone(), moniker.clone()));
+                    if let Some(info) = &cached_data.auth_info {
+                        return Ok(info.clone());
                     }
                 }
             }
 
             // Update cache with fresh data
-            cached_data.token_info = Some(fresh_token_info.clone());
-            cached_data.moniker_info = Some(fresh_moniker_info.clone());
+            cached_data.auth_info = Some((fresh_token_info.clone(), fresh_moniker_info.clone()));
             cached_data.token_expiry = token_expiry;
         }
 
@@ -416,7 +404,7 @@ impl GenevaConfigClient {
         let body = response.text().await?;
 
         if status.is_success() {
-            let parsed = match serde_json::from_str::<ExtendedGenevaResponse>(&body) {
+            let parsed = match serde_json::from_str::<GenevaResponse>(&body) {
                 Ok(response) => response,
                 Err(_) => {
                     return Err(GenevaConfigClientError::AuthInfoNotFound(
