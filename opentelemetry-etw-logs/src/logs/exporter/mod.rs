@@ -41,7 +41,6 @@ impl ETWExporter {
     const KEYWORD: u64 = 1;
 
     pub(crate) fn new(provider_name: &str) -> Self {
-        // TODO: validate provider_name
         let mut options = tld::Provider::options();
 
         options.callback(enabled_callback_noop, 0x0);
