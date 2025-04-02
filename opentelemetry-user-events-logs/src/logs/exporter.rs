@@ -190,7 +190,11 @@ impl UserEventsExporter {
                 // for each event.
                 // TODO: What if the event name is not provided? "Log" is used as default.
                 // TODO: Should event_tag be non-zero?
-                eb.reset(log_record.event_name().unwrap_or("Log"), 0);
+                let event_name = log_record
+                    .event_name()
+                    .filter(|s| !s.trim().is_empty())
+                    .unwrap_or("Log");                
+                eb.reset(event_name, 0);
 
                 eb.add_value("__csver__", 1024, FieldFormat::UnsignedInt, 0); // 0x400 in hex
 
@@ -319,10 +323,8 @@ impl UserEventsExporter {
                 // TODO: eventname is already added to header.
                 // Should we add it again?
                 // Or should we use Target?
-                if let Some(event_name) = log_record.event_name() {
-                    eb.add_str("name", event_name, FieldFormat::Default, 0);
-                    cs_b_count += 1;
-                }
+                eb.add_str("name", event_name, FieldFormat::Default, 0);
+                cs_b_count += 1;
                 eb.set_struct_field_count(cs_b_bookmark, cs_b_count);
 
                 let result = eb.write(event_set, None, None);
