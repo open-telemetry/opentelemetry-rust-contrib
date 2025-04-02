@@ -92,7 +92,7 @@ impl ETWExporter {
             event_tags,
         );
 
-        event.add_u16("__csver__", 0x0401u16, tld::OutType::Hex, field_tag);
+        event.add_u16("__csver__", 1024, tld::OutType::Unsigned, field_tag); // 0x400 hex
 
         part_a::populate_part_a(&mut event, &self.resource, log_record, field_tag);
 
