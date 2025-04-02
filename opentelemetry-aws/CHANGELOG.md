@@ -5,8 +5,10 @@
 ## v0.17.0
 
 ### Changed
-- Update the opentelemetry and opentelemetry_sdk dependencies to always use the latest versions specified in `opentelemetry-rust-contrib`
+
+- Bump opentelemetry and opentelemetry_sdk versions to 0.29.0
 - Breaking change in the way XrayIdGenerator is configured:
+  
   ```rust
   // Before
   SdkTracerProvider::builder()

@@ -1,6 +1,6 @@
 [package]
 name = "opentelemetry-etw-metrics"
-version = "0.7.1"
+version = "0.8.0"
 edition = "2021"
 description = "OpenTelemetry metrics exporter to ETW (Event Tracing for Windows)"
 homepage = "https://github.com/open-telemetry/opentelemetry-rust-contrib/tree/main/opentelemetry-etw-metrics"
