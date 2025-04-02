@@ -4,7 +4,7 @@ The diagram below illustrates how the `GenevaConfigClient` initializes with a cl
 
 ```mermaid
 sequenceDiagram
-    participant App as Your App
+    participant App as User
     participant Client as GenevaConfigClient
     participant TLS as native_tls
     participant GCS as Geneva Config Service
