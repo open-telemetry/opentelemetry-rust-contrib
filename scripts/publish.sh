@@ -1,7 +1,7 @@
 #!/bin/bash
 
 packages=(
-    "actix-web-opentelemetry",
+    "actix-web-opentelemetry"
     "opentelemetry-aws"
     "opentelemetry-contrib"
     "opentelemetry-datadog"
@@ -10,9 +10,8 @@ packages=(
     "opentelemetry-resource-detectors"
     "opentelemetry-stackdriver"
     "opentelemetry-user-events-logs"
-    "opentelemetry-user-events-metrics",
-    opentelemetry-user-events-trace
-
+    "opentelemetry-user-events-metrics"
+    "opentelemetry-user-events-trace"
     # Add more packages as needed, in the right order. A package should only be published after all it's dependencies have been published
 )
 
