@@ -13,6 +13,7 @@ uuid = { version = "1.0", features = ["v4"] }
 reqwest = { version = "0.12", features = ["native-tls", "native-tls-alpn"]}
 native-tls = "0.2" 
 thiserror = "2.0"
+chrono = "0.4"
 
 [features]
 self_signed_certs = [] # Empty by default for security

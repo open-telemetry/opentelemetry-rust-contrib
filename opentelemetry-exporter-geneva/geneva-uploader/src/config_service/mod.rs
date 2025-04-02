@@ -69,22 +69,13 @@ mod tests {
         let mock_response = serde_json::json!({
             "IngestionGatewayInfo": {
                 "Endpoint": "https://mock.ingestion.endpoint",
-                "AuthToken": "mock-token"
+                "AuthToken": "mock-token",
+                "AuthTokenExpiryTime": "2030-01-01T00:00:00Z"
             },
             "StorageAccountKeys": [
                 {
-                    "AccountMonikerName": "test-moniker-audit-primary",
-                    "AccountGroupName": "test-group-audit-primary",
-                    "IsPrimaryMoniker": true
-                },
-                {
-                    "AccountMonikerName": "test-moniker-security-primary",
-                    "AccountGroupName": "test-group-security-primary",
-                    "IsPrimaryMoniker": true
-                },
-                {
-                    "AccountMonikerName": "test-moniker-diag-primary", //this should have diag
-                    "AccountGroupName": "test-group-diag-primary",
+                    "AccountMonikerName": "mock-diag-moniker",
+                    "AccountGroupName": "mock-diag-group",
                     "IsPrimaryMoniker": true
                 }
             ],
@@ -120,8 +111,8 @@ mod tests {
         assert_eq!(ingestion_info.endpoint, "https://mock.ingestion.endpoint");
         assert_eq!(ingestion_info.auth_token, "mock-token");
 
-        assert_eq!(moniker_info.name, "test-moniker-diag-primary");
-        assert_eq!(moniker_info.account_group, "test-group-diag-primary");
+        assert_eq!(moniker_info.name, "mock-diag-moniker");
+        assert_eq!(moniker_info.account_group, "mock-diag-group");
     }
 
     #[cfg_attr(target_os = "macos", ignore)] // cert generated not compatible with macOS

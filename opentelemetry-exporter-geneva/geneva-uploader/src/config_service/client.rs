@@ -7,8 +7,10 @@ use std::time::Duration;
 use thiserror::Error;
 use uuid::Uuid;
 
+use chrono::{DateTime, Utc};
 use native_tls::{Identity, Protocol};
 use std::fs;
+use std::sync::RwLock;
 
 /// Authentication methods for the Geneva Config Client.
 ///
@@ -69,6 +71,8 @@ pub enum GenevaConfigClientError {
     SerdeJson(#[from] serde_json::Error),
     #[error("Moniker not found: {0}")]
     MonikerNotFound(String),
+    #[error("Internal error: {0}")]
+    InternalError(String),
     //#[error("Mismatched TagId. Sent: {sent}, Received: {received}")]
     //MismatchedTagId { sent: String, received: String },
 }
@@ -121,6 +125,8 @@ pub(crate) struct IngestionGatewayInfo {
     pub(crate) endpoint: String,
     #[serde(rename = "AuthToken")]
     pub(crate) auth_token: String,
+    #[serde(rename = "AuthTokenExpiryTime")]
+    pub(crate) auth_token_expiry_time: String,
 }
 
 #[allow(dead_code)]
@@ -160,9 +166,17 @@ struct ExtendedGenevaResponse {
 }
 
 #[allow(dead_code)]
+struct CachedAuthData {
+    token_info: Option<IngestionGatewayInfo>,
+    moniker_info: Option<MonikerInfo>,
+    token_expiry: Option<DateTime<Utc>>,
+}
+
+#[allow(dead_code)]
 pub(crate) struct GenevaConfigClient {
     config: GenevaConfigClientConfig,
     http_client: Client,
+    cached_data: RwLock<CachedAuthData>,
 }
 
 /// Client for interacting with the Geneva Configuration Service.
@@ -214,7 +228,35 @@ impl GenevaConfigClient {
         Ok(Self {
             config,
             http_client,
+            cached_data: RwLock::new(CachedAuthData {
+                token_info: None,
+                moniker_info: None,
+                token_expiry: None,
+            }),
         })
+    }
+
+    fn parse_token_expiry(&self, expiry_str: &str) -> Option<DateTime<Utc>> {
+        // Attempt to parse the ISO 8601 datetime string
+        DateTime::parse_from_rfc3339(expiry_str)
+            .ok()
+            .map(|dt| dt.with_timezone(&Utc))
+    }
+
+    fn is_token_expired(&self, expiry: DateTime<Utc>) -> bool {
+        // Get current time
+        let now = Utc::now();
+
+        // Consider token expired if it's within 5 minutes of expiry
+        now + chrono::Duration::minutes(5) >= expiry
+    }
+
+    #[allow(dead_code)]
+    pub(crate) fn get_token_expiry(&self) -> Option<DateTime<Utc>> {
+        self.cached_data
+            .read()
+            .ok()
+            .and_then(|data| data.token_expiry)
     }
 
     /// Retrieves ingestion gateway information from the Geneva Config Service.
@@ -262,6 +304,60 @@ impl GenevaConfigClient {
     /// * `GenevaConfigClientError::SerdeJson` - If JSON parsing fails
     #[allow(dead_code)]
     pub(crate) async fn get_ingestion_info(&self) -> Result<(IngestionGatewayInfo, MonikerInfo)> {
+        // First, try to read from cache (shared read access)
+        {
+            let cached_data = self.cached_data.read().map_err(|_| {
+                GenevaConfigClientError::InternalError("RwLock poisoned".to_string())
+            })?;
+
+            if let (Some(token_info), Some(moniker_info), Some(expiry)) = (
+                &cached_data.token_info,
+                &cached_data.moniker_info,
+                cached_data.token_expiry,
+            ) {
+                if !self.is_token_expired(expiry) {
+                    return Ok((token_info.clone(), moniker_info.clone()));
+                }
+            }
+        }
+
+        // Cache miss or expired token, fetch fresh data
+        // Perform actual fetch before acquiring write lock to minimize lock contention
+        let (fresh_token_info, fresh_moniker_info) = self.fetch_ingestion_info().await?;
+        let token_expiry = self.parse_token_expiry(&fresh_token_info.auth_token_expiry_time);
+
+        // Now update the cache with exclusive write access
+        {
+            let mut cached_data = self
+                .cached_data
+                .write()
+                .map_err(|_| GenevaConfigClientError::Certificate("RwLock poisoned".to_string()))?;
+
+            // Double-check in case another thread updated while we were fetching
+            if let (Some(existing_expiry), Some(new_expiry)) =
+                (cached_data.token_expiry, token_expiry)
+            {
+                if new_expiry <= existing_expiry {
+                    // Another thread already got a newer token, use cached data
+                    if let (Some(token), Some(moniker)) =
+                        (&cached_data.token_info, &cached_data.moniker_info)
+                    {
+                        return Ok((token.clone(), moniker.clone()));
+                    }
+                }
+            }
+
+            // Update cache with fresh data
+            cached_data.token_info = Some(fresh_token_info.clone());
+            cached_data.moniker_info = Some(fresh_moniker_info.clone());
+            cached_data.token_expiry = token_expiry;
+        }
+
+        Ok((fresh_token_info, fresh_moniker_info))
+    }
+
+    /// Internal method that actually fetches data from Geneva Config Service
+    async fn fetch_ingestion_info(&self) -> Result<(IngestionGatewayInfo, MonikerInfo)> {
         let agent_identity = "GenevaUploader"; // TODO make this configurable
         let agent_version = "0.1"; // TODO make this configurable
         let identity = format!(
@@ -281,7 +377,7 @@ impl GenevaConfigClient {
         //   &ConfigMajorVersion=Ver<major_version>v0
         //   &TagId=<uuid>
         let endpoint = self.config.endpoint.trim_end_matches('/');
-        let tag_id = Uuid::new_v4().to_string(); //TODO - uuid is  costly, check if counter is enough?
+        let tag_id = Uuid::new_v4().to_string(); //TODO - uuid is costly, check if counter is enough?
         let mut url = String::with_capacity(endpoint.len() + 200); // Pre-allocate with reasonable capacity
         url.push_str(endpoint);
         url.push_str("/api/agent/v3/");
@@ -302,7 +398,6 @@ impl GenevaConfigClient {
         url.push_str(&tag_id);
 
         let req_id = Uuid::new_v4().to_string();
-        // TODO: Make tag_id, agent_identity, and agent_version configurable instead of hardcoded/default
 
         let response = self
             .http_client
@@ -323,21 +418,24 @@ impl GenevaConfigClient {
         if status.is_success() {
             let parsed = match serde_json::from_str::<ExtendedGenevaResponse>(&body) {
                 Ok(response) => response,
-                Err(_e) => {
+                Err(_) => {
                     return Err(GenevaConfigClientError::AuthInfoNotFound(
                         "No primary diag moniker found in storage accounts".to_string(),
                     ));
                 }
             };
+
             for account in &parsed.storage_account_keys {
                 if account.is_primary_moniker && account.account_moniker_name.contains("diag") {
                     let moniker_info = MonikerInfo {
                         name: account.account_moniker_name.clone(),
                         account_group: account.account_group_name.clone(),
                     };
+
                     return Ok((parsed.ingestion_gateway_info, moniker_info));
                 }
             }
+
             Err(GenevaConfigClientError::MonikerNotFound(
                 "No primary diag moniker found in storage accounts".to_string(),
             ))
