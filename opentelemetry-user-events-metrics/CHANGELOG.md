@@ -2,6 +2,8 @@
 
 ## vNext
 
+## v0.10.0
+
 - Bump opentelemetry and opentelemetry_sdk versions to 0.29
 - Bump opentelemetry-proto version to 0.29
 

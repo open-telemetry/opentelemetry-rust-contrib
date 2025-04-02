@@ -2,6 +2,8 @@
 
 ## vNext
 
+## v0.8.0
+
 - Added the `with_etw_exporter` trait method to `LoggerProviderBuilder`.
   This is now the only way to add an ETW exporter. The following line
   will add an ETW exporter using the given provider name:

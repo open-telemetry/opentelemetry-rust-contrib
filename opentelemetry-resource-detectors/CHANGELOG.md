@@ -2,6 +2,8 @@
 
 ## vNext
 
+## v0.8.0
+
 ### Changed
 
 - Expose `K8sResourceDetector`, which populates `k8s.pod.name` and `k8s.namespace.name`

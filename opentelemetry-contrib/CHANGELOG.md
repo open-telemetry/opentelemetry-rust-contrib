@@ -2,6 +2,8 @@
 
 ## vNext
 
+## v0.21.0
+
 - Bump `base64` version to 0.22
 - `rt-async-std` feature removed, as it is removed from upstream `opentelemetry_sdk`
 - Bump opentelemetry and opentelemetry_sdk versions to 0.29

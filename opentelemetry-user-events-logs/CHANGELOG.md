@@ -2,6 +2,8 @@
 
 ## vNext
 
+## v0.12.0
+
 - Added support for Populating Cloud RoleName, RoleInstance from Resource's
   "service.name" and "service.instance.id" attributes respectively.
 - Make exporter reentrant-safe by removing logs that could be bridged back
