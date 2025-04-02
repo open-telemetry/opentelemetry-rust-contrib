@@ -1,6 +1,6 @@
 [package]
 name = "opentelemetry-resource-detectors"
-version = "0.7.0"
+version = "0.8.0"
 edition = "2021"
 description = "A collection of community supported resource detectors for OpenTelemetry"
 homepage = "https://github.com/open-telemetry/opentelemetry-rust-contrib/tree/main/opentelemetry-resource-detectors"
