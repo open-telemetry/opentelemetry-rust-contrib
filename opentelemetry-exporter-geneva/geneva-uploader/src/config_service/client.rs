@@ -40,7 +40,7 @@ use std::sync::RwLock;
 /// ```
 #[allow(dead_code)]
 #[derive(Clone)]
-pub enum AuthMethod {
+pub(crate) enum AuthMethod {
     /// Certificate-based authentication
     ///
     /// # Arguments
@@ -54,7 +54,7 @@ pub enum AuthMethod {
 }
 
 #[derive(Debug, Error)]
-pub enum GenevaConfigClientError {
+pub(crate) enum GenevaConfigClientError {
     #[error("HTTP error: {0}")]
     Http(#[from] reqwest::Error),
     #[error("Certificate error: {0}")]
@@ -78,7 +78,7 @@ pub enum GenevaConfigClientError {
 }
 
 #[allow(dead_code)]
-pub type Result<T> = std::result::Result<T, GenevaConfigClientError>;
+pub(crate) type Result<T> = std::result::Result<T, GenevaConfigClientError>;
 
 /// Configuration for the Geneva Config Client.
 ///
@@ -108,7 +108,7 @@ pub type Result<T> = std::result::Result<T, GenevaConfigClientError>;
 /// ```
 #[allow(dead_code)]
 #[derive(Clone)]
-pub struct GenevaConfigClientConfig {
+pub(crate) struct GenevaConfigClientConfig {
     pub endpoint: String,
     pub environment: String,
     pub account: String,
