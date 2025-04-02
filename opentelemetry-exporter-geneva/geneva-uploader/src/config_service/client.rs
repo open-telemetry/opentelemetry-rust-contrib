@@ -164,6 +164,8 @@ struct GenevaResponse {
 struct CachedAuthData {
     // Store the complete token and moniker info
     auth_info: Option<(IngestionGatewayInfo, MonikerInfo)>,
+    // Store the endpoint from token for quick access
+    token_endpoint: Option<String>,
     // Store expiry separately for quick access
     token_expiry: Option<DateTime<Utc>>,
 }
@@ -226,6 +228,7 @@ impl GenevaConfigClient {
             http_client,
             cached_data: RwLock::new(CachedAuthData {
                 auth_info: None,
+                token_endpoint: None,
                 token_expiry: None,
             }),
         })
@@ -236,14 +239,6 @@ impl GenevaConfigClient {
         DateTime::parse_from_rfc3339(expiry_str)
             .ok()
             .map(|dt| dt.with_timezone(&Utc))
-    }
-
-    fn is_token_expired(&self, expiry: DateTime<Utc>) -> bool {
-        // Get current time
-        let now = Utc::now();
-
-        // Consider token expired if it's within 5 minutes of expiry
-        now + chrono::Duration::minutes(5) >= expiry
     }
 
     #[allow(dead_code)]
@@ -298,16 +293,26 @@ impl GenevaConfigClient {
     /// * `GenevaConfigClientError::AuthInfoNotFound` - If the response doesn't contain ingestion info
     /// * `GenevaConfigClientError::SerdeJson` - If JSON parsing fails
     #[allow(dead_code)]
-    pub(crate) async fn get_ingestion_info(&self) -> Result<(IngestionGatewayInfo, MonikerInfo)> {
+    pub(crate) async fn get_ingestion_info(
+        &self,
+    ) -> Result<(IngestionGatewayInfo, MonikerInfo, String)> {
         // First, try to read from cache (shared read access)
         {
-            let cached_data = self.cached_data.read().map_err(|_| {
-                GenevaConfigClientError::InternalError("RwLock poisoned".to_string())
-            })?;
+            let cached_data: std::sync::RwLockReadGuard<'_, CachedAuthData> =
+                self.cached_data.read().map_err(|_| {
+                    GenevaConfigClientError::InternalError("RwLock poisoned".to_string())
+                })?;
 
-            if let (Some(info), Some(expiry)) = (&cached_data.auth_info, cached_data.token_expiry) {
-                if !self.is_token_expired(expiry) {
-                    return Ok(info.clone());
+            if let Some(expiry) = cached_data.token_expiry {
+                // Use 5-minute buffer for token expiry check
+                // Token lasts for 3 days (As observed), so 5 minutes is plenty of safety margin
+                // This ensures we have time to refresh before the token expires
+                if expiry > Utc::now() + chrono::Duration::minutes(5) {
+                    if let (Some((ingestion, moniker)), Some(endpoint)) =
+                        (&cached_data.auth_info, &cached_data.token_endpoint)
+                    {
+                        return Ok((ingestion.clone(), moniker.clone(), endpoint.clone()));
+                    }
                 }
             }
         }
@@ -316,32 +321,49 @@ impl GenevaConfigClient {
         // Perform actual fetch before acquiring write lock to minimize lock contention
         let (fresh_token_info, fresh_moniker_info) = self.fetch_ingestion_info().await?;
         let token_expiry = self.parse_token_expiry(&fresh_token_info.auth_token_expiry_time);
+        let token_endpoint =
+            extract_endpoint_from_token(&fresh_token_info.auth_token).map_err(|e| {
+                GenevaConfigClientError::Certificate(format!(
+                    "Failed to extract endpoint from token: {}",
+                    e
+                ))
+            })?;
 
         // Now update the cache with exclusive write access
         {
-            let mut cached_data = self
-                .cached_data
-                .write()
-                .map_err(|_| GenevaConfigClientError::Certificate("RwLock poisoned".to_string()))?;
+            let mut cached_data = self.cached_data.write().map_err(|_| {
+                GenevaConfigClientError::InternalError("RwLock poisoned".to_string())
+            })?;
 
             // Double-check in case another thread updated while we were fetching
-            if let (Some(existing_expiry), Some(new_expiry)) =
-                (cached_data.token_expiry, token_expiry)
-            {
-                if new_expiry <= existing_expiry {
-                    // Another thread already got a newer token, use cached data
-                    if let Some(info) = &cached_data.auth_info {
-                        return Ok(info.clone());
+            if let Some(existing) = cached_data.token_expiry {
+                if let Some(new) = token_expiry {
+                    if existing >= new {
+                        // Existing token is newer, use it
+                        if let (Some(info), Some(endpoint)) =
+                            (&cached_data.auth_info, &cached_data.token_endpoint)
+                        {
+                            return Ok((info.0.clone(), info.1.clone(), endpoint.clone()));
+                        }
                     }
                 }
             }
 
             // Update cache with fresh data
-            cached_data.auth_info = Some((fresh_token_info.clone(), fresh_moniker_info.clone()));
+            cached_data.auth_info = Some((fresh_token_info, fresh_moniker_info));
+            cached_data.token_endpoint = Some(token_endpoint);
             cached_data.token_expiry = token_expiry;
-        }
 
-        Ok((fresh_token_info, fresh_moniker_info))
+            if let (Some(info), Some(endpoint)) =
+                (&cached_data.auth_info, &cached_data.token_endpoint)
+            {
+                Ok((info.0.clone(), info.1.clone(), endpoint.clone()))
+            } else {
+                Err(GenevaConfigClientError::InternalError(
+                    "Cache was not properly updated".to_string(),
+                ))
+            }
+        }
     }
 
     /// Internal method that actually fetches data from Geneva Config Service
@@ -444,6 +466,47 @@ fn get_os_type() -> &'static str {
         "linux" => "Linux",
         other => other,
     }
+}
+
+fn extract_endpoint_from_token(token: &str) -> Result<String> {
+    let parts: Vec<&str> = token.split('.').collect();
+    if parts.len() != 3 {
+        return Err(GenevaConfigClientError::Certificate(
+            "Invalid JWT token format".into(),
+        ));
+    }
+
+    // Decode the payload
+    let payload = parts[1];
+    let payload = match payload.len() % 4 {
+        0 => payload.to_string(),
+        2 => format!("{}==", payload),
+        3 => format!("{}=", payload),
+        _ => payload.to_string(),
+    };
+
+    let decoded = general_purpose::URL_SAFE_NO_PAD
+        .decode(payload)
+        .map_err(|e| {
+            GenevaConfigClientError::Certificate(format!("Failed to decode JWT: {}", e))
+        })?;
+
+    let decoded_str = String::from_utf8(decoded).map_err(|e| {
+        GenevaConfigClientError::Certificate(format!("Invalid UTF-8 in JWT: {}", e))
+    })?;
+
+    // Parse as JSON and extract the Endpoint claim
+    let payload_json: serde_json::Value =
+        serde_json::from_str(&decoded_str).map_err(GenevaConfigClientError::SerdeJson)?;
+
+    let endpoint = payload_json["Endpoint"]
+        .as_str()
+        .ok_or_else(|| {
+            GenevaConfigClientError::Certificate("No Endpoint claim in JWT token".to_string())
+        })?
+        .to_string();
+
+    Ok(endpoint)
 }
 
 #[cfg(feature = "self_signed_certs")]

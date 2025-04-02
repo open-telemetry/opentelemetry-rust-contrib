@@ -65,11 +65,13 @@ mod tests {
     #[tokio::test]
     async fn test_get_ingestion_info_mocked() {
         let mock_server = MockServer::start().await;
+        let jwt_endpoint = "https://test.endpoint";
+        let valid_token = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJFbmRwb2ludCI6Imh0dHBzOi8vdGVzdC5lbmRwb2ludCJ9.signature";
 
         let mock_response = serde_json::json!({
             "IngestionGatewayInfo": {
                 "Endpoint": "https://mock.ingestion.endpoint",
-                "AuthToken": "mock-token",
+                "AuthToken": valid_token,
                 "AuthTokenExpiryTime": "2030-01-01T00:00:00Z"
             },
             "StorageAccountKeys": [
@@ -106,13 +108,20 @@ mod tests {
         };
 
         let client = GenevaConfigClient::new(config).await.unwrap();
-        let (ingestion_info, moniker_info) = client.get_ingestion_info().await.unwrap();
+        let (ingestion_info, moniker_info, token_endpoint) =
+            client.get_ingestion_info().await.unwrap();
 
         assert_eq!(ingestion_info.endpoint, "https://mock.ingestion.endpoint");
-        assert_eq!(ingestion_info.auth_token, "mock-token");
+        assert_eq!(ingestion_info.auth_token, valid_token);
+        assert_eq!(
+            ingestion_info.auth_token_expiry_time,
+            "2030-01-01T00:00:00Z"
+        );
 
+        // Check moniker info
         assert_eq!(moniker_info.name, "mock-diag-moniker");
         assert_eq!(moniker_info.account_group, "mock-diag-group");
+        assert_eq!(token_endpoint, jwt_endpoint);
     }
 
     #[cfg_attr(target_os = "macos", ignore)] // cert generated not compatible with macOS
@@ -294,7 +303,7 @@ mod tests {
             .expect("Failed to create client");
 
         println!("Fetching ingestion info...");
-        let (ingestion_info, moniker) = client
+        let (ingestion_info, moniker, _token_endpoint) = client
             .get_ingestion_info()
             .await
             .expect("Failed to get ingestion info");
