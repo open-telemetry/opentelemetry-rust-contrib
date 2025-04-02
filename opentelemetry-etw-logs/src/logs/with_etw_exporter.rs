@@ -14,8 +14,8 @@ impl ETWLoggerProviderBuilderExt for LoggerProviderBuilder {
             otel_warn!(name: "ETW.Exporter.CreationFailed", reason = &error);
             self
         } else {
-            let reenterant_processor = ReentrantLogProcessor::new(provider_name);
-            self.with_log_processor(reenterant_processor)
+            let reentrant_processor = ReentrantLogProcessor::new(provider_name);
+            self.with_log_processor(reentrant_processor)
         }
     }
 }
