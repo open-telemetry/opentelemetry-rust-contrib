@@ -39,8 +39,8 @@ impl UserEventsLoggerProviderBuilderExt for LoggerProviderBuilder {
     fn with_user_events_exporter(self, provider_name: &str) -> Self {
         match UserEventsExporter::new(provider_name) {
             Ok(exporter) => {
-                let reentrant_processor = ReentrantLogProcessor::new(exporter);
-                self.with_log_processor(reentrant_processor)
+                let reenterant_processor = ReentrantLogProcessor::new(exporter);
+                self.with_log_processor(reenterant_processor)
             }
             Err(e) => {
                 otel_warn!(name: "User_Events.Exporter.CreationFailed", reason = &e);
