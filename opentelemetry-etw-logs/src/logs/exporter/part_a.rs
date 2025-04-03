@@ -93,7 +93,6 @@ fn populate_time(
         .unwrap_or_else(SystemTime::now);
 
     let timestamp: DateTime<Utc> = event_time.into();
-    // TODO: time should be string
     event.add_str8(
         "time",
         timestamp.to_rfc3339().as_str(),

@@ -41,7 +41,10 @@ pub fn add_attribute_to_event(event: &mut tld::EventBuilder, key: &Key, value: &
                 0,
             );
         }
-        &_ => {}
+        &_ => {
+            // For unsupported types, add the key with an empty string as the value.
+            event.add_str8(key.as_str(), "", tld::OutType::Default, 0);
+        }
     }
 }
 
