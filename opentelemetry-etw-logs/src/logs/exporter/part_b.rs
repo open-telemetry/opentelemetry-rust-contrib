@@ -28,7 +28,7 @@ pub fn populate_part_b(
         super::common::add_attribute_to_event(event, &Key::new("body"), body);
     }
 
-    event.add_i16("severityNumber", level as i16, tld::OutType::Default, 0); // TODO: use int16
+    event.add_i16("severityNumber", level as i16, tld::OutType::Default, 0);
 
     if let Some(severity_text) = &log_record.severity_text() {
         event.add_str8("severityText", severity_text, tld::OutType::Default, 0);

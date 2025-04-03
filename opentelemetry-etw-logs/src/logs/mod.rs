@@ -1,3 +1,4 @@
+#[cfg(feature = "serde_json")]
 mod converters;
 mod exporter;
 mod reentrant_logprocessor;

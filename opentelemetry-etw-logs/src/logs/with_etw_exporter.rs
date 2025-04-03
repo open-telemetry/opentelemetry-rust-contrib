@@ -1,4 +1,5 @@
-use crate::logs::reentrant_logprocessor::ReentrantLogProcessor;
+use crate::logs::reentrant_logprocessor::{validate_provider_name, ReentrantLogProcessor};
+use opentelemetry::otel_warn;
 use opentelemetry_sdk::logs::LoggerProviderBuilder;
 
 /// Extension trait for adding a ETW exporter to the logger provider builder.
@@ -9,8 +10,13 @@ pub trait ETWLoggerProviderBuilderExt {
 
 impl ETWLoggerProviderBuilderExt for LoggerProviderBuilder {
     fn with_etw_exporter(self, provider_name: &str) -> Self {
-        let reenterant_processor = ReentrantLogProcessor::new(provider_name);
-        self.with_log_processor(reenterant_processor)
+        if let Err(error) = validate_provider_name(provider_name) {
+            otel_warn!(name: "ETW.Exporter.CreationFailed", reason = &error);
+            self
+        } else {
+            let reentrant_processor = ReentrantLogProcessor::new(provider_name);
+            self.with_log_processor(reentrant_processor)
+        }
     }
 }
 

@@ -1,3 +1,4 @@
+#[cfg(feature = "serde_json")]
 use crate::logs::converters::IntoJson;
 use opentelemetry::{
     logs::{AnyValue, Severity},
@@ -22,6 +23,7 @@ pub fn add_attribute_to_event(event: &mut tld::EventBuilder, key: &Key, value: &
         AnyValue::Bytes(b) => {
             event.add_binaryc(key.as_str(), b.as_slice(), tld::OutType::Default, 0);
         }
+        #[cfg(feature = "serde_json")]
         AnyValue::ListAny(l) => {
             event.add_str8(
                 key.as_str(),
@@ -30,6 +32,7 @@ pub fn add_attribute_to_event(event: &mut tld::EventBuilder, key: &Key, value: &
                 0,
             );
         }
+        #[cfg(feature = "serde_json")]
         AnyValue::Map(m) => {
             event.add_str8(
                 key.as_str(),
@@ -38,7 +41,10 @@ pub fn add_attribute_to_event(event: &mut tld::EventBuilder, key: &Key, value: &
                 0,
             );
         }
-        &_ => {}
+        &_ => {
+            // For unsupported types, add the key with an empty string as the value.
+            event.add_str8(key.as_str(), "", tld::OutType::Default, 0);
+        }
     }
 }
 
