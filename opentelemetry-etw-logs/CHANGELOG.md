@@ -2,6 +2,9 @@
 
 ## vNext
 
+- Added validation to provider name
+- Added optional feature `serde_json` to serialize List and Maps.
+
 ## v0.8.0
 
 - Added the `with_etw_exporter` trait method to `LoggerProviderBuilder`.
@@ -22,8 +25,6 @@
 - `_typeName` field uses "Log" instead of "Logs".
 - Exporter now unregisters the Etw provider on `shutdown()`.
   [#222](https://github.com/open-telemetry/opentelemetry-rust-contrib/pull/222)
-- Added validation to provider name
-- Added optional feature `serde_json` to serialize List and Maps.
 
 ## v0.7.0
 
