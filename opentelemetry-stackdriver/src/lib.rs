@@ -40,6 +40,7 @@ use tonic::{
 };
 
 #[allow(clippy::derive_partial_eq_without_eq)] // tonic doesn't derive Eq for generated types
+#[allow(clippy::doc_overindented_list_items)]
 pub mod proto;
 
 #[cfg(feature = "propagator")]
