@@ -26,6 +26,9 @@ impl UserEventsExporter {
     /// Create instance of the exporter
     pub(crate) fn new(provider_name: &str) -> Result<Self, String> {
         // Validate provider_name
+        if provider_name.is_empty() {
+            return Err("Provider name cannot be empty.".to_string());
+        }
         if provider_name.len() >= 234 {
             return Err("Provider name must be less than 234 characters.".to_string());
         }
