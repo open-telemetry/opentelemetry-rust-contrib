@@ -76,7 +76,7 @@ mod tests {
         let result = AnyValue::ListAny(Box::new(vec)).as_json_value();
         assert_eq!(result, json!([1, 2, 3, 0, -2]));
 
-        let result = AnyValue::ListAny(Box::new(Vec::new())).as_json_value();
+        let result = AnyValue::ListAny(Box::default()).as_json_value();
         assert_eq!(result, json!([]));
 
         let vec_of_bools = vec![AnyValue::Boolean(true), AnyValue::Boolean(false)];
