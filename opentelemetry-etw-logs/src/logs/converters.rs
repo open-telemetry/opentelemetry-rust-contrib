@@ -13,30 +13,34 @@ impl IntoJson for AnyValue {
     }
 }
 
-fn serialize_anyvalue(value: &AnyValue, depth: usize) -> Value {
-    // Check depth limit
-    if depth > 1 {
-        return Value::String("Maximum allowed nesting depth of `1` exceeded".to_string());
-    }
+const ERROR_MSG: &str = "Maximum allowed nesting depth of `1` exceeded";
 
+fn serialize_anyvalue(value: &AnyValue, depth: usize) -> Value {
     match value {
         AnyValue::Int(value) => json!(value),
         AnyValue::Double(value) => json!(value),
         AnyValue::String(value) => json!(value.as_str()),
         AnyValue::Boolean(value) => json!(value),
         AnyValue::Bytes(_value) => todo!("No support for AnyValue::Bytes yet."),
-        AnyValue::ListAny(value) => serialize_anyvalue_slice(value, depth),
-        AnyValue::Map(value) => serialize_hashmap_of_anyvalue(value, depth),
+        AnyValue::ListAny(value) => {
+            if depth > 0 {
+                Value::String(ERROR_MSG.to_string())
+            } else {
+                serialize_anyvalue_slice(value, depth)
+            }
+        }
+        AnyValue::Map(value) => {
+            if depth > 0 {
+                Value::String(ERROR_MSG.to_string())
+            } else {
+                serialize_hashmap_of_anyvalue(value, depth)
+            }
+        }
         &_ => Value::Null,
     }
 }
 
 fn serialize_anyvalue_slice(value: &[AnyValue], depth: usize) -> Value {
-    // Check depth limit
-    if depth > 2 {
-        return Value::String("Maximum allowed nesting depth of `2` exceeded".to_string());
-    }
-
     Value::Array(
         value
             .iter()
@@ -46,11 +50,6 @@ fn serialize_anyvalue_slice(value: &[AnyValue], depth: usize) -> Value {
 }
 
 fn serialize_hashmap_of_anyvalue(value: &HashMap<Key, AnyValue>, depth: usize) -> Value {
-    // Check depth limit
-    if depth > 2 {
-        return Value::String("Maximum allowed nesting depth of `2` exceeded".to_string());
-    }
-
     Value::Object(
         value
             .iter()
@@ -180,7 +179,7 @@ mod tests {
         let result = AnyValue::ListAny(Box::new(complex_vec)).as_json_value();
         assert_eq!(
             result.to_string(),
-            r#"[["Maximum allowed nesting depth of `1` exceeded","Maximum allowed nesting depth of `1` exceeded"],42]"#
+            r#"["Maximum allowed nesting depth of `1` exceeded",42]"#
         );
 
         let mut inner_map = HashMap::new();
@@ -192,7 +191,7 @@ mod tests {
         let result = AnyValue::Map(Box::new(complex_map)).as_json_value();
         assert_eq!(
             result.to_string(),
-            r#"{"a":1,"b":{"a":"Maximum allowed nesting depth of `1` exceeded"}}"#
+            r#"{"a":1,"b":"Maximum allowed nesting depth of `1` exceeded"}"#
         );
 
         // Construct a deeply nested list
@@ -206,7 +205,7 @@ mod tests {
         let result = current_value.as_json_value();
         assert_eq!(
             result.to_string(),
-            r#"[["Maximum allowed nesting depth of `1` exceeded"]]"#
+            r#"["Maximum allowed nesting depth of `1` exceeded"]"#
         );
     }
 }
