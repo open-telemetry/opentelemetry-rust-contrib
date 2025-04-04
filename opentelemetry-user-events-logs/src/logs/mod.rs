@@ -11,6 +11,7 @@ pub trait UserEventsLoggerProviderBuilderExt {
     /// Adds a user event exporter to the logger provider builder with the given provider name.
     ///
     /// The provider name must:
+    /// - Not be empty.
     /// - Be less than 234 characters.
     /// - Contain only ASCII letters, digits, and the underscore (`'_'`) character.
     /// - Be short, human-readable, and unique enough to avoid conflicts with other provider names.

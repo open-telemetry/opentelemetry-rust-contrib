@@ -2,6 +2,9 @@
 
 ## vNext
 
+- Enhanced validation for the provider name in `with_user_event_exporter(provider_name)`:
+  - Empty provider names are now disallowed.
+
 ## v0.12.0
 
 - Added support for Populating Cloud RoleName, RoleInstance from Resource's
