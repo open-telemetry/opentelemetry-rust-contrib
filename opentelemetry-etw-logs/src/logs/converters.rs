@@ -13,7 +13,7 @@ impl IntoJson for AnyValue {
     }
 }
 
-const ERROR_MSG: &str = "Maximum allowed nesting depth of `1` exceeded";
+const ERROR_MSG: &str = "Nested lists/maps are not supported.";
 
 fn serialize_anyvalue(value: &AnyValue, depth: usize) -> Value {
     match value {
@@ -24,14 +24,16 @@ fn serialize_anyvalue(value: &AnyValue, depth: usize) -> Value {
         AnyValue::Bytes(_value) => todo!("No support for AnyValue::Bytes yet."),
         AnyValue::ListAny(value) => {
             if depth > 0 {
-                Value::String(ERROR_MSG.to_string())
+                // Do not allow nested lists.
+                json!(ERROR_MSG)
             } else {
                 serialize_anyvalue_slice(value, depth)
             }
         }
         AnyValue::Map(value) => {
             if depth > 0 {
-                Value::String(ERROR_MSG.to_string())
+                // Do not allow nested maps.
+                json!(ERROR_MSG)
             } else {
                 serialize_hashmap_of_anyvalue(value, depth)
             }
@@ -179,7 +181,7 @@ mod tests {
         let result = AnyValue::ListAny(Box::new(complex_vec)).as_json_value();
         assert_eq!(
             result.to_string(),
-            r#"["Maximum allowed nesting depth of `1` exceeded",42]"#
+            r#"["Nested lists/maps are not supported.",42]"#
         );
 
         let mut inner_map = HashMap::new();
@@ -191,7 +193,7 @@ mod tests {
         let result = AnyValue::Map(Box::new(complex_map)).as_json_value();
         assert_eq!(
             result.to_string(),
-            r#"{"a":1,"b":"Maximum allowed nesting depth of `1` exceeded"}"#
+            r#"{"a":1,"b":"Nested lists/maps are not supported."}"#
         );
 
         // Construct a deeply nested list
@@ -205,7 +207,7 @@ mod tests {
         let result = current_value.as_json_value();
         assert_eq!(
             result.to_string(),
-            r#"["Maximum allowed nesting depth of `1` exceeded"]"#
+            r#"["Nested lists/maps are not supported."]"#
         );
     }
 }
