@@ -13,7 +13,7 @@ use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::time::SystemTime;
 
-/// An exporter for jaeger comptible json files containing trace data
+/// An exporter for jaeger compatible json files containing trace data
 #[derive(Debug)]
 pub struct JaegerJsonExporter<R> {
     out_path: PathBuf,
@@ -26,7 +26,7 @@ impl<R: JaegerJsonRuntime> JaegerJsonExporter<R> {
     /// Configure a new jaeger-json exporter
     ///
     /// * `out_path` refers to an directory where span data are written. If it does not exist, it is created by the exporter
-    /// * `file_prefix` refers to a prefix prependend to each span file
+    /// * `file_prefix` refers to a prefix prepended to each span file
     /// * `service_name` is used to identify the corresponding service in jaeger
     /// * `runtime` specifies the used async runtime to write the trace data
     pub fn new(out_path: PathBuf, file_prefix: String, service_name: String, runtime: R) -> Self {
