@@ -139,8 +139,8 @@ impl RequestMetricsBuilder {
 ///
 /// ```no_run
 /// use actix_web::{dev, http, web, App, HttpRequest, HttpServer};
-/// use actix_web_opentelemetry::{PrometheusMetricsHandler, RequestMetrics, RequestTracing};
 /// use opentelemetry::global;
+/// use opentelemetry_instrumentation_actix_web::{PrometheusMetricsHandler, RequestMetrics, RequestTracing};
 /// use opentelemetry_sdk::metrics::SdkMeterProvider;
 ///
 /// #[actix_web::main]

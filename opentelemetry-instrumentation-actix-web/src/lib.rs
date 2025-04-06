@@ -1,4 +1,4 @@
-//! [OpenTelemetry] integration for [Actix Web].
+//! [OpenTelemetry] instrumentation for [Actix Web].
 //!
 //! This crate allows you to easily instrument client and server requests.
 //!
@@ -25,7 +25,7 @@
 //! # #[cfg(feature="awc")]
 //! # {
 //! use awc::{Client, error::SendRequestError};
-//! use actix_web_opentelemetry::ClientExt;
+//! use opentelemetry_instrumentation_actix_web::ClientExt;
 //!
 //! async fn execute_request(client: &Client) -> Result<(), SendRequestError> {
 //!     let res = client
@@ -49,8 +49,8 @@
 //!
 //! ```no_run
 //! use actix_web::{web, App, HttpServer};
-//! use actix_web_opentelemetry::RequestTracing;
 //! use opentelemetry::global;
+//! use opentelemetry_instrumentation_actix_web::RequestTracing;
 //! use opentelemetry_sdk::trace::SdkTracerProvider;
 //!
 //! async fn index() -> &'static str {
@@ -86,9 +86,9 @@
 //!
 //! ```no_run
 //! use actix_web::{dev, http, web, App, HttpRequest, HttpServer};
-//! # #[cfg(feature = "metrics-prometheus")]
-//! use actix_web_opentelemetry::{PrometheusMetricsHandler, RequestMetrics, RequestTracing};
 //! use opentelemetry::global;
+//! # #[cfg(feature = "metrics-prometheus")]
+//! use opentelemetry_instrumentation_actix_web::{PrometheusMetricsHandler, RequestMetrics, RequestTracing};
 //! use opentelemetry_sdk::metrics::SdkMeterProvider;
 //!
 //! # #[cfg(feature = "metrics-prometheus")]

@@ -1,5 +1,5 @@
-use actix_web_opentelemetry::ClientExt;
 use opentelemetry::{global, KeyValue};
+use opentelemetry_instrumentation_actix_web::ClientExt;
 use opentelemetry_sdk::propagation::TraceContextPropagator;
 use opentelemetry_sdk::trace::SdkTracerProvider;
 use opentelemetry_sdk::Resource;

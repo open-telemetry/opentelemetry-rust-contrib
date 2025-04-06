@@ -23,8 +23,8 @@ use crate::util::trace_attributes_from_request;
 ///
 /// ```no_run
 /// use actix_web::{web, App, HttpServer};
-/// use actix_web_opentelemetry::RequestTracing;
 /// use opentelemetry::global;
+/// use opentelemetry_instrumentation_actix_web::RequestTracing;
 /// use opentelemetry_sdk::trace::SdkTracerProvider;
 ///
 /// async fn index() -> &'static str {
@@ -72,7 +72,7 @@ impl RequestTracing {
     ///
     /// ```no_run
     /// use actix_web::{web, App, HttpServer};
-    /// use actix_web_opentelemetry::{RouteFormatter, RequestTracing};
+    /// use opentelemetry_instrumentation_actix_web::{RouteFormatter, RequestTracing};
     ///
     /// # #[actix_web::main]
     /// # async fn main() -> std::io::Result<()> {
