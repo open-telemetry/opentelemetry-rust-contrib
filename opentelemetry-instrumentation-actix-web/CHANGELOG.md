@@ -1,5 +1,11 @@
 # Changelog
 
+## vNext
+
+### Changed
+
+* **Breaking** Rename crate to `opentelemetry-instrumentation-actix-web`
+
 ## [v0.22.0](https://github.com/OutThereLabs/actix-web-opentelemetry/compare/v0.22.0..v0.21.0)
 
 ### Changed

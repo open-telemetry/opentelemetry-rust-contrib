@@ -1,12 +1,12 @@
 [package]
-name = "actix-web-opentelemetry"
+name = "opentelemetry-instrumentation-actix-web"
 version = "0.22.0"
-description = "Deprecated: 0.22.0 is the last release for this crate. Use opentelemetry-instrumentation-actix-web instead"
+description = "OpenTelemetry instrumentation for Actix Web apps"
 homepage = "https://github.com/open-telemetry/opentelemetry-rust-contrib/tree/main/actix-web-opentelemetry"
 repository = "https://github.com/open-telemetry/opentelemetry-rust-contrib/tree/main/actix-web-opentelemetry"
 readme = "README.md"
 categories = ["api-bindings"]
-keywords = ["actix", "actix-web", "opentelemetry", "jaeger", "prometheus"]
+keywords = ["actix", "actix-web", "opentelemetry", "prometheus"]
 license = "Apache-2.0"
 edition = "2021"
 rust-version = "1.75.0"
@@ -50,7 +50,7 @@ tracing = { version = "0.1.41", optional = true }
 
 [dev-dependencies]
 actix-web = { version = "4.0", features = ["macros"] }
-actix-web-opentelemetry = { path = ".", features = [
+opentelemetry-instrumentation-actix-web = { path = ".", features = [
   "metrics-prometheus",
   "sync-middleware",
   "awc",
