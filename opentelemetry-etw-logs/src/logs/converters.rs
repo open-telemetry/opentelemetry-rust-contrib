@@ -13,7 +13,7 @@ impl IntoJson for AnyValue {
     }
 }
 
-const ERROR_MSG: &str = "Nested lists/maps are not supported.";
+const ERROR_MSG: &str = "Message truncated as nested lists/maps are not supported.";
 
 fn serialize_anyvalue(value: &AnyValue, depth: usize) -> Value {
     match value {
@@ -181,7 +181,7 @@ mod tests {
         let result = AnyValue::ListAny(Box::new(complex_vec)).as_json_value();
         assert_eq!(
             result.to_string(),
-            r#"["Nested lists/maps are not supported.",42]"#
+            r#"["Message truncated as nested lists/maps are not supported.",42]"#
         );
 
         let mut inner_map = HashMap::new();
@@ -193,7 +193,7 @@ mod tests {
         let result = AnyValue::Map(Box::new(complex_map)).as_json_value();
         assert_eq!(
             result.to_string(),
-            r#"{"a":1,"b":"Nested lists/maps are not supported."}"#
+            r#"{"a":1,"b":"Message truncated as nested lists/maps are not supported."}"#
         );
 
         // Construct a deeply nested list
@@ -207,7 +207,7 @@ mod tests {
         let result = current_value.as_json_value();
         assert_eq!(
             result.to_string(),
-            r#"["Nested lists/maps are not supported."]"#
+            r#"["Message truncated as nested lists/maps are not supported."]"#
         );
     }
 }
