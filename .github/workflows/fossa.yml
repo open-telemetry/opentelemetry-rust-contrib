@@ -1,12 +1,12 @@
 name: FOSSA scanning
 
+permissions:
+  contents: read
+
 on:
   push:
     branches:
       - main
-
-permissions:
-  contents: read
 
 jobs:
   fossa:
