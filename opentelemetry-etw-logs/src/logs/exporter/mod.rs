@@ -86,7 +86,7 @@ impl ETWExporter {
 
         // reset
         event.reset(
-            common::get_event_name(log_record),
+            common::get_etw_event_name(log_record),
             level,
             Self::KEYWORD,
             event_tags,

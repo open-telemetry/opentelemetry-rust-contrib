@@ -75,8 +75,12 @@ pub const fn convert_severity_to_level(severity: Severity) -> tld::Level {
     }
 }
 
-pub fn get_event_name(log_record: &opentelemetry_sdk::logs::SdkLogRecord) -> &str {
-    log_record.event_name().unwrap_or("Log")
+pub fn get_etw_event_name(log_record: &opentelemetry_sdk::logs::SdkLogRecord) -> &str {
+    const LOG: &str = "Log";
+    log_record
+        .target()
+        .filter(|s| !s.trim().is_empty())
+        .map_or(LOG, |v| v)
 }
 
 #[cfg(test)]
@@ -127,10 +131,34 @@ fn test_get_event_name() {
 
     let mut log_record = test_utils::new_sdk_log_record();
 
-    let result = get_event_name(&log_record);
+    let result = get_etw_event_name(&log_record);
     assert_eq!(result, "Log");
 
-    log_record.set_event_name("event-name");
-    let result = get_event_name(&log_record);
-    assert_eq!(result, "event-name");
+    log_record.set_target("");
+    let result = get_etw_event_name(&log_record);
+    assert_eq!(result, "Log");
+
+    log_record.set_target(" ");
+    let result = get_etw_event_name(&log_record);
+    assert_eq!(result, "Log");
+
+    log_record.set_target("        ");
+    let result = get_etw_event_name(&log_record);
+    assert_eq!(result, "Log");
+
+    log_record.set_target("event-name ");
+    let result = get_etw_event_name(&log_record);
+    assert_eq!(result, "event-name ");
+
+    log_record.set_target(" event-name");
+    let result = get_etw_event_name(&log_record);
+    assert_eq!(result, " event-name");
+
+    log_record.set_target(" event-name ");
+    let result = get_etw_event_name(&log_record);
+    assert_eq!(result, " event-name ");
+
+    log_record.set_target(" event name ");
+    let result = get_etw_event_name(&log_record);
+    assert_eq!(result, " event name ");
 }

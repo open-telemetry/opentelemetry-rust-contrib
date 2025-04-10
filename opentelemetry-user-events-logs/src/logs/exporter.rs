@@ -187,17 +187,8 @@ impl UserEventsExporter {
         if event_set.enabled() {
             let _res = EBW.with(|eb| {
                 let mut eb = eb.borrow_mut();
-                // EventBuilder doc suggests that event name should not be
-                // reused for events with different schema. 
-                // In well-behaved application, event-name should be unique
-                // for each event.
-                // TODO: What if the event name is not provided? "Log" is used as default.
                 // TODO: Should event_tag be non-zero?
-                let event_name = log_record
-                    .event_name()
-                    .filter(|s| !s.trim().is_empty())
-                    .unwrap_or("Log");                
-                eb.reset(event_name, 0);
+                eb.reset(get_ue_event_name(log_record), 0);
 
                 eb.add_value("__csver__", 1024, FieldFormat::UnsignedInt, 0); // 0x400 in hex
 
@@ -323,11 +314,10 @@ impl UserEventsExporter {
                     eb.add_value("eventId", event_id, FieldFormat::SignedInt, 0);
                     cs_b_count += 1;
                 }
-                // TODO: eventname is already added to header.
-                // Should we add it again?
-                // Or should we use Target?
-                eb.add_str("name", event_name, FieldFormat::Default, 0);
-                cs_b_count += 1;
+                if let Some(event_name) = log_record.event_name() {
+                    eb.add_str("name", event_name, FieldFormat::Default, 0);
+                    cs_b_count += 1;
+                }
                 eb.set_struct_field_count(cs_b_bookmark, cs_b_count);
 
                 let result = eb.write(event_set, None, None);
@@ -407,6 +397,14 @@ impl opentelemetry_sdk::logs::LogExporter for UserEventsExporter {
             .get(&Key::from_static_str("service.instance.id"))
             .map(|v| v.to_string());
     }
+}
+
+fn get_ue_event_name(log_record: &opentelemetry_sdk::logs::SdkLogRecord) -> &str {
+    const LOG: &str = "Log";
+    log_record
+        .target()
+        .filter(|s| !s.trim().is_empty())
+        .map_or(LOG, |v| v)
 }
 
 #[cfg(test)]
