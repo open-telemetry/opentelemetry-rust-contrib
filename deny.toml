@@ -1,7 +1,5 @@
 [graph]
-exclude=[
-    "protobuf" # opentelemetry-instrumentation-actix-web depends on prometheus should try to remove it
-]
+exclude=[]
 
 [licenses]
 allow = [

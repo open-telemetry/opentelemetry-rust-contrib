@@ -1,18 +1,17 @@
-use actix_web::{web, App, HttpRequest, HttpServer};
+use actix_web::{web, App, HttpResponse, HttpServer, Responder};
 use opentelemetry::{global, KeyValue};
-use opentelemetry_instrumentation_actix_web::{
-    PrometheusMetricsHandler, RequestMetrics, RequestTracing,
-};
-use opentelemetry_otlp::WithExportConfig;
+use opentelemetry_instrumentation_actix_web::{RequestMetrics, RequestTracing};
+use opentelemetry_otlp::{Protocol, WithExportConfig};
 use opentelemetry_sdk::{
     metrics::{Aggregation, Instrument, SdkMeterProvider, Stream},
     propagation::TraceContextPropagator,
     trace::SdkTracerProvider,
     Resource,
 };
+use uuid::Uuid;
 
-async fn index(_req: HttpRequest, _path: actix_web::web::Path<String>) -> &'static str {
-    "Hello world!"
+async fn manual_hello() -> impl Responder {
+    HttpResponse::Ok().body("Hey there!")
 }
 
 #[actix_web::main]
@@ -36,19 +35,21 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     global::set_tracer_provider(tracer.clone());
 
-    // Start a new prometheus metrics pipeline if --features metrics-prometheus is used
-    #[cfg(feature = "metrics-prometheus")]
-    let (metrics_handler, meter_provider) = {
-        let registry = prometheus::Registry::new();
-        let exporter = opentelemetry_prometheus::exporter()
-            .with_registry(registry.clone())
+    // Setup a OTLP metrics exporter if --features metrics is used
+    #[cfg(feature = "metrics")]
+    let meter_provider = {
+        let exporter = opentelemetry_otlp::MetricExporter::builder()
+            .with_http()
+            .with_protocol(Protocol::HttpBinary)
+            .with_endpoint("http://localhost:9090/api/v1/otlp/v1/metrics")
             .build()?;
 
         let provider = SdkMeterProvider::builder()
-            .with_reader(exporter)
+            .with_periodic_exporter(exporter)
             .with_resource(
                 Resource::builder_empty()
                     .with_attribute(KeyValue::new("service.name", "my_app"))
+                    .with_attribute(KeyValue::new("service.instance.id", Uuid::new_v4().to_string()))
                     .build(),
             )
             .with_view(
@@ -67,19 +68,14 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             .build();
         global::set_meter_provider(provider.clone());
 
-        (PrometheusMetricsHandler::new(registry), provider)
+        provider
     };
 
     HttpServer::new(move || {
-        let app = App::new()
+        App::new()
             .wrap(RequestTracing::new())
             .wrap(RequestMetrics::default())
-            .service(web::resource("/users/{id}").to(index));
-
-        #[cfg(feature = "metrics-prometheus")]
-        let app = app.route("/metrics", web::get().to(metrics_handler.clone()));
-
-        app
+            .route("/hey", web::get().to(manual_hello))
     })
     .bind("127.0.0.1:8080")?
     .run()
@@ -88,7 +84,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Ensure all spans have been reported
     tracer.shutdown()?;
 
-    #[cfg(feature = "metrics-prometheus")]
+    #[cfg(feature = "metrics")]
     meter_provider.shutdown()?;
 
     Ok(())

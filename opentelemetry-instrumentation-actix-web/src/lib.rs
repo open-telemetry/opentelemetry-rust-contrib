@@ -8,7 +8,8 @@
 //!
 //! * Client requests can be traced by using the [`ClientExt::trace_request`] method.
 //!
-//! The `metrics` feature allows you to expose request metrics to [Prometheus].
+//! The `metrics` feature allows you to export request metrics to any OTLP supported
+//! backend like [Prometheus].
 //!
 //! * Metrics can be tracked using the [`RequestMetrics`] middleware.
 //!
@@ -86,42 +87,61 @@
 //!
 //! ```no_run
 //! use actix_web::{dev, http, web, App, HttpRequest, HttpServer};
-//! use opentelemetry::global;
-//! # #[cfg(feature = "metrics-prometheus")]
-//! use opentelemetry_instrumentation_actix_web::{PrometheusMetricsHandler, RequestMetrics, RequestTracing};
-//! use opentelemetry_sdk::metrics::SdkMeterProvider;
+//! use opentelemetry::{global, KeyValue};
+//! # #[cfg(feature = "metrics")]
+//! use opentelemetry_instrumentation_actix_web::{RequestMetrics, RequestTracing};
+//! use opentelemetry_otlp::{Protocol, WithExportConfig};
+//! use opentelemetry_sdk::{metrics::SdkMeterProvider, Resource};
+//! use uuid::Uuid;
 //!
-//! # #[cfg(feature = "metrics-prometheus")]
+//! async fn index() -> &'static str {
+//!     "Hello world!"
+//! }
+//!
+//! # #[cfg(feature = "metrics")]
 //! #[actix_web::main]
 //! async fn main() -> Result<(), Box<dyn std::error::Error>> {
-//!     // Configure prometheus or your preferred metrics service
-//!     let registry = prometheus::Registry::new();
-//!     let exporter = opentelemetry_prometheus::exporter()
-//!         .with_registry(registry.clone())
+//!     // Initialize OTLP exporter using HTTP binary protocol
+//!     let exporter = opentelemetry_otlp::MetricExporter::builder()
+//!         .with_http()
+//!         .with_protocol(Protocol::HttpBinary)
+//!         .with_endpoint("http://localhost:9090/api/v1/otlp/v1/metrics")
 //!         .build()?;
 //!
 //!     // set up your meter provider with your exporter(s)
 //!     let provider = SdkMeterProvider::builder()
-//!         .with_reader(exporter)
+//!         .with_periodic_exporter(exporter)
+//!         .with_resource(
+//!             // recommended attributes
+//!             Resource::builder_empty()
+//!                 .with_attribute(KeyValue::new("service.name", "my_app"))
+//!                 .with_attribute(KeyValue::new("service.instance.id", Uuid::new_v4().to_string()))
+//!                 .build(),
+//!         )
 //!         .build();
-//!     global::set_meter_provider(provider);
+//!     global::set_meter_provider(provider.clone());
 //!
 //!     // Run actix server, metrics are now available at http://localhost:8080/metrics
 //!     HttpServer::new(move || {
 //!         App::new()
 //!             .wrap(RequestTracing::new())
 //!             .wrap(RequestMetrics::default())
-//!             .route("/metrics", web::get().to(PrometheusMetricsHandler::new(registry.clone())))
+//!             .service(web::resource("/").to(index))
 //!         })
 //!         .bind("localhost:8080")?
 //!         .run()
 //!         .await;
 //!
+//!     //Shutdown the meter provider. This will trigger an export of all metrics.
+//!     provider.shutdown()?;
+//!
 //!     Ok(())
 //! }
-//! # #[cfg(not(feature = "metrics-prometheus"))]
+//! # #[cfg(not(feature = "metrics"))]
 //! # fn main() {}
 //! ```
+//!
+//! For more information on how to configure Prometheus with [OTLP](https://prometheus.io/docs/guides/opentelemetry)
 //!
 //! ### Exporter configuration
 //!
@@ -153,9 +173,6 @@ mod util;
 #[cfg_attr(docsrs, doc(cfg(feature = "awc")))]
 pub use client::{ClientExt, InstrumentedClientRequest};
 
-#[cfg(feature = "metrics-prometheus")]
-#[cfg_attr(docsrs, doc(cfg(feature = "metrics-prometheus")))]
-pub use middleware::metrics::prometheus::PrometheusMetricsHandler;
 #[cfg(feature = "metrics")]
 #[cfg_attr(docsrs, doc(cfg(feature = "metrics")))]
 pub use middleware::metrics::{RequestMetrics, RequestMetricsBuilder, RequestMetricsMiddleware};

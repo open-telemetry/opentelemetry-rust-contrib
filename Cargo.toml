@@ -31,6 +31,7 @@ debug = 1
 opentelemetry = "0.29"
 opentelemetry-appender-tracing = "0.29"
 opentelemetry-http = "0.29"
+opentelemetry-otlp = "0.29"
 opentelemetry-proto = { version = "0.29", default-features = false }
 opentelemetry_sdk = { version = "0.29", default-features = false }
 opentelemetry-stdout = "0.29"
