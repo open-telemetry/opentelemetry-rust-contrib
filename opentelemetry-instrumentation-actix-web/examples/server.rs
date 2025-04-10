@@ -49,7 +49,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             .with_resource(
                 Resource::builder_empty()
                     .with_attribute(KeyValue::new("service.name", "my_app"))
-                    .with_attribute(KeyValue::new("service.instance.id", Uuid::new_v4().to_string()))
+                    .with_attribute(KeyValue::new(
+                        "service.instance.id",
+                        Uuid::new_v4().to_string(),
+                    ))
                     .build(),
             )
             .with_view(
