@@ -1,4 +1,4 @@
-// Geneva Config Client with TLS (P12) and TODO: Managed Identity support
+// Geneva Config Client with TLS (PKCS#12) and TODO: Managed Identity support
 
 use base64::{engine::general_purpose, Engine as _};
 use reqwest::Client;
