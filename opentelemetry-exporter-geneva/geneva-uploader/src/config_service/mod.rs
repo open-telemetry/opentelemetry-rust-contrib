@@ -6,6 +6,7 @@ mod tests {
     use openssl::{pkcs12::Pkcs12, pkey::PKey, x509::X509};
     use rcgen::generate_simple_self_signed;
     use std::io::Write;
+    use std::path::PathBuf;
     use tempfile::NamedTempFile;
     use wiremock::matchers::{method, path};
     use wiremock::{Mock, MockServer, ResponseTemplate};
@@ -102,7 +103,7 @@ mod tests {
             region: "mockregion".into(),
             config_major_version: 1,
             auth_method: AuthMethod::Certificate {
-                path: temp_p12_file.path().to_string_lossy().to_string(),
+                path: PathBuf::from(temp_p12_file.path().to_string_lossy().to_string()),
                 password,
             },
         };
@@ -147,7 +148,7 @@ mod tests {
             region: "mockregion".into(),
             config_major_version: 1,
             auth_method: AuthMethod::Certificate {
-                path: temp_p12_file.path().to_string_lossy().to_string(),
+                path: PathBuf::from(temp_p12_file.path().to_string_lossy().to_string()),
                 password,
             },
         };
@@ -198,7 +199,7 @@ mod tests {
             region: "mockregion".into(),
             config_major_version: 1,
             auth_method: AuthMethod::Certificate {
-                path: temp_p12_file.path().to_string_lossy().to_string(),
+                path: PathBuf::from(temp_p12_file.path().to_string_lossy().to_string()),
                 password,
             },
         };
@@ -229,7 +230,7 @@ mod tests {
             region: "region".to_string(),
             config_major_version: 1,
             auth_method: AuthMethod::Certificate {
-                path: "/nonexistent/path.p12".to_string(),
+                path: PathBuf::from("/nonexistent/path.p12".to_string()),
                 password: "test".to_string(),
             },
         };
@@ -292,7 +293,7 @@ mod tests {
             region,
             config_major_version,
             auth_method: AuthMethod::Certificate {
-                path: cert_path,
+                path: PathBuf::from(cert_path),
                 password: cert_password,
             },
         };

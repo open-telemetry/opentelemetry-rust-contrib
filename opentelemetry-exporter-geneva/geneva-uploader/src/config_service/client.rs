@@ -13,6 +13,7 @@ use uuid::Uuid;
 use chrono::{DateTime, Utc};
 use native_tls::{Identity, Protocol};
 use std::fs;
+use std::path::PathBuf;
 use std::sync::RwLock;
 
 /// Authentication methods for the Geneva Config Client.
@@ -49,7 +50,7 @@ pub(crate) enum AuthMethod {
     /// # Arguments
     /// * `path` - Path to the PKCS#12 (.p12) certificate file
     /// * `password` - Password to decrypt the PKCS#12 file
-    Certificate { path: String, password: String },
+    Certificate { path: PathBuf, password: String },
     /// Azure Managed Identity authentication
     ///
     /// Note(TODO): This is not yet implemented.
