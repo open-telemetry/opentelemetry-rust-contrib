@@ -75,7 +75,7 @@ pub const fn convert_severity_to_level(severity: Severity) -> tld::Level {
     }
 }
 
-pub fn get_event_name(log_record: &opentelemetry_sdk::logs::SdkLogRecord) -> &str {
+pub fn get_event_name(_log_record: &opentelemetry_sdk::logs::SdkLogRecord) -> &str {
     "Log"
 }
 
