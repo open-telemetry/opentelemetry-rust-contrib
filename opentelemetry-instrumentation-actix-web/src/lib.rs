@@ -60,9 +60,8 @@
 //!
 //! #[actix_web::main]
 //! async fn main() -> std::io::Result<()> {
-//!     // Install an OpenTelemetry trace pipeline.
-//!     // Swap for https://docs.rs/opentelemetry-jaeger or other compatible
-//!     // exporter to send trace information to your collector.
+//!     // Swap for `opentelemetry_otlp` or any other compatible
+//!     // exporter to send metrics to your collector.
 //!     let exporter = opentelemetry_stdout::SpanExporter::default();
 //!
 //!     // Configure your tracer provider with your exporter(s)
@@ -90,9 +89,7 @@
 //! use opentelemetry::{global, KeyValue};
 //! # #[cfg(feature = "metrics")]
 //! use opentelemetry_instrumentation_actix_web::{RequestMetrics, RequestTracing};
-//! use opentelemetry_otlp::{Protocol, WithExportConfig};
 //! use opentelemetry_sdk::{metrics::SdkMeterProvider, Resource};
-//! use uuid::Uuid;
 //!
 //! async fn index() -> &'static str {
 //!     "Hello world!"
@@ -101,21 +98,16 @@
 //! # #[cfg(feature = "metrics")]
 //! #[actix_web::main]
 //! async fn main() -> Result<(), Box<dyn std::error::Error>> {
-//!     // Initialize OTLP exporter using HTTP binary protocol
-//!     let exporter = opentelemetry_otlp::MetricExporter::builder()
-//!         .with_http()
-//!         .with_protocol(Protocol::HttpBinary)
-//!         .with_endpoint("http://localhost:9090/api/v1/otlp/v1/metrics")
-//!         .build()?;
+//!     // Swap for `opentelemetry_otlp` or any other compatible
+//!     // exporter to send metrics to your collector.
+//!     let exporter = opentelemetry_stdout::MetricExporter::default();
 //!
 //!     // set up your meter provider with your exporter(s)
 //!     let provider = SdkMeterProvider::builder()
 //!         .with_periodic_exporter(exporter)
 //!         .with_resource(
-//!             // recommended attributes
 //!             Resource::builder_empty()
 //!                 .with_attribute(KeyValue::new("service.name", "my_app"))
-//!                 .with_attribute(KeyValue::new("service.instance.id", Uuid::new_v4().to_string()))
 //!                 .build(),
 //!         )
 //!         .build();

@@ -46,9 +46,7 @@ opentelemetry_sdk = { workspace = true, features = [
   "metrics",
   "rt-tokio-current-thread",
 ] }
-opentelemetry-otlp = { workspace = true, features = ["grpc-tonic"] }
 opentelemetry-stdout = { workspace = true, features = ["trace", "metrics"] }
-uuid = { version = "1.16.0", features = ["v4"] }
 
 [package.metadata.docs.rs]
 all-features = true

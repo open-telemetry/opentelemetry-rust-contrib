@@ -1,14 +1,13 @@
 use actix_web::{web, App, HttpResponse, HttpServer, Responder};
 use opentelemetry::{global, KeyValue};
 use opentelemetry_instrumentation_actix_web::{RequestMetrics, RequestTracing};
-use opentelemetry_otlp::{Protocol, WithExportConfig};
 use opentelemetry_sdk::{
     metrics::{Aggregation, Instrument, SdkMeterProvider, Stream},
     propagation::TraceContextPropagator,
     trace::SdkTracerProvider,
     Resource,
 };
-use uuid::Uuid;
+use opentelemetry_stdout::{MetricExporter, SpanExporter};
 
 async fn manual_hello() -> impl Responder {
     HttpResponse::Ok().body("Hey there!")
@@ -24,12 +23,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .build();
 
     let tracer = SdkTracerProvider::builder()
-        .with_batch_exporter(
-            opentelemetry_otlp::SpanExporter::builder()
-                .with_tonic()
-                .with_endpoint("http://127.0.0.1:6565")
-                .build()?,
-        )
+        .with_simple_exporter(SpanExporter::default())
         .with_resource(service_name_resource)
         .build();
 
@@ -38,21 +32,11 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Setup a OTLP metrics exporter if --features metrics is used
     #[cfg(feature = "metrics")]
     let meter_provider = {
-        let exporter = opentelemetry_otlp::MetricExporter::builder()
-            .with_http()
-            .with_protocol(Protocol::HttpBinary)
-            .with_endpoint("http://localhost:9090/api/v1/otlp/v1/metrics")
-            .build()?;
-
         let provider = SdkMeterProvider::builder()
-            .with_periodic_exporter(exporter)
+            .with_periodic_exporter(MetricExporter::default())
             .with_resource(
                 Resource::builder_empty()
                     .with_attribute(KeyValue::new("service.name", "my_app"))
-                    .with_attribute(KeyValue::new(
-                        "service.instance.id",
-                        Uuid::new_v4().to_string(),
-                    ))
                     .build(),
             )
             .with_view(
