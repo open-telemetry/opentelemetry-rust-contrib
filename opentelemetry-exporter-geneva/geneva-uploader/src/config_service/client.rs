@@ -1,7 +1,10 @@
 // Geneva Config Client with TLS (P12) and TODO: Managed Identity support
 
 use base64::{engine::general_purpose, Engine as _};
-use reqwest::Client;
+use reqwest::{
+    header::{HeaderMap, HeaderValue, ACCEPT, USER_AGENT},
+    Client,
+};
 use serde::Deserialize;
 use std::time::Duration;
 use thiserror::Error;
@@ -69,12 +72,12 @@ pub(crate) enum GenevaConfigClientError {
     Tls(#[from] native_tls::Error),
     #[error("JSON error: {0}")]
     SerdeJson(#[from] serde_json::Error),
+    #[error("Invalid or malformed JWT token: {0}")]
+    JwtTokenError(String),
     #[error("Moniker not found: {0}")]
     MonikerNotFound(String),
     #[error("Internal error: {0}")]
     InternalError(String),
-    //#[error("Mismatched TagId. Sent: {sent}, Received: {received}")]
-    //MismatchedTagId { sent: String, received: String },
 }
 
 #[allow(dead_code)]
@@ -109,13 +112,13 @@ pub(crate) type Result<T> = std::result::Result<T, GenevaConfigClientError>;
 #[allow(dead_code)]
 #[derive(Clone)]
 pub(crate) struct GenevaConfigClientConfig {
-    pub endpoint: String,
-    pub environment: String,
-    pub account: String,
-    pub namespace: String,
-    pub region: String,
-    pub config_major_version: u32,
-    pub auth_method: AuthMethod, // agent_identity and agent_version are hardcoded for now
+    pub(crate) endpoint: String,
+    pub(crate) environment: String,
+    pub(crate) account: String,
+    pub(crate) namespace: String,
+    pub(crate) region: String,
+    pub(crate) config_major_version: u32,
+    pub(crate) auth_method: AuthMethod, // agent_identity and agent_version are hardcoded for now
 }
 
 #[allow(dead_code)]
@@ -175,6 +178,10 @@ pub(crate) struct GenevaConfigClient {
     config: GenevaConfigClientConfig,
     http_client: Client,
     cached_data: RwLock<CachedAuthData>,
+    precomputed_url_prefix: String,
+    agent_identity: String,
+    agent_version: String,
+    static_headers: HeaderMap,
 }
 
 /// Client for interacting with the Geneva Configuration Service.
@@ -221,6 +228,35 @@ impl GenevaConfigClient {
             }
         }
 
+        let agent_identity = "GenevaUploader".to_string();
+        let agent_version = "0.1".to_string();
+        let static_headers = Self::build_static_headers(&agent_identity, &agent_version);
+
+        let identity = format!(
+            "Tenant=Default/Role=GcsClient/RoleInstance={}",
+            agent_identity
+        );
+
+        let encoded_identity = general_purpose::STANDARD.encode(&identity);
+        let version_str = format!("Ver{}v0", config.config_major_version);
+
+        let mut pre_url = String::with_capacity(config.endpoint.len() + 200);
+        pre_url.push_str(config.endpoint.trim_end_matches('/'));
+        pre_url.push_str("/api/agent/v3/");
+        pre_url.push_str(&config.environment);
+        pre_url.push('/');
+        pre_url.push_str(&config.account);
+        pre_url.push_str("/MonitoringStorageKeys/?Namespace=");
+        pre_url.push_str(&config.namespace);
+        pre_url.push_str("&Region=");
+        pre_url.push_str(&config.region);
+        pre_url.push_str("&Identity=");
+        pre_url.push_str(&encoded_identity);
+        pre_url.push_str("&OSType=");
+        pre_url.push_str(get_os_type());
+        pre_url.push_str("&ConfigMajorVersion=");
+        pre_url.push_str(&version_str);
+
         let http_client = client_builder.build()?;
 
         Ok(Self {
@@ -231,6 +267,10 @@ impl GenevaConfigClient {
                 token_endpoint: None,
                 token_expiry: None,
             }),
+            precomputed_url_prefix: pre_url,
+            agent_identity: agent_identity.to_string(), // TODO make this configurable
+            agent_version: "1.0".to_string(),           // TODO make this configurable
+            static_headers,
         })
     }
 
@@ -247,6 +287,14 @@ impl GenevaConfigClient {
             .read()
             .ok()
             .and_then(|data| data.token_expiry)
+    }
+
+    fn build_static_headers(agent_identity: &str, agent_version: &str) -> HeaderMap {
+        let mut headers = HeaderMap::new();
+        let user_agent = format!("{}-{}", agent_identity, agent_version);
+        headers.insert(USER_AGENT, HeaderValue::from_str(&user_agent).unwrap());
+        headers.insert(ACCEPT, HeaderValue::from_static("application/json"));
+        headers
     }
 
     /// Retrieves ingestion gateway information from the Geneva Config Service.
@@ -305,7 +353,7 @@ impl GenevaConfigClient {
 
             if let Some(expiry) = cached_data.token_expiry {
                 // Use 5-minute buffer for token expiry check
-                // Token lasts for 3 days (As observed), so 5 minutes is plenty of safety margin
+                // Token lasts for 3 days (as observed), so 5 minutes is plenty of safety margin
                 // This ensures we have time to refresh before the token expires
                 if expiry > Utc::now() + chrono::Duration::minutes(5) {
                     if let (Some((ingestion, moniker)), Some(endpoint)) =
@@ -319,10 +367,12 @@ impl GenevaConfigClient {
 
         // Cache miss or expired token, fetch fresh data
         // Perform actual fetch before acquiring write lock to minimize lock contention
-        let (fresh_token_info, fresh_moniker_info) = self.fetch_ingestion_info().await?;
-        let token_expiry = self.parse_token_expiry(&fresh_token_info.auth_token_expiry_time);
-        let token_endpoint =
-            extract_endpoint_from_token(&fresh_token_info.auth_token).map_err(|e| {
+        let (fresh_ingestion_gateway_info, fresh_moniker_info) =
+            self.fetch_ingestion_info().await?;
+        let token_expiry =
+            self.parse_token_expiry(&fresh_ingestion_gateway_info.auth_token_expiry_time);
+        let token_endpoint = extract_endpoint_from_token(&fresh_ingestion_gateway_info.auth_token)
+            .map_err(|e| {
                 GenevaConfigClientError::Certificate(format!(
                     "Failed to extract endpoint from token: {}",
                     e
@@ -331,7 +381,7 @@ impl GenevaConfigClient {
 
         // Now update the cache with exclusive write access
         {
-            let mut cached_data = self.cached_data.write().map_err(|_| {
+            let cached_data = self.cached_data.write().map_err(|_| {
                 GenevaConfigClientError::InternalError("RwLock poisoned".to_string())
             })?;
 
@@ -349,75 +399,31 @@ impl GenevaConfigClient {
                 }
             }
 
-            // Update cache with fresh data
-            cached_data.auth_info = Some((fresh_token_info, fresh_moniker_info));
-            cached_data.token_endpoint = Some(token_endpoint);
-            cached_data.token_expiry = token_expiry;
-
-            if let (Some(info), Some(endpoint)) =
-                (&cached_data.auth_info, &cached_data.token_endpoint)
-            {
-                Ok((info.0.clone(), info.1.clone(), endpoint.clone()))
-            } else {
-                Err(GenevaConfigClientError::InternalError(
-                    "Cache was not properly updated".to_string(),
-                ))
-            }
+            Ok((
+                fresh_ingestion_gateway_info,
+                fresh_moniker_info,
+                token_endpoint,
+            ))
         }
     }
 
     /// Internal method that actually fetches data from Geneva Config Service
     async fn fetch_ingestion_info(&self) -> Result<(IngestionGatewayInfo, MonikerInfo)> {
-        let agent_identity = "GenevaUploader"; // TODO make this configurable
-        let agent_version = "0.1"; // TODO make this configurable
-        let identity = format!(
-            "Tenant=Default/Role=GcsClient/RoleInstance={}",
-            agent_identity
-        );
-
-        let encoded_identity = general_purpose::STANDARD.encode(&identity);
-        let version_str = format!("Ver{}v0", self.config.config_major_version);
-
-        // Construct the following URL:
-        // https://<endpoint>/api/agent/v3/<environment>/<account>/MonitoringStorageKeys/
-        //   ?Namespace=<namespace>
-        //   &Region=<region>
-        //   &Identity=<base64-encoded identity>
-        //   &OSType=<os_type>
-        //   &ConfigMajorVersion=Ver<major_version>v0
-        //   &TagId=<uuid>
-        let endpoint = self.config.endpoint.trim_end_matches('/');
         let tag_id = Uuid::new_v4().to_string(); //TODO - uuid is costly, check if counter is enough?
-        let mut url = String::with_capacity(endpoint.len() + 200); // Pre-allocate with reasonable capacity
-        url.push_str(endpoint);
-        url.push_str("/api/agent/v3/");
-        url.push_str(&self.config.environment);
-        url.push('/');
-        url.push_str(&self.config.account);
-        url.push_str("/MonitoringStorageKeys/?Namespace=");
-        url.push_str(&self.config.namespace);
-        url.push_str("&Region=");
-        url.push_str(&self.config.region);
-        url.push_str("&Identity=");
-        url.push_str(&encoded_identity);
-        url.push_str("&OSType=");
-        url.push_str(get_os_type());
-        url.push_str("&ConfigMajorVersion=");
-        url.push_str(&version_str);
+        let mut url = String::with_capacity(self.precomputed_url_prefix.len() + 50); // Pre-allocate with reasonable capacity
+        url.push_str(&self.precomputed_url_prefix);
         url.push_str("&TagId=");
         url.push_str(&tag_id);
 
         let req_id = Uuid::new_v4().to_string();
 
-        let response = self
+        let mut request = self
             .http_client
             .get(&url)
-            .header(
-                "User-Agent",
-                format!("{}-{}", agent_identity, agent_version),
-            )
-            .header("x-ms-client-request-id", req_id)
-            .header("Accept", "application/json")
+            .headers(self.static_headers.clone()); // Clone only cheap references
+
+        request = request.header("x-ms-client-request-id", req_id);
+        let response = request
             .send()
             .await
             .map_err(GenevaConfigClientError::Http)?;
@@ -428,10 +434,11 @@ impl GenevaConfigClient {
         if status.is_success() {
             let parsed = match serde_json::from_str::<GenevaResponse>(&body) {
                 Ok(response) => response,
-                Err(_) => {
-                    return Err(GenevaConfigClientError::AuthInfoNotFound(
-                        "No primary diag moniker found in storage accounts".to_string(),
-                    ));
+                Err(e) => {
+                    return Err(GenevaConfigClientError::AuthInfoNotFound(format!(
+                        "Failed to parse response: {}",
+                        e
+                    )));
                 }
             };
 
@@ -488,11 +495,11 @@ fn extract_endpoint_from_token(token: &str) -> Result<String> {
     let decoded = general_purpose::URL_SAFE_NO_PAD
         .decode(payload)
         .map_err(|e| {
-            GenevaConfigClientError::Certificate(format!("Failed to decode JWT: {}", e))
+            GenevaConfigClientError::JwtTokenError(format!("Failed to decode JWT: {}", e))
         })?;
 
     let decoded_str = String::from_utf8(decoded).map_err(|e| {
-        GenevaConfigClientError::Certificate(format!("Invalid UTF-8 in JWT: {}", e))
+        GenevaConfigClientError::JwtTokenError(format!("Invalid UTF-8 in JWT: {}", e))
     })?;
 
     // Parse as JSON and extract the Endpoint claim
@@ -502,7 +509,7 @@ fn extract_endpoint_from_token(token: &str) -> Result<String> {
     let endpoint = payload_json["Endpoint"]
         .as_str()
         .ok_or_else(|| {
-            GenevaConfigClientError::Certificate("No Endpoint claim in JWT token".to_string())
+            GenevaConfigClientError::JwtTokenError("No Endpoint claim in JWT token".to_string())
         })?
         .to_string();
 
