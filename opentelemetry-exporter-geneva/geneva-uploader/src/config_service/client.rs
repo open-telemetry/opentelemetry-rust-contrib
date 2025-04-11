@@ -160,25 +160,25 @@ struct GenevaResponse {
     #[serde(rename = "StorageAccountKeys", default)]
     storage_account_keys: Vec<StorageAccountKey>,
     // Keep tag_id as it might be used for validation
-    #[serde(rename = "TagId", default)]
-    tag_id: Option<String>,
+    #[serde(rename = "TagId")]
+    tag_id: String,
 }
 
 #[allow(dead_code)]
 struct CachedAuthData {
     // Store the complete token and moniker info
-    auth_info: Option<(IngestionGatewayInfo, MonikerInfo)>,
+    auth_info: (IngestionGatewayInfo, MonikerInfo),
     // Store the endpoint from token for quick access
-    token_endpoint: Option<String>,
+    token_endpoint: String,
     // Store expiry separately for quick access
-    token_expiry: Option<DateTime<Utc>>,
+    token_expiry: DateTime<Utc>,
 }
 
 #[allow(dead_code)]
 pub(crate) struct GenevaConfigClient {
     config: GenevaConfigClientConfig,
     http_client: Client,
-    cached_data: RwLock<CachedAuthData>,
+    cached_data: RwLock<Option<CachedAuthData>>,
     precomputed_url_prefix: String,
     agent_identity: String,
     agent_version: String,
@@ -263,11 +263,7 @@ impl GenevaConfigClient {
         Ok(Self {
             config,
             http_client,
-            cached_data: RwLock::new(CachedAuthData {
-                auth_info: None,
-                token_endpoint: None,
-                token_expiry: None,
-            }),
+            cached_data: RwLock::new(None),
             precomputed_url_prefix: pre_url,
             agent_identity: agent_identity.to_string(), // TODO make this configurable
             agent_version: "1.0".to_string(),           // TODO make this configurable
@@ -287,7 +283,7 @@ impl GenevaConfigClient {
         self.cached_data
             .read()
             .ok()
-            .and_then(|data| data.token_expiry)
+            .and_then(|guard| guard.as_ref().map(|data| data.token_expiry))
     }
 
     fn build_static_headers(agent_identity: &str, agent_version: &str) -> HeaderMap {
@@ -346,22 +342,15 @@ impl GenevaConfigClient {
         &self,
     ) -> Result<(IngestionGatewayInfo, MonikerInfo, String)> {
         // First, try to read from cache (shared read access)
-        {
-            let cached_data: std::sync::RwLockReadGuard<'_, CachedAuthData> =
-                self.cached_data.read().map_err(|_| {
-                    GenevaConfigClientError::InternalError("RwLock poisoned".to_string())
-                })?;
-
-            if let Some(expiry) = cached_data.token_expiry {
-                // Use 5-minute buffer for token expiry check
-                // Token lasts for 3 days (as observed), so 5 minutes is plenty of safety margin
-                // This ensures we have time to refresh before the token expires
+        if let Ok(guard) = self.cached_data.read() {
+            if let Some(cached_data) = guard.as_ref() {
+                let expiry = cached_data.token_expiry;
                 if expiry > Utc::now() + chrono::Duration::minutes(5) {
-                    if let (Some((ingestion, moniker)), Some(endpoint)) =
-                        (&cached_data.auth_info, &cached_data.token_endpoint)
-                    {
-                        return Ok((ingestion.clone(), moniker.clone(), endpoint.clone()));
-                    }
+                    return Ok((
+                        cached_data.auth_info.0.clone(),
+                        cached_data.auth_info.1.clone(),
+                        cached_data.token_endpoint.clone(),
+                    ));
                 }
             }
         }
@@ -370,8 +359,13 @@ impl GenevaConfigClient {
         // Perform actual fetch before acquiring write lock to minimize lock contention
         let (fresh_ingestion_gateway_info, fresh_moniker_info) =
             self.fetch_ingestion_info().await?;
-        let token_expiry =
-            self.parse_token_expiry(&fresh_ingestion_gateway_info.auth_token_expiry_time);
+
+        let token_expiry = self
+            .parse_token_expiry(&fresh_ingestion_gateway_info.auth_token_expiry_time)
+            .ok_or_else(|| {
+                GenevaConfigClientError::InternalError("Failed to parse token expiry".into())
+            })?;
+
         let token_endpoint = extract_endpoint_from_token(&fresh_ingestion_gateway_info.auth_token)
             .map_err(|e| {
                 GenevaConfigClientError::Certificate(format!(
@@ -382,23 +376,29 @@ impl GenevaConfigClient {
 
         // Now update the cache with exclusive write access
         {
-            let cached_data = self.cached_data.write().map_err(|_| {
+            let mut guard = self.cached_data.write().map_err(|_| {
                 GenevaConfigClientError::InternalError("RwLock poisoned".to_string())
             })?;
 
             // Double-check in case another thread updated while we were fetching
-            if let Some(existing) = cached_data.token_expiry {
-                if let Some(new) = token_expiry {
-                    if existing >= new {
-                        // Existing token is newer, use it
-                        if let (Some(info), Some(endpoint)) =
-                            (&cached_data.auth_info, &cached_data.token_endpoint)
-                        {
-                            return Ok((info.0.clone(), info.1.clone(), endpoint.clone()));
-                        }
-                    }
+            if let Some(existing) = guard.as_ref() {
+                if existing.token_expiry >= token_expiry {
+                    return Ok((
+                        existing.auth_info.0.clone(),
+                        existing.auth_info.1.clone(),
+                        existing.token_endpoint.clone(),
+                    ));
                 }
             }
+            // Update with fresh data
+            *guard = Some(CachedAuthData {
+                auth_info: (
+                    fresh_ingestion_gateway_info.clone(),
+                    fresh_moniker_info.clone(),
+                ),
+                token_endpoint: token_endpoint.clone(),
+                token_expiry,
+            });
 
             Ok((
                 fresh_ingestion_gateway_info,
