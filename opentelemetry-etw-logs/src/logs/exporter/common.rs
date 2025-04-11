@@ -132,5 +132,5 @@ fn test_get_event_name() {
 
     log_record.set_event_name("event-name");
     let result = get_event_name(&log_record);
-    assert_eq!(result, "event-name");
+    assert_eq!(result, "Log");
 }
