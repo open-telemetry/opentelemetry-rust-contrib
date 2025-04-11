@@ -52,5 +52,4 @@ $ firefox http://localhost:16686/
 
 - `awc` -- enable support for tracing the `awc` http client.
 - `metrics` -- enable support for opentelemetry metrics (only traces are enabled by default)
-- `metrics-prometheus` -- enable support for prometheus metrics (requires `metrics` feature)
 - `sync-middleware` -- enable tracing on actix-web middlewares that do synchronous work before returning a future. Adds a small amount of overhead to every request.
