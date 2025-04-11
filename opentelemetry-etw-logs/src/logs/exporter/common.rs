@@ -76,7 +76,7 @@ pub const fn convert_severity_to_level(severity: Severity) -> tld::Level {
 }
 
 pub fn get_event_name(log_record: &opentelemetry_sdk::logs::SdkLogRecord) -> &str {
-    log_record.event_name().unwrap_or("Log")
+    "Log"
 }
 
 #[cfg(test)]
