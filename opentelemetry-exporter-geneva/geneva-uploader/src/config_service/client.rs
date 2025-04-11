@@ -152,7 +152,7 @@ struct StorageAccountKey {
 struct GenevaResponse {
     #[serde(rename = "IngestionGatewayInfo")]
     ingestion_gateway_info: IngestionGatewayInfo,
-    // Make storage_account_keys optional since it might not be present in all responses
+    // TODO: Make storage_account_keys optional since it might not be present in all responses
     #[serde(rename = "StorageAccountKeys", default)]
     storage_account_keys: Vec<StorageAccountKey>,
     // Keep tag_id as it might be used for validation
