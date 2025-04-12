@@ -206,9 +206,7 @@ impl GenevaConfigClient {
     pub(crate) async fn new(config: GenevaConfigClientConfig) -> Result<Self> {
         let mut client_builder = Client::builder()
             .http1_only()
-            .timeout(Duration::from_secs(30))
-            .pool_idle_timeout(Duration::from_secs(90))
-            .pool_max_idle_per_host(16);
+            .timeout(Duration::from_secs(30)); //TODO - make this configurable
 
         match &config.auth_method {
             // TODO: Certificate auth would be removed in favor of managed identity.,
