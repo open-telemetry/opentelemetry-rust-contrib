@@ -441,11 +441,11 @@ impl GenevaConfigClient {
                 }
             };
 
-            for account in &parsed.storage_account_keys {
+            for account in parsed.storage_account_keys {
                 if account.is_primary_moniker && account.account_moniker_name.contains("diag") {
                     let moniker_info = MonikerInfo {
-                        name: account.account_moniker_name.clone(),
-                        account_group: account.account_group_name.clone(),
+                        name: account.account_moniker_name,
+                        account_group: account.account_group_name,
                     };
 
                     return Ok((parsed.ingestion_gateway_info, moniker_info));
