@@ -210,9 +210,9 @@ impl GenevaConfigClient {
     /// * `Result<Self>` - A new client instance or an error
     ///
     /// # Errors
-    /// * `GenevaConfigClientError::Certificate` - If certificate authentication fails
-    /// * `GenevaConfigClientError::Io` - If reading certificate files fails
-    /// * `GenevaConfigClientError::Tls` - If TLS configuration fails
+    /// * `GenevaConfigClientError::Io` - If reading the certificate file from disk fails
+    /// * `GenevaConfigClientError::Tls` - If constructing the TLS connector fails
+    /// * `GenevaConfigClientError::AuthMethodNotImplemented` - If the specified auth method is not yet supported
     #[allow(dead_code)]
     pub(crate) async fn new(config: GenevaConfigClientConfig) -> Result<Self> {
         let mut client_builder = Client::builder()
