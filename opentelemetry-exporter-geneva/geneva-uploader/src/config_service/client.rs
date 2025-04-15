@@ -477,7 +477,7 @@ fn get_os_type() -> &'static str {
 fn extract_endpoint_from_token(token: &str) -> Result<String> {
     let parts: Vec<&str> = token.split('.').collect();
     if parts.len() != 3 {
-        return Err(GenevaConfigClientError::Certificate(
+        return Err(GenevaConfigClientError::JwtTokenError(
             "Invalid JWT token format".into(),
         ));
     }
