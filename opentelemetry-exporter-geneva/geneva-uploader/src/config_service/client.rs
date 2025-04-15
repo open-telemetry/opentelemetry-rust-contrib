@@ -482,7 +482,9 @@ fn extract_endpoint_from_token(token: &str) -> Result<String> {
         ));
     }
 
-    // Decode the payload
+    // Base64-decode the JWT payload (2nd segment of the token).
+    // Some JWTs may omit padding ('='), so we restore it manually to ensure valid Base64.
+    // This is necessary because the decoder (URL_SAFE_NO_PAD) expects properly padded input.
     let payload = parts[1];
     let payload = match payload.len() % 4 {
         0 => payload.to_string(),
@@ -491,12 +493,14 @@ fn extract_endpoint_from_token(token: &str) -> Result<String> {
         _ => payload.to_string(),
     };
 
+    // Decode the Base64-encoded payload into raw bytes
     let decoded = general_purpose::URL_SAFE_NO_PAD
         .decode(payload)
         .map_err(|e| {
             GenevaConfigClientError::JwtTokenError(format!("Failed to decode JWT: {}", e))
         })?;
 
+    // Convert the raw bytes into a UTF-8 string
     let decoded_str = String::from_utf8(decoded).map_err(|e| {
         GenevaConfigClientError::JwtTokenError(format!("Invalid UTF-8 in JWT: {}", e))
     })?;
@@ -505,6 +509,7 @@ fn extract_endpoint_from_token(token: &str) -> Result<String> {
     let payload_json: serde_json::Value =
         serde_json::from_str(&decoded_str).map_err(GenevaConfigClientError::SerdeJson)?;
 
+    // Extract "Endpoint" from JWT payload as a string, or fail if missing or invalid.
     let endpoint = payload_json["Endpoint"]
         .as_str()
         .ok_or_else(|| {
