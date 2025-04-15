@@ -59,22 +59,33 @@ pub(crate) enum AuthMethod {
 
 #[derive(Debug, Error)]
 pub(crate) enum GenevaConfigClientError {
-    #[error("HTTP error: {0}")]
-    Http(#[from] reqwest::Error),
-    #[error("Certificate error: {0}")]
-    Certificate(String),
+    // Authentication-related errors
+    #[error("Authentication method not implemented: {0}")]
+    AuthMethodNotImplemented(String),
     #[error("Missing Auth Info: {0}")]
     AuthInfoNotFound(String),
-    #[error("Request failed with status {status}: {message}")]
-    RequestFailed { status: u16, message: String },
-    #[error("IO error: {0}")]
-    Io(#[from] std::io::Error),
-    #[error("TLS error: {0}")]
-    Tls(#[from] native_tls::Error),
-    #[error("JSON error: {0}")]
-    SerdeJson(#[from] serde_json::Error),
     #[error("Invalid or malformed JWT token: {0}")]
     JwtTokenError(String),
+    #[error("Certificate error: {0}")]
+    Certificate(String),
+
+    // Networking / HTTP / TLS
+    #[error("HTTP error: {0}")]
+    Http(#[from] reqwest::Error),
+    #[error("Request failed with status {status}: {message}")]
+    RequestFailed { status: u16, message: String },
+    #[error("TLS error: {0}")]
+    Tls(#[from] native_tls::Error),
+
+    // Data / parsing
+    #[error("JSON error: {0}")]
+    SerdeJson(#[from] serde_json::Error),
+
+    // System / I/O
+    #[error("IO error: {0}")]
+    Io(#[from] std::io::Error),
+
+    // Misc
     #[error("Moniker not found: {0}")]
     MonikerNotFound(String),
     #[error("Internal error: {0}")]
@@ -221,7 +232,7 @@ impl GenevaConfigClient {
                 client_builder = client_builder.use_preconfigured_tls(tls_connector);
             }
             AuthMethod::ManagedIdentity => {
-                return Err(GenevaConfigClientError::Certificate(
+                return Err(GenevaConfigClientError::AuthMethodNotImplemented(
                     "Managed Identity authentication is not implemented yet".into(),
                 ));
             }
