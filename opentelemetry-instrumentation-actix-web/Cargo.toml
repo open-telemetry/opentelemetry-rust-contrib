@@ -1,25 +1,18 @@
 [package]
-name = "actix-web-opentelemetry"
+name = "opentelemetry-instrumentation-actix-web"
 version = "0.22.0"
-description = "Deprecated: 0.22.0 is the last release for this crate. Use opentelemetry-instrumentation-actix-web instead"
+description = "OpenTelemetry instrumentation for Actix Web apps"
 homepage = "https://github.com/open-telemetry/opentelemetry-rust-contrib/tree/main/actix-web-opentelemetry"
 repository = "https://github.com/open-telemetry/opentelemetry-rust-contrib/tree/main/actix-web-opentelemetry"
 readme = "README.md"
 categories = ["api-bindings"]
-keywords = ["actix", "actix-web", "opentelemetry", "jaeger", "prometheus"]
+keywords = ["actix", "actix-web", "opentelemetry"]
 license = "Apache-2.0"
 edition = "2021"
 rust-version = "1.75.0"
 
 [features]
 metrics = ["opentelemetry/metrics"]
-metrics-prometheus = [
-  "metrics",
-  "opentelemetry-prometheus",
-  "prometheus",
-  "dep:opentelemetry_sdk",
-  "dep:tracing",
-]
 sync-middleware = []
 
 [dependencies]
@@ -36,22 +29,15 @@ futures-util = { version = "0.3", default-features = false, features = [
   "alloc",
 ] }
 opentelemetry = { workspace = true, features = ["trace"] }
-opentelemetry-prometheus = { version = "0.29", optional = true }
 opentelemetry-semantic-conventions = { workspace = true, features = [
   "semconv_experimental",
 ] }
-opentelemetry_sdk = { workspace = true, optional = true, features = [
-  "metrics",
-  "rt-tokio-current-thread",
-] }
-prometheus = { version = "0.13", default-features = false, optional = true }
 serde = "1.0"
-tracing = { version = "0.1.41", optional = true }
 
 [dev-dependencies]
 actix-web = { version = "4.0", features = ["macros"] }
-actix-web-opentelemetry = { path = ".", features = [
-  "metrics-prometheus",
+opentelemetry-instrumentation-actix-web = { path = ".", features = [
+  "metrics",
   "sync-middleware",
   "awc",
 ] }
@@ -60,7 +46,6 @@ opentelemetry_sdk = { workspace = true, features = [
   "metrics",
   "rt-tokio-current-thread",
 ] }
-opentelemetry-otlp = { version = "0.29", features = ["grpc-tonic"] }
 opentelemetry-stdout = { workspace = true, features = ["trace", "metrics"] }
 
 [package.metadata.docs.rs]

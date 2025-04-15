@@ -1,5 +1,35 @@
 # Changelog
 
+## vNext
+
+### Changed
+
+* Remove `opentelemetry-prometheus`, `opentelemetry_sdk`, `prometheus` and `tracing` dependencies
+* **Breaking** Rename crate to `opentelemetry-instrumentation-actix-web`
+* **Breaking** Remove `metrics-prometheus` feature and use `metric` feature instead
+* **Breaking** Remove Prometheus middleware `PrometheusMetricsHandler` and use OTLP exporter instead
+  ```rust
+  // Initialize OTLP exporter using HTTP binary protocol
+  let exporter = opentelemetry_otlp::MetricExporter::builder()
+      .with_http()
+      .with_protocol(Protocol::HttpBinary)
+      .with_endpoint("http://localhost:9090/api/v1/otlp/v1/metrics")
+      .build()?;
+
+  // set up your meter provider with your exporter(s)
+  let provider = SdkMeterProvider::builder()
+      .with_periodic_exporter(exporter)
+      .with_resource(
+          // recommended attributes
+          Resource::builder_empty()
+              .with_attribute(KeyValue::new("service.name", "my_app"))
+              .with_attribute(KeyValue::new("service.instance.id", Uuid::new_v4().to_string()))
+              .build(),
+      )
+      .build();
+  global::set_meter_provider(provider.clone());
+  ```
+
 ## [v0.22.0](https://github.com/OutThereLabs/actix-web-opentelemetry/compare/v0.22.0..v0.21.0)
 
 ### Changed

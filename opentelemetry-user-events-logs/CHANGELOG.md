@@ -2,6 +2,9 @@
 
 ## vNext
 
+- Enhanced validation for the provider name in `with_user_event_exporter(provider_name)`:
+  - Empty provider names are now disallowed.
+
 ## v0.12.0
 
 - Added support for Populating Cloud RoleName, RoleInstance from Resource's
@@ -74,13 +77,13 @@
 - **BREAKING** Decouple Exporter creation with the Reentrant processor [#82](https://github.com/open-telemetry/opentelemetry-rust-contrib/pull/82)
   The UserEventsExporter is now created separately and passed to the ReentrantProcessor. Update your application code from:
   ```rust
-    let reenterant_processor = ReentrantLogProcessor::new("test", None, exporter_config);
+    let reentrant_processor = ReentrantLogProcessor::new("test", None, exporter_config);
   ```
   to:
 
   ```rust
       let exporter = UserEventsExporter::new("test", None, exporter_config);
-      let reenterant_processor = ReentrantLogProcessor::new(exporter);
+      let reentrant_processor = ReentrantLogProcessor::new(exporter);
   ``
 - Bump opentelemetry and opentelemetry_sdk versions to 0.24
 

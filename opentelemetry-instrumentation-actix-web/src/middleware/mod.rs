@@ -7,7 +7,7 @@ pub(crate) mod route_formatter;
 pub(crate) mod trace;
 
 pub(crate) fn get_scope() -> InstrumentationScope {
-    InstrumentationScope::builder("actix-web-opentelemetry")
+    InstrumentationScope::builder("opentelemetry-instrumentation-actix-web")
         .with_version(env!("CARGO_PKG_VERSION"))
         .with_schema_url(opentelemetry_semantic_conventions::SCHEMA_URL)
         .build()

@@ -7,6 +7,22 @@ use opentelemetry_sdk::Resource;
 
 use crate::logs::exporter::*;
 
+pub fn validate_provider_name(provider_name: &str) -> Result<(), String> {
+    if provider_name.is_empty() {
+        return Err("Provider name cannot be empty.".to_string());
+    }
+    if provider_name.len() >= 234 {
+        return Err("Provider name must be less than 234 characters.".to_string());
+    }
+    if !provider_name
+        .chars()
+        .all(|c| c.is_ascii_alphanumeric() || c == '_')
+    {
+        return Err("Provider name must contain only ASCII letters, digits, and '_'.".to_string());
+    }
+    Ok(())
+}
+
 /// Thread-safe LogProcessor for exporting logs to ETW.
 
 #[derive(Debug)]
@@ -82,7 +98,7 @@ mod tests {
 
     #[test]
     fn test_emit() {
-        let processor = ReentrantLogProcessor::new("test-provider-name");
+        let processor: ReentrantLogProcessor = ReentrantLogProcessor::new("test-provider-name");
 
         let mut record = SdkLoggerProvider::builder()
             .build()
