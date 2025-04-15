@@ -287,14 +287,6 @@ impl GenevaConfigClient {
             .map(|dt| dt.with_timezone(&Utc))
     }
 
-    #[allow(dead_code)]
-    pub(crate) fn get_token_expiry(&self) -> Option<DateTime<Utc>> {
-        self.cached_data
-            .read()
-            .ok()
-            .and_then(|guard| guard.as_ref().map(|data| data.token_expiry))
-    }
-
     fn build_static_headers(agent_identity: &str, agent_version: &str) -> HeaderMap {
         let mut headers = HeaderMap::new();
         let user_agent = format!("{}-{}", agent_identity, agent_version);
