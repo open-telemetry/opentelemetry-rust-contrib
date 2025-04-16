@@ -2,9 +2,7 @@ use http_body_util::Full;
 use hyper::body::Bytes;
 use hyper::{Request, Response};
 use opentelemetry::global;
-use opentelemetry_otlp::{
-    WithExportConfig, {self},
-};
+use opentelemetry_otlp;
 use opentelemetry_sdk::metrics::PeriodicReader;
 use opentelemetry_sdk::Resource;
 use std::convert::Infallible;
@@ -12,7 +10,6 @@ use std::net::SocketAddr;
 use std::time::Duration;
 use tokio::net::TcpListener;
 use tower::ServiceBuilder;
-use tower_otel_http_metrics;
 
 const SERVICE_NAME: &str = "example-hyper-http-service";
 // Metric export interval should be less than or equal to 15s

@@ -1,13 +1,10 @@
 use axum::routing::{get, post, put, Router};
 use bytes::Bytes;
 use opentelemetry::global;
-use opentelemetry_otlp::{
-    WithExportConfig, {self},
-};
+use opentelemetry_otlp;
 use opentelemetry_sdk::metrics::PeriodicReader;
 use opentelemetry_sdk::Resource;
 use std::time::Duration;
-use tower_otel_http_metrics;
 
 const SERVICE_NAME: &str = "example-axum-http-service";
 // Metric export interval should be less than or equal to 15s
