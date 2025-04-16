@@ -1,0 +1,16 @@
+[package]
+name = "example-axum-http-service"
+version = "0.1.0-alpha.0"
+edition = "2021"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[dependencies]
+tower_otel_http_metrics = { path = "../../", package = "tower-otel-http-metrics", features = ["axum"], default-features = false }
+axum = { features = ["http1", "tokio"], version = "0.8", default-features = false }
+bytes = { version = "1", default-features = false }
+opentelemetry = { version = "0.29", default-features = false }
+opentelemetry_sdk = { version = "0.29", default-features = false }
+opentelemetry-otlp = { version = "0.29", features = ["grpc-tonic", "metrics"], default-features = false }
+tokio = { version = "1", features = ["rt-multi-thread"], default-features = false }
+rand_09 = { package = "rand", version = "0.9" }

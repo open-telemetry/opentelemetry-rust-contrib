@@ -1,0 +1,16 @@
+FROM rust:1-bullseye AS builder
+WORKDIR /home/echo-server
+
+RUN apt-get update \
+    && apt-get install -y protobuf-compiler
+
+COPY . /home
+
+WORKDIR /home/examples/axum-http-service
+RUN cargo build --locked --release
+
+FROM debian:bullseye-slim
+LABEL org.opencontainers.image.source=https://github.com/francoposa/tower-otel-http-metrics/examples/axum-http-service
+
+COPY --from=builder /home/examples/axum-http-service/target/release/example-axum-http-service /usr/local/bin/echo-server
+CMD ["echo-server"]
