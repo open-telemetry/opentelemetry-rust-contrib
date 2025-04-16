@@ -6,6 +6,8 @@ members = [
     "opentelemetry-etw-logs",
     "opentelemetry-etw-metrics",
     "opentelemetry-instrumentation-actix-web",
+    "opentelemetry-instrumentation-tower",
+    "opentelemetry-instrumentation-tower/examples/*",
     "opentelemetry-resource-detectors",
     "opentelemetry-stackdriver",
     "opentelemetry-user-events-logs",
