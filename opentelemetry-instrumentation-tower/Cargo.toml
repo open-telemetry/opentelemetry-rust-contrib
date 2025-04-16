@@ -1,0 +1,27 @@
+[package]
+name = "tower-otel-http-metrics"
+edition = "2021"
+version = "0.14.0"
+license = "MIT"
+description = "OpenTelemetry Metrics Middleware for Tower-compatible Rust HTTP servers"
+homepage = "https://github.com/francoposa/tower-otel-http-metrics"
+repository = "https://github.com/francoposa/tower-otel-http-metrics"
+documentation = "https://docs.rs/tower-otel-http-metrics"
+readme = "README.md"
+include = ["src/"]
+
+[features]
+default = []
+axum = ["dep:axum"]
+
+[dependencies]
+axum = { features = ["matched-path", "macros"], version = "0.8", default-features = false, optional = true }
+futures-util = { version = "0.3", default-features = false }
+http = { version = "1", features = ["std"], default-features = false }
+http-body = { version = "1", default-features = false }
+opentelemetry = { version = "0.29", features = ["futures-core", "futures-sink", "pin-project-lite", "metrics"], default-features = false }
+pin-project-lite = { version = "0.2", default-features = false }
+tower-service = { version = "0.3", default-features = false }
+tower-layer = { version = "0.3", default-features = false }
+
+[dev-dependencies]
