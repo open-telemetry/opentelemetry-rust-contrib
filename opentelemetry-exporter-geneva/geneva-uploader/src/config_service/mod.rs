@@ -108,7 +108,7 @@ mod tests {
             },
         };
 
-        let client = GenevaConfigClient::new(config).await.unwrap();
+        let client = GenevaConfigClient::new(config).unwrap();
         let (ingestion_info, moniker_info, token_endpoint) =
             client.get_ingestion_info().await.unwrap();
 
@@ -153,7 +153,7 @@ mod tests {
             },
         };
 
-        let client = GenevaConfigClient::new(config).await.unwrap();
+        let client = GenevaConfigClient::new(config).unwrap();
         let result = client.get_ingestion_info().await;
 
         assert!(result.is_err());
@@ -204,7 +204,7 @@ mod tests {
             },
         };
 
-        let client = GenevaConfigClient::new(config).await.unwrap();
+        let client = GenevaConfigClient::new(config).unwrap();
         let result = client.get_ingestion_info().await;
 
         assert!(result.is_err());
@@ -235,7 +235,7 @@ mod tests {
             },
         };
 
-        let result = GenevaConfigClient::new(config).await;
+        let result = GenevaConfigClient::new(config);
 
         assert!(result.is_err());
         match result {
@@ -299,9 +299,7 @@ mod tests {
         };
 
         println!("Connecting to real Geneva Config service...");
-        let client = GenevaConfigClient::new(config)
-            .await
-            .expect("Failed to create client");
+        let client = GenevaConfigClient::new(config).expect("Failed to create client");
 
         println!("Fetching ingestion info...");
         let (ingestion_info, moniker, _token_endpoint) = client

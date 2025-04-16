@@ -214,7 +214,7 @@ impl GenevaConfigClient {
     /// * `GenevaConfigClientError::Tls` - If constructing the TLS connector fails
     /// * `GenevaConfigClientError::AuthMethodNotImplemented` - If the specified auth method is not yet supported
     #[allow(dead_code)]
-    pub(crate) async fn new(config: GenevaConfigClientConfig) -> Result<Self> {
+    pub(crate) fn new(config: GenevaConfigClientConfig) -> Result<Self> {
         let mut client_builder = Client::builder()
             .http1_only()
             .timeout(Duration::from_secs(30)); //TODO - make this configurable
@@ -226,6 +226,8 @@ impl GenevaConfigClient {
                 // Read the PKCS#12 file
                 let p12_bytes = fs::read(path)?;
                 let identity = Identity::from_pkcs12(&p12_bytes, password)?;
+                //TODO - use use_native_tls instead of preconfigured_tls once we no longer need self-signed certs
+                // and TLS 1.2 as the exclusive protocol.
                 let tls_connector =
                     configure_tls_connector(native_tls::TlsConnector::builder(), identity)
                         .build()?;
