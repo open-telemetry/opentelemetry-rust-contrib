@@ -16,3 +16,6 @@ opentelemetry-otlp = { version = "0.29", features = ["grpc-tonic", "metrics"], d
 tokio = { version = "1", features = ["rt-multi-thread", "macros"], default-features = false }
 tower = { version = "0.5", default-features = false }
 rand_09 = { package = "rand", version = "0.9" }
+
+[lints]
+workspace = true
