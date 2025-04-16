@@ -1,0 +1,71 @@
+---
+extensions:
+  basicauth/otlp:
+    client_auth:
+      username: team-a
+      password: team-a
+
+receivers:
+  otlp:
+    protocols:
+      grpc:
+        endpoint: 0.0.0.0:4317
+
+exporters:
+  debug:
+    verbosity: detailed
+  otlphttp/grafana-cloud:
+    # see https://grafana.com/docs/grafana-cloud/send-data/otlp/send-data-otlp/
+    # for how to get your endpoint, username, and password (cloud access policy token)
+    endpoint: https://otlp-gateway-prod-us-central-0.grafana.net/otlp
+    auth:
+      authenticator: basicauth/otlp
+  otlphttp/mimir-microservices-mode-local:
+    endpoint: http://127.0.0.1:8000/otlp
+    # use for multi-tenant Mimir
+    #    headers:
+    #      "X-Scope-OrgId": "team-a"
+    #    auth:
+    #      authenticator: basicauth/otlp
+  otlphttp/mimir-monolithic-mode-local:
+    endpoint: http://127.0.0.1:8001/otlp
+  otlphttp/mimir-monolithic-mode-docker-compose:
+    endpoint: http://mimir:8001/otlp
+  otlphttp/grafana-enterprise-metrics-local:
+    endpoint: http://127.0.0.1:8081/otlp
+    headers:
+      "X-Scope-OrgId": "team-a"
+    auth:
+      authenticator: basicauth/otlp
+  otlphttp/grafana-enterprise-metrics-gateway-local:
+    endpoint: http://127.0.0.1:8888/otlp
+    headers:
+      "X-Scope-OrgId": "team-a"
+    auth:
+      authenticator: basicauth/otlp
+  prometheusremotewrite/grafana-cloud:
+    # not in use, now that pushing to Grafana OTEL endpoint is working
+    endpoint: https://prometheus-us-central1.grafana.net/api/prom/push
+    auth:
+      authenticator: basicauth/otlp
+    resource_to_telemetry_conversion:
+      enabled: true  # convert resource attributes to metric labels
+
+service:
+  telemetry:
+    metrics:
+      # disable metrics export from collector self-instrumentation
+      # tends to collide with other ports when running on host network
+      # https://github.com/open-telemetry/opentelemetry-collector/discussions/6547
+      level: none
+  extensions: [ basicauth/otlp ]
+  pipelines:
+    metrics:
+      receivers: [ otlp ]
+      exporters: [ debug, otlphttp/mimir-monolithic-mode-docker-compose ]
+#    traces:
+#      receivers: [ otlp ]
+#      exporters: [ debug ]
+#    logs:
+#      receivers: [ otlp ]
+#      exporters: [ debug ]
