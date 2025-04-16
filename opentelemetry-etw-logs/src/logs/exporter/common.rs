@@ -1,5 +1,6 @@
 #[cfg(feature = "serde_json")]
 use crate::logs::converters::IntoJson;
+use crate::logs::ExporterOptions;
 use opentelemetry::{
     logs::{AnyValue, Severity},
     Key,
@@ -75,7 +76,23 @@ pub const fn convert_severity_to_level(severity: Severity) -> tld::Level {
     }
 }
 
-pub fn get_event_name(_log_record: &opentelemetry_sdk::logs::SdkLogRecord) -> &str {
+pub fn get_event_name(
+    options: &ExporterOptions,
+    log_record: &opentelemetry_sdk::logs::SdkLogRecord,
+) -> &'static str {
+    // Using target for now. This would be the default behavior.
+    // Future versions of this library may add mechanisms to chose the key of the mapping
+    if let Some(target) = log_record.target() {
+        if let Some(mapping) = options.event_mapping() {
+            match mapping {
+                crate::logs::EventMapping::HashMap(hash_map) => {
+                    if let Some(name) = hash_map.get(target.as_ref()) {
+                        return name;
+                    }
+                }
+            }
+        }
+    }
     "Log"
 }
 
@@ -86,9 +103,10 @@ pub mod test_utils {
     use opentelemetry_sdk::logs::SdkLoggerProvider;
 
     use super::super::ETWExporter;
+    use super::ExporterOptions;
 
     pub fn new_etw_exporter() -> ETWExporter {
-        ETWExporter::new("test-provider-name")
+        ETWExporter::new(test_options())
     }
 
     pub fn new_instrumentation_scope() -> opentelemetry::InstrumentationScope {
@@ -100,6 +118,12 @@ pub mod test_utils {
             .build()
             .logger("test")
             .create_log_record()
+    }
+
+    pub fn test_options() -> ExporterOptions {
+        ExporterOptions::builder("test_provider_name".to_string())
+            .build()
+            .unwrap()
     }
 }
 
@@ -127,10 +151,11 @@ fn test_get_event_name() {
 
     let mut log_record = test_utils::new_sdk_log_record();
 
-    let result = get_event_name(&log_record);
+    let result = get_event_name(&test_utils::test_options(), &log_record);
     assert_eq!(result, "Log");
 
     log_record.set_event_name("event-name");
-    let result = get_event_name(&log_record);
+    let result = get_event_name(&test_utils::test_options(), &log_record);
     assert_eq!(result, "Log");
 }
+

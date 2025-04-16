@@ -40,13 +40,21 @@
 
 use opentelemetry_appender_tracing::layer;
 use opentelemetry_etw_logs::ETWLoggerProviderBuilderExt;
+use opentelemetry_etw_logs::EventMapping;
 use opentelemetry_etw_logs::ExporterOptions;
 use opentelemetry_sdk::logs::SdkLoggerProvider;
+use std::collections::HashMap;
 use tracing::error;
 use tracing_subscriber::prelude::*;
 
 fn init_logger() -> SdkLoggerProvider {
+    let mapping = EventMapping::HashMap(HashMap::from([
+        ("opentelemetry*", "opentelemetry"),
+        ("hyper", "hyper"),
+        ("tracing", "tracing-logs"),
+    ]));
     let exporter_options = ExporterOptions::builder("provider-name".to_string())
+        .with_event_mapping(mapping)
         .build()
         .unwrap();
 

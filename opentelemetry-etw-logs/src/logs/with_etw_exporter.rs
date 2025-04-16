@@ -1,24 +1,29 @@
-use crate::logs::reentrant_logprocessor::{validate_provider_name, ReentrantLogProcessor};
-use opentelemetry::otel_warn;
+use super::reentrant_logprocessor::ReentrantLogProcessor;
+use super::ExporterOptions;
+
 use opentelemetry_sdk::logs::LoggerProviderBuilder;
 
 /// Extension trait for adding a ETW exporter to the logger provider builder.
 pub trait ETWLoggerProviderBuilderExt {
     /// Adds an ETW exporter to the logger provider builder with the given provider name and event_name.
-    fn with_etw_exporter(self, provider_name: &str) -> Self;
+    fn with_etw_exporter(self, options: ExporterOptions) -> Self;
 }
 
 impl ETWLoggerProviderBuilderExt for LoggerProviderBuilder {
-    fn with_etw_exporter(self, provider_name: &str) -> Self {
-        if let Err(error) = validate_provider_name(provider_name) {
-            otel_warn!(name: "ETW.Exporter.CreationFailed", reason = &error);
-            self
-        } else {
-            let reentrant_processor = ReentrantLogProcessor::new(provider_name);
-            self.with_log_processor(reentrant_processor)
-        }
+    fn with_etw_exporter(self, options: ExporterOptions) -> Self {
+        let reentrant_processor = ReentrantLogProcessor::new(options);
+        self.with_log_processor(reentrant_processor)
     }
 }
+
+// impl<'a> std::fmt::Debug for ExporterOptions {
+//     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+//         f.debug_struct("ExporterOptions")
+//             .field("provider_name", &self.provider_name)
+//             .field("event_mapping", &if self.event_mapping.is_some() { "Some(FnOnce)" } else { "None" })
+//             .finish()
+//     }
+// }
 
 #[cfg(test)]
 mod tests {
@@ -30,8 +35,11 @@ mod tests {
 
     #[test]
     fn with_etw_exporter_trait() {
+        let options = ExporterOptions::builder("provider_name".to_string())
+            .build()
+            .unwrap();
         let logger_provider = SdkLoggerProvider::builder()
-            .with_etw_exporter("provider-name")
+            .with_etw_exporter(options)
             .build();
 
         let layer = layer::OpenTelemetryTracingBridge::new(&logger_provider);
