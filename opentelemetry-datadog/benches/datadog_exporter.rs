@@ -195,10 +195,10 @@ fn generate_traces(number_of_traces: usize, spans_per_trace: usize) -> Vec<SpanD
     result
 }
 
-fn criterion_benchmark(c: &mut Criterion) {
+fn bench_export(c: &mut Criterion, api_version: ApiVersion) {
     let exporter = new_pipeline()
         .with_service_name("trace-demo")
-        .with_api_version(ApiVersion::Version05)
+        .with_api_version(api_version)
         .with_http_client(DummyClient)
         .build_exporter()
         .unwrap();
@@ -210,11 +210,22 @@ fn criterion_benchmark(c: &mut Criterion) {
         let data_ref = &data;
 
         c.bench_function(
-            format!("export {number_of_traces} traces with {spans_per_trace} spans").as_str(),
+            format!(
+                "export {number_of_traces} traces with {spans_per_trace} spans for {api_version:?}"
+            )
+            .as_str(),
             |b| b.iter(|| exporter.export(black_box(data_ref.clone()))),
         );
     }
 }
 
-criterion_group!(benches, criterion_benchmark);
+fn bench_export_v05(c: &mut Criterion) {
+    bench_export(c, ApiVersion::Version05);
+}
+
+fn bench_export_v07(c: &mut Criterion) {
+    bench_export(c, ApiVersion::Version07);
+}
+
+criterion_group!(benches, bench_export_v05, bench_export_v07);
 criterion_main!(benches);

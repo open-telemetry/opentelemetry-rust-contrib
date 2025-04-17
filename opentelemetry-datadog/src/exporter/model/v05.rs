@@ -1,13 +1,13 @@
 use crate::exporter::intern::StringInterner;
 use crate::exporter::model::{DD_MEASURED_KEY, SAMPLING_PRIORITY_KEY};
 use crate::exporter::{Error, ModelConfig};
-use crate::propagator::DatadogTraceState;
 use opentelemetry::trace::Status;
 use opentelemetry_sdk::trace::SpanData;
 use opentelemetry_sdk::Resource;
 use std::time::SystemTime;
 
 use super::unified_tags::{UnifiedTagField, UnifiedTags};
+use super::{get_measuring, get_sampling_priority, get_span_type};
 
 const SPAN_NUM_ELEMENTS: u32 = 12;
 const METRICS_LEN: u32 = 2;
@@ -127,28 +127,6 @@ fn write_unified_tag<'a>(
     Ok(())
 }
 
-#[cfg(not(feature = "agent-sampling"))]
-fn get_sampling_priority(_span: &SpanData) -> f64 {
-    1.0
-}
-
-#[cfg(feature = "agent-sampling")]
-fn get_sampling_priority(span: &SpanData) -> f64 {
-    if span.span_context.trace_state().priority_sampling_enabled() {
-        1.0
-    } else {
-        0.0
-    }
-}
-
-fn get_measuring(span: &SpanData) -> f64 {
-    if span.span_context.trace_state().measuring_enabled() {
-        1.0
-    } else {
-        0.0
-    }
-}
-
 #[allow(clippy::too_many_arguments)]
 fn encode_traces<'interner, S, N, R>(
     interner: &mut StringInterner<'interner>,
@@ -186,11 +164,8 @@ where
                 .unwrap_or(0);
 
             let mut span_type = interner.intern("");
-            for kv in &span.attributes {
-                if kv.key.as_str() == "span.type" {
-                    span_type = interner.intern_value(&kv.value);
-                    break;
-                }
+            if let Some(value) = get_span_type(span) {
+                span_type = interner.intern_value(value);
             }
 
             // Datadog span name is OpenTelemetry component name - see module docs for more information
