@@ -49,9 +49,9 @@ use tracing_subscriber::prelude::*;
 
 fn init_logger() -> SdkLoggerProvider {
     let mapping = EventMapping::HashMap(HashMap::from([
-        ("opentelemetry*", "opentelemetry"),
-        ("hyper", "hyper"),
-        ("tracing", "tracing-logs"),
+        ("opentelemetry*".into(), "opentelemetry".into()),
+        ("hyper".into(), "hyper".into()),
+        ("tracing".into(), "tracing-logs".into()),
     ]));
     let exporter_options = ExporterOptions::builder("provider-name".to_string())
         .with_event_mapping(mapping)

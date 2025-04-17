@@ -1,18 +1,24 @@
-use std::collections::HashMap;
 use opentelemetry::otel_warn;
+use std::collections::HashMap;
 
+/// TODO: Add documentation
 #[non_exhaustive]
 #[derive(Debug)]
 pub enum EventMapping {
-    HashMap(HashMap<&'static str, &'static str>),
+    /// TODO: Add documentation
+    HashMap(HashMap<String, String>),
+    /// TODO: Add documentation
+    FrozenMap(frozen_collections::FzStringMap<String, String>),
 }
 
+/// TODO: Add documentation
 #[derive(Debug)]
 pub struct ExporterOptions {
     provider_name: String,
     event_mapping: Option<EventMapping>,
 }
 
+/// TODO: Add documentation
 #[derive(Debug)]
 pub struct ExporterOptionsBuilder {
     provider_name: String,
@@ -20,14 +26,17 @@ pub struct ExporterOptionsBuilder {
 }
 
 impl ExporterOptions {
+    /// TODO: Add documentation
     pub fn builder(provider_name: String) -> ExporterOptionsBuilder {
         ExporterOptionsBuilder::new(provider_name)
     }
 
+    /// TODO: Add documentation
     pub fn provider_name(&self) -> &str {
         &self.provider_name
     }
 
+    /// TODO: Add documentation
     pub fn event_mapping(&self) -> Option<&EventMapping> {
         self.event_mapping.as_ref()
     }

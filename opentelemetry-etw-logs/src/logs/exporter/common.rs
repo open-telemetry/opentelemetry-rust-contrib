@@ -1,6 +1,7 @@
 #[cfg(feature = "serde_json")]
 use crate::logs::converters::IntoJson;
 use crate::logs::ExporterOptions;
+use frozen_collections::MapQuery;
 use opentelemetry::{
     logs::{AnyValue, Severity},
     Key,
@@ -79,7 +80,7 @@ pub const fn convert_severity_to_level(severity: Severity) -> tld::Level {
 pub fn get_event_name(
     options: &ExporterOptions,
     log_record: &opentelemetry_sdk::logs::SdkLogRecord,
-) -> &'static str {
+) -> String {
     // Using target for now. This would be the default behavior.
     // Future versions of this library may add mechanisms to chose the key of the mapping
     if let Some(target) = log_record.target() {
@@ -87,13 +88,18 @@ pub fn get_event_name(
             match mapping {
                 crate::logs::EventMapping::HashMap(hash_map) => {
                     if let Some(name) = hash_map.get(target.as_ref()) {
-                        return name;
+                        return name.clone();
+                    }
+                }
+                crate::logs::EventMapping::FrozenMap(frozen_map) => {
+                    if let Some(name) = frozen_map.get(target.as_ref()) {
+                        return name.clone();
                     }
                 }
             }
         }
     }
-    "Log"
+    "Log".into()
 }
 
 #[cfg(test)]
@@ -158,4 +164,3 @@ fn test_get_event_name() {
     let result = get_event_name(&test_utils::test_options(), &log_record);
     assert_eq!(result, "Log");
 }
-

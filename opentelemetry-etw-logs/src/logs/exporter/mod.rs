@@ -44,7 +44,10 @@ impl ETWExporter {
         let mut provider_options = tld::Provider::options();
 
         provider_options.callback(enabled_callback_noop, 0x0);
-        let provider = Arc::pin(tld::Provider::new(options.provider_name(), &provider_options));
+        let provider = Arc::pin(tld::Provider::new(
+            options.provider_name(),
+            &provider_options,
+        ));
         // SAFETY: tracelogging (ETW) enables an ETW callback into the provider when `register()` is called.
         // This might crash if the provider is dropped without calling unregister before.
         // This only affects static providers.
@@ -87,7 +90,7 @@ impl ETWExporter {
 
         // reset
         event.reset(
-            common::get_event_name(&self.options, log_record),
+            common::get_event_name(&self.options, log_record).as_str(),
             level,
             Self::KEYWORD,
             event_tags,
