@@ -49,7 +49,7 @@ use tracing_subscriber::prelude::*;
 
 fn init_logger() -> SdkLoggerProvider {
     let mapping = EventMapping::HashMap(HashMap::from([
-        ("opentelemetry*".into(), "opentelemetry".into()),
+        ("opentelemetry".into(), "opentelemetry".into()),
         ("hyper".into(), "hyper".into()),
         ("tracing".into(), "tracing-logs".into()),
     ]));
