@@ -35,12 +35,12 @@ impl ExporterOptions {
     }
 
     /// TODO: Add documentation
-    pub fn default_event_name(&self) -> String {
-        self.default_event_name.clone()
+    pub fn default_event_name(&self) -> &str {
+        self.default_event_name.as_str()
     }
 
     /// TODO: Add documentation
-    pub fn get_etw_event_name(&self, log_record: &opentelemetry_sdk::logs::SdkLogRecord) -> String {
+    pub fn get_etw_event_name<'a>(&'a self, log_record: &'a opentelemetry_sdk::logs::SdkLogRecord) -> &'a str {
         // Using target for now. This is the default behavior.
         // Future versions of this library may add mechanisms to chose which attribute to use for the mapping key
         if let Some(target) = log_record.target() {
@@ -48,9 +48,9 @@ impl ExporterOptions {
                 match mapping {
                     crate::logs::EventMapping::HashMap(map) => {
                         if let Some(name) = map.get(&target.to_string()) {
-                            return name.clone();
+                            return name.as_str();
                         } else if self.on_missing_key_use_value {
-                            return target.to_string();
+                            return target.as_ref();
                         }
                         return self.default_event_name();
                     }
