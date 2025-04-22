@@ -1,7 +1,5 @@
 #[cfg(feature = "serde_json")]
 use crate::logs::converters::IntoJson;
-use crate::logs::ExporterOptions;
-use frozen_collections::MapQuery;
 use opentelemetry::{
     logs::{AnyValue, Severity},
     Key,
@@ -77,31 +75,7 @@ pub const fn convert_severity_to_level(severity: Severity) -> tld::Level {
     }
 }
 
-// TODO: Move to ExporterOptions
-pub fn get_event_name(
-    options: &ExporterOptions,
-    log_record: &opentelemetry_sdk::logs::SdkLogRecord,
-) -> String {
-    // Using target for now. This would be the default behavior.
-    // Future versions of this library may add mechanisms to chose the key of the mapping
-    if let Some(target) = log_record.target() {
-        if let Some(mapping) = options.event_mapping() {
-            match mapping {
-                crate::logs::EventMapping::HashMap(hash_map) => {
-                    if let Some(name) = hash_map.get(target.as_ref()) {
-                        return name.clone();
-                    }
-                }
-                crate::logs::EventMapping::FrozenMap(frozen_map) => {
-                    if let Some(name) = frozen_map.get(target.as_ref()) {
-                        return name.clone();
-                    }
-                }
-            }
-        }
-    }
-    options.default_event_name()
-}
+
 
 #[cfg(test)]
 pub mod test_utils {
@@ -109,8 +83,8 @@ pub mod test_utils {
     use opentelemetry::logs::LoggerProvider;
     use opentelemetry_sdk::logs::SdkLoggerProvider;
 
-    use super::super::ETWExporter;
-    use super::ExporterOptions;
+    use crate::logs::exporter::ETWExporter;
+    use crate::ExporterOptions;
 
     pub fn new_etw_exporter() -> ETWExporter {
         ETWExporter::new(test_options())
@@ -152,83 +126,3 @@ fn test_get_severity_level() {
     assert_eq!(result, tld::Level::Warning);
 }
 
-#[test]
-fn test_get_event_name() {
-    use opentelemetry::logs::LogRecord;
-
-    let mut log_record = test_utils::new_sdk_log_record();
-
-    let result = get_event_name(&test_utils::test_options(), &log_record);
-    assert_eq!(result, "Log");
-
-    log_record.set_event_name("event-name");
-    let result = get_event_name(&test_utils::test_options(), &log_record);
-    assert_eq!(result, "Log");
-
-    log_record.set_target("target-name");
-    let result = get_event_name(&test_utils::test_options(), &log_record);
-    assert_eq!(result, "Log");
-}
-
-#[test]
-fn test_get_event_name_with_default_event_name() {
-    use opentelemetry::logs::LogRecord;
-
-    let mut log_record = test_utils::new_sdk_log_record();
-
-    let options = ExporterOptions::builder("test_provider_name".to_string())
-        .with_default_event_name("default_event_name".into())
-        .build()
-        .unwrap();
-
-    let result = get_event_name(&options, &log_record);
-    assert_eq!(result, "default_event_name");
-
-    log_record.set_event_name("event-name");
-    let result = get_event_name(&options, &log_record);
-    assert_eq!(result, "default_event_name");
-
-    log_record.set_target("target-name");
-    let result = get_event_name(&options, &log_record);
-    assert_eq!(result, "default_event_name");
-}
-
-#[test]
-fn test_get_event_name_with_mapping() {
-    use opentelemetry::logs::LogRecord;
-
-    let mut log_record = test_utils::new_sdk_log_record();
-
-    let mut event_mapping = std::collections::HashMap::new();
-    event_mapping.insert("target-name".into(), "event-name".into());
-
-    let options = ExporterOptions::builder("test_provider_name".to_string())
-        .with_event_mapping(crate::logs::EventMapping::HashMap(event_mapping))
-        .build()
-        .unwrap();
-
-    log_record.set_target("target-name");
-    let result = get_event_name(&options, &log_record);
-    assert_eq!(result, "event-name");
-}
-
-
-// TODO: decide if to implement or not
-// #[test]
-// fn test_get_event_name_with_mapping_prefix() {
-//     use opentelemetry::logs::LogRecord;
-
-//     let mut log_record = test_utils::new_sdk_log_record();
-
-//     let mut event_mapping = std::collections::HashMap::new();
-//     event_mapping.insert("target-name*".into(), "event-name".into());
-
-//     let options = ExporterOptions::builder("test_provider_name".to_string())
-//         .with_event_mapping(crate::logs::EventMapping::HashMap(event_mapping))
-//         .build()
-//         .unwrap();
-
-//     log_record.set_target("target-name-long");
-//     let result = get_event_name(&options, &log_record);
-//     assert_eq!(result, "event-name");
-// }

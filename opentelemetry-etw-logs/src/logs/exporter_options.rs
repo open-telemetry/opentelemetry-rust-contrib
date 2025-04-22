@@ -1,6 +1,7 @@
+use frozen_collections::MapQuery;
+use frozen_collections::{FzStringMap, MapIteration};
 use opentelemetry::otel_warn;
 use std::collections::HashMap;
-use frozen_collections::{FzStringMap, MapIteration};
 
 /// TODO: Add documentation
 #[non_exhaustive]
@@ -47,6 +48,29 @@ impl ExporterOptions {
     /// TODO: Add documentation
     pub fn default_event_name(&self) -> String {
         self.default_event_name.clone()
+    }
+
+    /// TODO: Add documentation
+    pub fn get_event_name(&self, log_record: &opentelemetry_sdk::logs::SdkLogRecord) -> String {
+        // Using target for now. This is the default behavior.
+        // Future versions of this library may add mechanisms to chose which attribute to use for the mapping key
+        if let Some(target) = log_record.target() {
+            if let Some(mapping) = self.event_mapping() {
+                match mapping {
+                    crate::logs::EventMapping::HashMap(hash_map) => {
+                        if let Some(name) = hash_map.get(target.as_ref()) {
+                            return name.clone();
+                        }
+                    }
+                    crate::logs::EventMapping::FrozenMap(frozen_map) => {
+                        if let Some(name) = frozen_map.get(target.as_ref()) {
+                            return name.clone();
+                        }
+                    }
+                }
+            }
+        }
+        self.default_event_name()
     }
 }
 
@@ -107,9 +131,7 @@ fn validate_provider_name(provider_name: &str) -> Result<(), String> {
     Ok(())
 }
 
-fn validate_event_mapping(
-    event_mapping: &EventMapping,
-) -> Result<(), String> {
+fn validate_event_mapping(event_mapping: &EventMapping) -> Result<(), String> {
     match event_mapping {
         EventMapping::HashMap(map) => {
             for (key, value) in map.iter() {
@@ -127,4 +149,92 @@ fn validate_event_mapping(
         }
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::logs::exporter::common::test_utils;
+
+    #[test]
+    fn test_get_event_name() {
+        use opentelemetry::logs::LogRecord;
+
+        let mut log_record = test_utils::new_sdk_log_record();
+
+        let options = test_utils::test_options();
+
+        let result = options.get_event_name(&log_record);
+        assert_eq!(result, "Log");
+
+        log_record.set_event_name("event-name");
+        let result = options.get_event_name(&log_record);
+        assert_eq!(result, "Log");
+
+        log_record.set_target("target-name");
+        let result = options.get_event_name(&log_record);
+        assert_eq!(result, "Log");
+    }
+
+    #[test]
+    fn test_get_event_name_with_default_event_name() {
+        use opentelemetry::logs::LogRecord;
+
+        let mut log_record = test_utils::new_sdk_log_record();
+
+        let options = ExporterOptions::builder("test_provider_name".to_string())
+            .with_default_event_name("default_event_name".into())
+            .build()
+            .unwrap();
+
+        let result = options.get_event_name(&log_record);
+        assert_eq!(result, "default_event_name");
+
+        log_record.set_event_name("event-name");
+        let result = options.get_event_name(&log_record);
+        assert_eq!(result, "default_event_name");
+
+        log_record.set_target("target-name");
+        let result = options.get_event_name(&log_record);
+        assert_eq!(result, "default_event_name");
+    }
+
+    #[test]
+    fn test_get_event_name_with_mapping() {
+        use opentelemetry::logs::LogRecord;
+
+        let mut log_record = test_utils::new_sdk_log_record();
+
+        let mut event_mapping = std::collections::HashMap::new();
+        event_mapping.insert("target-name".into(), "event-name".into());
+
+        let options = ExporterOptions::builder("test_provider_name".to_string())
+            .with_event_mapping(crate::logs::EventMapping::HashMap(event_mapping))
+            .build()
+            .unwrap();
+
+        log_record.set_target("target-name");
+        let result = options.get_event_name(&log_record);
+        assert_eq!(result, "event-name");
+    }
+
+    // TODO: decide if to implement or not
+    // #[test]
+    // fn test_get_event_name_with_mapping_prefix() {
+    //     use opentelemetry::logs::LogRecord;
+
+    //     let mut log_record = test_utils::new_sdk_log_record();
+
+    //     let mut event_mapping = std::collections::HashMap::new();
+    //     event_mapping.insert("target-name*".into(), "event-name".into());
+
+    //     let options = ExporterOptions::builder("test_provider_name".to_string())
+    //         .with_event_mapping(crate::logs::EventMapping::HashMap(event_mapping))
+    //         .build()
+    //         .unwrap();
+
+    //     log_record.set_target("target-name-long");
+    //     let result = options.get_event_name(&log_record);
+    //     assert_eq!(result, "event-name");
+    // }
 }

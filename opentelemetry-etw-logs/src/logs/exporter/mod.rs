@@ -8,7 +8,7 @@ use opentelemetry::logs::Severity;
 use opentelemetry::Key;
 use opentelemetry_sdk::error::{OTelSdkError, OTelSdkResult};
 
-mod common;
+pub(crate) mod common;
 mod part_a;
 mod part_b;
 mod part_c;
@@ -90,7 +90,7 @@ impl ETWExporter {
 
         // reset
         event.reset(
-            common::get_event_name(&self.options, log_record).as_str(),
+            self.options.get_event_name(log_record).as_str(),
             level,
             Self::KEYWORD,
             event_tags,
