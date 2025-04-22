@@ -10,6 +10,7 @@ pub enum EventMapping {
     /// TODO: Add documentation
     HashMap(HashMap<String, String>),
     /// TODO: Add documentation
+    /// TODO: place FrozenMap behind edition 2024 feature
     FrozenMap(FzStringMap<String, String>),
 }
 
@@ -18,14 +19,17 @@ pub enum EventMapping {
 pub struct ExporterOptions {
     provider_name: String,
     event_mapping: Option<EventMapping>,
+    on_missing_key_use_value: bool,
     default_event_name: String,
 }
 
 /// TODO: Add documentation
 #[derive(Debug)]
 pub struct ExporterOptionsBuilder {
+    // TODO: Remove this duplication
     provider_name: String,
     event_mapping: Option<EventMapping>,
+    on_missing_key_use_value: bool,
     default_event_name: String,
 }
 
@@ -57,14 +61,19 @@ impl ExporterOptions {
         if let Some(target) = log_record.target() {
             if let Some(mapping) = self.event_mapping() {
                 match mapping {
-                    crate::logs::EventMapping::HashMap(hash_map) => {
-                        if let Some(name) = hash_map.get(target.as_ref()) {
+                    // TODO: Refactor, maybe using static dispatch with MapQuery trait
+                    crate::logs::EventMapping::HashMap(map) => {
+                        if let Some(name) = map.get(target.as_ref()) {
                             return name.clone();
+                        } else if self.on_missing_key_use_value {
+                            return target.to_string();
                         }
                     }
-                    crate::logs::EventMapping::FrozenMap(frozen_map) => {
-                        if let Some(name) = frozen_map.get(target.as_ref()) {
+                    crate::logs::EventMapping::FrozenMap(map) => {
+                        if let Some(name) = map.get(target.as_ref()) {
                             return name.clone();
+                        } else if self.on_missing_key_use_value {
+                            return target.to_string();
                         }
                     }
                 }
@@ -79,12 +88,23 @@ impl ExporterOptionsBuilder {
         ExporterOptionsBuilder {
             provider_name,
             event_mapping: None,
+            on_missing_key_use_value: false,
             default_event_name: "Log".to_string(),
         }
     }
 
     pub fn with_event_mapping(mut self, event_mapping: EventMapping) -> Self {
         self.event_mapping = Some(event_mapping);
+        self
+    }
+
+    pub fn on_missing_key_use_value(mut self) -> Self {
+        self.on_missing_key_use_value = true;
+        self
+    }
+
+    pub fn on_missing_key_use_default(mut self) -> Self {
+        self.on_missing_key_use_value = false;
         self
     }
 
@@ -102,6 +122,7 @@ impl ExporterOptionsBuilder {
         Ok(ExporterOptions {
             provider_name: self.provider_name,
             event_mapping: self.event_mapping,
+            on_missing_key_use_value: self.on_missing_key_use_value,
             default_event_name: self.default_event_name,
         })
     }
@@ -132,6 +153,7 @@ fn validate_provider_name(provider_name: &str) -> Result<(), String> {
 }
 
 fn validate_event_mapping(event_mapping: &EventMapping) -> Result<(), String> {
+    // TODO: Review this validation
     match event_mapping {
         EventMapping::HashMap(map) => {
             for (key, value) in map.iter() {
@@ -157,7 +179,7 @@ mod tests {
     use crate::logs::exporter::common::test_utils;
 
     #[test]
-    fn test_get_event_name() {
+    fn test_get_default_event_name() {
         use opentelemetry::logs::LogRecord;
 
         let mut log_record = test_utils::new_sdk_log_record();
@@ -177,7 +199,7 @@ mod tests {
     }
 
     #[test]
-    fn test_get_event_name_with_default_event_name() {
+    fn test_get_event_name_with_provided_default_event_name() {
         use opentelemetry::logs::LogRecord;
 
         let mut log_record = test_utils::new_sdk_log_record();
@@ -218,23 +240,45 @@ mod tests {
         assert_eq!(result, "event-name");
     }
 
-    // TODO: decide if to implement or not
-    // #[test]
-    // fn test_get_event_name_with_mapping_prefix() {
-    //     use opentelemetry::logs::LogRecord;
+    #[test]
+    fn test_get_event_name_with_missing_mapping_key_use_default() {
+        use opentelemetry::logs::LogRecord;
 
-    //     let mut log_record = test_utils::new_sdk_log_record();
+        let mut log_record = test_utils::new_sdk_log_record();
 
-    //     let mut event_mapping = std::collections::HashMap::new();
-    //     event_mapping.insert("target-name*".into(), "event-name".into());
+        let mut event_mapping = std::collections::HashMap::new();
+        event_mapping.insert("target-name".into(), "event-name".into());
 
-    //     let options = ExporterOptions::builder("test_provider_name".to_string())
-    //         .with_event_mapping(crate::logs::EventMapping::HashMap(event_mapping))
-    //         .build()
-    //         .unwrap();
+        let options = ExporterOptions::builder("test_provider_name".to_string())
+            .with_event_mapping(crate::logs::EventMapping::HashMap(event_mapping))
+            .on_missing_key_use_default()
+            .with_default_event_name("default_event_name".into())
+            .build()
+            .unwrap();
 
-    //     log_record.set_target("target-name-long");
-    //     let result = options.get_event_name(&log_record);
-    //     assert_eq!(result, "event-name");
-    // }
+        log_record.set_target("new-missing-target-name");
+        let result = options.get_etw_event_name(&log_record);
+        assert_eq!(result, "default_event_name");
+    }
+
+    #[test]
+    fn test_get_event_name_with_missing_mapping_key_use_value() {
+        use opentelemetry::logs::LogRecord;
+
+        let mut log_record = test_utils::new_sdk_log_record();
+
+        let mut event_mapping = std::collections::HashMap::new();
+        event_mapping.insert("target-name".into(), "event-name".into());
+
+        let options = ExporterOptions::builder("test_provider_name".to_string())
+            .with_event_mapping(crate::logs::EventMapping::HashMap(event_mapping))
+            .on_missing_key_use_value()
+            .with_default_event_name("default_event_name".into())
+            .build()
+            .unwrap();
+
+        log_record.set_target("new-missing-target-name");
+        let result = options.get_etw_event_name(&log_record);
+        assert_eq!(result, "new-missing-target-name");
+    }
 }
