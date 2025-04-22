@@ -1,7 +1,6 @@
 
 use opentelemetry::otel_warn;
 use std::collections::HashMap;
-use std::borrow::Cow;
 
 /// TODO: Add documentation
 #[non_exhaustive]
@@ -14,16 +13,6 @@ pub enum EventMapping {
 /// TODO: Add documentation
 #[derive(Debug)]
 pub struct ExporterOptions {
-    provider_name: String,
-    event_mapping: Option<EventMapping>,
-    on_missing_key_use_value: bool,
-    default_event_name: String,
-}
-
-/// TODO: Add documentation
-#[derive(Debug)]
-pub struct ExporterOptionsBuilder {
-    // TODO: Remove this duplication
     provider_name: String,
     event_mapping: Option<EventMapping>,
     on_missing_key_use_value: bool,
@@ -74,33 +63,41 @@ impl ExporterOptions {
     
 }
 
+/// TODO: Add documentation
+#[derive(Debug)]
+pub struct ExporterOptionsBuilder {
+    inner: ExporterOptions,
+}
+
 impl ExporterOptionsBuilder {
     pub fn new(provider_name: String) -> Self {
-        ExporterOptionsBuilder {
+      ExporterOptionsBuilder {
+        inner: ExporterOptions {
             provider_name,
             event_mapping: None,
             on_missing_key_use_value: false,
             default_event_name: "Log".to_string(),
         }
+      }
     }
 
     pub fn with_event_mapping(mut self, event_mapping: EventMapping) -> Self {
-        self.event_mapping = Some(event_mapping);
+        self.inner.event_mapping = Some(event_mapping);
         self
     }
 
     pub fn on_missing_key_use_value(mut self) -> Self {
-        self.on_missing_key_use_value = true;
+        self.inner.on_missing_key_use_value = true;
         self
     }
 
     pub fn on_missing_key_use_default(mut self) -> Self {
-        self.on_missing_key_use_value = false;
+        self.inner.on_missing_key_use_value = false;
         self
     }
 
     pub fn with_default_event_name(mut self, default_event_name: String) -> Self {
-        self.default_event_name = default_event_name;
+        self.inner.default_event_name = default_event_name;
         self
     }
 
@@ -110,17 +107,12 @@ impl ExporterOptionsBuilder {
             return Err(error);
         }
 
-        Ok(ExporterOptions {
-            provider_name: self.provider_name,
-            event_mapping: self.event_mapping,
-            on_missing_key_use_value: self.on_missing_key_use_value,
-            default_event_name: self.default_event_name,
-        })
+        Ok(self.inner)
     }
 
     fn validate(&self) -> Result<(), String> {
-        validate_provider_name(&self.provider_name)?;
-        if let Some(ref event_mapping) = self.event_mapping {
+        validate_provider_name(&self.inner.provider_name)?;
+        if let Some(ref event_mapping) = self.inner.event_mapping {
             validate_event_mapping(event_mapping)?;
         }
         Ok(())
