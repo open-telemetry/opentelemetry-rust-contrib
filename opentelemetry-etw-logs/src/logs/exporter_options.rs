@@ -51,7 +51,7 @@ impl ExporterOptions {
     }
 
     /// TODO: Add documentation
-    pub fn get_event_name(&self, log_record: &opentelemetry_sdk::logs::SdkLogRecord) -> String {
+    pub fn get_etw_event_name(&self, log_record: &opentelemetry_sdk::logs::SdkLogRecord) -> String {
         // Using target for now. This is the default behavior.
         // Future versions of this library may add mechanisms to chose which attribute to use for the mapping key
         if let Some(target) = log_record.target() {
@@ -164,15 +164,15 @@ mod tests {
 
         let options = test_utils::test_options();
 
-        let result = options.get_event_name(&log_record);
+        let result = options.get_etw_event_name(&log_record);
         assert_eq!(result, "Log");
 
         log_record.set_event_name("event-name");
-        let result = options.get_event_name(&log_record);
+        let result = options.get_etw_event_name(&log_record);
         assert_eq!(result, "Log");
 
         log_record.set_target("target-name");
-        let result = options.get_event_name(&log_record);
+        let result = options.get_etw_event_name(&log_record);
         assert_eq!(result, "Log");
     }
 
@@ -187,15 +187,15 @@ mod tests {
             .build()
             .unwrap();
 
-        let result = options.get_event_name(&log_record);
+        let result = options.get_etw_event_name(&log_record);
         assert_eq!(result, "default_event_name");
 
         log_record.set_event_name("event-name");
-        let result = options.get_event_name(&log_record);
+        let result = options.get_etw_event_name(&log_record);
         assert_eq!(result, "default_event_name");
 
         log_record.set_target("target-name");
-        let result = options.get_event_name(&log_record);
+        let result = options.get_etw_event_name(&log_record);
         assert_eq!(result, "default_event_name");
     }
 
@@ -214,7 +214,7 @@ mod tests {
             .unwrap();
 
         log_record.set_target("target-name");
-        let result = options.get_event_name(&log_record);
+        let result = options.get_etw_event_name(&log_record);
         assert_eq!(result, "event-name");
     }
 
