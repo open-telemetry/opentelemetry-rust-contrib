@@ -1,5 +1,4 @@
-use frozen_collections::MapQuery;
-use frozen_collections::{FzStringMap, MapIteration};
+
 use opentelemetry::otel_warn;
 use std::collections::HashMap;
 use std::borrow::Cow;
@@ -10,9 +9,6 @@ use std::borrow::Cow;
 pub enum EventMapping {
     /// TODO: Add documentation
     HashMap(HashMap<String, String>),
-    /// TODO: Add documentation
-    /// TODO: place FrozenMap behind edition 2024 feature
-    FrozenMap(FzStringMap<String, String>),
 }
 
 /// TODO: Add documentation
@@ -62,30 +58,20 @@ impl ExporterOptions {
         if let Some(target) = log_record.target() {
             if let Some(mapping) = self.event_mapping() {
                 match mapping {
-                    // TODO: Refactor, maybe using static dispatch with MapQuery trait
                     crate::logs::EventMapping::HashMap(map) => {
-                      return self.get_mapping(map, target);
-                    }
-                    crate::logs::EventMapping::FrozenMap(map) => {
-                      return self.get_mapping(map, target);
+                      if let Some(name) = map.get(&target.to_string()) {
+                        return name.clone();
+                      } else if self.on_missing_key_use_value {
+                          return target.to_string();
+                      }
+                      return self.default_event_name();
                     }
                 }
             }
         }
         self.default_event_name()
     }
-
-    fn get_mapping<T>(&self, map: &T, key: &Cow<'_, str>) -> String
-    where
-        T: MapQuery<String, String>,
-    {
-        if let Some(name) = map.get(&key.to_string()) {
-          return name.clone();
-        } else if self.on_missing_key_use_value {
-            return key.to_string();
-        }
-        self.default_event_name()
-    }
+    
 }
 
 impl ExporterOptionsBuilder {
@@ -161,13 +147,6 @@ fn validate_event_mapping(event_mapping: &EventMapping) -> Result<(), String> {
     // TODO: Review this validation
     match event_mapping {
         EventMapping::HashMap(map) => {
-            for (key, value) in map.iter() {
-                if key.is_empty() || value.is_empty() {
-                    return Err("Event mapping keys and values cannot be empty.".to_string());
-                }
-            }
-        }
-        EventMapping::FrozenMap(map) => {
             for (key, value) in map.iter() {
                 if key.is_empty() || value.is_empty() {
                     return Err("Event mapping keys and values cannot be empty.".to_string());
