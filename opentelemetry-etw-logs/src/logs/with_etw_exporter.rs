@@ -35,7 +35,7 @@ mod tests {
 
     #[test]
     fn with_etw_exporter_trait() {
-        let options = ExporterOptions::builder("provider_name".to_string())
+        let options = ExporterOptions::builder("provider_name".into())
             .build()
             .unwrap();
         let logger_provider = SdkLoggerProvider::builder()

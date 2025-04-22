@@ -13,15 +13,15 @@ pub enum EventMapping {
 /// TODO: Add documentation
 #[derive(Debug)]
 pub struct ExporterOptions {
-    provider_name: String,
+    provider_name: Cow<'static, str>,
     event_mapping: Option<EventMapping>,
     on_missing_key_use_value: bool,
-    default_event_name: String,
+    default_event_name: Cow<'static, str>,
 }
 
 impl ExporterOptions {
     /// TODO: Add documentation
-    pub fn builder(provider_name: String) -> ExporterOptionsBuilder {
+    pub fn builder(provider_name: Cow<'static, str>) -> ExporterOptionsBuilder {
         ExporterOptionsBuilder::new(provider_name)
     }
 
@@ -37,7 +37,7 @@ impl ExporterOptions {
 
     /// TODO: Add documentation
     pub fn default_event_name(&self) -> &str {
-        self.default_event_name.as_str()
+        self.default_event_name.as_ref()
     }
 
     /// TODO: Add documentation
@@ -72,13 +72,13 @@ pub struct ExporterOptionsBuilder {
 }
 
 impl ExporterOptionsBuilder {
-    pub fn new(provider_name: String) -> Self {
+    pub fn new(provider_name: Cow<'static, str>) -> Self {
         ExporterOptionsBuilder {
             inner: ExporterOptions {
                 provider_name,
                 event_mapping: None,
                 on_missing_key_use_value: false,
-                default_event_name: "Log".to_string(),
+                default_event_name: "Log".into(),
             },
         }
     }
@@ -98,7 +98,7 @@ impl ExporterOptionsBuilder {
         self
     }
 
-    pub fn with_default_event_name(mut self, default_event_name: String) -> Self {
+    pub fn with_default_event_name(mut self, default_event_name: Cow<'static, str>) -> Self {
         self.inner.default_event_name = default_event_name;
         self
     }
@@ -182,7 +182,7 @@ mod tests {
 
         let mut log_record = test_utils::new_sdk_log_record();
 
-        let options = ExporterOptions::builder("test_provider_name".to_string())
+        let options = ExporterOptions::builder("test_provider_name".into())
             .with_default_event_name("default_event_name".into())
             .build()
             .unwrap();
@@ -208,7 +208,7 @@ mod tests {
         let mut event_mapping = std::collections::HashMap::new();
         event_mapping.insert("target-name".into(), "event-name".into());
 
-        let options = ExporterOptions::builder("test_provider_name".to_string())
+        let options = ExporterOptions::builder("test_provider_name".into())
             .with_event_mapping(crate::logs::EventMapping::HashMap(event_mapping))
             .build()
             .unwrap();
@@ -227,7 +227,7 @@ mod tests {
         let mut event_mapping = std::collections::HashMap::new();
         event_mapping.insert("target-name".into(), "event-name".into());
 
-        let options = ExporterOptions::builder("test_provider_name".to_string())
+        let options = ExporterOptions::builder("test_provider_name".into())
             .with_event_mapping(crate::logs::EventMapping::HashMap(event_mapping))
             .on_missing_key_use_default()
             .with_default_event_name("default_event_name".into())
@@ -248,7 +248,7 @@ mod tests {
         let mut event_mapping = std::collections::HashMap::new();
         event_mapping.insert("target-name".into(), "event-name".into());
 
-        let options = ExporterOptions::builder("test_provider_name".to_string())
+        let options = ExporterOptions::builder("test_provider_name".into())
             .with_event_mapping(crate::logs::EventMapping::HashMap(event_mapping))
             .on_missing_key_use_value()
             .with_default_event_name("default_event_name".into())

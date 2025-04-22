@@ -54,7 +54,7 @@ fn init_logger() -> SdkLoggerProvider {
         ("tracing".into(), "tracing-logs".into()),
     ]));
 
-    let exporter_options = ExporterOptions::builder("provider-name".to_string())
+    let exporter_options = ExporterOptions::builder("provider-name".into())
         .with_event_mapping(mapping)
         .build()
         .unwrap();
