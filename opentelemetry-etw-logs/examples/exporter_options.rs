@@ -53,6 +53,7 @@ fn init_logger() -> SdkLoggerProvider {
         ("hyper".into(), "hyper".into()),
         ("tracing".into(), "tracing-logs".into()),
     ]));
+
     let exporter_options = ExporterOptions::builder("provider-name".to_string())
         .with_event_mapping(mapping)
         .build()

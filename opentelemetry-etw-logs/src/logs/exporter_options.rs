@@ -1,4 +1,5 @@
 use opentelemetry::otel_warn;
+use std::borrow::Cow;
 use std::collections::HashMap;
 
 /// TODO: Add documentation
@@ -6,7 +7,7 @@ use std::collections::HashMap;
 #[derive(Debug)]
 pub enum EventMapping {
     /// TODO: Add documentation
-    HashMap(HashMap<String, String>),
+    HashMap(HashMap<Cow<'static, str>, String>),
 }
 
 /// TODO: Add documentation
@@ -40,14 +41,17 @@ impl ExporterOptions {
     }
 
     /// TODO: Add documentation
-    pub fn get_etw_event_name<'a>(&'a self, log_record: &'a opentelemetry_sdk::logs::SdkLogRecord) -> &'a str {
+    pub fn get_etw_event_name<'a>(
+        &'a self,
+        log_record: &'a opentelemetry_sdk::logs::SdkLogRecord,
+    ) -> &'a str {
         // Using target for now. This is the default behavior.
         // Future versions of this library may add mechanisms to chose which attribute to use for the mapping key
         if let Some(target) = log_record.target() {
             if let Some(mapping) = self.event_mapping() {
                 match mapping {
                     crate::logs::EventMapping::HashMap(map) => {
-                        if let Some(name) = map.get(&target.to_string()) {
+                        if let Some(name) = map.get(target.as_ref()) {
                             return name.as_str();
                         } else if self.on_missing_key_use_value {
                             return target.as_ref();
