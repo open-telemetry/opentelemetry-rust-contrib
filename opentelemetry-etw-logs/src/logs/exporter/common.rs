@@ -75,8 +75,6 @@ pub const fn convert_severity_to_level(severity: Severity) -> tld::Level {
     }
 }
 
-
-
 #[cfg(test)]
 pub mod test_utils {
     use opentelemetry::logs::Logger;
@@ -125,4 +123,3 @@ fn test_get_severity_level() {
     let result = convert_severity_to_level(Severity::Warn);
     assert_eq!(result, tld::Level::Warning);
 }
-
