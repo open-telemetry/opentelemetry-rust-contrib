@@ -1,4 +1,3 @@
-
 use opentelemetry::otel_warn;
 use std::collections::HashMap;
 
@@ -48,19 +47,18 @@ impl ExporterOptions {
             if let Some(mapping) = self.event_mapping() {
                 match mapping {
                     crate::logs::EventMapping::HashMap(map) => {
-                      if let Some(name) = map.get(&target.to_string()) {
-                        return name.clone();
-                      } else if self.on_missing_key_use_value {
-                          return target.to_string();
-                      }
-                      return self.default_event_name();
+                        if let Some(name) = map.get(&target.to_string()) {
+                            return name.clone();
+                        } else if self.on_missing_key_use_value {
+                            return target.to_string();
+                        }
+                        return self.default_event_name();
                     }
                 }
             }
         }
         self.default_event_name()
     }
-    
 }
 
 /// TODO: Add documentation
@@ -71,14 +69,14 @@ pub struct ExporterOptionsBuilder {
 
 impl ExporterOptionsBuilder {
     pub fn new(provider_name: String) -> Self {
-      ExporterOptionsBuilder {
-        inner: ExporterOptions {
-            provider_name,
-            event_mapping: None,
-            on_missing_key_use_value: false,
-            default_event_name: "Log".to_string(),
+        ExporterOptionsBuilder {
+            inner: ExporterOptions {
+                provider_name,
+                event_mapping: None,
+                on_missing_key_use_value: false,
+                default_event_name: "Log".to_string(),
+            },
         }
-      }
     }
 
     pub fn with_event_mapping(mut self, event_mapping: EventMapping) -> Self {
