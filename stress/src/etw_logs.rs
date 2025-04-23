@@ -27,9 +27,7 @@ mod throughput;
 
 // Function to initialize the logger
 fn init_logger() -> SdkLoggerProvider {
-    let options = ExporterOptions::builder("provider_name")
-        .build()
-        .unwrap();
+    let options = ExporterOptions::builder("provider_name").build().unwrap();
 
     SdkLoggerProvider::builder()
         .with_etw_exporter(options)

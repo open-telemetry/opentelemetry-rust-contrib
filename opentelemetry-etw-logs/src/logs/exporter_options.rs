@@ -98,7 +98,10 @@ impl ExporterOptionsBuilder {
         self
     }
 
-    pub fn with_default_event_name(mut self, default_event_name: impl Into<Cow<'static, str>>) -> Self {
+    pub fn with_default_event_name(
+        mut self,
+        default_event_name: impl Into<Cow<'static, str>>,
+    ) -> Self {
         self.inner.default_event_name = default_event_name.into();
         self
     }
