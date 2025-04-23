@@ -143,7 +143,7 @@ fn validate_event_mapping(event_mapping: &EventMapping) -> Result<(), String> {
         EventMapping::HashMap(map) => {
             for (key, value) in map.iter() {
                 if key.is_empty() || value.is_empty() {
-                    return Err("Event mapping keys and values cannot be empty.".to_string());
+                    return Err("Event mapping keys or values cannot be empty.".to_string());
                 }
             }
         }
