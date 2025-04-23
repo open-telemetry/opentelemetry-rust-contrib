@@ -113,7 +113,7 @@ mod tests {
     }
 
     fn test_options() -> ExporterOptions {
-        ExporterOptions::builder("test_provider_name".into())
+        ExporterOptions::builder("test_provider_name")
             .build()
             .unwrap()
     }
