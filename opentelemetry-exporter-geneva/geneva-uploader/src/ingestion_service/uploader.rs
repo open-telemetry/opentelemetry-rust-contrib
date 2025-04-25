@@ -206,7 +206,7 @@ impl GenevaUploader {
 
         if status == reqwest::StatusCode::ACCEPTED {
             let ingest_response: IngestionResponse =
-                serde_json::from_str(&body).map_err(|e| GenevaUploaderError::Json(e))?;
+                serde_json::from_str(&body).map_err(GenevaUploaderError::Json)?;
             Ok(ingest_response)
         } else {
             Err(GenevaUploaderError::UploadFailed {
