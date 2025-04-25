@@ -183,6 +183,7 @@ struct CachedAuthData {
 pub(crate) struct GenevaConfigClient {
     config: GenevaConfigClientConfig,
     http_client: Client,
+    // TODO: revisit if the lock can be removed
     cached_data: RwLock<Option<CachedAuthData>>,
     precomputed_url_prefix: String,
     agent_identity: String,
@@ -204,9 +205,8 @@ impl GenevaConfigClient {
     /// * `Result<Self>` - A new client instance or an error
     ///
     /// # Errors
-    /// * `GenevaConfigClientError::Io` - If reading the certificate file from disk fails
-    /// * `GenevaConfigClientError::Tls` - If constructing the TLS connector fails
-    /// * `GenevaConfigClientError::AuthMethodNotImplemented` - If the specified auth method is not yet supported
+    /// * `GenevaConfigClientError::Certificate` - If reading the certificate file, parsing it, or constructing the TLS connector fails
+    /// * `GenevaConfigClientError::AuthMethodNotImplemented` - If the specified authentication method is not yet supported
     #[allow(dead_code)]
     pub(crate) fn new(config: GenevaConfigClientConfig) -> Result<Self> {
         let mut client_builder = Client::builder()
@@ -239,7 +239,7 @@ impl GenevaConfigClient {
 
         let agent_identity = "GenevaUploader";
         let agent_version = "0.1";
-        let static_headers = Self::build_static_headers(&agent_identity, &agent_version);
+        let static_headers = Self::build_static_headers(agent_identity, agent_version);
 
         let identity = format!(
             "Tenant=Default/Role=GcsClient/RoleInstance={}",
