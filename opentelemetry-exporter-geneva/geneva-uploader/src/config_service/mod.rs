@@ -157,17 +157,14 @@ mod tests {
         let result = client.get_ingestion_info().await;
 
         assert!(result.is_err());
-        match result {
-            Err(err) => match err {
-                crate::config_service::client::GenevaConfigClientError::RequestFailed {
-                    status,
-                    ..
-                } => {
-                    assert_eq!(status, 403);
-                }
-                _ => panic!("Expected RequestFailed error, got: {:?}", err),
-            },
-            _ => panic!("Expected error, got success"),
+        if let Err(crate::config_service::client::GenevaConfigClientError::RequestFailed {
+            status,
+            ..
+        }) = result
+        {
+            assert_eq!(status, 403);
+        } else {
+            panic!("Expected RequestFailed with 403, got: {:?}", result);
         }
     }
 
@@ -240,7 +237,7 @@ mod tests {
         assert!(result.is_err());
         match result {
             Err(err) => match err {
-                crate::config_service::client::GenevaConfigClientError::Io(_) => {
+                crate::config_service::client::GenevaConfigClientError::Certificate(_) => {
                     // Test passed
                 }
                 _ => panic!("Expected Io error, got: {:?}", err),

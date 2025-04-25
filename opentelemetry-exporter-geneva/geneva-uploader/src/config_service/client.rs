@@ -74,16 +74,10 @@ pub(crate) enum GenevaConfigClientError {
     Http(#[from] reqwest::Error),
     #[error("Request failed with status {status}: {message}")]
     RequestFailed { status: u16, message: String },
-    #[error("TLS error: {0}")]
-    Tls(#[from] native_tls::Error),
 
     // Data / parsing
     #[error("JSON error: {0}")]
     SerdeJson(#[from] serde_json::Error),
-
-    // System / I/O
-    #[error("IO error: {0}")]
-    Io(#[from] std::io::Error),
 
     // Misc
     #[error("Moniker not found: {0}")]
@@ -224,13 +218,16 @@ impl GenevaConfigClient {
             // This is for testing, so we can use self-signed certs, and password in plain text.
             AuthMethod::Certificate { path, password } => {
                 // Read the PKCS#12 file
-                let p12_bytes = fs::read(path)?;
-                let identity = Identity::from_pkcs12(&p12_bytes, password)?;
+                let p12_bytes = fs::read(path)
+                    .map_err(|e| GenevaConfigClientError::Certificate(e.to_string()))?;
+                let identity = Identity::from_pkcs12(&p12_bytes, password)
+                    .map_err(|e| GenevaConfigClientError::Certificate(e.to_string()))?;
                 //TODO - use use_native_tls instead of preconfigured_tls once we no longer need self-signed certs
                 // and TLS 1.2 as the exclusive protocol.
                 let tls_connector =
                     configure_tls_connector(native_tls::TlsConnector::builder(), identity)
-                        .build()?;
+                        .build()
+                        .map_err(|e| GenevaConfigClientError::Certificate(e.to_string()))?;
                 client_builder = client_builder.use_preconfigured_tls(tls_connector);
             }
             AuthMethod::ManagedIdentity => {
@@ -240,8 +237,8 @@ impl GenevaConfigClient {
             }
         }
 
-        let agent_identity = "GenevaUploader".to_string();
-        let agent_version = "0.1".to_string();
+        let agent_identity = "GenevaUploader";
+        let agent_version = "0.1";
         let static_headers = Self::build_static_headers(&agent_identity, &agent_version);
 
         let identity = format!(
@@ -282,7 +279,7 @@ impl GenevaConfigClient {
         })
     }
 
-    fn parse_token_expiry(&self, expiry_str: &str) -> Option<DateTime<Utc>> {
+    fn parse_token_expiry(expiry_str: &str) -> Option<DateTime<Utc>> {
         // Attempt to parse the ISO 8601 datetime string
         DateTime::parse_from_rfc3339(expiry_str)
             .ok()
@@ -363,52 +360,45 @@ impl GenevaConfigClient {
         let (fresh_ingestion_gateway_info, fresh_moniker_info) =
             self.fetch_ingestion_info().await?;
 
-        let token_expiry = self
-            .parse_token_expiry(&fresh_ingestion_gateway_info.auth_token_expiry_time)
-            .ok_or_else(|| {
-                GenevaConfigClientError::InternalError("Failed to parse token expiry".into())
-            })?;
+        let token_expiry =
+            Self::parse_token_expiry(&fresh_ingestion_gateway_info.auth_token_expiry_time)
+                .ok_or_else(|| {
+                    GenevaConfigClientError::InternalError("Failed to parse token expiry".into())
+                })?;
 
-        let token_endpoint = extract_endpoint_from_token(&fresh_ingestion_gateway_info.auth_token)
-            .map_err(|e| {
-                GenevaConfigClientError::Certificate(format!(
-                    "Failed to extract endpoint from token: {}",
-                    e
-                ))
-            })?;
+        let token_endpoint = extract_endpoint_from_token(&fresh_ingestion_gateway_info.auth_token)?;
 
         // Now update the cache with exclusive write access
-        {
-            let mut guard = self.cached_data.write().map_err(|_| {
-                GenevaConfigClientError::InternalError("RwLock poisoned".to_string())
-            })?;
+        let mut guard = self
+            .cached_data
+            .write()
+            .map_err(|_| GenevaConfigClientError::InternalError("RwLock poisoned".to_string()))?;
 
-            // Double-check in case another thread updated while we were fetching
-            if let Some(existing) = guard.as_ref() {
-                if existing.token_expiry >= token_expiry {
-                    return Ok((
-                        existing.auth_info.0.clone(),
-                        existing.auth_info.1.clone(),
-                        existing.token_endpoint.clone(),
-                    ));
-                }
+        // Double-check in case another thread updated while we were fetching
+        if let Some(existing) = guard.as_ref() {
+            if existing.token_expiry >= token_expiry {
+                return Ok((
+                    existing.auth_info.0.clone(),
+                    existing.auth_info.1.clone(),
+                    existing.token_endpoint.clone(),
+                ));
             }
-            // Update with fresh data
-            *guard = Some(CachedAuthData {
-                auth_info: (
-                    fresh_ingestion_gateway_info.clone(),
-                    fresh_moniker_info.clone(),
-                ),
-                token_endpoint: token_endpoint.clone(),
-                token_expiry,
-            });
-
-            Ok((
-                fresh_ingestion_gateway_info,
-                fresh_moniker_info,
-                token_endpoint,
-            ))
         }
+        // Update with fresh data
+        *guard = Some(CachedAuthData {
+            auth_info: (
+                fresh_ingestion_gateway_info.clone(),
+                fresh_moniker_info.clone(),
+            ),
+            token_endpoint: token_endpoint.clone(),
+            token_expiry,
+        });
+
+        Ok((
+            fresh_ingestion_gateway_info,
+            fresh_moniker_info,
+            token_endpoint,
+        ))
     }
 
     /// Internal method that actually fetches data from Geneva Config Service
