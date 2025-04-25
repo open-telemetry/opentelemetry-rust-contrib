@@ -11,13 +11,13 @@ keywords = ["opentelemetry", "log", "trace", "etw"]
 license = "Apache-2.0"
 
 [dependencies]
-tracelogging = "1.2.1"
 tracelogging_dynamic = "1.2.1"
 opentelemetry = { workspace = true, features = ["logs"] }
 opentelemetry_sdk = { workspace = true, features = ["logs"] }
-# TODO: Make json optional
-serde_json = "1.0.113"
+tracing = { version = "0.1", optional = true }
+serde_json = { version = "1.0.113", optional = true }
 futures-executor = "0.3.31"
+chrono = { version = "0.4.40", default-features = false, features = ["alloc", "std"] }
 
 [dev-dependencies]
 opentelemetry-appender-tracing = { workspace = true }
@@ -36,7 +36,13 @@ spec_unstable_logs_enabled = [
     "opentelemetry/spec_unstable_logs_enabled",
     "opentelemetry_sdk/spec_unstable_logs_enabled",
 ]
-default = []
+internal-logs = [
+    "tracing",
+    "opentelemetry/internal-logs",
+    "opentelemetry_sdk/internal-logs",
+]
+serde_json = ["dep:serde_json"]
+default = ["internal-logs"]
 
 [[example]]
 name = "basic"

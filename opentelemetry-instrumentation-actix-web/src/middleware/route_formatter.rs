@@ -13,7 +13,7 @@
 /// # Custom Formatter Examples
 ///
 /// ```
-/// use actix_web_opentelemetry::RouteFormatter;
+/// use opentelemetry_instrumentation_actix_web::RouteFormatter;
 ///
 /// // A formatter to ensure all paths are reported as lowercase.
 /// #[derive(Debug)]

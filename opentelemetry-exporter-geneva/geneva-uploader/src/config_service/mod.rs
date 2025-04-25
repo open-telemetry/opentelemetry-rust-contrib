@@ -6,6 +6,7 @@ mod tests {
     use openssl::{pkcs12::Pkcs12, pkey::PKey, x509::X509};
     use rcgen::generate_simple_self_signed;
     use std::io::Write;
+    use std::path::PathBuf;
     use tempfile::NamedTempFile;
     use wiremock::matchers::{method, path};
     use wiremock::{Mock, MockServer, ResponseTemplate};
@@ -102,12 +103,12 @@ mod tests {
             region: "mockregion".into(),
             config_major_version: 1,
             auth_method: AuthMethod::Certificate {
-                path: temp_p12_file.path().to_string_lossy().to_string(),
+                path: PathBuf::from(temp_p12_file.path().to_string_lossy().to_string()),
                 password,
             },
         };
 
-        let client = GenevaConfigClient::new(config).await.unwrap();
+        let client = GenevaConfigClient::new(config).unwrap();
         let (ingestion_info, moniker_info, token_endpoint) =
             client.get_ingestion_info().await.unwrap();
 
@@ -147,26 +148,23 @@ mod tests {
             region: "mockregion".into(),
             config_major_version: 1,
             auth_method: AuthMethod::Certificate {
-                path: temp_p12_file.path().to_string_lossy().to_string(),
+                path: PathBuf::from(temp_p12_file.path().to_string_lossy().to_string()),
                 password,
             },
         };
 
-        let client = GenevaConfigClient::new(config).await.unwrap();
+        let client = GenevaConfigClient::new(config).unwrap();
         let result = client.get_ingestion_info().await;
 
         assert!(result.is_err());
-        match result {
-            Err(err) => match err {
-                crate::config_service::client::GenevaConfigClientError::RequestFailed {
-                    status,
-                    ..
-                } => {
-                    assert_eq!(status, 403);
-                }
-                _ => panic!("Expected RequestFailed error, got: {:?}", err),
-            },
-            _ => panic!("Expected error, got success"),
+        if let Err(crate::config_service::client::GenevaConfigClientError::RequestFailed {
+            status,
+            ..
+        }) = result
+        {
+            assert_eq!(status, 403);
+        } else {
+            panic!("Expected RequestFailed with 403, got: {:?}", result);
         }
     }
 
@@ -198,12 +196,12 @@ mod tests {
             region: "mockregion".into(),
             config_major_version: 1,
             auth_method: AuthMethod::Certificate {
-                path: temp_p12_file.path().to_string_lossy().to_string(),
+                path: PathBuf::from(temp_p12_file.path().to_string_lossy().to_string()),
                 password,
             },
         };
 
-        let client = GenevaConfigClient::new(config).await.unwrap();
+        let client = GenevaConfigClient::new(config).unwrap();
         let result = client.get_ingestion_info().await;
 
         assert!(result.is_err());
@@ -229,17 +227,18 @@ mod tests {
             region: "region".to_string(),
             config_major_version: 1,
             auth_method: AuthMethod::Certificate {
-                path: "/nonexistent/path.p12".to_string(),
+                path: PathBuf::from("/nonexistent/path.p12".to_string()),
                 password: "test".to_string(),
             },
         };
 
-        let result = GenevaConfigClient::new(config).await;
+
+        let result = GenevaConfigClient::new(config);
 
         assert!(result.is_err());
         match result {
             Err(err) => match err {
-                crate::config_service::client::GenevaConfigClientError::Io(_) => {
+                crate::config_service::client::GenevaConfigClientError::Certificate(_) => {
                     // Test passed
                 }
                 _ => panic!("Expected Io error, got: {:?}", err),
@@ -292,15 +291,13 @@ mod tests {
             region,
             config_major_version,
             auth_method: AuthMethod::Certificate {
-                path: cert_path,
+                path: PathBuf::from(cert_path),
                 password: cert_password,
             },
         };
 
         println!("Connecting to real Geneva Config service...");
-        let client = GenevaConfigClient::new(config)
-            .await
-            .expect("Failed to create client");
+        let client = GenevaConfigClient::new(config).expect("Failed to create client");
 
         println!("Fetching ingestion info...");
         let (ingestion_info, moniker, _token_endpoint) = client

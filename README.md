@@ -5,6 +5,7 @@ The Rust [OpenTelemetry](https://opentelemetry.io/) implementation of contrib co
 [![LICENSE](https://img.shields.io/crates/l/opentelemetry)](./LICENSE)
 [![GitHub Actions CI](https://github.com/open-telemetry/opentelemetry-rust-contrib/workflows/CI/badge.svg)](https://github.com/open-telemetry/opentelemetry-rust-contrib/actions?query=workflow%3ACI+branch%3Amain)
 [![codecov](https://codecov.io/gh/open-telemetry/opentelemetry-rust-contrib/branch/main/graph/badge.svg)](https://codecov.io/gh/open-telemetry/opentelemetry-rust-contrib)
+[![OpenSSF Scorecard](https://api.scorecard.dev/projects/github.com/open-telemetry/opentelemetry-rust-contrib/badge)](https://scorecard.dev/viewer/?uri=github.com/open-telemetry/opentelemetry-rust-contrib)
 [![Slack](https://img.shields.io/badge/slack-@cncf/otel/rust-brightgreen.svg?logo=slack)](https://cloud-native.slack.com/archives/C03GDP0H023)
 
 [Website](https://opentelemetry.io/) |

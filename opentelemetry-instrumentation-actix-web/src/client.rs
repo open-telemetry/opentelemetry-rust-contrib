@@ -72,8 +72,8 @@ pub trait ClientExt {
     ///
     /// Example:
     /// ```no_run
-    /// use actix_web_opentelemetry::ClientExt;
     /// use awc::{Client, error::SendRequestError};
+    /// use opentelemetry_instrumentation_actix_web::ClientExt;
     ///
     /// async fn execute_request(client: &Client) -> Result<(), SendRequestError> {
     ///     let res = client.get("http://localhost:8080")
@@ -97,9 +97,9 @@ pub trait ClientExt {
     ///
     /// Example:
     /// ```no_run
-    /// use actix_web_opentelemetry::ClientExt;
     /// use awc::{Client, error::SendRequestError};
     /// use opentelemetry::Context;
+    /// use opentelemetry_instrumentation_actix_web::ClientExt;
     ///
     /// async fn execute_request(client: &Client) -> Result<(), SendRequestError> {
     ///     let res = client.get("http://localhost:8080")
@@ -243,9 +243,9 @@ impl InstrumentedClientRequest {
     ///
     /// Example:
     /// ```
-    /// use actix_web_opentelemetry::ClientExt;
     /// use awc::{Client, error::SendRequestError};
     /// use opentelemetry::KeyValue;
+    /// use opentelemetry_instrumentation_actix_web::ClientExt;
     ///
     /// async fn execute_request(client: &Client) -> Result<(), SendRequestError> {
     ///     let attrs = [KeyValue::new("dye-key", "dye-value")];
@@ -272,8 +272,8 @@ impl InstrumentedClientRequest {
     ///
     /// Example:
     /// ```
-    /// use actix_web_opentelemetry::ClientExt;
     /// use awc::{Client, error::SendRequestError};
+    /// use opentelemetry_instrumentation_actix_web::ClientExt;
     ///
     /// async fn execute_request(client: &Client) -> Result<(), SendRequestError> {
     ///     let res = client.get("http://localhost:8080")

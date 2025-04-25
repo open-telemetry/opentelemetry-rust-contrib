@@ -2,6 +2,9 @@
 
 ## vNext
 
+- Added validation to provider name
+- Added optional feature `serde_json` to serialize List and Maps.
+
 ## v0.8.0
 
 - Added the `with_etw_exporter` trait method to `LoggerProviderBuilder`.
@@ -13,19 +16,12 @@
   ```
 
   Event name now will be inferred from the `LogRecord` being emitted. If no name is given, it defaults to `Log`.
-
 - Removed `opentelemetry_etw_logs::{ExporterConfig, ReentrantLogProcessor, ETWExporter}` from the public API. Ability to customize Provider Group or Keyword may be added in the future.
-
 - Renamed `logs_level_enabled` feature to `spec_unstable_logs_enabled` to match `opentelemetry` features.
-
 - `default` feature does not enable `spec_unstable_logs_enabled` anymore.
-
 - Bump opentelemetry and opentelemetry_sdk versions to 0.29
-
 - Added support for TraceId,SpanId
-
 - Added support for populating cloud `role` and `roleInstance` from Resource's `service.name` and `service.instance.id` attributes respectively.
-
 - `_typeName` field uses "Log" instead of "Logs".
 - Exporter now unregisters the Etw provider on `shutdown()`.
   [#222](https://github.com/open-telemetry/opentelemetry-rust-contrib/pull/222)

@@ -135,38 +135,50 @@ impl RequestMetricsBuilder {
 
 /// Request metrics tracking
 ///
+/// For more information on how to configure Prometheus with [OTLP](https://prometheus.io/docs/guides/opentelemetry)
+///
 /// # Examples
 ///
 /// ```no_run
-/// use actix_web::{dev, http, web, App, HttpRequest, HttpServer};
-/// use actix_web_opentelemetry::{PrometheusMetricsHandler, RequestMetrics, RequestTracing};
-/// use opentelemetry::global;
-/// use opentelemetry_sdk::metrics::SdkMeterProvider;
+/// use actix_web::{http, web, App, HttpRequest, HttpResponse, HttpServer, Responder};
+/// use opentelemetry::{global, KeyValue};
+/// use opentelemetry_instrumentation_actix_web::{RequestMetrics, RequestTracing};
+/// use opentelemetry_sdk::{metrics::SdkMeterProvider, Resource};
+///
+/// async fn manual_hello() -> impl Responder {
+///     HttpResponse::Ok().body("Hey there!")
+/// }
 ///
 /// #[actix_web::main]
 /// async fn main() -> Result<(), Box<dyn std::error::Error>> {
-///     // Configure prometheus or your preferred metrics service
-///     let registry = prometheus::Registry::new();
-///     let exporter = opentelemetry_prometheus::exporter()
-///         .with_registry(registry.clone())
-///         .build()?;
+///     // Initialize STDOUT exporter
+///     let exporter = opentelemetry_stdout::MetricExporter::default();
 ///
 ///     // set up your meter provider with your exporter(s)
 ///     let provider = SdkMeterProvider::builder()
-///         .with_reader(exporter)
+///         .with_periodic_exporter(exporter)
+///         .with_resource(
+///             // recommended attributes
+///             Resource::builder_empty()
+///                 .with_attribute(KeyValue::new("service.name", "my_app"))
+///                 .build(),
+///         )
 ///         .build();
-///     global::set_meter_provider(provider);
+///     global::set_meter_provider(provider.clone());
 ///
-///     // Run actix server, metrics are now available at http://localhost:8080/metrics
+///     // Run actix server, metrics will be exported periodically
 ///     HttpServer::new(move || {
 ///         App::new()
 ///             .wrap(RequestTracing::new())
 ///             .wrap(RequestMetrics::default())
-///             .route("/metrics", web::get().to(PrometheusMetricsHandler::new(registry.clone())))
+///             .route("/hey", web::get().to(manual_hello))
 ///         })
 ///         .bind("localhost:8080")?
 ///         .run()
 ///         .await?;
+///
+///     //Shutdown the meter provider. This will trigger an export of all metrics.
+///     provider.shutdown()?;
 ///
 ///     Ok(())
 /// }
@@ -298,60 +310,5 @@ where
                 res
             }
         }))
-    }
-}
-
-#[cfg(feature = "metrics-prometheus")]
-#[cfg_attr(docsrs, doc(cfg(feature = "metrics-prometheus")))]
-pub(crate) mod prometheus {
-    use actix_web::{dev, http::StatusCode};
-    use futures_util::future::{self, LocalBoxFuture};
-    use opentelemetry_sdk::metrics::MetricError;
-    use prometheus::{Encoder, Registry, TextEncoder};
-
-    /// Prometheus request metrics service
-    #[derive(Clone, Debug)]
-    pub struct PrometheusMetricsHandler {
-        prometheus_registry: Registry,
-    }
-
-    impl PrometheusMetricsHandler {
-        /// Build a route to serve Prometheus metrics
-        pub fn new(registry: Registry) -> Self {
-            Self {
-                prometheus_registry: registry,
-            }
-        }
-    }
-
-    impl PrometheusMetricsHandler {
-        fn metrics(&self) -> String {
-            let encoder = TextEncoder::new();
-            let metric_families = self.prometheus_registry.gather();
-            let mut buf = Vec::new();
-            if let Err(err) = encoder.encode(&metric_families[..], &mut buf) {
-                tracing::error!(
-                    name: "encode_failure",
-                    target: env!("CARGO_PKG_NAME"),
-                    name = "encode_failure",
-                    error = MetricError::Other(err.to_string()).to_string(),
-                    ""
-                );
-            }
-
-            String::from_utf8(buf).unwrap_or_default()
-        }
-    }
-
-    impl dev::Handler<actix_web::HttpRequest> for PrometheusMetricsHandler {
-        type Output = Result<actix_web::HttpResponse<String>, actix_web::error::Error>;
-        type Future = LocalBoxFuture<'static, Self::Output>;
-
-        fn call(&self, _req: actix_web::HttpRequest) -> Self::Future {
-            Box::pin(future::ok(actix_web::HttpResponse::with_body(
-                StatusCode::OK,
-                self.metrics(),
-            )))
-        }
     }
 }
