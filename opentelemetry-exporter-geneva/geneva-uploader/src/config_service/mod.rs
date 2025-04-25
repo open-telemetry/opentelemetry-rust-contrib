@@ -232,7 +232,6 @@ mod tests {
             },
         };
 
-
         let result = GenevaConfigClient::new(config);
 
         assert!(result.is_err());
