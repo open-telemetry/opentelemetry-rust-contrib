@@ -46,7 +46,7 @@ use tracing::error;
 use tracing_subscriber::prelude::*;
 
 fn init_logger() -> SdkLoggerProvider {
-    let exporter_options = ExporterOptions::builder("provider-name").build().unwrap();
+    let exporter_options = ExporterOptions::builder("provider_name").build().unwrap();
 
     SdkLoggerProvider::builder()
         .with_etw_exporter(exporter_options)

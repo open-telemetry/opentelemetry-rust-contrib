@@ -51,7 +51,11 @@ impl ExporterOptions {
             if let Some(mapping) = self.event_mapping() {
                 match mapping {
                     crate::logs::EventMapping::HashMap(map) => {
+                        // Search fast for exact match
                         if let Some(name) = map.get(target.as_ref()) {
+                            return name.as_str();
+                            // Slow search for prefix match
+                        } else if let Some(name) = map.get_by_prefix(target.as_ref()) {
                             return name.as_str();
                         } else if self.on_missing_key_use_value {
                             return target.as_ref();
@@ -152,6 +156,22 @@ fn validate_event_mapping(event_mapping: &EventMapping) -> Result<(), String> {
         }
     }
     Ok(())
+}
+
+trait GetByPrefix {
+    fn get_by_prefix(&self, prefix: &str) -> Option<&String>;
+}
+
+impl GetByPrefix for HashMap<Cow<'static, str>, String> {
+    fn get_by_prefix(&self, prefix: &str) -> Option<&String> {
+        self.iter().find_map(|(key, value)| {
+            if prefix.starts_with(key.as_ref()) {
+                Some(value)
+            } else {
+                None
+            }
+        })
+    }
 }
 
 #[cfg(test)]
