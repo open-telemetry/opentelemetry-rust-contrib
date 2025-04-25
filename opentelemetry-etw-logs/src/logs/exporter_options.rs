@@ -26,22 +26,22 @@ impl ExporterOptions {
     }
 
     /// TODO: Add documentation
-    pub fn provider_name(&self) -> &str {
+    pub(crate) fn provider_name(&self) -> &str {
         &self.provider_name
     }
 
     /// TODO: Add documentation
-    pub fn event_mapping(&self) -> Option<&EventMapping> {
+    pub(crate) fn event_mapping(&self) -> Option<&EventMapping> {
         self.event_mapping.as_ref()
     }
 
     /// TODO: Add documentation
-    pub fn default_event_name(&self) -> &str {
+    pub(crate) fn default_event_name(&self) -> &str {
         self.default_event_name.as_ref()
     }
 
     /// TODO: Add documentation
-    pub fn get_etw_event_name<'a>(
+    pub(crate) fn get_etw_event_name<'a>(
         &'a self,
         log_record: &'a opentelemetry_sdk::logs::SdkLogRecord,
     ) -> &'a str {
