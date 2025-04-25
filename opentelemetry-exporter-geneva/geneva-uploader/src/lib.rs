@@ -15,4 +15,3 @@ pub use ingestion_service::uploader::{
 };
 
 pub use uploader::{create_uploader, GenevaUploader as Uploader};
-

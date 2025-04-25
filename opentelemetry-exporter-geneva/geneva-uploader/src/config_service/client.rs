@@ -212,7 +212,7 @@ impl GenevaConfigClient {
         let mut client_builder = Client::builder()
             .http1_only()
             .timeout(Duration::from_secs(30)); //TODO - make this configurable
-        
+
         match &config.auth_method {
             // TODO: Certificate auth would be removed in favor of managed identity.,
             // This is for testing, so we can use self-signed certs, and password in plain text.
