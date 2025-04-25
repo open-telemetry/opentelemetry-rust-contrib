@@ -1,7 +1,9 @@
 use chrono::{DateTime, Duration as ChronoDuration, Utc};
-use chrono::{Datelike, Timelike};
 
-use crate::config_service::client::{GenevaConfigClient, IngestionGatewayInfo};
+use crate::config_service::client::{
+    GenevaConfigClient, GenevaConfigClientError, IngestionGatewayInfo,
+};
+use chrono::{Datelike, Timelike};
 use reqwest::{header, Client};
 use serde::Deserialize;
 use serde_json::Value;
@@ -18,6 +20,8 @@ pub(crate) enum GenevaUploaderError {
     Http(#[from] reqwest::Error),
     #[error("JSON error: {0}")]
     Json(#[from] serde_json::Error),
+    #[error("Config service error: {0}")]
+    ConfigService(String),
     #[allow(dead_code)]
     #[error("Upload failed with status {status}: {message}")]
     UploadFailed { status: u16, message: String },
@@ -25,6 +29,14 @@ pub(crate) enum GenevaUploaderError {
     #[error("Uploader error: {0}")]
     Other(String),
 }
+
+impl From<GenevaConfigClientError> for GenevaUploaderError {
+    fn from(err: GenevaConfigClientError) -> Self {
+        // This preserves the original error message format from the code
+        GenevaUploaderError::ConfigService(format!("GCS error: {}", err))
+    }
+}
+
 #[allow(dead_code)]
 pub(crate) type Result<T> = std::result::Result<T, GenevaUploaderError>;
 
@@ -44,7 +56,7 @@ pub(crate) struct GenevaUploaderConfig {
     pub namespace: String,
     pub source_identity: String,
     pub environment: String,
-    pub schema_ids: Option<String>,
+    pub schema_ids: String,
 }
 
 #[allow(dead_code)]
@@ -72,16 +84,10 @@ impl GenevaUploader {
         config_client: &GenevaConfigClient,
         uploader_config: GenevaUploaderConfig,
     ) -> Result<Self> {
-        let (auth_info, moniker_info, monitoring_endpoint) = config_client
-            .get_ingestion_info()
-            .await
-            .map_err(|e| GenevaUploaderError::Other(format!("GCS error: {}", e)))?;
+        let (auth_info, moniker_info, monitoring_endpoint) =
+            config_client.get_ingestion_info().await?;
 
-        println!("Monitoring endpoint: {}", monitoring_endpoint); // For debugging purposes
-        let http_client = Client::builder()
-            .timeout(Duration::from_secs(30))
-            .build()
-            .map_err(GenevaUploaderError::Http)?;
+        let http_client = Client::builder().timeout(Duration::from_secs(30)).build()?;
 
         Ok(Self {
             auth_info,
@@ -95,12 +101,12 @@ impl GenevaUploader {
     /// Creates the GIG upload URI with required parameters
     #[allow(dead_code)]
     fn create_upload_uri(&self, data_size: usize, event_name: &str, event_version: &str) -> String {
-        // Current time and end time (5 minutes later)
-        let now: DateTime<Utc> = Utc::now();
-        let end_time = now + ChronoDuration::minutes(5);
+        let now: DateTime<Utc> = Utc::now(); //TODO - this need to be calculated from the bond data
+        let end_time = now + ChronoDuration::minutes(5); //TODO - this need to be calculated from the bond data
 
         // Format times in ISO 8601 format with fixed precision
         // Using .NET compatible format (matches DateTime.ToString("O"))
+
         let start_time = format!(
             "{:04}-{:02}-{:02}T{:02}:{:02}:{:02}.{:07}Z",
             now.year(),
@@ -127,22 +133,12 @@ impl GenevaUploader {
         // TODO - Maintain this as url-encoded in config service to avoid conversion here
         let encoded_monitoring_endpoint: String =
             byte_serialize(self.monitoring_endpoint.as_bytes()).collect();
-        println!(
-            "Encoded monitoring endpoint: {}",
-            encoded_monitoring_endpoint
-        ); // For debugging purposes
 
         let encoded_source_identity: String =
             byte_serialize(self.config.source_identity.as_bytes()).collect();
-        println!("Encoded source identity: {}", encoded_source_identity); // For debugging purposes
 
         // Create a source unique ID - using a UUID to ensure uniqueness
         let source_unique_id = Uuid::new_v4().to_string();
-
-        // Use provided schema IDs or default if not specified
-        let schema_ids = self.config.schema_ids.clone().unwrap_or_else(|| {
-            "c1ce0ecea020359624c493bbe97f9e80;0da22cabbee419e000541a5eda732eb3".to_string()
-        });
 
         // Create the query string
         format!(
@@ -159,7 +155,7 @@ impl GenevaUploader {
             "centralbond/lz4hc", // Format encoding
             data_size,
             2, // Min level
-            schema_ids
+            self.config.schema_ids
         )
     }
 
@@ -184,8 +180,6 @@ impl GenevaUploader {
             self.auth_info.endpoint.trim_end_matches('/'),
             upload_uri
         );
-        println!("Upload URI: {}", full_url); // For debugging purposes
-        println!("Auth Token: {}", self.auth_info.auth_token); // For debugging purposes
 
         // Send the upload request
         let response = self

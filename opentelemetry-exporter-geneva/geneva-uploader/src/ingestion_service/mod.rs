@@ -13,7 +13,7 @@ mod tests {
     /// To run this test against a real Geneva Config Service and GIG, set the following environment variables:
     ///
     /// ```bash
-    /// export GENEVA_ENDPOINT="https://<gcs-endpoint>"
+    /// export GENEVA_ENDPOINT="xxxhttps://<gcs-endpoint>"
     /// export GENEVA_ENVIRONMENT="Test"
     /// export GENEVA_ACCOUNT="YourAccountName"
     /// export GENEVA_NAMESPACE="YourNamespace"
@@ -50,13 +50,15 @@ mod tests {
             .expect("GENEVA_CONFIG_MAJOR_VERSION must be a u32");
         let source_identity = env::var("GENEVA_SOURCE_IDENTITY")
             .unwrap_or_else(|_| "Tenant=Default/Role=Uploader/RoleInstance=devhost".to_string());
+        let schema_ids =
+            "c1ce0ecea020359624c493bbe97f9e80;0da22cabbee419e000541a5eda732eb3".to_string(); //TODO make this configurable
 
         // === 3. Define uploader config ===
         let uploader_config = GenevaUploaderConfig {
             namespace: namespace.clone(),
             source_identity,
             environment: environment.clone(),
-            schema_ids: None,
+            schema_ids,
         };
 
         let config = GenevaConfigClientConfig {
@@ -75,9 +77,14 @@ mod tests {
         // === 4. Build client and uploader ===
         let config_client =
             GenevaConfigClient::new(config).expect("Failed to create config client");
-        let uploader = GenevaUploader::from_config_client(&config_client, uploader_config)
-            .await
-            .expect("Failed to create uploader");
+        let uploader =
+            match GenevaUploader::from_config_client(&config_client, uploader_config).await {
+                Ok(u) => u,
+                Err(e) => {
+                    eprintln!("Error creating uploader: {:?}", e);
+                    panic!("Failed to create uploader");
+                }
+            };
 
         // === 5. Upload ===
         let event_name = "Log";
@@ -150,12 +157,14 @@ mod tests {
             .expect("GENEVA_CONFIG_MAJOR_VERSION must be a u32");
         let source_identity = env::var("GENEVA_SOURCE_IDENTITY")
             .unwrap_or_else(|_| "Tenant=Default/Role=Uploader/RoleInstance=devhost".to_string());
+        let schema_ids =
+            "c1ce0ecea020359624c493bbe97f9e80;0da22cabbee419e000541a5eda732eb3".to_string(); //TODO make this configurable
 
         let uploader_config = GenevaUploaderConfig {
             namespace: namespace.clone(),
             source_identity,
             environment: environment.clone(),
-            schema_ids: None,
+            schema_ids,
         };
 
         let config = GenevaConfigClientConfig {
