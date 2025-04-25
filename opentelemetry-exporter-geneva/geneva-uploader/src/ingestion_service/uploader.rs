@@ -8,42 +8,46 @@ use serde_json::Value;
 use std::collections::HashMap;
 use std::time::Duration;
 use thiserror::Error;
-use url::form_urlencoded;
 use url::form_urlencoded::byte_serialize;
 use uuid::Uuid;
 
 /// Error types for the Geneva Uploader
 #[derive(Debug, Error)]
-pub enum GenevaUploaderError {
+pub(crate) enum GenevaUploaderError {
     #[error("HTTP error: {0}")]
     Http(#[from] reqwest::Error),
     #[error("JSON error: {0}")]
     Json(#[from] serde_json::Error),
+    #[allow(dead_code)]
     #[error("Upload failed with status {status}: {message}")]
     UploadFailed { status: u16, message: String },
+    #[allow(dead_code)]
     #[error("Uploader error: {0}")]
     Other(String),
 }
+#[allow(dead_code)]
+pub(crate) type Result<T> = std::result::Result<T, GenevaUploaderError>;
 
-pub type Result<T> = std::result::Result<T, GenevaUploaderError>;
-
+#[allow(dead_code)]
 /// Response from the ingestion API when submitting data
 #[derive(Debug, Clone, Deserialize)]
-pub struct IngestionResponse {
-    pub ticket: String,
+pub(crate) struct IngestionResponse {
+    pub(crate) ticket: String,
     #[serde(flatten)]
-    pub extra: HashMap<String, Value>,
+    pub(crate) extra: HashMap<String, Value>,
 }
 
+#[allow(dead_code)]
 /// Configuration for the Geneva Uploader
 #[derive(Debug, Clone)]
-pub struct GenevaUploaderConfig {
+pub(crate) struct GenevaUploaderConfig {
     pub namespace: String,
     pub source_identity: String,
     pub environment: String,
     pub schema_ids: Option<String>,
 }
 
+#[allow(dead_code)]
 /// Client for uploading data to Geneva Ingestion Gateway (GIG)
 #[derive(Debug, Clone)]
 pub struct GenevaUploader {
@@ -63,7 +67,8 @@ impl GenevaUploader {
     ///
     /// # Returns
     /// * `Result<GenevaUploader>` with authenticated client and resolved moniker/endpoint
-    pub async fn from_config_client(
+    #[allow(dead_code)]
+    pub(crate) async fn from_config_client(
         config_client: &GenevaConfigClient,
         uploader_config: GenevaUploaderConfig,
     ) -> Result<Self> {
@@ -88,6 +93,7 @@ impl GenevaUploader {
     }
 
     /// Creates the GIG upload URI with required parameters
+    #[allow(dead_code)]
     fn create_upload_uri(&self, data_size: usize, event_name: &str, event_version: &str) -> String {
         // Current time and end time (5 minutes later)
         let now: DateTime<Utc> = Utc::now();
@@ -164,7 +170,8 @@ impl GenevaUploader {
     ///
     /// # Returns
     /// * `Result<IngestionResponse>` - The response containing the ticket ID or an error
-    pub async fn upload(
+    #[allow(dead_code)]
+    pub(crate) async fn upload(
         &self,
         data: Vec<u8>,
         event_name: &str,

@@ -39,7 +39,10 @@ mod tests {
         let account = env::var("GENEVA_ACCOUNT").expect("GENEVA_ACCOUNT is required");
         let namespace = env::var("GENEVA_NAMESPACE").expect("GENEVA_NAMESPACE is required");
         let region = env::var("GENEVA_REGION").expect("GENEVA_REGION is required");
-        let cert_path = env::var("GENEVA_CERT_PATH").expect("GENEVA_CERT_PATH is required");
+        let cert_path = std::path::PathBuf::from(
+            std::env::var("GENEVA_CERT_PATH").expect("GENEVA_CERT_PATH is required"),
+        );
+
         let cert_password = env::var("GENEVA_CERT_PASSWORD").unwrap_or_default();
         let config_major_version = env::var("GENEVA_CONFIG_MAJOR_VERSION")
             .expect("GENEVA_CONFIG_MAJOR_VERSION is required")
@@ -70,9 +73,8 @@ mod tests {
         };
 
         // === 4. Build client and uploader ===
-        let config_client = GenevaConfigClient::new(config)
-            .await
-            .expect("Failed to create config client");
+        let config_client =
+            GenevaConfigClient::new(config).expect("Failed to create config client");
         let uploader = GenevaUploader::from_config_client(&config_client, uploader_config)
             .await
             .expect("Failed to create uploader");
@@ -138,7 +140,9 @@ mod tests {
         let account = env::var("GENEVA_ACCOUNT").expect("GENEVA_ACCOUNT is required");
         let namespace = env::var("GENEVA_NAMESPACE").expect("GENEVA_NAMESPACE is required");
         let region = env::var("GENEVA_REGION").expect("GENEVA_REGION is required");
-        let cert_path = env::var("GENEVA_CERT_PATH").expect("GENEVA_CERT_PATH is required");
+        let cert_path = std::path::PathBuf::from(
+            std::env::var("GENEVA_CERT_PATH").expect("GENEVA_CERT_PATH is required"),
+        );
         let cert_password = env::var("GENEVA_CERT_PASSWORD").unwrap_or_default();
         let config_major_version = env::var("GENEVA_CONFIG_MAJOR_VERSION")
             .expect("GENEVA_CONFIG_MAJOR_VERSION is required")
@@ -167,9 +171,8 @@ mod tests {
             },
         };
 
-        let config_client = GenevaConfigClient::new(config)
-            .await
-            .expect("Failed to create config client");
+        let config_client =
+            GenevaConfigClient::new(config).expect("Failed to create config client");
         let uploader = GenevaUploader::from_config_client(&config_client, uploader_config)
             .await
             .expect("Failed to create uploader");
