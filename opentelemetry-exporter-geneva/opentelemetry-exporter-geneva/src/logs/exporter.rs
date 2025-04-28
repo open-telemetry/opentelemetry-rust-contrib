@@ -45,7 +45,7 @@ impl opentelemetry_sdk::logs::LogExporter for GenevaExporter {
     async fn export(&self, _batch: LogBatch<'_>) -> OTelSdkResult {
         //serialize to otlp format
         let otlp = group_logs_by_resource_and_scope(_batch, &self.resource);
-        //send to Geneva using geneva-uploader
+        //TODO send to Geneva using geneva-uploader
         let _ = self.uploader.upload_logs(otlp).await;
 
         Ok(())

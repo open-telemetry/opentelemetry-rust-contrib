@@ -28,6 +28,7 @@ openssl = { version = "0.10", features = ["vendored"] }
 tempfile = "3.5"
 wiremock = "0.6"
 futures = "0.3"
+num_cpus = "1.16"
 
 [lints]
 workspace = true

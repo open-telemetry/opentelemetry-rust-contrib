@@ -8,6 +8,7 @@ use reqwest::{header, Client};
 use serde::Deserialize;
 use serde_json::Value;
 use std::collections::HashMap;
+use std::fmt::Write;
 use std::time::Duration;
 use thiserror::Error;
 use url::form_urlencoded::byte_serialize;
@@ -19,21 +20,21 @@ pub(crate) enum GenevaUploaderError {
     #[error("HTTP error: {0}")]
     Http(#[from] reqwest::Error),
     #[error("JSON error: {0}")]
-    Json(#[from] serde_json::Error),
+    SerdeJson(#[from] serde_json::Error),
     #[error("Config service error: {0}")]
     ConfigService(String),
     #[allow(dead_code)]
     #[error("Upload failed with status {status}: {message}")]
     UploadFailed { status: u16, message: String },
     #[allow(dead_code)]
-    #[error("Uploader error: {0}")]
-    Other(String),
+    #[error("Internal error: {0}")]
+    InternalError(String),
 }
 
 impl From<GenevaConfigClientError> for GenevaUploaderError {
     fn from(err: GenevaConfigClientError) -> Self {
         // This preserves the original error message format from the code
-        GenevaUploaderError::ConfigService(format!("GCS error: {}", err))
+        GenevaUploaderError::ConfigService(format!("GenevaConfigClient error: {}", err))
     }
 }
 
@@ -86,8 +87,16 @@ impl GenevaUploader {
     ) -> Result<Self> {
         let (auth_info, moniker_info, monitoring_endpoint) =
             config_client.get_ingestion_info().await?;
-
-        let http_client = Client::builder().timeout(Duration::from_secs(30)).build()?;
+        // client with header             .header(header::ACCEPT, "application/json")
+        let mut headers = header::HeaderMap::new();
+        headers.insert(
+            header::ACCEPT,
+            header::HeaderValue::from_static("application/json"),
+        );
+        let http_client = Client::builder()
+            .timeout(Duration::from_secs(30))
+            .default_headers(headers)
+            .build()?;
 
         Ok(Self {
             auth_info,
@@ -100,7 +109,12 @@ impl GenevaUploader {
 
     /// Creates the GIG upload URI with required parameters
     #[allow(dead_code)]
-    fn create_upload_uri(&self, data_size: usize, event_name: &str, event_version: &str) -> String {
+    fn create_upload_uri(
+        &self,
+        data_size: usize,
+        event_name: &str,
+        event_version: &str,
+    ) -> Result<String> {
         let now: DateTime<Utc> = Utc::now(); //TODO - this need to be calculated from the bond data
         let end_time = now + ChronoDuration::minutes(5); //TODO - this need to be calculated from the bond data
 
@@ -138,25 +152,25 @@ impl GenevaUploader {
             byte_serialize(self.config.source_identity.as_bytes()).collect();
 
         // Create a source unique ID - using a UUID to ensure uniqueness
-        let source_unique_id = Uuid::new_v4().to_string();
+        let source_unique_id = Uuid::new_v4();
 
         // Create the query string
-        format!(
-            "api/v1/ingestion/ingest?endpoint={}&moniker={}&namespace={}&event={}&version={}&sourceUniqueId={}&sourceIdentity={}&startTime={}&endTime={}&format={}&dataSize={}&minLevel={}&schemaIds={}",
+        let mut query = String::with_capacity(512); // Preallocate enough space for the query string (decided based on expected size)
+        write!(&mut query, "api/v1/ingestion/ingest?endpoint={}&moniker={}&namespace={}&event={}&version={}&sourceUniqueId={}&sourceIdentity={}&startTime={}&endTime={}&format=centralbond/lz4hc&dataSize={}&minLevel={}&schemaIds={}",
             encoded_monitoring_endpoint,
             self.moniker,
             self.config.namespace,
             event_name,
             event_version,
             source_unique_id,
-            encoded_source_identity, // source identity (tenant/role/instance)
+            encoded_source_identity,
             start_time,
             end_time,
-            "centralbond/lz4hc", // Format encoding
             data_size,
-            2, // Min level
+            2,
             self.config.schema_ids
-        )
+        ).map_err(|e| GenevaUploaderError::InternalError(format!("Failed to write query string: {e}")))?;
+        Ok(query)
     }
 
     /// Uploads data to the ingestion gateway
@@ -174,7 +188,7 @@ impl GenevaUploader {
         event_version: &str,
     ) -> Result<IngestionResponse> {
         let data_size = data.len();
-        let upload_uri = self.create_upload_uri(data_size, event_name, event_version);
+        let upload_uri = self.create_upload_uri(data_size, event_name, event_version)?;
         let full_url = format!(
             "{}/{}",
             self.auth_info.endpoint.trim_end_matches('/'),
@@ -200,7 +214,7 @@ impl GenevaUploader {
 
         if status == reqwest::StatusCode::ACCEPTED {
             let ingest_response: IngestionResponse =
-                serde_json::from_str(&body).map_err(GenevaUploaderError::Json)?;
+                serde_json::from_str(&body).map_err(GenevaUploaderError::SerdeJson)?;
             Ok(ingest_response)
         } else {
             Err(GenevaUploaderError::UploadFailed {
