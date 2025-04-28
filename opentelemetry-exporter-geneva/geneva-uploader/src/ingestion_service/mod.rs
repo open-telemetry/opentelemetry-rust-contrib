@@ -150,7 +150,7 @@ mod tests {
     /// 📊 Average upload duration: 0.12 sec
     /// ⏱️ Total elapsed for 5 parallel uploads: 125.30ms (successes: 5, failures: 0)
 
-    #[tokio::test]
+    #[tokio::test(flavor = "multi_thread")]
     #[ignore]
     async fn test_parallel_uploads() {
         use std::env;
@@ -177,35 +177,30 @@ mod tests {
 
             let handle = tokio::spawn(async move {
                 let start = Instant::now();
-                match uploader.upload(data, &event_name, &event_version).await {
-                    Ok(resp) => {
-                        let elapsed = start.elapsed();
-                        println!(
-                            "✅ Upload {} complete in {:.2?}. Ticket: {}",
-                            i, elapsed, resp.ticket
-                        );
-                        Some(elapsed)
-                    }
-                    Err(e) => {
-                        eprintln!("❌ Upload {} failed: {:?}", i, e);
-                        None
-                    }
-                }
+                let resp = uploader
+                    .upload(data, &event_name, &event_version)
+                    .await
+                    .expect(&format!("Upload {} failed", i));
+                let elapsed = start.elapsed();
+                println!(
+                    "✅ Upload {} complete in {:.2?}. Ticket: {}",
+                    i, elapsed, resp.ticket
+                );
+                elapsed
             });
+
             handles.push(handle);
         }
 
         let results: Vec<_> = futures::future::join_all(handles)
             .await
             .into_iter()
-            .map(|res| res.ok().flatten())
+            .map(|res| res.expect("Join error in upload task"))
             .collect();
 
         let total_time = start_all.elapsed();
-        let success_count = results.iter().filter(|r| r.is_some()).count();
-        let failure_count = parallel_uploads - success_count;
 
-        let durations: Vec<_> = results.into_iter().flatten().collect();
+        let durations: Vec<_> = results;
 
         if !durations.is_empty() {
             let avg =
@@ -214,8 +209,8 @@ mod tests {
         }
 
         println!(
-            "⏱️ Total elapsed for {} parallel uploads: {:.2?} (successes: {}, failures: {})",
-            parallel_uploads, total_time, success_count, failure_count
+            "⏱️ Total elapsed for {} parallel uploads: {:.2?})",
+            parallel_uploads, total_time
         );
     }
 }
