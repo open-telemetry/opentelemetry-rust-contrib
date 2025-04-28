@@ -12,6 +12,7 @@ use uuid::Uuid;
 
 use chrono::{DateTime, Utc};
 use native_tls::{Identity, Protocol};
+use std::fmt;
 use std::fs;
 use std::path::PathBuf;
 use std::sync::RwLock;
@@ -43,7 +44,7 @@ use std::sync::RwLock;
 /// openssl pkcs12 -export -in cert.pem -inkey key.pem -out client.p12 -name "alias"
 /// ```
 #[allow(dead_code)]
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub(crate) enum AuthMethod {
     /// Certificate-based authentication
     ///
@@ -116,7 +117,7 @@ pub(crate) type Result<T> = std::result::Result<T, GenevaConfigClientError>;
 /// };
 /// ```
 #[allow(dead_code)]
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub(crate) struct GenevaConfigClientConfig {
     pub(crate) endpoint: String,
     pub(crate) environment: String,
@@ -189,6 +190,18 @@ pub(crate) struct GenevaConfigClient {
     agent_identity: String,
     agent_version: String,
     static_headers: HeaderMap,
+}
+
+impl fmt::Debug for GenevaConfigClient {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("GenevaConfigClient")
+            .field("config", &self.config)
+            .field("precomputed_url_prefix", &self.precomputed_url_prefix)
+            .field("agent_identity", &self.agent_identity)
+            .field("agent_version", &self.agent_version)
+            // Don't print http_client, cached_data, static_headers
+            .finish()
+    }
 }
 
 /// Client for interacting with the Geneva Configuration Service.

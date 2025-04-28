@@ -11,6 +11,7 @@ mod tests {
         };
         use std::env;
         use std::fs;
+        use std::sync::Arc;
 
         pub struct TestUploadContext {
             pub data: Vec<u8>,
@@ -70,9 +71,10 @@ mod tests {
             // Build client and uploader
             let config_client =
                 GenevaConfigClient::new(config).expect("Failed to create config client");
-            let uploader = GenevaUploader::from_config_client(&config_client, uploader_config)
-                .await
-                .expect("Failed to create uploader");
+            let uploader =
+                GenevaUploader::from_config_client(Arc::new(config_client), uploader_config)
+                    .await
+                    .expect("Failed to create uploader");
 
             // Event name/version
             let event_name = "Log".to_string();
@@ -108,7 +110,14 @@ mod tests {
     async fn test_upload_to_gig_real_server() {
         let ctx = test_helpers::build_test_upload_context().await;
         println!("✅ Loaded blob ({} bytes)", ctx.data.len());
-        println!("🚀 Uploading to: {}", ctx.uploader.auth_info.endpoint);
+        // below call is only for logging purposes, to get endpoint and auth info.
+        let (auth_info, _, _) = ctx
+            .uploader
+            .config_client
+            .get_ingestion_info()
+            .await
+            .unwrap();
+        println!("🚀 Uploading to: {}", auth_info.endpoint);
 
         let start = Instant::now();
         let response = ctx
@@ -164,6 +173,19 @@ mod tests {
             .unwrap_or_else(num_cpus::get);
         let ctx = test_helpers::build_test_upload_context().await;
 
+        // --- Warm-up: do the first upload to populate the token cache ---
+        println!("🔥 Performing warm-up upload...");
+        let start_warmup = Instant::now();
+        let _ = ctx
+            .uploader
+            .upload(ctx.data.clone(), &ctx.event_name, &ctx.event_version)
+            .await
+            .expect("Warm-up upload failed");
+        println!(
+            "🔥 Warm-up upload complete in {:.2?}",
+            start_warmup.elapsed()
+        );
+
         println!("🚀 Launching {parallel_uploads} parallel uploads...");
 
         let start_all = Instant::now();
@@ -203,9 +225,9 @@ mod tests {
         let durations: Vec<_> = results;
 
         if !durations.is_empty() {
-            let avg =
-                durations.iter().map(|d| d.as_secs_f64()).sum::<f64>() / durations.len() as f64;
-            println!("📊 Average upload duration: {:.2} sec", avg);
+            let avg_ms = durations.iter().map(|d| d.as_millis()).sum::<u128>() as f64
+                / durations.len() as f64;
+            println!("📊 Average upload duration: {:.2} ms", avg_ms);
         }
 
         println!(

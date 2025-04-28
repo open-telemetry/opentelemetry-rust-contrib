@@ -9,6 +9,7 @@ use serde::Deserialize;
 use serde_json::Value;
 use std::collections::HashMap;
 use std::fmt::Write;
+use std::sync::Arc;
 use std::time::Duration;
 use thiserror::Error;
 use url::form_urlencoded::byte_serialize;
@@ -64,11 +65,9 @@ pub(crate) struct GenevaUploaderConfig {
 /// Client for uploading data to Geneva Ingestion Gateway (GIG)
 #[derive(Debug, Clone)]
 pub struct GenevaUploader {
-    pub auth_info: IngestionGatewayInfo,
-    pub moniker: String,
+    pub config_client: Arc<GenevaConfigClient>,
     pub config: GenevaUploaderConfig,
     pub http_client: Client,
-    pub monitoring_endpoint: String,
 }
 
 impl GenevaUploader {
@@ -82,12 +81,9 @@ impl GenevaUploader {
     /// * `Result<GenevaUploader>` with authenticated client and resolved moniker/endpoint
     #[allow(dead_code)]
     pub(crate) async fn from_config_client(
-        config_client: &GenevaConfigClient,
+        config_client: Arc<GenevaConfigClient>,
         uploader_config: GenevaUploaderConfig,
     ) -> Result<Self> {
-        let (auth_info, moniker_info, monitoring_endpoint) =
-            config_client.get_ingestion_info().await?;
-        // client with header             .header(header::ACCEPT, "application/json")
         let mut headers = header::HeaderMap::new();
         headers.insert(
             header::ACCEPT,
@@ -99,11 +95,9 @@ impl GenevaUploader {
             .build()?;
 
         Ok(Self {
-            auth_info,
-            moniker: moniker_info.name,
+            config_client,
             config: uploader_config,
             http_client,
-            monitoring_endpoint,
         })
     }
 
@@ -111,6 +105,8 @@ impl GenevaUploader {
     #[allow(dead_code)]
     fn create_upload_uri(
         &self,
+        monitoring_endpoint: &str,
+        moniker: &str,
         data_size: usize,
         event_name: &str,
         event_version: &str,
@@ -146,7 +142,7 @@ impl GenevaUploader {
         // URL encode parameters
         // TODO - Maintain this as url-encoded in config service to avoid conversion here
         let encoded_monitoring_endpoint: String =
-            byte_serialize(self.monitoring_endpoint.as_bytes()).collect();
+            byte_serialize(monitoring_endpoint.as_bytes()).collect();
 
         let encoded_source_identity: String =
             byte_serialize(self.config.source_identity.as_bytes()).collect();
@@ -158,7 +154,7 @@ impl GenevaUploader {
         let mut query = String::with_capacity(512); // Preallocate enough space for the query string (decided based on expected size)
         write!(&mut query, "api/v1/ingestion/ingest?endpoint={}&moniker={}&namespace={}&event={}&version={}&sourceUniqueId={}&sourceIdentity={}&startTime={}&endTime={}&format=centralbond/lz4hc&dataSize={}&minLevel={}&schemaIds={}",
             encoded_monitoring_endpoint,
-            self.moniker,
+            moniker,
             self.config.namespace,
             event_name,
             event_version,
@@ -187,11 +183,20 @@ impl GenevaUploader {
         event_name: &str,
         event_version: &str,
     ) -> Result<IngestionResponse> {
+        // Always get fresh auth info
+        let (auth_info, moniker_info, monitoring_endpoint) =
+            self.config_client.get_ingestion_info().await?;
         let data_size = data.len();
-        let upload_uri = self.create_upload_uri(data_size, event_name, event_version)?;
+        let upload_uri = self.create_upload_uri(
+            &monitoring_endpoint,
+            &moniker_info.name,
+            data_size,
+            event_name,
+            event_version,
+        )?;
         let full_url = format!(
             "{}/{}",
-            self.auth_info.endpoint.trim_end_matches('/'),
+            auth_info.endpoint.trim_end_matches('/'),
             upload_uri
         );
 
@@ -202,7 +207,7 @@ impl GenevaUploader {
             .header(header::ACCEPT, "application/json")
             .header(
                 header::AUTHORIZATION,
-                format!("Bearer {}", self.auth_info.auth_token),
+                format!("Bearer {}", auth_info.auth_token),
             )
             .body(data)
             .send()
