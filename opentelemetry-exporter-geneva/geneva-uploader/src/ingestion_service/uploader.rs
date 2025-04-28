@@ -1,8 +1,6 @@
 use chrono::{DateTime, Duration as ChronoDuration, Utc};
 
-use crate::config_service::client::{
-    GenevaConfigClient, GenevaConfigClientError, IngestionGatewayInfo,
-};
+use crate::config_service::client::{GenevaConfigClient, GenevaConfigClientError};
 use chrono::{Datelike, Timelike};
 use reqwest::{header, Client};
 use serde::Deserialize;
