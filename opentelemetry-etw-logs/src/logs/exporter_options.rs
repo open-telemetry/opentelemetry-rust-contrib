@@ -32,7 +32,7 @@ impl ExporterOptions {
         // Using target for now. This is the default behavior.
         // Future versions of this library may add mechanisms to chose which attribute to use for the mapping key
         if let Some(target) = log_record.target() {
-          return target.as_ref();
+            return target.as_ref();
         }
         self.default_event_name()
     }
