@@ -99,7 +99,7 @@ mod tests {
     use crate::logs::exporter::common::test_utils;
 
     #[test]
-    fn test_get_default_event_name() {
+    fn test_get_event_name() {
         use opentelemetry::logs::LogRecord;
 
         let mut log_record = test_utils::new_sdk_log_record();
@@ -115,7 +115,7 @@ mod tests {
 
         log_record.set_target("target-name");
         let result = options.get_etw_event_name(&log_record);
-        assert_eq!(result, "Log");
+        assert_eq!(result, "target-name");
     }
 
     #[test]
@@ -138,6 +138,6 @@ mod tests {
 
         log_record.set_target("target-name");
         let result = options.get_etw_event_name(&log_record);
-        assert_eq!(result, "default_event_name");
+        assert_eq!(result, "target-name");
     }
 }
