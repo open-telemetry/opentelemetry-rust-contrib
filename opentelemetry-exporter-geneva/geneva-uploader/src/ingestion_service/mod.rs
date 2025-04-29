@@ -204,7 +204,7 @@ mod tests {
                 let resp = uploader
                     .upload(data, &event_name, &event_version)
                     .await
-                    .expect(&format!("Upload {} failed", i));
+                    .unwrap_or_else(|_| panic!("Upload {} failed", i));
                 let elapsed = start.elapsed();
                 println!(
                     "✅ Upload {} complete in {:.2?}. Ticket: {}",
