@@ -25,29 +25,64 @@ impl ResourceDetector for ProcessResourceDetector {
             .map(|arg| arg.to_string_lossy().into_owned().into())
             .collect::<Vec<StringValue>>();
         Resource::builder_empty()
-            .with_attributes(vec![
-                KeyValue::new(
-                    opentelemetry_semantic_conventions::attribute::PROCESS_COMMAND_ARGS,
-                    Value::Array(cmd_arg_val.into()),
-                ),
-                KeyValue::new(
-                    opentelemetry_semantic_conventions::attribute::PROCESS_PID,
-                    id() as i64,
-                ),
-            ])
+            .with_attributes(
+                vec![
+                    Some(KeyValue::new(
+                        opentelemetry_semantic_conventions::attribute::PROCESS_COMMAND_ARGS,
+                        Value::Array(cmd_arg_val.into()),
+                    )),
+                    Some(KeyValue::new(
+                        opentelemetry_semantic_conventions::attribute::PROCESS_PID,
+                        id() as i64,
+                    )),
+                    Some(KeyValue::new(
+                        opentelemetry_semantic_conventions::attribute::PROCESS_RUNTIME_NAME,
+                        "rustc",
+                    )),
+                    option_env!("RUSTC_VERSION").map(|rustc_version| {
+                        KeyValue::new(
+                            opentelemetry_semantic_conventions::attribute::PROCESS_RUNTIME_VERSION,
+                            rustc_version,
+                        )
+                    }),
+                ]
+                .into_iter()
+                .flatten(),
+            )
             .build()
     }
 }
 
-#[cfg(target_os = "linux")]
 #[cfg(test)]
 mod tests {
     use super::ProcessResourceDetector;
     use opentelemetry_sdk::resource::ResourceDetector;
 
+    #[cfg(target_os = "linux")]
     #[test]
     fn test_processor_resource_detector() {
         let resource = ProcessResourceDetector.detect();
-        assert_eq!(resource.len(), 2); // we cannot assert on the values because it changes along with runtime.
+        assert_eq!(resource.len(), 4); // we cannot assert on the values because it changes along with runtime.
+    }
+
+    #[test]
+    fn test_processor_resource_detector_runtime() {
+        use opentelemetry_semantic_conventions::attribute::{
+            PROCESS_RUNTIME_NAME, PROCESS_RUNTIME_VERSION,
+        };
+
+        let resource = ProcessResourceDetector.detect();
+
+        assert_eq!(
+            resource.get(&PROCESS_RUNTIME_NAME.into()),
+            Some("rustc".into())
+        );
+
+        if option_env!("RUSTC_VERSION").is_some() {
+            assert_eq!(
+                resource.get(&PROCESS_RUNTIME_VERSION.into()),
+                Some(env!("RUSTC_VERSION").into())
+            );
+        }
     }
 }
