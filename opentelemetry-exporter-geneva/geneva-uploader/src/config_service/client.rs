@@ -16,6 +16,7 @@ use std::fmt;
 use std::fs;
 use std::path::PathBuf;
 use std::sync::RwLock;
+use std::fmt::Write;
 
 /// Authentication methods for the Geneva Config Client.
 ///
@@ -263,21 +264,18 @@ impl GenevaConfigClient {
         let version_str = format!("Ver{}v0", config.config_major_version);
 
         let mut pre_url = String::with_capacity(config.endpoint.len() + 200);
-        pre_url.push_str(config.endpoint.trim_end_matches('/'));
-        pre_url.push_str("/api/agent/v3/");
-        pre_url.push_str(&config.environment);
-        pre_url.push('/');
-        pre_url.push_str(&config.account);
-        pre_url.push_str("/MonitoringStorageKeys/?Namespace=");
-        pre_url.push_str(&config.namespace);
-        pre_url.push_str("&Region=");
-        pre_url.push_str(&config.region);
-        pre_url.push_str("&Identity=");
-        pre_url.push_str(&encoded_identity);
-        pre_url.push_str("&OSType=");
-        pre_url.push_str(get_os_type());
-        pre_url.push_str("&ConfigMajorVersion=");
-        pre_url.push_str(&version_str);
+        write!(
+            &mut pre_url,
+            "{}/api/agent/v3/{}/{}/MonitoringStorageKeys/?Namespace={}&Region={}&Identity={}&OSType={}&ConfigMajorVersion={}",
+            config.endpoint.trim_end_matches('/'),
+            config.environment,
+            config.account,
+            config.namespace,
+            config.region,
+            encoded_identity,
+            get_os_type(),
+            version_str
+        ).map_err(|e| GenevaConfigClientError::InternalError(format!("Failed to write URL: {e}")))?;
 
         let http_client = client_builder.build()?;
 
