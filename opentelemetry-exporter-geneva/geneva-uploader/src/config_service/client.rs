@@ -12,6 +12,8 @@ use uuid::Uuid;
 
 use chrono::{DateTime, Utc};
 use native_tls::{Identity, Protocol};
+use std::fmt;
+use std::fmt::Write;
 use std::fs;
 use std::path::PathBuf;
 use std::sync::RwLock;
@@ -43,7 +45,7 @@ use std::sync::RwLock;
 /// openssl pkcs12 -export -in cert.pem -inkey key.pem -out client.p12 -name "alias"
 /// ```
 #[allow(dead_code)]
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub(crate) enum AuthMethod {
     /// Certificate-based authentication
     ///
@@ -116,7 +118,7 @@ pub(crate) type Result<T> = std::result::Result<T, GenevaConfigClientError>;
 /// };
 /// ```
 #[allow(dead_code)]
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub(crate) struct GenevaConfigClientConfig {
     pub(crate) endpoint: String,
     pub(crate) environment: String,
@@ -191,6 +193,18 @@ pub(crate) struct GenevaConfigClient {
     static_headers: HeaderMap,
 }
 
+impl fmt::Debug for GenevaConfigClient {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("GenevaConfigClient")
+            .field("config", &self.config)
+            .field("precomputed_url_prefix", &self.precomputed_url_prefix)
+            .field("agent_identity", &self.agent_identity)
+            .field("agent_version", &self.agent_version)
+            .field("static_headers", &self.static_headers)
+            .finish()
+    }
+}
+
 /// Client for interacting with the Geneva Configuration Service.
 ///
 /// This client handles authentication and communication with the Geneva Config
@@ -250,21 +264,18 @@ impl GenevaConfigClient {
         let version_str = format!("Ver{}v0", config.config_major_version);
 
         let mut pre_url = String::with_capacity(config.endpoint.len() + 200);
-        pre_url.push_str(config.endpoint.trim_end_matches('/'));
-        pre_url.push_str("/api/agent/v3/");
-        pre_url.push_str(&config.environment);
-        pre_url.push('/');
-        pre_url.push_str(&config.account);
-        pre_url.push_str("/MonitoringStorageKeys/?Namespace=");
-        pre_url.push_str(&config.namespace);
-        pre_url.push_str("&Region=");
-        pre_url.push_str(&config.region);
-        pre_url.push_str("&Identity=");
-        pre_url.push_str(&encoded_identity);
-        pre_url.push_str("&OSType=");
-        pre_url.push_str(get_os_type());
-        pre_url.push_str("&ConfigMajorVersion=");
-        pre_url.push_str(&version_str);
+        write!(
+            &mut pre_url,
+            "{}/api/agent/v3/{}/{}/MonitoringStorageKeys/?Namespace={}&Region={}&Identity={}&OSType={}&ConfigMajorVersion={}",
+            config.endpoint.trim_end_matches('/'),
+            config.environment,
+            config.account,
+            config.namespace,
+            config.region,
+            encoded_identity,
+            get_os_type(),
+            version_str
+        ).map_err(|e| GenevaConfigClientError::InternalError(format!("Failed to write URL: {e}")))?;
 
         let http_client = client_builder.build()?;
 
@@ -405,9 +416,9 @@ impl GenevaConfigClient {
     async fn fetch_ingestion_info(&self) -> Result<(IngestionGatewayInfo, MonikerInfo)> {
         let tag_id = Uuid::new_v4().to_string(); //TODO - uuid is costly, check if counter is enough?
         let mut url = String::with_capacity(self.precomputed_url_prefix.len() + 50); // Pre-allocate with reasonable capacity
-        url.push_str(&self.precomputed_url_prefix);
-        url.push_str("&TagId=");
-        url.push_str(&tag_id);
+        write!(&mut url, "{}&TagId={}", self.precomputed_url_prefix, tag_id).map_err(|e| {
+            GenevaConfigClientError::InternalError(format!("Failed to write URL: {e}"))
+        })?;
 
         let req_id = Uuid::new_v4().to_string();
 

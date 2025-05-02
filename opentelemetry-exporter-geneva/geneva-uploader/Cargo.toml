@@ -14,6 +14,8 @@ reqwest = { version = "0.12", features = ["native-tls", "native-tls-alpn"]}
 native-tls = "0.2" 
 thiserror = "2.0"
 chrono = "0.4"
+url = "2.2"
+
 
 [features]
 self_signed_certs = [] # Empty by default for security
@@ -25,6 +27,8 @@ rcgen = "0.13"
 openssl = { version = "0.10", features = ["vendored"] }
 tempfile = "3.5"
 wiremock = "0.6"
+futures = "0.3"
+num_cpus = "1.16"
 
 [lints]
 workspace = true
