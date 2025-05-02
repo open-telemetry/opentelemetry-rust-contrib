@@ -13,10 +13,10 @@ use uuid::Uuid;
 use chrono::{DateTime, Utc};
 use native_tls::{Identity, Protocol};
 use std::fmt;
+use std::fmt::Write;
 use std::fs;
 use std::path::PathBuf;
 use std::sync::RwLock;
-use std::fmt::Write;
 
 /// Authentication methods for the Geneva Config Client.
 ///
@@ -416,9 +416,9 @@ impl GenevaConfigClient {
     async fn fetch_ingestion_info(&self) -> Result<(IngestionGatewayInfo, MonikerInfo)> {
         let tag_id = Uuid::new_v4().to_string(); //TODO - uuid is costly, check if counter is enough?
         let mut url = String::with_capacity(self.precomputed_url_prefix.len() + 50); // Pre-allocate with reasonable capacity
-        url.push_str(&self.precomputed_url_prefix);
-        url.push_str("&TagId=");
-        url.push_str(&tag_id);
+        write!(&mut url, "{}&TagId={}", self.precomputed_url_prefix, tag_id).map_err(|e| {
+            GenevaConfigClientError::InternalError(format!("Failed to write URL: {e}"))
+        })?;
 
         let req_id = Uuid::new_v4().to_string();
 
