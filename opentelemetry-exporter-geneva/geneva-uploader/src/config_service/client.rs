@@ -199,7 +199,7 @@ impl fmt::Debug for GenevaConfigClient {
             .field("precomputed_url_prefix", &self.precomputed_url_prefix)
             .field("agent_identity", &self.agent_identity)
             .field("agent_version", &self.agent_version)
-            // Don't print http_client, cached_data, static_headers
+            .field("static_headers", &self.static_headers)
             .finish()
     }
 }

@@ -21,7 +21,7 @@ pub(crate) enum GenevaUploaderError {
     #[error("JSON error: {0}")]
     SerdeJson(#[from] serde_json::Error),
     #[error("Config service error: {0}")]
-    ConfigService(String),
+    ConfigClient(String),
     #[allow(dead_code)]
     #[error("Upload failed with status {status}: {message}")]
     UploadFailed { status: u16, message: String },
@@ -33,11 +33,10 @@ pub(crate) enum GenevaUploaderError {
 impl From<GenevaConfigClientError> for GenevaUploaderError {
     fn from(err: GenevaConfigClientError) -> Self {
         // This preserves the original error message format from the code
-        GenevaUploaderError::ConfigService(format!("GenevaConfigClient error: {}", err))
+        GenevaUploaderError::ConfigClient(format!("GenevaConfigClient error: {}", err))
     }
 }
 
-#[allow(dead_code)]
 pub(crate) type Result<T> = std::result::Result<T, GenevaUploaderError>;
 
 #[allow(dead_code)]
@@ -49,17 +48,16 @@ pub(crate) struct IngestionResponse {
     pub(crate) extra: HashMap<String, Value>,
 }
 
-#[allow(dead_code)]
 /// Configuration for the Geneva Uploader
 #[derive(Debug, Clone)]
 pub(crate) struct GenevaUploaderConfig {
     pub namespace: String,
     pub source_identity: String,
+    #[allow(dead_code)]
     pub environment: String,
     pub schema_ids: String,
 }
 
-#[allow(dead_code)]
 /// Client for uploading data to Geneva Ingestion Gateway (GIG)
 #[derive(Debug, Clone)]
 pub struct GenevaUploader {
@@ -202,7 +200,6 @@ impl GenevaUploader {
         let response = self
             .http_client
             .post(&full_url)
-            .header(header::ACCEPT, "application/json")
             .header(
                 header::AUTHORIZATION,
                 format!("Bearer {}", auth_info.auth_token),

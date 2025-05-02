@@ -216,7 +216,7 @@ mod tests {
             handles.push(handle);
         }
 
-        let results: Vec<_> = futures::future::join_all(handles)
+        let durations: Vec<_> = futures::future::join_all(handles)
             .await
             .into_iter()
             .map(|res| res.expect("Join error in upload task"))
@@ -224,13 +224,9 @@ mod tests {
 
         let total_time = start_all.elapsed();
 
-        let durations: Vec<_> = results;
-
-        if !durations.is_empty() {
-            let avg_ms = durations.iter().map(|d| d.as_millis()).sum::<u128>() as f64
-                / durations.len() as f64;
-            println!("📊 Average upload duration: {:.2} ms", avg_ms);
-        }
+        let avg_ms =
+            durations.iter().map(|d| d.as_millis()).sum::<u128>() as f64 / durations.len() as f64;
+        println!("📊 Average upload duration: {:.2} ms", avg_ms);
 
         println!(
             "⏱️ Total elapsed for {} parallel uploads: {:.2?}",
