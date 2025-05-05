@@ -234,27 +234,14 @@ impl UserEventsExporter {
                     );
                 }
 
-                let mut cloud_ext_count = 0;
-                if self.cloud_role.is_some()
-                {
-                    cloud_ext_count += 1;
-                }
-                if self.cloud_role_instance.is_some()
-                {
-                    cloud_ext_count += 1;
+                if let Some(cloud_role) = &self.cloud_role {
+                    cs_a_count += 1;
+                    eb.add_str("ext_cloud_role", cloud_role, FieldFormat::Default, 0);
                 }
 
-                if cloud_ext_count > 0 {
-                    cs_a_count += 1; // for ext_cloud
-                    eb.add_struct("ext_cloud", cloud_ext_count, 0);
-
-                    if let Some(cloud_role) = &self.cloud_role {
-                        eb.add_str("role", cloud_role, FieldFormat::Default, 0);
-                    }
-
-                    if let Some(cloud_role_instance) = &self.cloud_role_instance {
-                        eb.add_str("roleInstance", cloud_role_instance, FieldFormat::Default, 0);
-                    }
+                if let Some(cloud_role_instance) = &self.cloud_role_instance {
+                    cs_a_count += 1;
+                    eb.add_str("ext_cloud_roleInstance", cloud_role_instance, FieldFormat::Default, 0);
                 }
 
                 eb.set_struct_field_count(cs_a_bookmark, cs_a_count);
