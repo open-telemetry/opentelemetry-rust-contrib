@@ -20,6 +20,8 @@ futures-executor = "0.3.31"
 chrono = { version = "0.4.40", default-features = false, features = ["alloc", "std"] }
 
 [dev-dependencies]
+log = { version = "0.4.21", features = ["kv_serde"] }
+opentelemetry-appender-log = { workspace = true }
 opentelemetry-appender-tracing = { workspace = true }
 opentelemetry_sdk = { workspace = true, features = ["logs", "trace"] }
 tokio = { version = "1.0", features = ["full"] }
@@ -49,7 +51,7 @@ name = "basic"
 path = "examples/basic.rs"
 
 [[example]]
-name = "basic"
+name = "exporter_options"
 path = "examples/exporter_options.rs"
 
 [lints]

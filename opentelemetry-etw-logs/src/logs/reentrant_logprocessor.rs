@@ -28,7 +28,7 @@ impl ReentrantLogProcessor {
 pub fn new_log_processor(
     options: ExporterOptions,
 ) -> impl opentelemetry_sdk::logs::LogProcessor {
-    reentrant_logprocessor::ReentrantLogProcessor::new(options)
+    ReentrantLogProcessor::new(options)
 }
 
 impl opentelemetry_sdk::logs::LogProcessor for ReentrantLogProcessor {
