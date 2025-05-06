@@ -10,13 +10,13 @@ use crate::logs::ExporterOptions;
 
 /// Thread-safe LogProcessor for exporting logs to ETW.
 #[derive(Debug)]
-pub struct ReentrantLogProcessor {
+pub(crate) struct ReentrantLogProcessor {
     event_exporter: ETWExporter,
 }
 
 impl ReentrantLogProcessor {
     /// Creates a new instance of the ReentrantLogProcessor using the given options.
-    pub fn new(options: ExporterOptions) -> Self {
+    pub(crate) fn new(options: ExporterOptions) -> Self {
         let exporter: ETWExporter = ETWExporter::new(options);
         ReentrantLogProcessor {
             event_exporter: exporter,
