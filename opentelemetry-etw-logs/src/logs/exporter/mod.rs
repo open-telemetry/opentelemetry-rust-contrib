@@ -237,6 +237,22 @@ mod tests {
         assert!(result.await.is_ok());
     }
 
+    
+    #[tokio::test]
+    #[should_panic]
+    async fn test_export_empty_batch_produces_failure() {
+        use opentelemetry_sdk::logs::LogBatch;
+        use opentelemetry_sdk::logs::LogExporter;
+
+        let records = [];
+        let batch = LogBatch::new(&records);
+
+        let exporter = common::test_utils::new_etw_exporter();
+        let result = exporter.export(batch);
+
+        assert!(result.await.is_ok());
+    }
+
     #[test]
     fn test_callback_noop() {
         enabled_callback_noop(
