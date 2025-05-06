@@ -1,29 +1,20 @@
-use super::reentrant_logprocessor::ReentrantLogProcessor;
+use super::new_log_processor;
 use super::ExporterOptions;
 
 use opentelemetry_sdk::logs::LoggerProviderBuilder;
 
-/// Extension trait for adding a ETW exporter to the logger provider builder.
+/// Extension trait for the logger provider builder to use an ETW exporter.
 pub trait ETWLoggerProviderBuilderExt {
-    /// Adds an ETW exporter to the logger provider builder with the given provider name and event_name.
+    /// Adds an ETW exporter to the logger provider builder using the given options.
     fn with_etw_exporter(self, options: ExporterOptions) -> Self;
 }
 
 impl ETWLoggerProviderBuilderExt for LoggerProviderBuilder {
     fn with_etw_exporter(self, options: ExporterOptions) -> Self {
-        let reentrant_processor = ReentrantLogProcessor::new(options);
+        let reentrant_processor = new_log_processor(options);
         self.with_log_processor(reentrant_processor)
     }
 }
-
-// impl<'a> std::fmt::Debug for ExporterOptions {
-//     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-//         f.debug_struct("ExporterOptions")
-//             .field("provider_name", &self.provider_name)
-//             .field("event_mapping", &if self.event_mapping.is_some() { "Some(FnOnce)" } else { "None" })
-//             .finish()
-//     }
-// }
 
 #[cfg(test)]
 mod tests {

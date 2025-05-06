@@ -9,7 +9,6 @@ use crate::logs::exporter::*;
 use crate::logs::ExporterOptions;
 
 /// Thread-safe LogProcessor for exporting logs to ETW.
-
 #[derive(Debug)]
 pub struct ReentrantLogProcessor {
     event_exporter: ETWExporter,
@@ -23,6 +22,13 @@ impl ReentrantLogProcessor {
             event_exporter: exporter,
         }
     }
+}
+
+/// TODOC
+pub fn new_log_processor(
+    options: ExporterOptions,
+) -> impl opentelemetry_sdk::logs::LogProcessor {
+    reentrant_logprocessor::ReentrantLogProcessor::new(options)
 }
 
 impl opentelemetry_sdk::logs::LogProcessor for ReentrantLogProcessor {
