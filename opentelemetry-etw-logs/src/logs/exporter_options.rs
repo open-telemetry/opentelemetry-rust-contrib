@@ -143,4 +143,52 @@ mod tests {
         let result = options.get_etw_event_name(&log_record);
         assert_eq!(result, "target-name");
     }
+
+    #[test]
+    #[should_panic(expected = "Provider name cannot be empty.")]
+    fn test_validate_empty_name() {
+        let _ = ExporterOptions::builder("").build().unwrap();
+    }
+
+    #[test]
+    #[should_panic(expected = "Provider name must be less than 234 characters.")]
+    fn test_validate_name_longer_than_234_chars() {
+        let _ = ExporterOptions::builder("a".repeat(235)).build().unwrap();
+    }
+
+    #[test]
+    #[should_panic(expected = "Provider name must contain only ASCII letters, digits, and '_'.")]
+    fn test_validate_name_uses_valid_chars() {
+        let _ = ExporterOptions::builder("i_have_a_-_").build().unwrap();
+    }
+
+    #[test]
+    fn test_validate_provider_name() {
+        let result = validate_provider_name("valid_provider_name");
+        assert!(result.is_ok());
+
+        let result = validate_provider_name("");
+        assert!(result.is_err());
+
+        let result = validate_provider_name("a".repeat(235).as_str());
+        assert!(result.is_err());
+
+        let result = validate_provider_name("i_have_a_-_");
+        assert!(result.is_err());
+
+        let result = validate_provider_name("_?_");
+        assert!(result.is_err());
+
+        let result = validate_provider_name("abcdefghijklmnopqrstuvwxyz");
+        assert!(result.is_ok());
+
+        let result = validate_provider_name("ABCDEFGHIJKLMNOPQRSTUVWXYZ");
+        assert!(result.is_ok());
+
+        let result = validate_provider_name("1234567890");
+        assert!(result.is_ok());
+
+        let result = validate_provider_name("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ1234567890_");
+        assert!(result.is_ok());
+    }
 }
