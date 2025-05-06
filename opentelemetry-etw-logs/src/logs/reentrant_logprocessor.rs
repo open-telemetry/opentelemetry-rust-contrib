@@ -15,7 +15,7 @@ pub struct ReentrantLogProcessor {
 }
 
 impl ReentrantLogProcessor {
-    /// constructor
+    /// Creates a new instance of the ReentrantLogProcessor using the given options.
     pub fn new(options: ExporterOptions) -> Self {
         let exporter: ETWExporter = ETWExporter::new(options);
         ReentrantLogProcessor {
@@ -24,7 +24,7 @@ impl ReentrantLogProcessor {
     }
 }
 
-/// TODOC
+/// Creates an opaque LogProcessor that can be used with the OpenTelemetry SDK.
 pub fn new_log_processor(
     options: ExporterOptions,
 ) -> impl opentelemetry_sdk::logs::LogProcessor {

@@ -1,7 +1,7 @@
 use opentelemetry::otel_warn;
 use std::borrow::Cow;
 
-/// TODO: Add documentation
+/// Options used by the Exporter.
 #[derive(Debug)]
 pub struct ExporterOptions {
     provider_name: Cow<'static, str>,
@@ -9,22 +9,22 @@ pub struct ExporterOptions {
 }
 
 impl ExporterOptions {
-    /// TODO: Add documentation
+    /// Creates a new instance of `ExporterOptionsBuilder` with the given provider name.
     pub fn builder(provider_name: impl Into<Cow<'static, str>>) -> ExporterOptionsBuilder {
         ExporterOptionsBuilder::new(provider_name)
     }
 
-    /// TODO: Add documentation
+    /// Returns the provider name that will be used for the ETW provider.
     pub(crate) fn provider_name(&self) -> &str {
         &self.provider_name
     }
 
-    /// TODO: Add documentation
+    /// Returns the default event name that will be used for the ETW events.
     pub(crate) fn default_event_name(&self) -> &str {
         self.default_event_name.as_ref()
     }
 
-    /// TODO: Add documentation
+    /// This function returns the event name to be used for the ETW event given the log record contents and the options.
     pub(crate) fn get_etw_event_name<'a>(
         &'a self,
         log_record: &'a opentelemetry_sdk::logs::SdkLogRecord,
@@ -38,13 +38,14 @@ impl ExporterOptions {
     }
 }
 
-/// TODO: Add documentation
+/// Builder for `ExporterOptions`.
 #[derive(Debug)]
 pub struct ExporterOptionsBuilder {
     inner: ExporterOptions,
 }
 
 impl ExporterOptionsBuilder {
+    /// Creates a new instance of `ExporterOptionsBuilder` with the given provider name.
     pub fn new(provider_name: impl Into<Cow<'static, str>>) -> Self {
         ExporterOptionsBuilder {
             inner: ExporterOptions {
@@ -54,6 +55,7 @@ impl ExporterOptionsBuilder {
         }
     }
 
+    /// Sets the fallback event name to use by `ExporterOptions::get_etw_event_name` if cannot extract one from the `SdkLogRecord`.
     pub fn with_default_event_name(
         mut self,
         default_event_name: impl Into<Cow<'static, str>>,
@@ -62,6 +64,7 @@ impl ExporterOptionsBuilder {
         self
     }
 
+    /// Validates the options given by consuming itself and returning the `ExporterOptions` or an error.
     pub fn build(self) -> Result<ExporterOptions, String> {
         if let Err(error) = self.validate() {
             otel_warn!(name: "ETW.ExporterOptions.CreationFailed", reason = &error);
