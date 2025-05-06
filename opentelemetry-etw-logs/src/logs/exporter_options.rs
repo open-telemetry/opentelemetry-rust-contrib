@@ -188,7 +188,9 @@ mod tests {
         let result = validate_provider_name("1234567890");
         assert!(result.is_ok());
 
-        let result = validate_provider_name("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ1234567890_");
+        let result = validate_provider_name(
+            "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ1234567890_",
+        );
         assert!(result.is_ok());
     }
 }

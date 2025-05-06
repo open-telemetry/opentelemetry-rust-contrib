@@ -59,11 +59,10 @@ mod tests {
         });
     }
 
-    
     #[test]
     fn log_with_etw_exporter_trait() {
-        use opentelemetry_appender_log::OpenTelemetryLogBridge;
         use log::{error, Level};
+        use opentelemetry_appender_log::OpenTelemetryLogBridge;
 
         let options = ExporterOptions::builder("provider_name").build().unwrap();
         let logger_provider = SdkLoggerProvider::builder()

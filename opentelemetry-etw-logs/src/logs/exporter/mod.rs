@@ -237,7 +237,6 @@ mod tests {
         assert!(result.await.is_ok());
     }
 
-    
     #[tokio::test]
     #[should_panic]
     async fn test_export_empty_batch_produces_failure() {
