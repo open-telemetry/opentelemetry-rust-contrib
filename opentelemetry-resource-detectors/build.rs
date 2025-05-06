@@ -11,6 +11,8 @@ fn main() {
         return;
     };
 
+    println!("cargo:rustc-env=RUSTC_VERSION_DESCRIPTION={}", stdout);
+
     // rustc -V: rustc 1.76.0 (07dca489a 2024-02-04)
     // version is 1.76.0
     if let Some(version) = stdout.split_whitespace().nth(1) {

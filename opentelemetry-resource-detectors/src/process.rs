@@ -45,6 +45,12 @@ impl ResourceDetector for ProcessResourceDetector {
                             rustc_version,
                         )
                     }),
+                    option_env!("RUSTC_VERSION_DESCRIPTION").map(|rustc_version_desc| {
+                        KeyValue::new(
+                            opentelemetry_semantic_conventions::attribute::PROCESS_RUNTIME_DESCRIPTION,
+                            rustc_version_desc,
+                        )
+                    }),
                 ]
                 .into_iter()
                 .flatten(),
@@ -57,12 +63,13 @@ impl ResourceDetector for ProcessResourceDetector {
 mod tests {
     use super::ProcessResourceDetector;
     use opentelemetry_sdk::resource::ResourceDetector;
+    use opentelemetry_semantic_conventions::resource::PROCESS_RUNTIME_DESCRIPTION;
 
     #[cfg(target_os = "linux")]
     #[test]
     fn test_processor_resource_detector() {
         let resource = ProcessResourceDetector.detect();
-        assert_eq!(resource.len(), 4); // we cannot assert on the values because it changes along with runtime.
+        assert_eq!(resource.len(), 5); // we cannot assert on the values because it changes along with runtime.
     }
 
     #[test]
@@ -78,11 +85,14 @@ mod tests {
             Some("rustc".into())
         );
 
-        if option_env!("RUSTC_VERSION").is_some() {
-            assert_eq!(
-                resource.get(&PROCESS_RUNTIME_VERSION.into()),
-                Some(env!("RUSTC_VERSION").into())
-            );
-        }
+        assert_eq!(
+            resource.get(&PROCESS_RUNTIME_VERSION.into()),
+            Some(env!("RUSTC_VERSION").into())
+        );
+
+        assert_eq!(
+            resource.get(&PROCESS_RUNTIME_DESCRIPTION.into()),
+            Some(env!("RUSTC_VERSION_DESCRIPTION").into())
+        );
     }
 }
