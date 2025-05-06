@@ -33,7 +33,7 @@ mod tests {
             .build();
 
         let layer = layer::OpenTelemetryTracingBridge::new(&logger_provider);
-        tracing_subscriber::registry().with(layer).init();
+        let _guard = tracing_subscriber::registry().with(layer).set_default(); // Temporary subscriber active for this function
 
         error!(
             name: "event-name",
