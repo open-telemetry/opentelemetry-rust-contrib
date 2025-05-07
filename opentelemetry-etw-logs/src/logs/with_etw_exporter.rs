@@ -1,4 +1,4 @@
-use super::new_log_processor;
+use super::etw_log_processor;
 use super::ExporterOptions;
 
 use opentelemetry_sdk::logs::LoggerProviderBuilder;
@@ -11,7 +11,7 @@ pub trait ETWLoggerProviderBuilderExt {
 
 impl ETWLoggerProviderBuilderExt for LoggerProviderBuilder {
     fn with_etw_exporter(self, options: ExporterOptions) -> Self {
-        let reentrant_processor = new_log_processor(options);
+        let reentrant_processor = etw_log_processor(options);
         self.with_log_processor(reentrant_processor)
     }
 }

@@ -25,7 +25,7 @@ impl ReentrantLogProcessor {
 }
 
 /// Creates an opaque LogProcessor that can be used with the OpenTelemetry SDK.
-pub fn new_log_processor(options: ExporterOptions) -> impl opentelemetry_sdk::logs::LogProcessor {
+pub fn etw_log_processor(options: ExporterOptions) -> impl opentelemetry_sdk::logs::LogProcessor {
     ReentrantLogProcessor::new(options)
 }
 
