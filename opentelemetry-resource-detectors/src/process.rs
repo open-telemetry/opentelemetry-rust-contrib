@@ -15,6 +15,9 @@ use std::process::id;
 /// - process command line arguments(`process.command_args`), the full command arguments of this
 ///   application.
 /// - OS assigned process id(`process.pid`).
+/// - process runtime version(`process.runtime.version`).
+/// - process runtime name(`process.runtime.name`).
+/// - process runtime description(`process.runtime.description`).
 pub struct ProcessResourceDetector;
 
 impl ResourceDetector for ProcessResourceDetector {
@@ -39,12 +42,14 @@ impl ResourceDetector for ProcessResourceDetector {
                         opentelemetry_semantic_conventions::attribute::PROCESS_RUNTIME_NAME,
                         "rustc",
                     )),
+                    // Set from build.rs
                     option_env!("RUSTC_VERSION").map(|rustc_version| {
                         KeyValue::new(
                             opentelemetry_semantic_conventions::attribute::PROCESS_RUNTIME_VERSION,
                             rustc_version,
                         )
                     }),
+                    // Set from build.rs
                     option_env!("RUSTC_VERSION_DESCRIPTION").map(|rustc_version_desc| {
                         KeyValue::new(
                             opentelemetry_semantic_conventions::attribute::PROCESS_RUNTIME_DESCRIPTION,
