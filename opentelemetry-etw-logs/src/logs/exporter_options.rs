@@ -91,7 +91,10 @@ fn validate_provider_name(provider_name: &str) -> Result<(), String> {
         .chars()
         .all(|c| c.is_ascii_alphanumeric() || c == '_' || c == '-')
     {
-        return Err("Provider name must contain only ASCII alphanumeric characters, '_' or '-'.".to_string());
+        return Err(
+            "Provider name must contain only ASCII alphanumeric characters, '_' or '-'."
+                .to_string(),
+        );
     }
     Ok(())
 }
@@ -157,7 +160,9 @@ mod tests {
     }
 
     #[test]
-    #[should_panic(expected = "Provider name must contain only ASCII alphanumeric characters, '_' or '-'.")]
+    #[should_panic(
+        expected = "Provider name must contain only ASCII alphanumeric characters, '_' or '-'."
+    )]
     fn test_validate_name_uses_valid_chars() {
         let _ = ExporterOptions::builder("i_have_a_?_").build().unwrap();
     }
