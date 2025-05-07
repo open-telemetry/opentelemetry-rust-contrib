@@ -2,8 +2,18 @@
 
 ## vNext
 
-- Added validation to provider name
+- Added validation to provider name.
 - Added optional feature `serde_json` to serialize List and Maps.
+- Added `new_log_processor()` method that returns an `impl LogProcessor`.
+- Added `ExporterOptions` which uses a builder pattern to configure the exporter.
+- The `with_etw_exporter` trait method now accepts an `ExporterOptions` instance:
+
+  ```rust
+  let options = ExporterOptions::builder("provider-name").build().unwrap();
+  let logger_provider = SdkLoggerProvider::builder()
+    .with_etw_exporter(options)
+    .build();
+  ```
 
 ## v0.8.0
 
