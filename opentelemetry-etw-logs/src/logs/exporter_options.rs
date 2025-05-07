@@ -89,9 +89,9 @@ fn validate_provider_name(provider_name: &str) -> Result<(), String> {
     }
     if !provider_name
         .chars()
-        .all(|c| c.is_ascii_alphanumeric() || c == '_')
+        .all(|c| c.is_ascii_alphanumeric() || c == '_' || c == '-')
     {
-        return Err("Provider name must contain only ASCII letters, digits, and '_'.".to_string());
+        return Err("Provider name must contain only ASCII alphanumeric characters, '_' or '-'.".to_string());
     }
     Ok(())
 }
@@ -127,17 +127,17 @@ mod tests {
 
         let mut log_record = test_utils::new_sdk_log_record();
 
-        let options = ExporterOptions::builder("test_provider_name")
-            .with_default_event_name("default_event_name")
+        let options = ExporterOptions::builder("test-provider-name")
+            .with_default_event_name("default-event-name")
             .build()
             .unwrap();
 
         let result = options.get_etw_event_name(&log_record);
-        assert_eq!(result, "default_event_name");
+        assert_eq!(result, "default-event-name");
 
         log_record.set_event_name("event-name");
         let result = options.get_etw_event_name(&log_record);
-        assert_eq!(result, "default_event_name");
+        assert_eq!(result, "default-event-name");
 
         log_record.set_target("target-name");
         let result = options.get_etw_event_name(&log_record);
@@ -157,9 +157,9 @@ mod tests {
     }
 
     #[test]
-    #[should_panic(expected = "Provider name must contain only ASCII letters, digits, and '_'.")]
+    #[should_panic(expected = "Provider name must contain only ASCII alphanumeric characters, '_' or '-'.")]
     fn test_validate_name_uses_valid_chars() {
-        let _ = ExporterOptions::builder("i_have_a_-_").build().unwrap();
+        let _ = ExporterOptions::builder("i_have_a_?_").build().unwrap();
     }
 
     #[test]
@@ -174,7 +174,7 @@ mod tests {
         assert!(result.is_err());
 
         let result = validate_provider_name("i_have_a_-_");
-        assert!(result.is_err());
+        assert!(result.is_ok());
 
         let result = validate_provider_name("_?_");
         assert!(result.is_err());

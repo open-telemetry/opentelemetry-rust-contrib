@@ -27,7 +27,7 @@ mod tests {
         use opentelemetry_appender_tracing::layer;
         use tracing::error;
 
-        let options = ExporterOptions::builder("provider_name").build().unwrap();
+        let options = ExporterOptions::builder("provider-name").build().unwrap();
         let logger_provider = SdkLoggerProvider::builder()
             .with_etw_exporter(options)
             .build();
@@ -64,7 +64,7 @@ mod tests {
         use log::{error, Level};
         use opentelemetry_appender_log::OpenTelemetryLogBridge;
 
-        let options = ExporterOptions::builder("provider_name").build().unwrap();
+        let options = ExporterOptions::builder("provider-name").build().unwrap();
         let logger_provider = SdkLoggerProvider::builder()
             .with_etw_exporter(options)
             .build();

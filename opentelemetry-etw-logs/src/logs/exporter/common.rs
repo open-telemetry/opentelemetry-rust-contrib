@@ -100,7 +100,7 @@ pub(crate) mod test_utils {
     }
 
     pub(crate) fn test_options() -> ExporterOptions {
-        ExporterOptions::builder("test_provider_name")
+        ExporterOptions::builder("test-provider-name")
             .build()
             .unwrap()
     }
