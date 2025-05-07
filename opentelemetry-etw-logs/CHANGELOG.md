@@ -4,6 +4,7 @@
 
 - Added validation to provider name
 - Added optional feature `serde_json` to serialize List and Maps.
+- Added `etw_log_processor()` method that returns an `impl LogProcessor`.
 
 ## v0.8.0
 
