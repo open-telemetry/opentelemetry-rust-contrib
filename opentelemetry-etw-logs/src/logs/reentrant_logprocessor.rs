@@ -40,6 +40,13 @@ impl ReentrantLogProcessor {
     }
 }
 
+/// Creates an opaque LogProcessor that can be used with the OpenTelemetry SDK.
+pub fn etw_log_processor(
+    provider_name: &str,
+) -> impl opentelemetry_sdk::logs::LogProcessor + use<> {
+    ReentrantLogProcessor::new(provider_name)
+}
+
 impl opentelemetry_sdk::logs::LogProcessor for ReentrantLogProcessor {
     fn emit(&self, data: &mut SdkLogRecord, instrumentation: &InstrumentationScope) {
         let log_tuple = &[(data as &SdkLogRecord, instrumentation)];
