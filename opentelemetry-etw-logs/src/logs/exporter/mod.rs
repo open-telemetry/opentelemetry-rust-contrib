@@ -7,9 +7,8 @@ use tracelogging_dynamic as tld;
 use opentelemetry::logs::Severity;
 use opentelemetry::Key;
 use opentelemetry_sdk::error::{OTelSdkError, OTelSdkResult};
-use std::str;
 
-mod common;
+pub(crate) mod common;
 mod part_a;
 mod part_b;
 mod part_c;
@@ -23,6 +22,7 @@ struct Resource {
 pub(crate) struct ETWExporter {
     provider: Pin<Arc<tld::Provider>>,
     resource: Resource,
+    options: crate::logs::ExporterOptions,
 }
 
 fn enabled_callback_noop(
@@ -40,11 +40,14 @@ fn enabled_callback_noop(
 impl ETWExporter {
     const KEYWORD: u64 = 1;
 
-    pub(crate) fn new(provider_name: &str) -> Self {
-        let mut options = tld::Provider::options();
+    pub(crate) fn new(options: crate::logs::ExporterOptions) -> Self {
+        let mut provider_options = tld::Provider::options();
 
-        options.callback(enabled_callback_noop, 0x0);
-        let provider = Arc::pin(tld::Provider::new(provider_name, &options));
+        provider_options.callback(enabled_callback_noop, 0x0);
+        let provider = Arc::pin(tld::Provider::new(
+            options.provider_name(),
+            &provider_options,
+        ));
         // SAFETY: tracelogging (ETW) enables an ETW callback into the provider when `register()` is called.
         // This might crash if the provider is dropped without calling unregister before.
         // This only affects static providers.
@@ -56,6 +59,7 @@ impl ETWExporter {
         ETWExporter {
             provider,
             resource: Default::default(),
+            options,
         }
     }
 
@@ -86,7 +90,7 @@ impl ETWExporter {
 
         // reset
         event.reset(
-            common::get_event_name(log_record),
+            self.options.get_etw_event_name(log_record),
             level,
             Self::KEYWORD,
             event_tags,
@@ -225,6 +229,21 @@ mod tests {
         let instrumentation = common::test_utils::new_instrumentation_scope();
 
         let records = [(&log_record, &instrumentation)];
+        let batch = LogBatch::new(&records);
+
+        let exporter = common::test_utils::new_etw_exporter();
+        let result = exporter.export(batch);
+
+        assert!(result.await.is_ok());
+    }
+
+    #[tokio::test]
+    #[should_panic]
+    async fn test_export_empty_batch_produces_failure() {
+        use opentelemetry_sdk::logs::LogBatch;
+        use opentelemetry_sdk::logs::LogExporter;
+
+        let records = [];
         let batch = LogBatch::new(&records);
 
         let exporter = common::test_utils::new_etw_exporter();

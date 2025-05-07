@@ -6,38 +6,27 @@ use opentelemetry_sdk::logs::{LogBatch, LogExporter, SdkLogRecord};
 use opentelemetry_sdk::Resource;
 
 use crate::logs::exporter::*;
-
-pub fn validate_provider_name(provider_name: &str) -> Result<(), String> {
-    if provider_name.is_empty() {
-        return Err("Provider name cannot be empty.".to_string());
-    }
-    if provider_name.len() >= 234 {
-        return Err("Provider name must be less than 234 characters.".to_string());
-    }
-    if !provider_name
-        .chars()
-        .all(|c| c.is_ascii_alphanumeric() || c == '_')
-    {
-        return Err("Provider name must contain only ASCII letters, digits, and '_'.".to_string());
-    }
-    Ok(())
-}
+use crate::logs::ExporterOptions;
 
 /// Thread-safe LogProcessor for exporting logs to ETW.
-
 #[derive(Debug)]
-pub struct ReentrantLogProcessor {
+pub(crate) struct ReentrantLogProcessor {
     event_exporter: ETWExporter,
 }
 
 impl ReentrantLogProcessor {
-    /// constructor
-    pub fn new(provider_name: &str) -> Self {
-        let exporter = ETWExporter::new(provider_name);
+    /// Creates a new instance of the ReentrantLogProcessor using the given options.
+    pub(crate) fn new(options: ExporterOptions) -> Self {
+        let exporter: ETWExporter = ETWExporter::new(options);
         ReentrantLogProcessor {
             event_exporter: exporter,
         }
     }
+}
+
+/// Creates an opaque LogProcessor that can be used with the OpenTelemetry SDK.
+pub fn etw_log_processor(options: ExporterOptions) -> impl opentelemetry_sdk::logs::LogProcessor {
+    ReentrantLogProcessor::new(options)
 }
 
 impl opentelemetry_sdk::logs::LogProcessor for ReentrantLogProcessor {
@@ -84,21 +73,21 @@ mod tests {
 
     #[test]
     fn test_shutdown() {
-        let processor = ReentrantLogProcessor::new("test-provider-name");
+        let processor = ReentrantLogProcessor::new(test_options());
 
         assert!(processor.shutdown().is_ok());
     }
 
     #[test]
     fn test_force_flush() {
-        let processor = ReentrantLogProcessor::new("test-provider-name");
+        let processor = ReentrantLogProcessor::new(test_options());
 
         assert!(processor.force_flush().is_ok());
     }
 
     #[test]
     fn test_emit() {
-        let processor: ReentrantLogProcessor = ReentrantLogProcessor::new("test-provider-name");
+        let processor: ReentrantLogProcessor = ReentrantLogProcessor::new(test_options());
 
         let mut record = SdkLoggerProvider::builder()
             .build()
@@ -111,7 +100,7 @@ mod tests {
     #[test]
     #[cfg(feature = "spec_unstable_logs_enabled")]
     fn test_event_enabled() {
-        let processor = ReentrantLogProcessor::new("test-provider-name");
+        let processor = ReentrantLogProcessor::new(test_options());
 
         // Unit test are forced to return true as there is no ETW session listening for the event
         assert!(processor.event_enabled(opentelemetry::logs::Severity::Info, "test", Some("test")));
@@ -125,5 +114,11 @@ mod tests {
             "test",
             Some("test")
         ));
+    }
+
+    fn test_options() -> ExporterOptions {
+        ExporterOptions::builder("test-provider-name")
+            .build()
+            .unwrap()
     }
 }

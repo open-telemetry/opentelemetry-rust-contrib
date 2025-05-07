@@ -191,13 +191,9 @@ impl UserEventsExporter {
                 // reused for events with different schema. 
                 // In well-behaved application, event-name should be unique
                 // for each event.
-                // TODO: What if the event name is not provided? "Log" is used as default.
                 // TODO: Should event_tag be non-zero?
-                let event_name = log_record
-                    .event_name()
-                    .filter(|s| !s.trim().is_empty())
-                    .unwrap_or("Log");                
-                eb.reset(event_name, 0);
+                // "Log" is used as default.
+                eb.reset("Log", 0);
 
                 eb.add_value("__csver__", 1024, FieldFormat::UnsignedInt, 0); // 0x400 in hex
 
@@ -326,6 +322,10 @@ impl UserEventsExporter {
                 // TODO: eventname is already added to header.
                 // Should we add it again?
                 // Or should we use Target?
+                let event_name = log_record
+                    .event_name()
+                    .filter(|s| !s.trim().is_empty())
+                    .unwrap_or("Log");
                 eb.add_str("name", event_name, FieldFormat::Default, 0);
                 cs_b_count += 1;
                 eb.set_struct_field_count(cs_b_bookmark, cs_b_count);
