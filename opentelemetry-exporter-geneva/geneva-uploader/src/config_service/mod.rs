@@ -1,5 +1,4 @@
 pub(crate) mod auth;
-pub(crate) mod client;
 pub(crate) mod common;
 pub(crate) mod error;
 pub(crate) mod geneva_config_info_client;
@@ -7,9 +6,15 @@ pub(crate) mod geneva_ingestion_info_client;
 
 #[cfg(test)]
 mod tests {
-    use crate::config_service::client::{
-        AuthMethod, GcsConfiguration, GenevaConfigClient, GenevaConfigClientConfig,
+
+    use crate::config_service::auth::AuthMethod;
+    use crate::config_service::geneva_config_info_client::{
+        GcsConfiguration, GenevaConfigXmlClient,
     };
+    use crate::config_service::geneva_ingestion_info_client::GenevaIngestionClient;
+
+    use crate::config_service::common::GenevaConfigClientConfig;
+    use crate::config_service::error::GenevaConfigClientError;
     use openssl::{pkcs12::Pkcs12, pkey::PKey, x509::X509};
     use rcgen::generate_simple_self_signed;
     use std::io::Write;
@@ -115,7 +120,7 @@ mod tests {
             },
         };
 
-        let client = GenevaConfigClient::new(config).unwrap();
+        let client = GenevaIngestionClient::new(config).unwrap();
         let (ingestion_info, moniker_info, token_endpoint) =
             client.get_ingestion_info().await.unwrap();
 
@@ -160,15 +165,11 @@ mod tests {
             },
         };
 
-        let client = GenevaConfigClient::new(config).unwrap();
+        let client = GenevaIngestionClient::new(config).unwrap();
         let result = client.get_ingestion_info().await;
 
         assert!(result.is_err());
-        if let Err(crate::config_service::client::GenevaConfigClientError::RequestFailed {
-            status,
-            ..
-        }) = result
-        {
+        if let Err(GenevaConfigClientError::RequestFailed { status, .. }) = result {
             assert_eq!(status, 403);
         } else {
             panic!("Expected RequestFailed with 403, got: {:?}", result);
@@ -208,19 +209,62 @@ mod tests {
             },
         };
 
-        let client = GenevaConfigClient::new(config).unwrap();
+        let client = GenevaIngestionClient::new(config).unwrap();
         let result = client.get_ingestion_info().await;
 
         assert!(result.is_err());
         match result {
             Err(err) => match err {
-                crate::config_service::client::GenevaConfigClientError::AuthInfoNotFound(_) => {
+                GenevaConfigClientError::AuthInfoNotFound(_) => {
                     // Test passed
                 }
                 _ => panic!("Expected AuthInfoNotFound error, got: {:?}", err),
             },
             _ => panic!("Expected error, got success"),
         }
+    }
+
+    #[cfg_attr(target_os = "macos", ignore)] // cert generated not compatible with macOS
+    #[tokio::test]
+    async fn test_fetch_gcs_config_mocked() {
+        let mock_server = MockServer::start().await;
+
+        let mock_response = serde_json::json!({
+            "Md5Hash": "mock-md5-hash",
+            "ConfigurationXml": "mock-encoded-xml"
+        });
+
+        Mock::given(method("GET"))
+            .and(path(
+                "/api/agent/v3/mockenv/mockacct/MonitoringConfiguration/",
+            ))
+            .respond_with(ResponseTemplate::new(200).set_body_json(mock_response))
+            .mount(&mock_server)
+            .await;
+
+        let (temp_p12_file, password) = generate_self_signed_p12();
+
+        let config = GenevaConfigClientConfig {
+            endpoint: mock_server.uri(),
+            environment: "mockenv".into(),
+            account: "mockacct".into(),
+            namespace: "mockns".into(),
+            region: "mockregion".into(),
+            config_major_version: 1,
+            auth_method: AuthMethod::Certificate {
+                path: PathBuf::from(temp_p12_file.path().to_string_lossy().to_string()),
+                password,
+            },
+        };
+
+        let client = GenevaConfigXmlClient::new(config).unwrap();
+        let gcs_config = client
+            .fetch_gcs_config("mockns", 1, 0)
+            .await
+            .expect("Failed to fetch GCS Config");
+
+        assert_eq!(gcs_config.md5_hash, "mock-md5-hash");
+        assert_eq!(gcs_config.configuration_xml, "mock-encoded-xml");
     }
 
     #[cfg_attr(target_os = "macos", ignore)] // cert generated not compatible with macOS
@@ -239,12 +283,12 @@ mod tests {
             },
         };
 
-        let result = GenevaConfigClient::new(config);
+        let result = GenevaIngestionClient::new(config);
 
         assert!(result.is_err());
         match result {
             Err(err) => match err {
-                crate::config_service::client::GenevaConfigClientError::Certificate(_) => {
+                GenevaConfigClientError::Certificate(_) => {
                     // Test passed
                 }
                 _ => panic!("Expected Io error, got: {:?}", err),
@@ -303,7 +347,7 @@ mod tests {
         };
 
         println!("Connecting to real Geneva Config service...");
-        let client = GenevaConfigClient::new(config).expect("Failed to create client");
+        let client = GenevaIngestionClient::new(config).expect("Failed to create client");
 
         println!("Fetching ingestion info...");
         let (ingestion_info, moniker, _token_endpoint) = client
@@ -372,7 +416,7 @@ mod tests {
         };
 
         println!("Connecting to real Geneva Config service for GCS config...");
-        let client = GenevaConfigClient::new(config).expect("Failed to create client");
+        let client = GenevaConfigXmlClient::new(config).expect("Failed to create client");
 
         println!("Fetching GCS config...");
         let gcs_config: GcsConfiguration = client
@@ -391,8 +435,7 @@ mod tests {
         );
 
         // Optionally: decode and decompress configuration XML
-        let xml = client
-            .decode_gcs_config_xml(&gcs_config.configuration_xml)
+        let xml = GenevaConfigXmlClient::decode_gcs_config_xml(&gcs_config.configuration_xml)
             .expect("Failed to decode and decompress GCS config XML");
         assert!(
             xml.contains("MonitoringManagement") || xml.contains("monitoringManagement"),

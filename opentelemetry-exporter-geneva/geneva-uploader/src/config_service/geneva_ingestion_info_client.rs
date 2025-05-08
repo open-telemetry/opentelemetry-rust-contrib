@@ -8,10 +8,7 @@ use crate::config_service::common::{
 use crate::config_service::error::{GenevaConfigClientError, GenevaConfigClientResult};
 use base64::{engine::general_purpose, Engine as _};
 use chrono::{DateTime, Utc};
-use reqwest::{
-    header::{HeaderMap, HeaderValue, ACCEPT, USER_AGENT},
-    Client,
-};
+use reqwest::{header::HeaderMap, Client};
 use serde::Deserialize;
 use std::fmt;
 use std::fmt::Write;
@@ -95,7 +92,7 @@ impl GenevaIngestionClient {
     #[allow(dead_code)]
     pub(crate) fn new(config: GenevaConfigClientConfig) -> GenevaConfigClientResult<Self> {
         let http_client = initialize_http_client(&config.auth_method)?;
-        let static_headers = Self::build_static_headers(AGENT_IDENTITY, AGENT_VERSION);
+        let static_headers = build_static_headers(AGENT_IDENTITY, AGENT_VERSION);
 
         let identity = format!(
             "Tenant=Default/Role=GcsClient/RoleInstance={}",
@@ -133,14 +130,6 @@ impl GenevaIngestionClient {
         DateTime::parse_from_rfc3339(expiry_str)
             .ok()
             .map(|dt| dt.with_timezone(&Utc))
-    }
-
-    fn build_static_headers(agent_identity: &str, agent_version: &str) -> HeaderMap {
-        let mut headers = HeaderMap::new();
-        let user_agent = format!("{}-{}", agent_identity, agent_version);
-        headers.insert(USER_AGENT, HeaderValue::from_str(&user_agent).unwrap());
-        headers.insert(ACCEPT, HeaderValue::from_static("application/json"));
-        headers
     }
 
     #[allow(dead_code)]

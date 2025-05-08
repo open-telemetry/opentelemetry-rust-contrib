@@ -6,11 +6,14 @@ use crate::config_service::common::{
     build_static_headers, get_os_type, initialize_http_client, GenevaConfigClientConfig,
     AGENT_IDENTITY, AGENT_VERSION,
 };
+use base64::{engine::general_purpose, Engine as _};
 
+use flate2::read::GzDecoder;
 use reqwest::{header::HeaderMap, Client};
 use serde::Deserialize;
 use std::fmt;
 use std::fmt::Write;
+use std::io::Read;
 
 #[allow(dead_code)]
 #[derive(Debug, Deserialize)]
@@ -122,5 +125,19 @@ impl GenevaConfigXmlClient {
                 )))
             }
         }
+    }
+
+    #[allow(dead_code)]
+    /// Decodes and decompresses the base64/gzip config XML string.
+    pub(crate) fn decode_gcs_config_xml(encoded: &str) -> crate::Result<String> {
+        let decoded = general_purpose::STANDARD.decode(encoded).map_err(|e| {
+            GenevaConfigClientError::InternalError(format!("Base64 decode failed: {e}"))
+        })?;
+        let mut gz = GzDecoder::new(&decoded[..]);
+        let mut out = String::new();
+        gz.read_to_string(&mut out).map_err(|e| {
+            GenevaConfigClientError::InternalError(format!("Gzip decode failed: {e}"))
+        })?;
+        Ok(out)
     }
 }
