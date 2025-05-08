@@ -2,7 +2,9 @@ pub(crate) mod client;
 
 #[cfg(test)]
 mod tests {
-    use crate::config_service::client::{AuthMethod, GenevaConfigClient, GenevaConfigClientConfig};
+    use crate::config_service::client::{
+        AuthMethod, GcsConfiguration, GenevaConfigClient, GenevaConfigClientConfig,
+    };
     use openssl::{pkcs12::Pkcs12, pkey::PKey, x509::X509};
     use rcgen::generate_simple_self_signed;
     use std::io::Write;
@@ -322,5 +324,78 @@ mod tests {
         println!("Endpoint: {}", ingestion_info.endpoint);
         println!("Auth token length: {}", ingestion_info.auth_token.len());
         println!("Moniker name: {}", moniker.name);
+    }
+
+    #[tokio::test]
+    #[ignore] // This test is ignored by default to prevent running in CI pipelines
+    async fn test_get_gcs_config_real_server() {
+        // Read configuration from environment variables
+        let endpoint =
+            env::var("GENEVA_ENDPOINT").expect("GENEVA_ENDPOINT environment variable must be set");
+        let environment = env::var("GENEVA_ENVIRONMENT")
+            .expect("GENEVA_ENVIRONMENT environment variable must be set");
+        let account =
+            env::var("GENEVA_ACCOUNT").expect("GENEVA_ACCOUNT environment variable must be set");
+        let namespace = env::var("GENEVA_NAMESPACE")
+            .expect("GENEVA_NAMESPACE environment variable must be set");
+        let region =
+            env::var("GENEVA_REGION").expect("GENEVA_REGION environment variable must be set");
+        let cert_path = env::var("GENEVA_CERT_PATH")
+            .expect("GENEVA_CERT_PATH environment variable must be set");
+        let cert_password = env::var("GENEVA_CERT_PASSWORD")
+            .expect("GENEVA_CERT_PASSWORD environment variable must be set");
+        let config_major_version = env::var("GENEVA_CONFIG_MAJOR_VERSION")
+            .expect("GENEVA_CONFIG_MAJOR_VERSION environment variable must be set")
+            .parse::<u32>()
+            .expect("GENEVA_CONFIG_MAJOR_VERSION must be a valid unsigned integer");
+        let config_minor_version = env::var("GENEVA_CONFIG_MINOR_VERSION")
+            .unwrap_or_else(|_| "0".to_string())
+            .parse::<u32>()
+            .expect("GENEVA_CONFIG_MINOR_VERSION must be a valid unsigned integer");
+
+        let config = GenevaConfigClientConfig {
+            endpoint,
+            environment,
+            account,
+            namespace: namespace.clone(),
+            region,
+            config_major_version,
+            auth_method: AuthMethod::Certificate {
+                path: PathBuf::from(cert_path),
+                password: cert_password,
+            },
+        };
+
+        println!("Connecting to real Geneva Config service for GCS config...");
+        let client = GenevaConfigClient::new(config).expect("Failed to create client");
+
+        println!("Fetching GCS config...");
+        let gcs_config: GcsConfiguration = client
+            .fetch_gcs_config(&namespace, config_major_version, config_minor_version)
+            .await
+            .expect("Failed to fetch GCS config");
+
+        // Validate the response contains expected fields
+        assert!(
+            !gcs_config.md5_hash.is_empty(),
+            "MD5 hash should not be empty"
+        );
+        assert!(
+            !gcs_config.configuration_xml.is_empty(),
+            "Configuration XML should not be empty"
+        );
+
+        // Optionally: decode and decompress configuration XML
+        let xml = client
+            .decode_gcs_config_xml(&gcs_config.configuration_xml)
+            .expect("Failed to decode and decompress GCS config XML");
+        assert!(
+            xml.contains("MonitoringManagement") || xml.contains("monitoringManagement"),
+            "Decoded XML does not contain expected root element"
+        );
+
+        println!("Successfully connected to real server for GCS config");
+        println!("MD5 hash: {}", gcs_config.md5_hash);
+        println!("Decoded XML (truncated):\n{}", &xml[..xml.len().min(10000)]);
     }
 }

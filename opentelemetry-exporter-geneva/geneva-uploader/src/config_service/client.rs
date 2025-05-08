@@ -11,10 +11,12 @@ use thiserror::Error;
 use uuid::Uuid;
 
 use chrono::{DateTime, Utc};
+use flate2::read::GzDecoder;
 use native_tls::{Identity, Protocol};
 use std::fmt;
 use std::fmt::Write;
 use std::fs;
+use std::io::Read;
 use std::path::PathBuf;
 use std::sync::RwLock;
 
@@ -86,6 +88,30 @@ pub(crate) enum GenevaConfigClientError {
     MonikerNotFound(String),
     #[error("Internal error: {0}")]
     InternalError(String),
+}
+
+#[allow(dead_code)]
+#[derive(Debug, Deserialize)]
+pub struct GcsConfiguration {
+    #[serde(rename = "Md5Hash")]
+    pub md5_hash: String,
+    #[serde(rename = "ConfigurationXml")]
+    pub configuration_xml: String,
+}
+
+#[allow(dead_code)]
+#[derive(Debug, Deserialize)]
+pub struct GcsConfigurationNotFound {
+    #[serde(rename = "LatestConfigVersionFound")]
+    pub latest_config_version_found: String,
+}
+
+#[allow(dead_code)]
+#[derive(Debug, Deserialize)]
+#[serde(untagged)]
+pub enum GcsConfigurationAPIResponse {
+    Config(GcsConfiguration),
+    NotFound(GcsConfigurationNotFound),
 }
 
 #[allow(dead_code)]
@@ -467,6 +493,78 @@ impl GenevaConfigClient {
                 message: body,
             })
         }
+    }
+
+    #[allow(dead_code)]
+    pub(crate) async fn fetch_gcs_config(
+        &self,
+        namespace: &str,
+        config_major_version: u32,
+        config_minor_version: u32,
+    ) -> Result<GcsConfiguration> {
+        let mut url = String::with_capacity(
+            self.config.endpoint.len() + 100, // adjust the extra based on expected path/query size
+        );
+
+        let version_str = format!("Ver{}v0.{}", config_major_version, config_minor_version);
+        write!(
+            &mut url,
+            "{}/api/agent/v3/{}/{}/MonitoringConfiguration/?Namespace={}&Version={}&OSType={}",
+            self.config.endpoint.trim_end_matches('/'),
+            self.config.environment,
+            self.config.account,
+            namespace,
+            version_str,
+            get_os_type(),
+        )
+        .expect("Failed to write URL");
+
+        println!("Fetching GCS config from URL: {}", url);
+
+        let response = self
+            .http_client
+            .get(&url)
+            .headers(self.static_headers.clone())
+            .send()
+            .await?;
+
+        let status = response.status();
+        let body = response.text().await?;
+
+        if !status.is_success() {
+            return Err(GenevaConfigClientError::RequestFailed {
+                status: status.as_u16(),
+                message: body,
+            });
+        }
+
+        println!("Response body: {}", body);
+
+        let parsed: GcsConfigurationAPIResponse = serde_json::from_str(&body)?;
+
+        match parsed {
+            GcsConfigurationAPIResponse::Config(cfg) => Ok(cfg),
+            GcsConfigurationAPIResponse::NotFound(nf) => {
+                Err(GenevaConfigClientError::InternalError(format!(
+                    "GCS config not found, latest version: {}",
+                    nf.latest_config_version_found
+                )))
+            }
+        }
+    }
+
+    #[allow(dead_code)]
+    /// Decodes and decompresses the base64/gzip config XML string.
+    pub(crate) fn decode_gcs_config_xml(&self, encoded: &str) -> crate::Result<String> {
+        let decoded = general_purpose::STANDARD.decode(encoded).map_err(|e| {
+            GenevaConfigClientError::InternalError(format!("Base64 decode failed: {e}"))
+        })?;
+        let mut gz = GzDecoder::new(&decoded[..]);
+        let mut out = String::new();
+        gz.read_to_string(&mut out).map_err(|e| {
+            GenevaConfigClientError::InternalError(format!("Gzip decode failed: {e}"))
+        })?;
+        Ok(out)
     }
 }
 
