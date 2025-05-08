@@ -1,4 +1,9 @@
+pub(crate) mod auth;
 pub(crate) mod client;
+pub(crate) mod common;
+pub(crate) mod error;
+pub(crate) mod geneva_config_info_client;
+pub(crate) mod geneva_ingestion_info_client;
 
 #[cfg(test)]
 mod tests {
