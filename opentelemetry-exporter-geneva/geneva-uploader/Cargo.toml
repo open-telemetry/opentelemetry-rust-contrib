@@ -15,6 +15,7 @@ native-tls = "0.2"
 thiserror = "2.0"
 chrono = "0.4"
 url = "2.2"
+flate2 = "1.0"
 
 
 [features]
