@@ -1,3 +1,4 @@
+use crate::logs::reentrant_logprocessor::ReentrantLogProcessor;
 use eventheader::{FieldFormat, Level};
 use eventheader_dynamic::{EventBuilder, EventSet, Provider};
 use opentelemetry::{otel_debug, otel_info};
@@ -11,20 +12,43 @@ use std::{cell::RefCell, str, time::SystemTime};
 
 thread_local! { static EBW: RefCell<EventBuilder> = RefCell::new(EventBuilder::new());}
 
-/// UserEventsExporter is a log exporter that exports logs in EventHeader format to user_events tracepoint.
-pub(crate) struct UserEventsExporter {
-    provider: Mutex<Provider>,
-    name: String,
-    event_sets: Vec<Arc<EventSet>>,
-    cloud_role: Option<String>,
-    cloud_role_instance: Option<String>,
+// Options for configuring the User Events Exporter.
+#[derive(Debug, Clone)]
+pub struct UserEventsOptions {
+    provider_name: String,
 }
 
-const EVENT_ID: &str = "event_id";
+impl UserEventsOptions {
+    /// Returns the provider name.
+    pub fn provider_name(&self) -> &str {
+        &self.provider_name
+    }
 
-impl UserEventsExporter {
-    /// Create instance of the exporter
-    pub(crate) fn new(provider_name: &str) -> Result<Self, String> {
+    /// Builder for `UserEventsOptions`.
+    pub fn builder() -> UserEventsOptionsBuilder {
+        UserEventsOptionsBuilder::default()
+    }
+}
+
+/// Builder for `UserEventsOptions`.
+#[derive(Default, Debug, Clone)]
+pub struct UserEventsOptionsBuilder {
+    provider_name: Option<String>,
+}
+
+impl UserEventsOptionsBuilder {
+    /// Sets the provider name.
+    pub fn with_provider_name(mut self, provider_name: &str) -> Self {
+        self.provider_name = Some(provider_name.to_string());
+        self
+    }
+
+    /// Builds the `UserEventsOptions` or returns an error if validation fails.
+    pub fn build(self) -> Result<UserEventsOptions, String> {
+        let provider_name = self
+            .provider_name
+            .ok_or_else(|| "Provider name is required.".to_string())?;
+
         // Validate provider_name
         if provider_name.is_empty() {
             return Err("Provider name cannot be empty.".to_string());
@@ -41,6 +65,25 @@ impl UserEventsExporter {
             );
         }
 
+        Ok(UserEventsOptions { provider_name })
+    }
+}
+
+/// UserEventsExporter is a log exporter that exports logs in EventHeader format to user_events tracepoint.
+pub struct UserEventsExporter {
+    provider: Mutex<Provider>,
+    name: String,
+    event_sets: Vec<Arc<EventSet>>,
+    cloud_role: Option<String>,
+    cloud_role_instance: Option<String>,
+}
+
+const EVENT_ID: &str = "event_id";
+
+impl UserEventsExporter {
+    /// Create instance of the exporter
+    pub(crate) fn new(options: UserEventsOptions) -> Result<Self, String> {
+        let provider_name = options.provider_name();
         let mut eventheader_provider: Provider =
             Provider::new(provider_name, &Provider::new_options());
         let event_sets = Self::register_events(&mut eventheader_provider);
@@ -53,6 +96,14 @@ impl UserEventsExporter {
             cloud_role: None,
             cloud_role_instance: None,
         })
+    }
+
+    /// Build a log processor for the `UserEventsExporter` using the provided options.
+    pub fn build_processor(
+        options: UserEventsOptions,
+    ) -> ReentrantLogProcessor<UserEventsExporter> {
+        let exporter = UserEventsExporter::new(options).expect("Failed to create exporter");
+        ReentrantLogProcessor::new(exporter)
     }
 
     fn register_events(
@@ -409,7 +460,11 @@ mod tests {
     use super::*;
     #[test]
     fn exporter_debug() {
-        let exporter = UserEventsExporter::new("test_provider");
+        let options = UserEventsOptions::builder()
+            .with_provider_name("test_provider")
+            .build()
+            .expect("Failed to create UserEventsOptions");
+        let exporter = UserEventsExporter::new(options);
         assert_eq!(
             format!("{:?}", exporter.expect("Failed to create exporter")),
             "user_events log exporter (provider name: test_provider)"
@@ -428,7 +483,11 @@ mod tests {
         ];
 
         for valid_name in valid_names {
-            let result = UserEventsExporter::new(valid_name);
+            let options = UserEventsOptions::builder()
+                .with_provider_name(valid_name)
+                .build()
+                .expect("Failed to build UserEventsOptions");
+            let result = UserEventsExporter::new(options);
             assert!(
                 result.is_ok(),
                 "Expected '{}' to be valid, but it was rejected",
@@ -440,7 +499,11 @@ mod tests {
     #[test]
     fn provider_name_too_long() {
         let long_name = "a".repeat(234);
-        let result = UserEventsExporter::new(&long_name);
+        let options = UserEventsOptions::builder()
+            .with_provider_name(&long_name)
+            .build()
+            .expect("Failed to build UserEventsOptions");
+        let result = UserEventsExporter::new(options);
         assert!(result.is_err());
         assert_eq!(
             result.err().unwrap(),
@@ -476,8 +539,11 @@ mod tests {
 
         // Test each invalid name
         for invalid_name in invalid_names {
-            let result = UserEventsExporter::new(invalid_name);
-
+            let options = UserEventsOptions::builder()
+                .with_provider_name(invalid_name)
+                .build()
+                .expect("Failed to build UserEventsOptions");
+            let result = UserEventsExporter::new(options);
             // Assert that the result is an error
             assert!(
                 result.is_err(),

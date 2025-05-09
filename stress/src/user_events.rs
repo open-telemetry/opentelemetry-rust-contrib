@@ -32,16 +32,22 @@
 // Threads: 16 - Average Throughput: TODO
 
 use opentelemetry_appender_tracing::layer;
+use opentelemetry_sdk::logs::LoggerProviderBuilder;
 use opentelemetry_sdk::logs::SdkLoggerProvider;
-use opentelemetry_user_events_logs::UserEventsLoggerProviderBuilderExt;
+use opentelemetry_user_events_logs::{UserEventsExporter, UserEventsOptions};
 use tracing::error;
 use tracing_subscriber::{prelude::*, EnvFilter};
 mod throughput;
 
 // Function to initialize the logger
 fn init_logger() -> SdkLoggerProvider {
-    SdkLoggerProvider::builder()
-        .with_user_events_exporter("myprovider")
+    let user_event_options = UserEventsOptions::builder()
+        .with_provider_name("myprovider")
+        .build()
+        .unwrap();
+    let user_event_processor = UserEventsExporter::build_processor(user_event_options);
+    LoggerProviderBuilder::default()
+        .with_log_processor(user_event_processor)
         .build()
 }
 
