@@ -164,7 +164,7 @@ mod tests {
                 // Sample output from perf-decode
                 {
         "./perf.data": [
-          { "n": "myprovider:my-event-name", "__csver__": 1024, "PartA": { "time": "2025-03-07T16:31:28.279214367+00:00" }, "PartC": { "user_name": "otel user", "user_email": "otel.user@opentelemetry.com" }, "PartB": { "_typeName": "Log", "severityNumber": 2, "severityText": "ERROR", "eventId": 20, "name": "my-event-name" }, "meta": { "time": 81252.403220286, "cpu": 4, "pid": 21084, "tid": 21085, "level": 2, "keyword": "0x1" } } ]
+          { "n": "myprovider:Log", "__csver__": 1024, "PartA": { "time": "2025-03-07T16:31:28.279214367+00:00", "ext_cloud_role": "myrolename"  }, "PartC": { "user_name": "otel user", "user_email": "otel.user@opentelemetry.com" }, "PartB": { "_typeName": "Log", "severityNumber": 2, "severityText": "ERROR", "eventId": 20, "name": "my-event-name" }, "meta": { "time": 81252.403220286, "cpu": 4, "pid": 21084, "tid": 21085, "level": 2, "keyword": "0x1" } } ]
         }
                  */
 
@@ -185,15 +185,15 @@ mod tests {
             .iter()
             .find(|e| {
                 if let Some(name) = e.get("n") {
-                    name.as_str().unwrap_or("") == "myprovider:my-event-name"
+                    name.as_str().unwrap_or("") == "myprovider:Log"
                 } else {
                     false
                 }
             })
-            .expect("Event 'myprovider:my-event-name' not found");
+            .expect("Event 'myprovider:Log' not found");
 
         // Validate event structure and fields
-        assert_eq!(event["n"].as_str().unwrap(), "myprovider:my-event-name");
+        assert_eq!(event["n"].as_str().unwrap(), "myprovider:Log");
         assert_eq!(event["__csver__"].as_i64().unwrap(), 1024);
 
         // Validate PartA
@@ -201,10 +201,10 @@ mod tests {
         // Only check if the time field exists, not the actual value
         assert!(part_a.get("time").is_some(), "PartA.time is missing");
 
-        let part_a_ext_cloud = part_a.get("ext_cloud").expect("PartA.ext_cloud is missing");
-
-        // Validate role
-        assert_eq!(part_a_ext_cloud["role"].as_str().unwrap(), "myrolename");
+        let role = part_a
+            .get("ext_cloud_role")
+            .expect("PartA.ext_cloud_role is missing");
+        assert_eq!(role.as_str().unwrap(), "myrolename");
 
         // Validate PartB
         let part_b = &event["PartB"];

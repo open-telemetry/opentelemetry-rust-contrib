@@ -197,7 +197,7 @@ impl UserEventsExporter {
                     .event_name()
                     .filter(|s| !s.trim().is_empty())
                     .unwrap_or("Log");                
-                eb.reset(event_name, 0);
+                eb.reset("Log", 0);
 
                 eb.add_value("__csver__", 1024, FieldFormat::UnsignedInt, 0); // 0x400 in hex
 
@@ -219,34 +219,29 @@ impl UserEventsExporter {
                 eb.add_str("time", time, FieldFormat::Default, 0);
 
                 if let Some(trace_context) = log_record.trace_context() {
-                    cs_a_count += 1; // for ext_dt
-                    // TODO: Flattened structure might be faster
-                    eb.add_struct("ext_dt", 2, 0);
-                    eb.add_str("traceId", trace_context.trace_id.to_string(), FieldFormat::Default, 0);
-                    eb.add_str("spanId", trace_context.span_id.to_string(), FieldFormat::Default, 0);
+                    cs_a_count += 2; // for ext_dt_traceId and ext_dt_spanId
+                    eb.add_str(
+                        "ext_dt_traceId",
+                        trace_context.trace_id.to_string(),
+                        FieldFormat::Default,
+                        0,
+                    );
+                    eb.add_str(
+                        "ext_dt_spanId",
+                        trace_context.span_id.to_string(),
+                        FieldFormat::Default,
+                        0,
+                    );
                 }
 
-                let mut cloud_ext_count = 0;
-                if self.cloud_role.is_some()
-                {
-                    cloud_ext_count += 1;
-                }
-                if self.cloud_role_instance.is_some()
-                {
-                    cloud_ext_count += 1;
+                if let Some(cloud_role) = &self.cloud_role {
+                    cs_a_count += 1;
+                    eb.add_str("ext_cloud_role", cloud_role, FieldFormat::Default, 0);
                 }
 
-                if cloud_ext_count > 0 {
-                    cs_a_count += 1; // for ext_cloud
-                    eb.add_struct("ext_cloud", cloud_ext_count, 0);
-
-                    if let Some(cloud_role) = &self.cloud_role {
-                        eb.add_str("role", cloud_role, FieldFormat::Default, 0);
-                    }
-
-                    if let Some(cloud_role_instance) = &self.cloud_role_instance {
-                        eb.add_str("roleInstance", cloud_role_instance, FieldFormat::Default, 0);
-                    }
+                if let Some(cloud_role_instance) = &self.cloud_role_instance {
+                    cs_a_count += 1;
+                    eb.add_str("ext_cloud_roleInstance", cloud_role_instance, FieldFormat::Default, 0);
                 }
 
                 eb.set_struct_field_count(cs_a_bookmark, cs_a_count);
