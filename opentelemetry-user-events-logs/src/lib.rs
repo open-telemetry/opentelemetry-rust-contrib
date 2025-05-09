@@ -85,7 +85,7 @@ pub use logs::*;
 #[cfg(test)]
 mod tests {
 
-    use super::*;
+    use crate::{UserEventsExporter, UserEventsOptions};
     use opentelemetry::trace::Tracer;
     use opentelemetry::trace::{TraceContextExt, TracerProvider};
     use opentelemetry_appender_tracing::layer;
@@ -110,10 +110,15 @@ mod tests {
 
         // Basic check if user_events are available
         check_user_events_available().expect("Kernel does not support user_events. Verify your distribution/kernel supports user_events: https://docs.kernel.org/trace/user_events.html.");
+        let user_event_options = UserEventsOptions::builder()
+            .with_provider_name("myprovider")
+            .build()
+            .unwrap();
+        let user_event_processor = UserEventsExporter::build_processor(user_event_options);
 
         let logger_provider = LoggerProviderBuilder::default()
             .with_resource(Resource::builder().with_service_name("myrolename").build())
-            .with_user_events_exporter("myprovider")
+            .with_log_processor(user_event_processor)
             .build();
 
         // Once provider with user_event exporter is created, it should create the TracePoints
@@ -241,8 +246,13 @@ mod tests {
             .build();
         let tracer = tracer_provider.tracer("test-tracer");
 
+        let user_event_options = UserEventsOptions::builder()
+            .with_provider_name("myprovider")
+            .build()
+            .unwrap();
+        let user_event_processor = UserEventsExporter::build_processor(user_event_options);
         let logger_provider = LoggerProviderBuilder::default()
-            .with_user_events_exporter("myprovider")
+            .with_log_processor(user_event_processor)
             .build();
 
         // Once provider with user_event exporter is created, it should create the TracePoints
