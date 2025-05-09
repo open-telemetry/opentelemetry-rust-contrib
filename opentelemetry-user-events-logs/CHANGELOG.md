@@ -5,6 +5,9 @@
 - Enhanced validation for the provider name in `with_user_event_exporter(provider_name)`:
   - Empty provider names are now disallowed.
 
+- Event header name is changed to "provider_name:Log". `ext_dt` and `ext_cloud` structs
+  are flattened.
+
 ## v0.12.0
 
 - Added support for Populating Cloud RoleName, RoleInstance from Resource's
