@@ -19,7 +19,7 @@ pub struct ExportOptions<'a> {
 
 impl<'a> ExportOptions<'a> {
     /// Returns the provider name.
-    pub fn provider_name(&self) -> &'a str {
+    fn provider_name(&self) -> &'a str {
         self.provider_name
     }
 
