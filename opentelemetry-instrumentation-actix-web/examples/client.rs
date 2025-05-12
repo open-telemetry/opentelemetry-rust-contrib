@@ -1,8 +1,9 @@
-use actix_web_opentelemetry::ClientExt;
 use opentelemetry::{global, KeyValue};
+use opentelemetry_instrumentation_actix_web::ClientExt;
 use opentelemetry_sdk::propagation::TraceContextPropagator;
 use opentelemetry_sdk::trace::SdkTracerProvider;
 use opentelemetry_sdk::Resource;
+use opentelemetry_stdout::SpanExporter;
 use std::error::Error;
 use std::io;
 
@@ -34,11 +35,7 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync + 'static>> {
         .build();
 
     let tracer = SdkTracerProvider::builder()
-        .with_batch_exporter(
-            opentelemetry_otlp::SpanExporter::builder()
-                .with_tonic()
-                .build()?,
-        )
+        .with_batch_exporter(SpanExporter::default())
         .with_resource(service_name_resource)
         .build();
 
