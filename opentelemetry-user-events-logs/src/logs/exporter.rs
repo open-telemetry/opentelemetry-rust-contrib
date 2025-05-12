@@ -30,7 +30,7 @@ impl ExportOptions {
     }
 }
 
-/// Builder for `UserEventsOptions`.
+/// Builder for `ExportOptions`.
 #[derive(Debug, Clone)]
 pub struct ExportOptionsBuilder {
     provider_name: String,
@@ -459,7 +459,7 @@ mod tests {
     fn exporter_debug() {
         let options = ExportOptions::builder("test_provider")
             .build()
-            .expect("Failed to create UserEventsOptions");
+            .expect("Failed to create ExportOptions");
         let exporter = UserEventsExporter::new(options);
         assert_eq!(
             format!("{:?}", exporter),
@@ -481,7 +481,7 @@ mod tests {
         for valid_name in valid_names {
             let options = ExportOptions::builder(valid_name)
                 .build()
-                .expect("Failed to build UserEventsOptions");
+                .expect("Failed to build ExportOptions");
             let _exporter = UserEventsExporter::new(options);
         }
     }

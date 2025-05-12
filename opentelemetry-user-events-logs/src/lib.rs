@@ -57,11 +57,11 @@
 //! ```rust
 //! use opentelemetry_sdk::logs::SdkLoggerProvider;
 //! use opentelemetry_sdk::Resource;
-//! use opentelemetry_user_events_logs::{UserEventsExporter, UserEventsOptions};
+//! use opentelemetry_user_events_logs::{UserEventsExporter, ExportOptions};
 //!
-//! let user_event_options = UserEventsOptions::builder("myprovider")
+//! let user_event_options = ExportOptions::builder("myprovider")
 //!     .build()
-//!     .expect("Failed to build UserEventsOptions");
+//!     .expect("Failed to build ExportOptions");
 //! let user_event_processor = UserEventsExporter::build_processor(user_event_options);
 //!
 //! let provider = SdkLoggerProvider::builder()
