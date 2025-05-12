@@ -116,7 +116,13 @@ mod tests {
             AnyValue::Bytes(Box::default()),
         ];
         let result = AnyValue::ListAny(Box::new(vec)).as_json_value();
-        assert_eq!(result, json!(["`AnyValue::Bytes` are not supported.", "`AnyValue::Bytes` are not supported."]));
+        assert_eq!(
+            result,
+            json!([
+                "`AnyValue::Bytes` are not supported.",
+                "`AnyValue::Bytes` are not supported."
+            ])
+        );
     }
 
     #[test]
