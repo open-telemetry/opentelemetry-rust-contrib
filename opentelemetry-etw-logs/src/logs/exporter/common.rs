@@ -24,19 +24,19 @@ pub fn add_attribute_to_event(event: &mut tld::EventBuilder, key: &Key, value: &
             event.add_binaryc(key.as_str(), b.as_slice(), tld::OutType::Default, 0);
         }
         #[cfg(feature = "serde_json")]
-        AnyValue::ListAny(l) => {
+        AnyValue::ListAny(_) => {
             event.add_str8(
                 key.as_str(),
-                l.as_json_value().to_string(),
+                value.as_json_value().to_string(),
                 tld::OutType::Json,
                 0,
             );
         }
         #[cfg(feature = "serde_json")]
-        AnyValue::Map(m) => {
+        AnyValue::Map(_) => {
             event.add_str8(
                 key.as_str(),
-                m.as_json_value().to_string(),
+                value.as_json_value().to_string(),
                 tld::OutType::Json,
                 0,
             );
