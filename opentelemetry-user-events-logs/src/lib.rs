@@ -60,8 +60,11 @@
 //! use opentelemetry_user_events_logs::{build_processor, ExportOptions};
 //!
 //! let export_options = ExportOptions::builder("myprovider")
-//!     .build()
-//!     .expect("Failed to build ExportOptions");
+//!   .build()
+//!   .unwrap_or_else(|err| {
+//!     eprintln!("Failed to create export options. Error: {}", err);
+//!     panic!("exiting due to error during initialization");
+//!              });
 //! let user_event_processor = build_processor(export_options);
 //!
 //! let provider = SdkLoggerProvider::builder()
