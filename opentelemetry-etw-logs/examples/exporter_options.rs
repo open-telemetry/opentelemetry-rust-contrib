@@ -48,6 +48,7 @@ use tracing_subscriber::prelude::*;
 fn init_logger() -> SdkLoggerProvider {
     let exporter_options = ExporterOptions::builder("provider-name")
         .with_default_event_name("default_event_name")
+        .use_etw_event_name_from_target()
         .build()
         .unwrap();
 
