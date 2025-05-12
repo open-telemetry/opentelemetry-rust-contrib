@@ -9,9 +9,9 @@
 - `ext_dt` and `ext_cloud` structs are flattened.
   are flattened.
 
-- **BREAKING** Add builder pattern with ExportOptions and implement build_processor method [256](https://github.com/open-telemetry/opentelemetry-rust-contrib/pull/256)
+- **BREAKING** Add builder pattern with `ExportOptions` and implement `build_processor` method [256](https://github.com/open-telemetry/opentelemetry-rust-contrib/pull/256)
   - Removed `with_user_events_exporter` extension method on `LoggerProviderBuilder`.
-  - Introduced a builder pattern for the UserEventsExporter which improves configuration flexibility.
+  - Introduced a builder pattern for the user_events exporter which improves configuration flexibility.
 
   Before:
 
