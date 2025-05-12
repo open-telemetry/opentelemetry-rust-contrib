@@ -84,19 +84,19 @@ impl ExporterOptionsBuilder {
         self
     }
 
-    /// Sets the provider name to be the default value ("Log"). The default value may be overridden by `with_default_event_name()`.
+    /// Sets the event name to be the default value ("Log"). The default value may be overridden by `with_default_event_name()`.
     pub fn use_etw_event_name_from_default(mut self) -> Self {
         self.inner.event_name_from = ETWEventNameFrom::Default;
         self
     }
 
-    /// Sets the provider name to be the `target` from `SdkLogRecord`. If `target` is `None`, it uses the default value ("Log"). The default value may be overridden by `with_default_event_name()`.
+    /// Sets the event name to be the `target` from `SdkLogRecord`. If `target` is `None`, it uses the default value ("Log"). The default value may be overridden by `with_default_event_name()`.
     pub fn use_etw_event_name_from_target(mut self) -> Self {
         self.inner.event_name_from = ETWEventNameFrom::Target;
         self
     }
 
-    /// Sets the provider name to be the `name` from `SdkLogRecord`. If `name` is `None`, it uses the default value ("Log"). The default value may be overridden by `with_default_event_name()`.
+    /// Sets the event name to be the `name` from `SdkLogRecord`. If `name` is `None`, it uses the default value ("Log"). The default value may be overridden by `with_default_event_name()`.
     pub fn use_etw_event_name_from_name(mut self) -> Self {
         self.inner.event_name_from = ETWEventNameFrom::Name;
         self
