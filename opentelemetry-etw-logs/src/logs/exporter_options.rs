@@ -18,6 +18,8 @@ pub struct ExporterOptions {
 
 impl ExporterOptions {
     /// Creates a new instance of `ExporterOptionsBuilder` with the given provider name.
+    ///
+    /// By default, all events will be exported to the "Log" ETW event. See `ExporterOptionsBuilder` docs for details on how to override this behavior.
     pub fn builder(provider_name: impl Into<Cow<'static, str>>) -> ExporterOptionsBuilder {
         ExporterOptionsBuilder::new(provider_name)
     }
@@ -63,6 +65,10 @@ pub struct ExporterOptionsBuilder {
 
 impl ExporterOptionsBuilder {
     /// Creates a new instance of `ExporterOptionsBuilder` with the given provider name.
+    ///
+    /// By default, all events will be exported to the "Log" ETW event, as if user has called:
+    /// - `builder.with_default_event_name("Log")`
+    /// - `builder.use_etw_event_name_from_default()`
     pub fn new(provider_name: impl Into<Cow<'static, str>>) -> Self {
         ExporterOptionsBuilder {
             inner: ExporterOptions {
@@ -73,9 +79,9 @@ impl ExporterOptionsBuilder {
         }
     }
 
-    /// Sets the default event name to use as fallback if:
+    /// Sets a default event name different than "Log" to be used as fallback if:
     /// - `use_etw_event_name_from_default()` has been selected, or
-    /// - it cannot extract name or target from the `SdkLogRecord`.
+    /// - it cannot extract name or target from the `SdkLogRecord` when `use_etw_event_name_from_default()` or `use_etw_event_name_from_target()` are selected.
     pub fn with_default_event_name(
         mut self,
         default_event_name: impl Into<Cow<'static, str>>,
@@ -84,7 +90,9 @@ impl ExporterOptionsBuilder {
         self
     }
 
-    /// Sets the event name to be the default value ("Log"). The default value may be overridden by `with_default_event_name()`.
+    /// Sets the event name to always be the default value ("Log"). The default value may be overridden by `with_default_event_name()`.
+    ///
+    /// This is the default behavior.
     pub fn use_etw_event_name_from_default(mut self) -> Self {
         self.inner.event_name_from = ETWEventNameFrom::Default;
         self
