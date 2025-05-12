@@ -54,9 +54,5 @@ default = ["internal-logs"]
 name = "basic"
 path = "examples/basic.rs"
 
-[[example]]
-name = "exporter_options"
-path = "examples/exporter_options.rs"
-
 [lints]
 workspace = true
