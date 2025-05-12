@@ -1,11 +1,25 @@
 use opentelemetry::otel_warn;
 use std::borrow::Cow;
+use thiserror::Error;
 
 #[derive(Debug)]
 enum ETWEventNameFrom {
     Default,
     Target,
     Name,
+}
+
+
+#[derive(Error, Debug, PartialEq)]
+/// Errors that can occur while building the `ExporterOptions`.
+#[non_exhaustive]
+pub enum ExporterOptionsBuildError {
+    #[error("Provider name cannot be empty.")]
+    EmptyProviderName,
+    #[error("Provider name must be less than 234 characters.")]
+    ProviderNameTooLong,
+    #[error("Provider name must contain only ASCII alphanumeric characters, '_' or '-'.")]
+    InvalidProviderName,
 }
 
 /// Options used by the Exporter.
@@ -111,36 +125,33 @@ impl ExporterOptionsBuilder {
     }
 
     /// Validates the options given by consuming itself and returning the `ExporterOptions` or an error.
-    pub fn build(self) -> Result<ExporterOptions, String> {
+    pub fn build(self) -> Result<ExporterOptions, ExporterOptionsBuildError> {
         if let Err(error) = self.validate() {
-            otel_warn!(name: "ETW.ExporterOptions.CreationFailed", reason = &error);
+            otel_warn!(name: "ETW.ExporterOptions.CreationFailed", reason = &error.to_string());
             return Err(error);
         }
 
         Ok(self.inner)
     }
 
-    fn validate(&self) -> Result<(), String> {
+    fn validate(&self) -> Result<(), ExporterOptionsBuildError> {
         validate_provider_name(&self.inner.provider_name)?;
         Ok(())
     }
 }
 
-fn validate_provider_name(provider_name: &str) -> Result<(), String> {
+fn validate_provider_name(provider_name: &str) -> Result<(), ExporterOptionsBuildError> {
     if provider_name.is_empty() {
-        return Err("Provider name cannot be empty.".to_string());
+        return Err(ExporterOptionsBuildError::EmptyProviderName);
     }
     if provider_name.len() >= 234 {
-        return Err("Provider name must be less than 234 characters.".to_string());
+        return Err(ExporterOptionsBuildError::ProviderNameTooLong);
     }
     if !provider_name
         .chars()
         .all(|c| c.is_ascii_alphanumeric() || c == '_' || c == '-')
     {
-        return Err(
-            "Provider name must contain only ASCII alphanumeric characters, '_' or '-'."
-                .to_string(),
-        );
+        return Err(ExporterOptionsBuildError::InvalidProviderName);
     }
     Ok(())
 }
@@ -311,23 +322,18 @@ mod tests {
     }
 
     #[test]
-    #[should_panic(expected = "Provider name cannot be empty.")]
     fn test_validate_empty_name() {
-        let _ = ExporterOptions::builder("").build().unwrap();
+        assert_eq!(ExporterOptions::builder("").build().unwrap_err(), ExporterOptionsBuildError::EmptyProviderName);
     }
 
     #[test]
-    #[should_panic(expected = "Provider name must be less than 234 characters.")]
     fn test_validate_name_longer_than_234_chars() {
-        let _ = ExporterOptions::builder("a".repeat(235)).build().unwrap();
+        assert_eq!(ExporterOptions::builder("a".repeat(235)).build().unwrap_err(), ExporterOptionsBuildError::ProviderNameTooLong);
     }
 
     #[test]
-    #[should_panic(
-        expected = "Provider name must contain only ASCII alphanumeric characters, '_' or '-'."
-    )]
     fn test_validate_name_uses_valid_chars() {
-        let _ = ExporterOptions::builder("i_have_a_?_").build().unwrap();
+        assert_eq!(ExporterOptions::builder("i_have_a_?_").build().unwrap_err(), ExporterOptionsBuildError::InvalidProviderName);
     }
 
     #[test]

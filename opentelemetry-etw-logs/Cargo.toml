@@ -11,13 +11,17 @@ keywords = ["opentelemetry", "log", "trace", "etw"]
 license = "Apache-2.0"
 
 [dependencies]
-tracelogging_dynamic = "1.2.1"
+chrono = { version = "0.4.40", default-features = false, features = [
+    "alloc",
+    "std",
+] }
+futures-executor = "0.3.31"
 opentelemetry = { workspace = true, features = ["logs"] }
 opentelemetry_sdk = { workspace = true, features = ["logs"] }
-tracing = { version = "0.1", optional = true }
 serde_json = { version = "1.0.113", optional = true }
-futures-executor = "0.3.31"
-chrono = { version = "0.4.40", default-features = false, features = ["alloc", "std"] }
+thiserror = { version = "2", default-features = false }
+tracelogging_dynamic = "1.2.1"
+tracing = { version = "0.1", optional = true }
 
 [dev-dependencies]
 log = { version = "0.4.21", features = ["kv_serde"] }
