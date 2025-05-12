@@ -73,7 +73,7 @@ impl ExporterOptionsBuilder {
         }
     }
 
-    /// Sets the default event name to use by `ExporterOptions::get_etw_event_name` if:
+    /// Sets the default event name to use as fallback if:
     /// - `use_etw_event_name_from_default()` has been selected, or
     /// - it cannot extract name or target from the `SdkLogRecord`.
     pub fn with_default_event_name(
