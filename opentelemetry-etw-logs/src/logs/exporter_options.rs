@@ -9,7 +9,6 @@ enum ETWEventNameFrom {
     Name,
 }
 
-
 #[derive(Error, Debug, PartialEq)]
 /// Errors that can occur while building the `ExporterOptions`.
 #[non_exhaustive]
@@ -323,17 +322,28 @@ mod tests {
 
     #[test]
     fn test_validate_empty_name() {
-        assert_eq!(ExporterOptions::builder("").build().unwrap_err(), ExporterOptionsBuildError::EmptyProviderName);
+        assert_eq!(
+            ExporterOptions::builder("").build().unwrap_err(),
+            ExporterOptionsBuildError::EmptyProviderName
+        );
     }
 
     #[test]
     fn test_validate_name_longer_than_234_chars() {
-        assert_eq!(ExporterOptions::builder("a".repeat(235)).build().unwrap_err(), ExporterOptionsBuildError::ProviderNameTooLong);
+        assert_eq!(
+            ExporterOptions::builder("a".repeat(235))
+                .build()
+                .unwrap_err(),
+            ExporterOptionsBuildError::ProviderNameTooLong
+        );
     }
 
     #[test]
     fn test_validate_name_uses_valid_chars() {
-        assert_eq!(ExporterOptions::builder("i_have_a_?_").build().unwrap_err(), ExporterOptionsBuildError::InvalidProviderName);
+        assert_eq!(
+            ExporterOptions::builder("i_have_a_?_").build().unwrap_err(),
+            ExporterOptionsBuildError::InvalidProviderName
+        );
     }
 
     #[test]
