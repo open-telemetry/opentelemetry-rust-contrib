@@ -21,7 +21,7 @@ fn serialize_anyvalue(value: &AnyValue, depth: usize) -> Value {
         AnyValue::Double(value) => json!(value),
         AnyValue::String(value) => json!(value.as_str()),
         AnyValue::Boolean(value) => json!(value),
-        AnyValue::Bytes(_value) => json!("No support for AnyValue::Bytes yet."),
+        AnyValue::Bytes(_value) => json!("`AnyValue::Bytes` are not supported."),
         AnyValue::ListAny(value) => {
             if depth > 0 {
                 // Do not allow nested lists.
@@ -116,7 +116,7 @@ mod tests {
             AnyValue::Bytes(Box::default()),
         ];
         let result = AnyValue::ListAny(Box::new(vec)).as_json_value();
-        assert_eq!(result, json!(["No support for AnyValue::Bytes yet.", "No support for AnyValue::Bytes yet."]));
+        assert_eq!(result, json!(["`AnyValue::Bytes` are not supported.", "`AnyValue::Bytes` are not supported."]));
     }
 
     #[test]
