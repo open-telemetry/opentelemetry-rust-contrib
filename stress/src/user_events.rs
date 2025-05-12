@@ -41,10 +41,7 @@ mod throughput;
 
 // Function to initialize the logger
 fn init_logger() -> SdkLoggerProvider {
-    let user_event_options = UserEventsOptions::builder()
-        .with_provider_name("myprovider")
-        .build()
-        .unwrap();
+    let user_event_options = UserEventsOptions::builder("myprovider").build().unwrap();
     let user_event_processor = UserEventsExporter::build_processor(user_event_options);
     LoggerProviderBuilder::default()
         .with_log_processor(user_event_processor)

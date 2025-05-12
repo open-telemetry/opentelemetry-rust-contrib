@@ -12,42 +12,41 @@ use std::{cell::RefCell, str, time::SystemTime};
 
 thread_local! { static EBW: RefCell<EventBuilder> = RefCell::new(EventBuilder::new());}
 
-// Options for configuring the User Events Exporter.
+/// Options for configuring the User Events Exporter.
 #[derive(Debug, Clone)]
-pub struct UserEventsOptions {
+pub struct ExportOptions {
     provider_name: String,
 }
 
-impl UserEventsOptions {
+impl ExportOptions {
     /// Returns the provider name.
     pub fn provider_name(&self) -> &str {
         &self.provider_name
     }
 
-    /// Builder for `UserEventsOptions`.
-    pub fn builder() -> UserEventsOptionsBuilder {
-        UserEventsOptionsBuilder::default()
+    /// Builder for `EventsOptions`.
+    pub fn builder(provider_name: impl Into<String>) -> ExportOptionsBuilder {
+        ExportOptionsBuilder::new(provider_name)
     }
 }
 
 /// Builder for `UserEventsOptions`.
-#[derive(Default, Debug, Clone)]
-pub struct UserEventsOptionsBuilder {
-    provider_name: Option<String>,
+#[derive(Debug, Clone)]
+pub struct ExportOptionsBuilder {
+    provider_name: String,
 }
 
-impl UserEventsOptionsBuilder {
-    /// Sets the provider name.
-    pub fn with_provider_name(mut self, provider_name: &str) -> Self {
-        self.provider_name = Some(provider_name.to_string());
-        self
+impl ExportOptionsBuilder {
+    /// Creates a new builder with a mandatory provider_name.
+    pub fn new(provider_name: impl Into<String>) -> Self {
+        Self {
+            provider_name: provider_name.into(),
+        }
     }
 
     /// Builds the `UserEventsOptions` or returns an error if validation fails.
-    pub fn build(self) -> Result<UserEventsOptions, String> {
-        let provider_name = self
-            .provider_name
-            .ok_or_else(|| "Provider name is required.".to_string())?;
+    pub fn build(self) -> Result<ExportOptions, String> {
+        let provider_name = self.provider_name;
 
         // Validate provider_name
         if provider_name.is_empty() {
@@ -65,7 +64,7 @@ impl UserEventsOptionsBuilder {
             );
         }
 
-        Ok(UserEventsOptions { provider_name })
+        Ok(ExportOptions { provider_name })
     }
 }
 
@@ -82,27 +81,25 @@ const EVENT_ID: &str = "event_id";
 
 impl UserEventsExporter {
     /// Create instance of the exporter
-    pub(crate) fn new(options: UserEventsOptions) -> Result<Self, String> {
+    pub(crate) fn new(options: ExportOptions) -> Self {
         let provider_name = options.provider_name();
         let mut eventheader_provider: Provider =
             Provider::new(provider_name, &Provider::new_options());
         let event_sets = Self::register_events(&mut eventheader_provider);
         otel_debug!(name: "UserEvents.Created", provider_name = provider_name);
         let name = eventheader_provider.name().to_string();
-        Ok(UserEventsExporter {
+        UserEventsExporter {
             provider: Mutex::new(eventheader_provider),
             name,
             event_sets,
             cloud_role: None,
             cloud_role_instance: None,
-        })
+        }
     }
 
     /// Build a log processor for the `UserEventsExporter` using the provided options.
-    pub fn build_processor(
-        options: UserEventsOptions,
-    ) -> ReentrantLogProcessor<UserEventsExporter> {
-        let exporter = UserEventsExporter::new(options).expect("Failed to create exporter");
+    pub fn build_processor(options: ExportOptions) -> impl opentelemetry_sdk::logs::LogProcessor {
+        let exporter = UserEventsExporter::new(options);
         ReentrantLogProcessor::new(exporter)
     }
 
@@ -460,13 +457,12 @@ mod tests {
     use super::*;
     #[test]
     fn exporter_debug() {
-        let options = UserEventsOptions::builder()
-            .with_provider_name("test_provider")
+        let options = ExportOptions::builder("test_provider")
             .build()
             .expect("Failed to create UserEventsOptions");
         let exporter = UserEventsExporter::new(options);
         assert_eq!(
-            format!("{:?}", exporter.expect("Failed to create exporter")),
+            format!("{:?}", exporter),
             "user_events log exporter (provider name: test_provider)"
         );
     }
@@ -483,30 +479,20 @@ mod tests {
         ];
 
         for valid_name in valid_names {
-            let options = UserEventsOptions::builder()
-                .with_provider_name(valid_name)
+            let options = ExportOptions::builder(valid_name)
                 .build()
                 .expect("Failed to build UserEventsOptions");
-            let result = UserEventsExporter::new(options);
-            assert!(
-                result.is_ok(),
-                "Expected '{}' to be valid, but it was rejected",
-                valid_name
-            );
+            let _exporter = UserEventsExporter::new(options);
         }
     }
 
     #[test]
     fn provider_name_too_long() {
         let long_name = "a".repeat(234);
-        let options = UserEventsOptions::builder()
-            .with_provider_name(&long_name)
-            .build()
-            .expect("Failed to build UserEventsOptions");
-        let result = UserEventsExporter::new(options);
-        assert!(result.is_err());
+        let options = ExportOptions::builder(long_name).build();
+        assert!(options.is_err());
         assert_eq!(
-            result.err().unwrap(),
+            options.err().unwrap(),
             "Provider name must be less than 234 characters.".to_string()
         );
     }
@@ -539,21 +525,17 @@ mod tests {
 
         // Test each invalid name
         for invalid_name in invalid_names {
-            let options = UserEventsOptions::builder()
-                .with_provider_name(invalid_name)
-                .build()
-                .expect("Failed to build UserEventsOptions");
-            let result = UserEventsExporter::new(options);
+            let options = ExportOptions::builder(invalid_name).build();
             // Assert that the result is an error
             assert!(
-                result.is_err(),
+                options.is_err(),
                 "Expected '{}' to be invalid, but it was accepted",
                 invalid_name
             );
 
             // Assert that the error message is as expected
             assert_eq!(
-                result.err().unwrap(),
+                options.err().unwrap(),
                 expected_error,
                 "Wrong error message for invalid name: '{}'",
                 invalid_name
