@@ -61,7 +61,7 @@ pub struct ExportOptionsBuilder<'a> {
 
 impl<'a> ExportOptionsBuilder<'a> {
     /// Creates a new builder with a mandatory provider_name.
-    pub fn new(provider_name: &'a str) -> Self {
+    fn new(provider_name: &'a str) -> Self {
         Self { provider_name }
     }
 
