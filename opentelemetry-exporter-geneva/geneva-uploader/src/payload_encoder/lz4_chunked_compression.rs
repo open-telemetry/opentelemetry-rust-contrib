@@ -42,7 +42,7 @@ pub(crate) fn lz4_chunked_compression(input: &[u8]) -> Vec<u8> {
     // Each chunk may require up to get_maximum_output_size(CHUNK_SIZE) bytes for compressed data,
     // plus 4 bytes for the length header per chunk.
     let mut output = Vec::with_capacity(
-        (input.len() / CHUNK_SIZE + 1) * (4 + get_maximum_output_size(CHUNK_SIZE)),
+        input.len().div_ceil(CHUNK_SIZE) * (4 + get_maximum_output_size(CHUNK_SIZE)),
     );
 
     // Temporary buffer for compressing each chunk (reused for all chunks).
