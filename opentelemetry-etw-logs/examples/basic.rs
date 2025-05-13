@@ -39,7 +39,7 @@
 //!
 
 use opentelemetry_appender_tracing::layer;
-use opentelemetry_etw_logs::ETWLoggerProviderBuilderExt;
+use opentelemetry_etw_logs::etw_log_processor;
 use opentelemetry_etw_logs::ExporterOptions;
 use opentelemetry_sdk::logs::SdkLoggerProvider;
 use tracing::error;
@@ -47,9 +47,10 @@ use tracing_subscriber::prelude::*;
 
 fn init_logger() -> SdkLoggerProvider {
     let exporter_options = ExporterOptions::builder("provider-name").build().unwrap();
+    let processor = etw_log_processor(exporter_options);
 
     SdkLoggerProvider::builder()
-        .with_etw_exporter(exporter_options)
+        .with_log_processor(processor)
         .build()
 }
 
