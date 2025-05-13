@@ -34,6 +34,7 @@ use lz4_flex::block::{compress_into, get_maximum_output_size};
 ///   This might let us use the input buffer as the temporary compression buffer, potentially reducing heap allocations further,
 ///   but care must be taken: LZ4 does not natively support in-place compression, and the compressed size may be larger than the input.
 ///   If single-buffer "in-place" compression is possible (e.g., with unsafe or buffer aliasing), document or implement it here.
+/// - Consider passing output buffer as mutable slice to avoid reallocation, and provide another method to return the max size of the output buffer.
 #[allow(dead_code)]
 pub(crate) fn lz4_chunked_compression(
     input: &[u8],
