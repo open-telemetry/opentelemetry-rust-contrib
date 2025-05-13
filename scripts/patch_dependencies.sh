@@ -7,4 +7,5 @@ function patch_version() {
 }
 
 patch_version home 0.5.5 # for opentelemetry-stackdriver
+patch_version actix-web 4.10.2 # for opentelemetry-instrumentation-actix-web, because 4.11.0+ needs `url = "2.5.4"`
 patch_version url 2.4.1 # for opentelemetry-datadog
