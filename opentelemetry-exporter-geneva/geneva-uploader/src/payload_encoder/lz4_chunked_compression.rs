@@ -35,18 +35,17 @@ use lz4_flex::block::{compress_into, get_maximum_output_size};
 ///   but care must be taken: LZ4 does not natively support in-place compression, and the compressed size may be larger than the input.
 ///   If single-buffer "in-place" compression is possible (e.g., with unsafe or buffer aliasing), document or implement it here.
 #[allow(dead_code)]
-pub(crate) fn lz4_chunked_compression(input: &[u8]) -> Vec<u8> {
+pub(crate) fn lz4_chunked_compression(
+    input: &[u8],
+) -> Result<Vec<u8>, lz4_flex::block::CompressError> {
     const CHUNK_SIZE: usize = 64 * 1024;
+    let max_chunk_compressed = get_maximum_output_size(CHUNK_SIZE);
 
     // Pre-allocate an output buffer large enough for the worst-case total output size:
     // Each chunk may require up to get_maximum_output_size(CHUNK_SIZE) bytes for compressed data,
     // plus 4 bytes for the length header per chunk.
-    let mut output = Vec::with_capacity(
-        input.len().div_ceil(CHUNK_SIZE) * (4 + get_maximum_output_size(CHUNK_SIZE)),
-    );
-
-    // Temporary buffer for compressing each chunk (reused for all chunks).
-    let mut temp = vec![0u8; get_maximum_output_size(CHUNK_SIZE)];
+    let mut output =
+        Vec::with_capacity(input.len().div_ceil(CHUNK_SIZE) * (4 + max_chunk_compressed));
 
     let mut offset = 0;
     // Process the input in 64 KiB chunks.
@@ -56,21 +55,30 @@ pub(crate) fn lz4_chunked_compression(input: &[u8]) -> Vec<u8> {
         // Get the current chunk from input.
         let chunk = &input[offset..end];
 
-        // Compress the chunk into the temporary buffer.
-        let compressed_size = compress_into(chunk, &mut temp).expect("Compression failed");
+        // Reserve space for the 4-byte header
+        let header_offset = output.len();
+        output.extend_from_slice(&[0u8; 4]); // Placeholder for length
 
-        // Write the compressed size as a 4-byte little-endian header to the output buffer.
-        let len_bytes = (compressed_size as u32).to_le_bytes();
-        output.extend_from_slice(&len_bytes);
+        // Reserve worst-case space for compressed data
+        let data_offset = output.len();
+        output.resize(data_offset + max_chunk_compressed, 0);
 
-        // Append the compressed data itself.
-        output.extend_from_slice(&temp[..compressed_size]);
+        // Compress directly into the reserved slice
+        let compressed_size = compress_into(
+            chunk,
+            &mut output[data_offset..data_offset + max_chunk_compressed],
+        )?;
 
-        // Move to the next chunk.
+        // Write the actual compressed length as little-endian u32
+        let compressed_size_le = (compressed_size as u32).to_le_bytes();
+        output[header_offset..header_offset + 4].copy_from_slice(&compressed_size_le);
+        // Truncate output to actual size (header + compressed)
+        output.truncate(data_offset + compressed_size);
+
         offset = end;
     }
 
-    output
+    Ok(output)
 }
 
 #[cfg(test)]
@@ -83,6 +91,8 @@ mod tests {
         // Very large input (10 MB of repeating pattern)
         let input = vec![0xAB; 10 * 1024 * 1024];
         let compressed = lz4_chunked_compression(&input);
+        assert!(compressed.is_ok());
+        let compressed = compressed.unwrap();
         let decompressed = decompress_chunked_lz4(&compressed, input.len());
         assert_eq!(decompressed, input);
     }
@@ -92,6 +102,8 @@ mod tests {
         // Empty input
         let input: Vec<u8> = Vec::new();
         let compressed = lz4_chunked_compression(&input);
+        assert!(compressed.is_ok());
+        let compressed = compressed.unwrap();
         let decompressed = decompress_chunked_lz4(&compressed, input.len());
         assert_eq!(decompressed, input);
     }
@@ -102,6 +114,8 @@ mod tests {
         let s = "😀 Grüße aus München! こんにちは世界 🌏 안녕하세요 세계";
         let input = s.as_bytes();
         let compressed = lz4_chunked_compression(input);
+        assert!(compressed.is_ok());
+        let compressed = compressed.unwrap();
         let decompressed = decompress_chunked_lz4(&compressed, input.len());
         assert_eq!(decompressed, input);
         assert_eq!(std::str::from_utf8(&decompressed).unwrap(), s);
@@ -113,6 +127,8 @@ mod tests {
         const CHUNK_SIZE: usize = 64 * 1024;
         let input = vec![0xCD; CHUNK_SIZE];
         let compressed = lz4_chunked_compression(&input);
+        assert!(compressed.is_ok());
+        let compressed = compressed.unwrap();
         let decompressed = decompress_chunked_lz4(&compressed, input.len());
         assert_eq!(decompressed, input);
     }
