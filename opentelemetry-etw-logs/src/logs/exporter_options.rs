@@ -2,13 +2,6 @@ use opentelemetry::otel_warn;
 use std::borrow::Cow;
 use thiserror::Error;
 
-#[derive(Debug)]
-enum ETWEventNameFrom {
-    Default,
-    Target,
-    Name,
-}
-
 #[derive(Error, Debug, PartialEq)]
 /// Errors that can occur while building the `ExporterOptions`.
 #[non_exhaustive]
@@ -25,8 +18,6 @@ pub enum ExporterOptionsBuildError {
 #[derive(Debug)]
 pub struct ExporterOptions {
     provider_name: Cow<'static, str>,
-    default_event_name: Cow<'static, str>,
-    event_name_from: ETWEventNameFrom,
 }
 
 impl ExporterOptions {
@@ -44,7 +35,7 @@ impl ExporterOptions {
 
     /// Returns the default event name that will be used for the ETW events.
     pub(crate) fn default_event_name(&self) -> &str {
-        self.default_event_name.as_ref()
+        "Log"
     }
 
     /// Returns the event name to be used for the ETW event given the log record contents and the options.
@@ -52,20 +43,6 @@ impl ExporterOptions {
         &'a self,
         log_record: &'a opentelemetry_sdk::logs::SdkLogRecord,
     ) -> &'a str {
-        // Using target for now. This is the default behavior.
-        match self.event_name_from {
-            ETWEventNameFrom::Default => return self.default_event_name(),
-            ETWEventNameFrom::Target => {
-                if let Some(target) = log_record.target() {
-                    return target.as_ref();
-                }
-            }
-            ETWEventNameFrom::Name => {
-                if let Some(name) = log_record.event_name() {
-                    return name;
-                }
-            }
-        }
         self.default_event_name()
     }
 }
@@ -85,42 +62,9 @@ impl ExporterOptionsBuilder {
     pub fn new(provider_name: impl Into<Cow<'static, str>>) -> Self {
         ExporterOptionsBuilder {
             inner: ExporterOptions {
-                provider_name: provider_name.into(),
-                default_event_name: "Log".into(),
-                event_name_from: ETWEventNameFrom::Default,
+                provider_name: provider_name.into()
             },
         }
-    }
-
-    /// Sets a default event name different than "Log" to be used as fallback if:
-    /// - `use_etw_event_name_from_default()` has been selected, or
-    /// - it cannot extract name or target from the `SdkLogRecord` when `use_etw_event_name_from_default()` or `use_etw_event_name_from_target()` are selected.
-    pub fn with_default_event_name(
-        mut self,
-        default_event_name: impl Into<Cow<'static, str>>,
-    ) -> Self {
-        self.inner.default_event_name = default_event_name.into();
-        self
-    }
-
-    /// Sets the event name to always be the default value ("Log"). The default value may be overridden by `with_default_event_name()`.
-    ///
-    /// This is the default behavior.
-    pub fn use_etw_event_name_from_default(mut self) -> Self {
-        self.inner.event_name_from = ETWEventNameFrom::Default;
-        self
-    }
-
-    /// Sets the event name to be the `target` from `SdkLogRecord`. If `target` is `None`, it uses the default value ("Log"). The default value may be overridden by `with_default_event_name()`.
-    pub fn use_etw_event_name_from_target(mut self) -> Self {
-        self.inner.event_name_from = ETWEventNameFrom::Target;
-        self
-    }
-
-    /// Sets the event name to be the `name` from `SdkLogRecord`. If `name` is `None`, it uses the default value ("Log"). The default value may be overridden by `with_default_event_name()`.
-    pub fn use_etw_event_name_from_name(mut self) -> Self {
-        self.inner.event_name_from = ETWEventNameFrom::Name;
-        self
     }
 
     /// Validates the options given by consuming itself and returning the `ExporterOptions` or an error.
@@ -187,7 +131,6 @@ mod tests {
         let mut log_record = test_utils::new_sdk_log_record();
 
         let options = ExporterOptions::builder("test-provider-name")
-            .use_etw_event_name_from_default()
             .build()
             .unwrap();
 
@@ -201,123 +144,6 @@ mod tests {
         log_record.set_target("target-name");
         let result = options.get_etw_event_name(&log_record);
         assert_eq!(result, "Log");
-    }
-
-    #[test]
-    fn test_get_event_name_from_target() {
-        use opentelemetry::logs::LogRecord;
-
-        let mut log_record = test_utils::new_sdk_log_record();
-
-        let options = ExporterOptions::builder("test-provider-name")
-            .use_etw_event_name_from_target()
-            .build()
-            .unwrap();
-
-        let result = options.get_etw_event_name(&log_record);
-        assert_eq!(result, "Log");
-
-        log_record.set_event_name("event-name");
-        let result = options.get_etw_event_name(&log_record);
-        assert_eq!(result, "Log");
-
-        log_record.set_target("target-name");
-        let result = options.get_etw_event_name(&log_record);
-        assert_eq!(result, "target-name");
-    }
-
-    #[test]
-    fn test_get_event_name_from_name() {
-        use opentelemetry::logs::LogRecord;
-
-        let mut log_record = test_utils::new_sdk_log_record();
-
-        let options = ExporterOptions::builder("test-provider-name")
-            .use_etw_event_name_from_name()
-            .build()
-            .unwrap();
-
-        let result = options.get_etw_event_name(&log_record);
-        assert_eq!(result, "Log");
-
-        log_record.set_target("target-name");
-        let result = options.get_etw_event_name(&log_record);
-        assert_eq!(result, "Log");
-
-        log_record.set_event_name("event-name");
-        let result = options.get_etw_event_name(&log_record);
-        assert_eq!(result, "event-name");
-    }
-
-    #[test]
-    fn test_get_event_name_with_provided_default_event_name() {
-        use opentelemetry::logs::LogRecord;
-
-        let mut log_record = test_utils::new_sdk_log_record();
-
-        let options = ExporterOptions::builder("test-provider-name")
-            .with_default_event_name("default-event-name")
-            .build()
-            .unwrap();
-
-        let result = options.get_etw_event_name(&log_record);
-        assert_eq!(result, "default-event-name");
-
-        log_record.set_event_name("event-name");
-        let result = options.get_etw_event_name(&log_record);
-        assert_eq!(result, "default-event-name");
-
-        log_record.set_target("target-name");
-        let result = options.get_etw_event_name(&log_record);
-        assert_eq!(result, "default-event-name");
-    }
-
-    #[test]
-    fn test_get_event_name_from_name_with_provided_default_event_name() {
-        use opentelemetry::logs::LogRecord;
-
-        let mut log_record = test_utils::new_sdk_log_record();
-
-        let options = ExporterOptions::builder("test-provider-name")
-            .with_default_event_name("default-event-name")
-            .use_etw_event_name_from_name()
-            .build()
-            .unwrap();
-
-        let result = options.get_etw_event_name(&log_record);
-        assert_eq!(result, "default-event-name");
-
-        log_record.set_target("target-name");
-        let result = options.get_etw_event_name(&log_record);
-        assert_eq!(result, "default-event-name");
-
-        log_record.set_event_name("event-name");
-        let result = options.get_etw_event_name(&log_record);
-        assert_eq!(result, "event-name");
-    }
-
-    #[test]
-    fn test_get_event_name_from_target_with_provided_default_event_name() {
-        use opentelemetry::logs::LogRecord;
-
-        let mut log_record = test_utils::new_sdk_log_record();
-
-        let options = ExporterOptions::builder("test-provider-name")
-            .with_default_event_name("default-event-name")
-            .use_etw_event_name_from_target()
-            .build()
-            .unwrap();
-
-        let result = options.get_etw_event_name(&log_record);
-        assert_eq!(result, "default-event-name");
-
-        log_record.set_event_name("event-name");
-        let result = options.get_etw_event_name(&log_record);
-        assert_eq!(result, "default-event-name");
-
-        log_record.set_target("target-name");
-        let result = options.get_etw_event_name(&log_record);
-        assert_eq!(result, "target-name");
     }
 
     #[test]
