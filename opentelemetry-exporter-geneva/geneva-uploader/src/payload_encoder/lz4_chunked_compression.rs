@@ -109,23 +109,22 @@ mod tests {
     }
 
     #[test]
-    fn test_roundtrip_unicode_input() {
-        // Input with valid UTF-8 (e.g. emoji, accented chars in multiple languages)
-        let s = "😀 Grüße aus München! こんにちは世界 🌏 안녕하세요 세계";
-        let input = s.as_bytes();
-        let compressed = lz4_chunked_compression(input);
-        assert!(compressed.is_ok());
-        let compressed = compressed.unwrap();
-        let decompressed = decompress_chunked_lz4(&compressed, input.len());
-        assert_eq!(decompressed, input);
-        assert_eq!(std::str::from_utf8(&decompressed).unwrap(), s);
-    }
-
-    #[test]
     fn test_roundtrip_exact_chunk_size() {
         // Input exactly one chunk
         const CHUNK_SIZE: usize = 64 * 1024;
         let input = vec![0xCD; CHUNK_SIZE];
+        let compressed = lz4_chunked_compression(&input);
+        assert!(compressed.is_ok());
+        let compressed = compressed.unwrap();
+        let decompressed = decompress_chunked_lz4(&compressed, input.len());
+        assert_eq!(decompressed, input);
+    }
+
+    #[test]
+    fn test_roundtrip_non_multiple_chunk_size() {
+        // Input larger than CHUNK_SIZE but not an exact multiple (e.g. 1.5 * CHUNK_SIZE)
+        const CHUNK_SIZE: usize = 64 * 1024;
+        let input = vec![0xEF; CHUNK_SIZE + CHUNK_SIZE / 2];
         let compressed = lz4_chunked_compression(&input);
         assert!(compressed.is_ok());
         let compressed = compressed.unwrap();
