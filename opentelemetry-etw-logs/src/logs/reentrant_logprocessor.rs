@@ -121,4 +121,44 @@ mod tests {
             .build()
             .unwrap()
     }
+
+    #[test]
+    fn tracing_with_etw_exporter_trait() {
+        use opentelemetry_appender_tracing::layer;
+        use tracing::error;
+        use tracing_subscriber::prelude::*;
+
+        let options = ExporterOptions::builder("provider-name").build().unwrap();
+        let processor = etw_log_processor(options);
+        let logger_provider = SdkLoggerProvider::builder()
+            .with_log_processor(processor)
+            .build();
+
+        let layer = layer::OpenTelemetryTracingBridge::new(&logger_provider);
+        let _guard = tracing_subscriber::registry().with(layer).set_default(); // Temporary subscriber active for this function
+
+        error!(
+            name: "event-name",
+            event_id = 20,
+            user_name = "otel user",
+            user_email = "otel@opentelemetry.io"
+        );
+
+        use opentelemetry::trace::{Tracer, TracerProvider};
+        let tracer_provider = opentelemetry_sdk::trace::SdkTracerProvider::builder()
+            .with_sampler(opentelemetry_sdk::trace::Sampler::AlwaysOn)
+            .build();
+        let tracer = tracer_provider.tracer("test-tracer");
+
+        tracer.in_span("test-span", |_cx| {
+            // logging is done inside span context.
+            error!(
+                name: "event-name",
+                event_id = 20,
+                user_name = "otel user",
+                user_email = "otel@opentelemetry.io"
+            );
+        });
+    }
 }
+
