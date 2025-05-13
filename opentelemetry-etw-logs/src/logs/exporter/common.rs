@@ -82,7 +82,7 @@ pub(crate) mod test_utils {
     use opentelemetry_sdk::logs::SdkLoggerProvider;
 
     use crate::logs::exporter::ETWExporter;
-    use crate::ExporterOptions;
+    use crate::Processor;
 
     pub(crate) fn new_etw_exporter() -> ETWExporter {
         ETWExporter::new(test_options())
@@ -99,8 +99,8 @@ pub(crate) mod test_utils {
             .create_log_record()
     }
 
-    pub(crate) fn test_options() -> ExporterOptions {
-        ExporterOptions::builder("test-provider-name")
+    pub(crate) fn test_options() -> Processor {
+        Processor::builder("test-provider-name")
             .build()
             .unwrap()
     }

@@ -22,7 +22,7 @@ struct Resource {
 pub(crate) struct ETWExporter {
     provider: Pin<Arc<tld::Provider>>,
     resource: Resource,
-    options: crate::logs::ExporterOptions,
+    options: crate::logs::Processor,
 }
 
 fn enabled_callback_noop(
@@ -40,7 +40,7 @@ fn enabled_callback_noop(
 impl ETWExporter {
     const KEYWORD: u64 = 1;
 
-    pub(crate) fn new(options: crate::logs::ExporterOptions) -> Self {
+    pub(crate) fn new(options: crate::logs::Processor) -> Self {
         let mut provider_options = tld::Provider::options();
 
         provider_options.callback(enabled_callback_noop, 0x0);

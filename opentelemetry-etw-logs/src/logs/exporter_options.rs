@@ -3,9 +3,9 @@ use std::borrow::Cow;
 use thiserror::Error;
 
 #[derive(Error, Debug, PartialEq)]
-/// Errors that can occur while building the `ExporterOptions`.
+/// Errors that can occur while building the `Processir`.
 #[non_exhaustive]
-pub enum ExporterOptionsBuildError {
+pub enum ProcessorBuildError {
     #[error("Provider name cannot be empty.")]
     EmptyProviderName,
     #[error("Provider name must be less than 234 characters.")]
@@ -16,16 +16,16 @@ pub enum ExporterOptionsBuildError {
 
 /// Options used by the Exporter.
 #[derive(Debug)]
-pub struct ExporterOptions {
+pub struct Processor {
     provider_name: Cow<'static, str>,
 }
 
-impl ExporterOptions {
-    /// Creates a new instance of `ExporterOptionsBuilder` with the given provider name.
+impl Processor {
+    /// Creates a new instance of `ProcessorBuilder` with the given provider name.
     ///
-    /// By default, all events will be exported to the "Log" ETW event. See `ExporterOptionsBuilder` docs for details on how to override this behavior.
-    pub fn builder(provider_name: impl Into<Cow<'static, str>>) -> ExporterOptionsBuilder {
-        ExporterOptionsBuilder::new(provider_name)
+    /// By default, all events will be exported to the "Log" ETW event. See `ProcessorBuilder` docs for details on how to override this behavior.
+    pub fn builder(provider_name: impl Into<Cow<'static, str>>) -> ProcessorBuilder {
+        ProcessorBuilder::new(provider_name)
     }
 
     /// Returns the provider name that will be used for the ETW provider.
@@ -47,54 +47,54 @@ impl ExporterOptions {
     }
 }
 
-/// Builder for `ExporterOptions`.
+/// Builder for `Processor`.
 #[derive(Debug)]
-pub struct ExporterOptionsBuilder {
-    inner: ExporterOptions,
+pub struct ProcessorBuilder {
+    inner: Processor,
 }
 
-impl ExporterOptionsBuilder {
-    /// Creates a new instance of `ExporterOptionsBuilder` with the given provider name.
+impl ProcessorBuilder {
+    /// Creates a new instance of `ProcessorBuilder` with the given provider name.
     ///
     /// By default, all events will be exported to the "Log" ETW event, as if user has called:
     /// - `builder.with_default_event_name("Log")`
     /// - `builder.use_etw_event_name_from_default()`
     pub fn new(provider_name: impl Into<Cow<'static, str>>) -> Self {
-        ExporterOptionsBuilder {
-            inner: ExporterOptions {
+        ProcessorBuilder {
+            inner: Processor {
                 provider_name: provider_name.into()
             },
         }
     }
 
-    /// Validates the options given by consuming itself and returning the `ExporterOptions` or an error.
-    pub fn build(self) -> Result<ExporterOptions, ExporterOptionsBuildError> {
+    /// Validates the options given by consuming itself and returning the `Processor` or an error.
+    pub fn build(self) -> Result<Processor, ProcessorBuildError> {
         if let Err(error) = self.validate() {
-            otel_warn!(name: "ETW.ExporterOptions.CreationFailed", reason = &error.to_string());
+            otel_warn!(name: "ETW.Processor.CreationFailed", reason = &error.to_string());
             return Err(error);
         }
 
         Ok(self.inner)
     }
 
-    fn validate(&self) -> Result<(), ExporterOptionsBuildError> {
+    fn validate(&self) -> Result<(), ProcessorBuildError> {
         validate_provider_name(&self.inner.provider_name)?;
         Ok(())
     }
 }
 
-fn validate_provider_name(provider_name: &str) -> Result<(), ExporterOptionsBuildError> {
+fn validate_provider_name(provider_name: &str) -> Result<(), ProcessorBuildError> {
     if provider_name.is_empty() {
-        return Err(ExporterOptionsBuildError::EmptyProviderName);
+        return Err(ProcessorBuildError::EmptyProviderName);
     }
     if provider_name.len() >= 234 {
-        return Err(ExporterOptionsBuildError::ProviderNameTooLong);
+        return Err(ProcessorBuildError::ProviderNameTooLong);
     }
     if !provider_name
         .chars()
         .all(|c| c.is_ascii_alphanumeric() || c == '_' || c == '-')
     {
-        return Err(ExporterOptionsBuildError::InvalidProviderName);
+        return Err(ProcessorBuildError::InvalidProviderName);
     }
     Ok(())
 }
@@ -130,7 +130,7 @@ mod tests {
 
         let mut log_record = test_utils::new_sdk_log_record();
 
-        let options = ExporterOptions::builder("test-provider-name")
+        let options = Processor::builder("test-provider-name")
             .build()
             .unwrap();
 
@@ -149,26 +149,26 @@ mod tests {
     #[test]
     fn test_validate_empty_name() {
         assert_eq!(
-            ExporterOptions::builder("").build().unwrap_err(),
-            ExporterOptionsBuildError::EmptyProviderName
+            Processor::builder("").build().unwrap_err(),
+            ProcessorBuildError::EmptyProviderName
         );
     }
 
     #[test]
     fn test_validate_name_longer_than_234_chars() {
         assert_eq!(
-            ExporterOptions::builder("a".repeat(235))
+            Processor::builder("a".repeat(235))
                 .build()
                 .unwrap_err(),
-            ExporterOptionsBuildError::ProviderNameTooLong
+            ProcessorBuildError::ProviderNameTooLong
         );
     }
 
     #[test]
     fn test_validate_name_uses_valid_chars() {
         assert_eq!(
-            ExporterOptions::builder("i_have_a_?_").build().unwrap_err(),
-            ExporterOptionsBuildError::InvalidProviderName
+            Processor::builder("i_have_a_?_").build().unwrap_err(),
+            ProcessorBuildError::InvalidProviderName
         );
     }
 

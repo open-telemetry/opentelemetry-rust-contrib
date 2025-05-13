@@ -6,7 +6,7 @@ use opentelemetry_sdk::logs::{LogBatch, LogExporter, SdkLogRecord};
 use opentelemetry_sdk::Resource;
 
 use crate::logs::exporter::*;
-use crate::logs::ExporterOptions;
+use crate::logs::Processor;
 
 /// Thread-safe LogProcessor for exporting logs to ETW.
 #[derive(Debug)]
@@ -16,7 +16,7 @@ pub(crate) struct ReentrantLogProcessor {
 
 impl ReentrantLogProcessor {
     /// Creates a new instance of the ReentrantLogProcessor using the given options.
-    pub(crate) fn new(options: ExporterOptions) -> Self {
+    pub(crate) fn new(options: Processor) -> Self {
         let exporter: ETWExporter = ETWExporter::new(options);
         ReentrantLogProcessor {
             event_exporter: exporter,
@@ -25,7 +25,7 @@ impl ReentrantLogProcessor {
 }
 
 /// Creates an opaque LogProcessor that can be used with the OpenTelemetry SDK.
-pub fn etw_log_processor(options: ExporterOptions) -> impl opentelemetry_sdk::logs::LogProcessor {
+pub fn etw_log_processor(options: Processor) -> impl opentelemetry_sdk::logs::LogProcessor {
     ReentrantLogProcessor::new(options)
 }
 
@@ -116,8 +116,8 @@ mod tests {
         ));
     }
 
-    fn test_options() -> ExporterOptions {
-        ExporterOptions::builder("test-provider-name")
+    fn test_options() -> Processor {
+        Processor::builder("test-provider-name")
             .build()
             .unwrap()
     }
@@ -128,7 +128,7 @@ mod tests {
         use tracing::error;
         use tracing_subscriber::prelude::*;
 
-        let options = ExporterOptions::builder("provider-name").build().unwrap();
+        let options = Processor::builder("provider-name").build().unwrap();
         let processor = etw_log_processor(options);
         let logger_provider = SdkLoggerProvider::builder()
             .with_log_processor(processor)
