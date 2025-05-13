@@ -109,6 +109,18 @@ mod tests {
     }
 
     #[test]
+    fn test_roundtrip_less_than_chunk_size() {
+        // Input smaller than CHUNK_SIZE (e.g. half of CHUNK_SIZE)
+        const CHUNK_SIZE: usize = 64 * 1024;
+        let input = vec![0xAA; CHUNK_SIZE / 2];
+        let compressed = lz4_chunked_compression(&input);
+        assert!(compressed.is_ok());
+        let compressed = compressed.unwrap();
+        let decompressed = decompress_chunked_lz4(&compressed, input.len());
+        assert_eq!(decompressed, input);
+    }
+
+    #[test]
     fn test_roundtrip_exact_chunk_size() {
         // Input exactly one chunk
         const CHUNK_SIZE: usize = 64 * 1024;
