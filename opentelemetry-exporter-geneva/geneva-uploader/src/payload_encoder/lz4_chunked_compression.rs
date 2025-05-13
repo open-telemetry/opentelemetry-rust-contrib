@@ -16,7 +16,7 @@ use lz4_flex::block::{compress_into, get_maximum_output_size};
 ///  Where:
 ///    04, 03, 02  = 4-byte little-endian u32 chunk length headers
 ///    ...., ..., .. = compressed LZ4 data for each chunk (length matches header)
-///    N     = number of chunks = (input.len() / CHUNK_SIZE) + (if input.len() % CHUNK_SIZE > 0 { 1 } else { 0 })
+///    N     = number of chunks = input.len().div_ceil(CHUNK_SIZE)
 ///
 /// Example for 3 chunks (lengths 4, 3, 2 bytes):
 ///  +----+--------+----+-------+----+-----+
