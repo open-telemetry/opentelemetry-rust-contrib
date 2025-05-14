@@ -1,8 +1,8 @@
 #[cfg(feature = "serde_json")]
 mod converters;
 mod exporter;
-mod reentrant_logprocessor;
+mod processor;
 
-pub use reentrant_logprocessor::Processor;
-pub use reentrant_logprocessor::ProcessorBuilder;
-pub use reentrant_logprocessor::ProcessorBuildError;
+pub use processor::Processor;
+pub use processor::ProcessorBuilder;
+pub use processor::ProcessorBuildError;
