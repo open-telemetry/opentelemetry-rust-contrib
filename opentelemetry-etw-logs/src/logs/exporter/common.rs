@@ -81,8 +81,8 @@ pub(crate) mod test_utils {
     use opentelemetry::logs::LoggerProvider;
     use opentelemetry_sdk::logs::SdkLoggerProvider;
 
+    use crate::logs::exporter::options::Options;
     use crate::logs::exporter::ETWExporter;
-    use crate::Processor;
 
     pub(crate) fn new_etw_exporter() -> ETWExporter {
         ETWExporter::new(test_options())
@@ -99,10 +99,8 @@ pub(crate) mod test_utils {
             .create_log_record()
     }
 
-    pub(crate) fn test_options() -> Processor {
-        Processor::builder("test-provider-name")
-            .build()
-            .unwrap()
+    pub(crate) fn test_options() -> Options {
+        Options::builder("ContosoProvider").build().unwrap()
     }
 }
 

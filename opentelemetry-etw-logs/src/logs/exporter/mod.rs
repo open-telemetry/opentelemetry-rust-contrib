@@ -9,9 +9,12 @@ use opentelemetry::Key;
 use opentelemetry_sdk::error::{OTelSdkError, OTelSdkResult};
 
 pub(crate) mod common;
+pub(crate) mod options;
 mod part_a;
 mod part_b;
 mod part_c;
+
+pub(crate) use options::{Options, OptionsBuilder};
 
 #[derive(Default)]
 struct Resource {
@@ -22,7 +25,7 @@ struct Resource {
 pub(crate) struct ETWExporter {
     provider: Pin<Arc<tld::Provider>>,
     resource: Resource,
-    options: crate::logs::Processor,
+    options: Options,
 }
 
 fn enabled_callback_noop(
@@ -40,7 +43,7 @@ fn enabled_callback_noop(
 impl ETWExporter {
     const KEYWORD: u64 = 1;
 
-    pub(crate) fn new(options: crate::logs::Processor) -> Self {
+    pub(crate) fn new(options: Options) -> Self {
         let mut provider_options = tld::Provider::options();
 
         provider_options.callback(enabled_callback_noop, 0x0);

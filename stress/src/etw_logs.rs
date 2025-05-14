@@ -19,7 +19,7 @@
 // logman stop OtelETWExampleBasic
 
 use opentelemetry_appender_tracing::layer;
-use opentelemetry_etw_logs::{ETWLoggerProviderBuilderExt, ExporterOptions};
+use opentelemetry_etw_logs::Processor;
 use opentelemetry_sdk::logs::SdkLoggerProvider;
 use tracing::info;
 use tracing_subscriber::prelude::*;
@@ -27,10 +27,10 @@ mod throughput;
 
 // Function to initialize the logger
 fn init_logger() -> SdkLoggerProvider {
-    let options = ExporterOptions::builder("provider-name").build().unwrap();
+    let processor = Processor::builder("provider-name").build().unwrap();
 
     SdkLoggerProvider::builder()
-        .with_etw_exporter(options)
+        .with_log_processor(processor)
         .build()
 }
 

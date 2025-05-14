@@ -39,7 +39,6 @@
 //!
 
 use opentelemetry_appender_tracing::layer;
-use opentelemetry_etw_logs::etw_log_processor;
 use opentelemetry_etw_logs::Processor;
 use opentelemetry_sdk::logs::SdkLoggerProvider;
 use tracing::error;
@@ -47,7 +46,6 @@ use tracing_subscriber::prelude::*;
 
 fn init_logger() -> SdkLoggerProvider {
     let processor = Processor::builder("provider-name").build().unwrap();
-    let processor = etw_log_processor(processor);
 
     SdkLoggerProvider::builder()
         .with_log_processor(processor)
