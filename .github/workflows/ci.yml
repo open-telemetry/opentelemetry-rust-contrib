@@ -65,8 +65,8 @@ jobs:
     - name: Install Boost and haskell (Ubuntu)
       if: ${{ matrix.os == 'ubuntu-latest'}}
       run: |
-        sudo apt-get update && sudo apt-get install -y libboost-all-dev
-        curl -sSL https://get.haskellstack.org/ | sh
+        sudo apt-get update && sudo apt-get install -y libboost-all-dev \
+        && curl -sSL https://get.haskellstack.org/ | sh
     # Install Serializer for Geneva exporter
     - name: Build and install Serializer (for Geneva exporter)
       if: ${{ matrix.os == 'ubuntu-latest'}}
