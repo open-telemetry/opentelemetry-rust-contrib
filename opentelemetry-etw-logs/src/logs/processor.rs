@@ -1,4 +1,8 @@
+use std::backtrace::Backtrace;
+use std::borrow::Cow;
 use std::fmt::Debug;
+
+use thiserror::Error;
 
 use opentelemetry::otel_warn;
 use opentelemetry::InstrumentationScope;
@@ -6,24 +10,64 @@ use opentelemetry_sdk::error::OTelSdkResult;
 use opentelemetry_sdk::logs::{LogBatch, LogExporter, SdkLogRecord};
 use opentelemetry_sdk::Resource;
 
-use std::borrow::Cow;
-use thiserror::Error;
-
 use crate::logs::exporter::*;
 
+/// Errors that can occur while building a `Processor` instance.
+#[derive(Debug)]
+pub struct ProcessorBuildError {
+    backtrace: Backtrace,
+    kind: ProcessorBuildErrorKind,
+}
+
+impl ProcessorBuildError {
+    /// Creates a new `ProcessorBuildError` with the given kind.
+    pub(crate) fn new(kind: ProcessorBuildErrorKind) -> Self {
+        ProcessorBuildError {
+            backtrace: Backtrace::capture(),
+            kind,
+        }
+    }
+
+    /// True if the error is due to an empty provider name.
+    pub fn is_provider_name_empty(&self) -> bool {
+        matches!(self.kind, ProcessorBuildErrorKind::ProviderNameEmpty)
+    }
+
+    /// True if the error is due to a provider name that exceeds the maximum length (234 characters).
+    pub fn is_provider_name_too_long(&self) -> bool {
+        matches!(self.kind, ProcessorBuildErrorKind::ProviderNameTooLong)
+    }
+
+    /// True if the error is due to a provider name with invalid characters.
+    pub fn is_provider_name_invalid(&self) -> bool {
+        matches!(self.kind, ProcessorBuildErrorKind::ProviderNameInvalid)
+    }
+}
+
 #[derive(Error, Debug, PartialEq)]
-/// Errors that can occur while building the `Processor`.
-#[non_exhaustive]
-pub enum ProcessorBuildError {
-    /// TODOC
+pub(crate) enum ProcessorBuildErrorKind {
     #[error("Provider name cannot be empty.")]
-    EmptyProviderName,
-    /// TODOC
+    ProviderNameEmpty,
     #[error("Provider name must be less than 234 characters.")]
     ProviderNameTooLong,
-    /// TODOC
     #[error("Provider name must contain only ASCII alphanumeric characters, '_' or '-'.")]
-    InvalidProviderName,
+    ProviderNameInvalid,
+}
+
+impl std::fmt::Display for ProcessorBuildError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", self.kind)?;
+        if self.backtrace.status() == std::backtrace::BacktraceStatus::Captured {
+            write!(f, "\nBacktrace: {:?}", self.backtrace)?;
+        }
+        Ok(())
+    }
+}
+
+impl std::error::Error for ProcessorBuildError {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        None
+    }
 }
 
 /// Builder for `Processor`.
@@ -49,7 +93,7 @@ impl ProcessorBuilder {
             Ok(options) => Ok(Processor::new(options)),
             Err(error) => {
                 otel_warn!(name: "ETW.Processor.CreationFailed", reason = &error.to_string());
-                return Err(error);
+                Err(error)
             }
         }
     }
@@ -230,25 +274,25 @@ mod tests {
 
     #[test]
     fn test_validate_empty_name() {
-        assert_eq!(
-            Processor::builder("").build().unwrap_err(),
-            ProcessorBuildError::EmptyProviderName
-        );
+        assert!(Processor::builder("")
+            .build()
+            .unwrap_err()
+            .is_provider_name_empty());
     }
 
     #[test]
     fn test_validate_name_longer_than_234_chars() {
-        assert_eq!(
-            Processor::builder("a".repeat(235)).build().unwrap_err(),
-            ProcessorBuildError::ProviderNameTooLong
-        );
+        assert!(Processor::builder("a".repeat(235))
+            .build()
+            .unwrap_err()
+            .is_provider_name_too_long());
     }
 
     #[test]
     fn test_validate_name_uses_valid_chars() {
-        assert_eq!(
-            Processor::builder("i_have_a_?_").build().unwrap_err(),
-            ProcessorBuildError::InvalidProviderName
-        );
+        assert!(Processor::builder("i_have_a_?_")
+            .build()
+            .unwrap_err()
+            .is_provider_name_invalid());
     }
 }

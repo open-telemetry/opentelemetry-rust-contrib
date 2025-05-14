@@ -1,6 +1,6 @@
 use std::borrow::Cow;
 
-use crate::ProcessorBuildError;
+use crate::logs::processor::{ProcessorBuildError, ProcessorBuildErrorKind};
 
 #[derive(Debug)]
 pub(crate) struct Options {
@@ -46,38 +46,42 @@ impl OptionsBuilder {
     }
 
     pub(crate) fn build(self) -> Result<Options, ProcessorBuildError> {
-      if let Err(e) = self.validate() {
-            return Err(e);
-        } 
+        self.validate()?;
         Ok(self.options)
     }
 
     fn validate(&self) -> Result<(), ProcessorBuildError> {
-      validate_provider_name(self.options.provider_name.as_ref())?;
-      Ok(())
+        validate_provider_name(self.options.provider_name.as_ref())?;
+        Ok(())
     }
 }
 
 fn validate_provider_name(provider_name: &str) -> Result<(), ProcessorBuildError> {
     if provider_name.is_empty() {
-        return Err(ProcessorBuildError::EmptyProviderName);
+        return Err(ProcessorBuildError::new(
+            ProcessorBuildErrorKind::ProviderNameEmpty,
+        ));
     }
     if provider_name.len() >= 234 {
-        return Err(ProcessorBuildError::ProviderNameTooLong);
+        return Err(ProcessorBuildError::new(
+            ProcessorBuildErrorKind::ProviderNameTooLong,
+        ));
     }
     if !provider_name
         .chars()
         .all(|c| c.is_ascii_alphanumeric() || c == '_' || c == '-')
     {
-        return Err(ProcessorBuildError::InvalidProviderName);
+        return Err(ProcessorBuildError::new(
+            ProcessorBuildErrorKind::ProviderNameInvalid,
+        ));
     }
     Ok(())
 }
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use super::super::common::test_utils;
+    use super::*;
 
     #[test]
     fn test_get_event_name_from_default() {

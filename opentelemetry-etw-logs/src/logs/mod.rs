@@ -4,5 +4,5 @@ mod exporter;
 mod processor;
 
 pub use processor::Processor;
-pub use processor::ProcessorBuilder;
 pub use processor::ProcessorBuildError;
+pub use processor::ProcessorBuilder;
