@@ -84,6 +84,26 @@ mod tests {
     use super::*;
 
     #[test]
+    fn test_get_event_name() {
+        use opentelemetry::logs::LogRecord;
+
+        let mut log_record = test_utils::new_sdk_log_record();
+
+        let options = test_utils::test_options();
+
+        let result = options.get_etw_event_name(&log_record);
+        assert_eq!(result, "Log");
+
+        log_record.set_event_name("event-name");
+        let result = options.get_etw_event_name(&log_record);
+        assert_eq!(result, "Log");
+
+        log_record.set_target("target-name");
+        let result = options.get_etw_event_name(&log_record);
+        assert_eq!(result, "Log");
+    }
+
+    #[test]
     fn test_get_event_name_from_default() {
         use opentelemetry::logs::LogRecord;
 

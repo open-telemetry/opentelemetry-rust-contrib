@@ -80,7 +80,6 @@ impl ProcessorBuilder {
     /// Creates a new instance of `ProcessorBuilder` with the given provider name.
     ///
     /// By default, all events will be exported to the "Log" ETW event.
-    /// TODOC
     pub fn new(provider_name: impl Into<Cow<'static, str>>) -> Self {
         ProcessorBuilder {
             options_builder: Options::builder(provider_name.into()),
@@ -99,7 +98,9 @@ impl ProcessorBuilder {
     }
 }
 
-/// Thread-safe LogProcessor for exporting logs to ETW.
+/// Processor for exporting logs to ETW.
+/// 
+/// Implements the opentelemetry_sdk::logs::LogProcessor trait, so it can be used as a log processor in the OpenTelemetry SDK.
 #[derive(Debug)]
 pub struct Processor {
     event_exporter: ETWExporter,
@@ -113,7 +114,7 @@ impl Processor {
         ProcessorBuilder::new(provider_name)
     }
 
-    /// Creates a new instance of the ReentrantLogProcessor using the given options.
+    /// Creates a new instance of the `Processor` using the given options.
     pub(crate) fn new(options: Options) -> Self {
         let exporter: ETWExporter = ETWExporter::new(options);
         Processor {
@@ -159,7 +160,6 @@ impl opentelemetry_sdk::logs::LogProcessor for Processor {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::logs::exporter::common::test_utils;
     use opentelemetry::logs::Logger;
     use opentelemetry::logs::LoggerProvider;
     use opentelemetry_sdk::logs::LogProcessor;
@@ -250,26 +250,6 @@ mod tests {
                 user_email = "otel@opentelemetry.io"
             );
         });
-    }
-
-    #[test]
-    fn test_get_event_name() {
-        use opentelemetry::logs::LogRecord;
-
-        let mut log_record = test_utils::new_sdk_log_record();
-
-        let options = test_utils::test_options();
-
-        let result = options.get_etw_event_name(&log_record);
-        assert_eq!(result, "Log");
-
-        log_record.set_event_name("event-name");
-        let result = options.get_etw_event_name(&log_record);
-        assert_eq!(result, "Log");
-
-        log_record.set_target("target-name");
-        let result = options.get_etw_event_name(&log_record);
-        assert_eq!(result, "Log");
     }
 
     #[test]
