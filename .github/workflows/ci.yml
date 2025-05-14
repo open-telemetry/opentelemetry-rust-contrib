@@ -61,14 +61,16 @@ jobs:
       if: ${{ matrix.os == 'windows-latest'}}
       run: ./scripts/test.ps1
       shell: pwsh
-    # Install Boost for Linux
-    - name: Install Boost (Ubuntu)
+    # Install Boost and Haskell for Linux
+    - name: Install Boost and haskell (Ubuntu)
       if: runner.os == 'Linux'
-      run: sudo apt-get update && sudo apt-get install -y libboost-all-dev
-    # Install Boost for MacOS
-    - name: Install Boost (macOS)
+      run: |
+        sudo apt-get update && sudo apt-get install -y libboost-all-dev
+        curl -sSL https://get.haskellstack.org/ | sh
+    # Install Boost and Haskell for MacOS
+    - name: Install Boost and haskell (macOS)
       if: runner.os == 'macOS'
-      run: brew install boost
+      run: brew install boost haskell-stack
     - name: Build and install Serializer (for Geneva exporter)
       if: ${{ matrix.os != 'windows-latest'}}
       run: |
