@@ -64,7 +64,7 @@ jobs:
     - name: Build and install Serializer (for Geneva exporter)
       if: ${{ matrix.os != 'windows-latest'}}
       run: |
-        bash ./scripts/build_bond_ci.sh $PWD/bond_local
+        bash ../../../scripts/build_bond_ci.sh $PWD/bond_local
         echo "BOND_INCLUDE_DIR=$PWD/bond_local/include" >> $GITHUB_ENV
         echo "BOND_LIB_DIR=$PWD/bond_local/lib" >> $GITHUB_ENV
       working-directory: opentelemetry-exporter-geneva/geneva-uploader
