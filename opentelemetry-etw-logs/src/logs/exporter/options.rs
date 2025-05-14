@@ -1,10 +1,15 @@
 use std::borrow::Cow;
 
+use opentelemetry_sdk::logs::SdkLogRecord;
+
 use crate::logs::processor::{ProcessorBuildError, ProcessorBuildErrorKind};
+
+type BoxedEventNameCallback = Box<dyn EventNameCallback>;
 
 #[derive(Debug)]
 pub(crate) struct Options {
     provider_name: Cow<'static, str>,
+    event_name_callback: Option<BoxedEventNameCallback>,
 }
 
 impl Options {
@@ -27,7 +32,20 @@ impl Options {
         &'a self,
         log_record: &'a opentelemetry_sdk::logs::SdkLogRecord,
     ) -> &'a str {
+        if let Some(callback) = &self.event_name_callback {
+            return callback(log_record);
+        }
         self.default_event_name()
+    }
+}
+
+trait EventNameCallback: Fn(&SdkLogRecord) -> &str + Send + Sync + 'static {}
+
+impl<F> EventNameCallback for F where F: Fn(&SdkLogRecord) -> &str + Send + Sync + 'static {}
+
+impl std::fmt::Debug for dyn EventNameCallback {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("ETW event name callback")
     }
 }
 
@@ -41,6 +59,7 @@ impl OptionsBuilder {
         OptionsBuilder {
             options: Options {
                 provider_name: provider_name.into(),
+                event_name_callback: None,
             },
         }
     }
@@ -48,6 +67,14 @@ impl OptionsBuilder {
     pub(crate) fn build(self) -> Result<Options, ProcessorBuildError> {
         self.validate()?;
         Ok(self.options)
+    }
+
+    pub(crate) fn use_etw_event_name_from_callback(
+        mut self,
+        callback: impl Fn(&SdkLogRecord) -> &str + Send + Sync + 'static,
+    ) -> Self {
+        self.options.event_name_callback = Some(Box::new(callback));
+        self
     }
 
     fn validate(&self) -> Result<(), ProcessorBuildError> {
