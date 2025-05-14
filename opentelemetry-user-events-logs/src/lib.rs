@@ -55,13 +55,26 @@
 //! To use the `user_events` exporter, you can set up a logger provider as follows:
 //!
 //! ```rust
-//! use opentelemetry_sdk::logs::LoggerProviderBuilder;
-//! use opentelemetry_user_events_logs::UserEventsLoggerProviderBuilderExt;
+//! use opentelemetry_sdk::logs::SdkLoggerProvider;
+//! use opentelemetry_sdk::Resource;
+//! use opentelemetry_user_events_logs::{build_processor, ExportOptions};
 //!
-//! let logger_provider = LoggerProviderBuilder::default()
-//!     .with_user_events_exporter("myprovider")
+//! let export_options = ExportOptions::builder("myprovider")
+//!   .build()
+//!   .unwrap_or_else(|err| {
+//!     eprintln!("Failed to create export options. Error: {}", err);
+//!     panic!("exiting due to error during initialization");
+//!              });
+//! let user_event_processor = build_processor(export_options);
+//!
+//! let provider = SdkLoggerProvider::builder()
+//!     .with_resource(
+//!         Resource::builder_empty()
+//!             .with_service_name("example")
+//!             .build(),
+//!     )
+//!     .with_log_processor(user_event_processor)
 //!     .build();
-//!
 //! ```
 //!
 //! This will create a logger provider with the `user_events` exporter enabled.
@@ -85,7 +98,7 @@ pub use logs::*;
 #[cfg(test)]
 mod tests {
 
-    use super::*;
+    use crate::{build_processor, ExportOptions};
     use opentelemetry::trace::Tracer;
     use opentelemetry::trace::{TraceContextExt, TracerProvider};
     use opentelemetry_appender_tracing::layer;
@@ -110,10 +123,12 @@ mod tests {
 
         // Basic check if user_events are available
         check_user_events_available().expect("Kernel does not support user_events. Verify your distribution/kernel supports user_events: https://docs.kernel.org/trace/user_events.html.");
+        let export_options = ExportOptions::builder("myprovider").build().unwrap();
+        let user_event_processor = build_processor(export_options);
 
         let logger_provider = LoggerProviderBuilder::default()
             .with_resource(Resource::builder().with_service_name("myrolename").build())
-            .with_user_events_exporter("myprovider")
+            .with_log_processor(user_event_processor)
             .build();
 
         // Once provider with user_event exporter is created, it should create the TracePoints
@@ -241,8 +256,10 @@ mod tests {
             .build();
         let tracer = tracer_provider.tracer("test-tracer");
 
+        let export_options = ExportOptions::builder("myprovider").build().unwrap();
+        let user_event_processor = build_processor(export_options);
         let logger_provider = LoggerProviderBuilder::default()
-            .with_user_events_exporter("myprovider")
+            .with_log_processor(user_event_processor)
             .build();
 
         // Once provider with user_event exporter is created, it should create the TracePoints
