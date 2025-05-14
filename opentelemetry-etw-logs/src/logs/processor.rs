@@ -234,7 +234,10 @@ mod tests {
         use tracing::error;
         use tracing_subscriber::prelude::*;
 
-        let processor = Processor::builder("provider-name").build().unwrap();
+        let processor = Processor::builder("provider-name")
+            .etw_event_name_from_callback(|_| "CustomEvent")
+            .build()
+            .unwrap();
         let logger_provider = SdkLoggerProvider::builder()
             .with_log_processor(processor)
             .build();
