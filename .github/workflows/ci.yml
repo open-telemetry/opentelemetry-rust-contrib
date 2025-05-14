@@ -61,6 +61,14 @@ jobs:
       if: ${{ matrix.os == 'windows-latest'}}
       run: ./scripts/test.ps1
       shell: pwsh
+    # Install Boost for Linux
+    - name: Install Boost (Ubuntu)
+      if: runner.os == 'Linux'
+      run: sudo apt-get update && sudo apt-get install -y libboost-all-dev
+    # Install Boost for MacOS
+    - name: Install Boost (macOS)
+      if: runner.os == 'macOS'
+      run: brew install boost
     - name: Build and install Serializer (for Geneva exporter)
       if: ${{ matrix.os != 'windows-latest'}}
       run: |
