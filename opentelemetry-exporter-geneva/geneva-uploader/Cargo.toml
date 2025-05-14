@@ -15,7 +15,8 @@ native-tls = "0.2"
 thiserror = "2.0"
 chrono = "0.4"
 url = "2.2"
-
+md5 = "0.7.0"
+smallvec = "1.15.0"
 
 [features]
 self_signed_certs = [] # Empty by default for security
@@ -29,6 +30,10 @@ tempfile = "3.5"
 wiremock = "0.6"
 futures = "0.3"
 num_cpus = "1.16"
+
+[build-dependencies]
+cc = "1.0"
+
 
 [lints]
 workspace = true
