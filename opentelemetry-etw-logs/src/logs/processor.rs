@@ -52,6 +52,8 @@ pub(crate) enum ProcessorBuildErrorKind {
     ProviderNameTooLong,
     #[error("Provider name must contain only ASCII alphanumeric characters, '_' or '-'.")]
     ProviderNameInvalid,
+    #[error("Event name cannot be empty.")]
+    EventNameEmpty,
 }
 
 impl std::fmt::Display for ProcessorBuildError {
@@ -86,6 +88,18 @@ impl ProcessorBuilder {
         }
     }
 
+    /// Sets a user-defined callback that computes the ETW event name based on the log record.
+    ///
+    /// The resulting name must be a valid CommonSchema 4.0 TraceLoggingDynamic event name. Otherwise,
+    /// the default "Log" ETW event name will be used.
+    pub fn etw_event_name_from_callback(
+        mut self,
+        callback: impl Fn(&SdkLogRecord) -> &str + Send + Sync + 'static,
+    ) -> Self {
+        self.options_builder = self.options_builder.etw_event_name_from_callback(callback);
+        self
+    }
+
     /// Validates the options given by consuming itself and returning the `Processor` or an error.
     pub fn build(self) -> Result<Processor, ProcessorBuildError> {
         match self.options_builder.build() {
@@ -99,7 +113,7 @@ impl ProcessorBuilder {
 }
 
 /// Processor for exporting logs to ETW.
-/// 
+///
 /// Implements the opentelemetry_sdk::logs::LogProcessor trait, so it can be used as a log processor in the OpenTelemetry SDK.
 #[derive(Debug)]
 pub struct Processor {
