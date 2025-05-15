@@ -311,9 +311,9 @@ impl UserEventsExporter {
                     .filter(|s| !s.trim().is_empty());
                 if let Some(name) = partb_name {
                     eb.add_str("name", name, FieldFormat::Default, 0);
+                    cs_b_count += 1;
                 }
 
-                cs_b_count += 1;
                 eb.set_struct_field_count(cs_b_bookmark, cs_b_count);
 
                 let result = eb.write(event_set, None, None);
