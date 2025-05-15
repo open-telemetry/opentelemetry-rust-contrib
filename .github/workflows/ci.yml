@@ -61,22 +61,8 @@ jobs:
       if: ${{ matrix.os == 'windows-latest'}}
       run: ./scripts/test.ps1
       shell: pwsh
-    # Install Boost and Haskell for Linux
-    - name: Install Boost and haskell (Ubuntu)
-      if: ${{ matrix.os == 'ubuntu-latest'}}
-      run: |
-        sudo apt-get update && sudo apt-get install -y libboost-all-dev \
-        && curl -sSL https://get.haskellstack.org/ | sh -s - -f
-    # Install Serializer for Geneva exporter
-    - name: Build and install Serializer (for Geneva exporter)
-      if: ${{ matrix.os == 'ubuntu-latest'}}
-      run: |
-        bash ./scripts/build_bond_ci.sh ./bond_local
-        echo "BOND_INCLUDE_DIR=$PWD/bond_local/include" >> $GITHUB_ENV
-        echo "BOND_LIB_DIR=$PWD/bond_local/lib" >> $GITHUB_ENV
-      working-directory: opentelemetry-exporter-geneva/geneva-uploader
     - name: Test (Unix)
-      if: ${{ matrix.os == 'ubuntu-latest'}}
+      if: ${{ matrix.os != 'windows-latest'}}
       run: bash ./scripts/test.sh
   lint:
     strategy:
