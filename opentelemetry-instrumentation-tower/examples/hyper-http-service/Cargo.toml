@@ -6,7 +6,7 @@ edition = "2021"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
-tower_otel_http_metrics = { path = "../../", package = "tower-otel-http-metrics", features = ["axum"], default-features = false }
+otel_tower_metrics = { path = "../../", package = "opentelemetry-instrumentation-tower", features = ["axum"], default-features = false }
 hyper = { version = "1", default-features = false }
 http-body-util = { version = "0.1", default-features = false }
 hyper-util = { version = "0.1", features = ["http1", "service", "server", "tokio"], default-features = false }

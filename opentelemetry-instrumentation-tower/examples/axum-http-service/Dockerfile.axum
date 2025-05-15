@@ -10,7 +10,6 @@ WORKDIR /home/examples/axum-http-service
 RUN cargo build --locked --release
 
 FROM debian:bullseye-slim
-LABEL org.opencontainers.image.source=https://github.com/francoposa/tower-otel-http-metrics/examples/axum-http-service
 
 COPY --from=builder /home/examples/axum-http-service/target/release/example-axum-http-service /usr/local/bin/echo-server
 CMD ["echo-server"]

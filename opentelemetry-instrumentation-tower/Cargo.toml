@@ -1,11 +1,11 @@
 [package]
-name = "tower-otel-http-metrics"
+name = "opentelemetry-instrumentation-tower"
 edition = "2021"
 version = "0.14.0"
 license = "MIT"
 description = "OpenTelemetry Metrics Middleware for Tower-compatible Rust HTTP servers"
-homepage = "https://github.com/francoposa/tower-otel-http-metrics"
-repository = "https://github.com/francoposa/tower-otel-http-metrics"
+homepage = "https://github.com/open-telemetry/opentelemetry-rust-contrib"
+repository = "https://github.com/open-telemetry/opentelemetry-rust-contrib"
 documentation = "https://docs.rs/tower-otel-http-metrics"
 readme = "README.md"
 include = ["src/"]

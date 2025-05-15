@@ -10,7 +10,6 @@ WORKDIR /home/examples/hyper-http-service
 RUN cargo build --locked --release
 
 FROM debian:bullseye-slim
-LABEL org.opencontainers.image.source=https://github.com/francoposa/tower-otel-http-metrics/examples/hyper-http-service
 
 COPY --from=builder /home/examples/hyper-http-service/target/release/example-hyper-http-service /usr/local/bin/echo-server
 CMD ["echo-server"]

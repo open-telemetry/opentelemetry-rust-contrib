@@ -25,7 +25,7 @@ use opentelemetry_otlp::{
 use opentelemetry_sdk::metrics::PeriodicReader;
 use opentelemetry_sdk::Resource;
 use std::time::Duration;
-use tower_otel_http_metrics;
+use otel_tower_metrics;
 
 const SERVICE_NAME: &str = "example-axum-http-service";
 // Metric export interval should be less than or equal to 15s
@@ -79,7 +79,7 @@ async fn main() {
     global::set_meter_provider(meter_provider);
     // init our otel metrics middleware
     let global_meter = global::meter(SERVICE_NAME);
-    let otel_metrics_service_layer = tower_otel_http_metrics::HTTPMetricsLayerBuilder::builder()
+    let otel_metrics_service_layer = otel_tower_metrics::HTTPMetricsLayerBuilder::builder()
         .with_meter(global_meter)
         .build()
         .unwrap();
@@ -119,7 +119,7 @@ use std::net::SocketAddr;
 use std::time::Duration;
 use tokio::net::TcpListener;
 use tower::ServiceBuilder;
-use tower_otel_http_metrics;
+use otel_tower_metrics;
 
 const SERVICE_NAME: &str = "example-hyper-http-service";
 // Metric export interval should be less than or equal to 15s
@@ -173,7 +173,7 @@ async fn main() {
     global::set_meter_provider(meter_provider);
     // init our otel metrics middleware
     let global_meter = global::meter(SERVICE_NAME);
-    let otel_metrics_service_layer = tower_otel_http_metrics::HTTPMetricsLayerBuilder::builder()
+    let otel_metrics_service_layer = otel_tower_metrics::HTTPMetricsLayerBuilder::builder()
         .with_meter(global_meter)
         .build()
         .unwrap();

@@ -63,7 +63,7 @@ async fn main() {
     global::set_meter_provider(meter_provider);
     // init our otel metrics middleware
     let global_meter = global::meter(SERVICE_NAME);
-    let otel_metrics_service_layer = tower_otel_http_metrics::HTTPMetricsLayerBuilder::builder()
+    let otel_metrics_service_layer = otel_tower_metrics::HTTPMetricsLayerBuilder::builder()
         .with_meter(global_meter)
         .build()
         .unwrap();
