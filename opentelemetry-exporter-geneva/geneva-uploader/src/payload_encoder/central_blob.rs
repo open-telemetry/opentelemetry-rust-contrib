@@ -184,7 +184,7 @@ impl CentralBlob {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{EncoderRow, EncoderSchema};
+    use crate::payload_encoder::{EncoderRow, EncoderSchema};
     use md5;
 
     //Helper to calculate MD5 hash, returns [u8;16]

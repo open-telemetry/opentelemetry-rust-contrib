@@ -8,7 +8,7 @@ use std::sync::{Arc, RwLock};
 /// Supported value types for the encoder
 #[allow(dead_code)]
 #[derive(Debug, Clone)]
-pub(crate) enum ValueType<'a> {
+pub enum ValueType<'a> {
     Float(f32),
     Int32(i32),
     String(Cow<'a, str>),
@@ -69,7 +69,7 @@ impl<'a> ValueType<'a> {
 
 #[allow(dead_code)]
 #[derive(Debug, Clone)]
-pub(crate) struct EncoderField<'a> {
+pub struct EncoderField<'a> {
     name: Cow<'a, str>,
     value: ValueType<'a>,
 }
@@ -89,7 +89,7 @@ impl<'a> EncoderField<'a> {
 
     /// Create field with static str and float value
     #[allow(dead_code)]
-    pub(crate) fn float(name: &'static str, value: f32) -> Self {
+    pub fn float(name: &'static str, value: f32) -> Self {
         Self {
             name: Cow::Borrowed(name),
             value: ValueType::Float(value),
@@ -98,7 +98,7 @@ impl<'a> EncoderField<'a> {
 
     /// Create field with static str and int32 value
     #[allow(dead_code)]
-    pub(crate) fn int32(name: &'static str, value: i32) -> Self {
+    pub fn int32(name: &'static str, value: i32) -> Self {
         Self {
             name: Cow::Borrowed(name),
             value: ValueType::Int32(value),
@@ -107,7 +107,7 @@ impl<'a> EncoderField<'a> {
 
     /// Create field with static str and borrowed string value
     #[allow(dead_code)]
-    pub(crate) fn string(name: &'static str, value: &'a str) -> Self {
+    pub fn string(name: &'static str, value: &'a str) -> Self {
         Self {
             name: Cow::Borrowed(name),
             value: ValueType::String(Cow::Borrowed(value)),
@@ -116,7 +116,7 @@ impl<'a> EncoderField<'a> {
 
     /// Create field with static str and owned string value
     #[allow(dead_code)]
-    pub(crate) fn string_owned(name: &'static str, value: String) -> Self {
+    pub fn string_owned(name: &'static str, value: String) -> Self {
         Self {
             name: Cow::Borrowed(name),
             value: ValueType::String(Cow::Owned(value)),
@@ -125,7 +125,7 @@ impl<'a> EncoderField<'a> {
 
     /// Create field with static str and borrowed wstring value
     #[allow(dead_code)]
-    pub(crate) fn wstring(name: &'static str, value: &'a str) -> Self {
+    pub fn wstring(name: &'static str, value: &'a str) -> Self {
         Self {
             name: Cow::Borrowed(name),
             value: ValueType::WString(Cow::Borrowed(value)),
@@ -134,7 +134,7 @@ impl<'a> EncoderField<'a> {
 
     /// Flexible method to create float field with any string type
     #[allow(dead_code)]
-    pub(crate) fn float_with<S>(name: S, value: f32) -> Self
+    pub fn float_with<S>(name: S, value: f32) -> Self
     where
         S: Into<Cow<'a, str>>,
     {
@@ -146,7 +146,7 @@ impl<'a> EncoderField<'a> {
 
     /// Flexible method to create int32 field with any string type
     #[allow(dead_code)]
-    pub(crate) fn int32_with<S>(name: S, value: i32) -> Self
+    pub fn int32_with<S>(name: S, value: i32) -> Self
     where
         S: Into<Cow<'a, str>>,
     {
@@ -158,7 +158,7 @@ impl<'a> EncoderField<'a> {
 
     /// Flexible method to create string field with any string type
     #[allow(dead_code)]
-    pub(crate) fn string_with<S, T>(name: S, value: T) -> Self
+    pub fn string_with<S, T>(name: S, value: T) -> Self
     where
         S: Into<Cow<'a, str>>,
         T: Into<Cow<'a, str>>,
@@ -171,7 +171,7 @@ impl<'a> EncoderField<'a> {
 
     /// Flexible method to create wstring field with any string type
     #[allow(dead_code)]
-    pub(crate) fn wstring_with<S, T>(name: S, value: T) -> Self
+    pub fn wstring_with<S, T>(name: S, value: T) -> Self
     where
         S: Into<Cow<'a, str>>,
         T: Into<Cow<'a, str>>,
@@ -184,7 +184,7 @@ impl<'a> EncoderField<'a> {
 
     /// Flexible method to create double field with any string type
     #[allow(dead_code)]
-    pub(crate) fn double_with<S>(name: S, value: f64) -> Self
+    pub fn double_with<S>(name: S, value: f64) -> Self
     where
         S: Into<Cow<'a, str>>,
     {
@@ -196,7 +196,7 @@ impl<'a> EncoderField<'a> {
 
     /// Create any field type with flexible name and value types
     #[allow(dead_code)]
-    pub(crate) fn new_any<S, V>(name: S, value: V) -> Self
+    pub fn new_any<S, V>(name: S, value: V) -> Self
     where
         S: Into<Cow<'a, str>>,
         V: Into<ValueType<'a>>,
@@ -259,14 +259,15 @@ struct FieldOrdering {
 
 /// The main encoder struct
 #[allow(dead_code)]
-pub(crate) struct Encoder {
+pub struct Encoder {
     schema_cache: Arc<RwLock<HashMap<u64, EncoderSchema>>>,
     ordering_cache: Arc<RwLock<HashMap<u64, FieldOrdering>>>,
 }
 
 impl Encoder {
+    /// Create a new encoder instance
     #[allow(dead_code)]
-    pub(crate) fn new() -> Self {
+    pub fn new() -> Self {
         Encoder {
             schema_cache: Arc::new(RwLock::new(HashMap::new())),
             ordering_cache: Arc::new(RwLock::new(HashMap::new())),
@@ -275,7 +276,7 @@ impl Encoder {
 
     /// Create a encoder blob from a simple key-value map
     #[allow(dead_code)]
-    pub(crate) fn encode<'a>(
+    pub fn encode<'a>(
         &self,
         fields: &[EncoderField<'a>],
         event_name: &str,
@@ -438,7 +439,7 @@ impl Encoder {
 
 /// Builder for creating Bond events with fluent API
 #[allow(dead_code)]
-pub(crate) struct EncoderEventBuilder<'a> {
+pub struct EncoderEventBuilder<'a> {
     encoder: Arc<Encoder>,
     fields: Vec<EncoderField<'a>>,
 }
@@ -455,49 +456,49 @@ impl<'a> EncoderEventBuilder<'a> {
 
     /// Add a float field
     #[allow(dead_code)]
-    pub(crate) fn add_float(mut self, name: &'static str, value: f32) -> Self {
+    pub fn add_float(mut self, name: &'static str, value: f32) -> Self {
         self.fields.push(EncoderField::float(name, value));
         self
     }
 
     /// Add an int32 field
     #[allow(dead_code)]
-    pub(crate) fn add_int32(mut self, name: &'static str, value: i32) -> Self {
+    pub fn add_int32(mut self, name: &'static str, value: i32) -> Self {
         self.fields.push(EncoderField::int32(name, value));
         self
     }
 
     /// Add a string field
     #[allow(dead_code)]
-    pub(crate) fn add_string(mut self, name: &'static str, value: &'a str) -> Self {
+    pub fn add_string(mut self, name: &'static str, value: &'a str) -> Self {
         self.fields.push(EncoderField::string(name, value));
         self
     }
 
     /// Add a string field from owned String
     #[allow(dead_code)]
-    pub(crate) fn add_string_owned(mut self, name: &'static str, value: String) -> Self {
+    pub fn add_string_owned(mut self, name: &'static str, value: String) -> Self {
         self.fields.push(EncoderField::string_owned(name, value));
         self
     }
 
     /// Add a wstring field
     #[allow(dead_code)]
-    pub(crate) fn add_wstring(mut self, name: &'static str, value: &'a str) -> Self {
+    pub fn add_wstring(mut self, name: &'static str, value: &'a str) -> Self {
         self.fields.push(EncoderField::wstring(name, value));
         self
     }
 
     /// Add a custom field
     #[allow(dead_code)]
-    pub(crate) fn add_field(mut self, field: EncoderField<'a>) -> Self {
+    pub fn add_field(mut self, field: EncoderField<'a>) -> Self {
         self.fields.push(field);
         self
     }
 
     /// Build the event and return the encoded bytes
     #[allow(dead_code)]
-    pub(crate) fn build(self, event_name: &str, level: u8, metadata: &str) -> Vec<u8> {
+    pub fn build(self, event_name: &str, level: u8, metadata: &str) -> Vec<u8> {
         self.encoder
             .encode(&self.fields, event_name, level, metadata)
     }
@@ -505,7 +506,7 @@ impl<'a> EncoderEventBuilder<'a> {
 
 impl Encoder {
     #[allow(dead_code)]
-    pub(crate) fn builder<'a>(self: &Arc<Self>) -> EncoderEventBuilder<'a> {
+    pub fn builder<'a>(self: &Arc<Self>) -> EncoderEventBuilder<'a> {
         EncoderEventBuilder::new(self.clone())
     }
 }
@@ -516,7 +517,7 @@ mod tests {
 
     #[test]
     fn test_bond_encoder_with_fields() {
-        let encoder = BondEncoder::new();
+        let encoder = Encoder::new();
 
         let fields = [
             EncoderField::float("FloatCol", 3.1415),
@@ -533,7 +534,7 @@ mod tests {
 
     #[test]
     fn test_bond_encoder_with_builder() {
-        let encoder = Arc::new(BondEncoder::new());
+        let encoder = Arc::new(Encoder::new());
 
         let payload = encoder
             .builder()
@@ -552,7 +553,7 @@ mod tests {
 
     #[test]
     fn test_schema_caching() {
-        let mut encoder = crate::encoder::BondEncoder::new();
+        let mut encoder = Encoder::new();
 
         // Create fields
         let fields = [
@@ -575,7 +576,7 @@ mod tests {
             EncoderField::string("StrCol", "world"), // Different value
         ];
 
-        let payload2 = encoder.encode(&fields2, "test_event", 1, metadata);
+        let _payload2 = encoder.encode(&fields2, "test_event", 1, metadata);
 
         // Schema cache should still have just one entry
         assert_eq!(encoder.schema_cache_size(), 1);
@@ -622,7 +623,7 @@ mod tests {
 
     #[test]
     fn test_ordering_cache() {
-        let encoder = BondEncoder::new();
+        let encoder = Encoder::new();
 
         // Create fields with specific order
         let fields = [
@@ -639,7 +640,7 @@ mod tests {
         let fields2 = [
             EncoderField::float("FloatCol", 99.9),
             EncoderField::int32("IntCol", 123),
-            BonEncoderFieldField::string("StrCol", "world"),
+            EncoderField::string("StrCol", "world"),
             EncoderField::string("StrCol", "world"),
         ];
 
