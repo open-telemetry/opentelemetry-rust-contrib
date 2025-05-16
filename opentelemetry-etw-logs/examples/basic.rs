@@ -39,14 +39,20 @@
 //!
 
 use opentelemetry_appender_tracing::layer;
-use opentelemetry_etw_logs::ETWLoggerProviderBuilderExt;
+use opentelemetry_etw_logs::Processor;
 use opentelemetry_sdk::logs::SdkLoggerProvider;
 use tracing::error;
 use tracing_subscriber::prelude::*;
 
 fn init_logger() -> SdkLoggerProvider {
+    let processor = Processor::builder("provider-name")
+        // Use a constant custom name for all events instead of "Log"
+        .etw_event_name_from_callback(|_| "CustomEvent")
+        .build()
+        .unwrap();
+
     SdkLoggerProvider::builder()
-        .with_etw_exporter("provider-name")
+        .with_log_processor(processor)
         .build()
 }
 
