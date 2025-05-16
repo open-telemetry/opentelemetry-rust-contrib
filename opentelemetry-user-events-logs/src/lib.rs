@@ -55,13 +55,26 @@
 //! To use the `user_events` exporter, you can set up a logger provider as follows:
 //!
 //! ```rust
-//! use opentelemetry_sdk::logs::LoggerProviderBuilder;
-//! use opentelemetry_user_events_logs::UserEventsLoggerProviderBuilderExt;
+//! use opentelemetry_sdk::logs::SdkLoggerProvider;
+//! use opentelemetry_sdk::Resource;
+//! use opentelemetry_user_events_logs::{build_processor, ExportOptions};
 //!
-//! let logger_provider = LoggerProviderBuilder::default()
-//!     .with_user_events_exporter("myprovider")
+//! let export_options = ExportOptions::builder("myprovider")
+//!   .build()
+//!   .unwrap_or_else(|err| {
+//!     eprintln!("Failed to create export options. Error: {}", err);
+//!     panic!("exiting due to error during initialization");
+//!              });
+//! let user_event_processor = build_processor(export_options);
+//!
+//! let provider = SdkLoggerProvider::builder()
+//!     .with_resource(
+//!         Resource::builder_empty()
+//!             .with_service_name("example")
+//!             .build(),
+//!     )
+//!     .with_log_processor(user_event_processor)
 //!     .build();
-//!
 //! ```
 //!
 //! This will create a logger provider with the `user_events` exporter enabled.
@@ -85,7 +98,7 @@ pub use logs::*;
 #[cfg(test)]
 mod tests {
 
-    use super::*;
+    use crate::{build_processor, ExportOptions};
     use opentelemetry::trace::Tracer;
     use opentelemetry::trace::{TraceContextExt, TracerProvider};
     use opentelemetry_appender_tracing::layer;
@@ -110,10 +123,12 @@ mod tests {
 
         // Basic check if user_events are available
         check_user_events_available().expect("Kernel does not support user_events. Verify your distribution/kernel supports user_events: https://docs.kernel.org/trace/user_events.html.");
+        let export_options = ExportOptions::builder("myprovider").build().unwrap();
+        let user_event_processor = build_processor(export_options);
 
         let logger_provider = LoggerProviderBuilder::default()
             .with_resource(Resource::builder().with_service_name("myrolename").build())
-            .with_user_events_exporter("myprovider")
+            .with_log_processor(user_event_processor)
             .build();
 
         // Once provider with user_event exporter is created, it should create the TracePoints
@@ -164,7 +179,7 @@ mod tests {
                 // Sample output from perf-decode
                 {
         "./perf.data": [
-          { "n": "myprovider:my-event-name", "__csver__": 1024, "PartA": { "time": "2025-03-07T16:31:28.279214367+00:00" }, "PartC": { "user_name": "otel user", "user_email": "otel.user@opentelemetry.com" }, "PartB": { "_typeName": "Log", "severityNumber": 2, "severityText": "ERROR", "eventId": 20, "name": "my-event-name" }, "meta": { "time": 81252.403220286, "cpu": 4, "pid": 21084, "tid": 21085, "level": 2, "keyword": "0x1" } } ]
+          { "n": "myprovider:Log", "__csver__": 1024, "PartA": { "time": "2025-03-07T16:31:28.279214367+00:00", "ext_cloud_role": "myrolename"  }, "PartC": { "user_name": "otel user", "user_email": "otel.user@opentelemetry.com" }, "PartB": { "_typeName": "Log", "severityNumber": 2, "severityText": "ERROR", "eventId": 20, "name": "my-event-name" }, "meta": { "time": 81252.403220286, "cpu": 4, "pid": 21084, "tid": 21085, "level": 2, "keyword": "0x1" } } ]
         }
                  */
 
@@ -185,15 +200,15 @@ mod tests {
             .iter()
             .find(|e| {
                 if let Some(name) = e.get("n") {
-                    name.as_str().unwrap_or("") == "myprovider:my-event-name"
+                    name.as_str().unwrap_or("") == "myprovider:Log"
                 } else {
                     false
                 }
             })
-            .expect("Event 'myprovider:my-event-name' not found");
+            .expect("Event 'myprovider:Log' not found");
 
         // Validate event structure and fields
-        assert_eq!(event["n"].as_str().unwrap(), "myprovider:my-event-name");
+        assert_eq!(event["n"].as_str().unwrap(), "myprovider:Log");
         assert_eq!(event["__csver__"].as_i64().unwrap(), 1024);
 
         // Validate PartA
@@ -201,10 +216,10 @@ mod tests {
         // Only check if the time field exists, not the actual value
         assert!(part_a.get("time").is_some(), "PartA.time is missing");
 
-        let part_a_ext_cloud = part_a.get("ext_cloud").expect("PartA.ext_cloud is missing");
-
-        // Validate role
-        assert_eq!(part_a_ext_cloud["role"].as_str().unwrap(), "myrolename");
+        let role = part_a
+            .get("ext_cloud_role")
+            .expect("PartA.ext_cloud_role is missing");
+        assert_eq!(role.as_str().unwrap(), "myrolename");
 
         // Validate PartB
         let part_b = &event["PartB"];
@@ -241,8 +256,10 @@ mod tests {
             .build();
         let tracer = tracer_provider.tracer("test-tracer");
 
+        let export_options = ExportOptions::builder("myprovider").build().unwrap();
+        let user_event_processor = build_processor(export_options);
         let logger_provider = LoggerProviderBuilder::default()
-            .with_user_events_exporter("myprovider")
+            .with_log_processor(user_event_processor)
             .build();
 
         // Once provider with user_event exporter is created, it should create the TracePoints

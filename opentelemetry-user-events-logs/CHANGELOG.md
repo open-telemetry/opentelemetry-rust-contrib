@@ -5,6 +5,41 @@
 - Enhanced validation for the provider name in `with_user_event_exporter(provider_name)`:
   - Empty provider names are now disallowed.
 
+- Event header name is changed to use "Log" instead of "LogRecord.EventName". 
+- `ext_dt` and `ext_cloud` structs are flattened.
+  are flattened.
+
+- **BREAKING** Add builder pattern with `ExportOptions` and implement `build_processor` method [256](https://github.com/open-telemetry/opentelemetry-rust-contrib/pull/256)
+  - Removed `with_user_events_exporter` extension method on `LoggerProviderBuilder`.
+  - Introduced a builder pattern for the user_events exporter which improves configuration flexibility.
+
+  Before:
+
+  ```rust
+  use opentelemetry_sdk::logs::LoggerProviderBuilder;
+  use opentelemetry_user_events_logs::UserEventsLoggerProviderBuilderExt;
+
+  let logger_provider = LoggerProviderBuilder::default()
+    .with_user_events_exporter("myprovider")
+    .build();
+  ```
+
+  After:
+  
+  ```rust
+  use opentelemetry_sdk::logs::LoggerProviderBuilder;
+  use opentelemetry_user_events_logs::{build_processor, ExportOptions};
+  let export_options = ExportOptions::builder("myprovider")
+    .build()
+    .unwrap_or_else(|err| {
+      eprintln!("Failed to create export options. Error: {}", err);
+      panic!("exiting due to error during initialization");
+    });
+  let user_event_processor = build_processor(export_options);
+  LoggerProviderBuilder::default()
+    .with_log_processor(user_event_processor)
+    .build();
+  ```
 ## v0.12.0
 
 - Added support for Populating Cloud RoleName, RoleInstance from Resource's
