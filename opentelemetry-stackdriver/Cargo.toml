@@ -29,7 +29,7 @@ futures-channel = { version = "0.3", default-features = false, features = ["std"
 [features]
 default = ["gcp-authorizer", "tls-native-roots", "internal-logs"]
 gcp-authorizer = ["dep:gcp_auth"]
-tls = ["tonic/tls-ring"]
+tls-ring = ["tonic/tls-ring"]
 tls-native-roots = ["tonic/tls-native-roots"]
 tls-webpki-roots = ["tonic/tls-webpki-roots"]
 propagator = []
