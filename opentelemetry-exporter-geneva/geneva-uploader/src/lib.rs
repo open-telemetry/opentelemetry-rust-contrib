@@ -1,5 +1,6 @@
 mod config_service;
 pub mod ingestion_service;
+mod payload_encoder;
 
 mod uploader;
 
