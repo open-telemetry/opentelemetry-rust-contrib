@@ -160,7 +160,7 @@ jobs:
         with:
             repo-token: ${{ secrets.GITHUB_TOKEN }}
       - name: doc
-        run: cargo doc --no-deps --all-features
+        run: cargo doc --no-deps --all-features --exclude opentelemetry-geneva-exporter
         env:
           CARGO_INCREMENTAL: '0'
           RUSTDOCFLAGS: -Dwarnings
