@@ -57,15 +57,14 @@
 //! ```rust
 //! use opentelemetry_sdk::logs::SdkLoggerProvider;
 //! use opentelemetry_sdk::Resource;
-//! use opentelemetry_user_events_logs::{build_processor, ExportOptions};
+//! use opentelemetry_user_events_logs::Processor;
 //!
-//! let export_options = ExportOptions::builder("myprovider")
+//! let user_event_processor = Processor::builder("myprovider")
 //!   .build()
 //!   .unwrap_or_else(|err| {
-//!     eprintln!("Failed to create export options. Error: {}", err);
+//!     eprintln!("Failed to create user_events processor. Error: {}", err);
 //!     panic!("exiting due to error during initialization");
 //!              });
-//! let user_event_processor = build_processor(export_options);
 //!
 //! let provider = SdkLoggerProvider::builder()
 //!     .with_resource(
@@ -93,12 +92,13 @@
 
 mod logs;
 
-pub use logs::*;
+pub use logs::Processor;
+pub use logs::ProcessorBuilder;
 
 #[cfg(test)]
 mod tests {
 
-    use crate::{build_processor, ExportOptions};
+    use crate::Processor;
     use opentelemetry::trace::Tracer;
     use opentelemetry::trace::{TraceContextExt, TracerProvider};
     use opentelemetry_appender_tracing::layer;
@@ -123,8 +123,7 @@ mod tests {
 
         // Basic check if user_events are available
         check_user_events_available().expect("Kernel does not support user_events. Verify your distribution/kernel supports user_events: https://docs.kernel.org/trace/user_events.html.");
-        let export_options = ExportOptions::builder("myprovider").build().unwrap();
-        let user_event_processor = build_processor(export_options);
+        let user_event_processor = Processor::builder("myprovider").build().unwrap();
 
         let logger_provider = LoggerProviderBuilder::default()
             .with_resource(Resource::builder().with_service_name("myrolename").build())
@@ -256,8 +255,7 @@ mod tests {
             .build();
         let tracer = tracer_provider.tracer("test-tracer");
 
-        let export_options = ExportOptions::builder("myprovider").build().unwrap();
-        let user_event_processor = build_processor(export_options);
+        let user_event_processor = Processor::builder("myprovider").build().unwrap();
         let logger_provider = LoggerProviderBuilder::default()
             .with_log_processor(user_event_processor)
             .build();

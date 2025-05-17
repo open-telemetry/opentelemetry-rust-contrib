@@ -34,15 +34,14 @@
 use opentelemetry_appender_tracing::layer;
 use opentelemetry_sdk::logs::LoggerProviderBuilder;
 use opentelemetry_sdk::logs::SdkLoggerProvider;
-use opentelemetry_user_events_logs::{build_processor, ExportOptions};
+use opentelemetry_user_events_logs::Processor;
 use tracing::error;
 use tracing_subscriber::{prelude::*, EnvFilter};
 mod throughput;
 
 // Function to initialize the logger
 fn init_logger() -> SdkLoggerProvider {
-    let export_options = ExportOptions::builder("myprovider").build().unwrap();
-    let user_event_processor = build_processor(export_options);
+    let user_event_processor = Processor::builder("myprovider").build().unwrap();
     LoggerProviderBuilder::default()
         .with_log_processor(user_event_processor)
         .build()
