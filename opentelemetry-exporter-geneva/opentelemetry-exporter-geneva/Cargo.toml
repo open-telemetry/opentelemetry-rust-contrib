@@ -6,8 +6,9 @@ edition = "2021"
 [workspace]
 
 [workspace.dependencies]
-opentelemetry_sdk = { workspace = true, default-features = false, features = ["logs"] }
-opentelemetry-proto = {workspace = true, default-features = false, features = ["logs"]}
+opentelemetry_sdk = {default-features = false, features = ["logs"], version = "0.29" }
+opentelemetry-proto = {default-features = false, features = ["logs"], version = "0.29"}
+
 geneva-uploader = {path = "../geneva-uploader/", version = "0.1.0"}
 
 
