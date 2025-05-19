@@ -127,7 +127,7 @@ mod tests {
         let mut row = Vec::new();
         row.extend_from_slice(&42i32.to_le_bytes()); // foo
         let s = "hello";
-        row.extend_from_slice(&(s.len() as u16).to_le_bytes()); // bar string length (u16 LE)
+        row.extend_from_slice(&(s.len() as u32).to_le_bytes()); // bar string length (u16 LE)
         row.extend_from_slice(s.as_bytes()); // bar string bytes
 
         let bond_row = EncoderRow::from_schema_and_row(&schema, &row);

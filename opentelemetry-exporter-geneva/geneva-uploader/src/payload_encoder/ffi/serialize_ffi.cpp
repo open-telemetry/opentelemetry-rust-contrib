@@ -87,7 +87,6 @@ extern "C" SchemaResult* marshal_schema_ffi(const void* schema_buf, size_t schem
             fd.type.id = static_cast<bond::BondDataType>(f.type);
             struct_def.fields.push_back(std::move(fd));
         }
-
          // Allocate schemaDef on heap
          auto schemaDef = std::make_unique<bond::SchemaDef>();
          schemaDef->root.id = bond::BT_STRUCT;
@@ -98,7 +97,6 @@ extern "C" SchemaResult* marshal_schema_ffi(const void* schema_buf, size_t schem
          bond::OutputBuffer buf;
          bond::SimpleBinaryWriter<bond::OutputBuffer> writer(buf);
          bond::Marshal(*schemaDef, writer);
- 
          // Copy marshaled bytes
          auto marshaled = buf.GetBuffer();
          void* bytes = malloc(marshaled.size());        
@@ -136,10 +134,8 @@ extern "C" void* marshal_row_ffi(void* schema_ptr,
         writer.WriteStructBegin(schemaDef->structs[0].metadata, false);
 
         for (const auto& f : fields) {
-            std::cout << "Processing field: " << f.metadata.name << " type " << f.type.id << std::endl;
             switch (f.type.id) {
                 case bond::BT_DOUBLE: {
-                    std::cout << "Field is double remain:" <<  remain << std::endl;
                     if (remain < 8) throw std::runtime_error("row too short");
                     double v;
                     std::memcpy(&v, ptr, 8);
@@ -148,7 +144,6 @@ extern "C" void* marshal_row_ffi(void* schema_ptr,
                     break;
                 }
                 case bond::BT_INT32: {
-                    std::cout << "Field is int32 remain:" <<  remain << std::endl;
                     if (remain < 4) throw std::runtime_error("row too short");
                     int32_t v;
                     std::memcpy(&v, ptr, 4);
@@ -157,7 +152,6 @@ extern "C" void* marshal_row_ffi(void* schema_ptr,
                     break;
                 }
                 case bond::BT_FLOAT: {
-                    std::cout << "Field is float remain:" << remain << std::endl;
                     if (remain < 4) throw std::runtime_error("row too short for float");
                     float v;
                     std::memcpy(&v, ptr, 4);
@@ -166,7 +160,6 @@ extern "C" void* marshal_row_ffi(void* schema_ptr,
                     break;
                 }
                 case bond::BT_STRING: {
-                    std::cout << "Field is string remain:" <<  remain << std::endl;
                     if (remain < 4) throw std::runtime_error("row too short for string len");
                     uint32_t slen = ptr[0] | (ptr[1] << 8) | (ptr[2] << 16) | (ptr[3] << 24);
                     ptr += 4; remain -= 4;
@@ -177,7 +170,6 @@ extern "C" void* marshal_row_ffi(void* schema_ptr,
                     break;
                 }
                 case bond::BT_WSTRING: {
-                    std::cout << "Field is wstring remain:" << remain << std::endl;
                     if (remain < 2) throw std::runtime_error("row too short for wstring len");
                     uint16_t slen = ptr[0] | (ptr[1] << 8);  // Read length in code units
                     ptr += 2; remain -= 2;
@@ -200,13 +192,11 @@ extern "C" void* marshal_row_ffi(void* schema_ptr,
                 }
                 // Extend here for more Seializable types as needed
                 default: {
-                    std::cout << "Unsupported type id: " << static_cast<int>(f.type.id) << std::endl;
                     throw std::runtime_error("unsupported type id");
                 }
             }
         }
         writer.WriteStructEnd();
-
         // Copy the Serialized buffer directly to a malloc'd buffer
         auto output = buf.GetBuffer();
         *out_len = output.size();

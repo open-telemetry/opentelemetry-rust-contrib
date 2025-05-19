@@ -1,6 +1,5 @@
 use crate::payload_encoder::central_blob::{CentralBlob, CentralEventEntry, CentralSchemaEntry};
 use crate::payload_encoder::{EncoderRow, EncoderSchema};
-use smallvec::SmallVec;
 use std::borrow::Cow;
 use std::collections::HashMap;
 use std::sync::{Arc, RwLock};
@@ -336,20 +335,19 @@ impl Encoder {
         &self,
         fields: &[EncoderField<'a>],
     ) -> (u64, CentralSchemaEntry) {
-        // Create a stable order for fields - use SmallVec to avoid allocations for small field sets
-        let mut field_defs = SmallVec::<[(&str, u8, u16); 16]>::with_capacity(fields.len());
-
         // Prepare field definitions for schema creation (sorted by name for deterministic schema)
-        for (i, field) in fields.iter().enumerate() {
-            field_defs.push((
-                field.name.as_ref(),
-                field.value.value_type_id(),
-                (i + 1) as u16,
-            ));
-        }
+        let mut field_vec: Vec<(&str, u8)> = fields
+            .iter()
+            .map(|field| (field.name.as_ref(), field.value.value_type_id()))
+            .collect();
 
-        // Sort by name for deterministic schema creation
-        field_defs.sort_by(|a, b| a.0.cmp(b.0));
+        field_vec.sort_by(|a, b| a.0.cmp(b.0));
+
+        let field_defs: Vec<(&str, u8, u16)> = field_vec
+            .iter()
+            .enumerate()
+            .map(|(i, (name, typ))| (*name, *typ, (i + 1) as u16))
+            .collect();
 
         // Calculate a hash for the schema
         let schema_id = self.calculate_schema_id(&field_defs);
