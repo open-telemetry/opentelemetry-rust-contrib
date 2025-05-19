@@ -553,7 +553,7 @@ mod tests {
 
     #[test]
     fn test_schema_caching() {
-        let mut encoder = Encoder::new();
+        let encoder = Encoder::new();
 
         // Create fields
         let fields = [
@@ -564,7 +564,7 @@ mod tests {
 
         // First encoding should create and cache the schema
         let metadata = "namespace=testNamespace/eventVersion=Ver1v0";
-        let payload1 = encoder.encode(&fields, "test_event", 1, metadata);
+        let _payload1 = encoder.encode(&fields, "test_event", 1, metadata);
 
         // Check that we have one schema in the cache
         assert_eq!(encoder.schema_cache_size(), 1);
