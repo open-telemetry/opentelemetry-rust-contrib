@@ -15,7 +15,7 @@ unsafe extern "C" {
     ) -> *mut SchemaResult;
 
     pub fn marshal_row_ffi(
-        schema_ptr: *mut c_void, // NOTE: This is the schema_ptr from SchemaResult! 
+        schema_ptr: *mut c_void, // NOTE: This is the schema_ptr from SchemaResult!
         row_buf: *const c_void,
         row_len: usize,
         out_len: *mut usize,

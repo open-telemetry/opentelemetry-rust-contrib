@@ -1,6 +1,7 @@
 pub mod central_blob;
 pub mod encoder;
 mod ffi;
+mod otlp_mapper;
 
 use std::slice;
 

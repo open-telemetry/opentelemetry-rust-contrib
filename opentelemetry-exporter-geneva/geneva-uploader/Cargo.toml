@@ -20,6 +20,7 @@ thiserror = "2.0"
 chrono = "0.4"
 url = "2.2"
 md5 = "0.7.0"
+hex = "0.4"
 
 [features]
 self_signed_certs = [] # Empty by default for security
