@@ -641,7 +641,6 @@ mod tests {
             EncoderField::float("FloatCol", 99.9),
             EncoderField::int32("IntCol", 123),
             EncoderField::string("StrCol", "world"),
-            EncoderField::string("StrCol", "world"),
         ];
 
         // Re-encode with same structure but different values
