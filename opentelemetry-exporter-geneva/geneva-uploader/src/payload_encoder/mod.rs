@@ -2,7 +2,6 @@ pub mod central_blob;
 pub mod encoder;
 mod ffi;
 
-//use smallvec::SmallVec;
 use std::slice;
 
 #[allow(dead_code)]
