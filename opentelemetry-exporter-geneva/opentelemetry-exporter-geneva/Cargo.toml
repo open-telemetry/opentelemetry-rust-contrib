@@ -3,11 +3,19 @@ name = "opentelemetry-exporter-geneva"
 version = "0.1.0"
 edition = "2021"
 
-[dependencies]
+[workspace]
+
+[workspace.dependencies]
 opentelemetry_sdk = { workspace = true, default-features = false, features = ["logs"] }
 opentelemetry-proto = {workspace = true, default-features = false, features = ["logs"]}
 geneva-uploader = {path = "../geneva-uploader/", version = "0.1.0"}
 
 
-[lints]
-workspace = true
+[workspace.lints.rust]
+rust_2024_compatibility = { level = "warn", priority = -1 }
+# No need to enable those, because it is either unnecessary or results in ugly syntax
+if_let_rescope = "allow"
+tail_expr_drop_order = "allow"
+
+[workspace.lints.clippy]
+all = { level = "warn", priority = 1 }
