@@ -4,6 +4,7 @@
 
 - Added validation to provider name
 - Added optional feature `serde_json` to serialize List and Maps.
+- Bump tracelogging crate to 1.2.4
 
 ## v0.8.0
 
