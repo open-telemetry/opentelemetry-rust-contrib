@@ -9,10 +9,10 @@ use std::fmt::Debug;
 
 use crate::logs::exporter::UserEventsExporter;
 
-/// Processes and exports logs to User Events.
+/// Processes and exports logs to user_events.
 ///
 /// This processor exports logs without synchronization.
-/// It is specifically designed for the User Events exporter, where
+/// It is specifically designed for the user_events exporter, where
 /// the underlying exporter is safe under concurrent calls.
 #[derive(Debug)]
 pub struct Processor {
@@ -20,7 +20,7 @@ pub struct Processor {
 }
 
 impl Processor {
-    /// Creates a builder for configuring a User Events Processor
+    /// Creates a builder for configuring a user_events Processor
     pub fn builder(provider_name: &str) -> ProcessorBuilder {
         ProcessorBuilder::new(provider_name)
     }
@@ -61,7 +61,7 @@ impl opentelemetry_sdk::logs::LogProcessor for Processor {
     }
 }
 
-/// Builder for configuring and constructing a User Events Processor
+/// Builder for configuring and constructing a user_events Processor
 #[derive(Debug)]
 pub struct ProcessorBuilder<'a> {
     provider_name: &'a str,
