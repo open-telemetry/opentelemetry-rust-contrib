@@ -3,7 +3,7 @@
 use opentelemetry_appender_tracing::layer;
 use opentelemetry_sdk::logs::LoggerProviderBuilder;
 use opentelemetry_sdk::logs::SdkLoggerProvider;
-use opentelemetry_user_events_logs::{build_processor, ExportOptions};
+use opentelemetry_user_events_logs::Processor;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use std::{thread, time::Duration};
@@ -15,13 +15,12 @@ fn init_logger() -> SdkLoggerProvider {
     let fmt_layer = tracing_subscriber::fmt::layer().with_filter(filter_fmt);
     let _guard = tracing_subscriber::registry().with(fmt_layer).set_default(); // Temporary subscriber active for this function
 
-    let export_options = ExportOptions::builder("myprovider")
+    let user_event_processor = Processor::builder("myprovider")
         .build()
         .unwrap_or_else(|err| {
-            eprintln!("Failed to create export options: {}", err);
+            eprintln!("Failed to create processor: {}", err);
             panic!("exiting due to error during initialization");
         });
-    let user_event_processor = build_processor(export_options);
     LoggerProviderBuilder::default()
         .with_log_processor(user_event_processor)
         .build()
