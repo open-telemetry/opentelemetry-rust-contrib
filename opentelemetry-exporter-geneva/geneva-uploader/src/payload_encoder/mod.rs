@@ -1,13 +1,13 @@
-pub mod central_blob;
-pub mod encoder;
-mod ffi;
-mod otlp_mapper;
+pub(crate) mod central_blob;
+pub(crate) mod encoder;
+pub(crate) mod ffi;
+pub(crate) mod otlp_mapper;
 
 use std::slice;
 
 #[allow(dead_code)]
 pub(crate) struct EncoderSchema {
-    schema_result: *mut ffi::SchemaResult,
+    schema_result: ffi::SchemaResultPtr,
     fields: Vec<(String, u8, u16)>, // (name, type, id)
 }
 
@@ -31,8 +31,8 @@ impl Clone for EncoderSchema {
 impl Drop for EncoderSchema {
     fn drop(&mut self) {
         unsafe {
-            if !self.schema_result.is_null() {
-                ffi::free_schema_buf_ffi(self.schema_result);
+            if !self.schema_result.0.is_null() {
+                ffi::free_schema_buf_ffi(self.schema_result.0);
             }
         }
     }
@@ -58,7 +58,7 @@ impl EncoderSchema {
             .map(|(name, typ, id)| (name.to_string(), *typ, *id))
             .collect();
         EncoderSchema {
-            schema_result,
+            schema_result: ffi::SchemaResultPtr(schema_result),
             fields,
         }
     }
@@ -66,7 +66,7 @@ impl EncoderSchema {
     #[allow(dead_code)]
     pub(crate) fn as_bytes(&self) -> &[u8] {
         unsafe {
-            let schema = &*self.schema_result;
+            let schema = &*self.schema_result.0;
             std::slice::from_raw_parts(schema.schema_bytes as *const u8, schema.schema_bytes_len)
         }
     }
@@ -77,7 +77,7 @@ impl EncoderRow {
     pub(crate) fn from_schema_and_row(schema: &EncoderSchema, row: &[u8]) -> Self {
         let mut out_len = 0usize;
         let ptr = unsafe {
-            let schema = &*schema.schema_result;
+            let schema = &*schema.schema_result.0;
             ffi::marshal_row_ffi(
                 schema.schema_ptr,
                 row.as_ptr() as *const _,

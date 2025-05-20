@@ -46,7 +46,7 @@ use std::sync::RwLock;
 /// ```
 #[allow(dead_code)]
 #[derive(Clone, Debug)]
-pub(crate) enum AuthMethod {
+pub enum AuthMethod {
     /// Certificate-based authentication
     ///
     /// # Arguments

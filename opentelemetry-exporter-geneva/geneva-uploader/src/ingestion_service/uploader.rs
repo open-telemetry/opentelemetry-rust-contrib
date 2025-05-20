@@ -179,6 +179,10 @@ impl GenevaUploader {
         event_name: &str,
         event_version: &str,
     ) -> Result<IngestionResponse> {
+        println!(
+            "Uploading data to Geneva Ingestion Gateway... event_name: {}, event_version: {}",
+            event_name, event_version
+        );
         // Always get fresh auth info
         let (auth_info, moniker_info, monitoring_endpoint) =
             self.config_client.get_ingestion_info().await?;
@@ -211,6 +215,8 @@ impl GenevaUploader {
 
         let status = response.status();
         let body = response.text().await.map_err(GenevaUploaderError::Http)?;
+        println!("Response status: {:?}", status);
+        println!("Response body: {:?}", body);
 
         if status == reqwest::StatusCode::ACCEPTED {
             let ingest_response: IngestionResponse =

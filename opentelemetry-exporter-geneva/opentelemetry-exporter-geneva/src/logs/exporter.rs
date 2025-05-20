@@ -1,8 +1,8 @@
 use core::fmt;
-use geneva_uploader::Uploader;
+use geneva_uploader::client::GenevaClient;
 use opentelemetry_proto::transform::common::tonic::ResourceAttributesWithSchema;
 use opentelemetry_proto::transform::logs::tonic::group_logs_by_resource_and_scope;
-use opentelemetry_sdk::error::OTelSdkResult;
+use opentelemetry_sdk::error::{OTelSdkError, OTelSdkResult};
 use opentelemetry_sdk::logs::LogBatch;
 use std::sync::{atomic, Arc};
 
@@ -10,26 +10,16 @@ use std::sync::{atomic, Arc};
 pub struct GenevaExporter {
     resource: ResourceAttributesWithSchema,
     _is_shutdown: atomic::AtomicBool,
-    uploader: Arc<Uploader>,
+    geneva_client: Arc<GenevaClient>,
 }
 
 impl GenevaExporter {
     /// Create a new GenavaExporter
-    pub fn new(uploader: Arc<Uploader>) -> Self {
+    pub fn new(geneva_client: Arc<GenevaClient>) -> Self {
         Self {
             resource: ResourceAttributesWithSchema::default(),
             _is_shutdown: atomic::AtomicBool::new(false),
-            uploader,
-        }
-    }
-}
-
-impl Default for GenevaExporter {
-    fn default() -> Self {
-        GenevaExporter {
-            resource: ResourceAttributesWithSchema::default(),
-            _is_shutdown: atomic::AtomicBool::new(false),
-            uploader: Arc::new(Uploader),
+            geneva_client,
         }
     }
 }
@@ -41,13 +31,11 @@ impl fmt::Debug for GenevaExporter {
 }
 
 impl opentelemetry_sdk::logs::LogExporter for GenevaExporter {
-    /// Export logs to stdout
-    async fn export(&self, _batch: LogBatch<'_>) -> OTelSdkResult {
-        //serialize to otlp format
-        let otlp = group_logs_by_resource_and_scope(_batch, &self.resource);
-        //TODO send to Geneva using geneva-uploader
-        let _ = self.uploader.upload_logs(otlp).await;
-
+    async fn export(&self, batch: LogBatch<'_>) -> OTelSdkResult {
+        let otlp = group_logs_by_resource_and_scope(batch, &self.resource);
+        if let Err(e) = self.geneva_client.upload_logs(otlp).await {
+            return Err(OTelSdkError::InternalFailure(e.into()));
+        }
         Ok(())
     }
 

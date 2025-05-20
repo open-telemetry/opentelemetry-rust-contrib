@@ -73,6 +73,15 @@ pub struct EncoderField<'a> {
     value: ValueType<'a>,
 }
 
+impl<'a> Default for EncoderField<'a> {
+    fn default() -> Self {
+        EncoderField {
+            name: Cow::Borrowed(""),
+            value: ValueType::Int32(0),
+        }
+    }
+}
+
 impl<'a> EncoderField<'a> {
     /// Create a new field with borrowed or owned values
     #[allow(dead_code)]
@@ -257,6 +266,7 @@ struct FieldOrdering {
 }
 
 /// The main encoder struct
+/// TODO - remove caching (to keep memory bounded)
 #[allow(dead_code)]
 pub struct Encoder {
     schema_cache: Arc<RwLock<HashMap<u64, EncoderSchema>>>,
