@@ -2,6 +2,8 @@
 
 ## vNext
 
+- Update `tonic` dependency version to 0.13
+
 ## v0.26.0
 
 - Update gRPC schemas
