@@ -333,15 +333,15 @@ mod tests {
             .iter()
             .find(|e| {
                 if let Some(name) = e.get("n") {
-                    name.as_str().unwrap_or("") == "myprovider:my-event-name"
+                    name.as_str().unwrap_or("") == "myprovider:Log"
                 } else {
                     false
                 }
             })
-            .expect("Event 'myprovider:my-event-name' not found");
+            .expect("Event 'myprovider:Log' not found");
 
         // Validate event structure and fields
-        assert_eq!(event["n"].as_str().unwrap(), "myprovider:my-event-name");
+        assert_eq!(event["n"].as_str().unwrap(), "myprovider:Log");
         assert_eq!(event["__csver__"].as_i64().unwrap(), 1024);
 
         // Validate PartA
@@ -349,15 +349,20 @@ mod tests {
         // Only check if the time field exists, not the actual value
         assert!(part_a.get("time").is_some(), "PartA.time is missing");
 
-        let part_a_ext_dt = part_a.get("ext_dt").expect("PartA.ext_dt is missing");
+        let part_a_ext_dt_trace_id = part_a
+            .get("ext_dt_traceId")
+            .expect("PartA.ext_dt_traceId is missing");
+        let part_a_ext_dt_span_id = part_a
+            .get("ext_dt_spanId")
+            .expect("PartA.ext_dt_spanId is missing");
 
         // Validate trace_id and span_id
         assert_eq!(
-            part_a_ext_dt["traceId"].as_str().unwrap(),
+            part_a_ext_dt_trace_id.as_str().unwrap(),
             format!("{:x}", trace_id_expected)
         );
         assert_eq!(
-            part_a_ext_dt["spanId"].as_str().unwrap(),
+            part_a_ext_dt_span_id.as_str().unwrap(),
             format!("{:x}", span_id_expected)
         );
 
