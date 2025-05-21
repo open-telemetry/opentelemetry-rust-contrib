@@ -19,7 +19,7 @@ opentelemetry-semantic-conventions = { workspace = true }
 prost = "0.13"
 prost-types = "0.13"
 thiserror = "2.0"
-tonic = { version = "0.12", default-features = false, features = ["channel", "codegen", "gzip", "prost", "tls"] }
+tonic = { version = "0.13", default-features = false, features = ["channel", "codegen", "gzip", "prost"] }
 tracing = { version = "0.1", optional = true }
 
 # Futures
@@ -29,7 +29,8 @@ futures-channel = { version = "0.3", default-features = false, features = ["std"
 [features]
 default = ["gcp-authorizer", "tls-native-roots", "internal-logs"]
 gcp-authorizer = ["dep:gcp_auth"]
-tls-native-roots = ["tonic/tls-roots"]
+tls-ring = ["tonic/tls-ring"]
+tls-native-roots = ["tonic/tls-native-roots"]
 tls-webpki-roots = ["tonic/tls-webpki-roots"]
 propagator = []
 internal-logs = ["tracing"]
@@ -37,8 +38,8 @@ internal-logs = ["tracing"]
 [dev-dependencies]
 reqwest = "0.12"
 tempfile = "3.3.0"
-tokio = "1"
-tonic-build = "0.12"
+tokio = { version = "1.0", features = ["macros", "rt"] }
+tonic-build = "0.13"
 walkdir = "2.3.2"
 futures-util = { version = "0.3", default-features = false }
 opentelemetry = { workspace = true, features = ["testing"] }
