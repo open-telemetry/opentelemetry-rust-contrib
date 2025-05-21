@@ -21,6 +21,7 @@ pub(crate) fn log_record_to_encoder_fields<'a>(
         count += 1;
     }
 
+
     if count < out.len() {
         out[count] = EncoderField::int32("Flags", log.flags as i32);
         count += 1;

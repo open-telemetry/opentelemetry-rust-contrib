@@ -3,8 +3,12 @@
 use crate::config_service::client::{AuthMethod, GenevaConfigClient, GenevaConfigClientConfig};
 use crate::ingestion_service::uploader::{GenevaUploader, GenevaUploaderConfig};
 use crate::payload_encoder::encoder::Encoder;
+use crate::payload_encoder::lz4_chunked_compression::lz4_chunked_compression;
 use opentelemetry_proto::tonic::logs::v1::ResourceLogs;
 use std::sync::Arc;
+
+use std::fs::File;
+use std::io::Write;
 
 /// Configuration for GenevaClient (user-facing)
 #[derive(Clone, Debug)]
@@ -16,8 +20,6 @@ pub struct GenevaClientConfig {
     pub region: String,
     pub config_major_version: u32,
     pub auth_method: AuthMethod,
-    pub source_identity: String,
-    pub schema_ids: String,
     pub tenant: String,
     pub role_name: String,
     pub role_instance: String,
@@ -50,12 +52,20 @@ impl GenevaClient {
                 .map_err(|e| format!("GenevaConfigClient init failed: {e}"))?,
         );
 
+        let source_identity = format!(
+            "Tenant={}/Role={}/RoleInstance={}",
+            cfg.tenant, cfg.role_name, cfg.role_instance
+        );
+
+        let schema_ids =
+            "c1ce0ecea020359624c493bbe97f9e80;0da22cabbee419e000541a5eda732eb3".to_string(); // TODO - find the actual value to be populated
+
         // Uploader config
         let uploader_config = GenevaUploaderConfig {
             namespace: cfg.namespace.clone(),
-            source_identity: cfg.source_identity,
+            source_identity,
             environment: cfg.environment,
-            schema_ids: cfg.schema_ids,
+            schema_ids,
         };
 
         let uploader = GenevaUploader::from_config_client(config_client, uploader_config)
@@ -101,11 +111,23 @@ impl GenevaClient {
                         level,
                         self.metadata.as_str(),
                     );
+                    println!("Encoded blob: {:?}", encoded_blob);
+                    File::create("/tmp/final_uncompressed.blob")
+                        .unwrap()
+                        .write_all(&encoded_blob)
+                        .unwrap();
 
+                    let compressed_blob = lz4_chunked_compression(&encoded_blob)
+                        .map_err(|e| format!("LZ4 compression failed: {e}"))?; //TODO - error handling
+                    File::create("/tmp/final_compressed.blob")
+                        .unwrap()
+                        .write_all(&compressed_blob)
+                        .unwrap();
                     // Upload using the internal uploader
-                    let event_version = "v1"; // TODO - find the actual value to be populated
+
+                    let event_version = "Ver2v0"; // TODO - find the actual value to be populated
                     self.uploader
-                        .upload(encoded_blob, event_name, event_version)
+                        .upload(compressed_blob, event_name, event_version)
                         .await
                         .map_err(|e| format!("Geneva upload failed: {e}"))?;
                 }

@@ -28,11 +28,6 @@ async fn main() {
         .parse()
         .expect("GENEVA_CONFIG_MAJOR_VERSION must be a u32");
 
-    // Optionally: these can have sensible defaults or also require env
-    let source_identity = env::var("GENEVA_SOURCE_IDENTITY")
-        .unwrap_or_else(|_| "default-source-identity".to_string());
-    let schema_ids =
-        env::var("GENEVA_SCHEMA_IDS").unwrap_or_else(|_| "default-schema-id".to_string());
     let tenant = env::var("GENEVA_TENANT").unwrap_or_else(|_| "default-tenant".to_string());
     let role_name = env::var("GENEVA_ROLE_NAME").unwrap_or_else(|_| "default-role".to_string());
     let role_instance =
@@ -49,8 +44,6 @@ async fn main() {
             path: cert_path,
             password: cert_password,
         },
-        source_identity,
-        schema_ids,
         tenant,
         role_name,
         role_instance,
@@ -96,7 +89,10 @@ async fn main() {
     // Create a new tracing::Fmt layer to print the logs to stdout. It has a
     // default filter of `info` level and above, and `debug` and above for logs
     // from OpenTelemetry crates. The filter levels can be customized as needed.
-    let filter_fmt = EnvFilter::new("info").add_directive("opentelemetry=debug".parse().unwrap());
+    let filter_fmt = EnvFilter::new("info")
+        .add_directive("hyper=debug".parse().unwrap())
+        .add_directive("reqwest=debug".parse().unwrap())
+        .add_directive("opentelemetry=debug".parse().unwrap());
     let fmt_layer = tracing_subscriber::fmt::layer()
         .with_thread_names(true)
         .with_filter(filter_fmt);
@@ -106,11 +102,11 @@ async fn main() {
         .with(fmt_layer)
         .init();
 
-    error!(name: "my-event-name", target: "my-system", event_id = 20, user_name = "otel", user_email = "otel@opentelemetry.io", message = "This is an example message");
+    error!(name: "Log", target: "my-system", event_id = 20, user_name = "otel-1", user_email = "otel@opentelemetry.io", message = "This is an example message-1");
 
     // sleep for a while
     println!("Sleeping for 3 seconds...");
-    thread::sleep(Duration::from_secs(30));
+    thread::sleep(Duration::from_secs(3));
     let _ = provider.shutdown();
     println!("Shutting down provider");
 }

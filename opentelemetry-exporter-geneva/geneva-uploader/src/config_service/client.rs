@@ -427,14 +427,17 @@ impl GenevaConfigClient {
             .get(&url)
             .headers(self.static_headers.clone()); // Clone only cheap references
 
+println!("GenevaConfigClient - Requesting URL: {}", url);
+
         request = request.header("x-ms-client-request-id", req_id);
         let response = request
             .send()
             .await
             .map_err(GenevaConfigClientError::Http)?;
-
+        println!("Response from GCS: {:?}", response);
         let status = response.status();
         let body = response.text().await?;
+        println!("GenevaConfigClient - Response Body: {}", body);
 
         if status.is_success() {
             let parsed = match serde_json::from_str::<GenevaResponse>(&body) {

@@ -1,9 +1,8 @@
 pub(crate) mod central_blob;
 pub(crate) mod encoder;
 pub(crate) mod ffi;
-pub(crate) mod otlp_mapper;
 pub(crate) mod lz4_chunked_compression;
-
+pub(crate) mod otlp_mapper;
 
 use std::slice;
 
