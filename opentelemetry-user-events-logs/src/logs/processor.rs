@@ -5,6 +5,7 @@ use opentelemetry_sdk::{
     error::OTelSdkResult,
     logs::{LogBatch, SdkLogRecord},
 };
+use std::error::Error;
 use std::fmt::Debug;
 
 use crate::logs::exporter::UserEventsExporter;
@@ -99,24 +100,21 @@ impl<'a> ProcessorBuilder<'a> {
     ///
     /// # Returns
     ///
-    /// A result containing the configured `Processor` or an error string if validation fails.
-    // TODO: Custom error struct instead of a string.
-    pub fn build(self) -> Result<Processor, String> {
+    /// A result containing the configured `Processor` or a boxed error if validation fails.
+    pub fn build(self) -> Result<Processor, Box<dyn Error>> {
         // Validate provider name
         if self.provider_name.is_empty() {
-            return Err("Provider name cannot be empty.".to_string());
+            return Err("Provider name cannot be empty.".into());
         }
         if self.provider_name.len() >= 234 {
-            return Err("Provider name must be less than 234 characters.".to_string());
+            return Err("Provider name must be less than 234 characters.".into());
         }
         if !self
             .provider_name
             .chars()
             .all(|c| c.is_ascii_alphanumeric() || c == '_')
         {
-            return Err(
-                "Provider name must contain only ASCII letters, digits, and '_'.".to_string(),
-            );
+            return Err("Provider name must contain only ASCII letters, digits, and '_'.".into());
         }
 
         let exporter = UserEventsExporter::new(self.provider_name);
@@ -138,7 +136,10 @@ mod tests {
     fn test_processor_builder_with_empty_provider_name() {
         let processor = Processor::builder("").build();
         assert!(processor.is_err());
-        assert_eq!(processor.unwrap_err(), "Provider name cannot be empty.");
+        assert_eq!(
+            processor.unwrap_err().to_string(),
+            "Provider name cannot be empty."
+        );
     }
 
     #[test]
@@ -195,8 +196,7 @@ mod tests {
         ];
 
         // Expected error message
-        let expected_error =
-            "Provider name must contain only ASCII letters, digits, and '_'.".to_string();
+        let expected_error = "Provider name must contain only ASCII letters, digits, and '_'.";
 
         // Test each invalid name
         for invalid_name in invalid_names {
@@ -210,7 +210,7 @@ mod tests {
 
             // Assert that the error message is as expected
             assert_eq!(
-                options.err().unwrap(),
+                options.err().unwrap().to_string(),
                 expected_error,
                 "Wrong error message for invalid name: '{}'",
                 invalid_name
