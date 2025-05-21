@@ -333,15 +333,15 @@ mod tests {
             .iter()
             .find(|e| {
                 if let Some(name) = e.get("n") {
-                    name.as_str().unwrap_or("") == "myprovider:my-event-name"
+                    name.as_str().unwrap_or("") == "myprovider:Log"
                 } else {
                     false
                 }
             })
-            .expect("Event 'myprovider:my-event-name' not found");
+            .expect("Event 'myprovider:Log' not found");
 
         // Validate event structure and fields
-        assert_eq!(event["n"].as_str().unwrap(), "myprovider:my-event-name");
+        assert_eq!(event["n"].as_str().unwrap(), "myprovider:Log");
         assert_eq!(event["__csver__"].as_i64().unwrap(), 1024);
 
         // Validate PartA
