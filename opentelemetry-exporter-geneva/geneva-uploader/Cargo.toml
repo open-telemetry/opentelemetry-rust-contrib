@@ -17,7 +17,7 @@ native-tls = "0.2"
 thiserror = "2.0"
 chrono = "0.4"
 url = "2.2"
-
+lz4_flex = { version = "0.11", features = ["safe-encode"], default-features = false }
 
 [features]
 self_signed_certs = [] # Empty by default for security
@@ -31,6 +31,7 @@ tempfile = "3.5"
 wiremock = "0.6"
 futures = "0.3"
 num_cpus = "1.16"
+lz4_flex = { version = "0.11" }
 
 [lints]
 workspace = true
