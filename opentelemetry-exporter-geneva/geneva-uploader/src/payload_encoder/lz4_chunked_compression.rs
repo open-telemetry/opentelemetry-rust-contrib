@@ -74,6 +74,7 @@ pub(crate) fn lz4_chunked_compression(
         let compressed_size_le = (compressed_size as u32).to_le_bytes();
         output[header_offset..header_offset + 4].copy_from_slice(&compressed_size_le);
         // Truncate output to actual size (header + compressed)
+        // TODO - This can be optimized further without needing to resize and truncate during each iteration.
         output.truncate(data_offset + compressed_size);
 
         offset = end;
