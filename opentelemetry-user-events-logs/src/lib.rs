@@ -101,6 +101,7 @@ mod tests {
     use crate::Processor;
     use opentelemetry::trace::Tracer;
     use opentelemetry::trace::{TraceContextExt, TracerProvider};
+    use opentelemetry::Key;
     use opentelemetry_appender_tracing::layer;
     use opentelemetry_sdk::Resource;
     use opentelemetry_sdk::{
@@ -407,8 +408,36 @@ mod tests {
         record.set_event_name("my-event-name");
         record.set_target("my-target");
         record.set_body(AnyValue::from("This is a test message"));
-        record.add_attribute("user_name", "otel.user");
-        record.add_attribute("user_email", "otel.user@opentelemetry.com");
+        // Add attributes for each AnyValue variant
+        // String variant
+        record.add_attribute("string_attr", "string value");
+        
+        // Int variant
+        record.add_attribute("int_attr", 42i64);
+        
+        // Double variant
+        record.add_attribute("double_attr", 3.14159);
+        
+        // Boolean variant
+        record.add_attribute("bool_attr", true);
+        
+        // Bytes variant
+        let bytes_data = vec![1, 2, 3, 4, 5];
+        record.add_attribute("bytes_attr", AnyValue::Bytes(Box::new(bytes_data)));
+        
+        // ListAny variant
+        let list_values = vec![
+            AnyValue::Int(1), 
+            AnyValue::Int(2), 
+            AnyValue::Int(3)
+        ];
+        record.add_attribute("list_attr", AnyValue::ListAny(Box::new(list_values)));
+        
+        // Map variant
+        let mut map_values = std::collections::HashMap::new();
+        map_values.insert(Key::new("key1"), AnyValue::String("value1".into()));
+        map_values.insert(Key::new("key2"), AnyValue::Int(42));
+        record.add_attribute("map_attr", AnyValue::Map(Box::new(map_values)));
 
         // Once provider with user_event exporter is created, it should create the TracePoints
         // following providername_level_k1 format
@@ -494,11 +523,15 @@ mod tests {
 
         // Validate PartC
         let part_c = &event["PartC"];
-        assert_eq!(part_c["user_name"].as_str().unwrap(), "otel.user");
-        assert_eq!(
-            part_c["user_email"].as_str().unwrap(),
-            "otel.user@opentelemetry.com"
-        );
+        assert_eq!(part_c["string_attr"].as_str().unwrap(), "string value");
+        assert_eq!(part_c["int_attr"].as_i64().unwrap(), 42i64);
+        assert_eq!(part_c["double_attr"].as_f64().unwrap(), 3.14159);
+        assert_eq!(part_c["bool_attr"].as_bool().unwrap(), true);
+
+        // These are not supported, and simply serialize to empty strings
+        assert_eq!(part_c["bytes_attr"].as_str().unwrap(), "");
+        assert_eq!(part_c["list_attr"].as_str().unwrap(), "");
+        assert_eq!(part_c["map_attr"].as_str().unwrap(), "");
     }
 
     #[ignore]
