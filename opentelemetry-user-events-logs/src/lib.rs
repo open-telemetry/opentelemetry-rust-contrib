@@ -416,7 +416,7 @@ mod tests {
         record.add_attribute("int_attr", 42i64);
 
         // Double variant
-        record.add_attribute("double_attr", 3.14159);
+        record.add_attribute("double_attr", 3.575);
 
         // Boolean variant
         record.add_attribute("bool_attr", true);
@@ -521,10 +521,11 @@ mod tests {
         let part_c = &event["PartC"];
         assert_eq!(part_c["string_attr"].as_str().unwrap(), "string value");
         assert_eq!(part_c["int_attr"].as_i64().unwrap(), 42i64);
-        assert_eq!(part_c["double_attr"].as_f64().unwrap(), 3.14159);
-        assert_eq!(part_c["bool_attr"].as_bool().unwrap(), true);
+        assert_eq!(part_c["double_attr"].as_f64().unwrap(), 3.575);
+        assert!(part_c["bool_attr"].as_bool().unwrap());
 
-        // These are not supported, and simply serialize to empty strings
+        // These are not supported currently, and are serialize as empty strings
+        // which is validated here.
         assert_eq!(part_c["bytes_attr"].as_str().unwrap(), "");
         assert_eq!(part_c["list_attr"].as_str().unwrap(), "");
         assert_eq!(part_c["map_attr"].as_str().unwrap(), "");
