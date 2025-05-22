@@ -439,7 +439,6 @@ mod tests {
         assert!(!json_content.is_empty());
 
         let formatted_output = json_content.trim().to_string();
-        println!("Formatted output: {}", formatted_output);
         /*
                 // Sample output from perf-decode
                 {
@@ -504,10 +503,10 @@ mod tests {
 
     #[ignore]
     #[test]
-    fn integration_test_direct_error() {
+    fn integration_test_direct() {
         use opentelemetry::logs::Severity;
         // Run using the below command
-        // sudo -E ~/.cargo/bin/cargo test integration_test_direct_error -- --nocapture --ignored
+        // sudo -E ~/.cargo/bin/cargo test integration_test_direct -- --nocapture --ignored
         integration_test_direct_helper(Severity::Debug, "user_events:myprovider_L5K1");
         integration_test_direct_helper(Severity::Info, "user_events:myprovider_L4K1");
         integration_test_direct_helper(Severity::Warn, "user_events:myprovider_L3K1");
