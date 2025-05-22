@@ -125,6 +125,9 @@ impl<'a> ProcessorBuilder<'a> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use opentelemetry::logs::Logger;
+    use opentelemetry::logs::LoggerProvider;
+    use opentelemetry_sdk::logs::{LogProcessor, SdkLoggerProvider};
 
     #[test]
     fn test_processor_builder_with_valid_provider() {
@@ -216,5 +219,46 @@ mod tests {
                 invalid_name
             );
         }
+    }
+
+    #[test]
+    fn test_shutdown() {
+        let processor = Processor::builder("test_provider").build().unwrap();
+        assert!(processor.shutdown().is_ok());
+    }
+
+    #[test]
+    fn test_force_flush() {
+        let processor = Processor::builder("test_provider").build().unwrap();
+        assert!(processor.force_flush().is_ok());
+    }
+
+    #[test]
+    fn test_emit() {
+        let processor = Processor::builder("test_provider").build().unwrap();
+
+        let mut record = SdkLoggerProvider::builder()
+            .build()
+            .logger("test")
+            .create_log_record();
+        let instrumentation = Default::default();
+        // No assertions here, simply calling the function to ensure it doesn't panic
+        processor.emit(&mut record, &instrumentation);
+    }
+
+    #[test]
+    #[cfg(feature = "spec_unstable_logs_enabled")]
+    fn test_event_enabled() {
+        let processor = Processor::builder("test_provider").build().unwrap();
+
+        // No assertions here, simply calling the function to ensure it doesn't panic
+        let _info_enabled =
+            processor.event_enabled(opentelemetry::logs::Severity::Info, "test", Some("test"));
+        let _debug_enabled =
+            processor.event_enabled(opentelemetry::logs::Severity::Debug, "test", Some("test"));
+        let _error_enabled =
+            processor.event_enabled(opentelemetry::logs::Severity::Error, "test", Some("test"));
+
+        // Test completes if no panics occur
     }
 }
