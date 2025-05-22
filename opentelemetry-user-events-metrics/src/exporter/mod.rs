@@ -1,4 +1,4 @@
-use opentelemetry::{otel_debug, otel_warn};
+use opentelemetry::{otel_debug, otel_info};
 use opentelemetry_proto::tonic::collector::metrics::v1::ExportMetricsServiceRequest;
 use opentelemetry_sdk::error::{OTelSdkError, OTelSdkResult};
 use opentelemetry_sdk::metrics::data;
@@ -111,7 +111,7 @@ impl PushMetricExporter for MetricsExporter {
         otel_debug!(name: "ExportStart", message = "Starting metrics export");
         if !self.trace_point.enabled() {
             // TODO - This can flood the logs if the tracepoint is disabled for long periods of time
-            otel_warn!(name: "TracepointDisabled", message = "Tracepoint is disabled, skipping export");
+            otel_info!(name: "TracepointDisabled", message = "Tracepoint is disabled, skipping export");
             return Ok(());
         } else {
             let mut errors = Vec::new();
