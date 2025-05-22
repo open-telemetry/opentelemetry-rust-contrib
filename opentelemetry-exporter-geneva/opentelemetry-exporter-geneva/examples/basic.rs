@@ -1,3 +1,4 @@
+
 //! run with `$ cargo run --example basic
 
 use geneva_uploader::client::{GenevaClient, GenevaClientConfig};
@@ -10,8 +11,19 @@ use std::path::PathBuf;
 use std::sync::Arc;
 use std::thread;
 use std::time::Duration;
-use tracing::error;
+use tracing::{error, info, warn};
 use tracing_subscriber::{prelude::*, EnvFilter};
+
+/*
+export GENEVA_ENDPOINT="https://gcs.ppe.monitoring.core.windows.net"
+export GENEVA_ENVIRONMENT="Test"
+export GENEVA_ACCOUNT="PipelineAgent2Demo"
+export GENEVA_NAMESPACE="PAdemo2"
+export GENEVA_REGION="eastus"
+export GENEVA_CERT_PATH="/tmp/client.p12"
+export GENEVA_CERT_PASSWORD="password"
+export GENEVA_CONFIG_MAJOR_VERSION=2
+*/
 
 #[tokio::main]
 async fn main() {
@@ -102,11 +114,34 @@ async fn main() {
         .with(fmt_layer)
         .init();
 
-    error!(name: "Log", target: "my-system", event_id = 20, user_name = "otel-1", user_email = "otel@opentelemetry.io", message = "This is an example message-1");
+    // User registration event
+    info!(name: "Log", target: "my-system", event_id = 20, user_name = "user1", user_email = "user1@opentelemetry.io", message = "Registration successful");
+
+    // User checkout event
+    info!(name: "Log", target: "my-system", event_id = 51, user_name = "user2", user_email = "user2@opentelemetry.io", message = "Checkout successful");
+
+    // Login event
+    info!(name: "Log", target: "my-system", event_id = 30, user_name = "user3", user_email = "user3@opentelemetry.io", message = "User login successful");
+
+    // Payment processed
+    info!(name: "Log", target: "my-system", event_id = 52, user_name = "user2", user_email = "user2@opentelemetry.io", message = "Payment processed successfully");
+
+    // Error event - Failed login
+    error!(name: "Log", target: "my-system", event_id = 31, user_name = "user4", user_email = "user4@opentelemetry.io", message = "Login failed - invalid credentials");
+
+    // Warning event - Cart abandoned
+    warn!(name: "Log", target: "my-system", event_id = 53, user_name = "user5", user_email = "user5@opentelemetry.io", message = "Shopping cart abandoned");
+
+    // Password reset
+    info!(name: "Log", target: "my-system", event_id = 32, user_name = "user1", user_email = "user1@opentelemetry.io", message = "Password reset requested");
+
+    // Order shipped
+    info!(name: "Log", target: "my-system", event_id = 54, user_name = "user2", user_email = "user2@opentelemetry.io", message = "Order shipped successfully");
 
     // sleep for a while
     println!("Sleeping for 3 seconds...");
     thread::sleep(Duration::from_secs(3));
     let _ = provider.shutdown();
     println!("Shutting down provider");
+
 }
