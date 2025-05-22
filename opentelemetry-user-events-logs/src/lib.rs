@@ -390,6 +390,7 @@ mod tests {
         use opentelemetry::logs::LogRecord;
         use opentelemetry::logs::Logger;
         use opentelemetry::logs::LoggerProvider;
+        use opentelemetry::logs::Severity;
 
         // Run using the below command
         // sudo -E ~/.cargo/bin/cargo test integration_test_direct -- --nocapture --ignored
@@ -406,6 +407,7 @@ mod tests {
         let logger = logger_provider.logger("test");
 
         let mut record = logger.create_log_record();
+        record.set_severity_number(Severity::Debug);
         record.set_event_name("my-event-name");
         record.set_target("my-target");
         record.set_body(AnyValue::from("This is a test message"));
