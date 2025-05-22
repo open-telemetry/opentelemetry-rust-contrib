@@ -139,7 +139,6 @@ impl GenevaUploader {
         // TODO - Maintain this as url-encoded in config service to avoid conversion here
         let encoded_monitoring_endpoint: String =
             byte_serialize(monitoring_endpoint.as_bytes()).collect();
-        println!("Source identity: {}", self.config.source_identity);
         let encoded_source_identity: String =
             byte_serialize(self.config.source_identity.as_bytes()).collect();
 
@@ -179,10 +178,6 @@ impl GenevaUploader {
         event_name: &str,
         event_version: &str,
     ) -> Result<IngestionResponse> {
-        println!(
-            "Uploading data to Geneva Ingestion Gateway... event_name: {}, event_version: {}",
-            event_name, event_version
-        );
         // Always get fresh auth info
         let (auth_info, moniker_info, monitoring_endpoint) =
             self.config_client.get_ingestion_info().await?;
@@ -199,7 +194,6 @@ impl GenevaUploader {
             auth_info.endpoint.trim_end_matches('/'),
             upload_uri
         );
-    println!("[GenevaUploader] Upload URL: {}", full_url);
 
         // Send the upload request
         let response = self
@@ -213,12 +207,9 @@ impl GenevaUploader {
             .send()
             .await
             .map_err(GenevaUploaderError::Http)?;
-        println!("Complete response: {:?}", response);
 
         let status = response.status();
         let body = response.text().await.map_err(GenevaUploaderError::Http)?;
-        println!("Response status: {:?}", status);
-        println!("Response body: {:?}", body);
 
         if status == reqwest::StatusCode::ACCEPTED {
             let ingest_response: IngestionResponse =

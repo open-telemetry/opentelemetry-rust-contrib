@@ -111,7 +111,6 @@ impl GenevaClient {
                         level,
                         self.metadata.as_str(),
                     );
-                    println!("Encoded blob: {:?}", encoded_blob);
                     File::create("/tmp/final_uncompressed.blob")
                         .unwrap()
                         .write_all(&encoded_blob)
