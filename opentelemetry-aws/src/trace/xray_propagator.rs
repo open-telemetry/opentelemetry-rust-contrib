@@ -46,7 +46,7 @@ use opentelemetry::{
 };
 use std::borrow::Cow;
 use std::convert::TryFrom;
-use std::sync::OnceLock;
+use std::sync::LazyLock;
 
 const AWS_XRAY_TRACE_HEADER: &str = "x-amzn-trace-id";
 const AWS_XRAY_VERSION_KEY: &str = "1";
@@ -60,12 +60,9 @@ const REQUESTED_SAMPLE_DECISION: &str = "?";
 
 const TRACE_FLAG_DEFERRED: TraceFlags = TraceFlags::new(0x02);
 
-// TODO Replace this with LazyLock when MSRV is 1.80+
-static TRACE_CONTEXT_HEADER_FIELDS: OnceLock<[String; 1]> = OnceLock::new();
-
-fn trace_context_header_fields() -> &'static [String; 1] {
-    TRACE_CONTEXT_HEADER_FIELDS.get_or_init(|| [AWS_XRAY_TRACE_HEADER.to_owned()])
-}
+#[allow(clippy::incompatible_msrv)]
+static TRACE_CONTEXT_HEADER_FIELDS: LazyLock<[String; 1]> =
+    LazyLock::new(|| [AWS_XRAY_TRACE_HEADER.to_owned()]);
 
 /// Extracts and injects `SpanContext`s into `Extractor`s or `Injector`s using AWS X-Ray header format.
 ///
@@ -225,7 +222,7 @@ impl TextMapPropagator for XrayPropagator {
     }
 
     fn fields(&self) -> FieldIter<'_> {
-        FieldIter::new(trace_context_header_fields())
+        FieldIter::new(&TRACE_CONTEXT_HEADER_FIELDS[..])
     }
 }
 
