@@ -383,17 +383,13 @@ mod tests {
         );
     }
 
-    #[ignore]
-    #[test]
-    fn integration_test_direct() {
+    // Helper function to test direct logging (i.e without tracing or log crate)
+    // with different severity levels
+    fn integration_test_direct_helper(severity: opentelemetry::logs::Severity, trace_point: &str) {
         use opentelemetry::logs::AnyValue;
         use opentelemetry::logs::LogRecord;
         use opentelemetry::logs::Logger;
         use opentelemetry::logs::LoggerProvider;
-        use opentelemetry::logs::Severity;
-
-        // Run using the below command
-        // sudo -E ~/.cargo/bin/cargo test integration_test_direct -- --nocapture --ignored
 
         // Basic check if user_events are available
         check_user_events_available().expect("Kernel does not support user_events. Verify your distribution/kernel supports user_events: https://docs.kernel.org/trace/user_events.html.");
@@ -407,7 +403,7 @@ mod tests {
         let logger = logger_provider.logger("test");
 
         let mut record = logger.create_log_record();
-        record.set_severity_number(Severity::Error);
+        record.set_severity_number(severity);
         record.set_event_name("my-event-name");
         record.set_target("my-target");
         record.set_body(AnyValue::from("This is a test message"));
@@ -425,8 +421,9 @@ mod tests {
         assert!(user_event_status.contains("myprovider_L5K1"));
 
         // Start perf recording in a separate thread and emit logs in parallel.
+        let trace_point_clone = trace_point.to_string();
         let perf_thread =
-            std::thread::spawn(|| run_perf_and_decode(5, "user_events:myprovider_L2K1"));
+            std::thread::spawn(move || run_perf_and_decode(5, trace_point_clone.as_ref()));
 
         // Give a little time for perf to start recording
         std::thread::sleep(std::time::Duration::from_millis(1000));
@@ -492,7 +489,7 @@ mod tests {
         // Validate PartB
         let part_b = &event["PartB"];
         assert_eq!(part_b["_typeName"].as_str().unwrap(), "Log");
-        assert_eq!(part_b["severityNumber"].as_i64().unwrap(), 17);
+        assert_eq!(part_b["severityNumber"].as_i64().unwrap(), severity as i64);
         assert_eq!(part_b["name"].as_str().unwrap(), "my-event-name");
         assert_eq!(part_b["body"].as_str().unwrap(), "This is a test message");
 
@@ -503,6 +500,19 @@ mod tests {
             part_c["user_email"].as_str().unwrap(),
             "otel.user@opentelemetry.com"
         );
+    }
+
+    #[ignore]
+    #[test]
+    fn integration_test_direct_error() {
+        use opentelemetry::logs::Severity;
+        // Run using the below command
+        // sudo -E ~/.cargo/bin/cargo test integration_test_direct_error -- --nocapture --ignored
+        integration_test_direct_helper(Severity::Debug, "user_events:myprovider_L5K1");
+        integration_test_direct_helper(Severity::Info, "user_events:myprovider_L4K1");
+        integration_test_direct_helper(Severity::Warn, "user_events:myprovider_L3K1");
+        integration_test_direct_helper(Severity::Error, "user_events:myprovider_L2K1");
+        integration_test_direct_helper(Severity::Fatal, "user_events:myprovider_L1K1");
     }
 
     fn check_user_events_available() -> Result<String, String> {
