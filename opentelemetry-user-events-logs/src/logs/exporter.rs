@@ -25,7 +25,7 @@ const EVENT_ID: &str = "event_id";
 const NO_LISTENER_ERROR: i32 = 9;
 const PAYLOAD_SIZE_EXCEEDED_ERROR: i32 = 34;
 const CS_VERSION: u32 = 1024; // 0x400 in hex
-const DEFAULT_LOG_TYPE_NAME: &'static str = "Log";
+const DEFAULT_LOG_TYPE_NAME: &str = "Log";
 
 impl UserEventsExporter {
     /// Create instance of the exporter
