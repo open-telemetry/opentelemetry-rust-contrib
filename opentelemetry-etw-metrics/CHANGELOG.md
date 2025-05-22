@@ -2,6 +2,8 @@
 
 ## vNext
 
+- Bump tracelogging crate to 1.2.4
+
 ## v0.8.0
 
 - Bump opentelemetry and opentelemetry_sdk versions to 0.29

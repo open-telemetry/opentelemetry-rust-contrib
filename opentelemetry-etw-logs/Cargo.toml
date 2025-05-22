@@ -11,7 +11,7 @@ keywords = ["opentelemetry", "log", "trace", "etw"]
 license = "Apache-2.0"
 
 [dependencies]
-tracelogging_dynamic = "1.2.1"
+tracelogging_dynamic = "1.2.4"
 opentelemetry = { workspace = true, features = ["logs"] }
 opentelemetry_sdk = { workspace = true, features = ["logs"] }
 tracing = { version = "0.1", optional = true }

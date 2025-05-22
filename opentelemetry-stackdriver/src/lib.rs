@@ -34,10 +34,13 @@ use opentelemetry_semantic_conventions as semconv;
 use thiserror::Error;
 #[cfg(feature = "gcp-authorizer")]
 use tonic::metadata::MetadataValue;
-use tonic::{
-    transport::{Channel, ClientTlsConfig},
-    Code, Request,
-};
+#[cfg(any(
+    feature = "tls-ring",
+    feature = "tls-native-roots",
+    feature = "tls-webpki-roots"
+))]
+use tonic::transport::ClientTlsConfig;
+use tonic::{transport::Channel, Code, Request};
 
 #[allow(clippy::derive_partial_eq_without_eq)] // tonic doesn't derive Eq for generated types
 #[allow(clippy::doc_overindented_list_items)]
@@ -173,30 +176,46 @@ impl Builder {
         } = self;
         let uri = http::uri::Uri::from_static("https://cloudtrace.googleapis.com:443");
 
-        #[cfg(all(feature = "tls-native-roots", not(feature = "tls-webpki-roots")))]
-        let tls_config = ClientTlsConfig::new().with_native_roots();
-        #[cfg(feature = "tls-webpki-roots")]
-        let tls_config = ClientTlsConfig::new().with_webpki_roots();
-        #[cfg(not(any(feature = "tls-native-roots", feature = "tls-webpki-roots")))]
-        let tls_config = ClientTlsConfig::new();
+        #[cfg(any(
+            feature = "tls-ring",
+            feature = "tls-native-roots",
+            feature = "tls-webpki-roots"
+        ))]
+        let tls_config = ClientTlsConfig::new().with_enabled_roots();
 
-        let trace_channel = Channel::builder(uri)
+        let trace_channel_builder = Channel::builder(uri);
+        #[cfg(any(
+            feature = "tls-ring",
+            feature = "tls-native-roots",
+            feature = "tls-webpki-roots"
+        ))]
+        let trace_channel_builder = trace_channel_builder
             .tls_config(tls_config.clone())
-            .map_err(|e| Error::Transport(e.into()))?
+            .map_err(|e| Error::Transport(e.into()))?;
+
+        let trace_channel = trace_channel_builder
             .connect()
             .await
             .map_err(|e| Error::Transport(e.into()))?;
 
         let log_client = match log_context {
             Some(log_context) => {
-                let log_channel = Channel::builder(http::uri::Uri::from_static(
+                let log_channel_builder = Channel::builder(http::uri::Uri::from_static(
                     "https://logging.googleapis.com:443",
-                ))
-                .tls_config(tls_config)
-                .map_err(|e| Error::Transport(e.into()))?
-                .connect()
-                .await
-                .map_err(|e| Error::Transport(e.into()))?;
+                ));
+                #[cfg(any(
+                    feature = "tls-ring",
+                    feature = "tls-native-roots",
+                    feature = "tls-webpki-roots"
+                ))]
+                let log_channel_builder = log_channel_builder
+                    .tls_config(tls_config)
+                    .map_err(|e| Error::Transport(e.into()))?;
+
+                let log_channel = log_channel_builder
+                    .connect()
+                    .await
+                    .map_err(|e| Error::Transport(e.into()))?;
 
                 Some(LogClient {
                     client: LoggingServiceV2Client::new(log_channel),

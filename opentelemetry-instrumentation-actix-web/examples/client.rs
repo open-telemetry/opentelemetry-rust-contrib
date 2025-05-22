@@ -13,16 +13,16 @@ async fn execute_request(client: awc::Client) -> io::Result<String> {
         .trace_request()
         .send()
         .await
-        .map_err(|err| io::Error::new(io::ErrorKind::Other, err.to_string()))?;
+        .map_err(|err| io::Error::other(err.to_string()))?;
 
     let bytes = response
         .body()
         .await
-        .map_err(|err| io::Error::new(io::ErrorKind::Other, err.to_string()))?;
+        .map_err(|err| io::Error::other(err.to_string()))?;
 
     std::str::from_utf8(&bytes)
         .map(|s| s.to_owned())
-        .map_err(|err| io::Error::new(io::ErrorKind::Other, err))
+        .map_err(io::Error::other)
 }
 
 #[actix_web::main]

@@ -1,5 +1,5 @@
 use core::fmt;
-use geneva_uploader::GenevaUploader;
+use geneva_uploader::Uploader;
 use opentelemetry_proto::transform::common::tonic::ResourceAttributesWithSchema;
 use opentelemetry_proto::transform::logs::tonic::group_logs_by_resource_and_scope;
 use opentelemetry_sdk::error::OTelSdkResult;
@@ -10,12 +10,12 @@ use std::sync::{atomic, Arc};
 pub struct GenevaExporter {
     resource: ResourceAttributesWithSchema,
     _is_shutdown: atomic::AtomicBool,
-    uploader: Arc<GenevaUploader>,
+    uploader: Arc<Uploader>,
 }
 
 impl GenevaExporter {
     /// Create a new GenavaExporter
-    pub fn new(uploader: Arc<GenevaUploader>) -> Self {
+    pub fn new(uploader: Arc<Uploader>) -> Self {
         Self {
             resource: ResourceAttributesWithSchema::default(),
             _is_shutdown: atomic::AtomicBool::new(false),
@@ -29,7 +29,7 @@ impl Default for GenevaExporter {
         GenevaExporter {
             resource: ResourceAttributesWithSchema::default(),
             _is_shutdown: atomic::AtomicBool::new(false),
-            uploader: Arc::new(GenevaUploader),
+            uploader: Arc::new(Uploader),
         }
     }
 }
@@ -45,7 +45,7 @@ impl opentelemetry_sdk::logs::LogExporter for GenevaExporter {
     async fn export(&self, _batch: LogBatch<'_>) -> OTelSdkResult {
         //serialize to otlp format
         let otlp = group_logs_by_resource_and_scope(_batch, &self.resource);
-        //send to Geneva using geneva-uploader
+        //TODO send to Geneva using geneva-uploader
         let _ = self.uploader.upload_logs(otlp).await;
 
         Ok(())

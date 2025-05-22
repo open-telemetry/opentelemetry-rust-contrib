@@ -2,6 +2,10 @@
 
 ## vNext
 
+### Added
+
+- Add "process.runtime.name/process.runtime.version/process.runtime.description" attributes into the `ProcessResourceDetector`.
+
 ## v0.8.0
 
 ### Changed

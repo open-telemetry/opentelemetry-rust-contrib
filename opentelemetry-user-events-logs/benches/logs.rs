@@ -29,19 +29,20 @@ use criterion::{criterion_group, criterion_main, Criterion};
 use opentelemetry_appender_tracing::layer as tracing_layer;
 use opentelemetry_sdk::logs::SdkLoggerProvider;
 use opentelemetry_sdk::Resource;
-use opentelemetry_user_events_logs::UserEventsLoggerProviderBuilderExt;
+use opentelemetry_user_events_logs::Processor;
 use tracing::error;
 use tracing_subscriber::prelude::*;
 use tracing_subscriber::Registry;
 
 fn benchmark_with_ot_layer(c: &mut Criterion, name: &str, num_attributes: usize) {
+    let user_event_processor = Processor::builder("myprovider").build().unwrap();
     let provider = SdkLoggerProvider::builder()
         .with_resource(
             Resource::builder_empty()
                 .with_service_name("benchmark")
                 .build(),
         )
-        .with_user_events_exporter("myprovider")
+        .with_log_processor(user_event_processor)
         .build();
     let ot_layer = tracing_layer::OpenTelemetryTracingBridge::new(&provider);
     let subscriber = Registry::default().with(ot_layer);
