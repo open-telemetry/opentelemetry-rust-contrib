@@ -15,10 +15,10 @@ use tracing::{error, info, warn};
 use tracing_subscriber::{prelude::*, EnvFilter};
 
 /*
-export GENEVA_ENDPOINT="https://gcs.ppe.monitoring.core.windows.net"
+export GENEVA_ENDPOINT="https://abc.azurewebsites.net"
 export GENEVA_ENVIRONMENT="Test"
-export GENEVA_ACCOUNT="PipelineAgent2Demo"
-export GENEVA_NAMESPACE="PAdemo2"
+export GENEVA_ACCOUNT="myaccount"
+export GENEVA_NAMESPACE="myns"
 export GENEVA_REGION="eastus"
 export GENEVA_CERT_PATH="/tmp/client.p12"
 export GENEVA_CERT_PASSWORD="password"
