@@ -411,28 +411,24 @@ mod tests {
         // Add attributes for each AnyValue variant
         // String variant
         record.add_attribute("string_attr", "string value");
-        
+
         // Int variant
         record.add_attribute("int_attr", 42i64);
-        
+
         // Double variant
         record.add_attribute("double_attr", 3.14159);
-        
+
         // Boolean variant
         record.add_attribute("bool_attr", true);
-        
+
         // Bytes variant
         let bytes_data = vec![1, 2, 3, 4, 5];
         record.add_attribute("bytes_attr", AnyValue::Bytes(Box::new(bytes_data)));
-        
+
         // ListAny variant
-        let list_values = vec![
-            AnyValue::Int(1), 
-            AnyValue::Int(2), 
-            AnyValue::Int(3)
-        ];
+        let list_values = vec![AnyValue::Int(1), AnyValue::Int(2), AnyValue::Int(3)];
         record.add_attribute("list_attr", AnyValue::ListAny(Box::new(list_values)));
-        
+
         // Map variant
         let mut map_values = std::collections::HashMap::new();
         map_values.insert(Key::new("key1"), AnyValue::String("value1".into()));
