@@ -20,9 +20,15 @@ pub(crate) struct UserEventsExporter {
     cloud_role_instance: Option<String>,
 }
 
+// Constants for the UserEventsExporter
 const EVENT_ID: &str = "event_id";
+const NO_LISTENER_ERROR: i32 = 9;
+const PAYLOAD_SIZE_EXCEEDED_ERROR: i32 = 34;
+const CS_VERSION: u32 = 1024; // 0x400 in hex
+const DEFAULT_LOG_TYPE_NAME: &'static str = "Log";
 
 impl UserEventsExporter {
+
     /// Create instance of the exporter
     pub(crate) fn new(provider_name: &str) -> Self {
         let mut eventheader_provider: Provider =
@@ -147,6 +153,53 @@ impl UserEventsExporter {
         // TODO: Add callback to get event name from the log record
         "Log"
     }
+    
+    /// Builds Part A of the Common Schema format
+    fn build_part_a(&self, eb: &mut EventBuilder, log_record: &opentelemetry_sdk::logs::SdkLogRecord) {
+        let mut cs_a_count = 0;
+        let mut cs_a_bookmark: usize = 0;
+        eb.add_struct_with_bookmark("PartA", 2, 0, &mut cs_a_bookmark);
+
+        let event_time: SystemTime = log_record
+            .timestamp()
+            .or(log_record.observed_timestamp())
+            .unwrap_or_else(SystemTime::now);
+        let time: String = chrono::DateTime::to_rfc3339(
+            &chrono::DateTime::<chrono::Utc>::from(event_time),
+        );
+
+        cs_a_count += 1; // for event_time
+        // Add time to PartA
+        eb.add_str("time", time, FieldFormat::Default, 0);
+
+        if let Some(trace_context) = log_record.trace_context() {
+            cs_a_count += 2; // for ext_dt_traceId and ext_dt_spanId
+            eb.add_str(
+                "ext_dt_traceId",
+                trace_context.trace_id.to_string(),
+                FieldFormat::Default,
+                0,
+            );
+            eb.add_str(
+                "ext_dt_spanId",
+                trace_context.span_id.to_string(),
+                FieldFormat::Default,
+                0,
+            );
+        }
+
+        if let Some(cloud_role) = &self.cloud_role {
+            cs_a_count += 1;
+            eb.add_str("ext_cloud_role", cloud_role, FieldFormat::Default, 0);
+        }
+
+        if let Some(cloud_role_instance) = &self.cloud_role_instance {
+            cs_a_count += 1;
+            eb.add_str("ext_cloud_roleInstance", cloud_role_instance, FieldFormat::Default, 0);
+        }
+
+        eb.set_struct_field_count(cs_a_bookmark, cs_a_count);
+    }
 
     pub(crate) fn export_log_data(
         &self,
@@ -186,52 +239,10 @@ impl UserEventsExporter {
                 let event_name = self.get_event_name(log_record);
                 eb.reset(event_name, 0);
 
-                eb.add_value("__csver__", 1024, FieldFormat::UnsignedInt, 0); // 0x400 in hex
+                eb.add_value("__csver__", CS_VERSION, FieldFormat::UnsignedInt, 0);
 
                 // populate CS PartA
-                let mut cs_a_count = 0;
-                let mut cs_a_bookmark: usize = 0;
-                eb.add_struct_with_bookmark("PartA", 2, 0, &mut cs_a_bookmark);
-
-                let event_time: SystemTime = log_record
-                    .timestamp()
-                    .or(log_record.observed_timestamp())
-                    .unwrap_or_else(SystemTime::now);
-                let time: String = chrono::DateTime::to_rfc3339(
-                    &chrono::DateTime::<chrono::Utc>::from(event_time),
-                );
-
-                cs_a_count += 1; // for event_time
-                // Add time to PartA
-                eb.add_str("time", time, FieldFormat::Default, 0);
-
-                if let Some(trace_context) = log_record.trace_context() {
-                    cs_a_count += 2; // for ext_dt_traceId and ext_dt_spanId
-                    eb.add_str(
-                        "ext_dt_traceId",
-                        trace_context.trace_id.to_string(),
-                        FieldFormat::Default,
-                        0,
-                    );
-                    eb.add_str(
-                        "ext_dt_spanId",
-                        trace_context.span_id.to_string(),
-                        FieldFormat::Default,
-                        0,
-                    );
-                }
-
-                if let Some(cloud_role) = &self.cloud_role {
-                    cs_a_count += 1;
-                    eb.add_str("ext_cloud_role", cloud_role, FieldFormat::Default, 0);
-                }
-
-                if let Some(cloud_role_instance) = &self.cloud_role_instance {
-                    cs_a_count += 1;
-                    eb.add_str("ext_cloud_roleInstance", cloud_role_instance, FieldFormat::Default, 0);
-                }
-
-                eb.set_struct_field_count(cs_a_bookmark, cs_a_count);
+                self.build_part_a(eb, log_record);
 
                 //populate CS PartC
                 // TODO: See if should hold on to this, and add PartB first then PartC
@@ -264,7 +275,7 @@ impl UserEventsExporter {
                 let mut cs_b_bookmark: usize = 0;
                 let mut cs_b_count = 0;
                 eb.add_struct_with_bookmark("PartB", 1, 0, &mut cs_b_bookmark);
-                eb.add_str("_typeName", "Log", FieldFormat::Default, 0);
+                eb.add_str("_typeName", DEFAULT_LOG_TYPE_NAME, FieldFormat::Default, 0);
                 cs_b_count += 1;
 
                 if let Some(body) = log_record.body() {
@@ -319,9 +330,9 @@ impl UserEventsExporter {
                 let result = eb.write(event_set, None, None);
                 if result > 0 {
                     // Specially treat the case where there is no listener or payload size exceeds the limit.
-                    if result == 9 {
+                    if result == NO_LISTENER_ERROR {
                         Err(OTelSdkError::InternalFailure("Failed to write event to user_events tracepoint as there is no listener. This can occur if there was a listener when we started serializing the event, but it was removed before the event was written".to_string()))
-                    } else if result == 34 {
+                    } else if result == PAYLOAD_SIZE_EXCEEDED_ERROR {
                         Err(OTelSdkError::InternalFailure("Failed to write event to user_events tracepoint as total payload size exceeded 64KB limit".to_string()))
                     } else {
                         // For all other cases, return failure and include the result code.
