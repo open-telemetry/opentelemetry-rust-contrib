@@ -1,23 +1,19 @@
-//! run with `$ cargo run --example basic --all-features
+//! run with `$ cargo run --example basic-metrics --all-features
 use opentelemetry::{metrics::MeterProvider as _, KeyValue};
-use opentelemetry_sdk::{
-    metrics::{PeriodicReader, SdkMeterProvider},
-    Resource,
-};
+use opentelemetry_sdk::{metrics::SdkMeterProvider, Resource};
 use opentelemetry_user_events_metrics::MetricsExporter;
 use std::thread;
 use std::time::Duration;
 use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt, EnvFilter, Layer};
 
 fn init_metrics(exporter: MetricsExporter) -> SdkMeterProvider {
-    let reader = PeriodicReader::builder(exporter).build();
     SdkMeterProvider::builder()
         .with_resource(
             Resource::builder_empty()
                 .with_attributes(vec![KeyValue::new("service.name", "metric-demo")])
                 .build(),
         )
-        .with_reader(reader)
+        .with_periodic_exporter(exporter)
         .build()
 }
 
