@@ -28,7 +28,6 @@ const CS_VERSION: u32 = 1024; // 0x400 in hex
 const DEFAULT_LOG_TYPE_NAME: &'static str = "Log";
 
 impl UserEventsExporter {
-
     /// Create instance of the exporter
     pub(crate) fn new(provider_name: &str) -> Self {
         let mut eventheader_provider: Provider =
@@ -153,9 +152,13 @@ impl UserEventsExporter {
         // TODO: Add callback to get event name from the log record
         "Log"
     }
-    
+
     /// Builds Part A of the Common Schema format
-    fn build_part_a(&self, eb: &mut EventBuilder, log_record: &opentelemetry_sdk::logs::SdkLogRecord) {
+    fn build_part_a(
+        &self,
+        eb: &mut EventBuilder,
+        log_record: &opentelemetry_sdk::logs::SdkLogRecord,
+    ) {
         let mut cs_a_count = 0;
         let mut cs_a_bookmark: usize = 0;
         eb.add_struct_with_bookmark("PartA", 2, 0, &mut cs_a_bookmark);
@@ -164,12 +167,11 @@ impl UserEventsExporter {
             .timestamp()
             .or(log_record.observed_timestamp())
             .unwrap_or_else(SystemTime::now);
-        let time: String = chrono::DateTime::to_rfc3339(
-            &chrono::DateTime::<chrono::Utc>::from(event_time),
-        );
+        let time: String =
+            chrono::DateTime::to_rfc3339(&chrono::DateTime::<chrono::Utc>::from(event_time));
 
         cs_a_count += 1; // for event_time
-        // Add time to PartA
+                         // Add time to PartA
         eb.add_str("time", time, FieldFormat::Default, 0);
 
         if let Some(trace_context) = log_record.trace_context() {
@@ -195,7 +197,12 @@ impl UserEventsExporter {
 
         if let Some(cloud_role_instance) = &self.cloud_role_instance {
             cs_a_count += 1;
-            eb.add_str("ext_cloud_roleInstance", cloud_role_instance, FieldFormat::Default, 0);
+            eb.add_str(
+                "ext_cloud_roleInstance",
+                cloud_role_instance,
+                FieldFormat::Default,
+                0,
+            );
         }
 
         eb.set_struct_field_count(cs_a_bookmark, cs_a_count);
@@ -242,7 +249,7 @@ impl UserEventsExporter {
                 eb.add_value("__csver__", CS_VERSION, FieldFormat::UnsignedInt, 0);
 
                 // populate CS PartA
-                self.build_part_a(eb, log_record);
+                self.build_part_a(&mut eb, log_record);
 
                 //populate CS PartC
                 // TODO: See if should hold on to this, and add PartB first then PartC
