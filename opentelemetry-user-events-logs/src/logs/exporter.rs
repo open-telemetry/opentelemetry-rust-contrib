@@ -27,12 +27,97 @@ const PAYLOAD_SIZE_EXCEEDED_ERROR: i32 = 34;
 const CS_VERSION: u32 = 1024; // 0x400 in hex
 const DEFAULT_LOG_TYPE_NAME: &str = "Log";
 
+// Constants for EventSet registration error codes
+const REGISTRATION_SUCCESS: i32 = 0;
+const TRACEFS_NOT_MOUNTED_ERROR: i32 = 95;
+const PERMISSION_DENIED_ERROR: i32 = 13;
+
+/// Register event sets with the EventHeader provider
+fn register_events(eventheader_provider: &mut eventheader_dynamic::Provider) -> Vec<Arc<EventSet>> {
+    let keyword: u64 = 1;
+    // Levels are added in the same order as their int representation,
+    // to ensure that the index of the Vec matches the int representation.
+    let levels = [
+        eventheader::Level::CriticalError,
+        eventheader::Level::Error,
+        eventheader::Level::Warning,
+        eventheader::Level::Informational,
+        eventheader::Level::Verbose,
+    ];
+
+    let mut event_sets = Vec::with_capacity(6);
+    // Push a dummy EventSet to position 0
+    // This is done so that EventSets can be retrieved using
+    // level as index to the Vec.
+    event_sets.push(Arc::new(EventSet::new_unregistered()));
+
+    for &level in levels.iter() {
+        let event_set = eventheader_provider.register_set(level, keyword);
+        match event_set.errno() {
+            REGISTRATION_SUCCESS => {
+                otel_debug!(name: "UserEvents.RegisteredTracePoint",  event_set = format!("{:?}", event_set));
+            }
+            TRACEFS_NOT_MOUNTED_ERROR => {
+                otel_info!(name: "UserEvents.TraceFSNotMounted", event_set = format!("{:?}", event_set));
+            }
+            PERMISSION_DENIED_ERROR => {
+                otel_info!(name: "UserEvents.PermissionDenied", event_set = format!("{:?}", event_set));
+            }
+
+            _ => {
+                otel_info!(
+                    name: "UserEvents.FailedToRegisterTracePoint",
+                    event_set = format!("{:?}", event_set)
+                );
+            }
+        }
+
+        // Always push the event set to the vector irrespective of whether
+        // there is a listener or not as listeners can be added later. In
+        // the event of failed registrations also, EventSet is pushed to the
+        // vector, but it'll not be enabled.
+        // This also ensures we can use the level as index to the Vec.
+        event_sets.push(event_set);
+    }
+    event_sets
+}
+
+/// Maps OpenTelemetry severity levels to EventHeader levels
+const fn get_severity_level(severity: Severity) -> Level {
+    match severity {
+        Severity::Debug
+        | Severity::Debug2
+        | Severity::Debug3
+        | Severity::Debug4
+        | Severity::Trace
+        | Severity::Trace2
+        | Severity::Trace3
+        | Severity::Trace4 => eventheader::Level::Verbose,
+
+        Severity::Info | Severity::Info2 | Severity::Info3 | Severity::Info4 => {
+            eventheader::Level::Informational
+        }
+
+        Severity::Error | Severity::Error2 | Severity::Error3 | Severity::Error4 => {
+            eventheader::Level::Error
+        }
+
+        Severity::Fatal | Severity::Fatal2 | Severity::Fatal3 | Severity::Fatal4 => {
+            eventheader::Level::CriticalError
+        }
+
+        Severity::Warn | Severity::Warn2 | Severity::Warn3 | Severity::Warn4 => {
+            eventheader::Level::Warning
+        }
+    }
+}
+
 impl UserEventsExporter {
     /// Create instance of the exporter
     pub(crate) fn new(provider_name: &str) -> Self {
         let mut eventheader_provider: Provider =
             Provider::new(provider_name, &Provider::new_options());
-        let event_sets = Self::register_events(&mut eventheader_provider);
+        let event_sets = register_events(&mut eventheader_provider);
         otel_debug!(name: "UserEvents.Created", provider_name = provider_name);
         let name = eventheader_provider.name().to_string();
         UserEventsExporter {
@@ -42,57 +127,6 @@ impl UserEventsExporter {
             cloud_role: None,
             cloud_role_instance: None,
         }
-    }
-
-    fn register_events(
-        eventheader_provider: &mut eventheader_dynamic::Provider,
-    ) -> Vec<Arc<EventSet>> {
-        let keyword: u64 = 1;
-        // Levels are added in the same order as their int representation,
-        // to ensure that the index of the Vec matches the int representation.
-        let levels = [
-            eventheader::Level::CriticalError,
-            eventheader::Level::Error,
-            eventheader::Level::Warning,
-            eventheader::Level::Informational,
-            eventheader::Level::Verbose,
-        ];
-
-        let mut event_sets = Vec::with_capacity(6);
-        // Push a dummy EventSet to position 0
-        // This is done so that EventSets can be retrieved using
-        // level as index to the Vec.
-        event_sets.push(Arc::new(EventSet::new_unregistered()));
-
-        for &level in levels.iter() {
-            let event_set = eventheader_provider.register_set(level, keyword);
-            match event_set.errno() {
-                0 => {
-                    otel_debug!(name: "UserEvents.RegisteredTracePoint",  event_set = format!("{:?}", event_set));
-                }
-                95 => {
-                    otel_info!(name: "UserEvents.TraceFSNotMounted", event_set = format!("{:?}", event_set));
-                }
-                13 => {
-                    otel_info!(name: "UserEvents.PermissionDenied", event_set = format!("{:?}", event_set));
-                }
-
-                _ => {
-                    otel_info!(
-                        name: "UserEvents.FailedToRegisterTracePoint",
-                        event_set = format!("{:?}", event_set)
-                    );
-                }
-            }
-
-            // Always push the event set to the vector irrespective of whether
-            // there is a listener or not as listeners can be added later. In
-            // the event of failed registrations also, EventSet is pushed to the
-            // vector, but it'll not be enabled.
-            // This also ensures we can use the level as index to the Vec.
-            event_sets.push(event_set);
-        }
-        event_sets
     }
 
     fn add_attribute_to_event(&self, eb: &mut EventBuilder, (key, value): (&Key, &AnyValue)) {
@@ -114,35 +148,6 @@ impl UserEventsExporter {
             // TODO: Add support for complex types with json serialization in future.
             _ => {
                 eb.add_str(field_name, "", FieldFormat::Default, 0);
-            }
-        }
-    }
-
-    const fn get_severity_level(severity: Severity) -> Level {
-        match severity {
-            Severity::Debug
-            | Severity::Debug2
-            | Severity::Debug3
-            | Severity::Debug4
-            | Severity::Trace
-            | Severity::Trace2
-            | Severity::Trace3
-            | Severity::Trace4 => eventheader::Level::Verbose,
-
-            Severity::Info | Severity::Info2 | Severity::Info3 | Severity::Info4 => {
-                eventheader::Level::Informational
-            }
-
-            Severity::Error | Severity::Error2 | Severity::Error3 | Severity::Error4 => {
-                eventheader::Level::Error
-            }
-
-            Severity::Fatal | Severity::Fatal2 | Severity::Fatal3 | Severity::Fatal4 => {
-                eventheader::Level::CriticalError
-            }
-
-            Severity::Warn | Severity::Warn2 | Severity::Warn3 | Severity::Warn4 => {
-                eventheader::Level::Warning
             }
         }
     }
@@ -218,7 +223,7 @@ impl UserEventsExporter {
             .ok_or(OTelSdkError::InternalFailure(
                 "Severity number is required for user-events exporter".to_string(),
             ))?;
-        let level = Self::get_severity_level(otel_severity);
+        let level = get_severity_level(otel_severity);
 
         // EventSets are stored in the same order as their int representation,
         // so we can use the level as index to the Vec.
@@ -396,7 +401,7 @@ impl opentelemetry_sdk::logs::LogExporter for UserEventsExporter {
     fn event_enabled(&self, level: Severity, _target: &str, _name: Option<&str>) -> bool {
         // EventSets are stored in the same order as their int representation,
         // so we can use the level as index to the Vec.
-        let level = Self::get_severity_level(level);
+        let level = get_severity_level(level);
         match self.event_sets.get(level.as_int() as usize) {
             Some(event_set) => event_set.enabled(),
             None => false,
