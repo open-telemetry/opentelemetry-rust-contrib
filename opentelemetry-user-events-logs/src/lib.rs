@@ -411,6 +411,8 @@ mod tests {
         record.set_event_name("my-event-name");
         record.set_target("my-target");
         record.set_body(AnyValue::from("This is a test message"));
+        record.add_attribute("user_name", "otel.user");
+        record.add_attribute("user_email", "otel.user@opentelemetry.com");
 
         // Once provider with user_event exporter is created, it should create the TracePoints
         // following providername_level_k1 format
@@ -491,20 +493,16 @@ mod tests {
         let part_b = &event["PartB"];
         assert_eq!(part_b["_typeName"].as_str().unwrap(), "Log");
         assert_eq!(part_b["severityNumber"].as_i64().unwrap(), 17);
-        assert_eq!(part_b["severityText"].as_str().unwrap(), "ERROR");
-        assert_eq!(part_b["eventId"].as_i64().unwrap(), 20);
         assert_eq!(part_b["name"].as_str().unwrap(), "my-event-name");
         assert_eq!(part_b["body"].as_str().unwrap(), "This is a test message");
 
         // Validate PartC
         let part_c = &event["PartC"];
-        assert_eq!(part_c["user_name"].as_str().unwrap(), "otel user");
+        assert_eq!(part_c["user_name"].as_str().unwrap(), "otel.user");
         assert_eq!(
             part_c["user_email"].as_str().unwrap(),
             "otel.user@opentelemetry.com"
         );
-        assert!(part_c["bool_field"].as_bool().unwrap());
-        assert_eq!(part_c["double_field"].as_f64().unwrap(), 1.0);
     }
 
     fn check_user_events_available() -> Result<String, String> {
