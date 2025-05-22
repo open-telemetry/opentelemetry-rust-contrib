@@ -383,6 +383,128 @@ mod tests {
         );
     }
 
+    #[ignore]
+    #[test]
+    fn integration_test_direct() {
+        use opentelemetry::logs::AnyValue;
+        use opentelemetry::logs::LogRecord;
+        use opentelemetry::logs::Logger;
+        use opentelemetry::logs::LoggerProvider;
+
+        // Run using the below command
+        // sudo -E ~/.cargo/bin/cargo test integration_test_direct -- --nocapture --ignored
+
+        // Basic check if user_events are available
+        check_user_events_available().expect("Kernel does not support user_events. Verify your distribution/kernel supports user_events: https://docs.kernel.org/trace/user_events.html.");
+        let user_event_processor = Processor::builder("myprovider").build().unwrap();
+
+        let logger_provider = LoggerProviderBuilder::default()
+            .with_resource(Resource::builder().with_service_name("myrolename").build())
+            .with_log_processor(user_event_processor)
+            .build();
+
+        let logger = logger_provider.logger("test");
+
+        let mut record = logger.create_log_record();
+        record.set_event_name("my-event-name");
+        record.set_target("my-target");
+        record.set_body(AnyValue::from("This is a test message"));
+
+        // Once provider with user_event exporter is created, it should create the TracePoints
+        // following providername_level_k1 format
+        // Validate that the TracePoints are created.
+        let user_event_status = check_user_events_available().expect("Kernel does not support user_events. Verify your distribution/kernel supports user_events: https://docs.kernel.org/trace/user_events.html.");
+        assert!(user_event_status.contains("myprovider_L1K1"));
+        assert!(user_event_status.contains("myprovider_L2K1"));
+        assert!(user_event_status.contains("myprovider_L3K1"));
+        assert!(user_event_status.contains("myprovider_L4K1"));
+        assert!(user_event_status.contains("myprovider_L5K1"));
+
+        // Start perf recording in a separate thread and emit logs in parallel.
+        let perf_thread =
+            std::thread::spawn(|| run_perf_and_decode(5, "user_events:myprovider_L2K1"));
+
+        // Give a little time for perf to start recording
+        std::thread::sleep(std::time::Duration::from_millis(1000));
+
+        // ACT
+        logger.emit(record);
+
+        // Wait for the perf thread to complete and get the results
+        let result = perf_thread.join().expect("Perf thread panicked");
+
+        assert!(result.is_ok());
+        let json_content = result.unwrap();
+        assert!(!json_content.is_empty());
+
+        let formatted_output = json_content.trim().to_string();
+        println!("Formatted output: {}", formatted_output);
+        /*
+                // Sample output from perf-decode
+                {
+        "./perf.data": [
+          { "n": "myprovider:Log", "__csver__": 1024, "PartA": { "time": "2025-03-07T16:31:28.279214367+00:00", "ext_cloud_role": "myrolename"  }, "PartC": { "user_name": "otel user", "user_email": "otel.user@opentelemetry.com" }, "PartB": { "_typeName": "Log", "severityNumber": 2, "severityText": "ERROR", "eventId": 20, "name": "my-event-name" }, "meta": { "time": 81252.403220286, "cpu": 4, "pid": 21084, "tid": 21085, "level": 2, "keyword": "0x1" } } ]
+        }
+                 */
+
+        let json_value: Value = from_str(&formatted_output).expect("Failed to parse JSON");
+        let perf_data_key = json_value
+            .as_object()
+            .expect("JSON is not an object")
+            .keys()
+            .find(|k| k.contains("perf.data"))
+            .expect("No perf.data key found in JSON");
+
+        let events = json_value[perf_data_key]
+            .as_array()
+            .expect("Events for perf.data is not an array");
+
+        // Find the specific event. Its named providername:eventname format.
+        let event = events
+            .iter()
+            .find(|e| {
+                if let Some(name) = e.get("n") {
+                    name.as_str().unwrap_or("") == "myprovider:Log"
+                } else {
+                    false
+                }
+            })
+            .expect("Event 'myprovider:Log' not found");
+
+        // Validate event structure and fields
+        assert_eq!(event["n"].as_str().unwrap(), "myprovider:Log");
+        assert_eq!(event["__csver__"].as_i64().unwrap(), 1024);
+
+        // Validate PartA
+        let part_a = &event["PartA"];
+        // Only check if the time field exists, not the actual value
+        assert!(part_a.get("time").is_some(), "PartA.time is missing");
+
+        let role = part_a
+            .get("ext_cloud_role")
+            .expect("PartA.ext_cloud_role is missing");
+        assert_eq!(role.as_str().unwrap(), "myrolename");
+
+        // Validate PartB
+        let part_b = &event["PartB"];
+        assert_eq!(part_b["_typeName"].as_str().unwrap(), "Log");
+        assert_eq!(part_b["severityNumber"].as_i64().unwrap(), 17);
+        assert_eq!(part_b["severityText"].as_str().unwrap(), "ERROR");
+        assert_eq!(part_b["eventId"].as_i64().unwrap(), 20);
+        assert_eq!(part_b["name"].as_str().unwrap(), "my-event-name");
+        assert_eq!(part_b["body"].as_str().unwrap(), "This is a test message");
+
+        // Validate PartC
+        let part_c = &event["PartC"];
+        assert_eq!(part_c["user_name"].as_str().unwrap(), "otel user");
+        assert_eq!(
+            part_c["user_email"].as_str().unwrap(),
+            "otel.user@opentelemetry.com"
+        );
+        assert!(part_c["bool_field"].as_bool().unwrap());
+        assert_eq!(part_c["double_field"].as_f64().unwrap(), 1.0);
+    }
+
     fn check_user_events_available() -> Result<String, String> {
         let output = Command::new("sudo")
             .arg("cat")
