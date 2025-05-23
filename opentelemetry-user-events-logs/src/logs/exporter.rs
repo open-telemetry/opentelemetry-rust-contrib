@@ -22,7 +22,7 @@ pub(crate) struct UserEventsExporter {
     event_sets: Vec<Arc<EventSet>>,
     cloud_role: Option<String>,
     cloud_role_instance: Option<String>,
-    event_name_callback: EventNameCallback,
+    event_name_callback: Option<EventNameCallback>,
 }
 
 // Constants for the UserEventsExporter
@@ -119,7 +119,7 @@ const fn get_severity_level(severity: Severity) -> Level {
 
 impl UserEventsExporter {
     /// Create instance of the exporter
-    pub(crate) fn new(provider_name: &str, event_name_callback: EventNameCallback) -> Self {
+    pub(crate) fn new(provider_name: &str, event_name_callback: Option<EventNameCallback>) -> Self {
         let mut eventheader_provider: Provider =
             Provider::new(provider_name, &Provider::new_options());
         let event_sets = register_events(&mut eventheader_provider);
@@ -158,9 +158,12 @@ impl UserEventsExporter {
         }
     }
 
-    /// Gets the event name from the log record using the provided callback
+    /// Gets the event name from the log record using the provided callback or returns "Log" if no callback is set
     fn get_event_name<'a>(&self, record: &'a opentelemetry_sdk::logs::SdkLogRecord) -> &'a str {
-        (self.event_name_callback)(record)
+        match &self.event_name_callback {
+            Some(callback) => (callback)(record),
+            None => DEFAULT_LOG_TYPE_NAME,
+        }
     }
 
     /// Builds Part A of the Common Schema format
@@ -428,7 +431,16 @@ mod tests {
     use super::*;
     #[test]
     fn exporter_debug() {
-        let exporter = UserEventsExporter::new("test_provider", Box::new(|_| "Test"));
+        let exporter = UserEventsExporter::new("test_provider", Some(Box::new(|_| "Test")));
+        assert_eq!(
+            format!("{:?}", exporter),
+            "user_events log exporter (provider name: test_provider)"
+        );
+    }
+    
+    #[test]
+    fn exporter_debug_no_callback() {
+        let exporter = UserEventsExporter::new("test_provider", None);
         assert_eq!(
             format!("{:?}", exporter),
             "user_events log exporter (provider name: test_provider)"

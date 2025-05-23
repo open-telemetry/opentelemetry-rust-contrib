@@ -163,12 +163,8 @@ impl<'a> ProcessorBuilder<'a> {
             return Err("Provider name must contain only ASCII letters, digits, and '_'.".into());
         }
 
-        // Use the provided callback or a default one that returns "Log"
-        let event_name_callback = self.event_name_callback.unwrap_or_else(|| {
-            Box::new(|_record: &opentelemetry_sdk::logs::SdkLogRecord| -> &str { "Log" })
-        });
 
-        let exporter = UserEventsExporter::new(self.provider_name, event_name_callback);
+        let exporter = UserEventsExporter::new(self.provider_name, self.event_name_callback);
         Ok(Processor { exporter })
     }
 }
