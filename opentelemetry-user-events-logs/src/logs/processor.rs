@@ -310,7 +310,7 @@ mod tests {
 
     #[test]
     fn test_event_name_callback() {
-        use opentelemetry::logs::{AnyValue, LogRecord};
+        use opentelemetry::logs::LogRecord;
 
         // Create a processor with a custom event name callback
         let processor = Processor::builder("test_provider")
