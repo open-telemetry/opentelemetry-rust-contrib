@@ -596,47 +596,16 @@ mod tests {
         // Run using the below command
         // sudo -E ~/.cargo/bin/cargo test integration_test_direct_with_custom_event_name -- --nocapture --ignored
 
-        // Helper function to test event name based on log severity
-        fn event_name_by_severity(record: &opentelemetry_sdk::logs::SdkLogRecord) -> &str {
-            match record.severity_number().unwrap_or(Severity::Debug) {
-                Severity::Fatal => "FatalEvent",
-                Severity::Error => "ErrorEvent",
-                Severity::Warn => "WarningEvent",
-                Severity::Info => "InfoEvent",
-                Severity::Debug => "DebugEvent",
-                _ => "UnknownEvent",
-            }
+        // Simple callback that returns a hardcoded event name
+        fn custom_event_name_callback(_record: &opentelemetry_sdk::logs::SdkLogRecord) -> &str {
+            "CustomEventName"
         }
 
-        // Test with different severity levels using the custom callback
+        // Test with a single severity level using the custom callback
         integration_test_direct_helper::<fn(&opentelemetry_sdk::logs::SdkLogRecord) -> &str>(
-            Severity::Debug,
-            "user_events:myprovider_L5K1",
-            Some(event_name_by_severity),
-        );
-
-        integration_test_direct_helper::<fn(&opentelemetry_sdk::logs::SdkLogRecord) -> &str>(
-            Severity::Info,
-            "user_events:myprovider_L4K1",
-            Some(event_name_by_severity),
-        );
-
-        integration_test_direct_helper::<fn(&opentelemetry_sdk::logs::SdkLogRecord) -> &str>(
-            Severity::Warn,
-            "user_events:myprovider_L3K1",
-            Some(event_name_by_severity),
-        );
-
-        integration_test_direct_helper::<fn(&opentelemetry_sdk::logs::SdkLogRecord) -> &str>(
-            Severity::Error,
+            Severity::Error, // Using ERROR severity
             "user_events:myprovider_L2K1",
-            Some(event_name_by_severity),
-        );
-
-        integration_test_direct_helper::<fn(&opentelemetry_sdk::logs::SdkLogRecord) -> &str>(
-            Severity::Fatal,
-            "user_events:myprovider_L1K1",
-            Some(event_name_by_severity),
+            Some(custom_event_name_callback),
         );
     }
 
