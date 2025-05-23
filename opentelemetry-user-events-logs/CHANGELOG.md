@@ -37,7 +37,7 @@
 
     The `build()` method of `LoggerProviderBuilder` returns a `Result`, allowing users to handle errors as needed.
     Additional validation: empty provider names are now disallowed.
-- Bumped opentelemetry-* crates versions to 0.30
+- Bump opentelemetry-* crates versions to 0.30
 
 ## v0.12.0
 
