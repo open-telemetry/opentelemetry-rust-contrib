@@ -437,7 +437,7 @@ mod tests {
             "user_events log exporter (provider name: test_provider)"
         );
     }
-    
+
     #[test]
     fn exporter_debug_no_callback() {
         let exporter = UserEventsExporter::new("test_provider", None);

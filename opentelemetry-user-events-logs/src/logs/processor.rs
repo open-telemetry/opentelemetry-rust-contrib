@@ -163,7 +163,6 @@ impl<'a> ProcessorBuilder<'a> {
             return Err("Provider name must contain only ASCII letters, digits, and '_'.".into());
         }
 
-
         let exporter = UserEventsExporter::new(self.provider_name, self.event_name_callback);
         Ok(Processor { exporter })
     }
