@@ -386,11 +386,13 @@ mod tests {
 
     // Helper function to test direct logging (i.e without tracing or log crate)
     // with different severity levels
-    fn integration_test_direct_helper(
+    fn integration_test_direct_helper<F>(
         severity: opentelemetry::logs::Severity,
         trace_point: &str,
-        event_name_callback: Option<impl Fn(&opentelemetry_sdk::logs::SdkLogRecord) -> &str + Send + Sync + 'static>,
-    ) {
+        event_name_callback: Option<F>,
+    ) where
+        F: Fn(&opentelemetry_sdk::logs::SdkLogRecord) -> &str + Send + Sync + 'static,
+    {
         use opentelemetry::logs::AnyValue;
         use opentelemetry::logs::LogRecord;
         use opentelemetry::logs::Logger;
@@ -398,7 +400,7 @@ mod tests {
 
         // Basic check if user_events are available
         check_user_events_available().expect("Kernel does not support user_events. Verify your distribution/kernel supports user_events: https://docs.kernel.org/trace/user_events.html.");
-        
+
         // Determine expected event name based on whether callback is provided
         let expected_event_name = if event_name_callback.is_some() {
             // If a callback was provided, we'll need to check dynamically based on the event
@@ -555,21 +557,45 @@ mod tests {
         use opentelemetry::logs::Severity;
         // Run using the below command
         // sudo -E ~/.cargo/bin/cargo test integration_test_direct -- --nocapture --ignored
-        integration_test_direct_helper(Severity::Debug, "user_events:myprovider_L5K1", None);
-        integration_test_direct_helper(Severity::Info, "user_events:myprovider_L4K1", None);
-        integration_test_direct_helper(Severity::Warn, "user_events:myprovider_L3K1", None);
-        integration_test_direct_helper(Severity::Error, "user_events:myprovider_L2K1", None);
-        integration_test_direct_helper(Severity::Fatal, "user_events:myprovider_L1K1", None);
+
+        // Specify None with explicit type for the event name callback
+        let none_callback: Option<fn(&opentelemetry_sdk::logs::SdkLogRecord) -> &str> = None;
+
+        integration_test_direct_helper(
+            Severity::Debug,
+            "user_events:myprovider_L5K1",
+            none_callback,
+        );
+        integration_test_direct_helper(
+            Severity::Info,
+            "user_events:myprovider_L4K1",
+            none_callback,
+        );
+        integration_test_direct_helper(
+            Severity::Warn,
+            "user_events:myprovider_L3K1",
+            none_callback,
+        );
+        integration_test_direct_helper(
+            Severity::Error,
+            "user_events:myprovider_L2K1",
+            none_callback,
+        );
+        integration_test_direct_helper(
+            Severity::Fatal,
+            "user_events:myprovider_L1K1",
+            none_callback,
+        );
     }
 
     #[ignore]
     #[test]
     fn integration_test_direct_with_custom_event_name() {
         use opentelemetry::logs::Severity;
-        
+
         // Run using the below command
         // sudo -E ~/.cargo/bin/cargo test integration_test_direct_with_custom_event_name -- --nocapture --ignored
-        
+
         // Helper function to test event name based on log severity
         fn event_name_by_severity(record: &opentelemetry_sdk::logs::SdkLogRecord) -> &str {
             match record.severity_number().unwrap_or(Severity::Debug) {
@@ -581,36 +607,36 @@ mod tests {
                 _ => "UnknownEvent",
             }
         }
-        
+
         // Test with different severity levels using the custom callback
-        integration_test_direct_helper(
+        integration_test_direct_helper::<fn(&opentelemetry_sdk::logs::SdkLogRecord) -> &str>(
             Severity::Debug,
             "user_events:myprovider_L5K1",
-            Some(event_name_by_severity)
+            Some(event_name_by_severity),
         );
-        
-        integration_test_direct_helper(
+
+        integration_test_direct_helper::<fn(&opentelemetry_sdk::logs::SdkLogRecord) -> &str>(
             Severity::Info,
-            "user_events:myprovider_L4K1", 
-            Some(event_name_by_severity)
+            "user_events:myprovider_L4K1",
+            Some(event_name_by_severity),
         );
-        
-        integration_test_direct_helper(
+
+        integration_test_direct_helper::<fn(&opentelemetry_sdk::logs::SdkLogRecord) -> &str>(
             Severity::Warn,
-            "user_events:myprovider_L3K1", 
-            Some(event_name_by_severity)
+            "user_events:myprovider_L3K1",
+            Some(event_name_by_severity),
         );
-        
-        integration_test_direct_helper(
+
+        integration_test_direct_helper::<fn(&opentelemetry_sdk::logs::SdkLogRecord) -> &str>(
             Severity::Error,
-            "user_events:myprovider_L2K1", 
-            Some(event_name_by_severity)
+            "user_events:myprovider_L2K1",
+            Some(event_name_by_severity),
         );
-        
-        integration_test_direct_helper(
+
+        integration_test_direct_helper::<fn(&opentelemetry_sdk::logs::SdkLogRecord) -> &str>(
             Severity::Fatal,
-            "user_events:myprovider_L1K1", 
-            Some(event_name_by_severity)
+            "user_events:myprovider_L1K1",
+            Some(event_name_by_severity),
         );
     }
 
