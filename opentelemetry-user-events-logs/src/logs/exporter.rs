@@ -11,6 +11,10 @@ use std::{cell::RefCell, str, time::SystemTime};
 
 thread_local! { static EBW: RefCell<EventBuilder> = RefCell::new(EventBuilder::new());}
 
+/// Type alias for the event name callback function
+pub(crate) type EventNameCallback =
+    Box<dyn Fn(&opentelemetry_sdk::logs::SdkLogRecord) -> &str + Send + Sync + 'static>;
+
 /// UserEventsExporter is a log exporter that exports logs in EventHeader format to user_events tracepoint.
 pub(crate) struct UserEventsExporter {
     provider: Mutex<Provider>,
@@ -18,6 +22,7 @@ pub(crate) struct UserEventsExporter {
     event_sets: Vec<Arc<EventSet>>,
     cloud_role: Option<String>,
     cloud_role_instance: Option<String>,
+    event_name_callback: EventNameCallback,
 }
 
 // Constants for the UserEventsExporter
@@ -114,7 +119,7 @@ const fn get_severity_level(severity: Severity) -> Level {
 
 impl UserEventsExporter {
     /// Create instance of the exporter
-    pub(crate) fn new(provider_name: &str) -> Self {
+    pub(crate) fn new(provider_name: &str, event_name_callback: EventNameCallback) -> Self {
         let mut eventheader_provider: Provider =
             Provider::new(provider_name, &Provider::new_options());
         let event_sets = register_events(&mut eventheader_provider);
@@ -126,6 +131,7 @@ impl UserEventsExporter {
             event_sets,
             cloud_role: None,
             cloud_role_instance: None,
+            event_name_callback,
         }
     }
 
@@ -152,10 +158,9 @@ impl UserEventsExporter {
         }
     }
 
-    /// Gets the event name from the log record
-    fn get_event_name<'a>(&self, _record: &'a opentelemetry_sdk::logs::SdkLogRecord) -> &'a str {
-        // TODO: Add callback to get event name from the log record
-        "Log"
+    /// Gets the event name from the log record using the provided callback
+    fn get_event_name<'a>(&self, record: &'a opentelemetry_sdk::logs::SdkLogRecord) -> &'a str {
+        (self.event_name_callback)(record)
     }
 
     /// Builds Part A of the Common Schema format
@@ -423,7 +428,7 @@ mod tests {
     use super::*;
     #[test]
     fn exporter_debug() {
-        let exporter = UserEventsExporter::new("test_provider");
+        let exporter = UserEventsExporter::new("test_provider", Box::new(|_| "Test"));
         assert_eq!(
             format!("{:?}", exporter),
             "user_events log exporter (provider name: test_provider)"

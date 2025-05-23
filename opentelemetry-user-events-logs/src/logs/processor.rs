@@ -63,9 +63,25 @@ impl opentelemetry_sdk::logs::LogProcessor for Processor {
 }
 
 /// Builder for configuring and constructing a user_events Processor
-#[derive(Debug)]
 pub struct ProcessorBuilder<'a> {
     provider_name: &'a str,
+    event_name_callback: Option<crate::logs::exporter::EventNameCallback>,
+}
+
+impl<'a> std::fmt::Debug for ProcessorBuilder<'a> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("ProcessorBuilder")
+            .field("provider_name", &self.provider_name)
+            .field(
+                "event_name_callback",
+                &if self.event_name_callback.is_some() {
+                    "Some(...)"
+                } else {
+                    "None"
+                },
+            )
+            .finish()
+    }
 }
 
 impl<'a> ProcessorBuilder<'a> {
@@ -93,7 +109,37 @@ impl<'a> ProcessorBuilder<'a> {
     /// For example the following will capture level 2 (Error) and 3(Warning) events:
     /// perf record -e user_events:myprovider_L2K1,user_events:myprovider_L3K1
     pub(crate) fn new(provider_name: &'a str) -> Self {
-        Self { provider_name }
+        Self {
+            provider_name,
+            event_name_callback: None,
+        }
+    }
+
+    /// Sets a callback function to determine the event name for each log record
+    ///
+    /// The callback receives a reference to the log record and returns a string
+    /// that will be used as the event name in the user_events tracepoint.
+    ///
+    /// # Example
+    ///
+    /// ```
+    /// use opentelemetry_user_events_logs::Processor;
+    /// use opentelemetry_sdk::logs::SdkLogRecord;
+    ///
+    /// let processor = Processor::builder("myprovider")
+    ///     .with_event_name_callback(|record| {
+    ///         // Use the event name from the record if available, otherwise use "DefaultEvent"
+    ///         record.event_name().unwrap_or("DefaultEvent")
+    ///     })
+    ///     .build()
+    ///     .unwrap();
+    /// ```
+    pub fn with_event_name_callback(
+        mut self,
+        callback: impl Fn(&opentelemetry_sdk::logs::SdkLogRecord) -> &str + Send + Sync + 'static,
+    ) -> Self {
+        self.event_name_callback = Some(Box::new(callback));
+        self
     }
 
     /// Builds the processor with the configured options
@@ -117,7 +163,12 @@ impl<'a> ProcessorBuilder<'a> {
             return Err("Provider name must contain only ASCII letters, digits, and '_'.".into());
         }
 
-        let exporter = UserEventsExporter::new(self.provider_name);
+        // Use the provided callback or a default one that returns "Log"
+        let event_name_callback = self.event_name_callback.unwrap_or_else(|| {
+            Box::new(|_record: &opentelemetry_sdk::logs::SdkLogRecord| -> &str { "Log" })
+        });
+
+        let exporter = UserEventsExporter::new(self.provider_name, event_name_callback);
         Ok(Processor { exporter })
     }
 }
@@ -260,5 +311,35 @@ mod tests {
             processor.event_enabled(opentelemetry::logs::Severity::Error, "test", Some("test"));
 
         // Test completes if no panics occur
+    }
+
+    #[test]
+    fn test_event_name_callback() {
+        use opentelemetry::logs::{AnyValue, LogRecord};
+
+        // Create a processor with a custom event name callback
+        let processor = Processor::builder("test_provider")
+            .with_event_name_callback(|record| {
+                // Use the event name from the record if available, otherwise use "CustomDefault"
+                record.event_name().unwrap_or("CustomDefault")
+            })
+            .build()
+            .unwrap();
+
+        // Create a log record with a specific event name
+        let mut record = SdkLoggerProvider::builder()
+            .build()
+            .logger("test")
+            .create_log_record();
+        record.set_event_name("TestEvent");
+
+        let instrumentation = Default::default();
+
+        // Just verify that it doesn't panic
+        processor.emit(&mut record, &instrumentation);
+
+        // Hard to verify the actual event name as we don't have direct access
+        // to the exporter's state, but the functionality is tested if the
+        // code executes without errors
     }
 }
