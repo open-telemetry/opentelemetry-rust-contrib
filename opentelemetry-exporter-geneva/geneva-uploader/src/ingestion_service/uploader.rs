@@ -139,7 +139,6 @@ impl GenevaUploader {
         // TODO - Maintain this as url-encoded in config service to avoid conversion here
         let encoded_monitoring_endpoint: String =
             byte_serialize(monitoring_endpoint.as_bytes()).collect();
-
         let encoded_source_identity: String =
             byte_serialize(self.config.source_identity.as_bytes()).collect();
 
@@ -179,6 +178,7 @@ impl GenevaUploader {
         event_name: &str,
         event_version: &str,
     ) -> Result<IngestionResponse> {
+        println!("Uploading data to Geneva Ingestion Gateway...");
         // Always get fresh auth info
         let (auth_info, moniker_info, monitoring_endpoint) =
             self.config_client.get_ingestion_info().await?;
