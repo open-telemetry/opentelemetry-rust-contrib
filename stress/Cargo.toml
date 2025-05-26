@@ -2,6 +2,8 @@
 name = "stress"
 version = "0.1.0"
 edition = "2021"
+license = "Apache-2.0"
+rust-version = "1.75.0"
 publish = false
 
 [[bin]]
@@ -9,10 +11,12 @@ name = "user_events"
 path = "src/user_events.rs"
 doc = false
 
-[[bin]]
-name = "etw"
-path = "src/etw_logs.rs"
-doc = false
+# below build is failing with otel v0.30. this needs to be enabled
+# while building for otel-v30
+#[[bin]]
+#name = "etw"
+#path = "src/etw_logs.rs"
+#doc = false
 
 [dependencies]
 ctrlc = "3.2.5"
@@ -20,8 +24,8 @@ num_cpus = "1.15.0"
 num-format = "0.4.4"
 sysinfo = { version = "0.32", optional = true }
 
-opentelemetry-appender-tracing = { workspace = true, features= ["spec_unstable_logs_enabled"] }
-opentelemetry_sdk = { workspace = true, features = ["logs", "spec_unstable_logs_enabled"] }
+opentelemetry-appender-tracing = { version = "0.30", features= ["spec_unstable_logs_enabled"] }
+opentelemetry_sdk = { version = "0.30", features = ["logs", "spec_unstable_logs_enabled"] }
 opentelemetry-user-events-logs = { path = "../opentelemetry-user-events-logs", features = ["spec_unstable_logs_enabled"]}
 opentelemetry-etw-logs = { path = "../opentelemetry-etw-logs"}
 tracing = { version = "0.1", default-features = false, features = ["std"] }

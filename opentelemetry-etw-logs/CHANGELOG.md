@@ -14,6 +14,7 @@
     .with_etw_exporter(options)
     .build();
   ```
+- Bump tracelogging crate to 1.2.4
 
 ## v0.8.0
 

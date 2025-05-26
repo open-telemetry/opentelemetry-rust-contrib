@@ -25,7 +25,7 @@ jobs:
         # test only stable version of Rust on Windows and MacOS
         include:
           - rust: stable
-            os: windows-latest
+            os: windows-2025
           - rust: stable
             os: macos-latest
           - rust: stable
@@ -58,17 +58,17 @@ jobs:
       with:
         repo-token: ${{ secrets.GITHUB_TOKEN }}
     - name: Test (Windows)
-      if: ${{ matrix.os == 'windows-latest'}}
+      if: ${{ matrix.os == 'windows-2025'}}
       run: ./scripts/test.ps1
       shell: pwsh
     - name: Test (Unix)
-      if: ${{ matrix.os != 'windows-latest'}}
+      if: ${{ matrix.os != 'windows-2025'}}
       run: bash ./scripts/test.sh
   lint:
     strategy:
       matrix:
         # clippy must be run in every OS to lint platform-specific code 
-        os: [ubuntu-latest, windows-latest, macos-latest, ubuntu-22.04-arm]
+        os: [ubuntu-latest, windows-2025, macos-latest, ubuntu-22.04-arm]
     runs-on: ${{ matrix.os }}
     steps:
     - name: Harden the runner (Audit all outbound calls)
@@ -89,20 +89,16 @@ jobs:
     - name: Format
       run: cargo fmt --all -- --check
     - name: Lint (Windows)
-      if: ${{ matrix.os == 'windows-latest'}}
+      if: ${{ matrix.os == 'windows-2025'}}
       run: ./scripts/lint.ps1
       shell: pwsh
     - name: Lint (Unix)
-      if: ${{ matrix.os != 'windows-latest'}}
+      if: ${{ matrix.os != 'windows-2025'}}
       run: ./scripts/lint.sh
   msrv:
     strategy:
       matrix:
-        rust: ["1.75.0"]
-        os: [
-          ubuntu-latest,
-          # windows-latest # Disabled due bug in `cargo-msrv` on Windows( https://github.com/foresterre/cargo-msrv/issues/1102 )
-        ]
+        os: [ubuntu-latest, windows-2025]
     runs-on: ${{ matrix.os }}
     continue-on-error: true
     steps:
@@ -114,22 +110,14 @@ jobs:
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
         with:
           submodules: true
-      - name: Set up Rust ${{ matrix.rust }}
-        uses: dtolnay/rust-toolchain@56f84321dbccf38fb67ce29ab63e4754056677e0
+      - uses: dtolnay/rust-toolchain@56f84321dbccf38fb67ce29ab63e4754056677e0
         with:
-          toolchain: ${{ matrix.rust }}
+          toolchain: stable
       - uses: taiki-e/install-action@a48a50298f98c47e46a957ae6f82c44cc4878e42 # v2.49.47
         with:
           tool: cargo-msrv
-      - name: Patch dependencies versions (Unix)
-        if: ${{ matrix.os != 'windows-latest'}}
-        run: bash ./scripts/patch_dependencies.sh
-      - name: Check MSRV for all crates (Unix)
-        if: ${{ matrix.os != 'windows-latest'}}
-        run: bash ./scripts/msrv.sh ${{ matrix.rust }}
-      - name: Check MSRV for all crates (Windows)
-        if: ${{ matrix.os == 'windows-latest'}}
-        run: ./scripts/msrv.ps1 ${{ matrix.rust }}
+      - name: Check MSRV for all crates
+        run: bash ./scripts/msrv.sh
   cargo-deny:
     runs-on: ubuntu-latest
     continue-on-error: true # Prevent sudden announcement of a new advisory from failing ci

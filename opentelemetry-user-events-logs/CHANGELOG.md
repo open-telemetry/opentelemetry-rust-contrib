@@ -2,12 +2,42 @@
 
 ## vNext
 
-- Enhanced validation for the provider name in `with_user_event_exporter(provider_name)`:
-  - Empty provider names are now disallowed.
+## v0.13.0
 
-- Event header name is changed to use "Log" instead of "LogRecord.EventName". 
+### Changed
+
+- Event header name is changed to use "Log" instead of "LogRecord.EventName".
 - `ext_dt` and `ext_cloud` structs are flattened.
-  are flattened.
+- **BREAKING**
+  - Removed the `with_user_events_exporter` extension method from `LoggerProviderBuilder`.
+    - Instead, introduced a builder pattern for configuring the user events exporter, providing greater flexibility.
+
+    **Before:**
+
+    ```rust
+    use opentelemetry_sdk::logs::LoggerProviderBuilder;
+    use opentelemetry_user_events_logs::UserEventsLoggerProviderBuilderExt;
+
+    let logger_provider = LoggerProviderBuilder::default()
+      .with_user_events_exporter("myprovider")
+      .build();
+    ```
+
+    **After:**
+
+    ```rust
+    use opentelemetry_sdk::logs::LoggerProviderBuilder;
+    let user_event_processor = opentelemetry_user_events_logs::Processor::builder("myprovider")
+        .build()
+        .expect("Expected to have processor built");
+    LoggerProviderBuilder::default()
+        .with_log_processor(user_event_processor)
+        .build();
+    ```
+
+    The `build()` method of `LoggerProviderBuilder` returns a `Result`, allowing users to handle errors as needed.
+    Additional validation: empty provider names are now disallowed.
+- Bump opentelemetry-* crates versions to 0.30
 
 - **BREAKING** Add builder pattern with `ExportOptions` and implement `build_processor` method [256](https://github.com/open-telemetry/opentelemetry-rust-contrib/pull/256)
   - Removed `with_user_events_exporter` extension method on `LoggerProviderBuilder`.
