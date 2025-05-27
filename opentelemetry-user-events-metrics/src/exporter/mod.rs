@@ -185,11 +185,10 @@ impl MetricsExporter {
             );
 
             byte_array.clear(); // Clear contents but retain capacity for performance
-            if self.encode_and_emit_metric(
-                export_metric_service_request_common,
-                byte_array,
-                metric,
-            ).is_err() {
+            if self
+                .encode_and_emit_metric(export_metric_service_request_common, byte_array, metric)
+                .is_err()
+            {
                 failed_count += 1;
             }
         }
@@ -253,11 +252,10 @@ impl MetricsExporter {
             ));
 
             byte_array.clear(); // Clear contents but retain capacity for performance
-            if self.encode_and_emit_metric(
-                export_metric_service_request_common,
-                byte_array,
-                metric,
-            ).is_err() {
+            if self
+                .encode_and_emit_metric(export_metric_service_request_common, byte_array, metric)
+                .is_err()
+            {
                 failed_count += 1;
             }
         }
@@ -327,11 +325,10 @@ impl MetricsExporter {
             );
 
             byte_array.clear(); // Clear contents but retain capacity for performance
-            if self.encode_and_emit_metric(
-                export_metric_service_request_common,
-                byte_array,
-                metric,
-            ).is_err() {
+            if self
+                .encode_and_emit_metric(export_metric_service_request_common, byte_array, metric)
+                .is_err()
+            {
                 failed_count += 1;
             }
         }
@@ -410,11 +407,10 @@ impl MetricsExporter {
             );
 
             byte_array.clear(); // Clear contents but retain capacity for performance
-            if self.encode_and_emit_metric(
-                export_metric_service_request_common,
-                byte_array,
-                metric,
-            ).is_err() {
+            if self
+                .encode_and_emit_metric(export_metric_service_request_common, byte_array, metric)
+                .is_err()
+            {
                 failed_count += 1;
             }
         }
