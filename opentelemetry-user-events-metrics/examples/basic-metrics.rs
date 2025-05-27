@@ -12,9 +12,7 @@ fn init_metrics(exporter: MetricsExporter) -> SdkMeterProvider {
     SdkMeterProvider::builder()
         .with_resource(
             Resource::builder()
-                .with_attributes(vec![
-                    KeyValue::new("service.name", SERVICE_NAME),
-                ])
+                .with_attributes(vec![KeyValue::new("service.name", SERVICE_NAME)])
                 .build(),
         )
         .with_periodic_exporter(exporter)
@@ -115,7 +113,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .with_description("test_description")
         .with_unit("test_unit")
         .with_callback(move |observer| {
-        let value = counter_value.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+            let value = counter_value.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
             observer.observe(
                 value,
                 &[
@@ -132,7 +130,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .with_description("test_description")
         .with_unit("test_unit")
         .with_callback(move |observer| {
-        let value = counter_value2.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+            let value = counter_value2.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
             observer.observe(
                 value as f64 * 1.0,
                 &[
