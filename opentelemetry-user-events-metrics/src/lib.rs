@@ -326,7 +326,7 @@ mod tests {
         );
 
         let perf_thread = std::thread::spawn(move || {
-            test_utils::run_perf_and_decode(5, "user_events:otlp_metrics".as_ref())
+            test_utils::run_perf_and_decode(5, "user_events:otlp_metrics")
         });
 
         // Give a little time for perf to start recording

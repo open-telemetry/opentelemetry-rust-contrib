@@ -185,11 +185,11 @@ impl MetricsExporter {
             );
 
             byte_array.clear(); // Clear contents but retain capacity for performance
-            if let Err(_) = self.encode_and_emit_metric(
+            if self.encode_and_emit_metric(
                 export_metric_service_request_common,
                 byte_array,
                 metric,
-            ) {
+            ).is_err() {
                 failed_count += 1;
             }
         }
@@ -253,11 +253,11 @@ impl MetricsExporter {
             ));
 
             byte_array.clear(); // Clear contents but retain capacity for performance
-            if let Err(_) = self.encode_and_emit_metric(
+            if self.encode_and_emit_metric(
                 export_metric_service_request_common,
                 byte_array,
                 metric,
-            ) {
+            ).is_err() {
                 failed_count += 1;
             }
         }
@@ -327,11 +327,11 @@ impl MetricsExporter {
             );
 
             byte_array.clear(); // Clear contents but retain capacity for performance
-            if let Err(_) = self.encode_and_emit_metric(
+            if self.encode_and_emit_metric(
                 export_metric_service_request_common,
                 byte_array,
                 metric,
-            ) {
+            ).is_err() {
                 failed_count += 1;
             }
         }
@@ -410,11 +410,11 @@ impl MetricsExporter {
             );
 
             byte_array.clear(); // Clear contents but retain capacity for performance
-            if let Err(_) = self.encode_and_emit_metric(
+            if self.encode_and_emit_metric(
                 export_metric_service_request_common,
                 byte_array,
                 metric,
-            ) {
+            ).is_err() {
                 failed_count += 1;
             }
         }
@@ -441,7 +441,7 @@ impl MetricsExporter {
                         metric_name = metric.name(),
                         size = byte_array.len()
                     );
-                    return Err(error_msg);
+                    Err(error_msg)
                 } else {
                     // Write to the tracepoint
                     let result = tracepoint::write(&self.trace_point, byte_array);
@@ -597,7 +597,7 @@ impl PushMetricExporter for MetricsExporter {
         if !self.trace_point.enabled() {
             // TODO - This can flood the logs if the tracepoint is disabled for long periods of time
             otel_info!(name: "TracepointDisabled", message = "Tracepoint is disabled, skipping export");
-            return Ok(());
+            Ok(())
         } else {
             self.export_resource_metrics(resource_metrics)
         }
