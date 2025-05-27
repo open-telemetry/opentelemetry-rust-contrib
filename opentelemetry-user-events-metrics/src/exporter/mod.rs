@@ -240,7 +240,7 @@ impl MetricsExporter {
             };
 
             let sum_point_proto = opentelemetry_proto::tonic::metrics::v1::Sum {
-                aggregation_temporality: 1,
+                aggregation_temporality: sum.temporality() as i32,
                 is_monotonic: sum_is_monotonic,
                 data_points: vec![number_data_point],
             };
@@ -312,7 +312,7 @@ impl MetricsExporter {
                 };
 
             let histogram_point_proto = opentelemetry_proto::tonic::metrics::v1::Histogram {
-                aggregation_temporality: 1,
+                aggregation_temporality: hist.temporality() as i32,
                 data_points: vec![histogram_data_point],
             };
 
@@ -394,7 +394,7 @@ impl MetricsExporter {
 
             let histogram_point_proto =
                 opentelemetry_proto::tonic::metrics::v1::ExponentialHistogram {
-                    aggregation_temporality: 1,
+                    aggregation_temporality: hist.temporality() as i32,
                     data_points: vec![histogram_data_point],
                 };
 
