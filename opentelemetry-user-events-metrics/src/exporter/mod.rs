@@ -425,14 +425,14 @@ impl MetricsExporter {
     ) -> Result<(), String> {
         match export_metric_service_request_common.encode(byte_array) {
             Ok(_) => {
-                otel_debug!(name: "SerializeSuccess", 
+                otel_debug!(name: "SerializationSucceeded", 
                     metric_name = metric.name(),
                     size = byte_array.len());
 
                 if byte_array.len() > MAX_EVENT_SIZE {
                     let error_msg = format!("Encoded event size exceeds maximum allowed limit of {} bytes. Event will be dropped.", MAX_EVENT_SIZE);
                     otel_debug!(
-                        name: "MaxEventSizeExceeded",
+                        name: "EventSizeExceeded",
                         reason = &error_msg,
                         metric_name = metric.name(),
                         size = byte_array.len()
@@ -442,7 +442,7 @@ impl MetricsExporter {
                     // Write to the tracepoint
                     let result = tracepoint::write(&self.trace_point, byte_array);
                     if result == 0 {
-                        otel_debug!(name: "TracepointWrite", message = "Encoded data successfully written to tracepoint", size = byte_array.len(), metric_name = metric.name());
+                        otel_debug!(name: "TracepointWriteSucceeded", message = "Encoded data successfully written to tracepoint", size = byte_array.len(), metric_name = metric.name());
                         Ok(())
                     } else {
                         let error_msg = "Failed to write to tracepoint".to_string();
@@ -453,7 +453,7 @@ impl MetricsExporter {
             }
             Err(err) => {
                 let error_msg = format!("Serialization failed: {}", err);
-                otel_debug!(name: "SerializeFailed",
+                otel_debug!(name: "SerializationFailed",
                     error = &error_msg,
                     metric_name = metric.name(),
                     size = byte_array.len());
@@ -589,7 +589,7 @@ impl MetricsExporter {
 
 impl PushMetricExporter for MetricsExporter {
     async fn export(&self, resource_metrics: &ResourceMetrics) -> OTelSdkResult {
-        otel_debug!(name: "ExportStart", message = "Starting metrics export");
+        otel_debug!(name: "ExportStarted", message = "Starting metrics export");
         if !self.trace_point.enabled() {
             // TODO - This can flood the logs if the tracepoint is disabled for long periods of time
             otel_info!(name: "TracepointDisabled", message = "Tracepoint is disabled, skipping export");
