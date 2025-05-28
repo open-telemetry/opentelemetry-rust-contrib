@@ -4,6 +4,8 @@
 
 ## v0.13.0
 
+Released 2025-May-27
+
 ### Changed
 
 - Event header name is changed to use "Log" instead of "LogRecord.EventName".
@@ -37,7 +39,7 @@
 
     The `build()` method of `LoggerProviderBuilder` returns a `Result`, allowing users to handle errors as needed.
     Additional validation: empty provider names are now disallowed.
-- Bump opentelemetry-* crates versions to 0.30
+- Bump opentelemetry and opentelemetry_sdk versions to 0.30
 
 ## v0.12.0
 
