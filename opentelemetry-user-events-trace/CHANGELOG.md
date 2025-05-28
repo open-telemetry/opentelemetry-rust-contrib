@@ -6,7 +6,7 @@
 
 Released 2025-May-27
 
-- Bump opentelemetry-* crates versions to 0.30
+- Bump opentelemetry and opentelemetry_sdk versions to 0.30
 
 ## v0.1.0
 
