@@ -44,7 +44,6 @@ opentelemetry-instrumentation-actix-web = { path = ".", features = [
 opentelemetry_sdk = { workspace = true, features = [
   "spec_unstable_metrics_views",
   "metrics",
-  "rt-tokio-current-thread",
 ] }
 opentelemetry-stdout = { workspace = true, features = ["trace", "metrics"] }
 

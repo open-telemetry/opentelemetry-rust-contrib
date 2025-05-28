@@ -2,7 +2,10 @@
 
 ## vNext
 
+## v0.27.0
+
 - Update `tonic` dependency version to 0.13
+- Update to opentelemetry v0.29.0, opentelemetry_sdk v0.29.0, opentelemetry-semantic-conventions v0.29.0
 
 ## v0.26.0
 

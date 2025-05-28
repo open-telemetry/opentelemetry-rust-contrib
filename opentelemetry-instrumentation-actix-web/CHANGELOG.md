@@ -5,9 +5,11 @@
 ### Changed
 
 * Remove `opentelemetry-prometheus`, `opentelemetry_sdk`, `prometheus` and `tracing` dependencies
+* Update `opentelemetry` and `opentelemetry-semantic-conventions` dependencies to 0.30
 * **Breaking** Rename crate to `opentelemetry-instrumentation-actix-web`
 * **Breaking** Remove `metrics-prometheus` feature and use `metric` feature instead
 * **Breaking** Remove Prometheus middleware `PrometheusMetricsHandler` and use OTLP exporter instead
+  
   ```rust
   // Initialize OTLP exporter using HTTP binary protocol
   let exporter = opentelemetry_otlp::MetricExporter::builder()
