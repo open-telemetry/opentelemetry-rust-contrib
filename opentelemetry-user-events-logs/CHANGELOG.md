@@ -4,6 +4,8 @@
 
 ## v0.13.0
 
+Released 2025-May-27
+
 ### Changed
 
 - Event header name is changed to use "Log" instead of "LogRecord.EventName".
