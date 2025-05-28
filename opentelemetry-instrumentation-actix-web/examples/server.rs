@@ -39,19 +39,24 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                     .with_attribute(KeyValue::new("service.name", "my_app"))
                     .build(),
             )
-            .with_view(
-                opentelemetry_sdk::metrics::new_view(
-                    Instrument::new().name("http.server.duration"),
-                    Stream::new().aggregation(Aggregation::ExplicitBucketHistogram {
-                        boundaries: vec![
-                            0.0, 0.005, 0.01, 0.025, 0.05, 0.075, 0.1, 0.25, 0.5, 0.75, 1.0, 2.5,
-                            5.0, 7.5, 10.0,
-                        ],
-                        record_min_max: true,
-                    }),
-                )
-                .unwrap(),
-            )
+            .with_view(|i: &Instrument| {
+                if i.name() == "http.server.duration" {
+                    Some(
+                        Stream::builder()
+                            .with_aggregation(Aggregation::ExplicitBucketHistogram {
+                                boundaries: vec![
+                                    0.0, 0.005, 0.01, 0.025, 0.05, 0.075, 0.1, 0.25, 0.5, 0.75,
+                                    1.0, 2.5, 5.0, 7.5, 10.0,
+                                ],
+                                record_min_max: true,
+                            })
+                            .build()
+                            .unwrap(),
+                    )
+                } else {
+                    None
+                }
+            })
             .build();
         global::set_meter_provider(provider.clone());
 
