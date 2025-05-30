@@ -46,8 +46,6 @@ use tracing_subscriber::prelude::*;
 
 fn init_logger() -> SdkLoggerProvider {
     let processor = Processor::builder("provider-name")
-        // Use a constant custom name for all events instead of "Log"
-        .etw_event_name_from_callback(|_| "CustomEvent")
         .build()
         .unwrap();
 

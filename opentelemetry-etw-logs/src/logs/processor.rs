@@ -1,4 +1,3 @@
-use opentelemetry::otel_warn;
 use opentelemetry::InstrumentationScope;
 use opentelemetry_sdk::error::OTelSdkResult;
 use opentelemetry_sdk::logs::{LogBatch, LogExporter, SdkLogRecord};
