@@ -4,16 +4,35 @@
 
 - Added validation to provider name.
 - Added optional feature `serde_json` to serialize List and Maps.
-- Added `etw_log_processor()` method that returns an `impl LogProcessor`.
-- Added `ExporterOptions` which uses a builder pattern to configure the exporter.
-- The `with_etw_exporter` trait method now accepts an `ExporterOptions` instance:
+- **BREAKING**
+  - Removed the `with_etw_exporter` extension method from `LoggerProviderBuilder`.
+    - Instead, introduced a builder pattern for configuring the ETW exporter, providing greater flexibility.
 
-  ```rust
-  let options = ExporterOptions::builder("provider-name").build().unwrap();
-  let logger_provider = SdkLoggerProvider::builder()
-    .with_etw_exporter(options)
-    .build();
-  ```
+    **Before:**
+
+    ```rust
+    use opentelemetry_etw_logs::ETWLoggerProviderBuilderExt;
+    use opentelemetry_sdk::logs::SdkLoggerProvider;
+
+    let logger_provider = SdkLoggerProvider::builder()
+      .with_etw_exporter("provider-name")
+      .build();
+    ```
+
+    **After:**
+
+    ```rust
+    use opentelemetry_etw_logs::Processor;
+    use opentelemetry_sdk::logs::SdkLoggerProvider;
+
+    let processor = Processor::builder("provider-name")
+      .build()
+      .expect("Valid provider name is required to build an ETW Processor.");
+    SdkLoggerProvider::builder()
+      .with_log_processor(processor)
+      .build();
+    ```
+
 - Bump tracelogging crate to 1.2.4
 - Bump opentelemetry and opentelemetry_sdk versions to 0.30
 

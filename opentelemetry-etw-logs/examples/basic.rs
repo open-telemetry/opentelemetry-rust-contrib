@@ -47,7 +47,7 @@ use tracing_subscriber::prelude::*;
 fn init_logger() -> SdkLoggerProvider {
     let processor = Processor::builder("provider-name")
         .build()
-        .unwrap();
+        .expect("Valid provider name is required to build an ETW Processor.");
 
     SdkLoggerProvider::builder()
         .with_log_processor(processor)
