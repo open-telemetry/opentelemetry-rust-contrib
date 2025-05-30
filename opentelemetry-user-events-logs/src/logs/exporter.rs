@@ -423,9 +423,6 @@ mod tests {
     use super::*;
     #[test]
     fn exporter_debug() {
-        let options = ExportOptions::builder("test_provider")
-            .build()
-            .expect("Failed to create ExportOptions");
         let exporter = UserEventsExporter::new(options);
         assert_eq!(
             format!("{:?}", exporter),
