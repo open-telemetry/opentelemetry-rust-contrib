@@ -114,9 +114,7 @@ impl ProcessorBuilder {
     pub fn build(self) -> Result<Processor, Box<dyn Error>> {
         match self.options_builder.build() {
             Ok(options) => Ok(Processor::new(options)),
-            Err(error) => {
-                Err(error)
-            }
+            Err(error) => Err(error),
         }
     }
 }
