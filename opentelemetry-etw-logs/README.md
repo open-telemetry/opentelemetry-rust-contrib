@@ -16,7 +16,7 @@ ETW events can be consumed in real-time or from a log file.
 
 ETW events created with this crate can be generated and collected on Windows Vista or later.
 
-This ETW exporter enables applications to use OpenTelemetry APIs to capture telemetry events and write to the ETW subsystem. From ETWs, the events can be
+This ETW exporter enables applications to use OpenTelemetry APIs to capture telemetry events and write to the ETW subsystem. From ETW, the events can be
 captured by agents running locally and listening for specific ETW events.
 
 [![Crates.io: opentelemetry-etw-logs](https://img.shields.io/crates/v/opentelemetry-etw-logs.svg)](https://crates.io/crates/opentelemetry-etw-logs)
@@ -28,7 +28,51 @@ captured by agents running locally and listening for specific ETW events.
 ## Viewing ETW Logs
 
 Logs exported to ETW can be viewed using tools like `logman`, `perfview` etc.
-// TODO - add instructions.
+
+### Using `logman`
+
+To view the telemetry emitted to ETW you can use [`logman`](https://learn.microsoft.com/windows-server/administration/windows-commands/logman) along with `perfview`.
+`logman` will listen to ETW events from the given provider (on this example, `provider-name`) and store them in a `.etl` file.
+
+[`perfview`](https://github.com/microsoft/perfview) will allow you to visualize the events.
+
+Instructions using Powershell:
+
+1. Get the ETW Session Guid for the given provider (on this example `provider-name`):
+
+    ```ps
+    $EtwSessionGuid = (new-object System.Diagnostics.Tracing.EventSource("provider-name")).Guid.ToString()`
+    ```
+
+1. Start Logman session:
+
+    ```ps
+    logman create trace OtelETWExampleBasic -o OtelETWExampleBasic.log -p "{$EtwSessionGuid}" -f bincirc -max 1000
+    logman start OtelETWExampleBasic
+    ```
+
+1. Execute this example:
+
+    ```ps
+    cd opentelemetry-etw-logs
+    cargo run --example basic
+    ```
+
+1. Stop and Remove `logman` session:
+
+    ```ps
+    logman stop OtelETWExampleBasic
+    logman delete OtelETWExampleBasic
+    ```
+
+1. View the events with `perfview`:
+
+    - Download PerfView: [Instructions](https://github.com/microsoft/perfview/blob/main/documentation/Downloading.md), [Releases](https://github.com/Microsoft/perfview/releases).
+    - Open PerfView.
+    - Go the location of the `.etl` file: `OtelETWExampleBasic.log_000001.etl` and open it.
+    - Double-click `Events` in the left-panel.
+    - Double-click the `provider-name/event-name` in the left-panel.
+    - You should see the events in the right-panel.
 
 ## OpenTelemetry Overview
 
@@ -47,4 +91,3 @@ of telemetry is intentionally left to other tools.
 
 [Prometheus]: https://prometheus.io
 [Jaeger]: https://www.jaegertracing.io
-
