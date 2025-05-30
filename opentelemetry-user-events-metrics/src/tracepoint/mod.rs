@@ -41,12 +41,12 @@ pub fn write(trace_point: &ehi::TracepointState, buffer: &[u8]) -> i32 {
     // This must stay in sync with the METRICS_EVENT_DEF string.
     // Return error -1 if buffer exceeds max size
     if buffer.len() > u16::MAX as usize {
-        otel_debug!(name: "TracePointWriteError", reason = "Buffer exceeds max length.", buffer_size = buffer.len());
+        otel_debug!(name: "TracepointWriteError", reason = "Buffer exceeds max length.", buffer_size = buffer.len());
         return -1;
     }
 
     if PROTOBUF_VERSION.len() != 8 {
-        otel_debug!(name: "TracePointWriteError", reason = "Version must be char[8].", version = format!("{:?}", PROTOBUF_VERSION));
+        otel_debug!(name: "TracepointWriteError", reason = "Version must be char[8].", version = format!("{:?}", PROTOBUF_VERSION));
         return -1;
     }
 
@@ -91,7 +91,7 @@ pub unsafe fn register(trace_point: Pin<&ehi::TracepointState>) -> i32 {
     match result {
         Ok(value) => {
             if value == 0 {
-                otel_info!(name: "TracePointRegistered", reason = "Tracepoint registered successfully.");
+                otel_info!(name: "TracepointRegistered", reason = "Tracepoint registered successfully.");
             } else if value == 95 {
                 otel_error!(name: "TracePointRegisterError", reason = "Trace/debug file systems are not mounted. Metrics will not be exported.");
             } else if value == 13 {

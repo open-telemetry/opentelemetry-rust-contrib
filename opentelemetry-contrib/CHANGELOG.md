@@ -2,6 +2,10 @@
 
 ## vNext
 
+## v0.22.0
+
+- Bump opentelemetry and opentelemetry_sdk versions to 0.30
+
 ## v0.21.0
 
 - Bump `base64` version to 0.22
