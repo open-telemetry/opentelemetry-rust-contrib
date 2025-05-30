@@ -1,118 +1,18 @@
-use std::backtrace::Backtrace;
-use std::borrow::Cow;
-use std::fmt::Debug;
-
-use thiserror::Error;
-
 use opentelemetry::otel_warn;
 use opentelemetry::InstrumentationScope;
 use opentelemetry_sdk::error::OTelSdkResult;
 use opentelemetry_sdk::logs::{LogBatch, LogExporter, SdkLogRecord};
 use opentelemetry_sdk::Resource;
+use std::error::Error;
+use std::fmt::Debug;
 
 use crate::logs::exporter::*;
 
-/// Errors that can occur while building a `Processor` instance.
-#[derive(Debug)]
-pub struct ProcessorBuildError {
-    backtrace: Backtrace,
-    kind: ProcessorBuildErrorKind,
-}
-
-impl ProcessorBuildError {
-    /// Creates a new `ProcessorBuildError` with the given kind.
-    pub(crate) fn new(kind: ProcessorBuildErrorKind) -> Self {
-        ProcessorBuildError {
-            backtrace: Backtrace::capture(),
-            kind,
-        }
-    }
-
-    /// True if the error is due to an empty provider name.
-    pub fn is_provider_name_empty(&self) -> bool {
-        matches!(self.kind, ProcessorBuildErrorKind::ProviderNameEmpty)
-    }
-
-    /// True if the error is due to a provider name that exceeds the maximum length (234 characters).
-    pub fn is_provider_name_too_long(&self) -> bool {
-        matches!(self.kind, ProcessorBuildErrorKind::ProviderNameTooLong)
-    }
-
-    /// True if the error is due to a provider name with invalid characters.
-    pub fn is_provider_name_invalid(&self) -> bool {
-        matches!(self.kind, ProcessorBuildErrorKind::ProviderNameInvalid)
-    }
-}
-
-#[derive(Error, Debug, PartialEq)]
-pub(crate) enum ProcessorBuildErrorKind {
-    #[error("Provider name cannot be empty.")]
-    ProviderNameEmpty,
-    #[error("Provider name must be less than 234 characters.")]
-    ProviderNameTooLong,
-    #[error("Provider name must contain only ASCII alphanumeric characters, '_' or '-'.")]
-    ProviderNameInvalid,
-    #[error("Event name cannot be empty.")]
-    EventNameEmpty,
-}
-
-impl std::fmt::Display for ProcessorBuildError {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{}", self.kind)?;
-        if self.backtrace.status() == std::backtrace::BacktraceStatus::Captured {
-            write!(f, "\nBacktrace: {:?}", self.backtrace)?;
-        }
-        Ok(())
-    }
-}
-
-impl std::error::Error for ProcessorBuildError {
-    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
-        None
-    }
-}
-
-/// Builder for `Processor`.
-#[derive(Debug)]
-pub struct ProcessorBuilder {
-    options_builder: OptionsBuilder,
-}
-
-impl ProcessorBuilder {
-    /// Creates a new instance of `ProcessorBuilder` with the given provider name.
-    ///
-    /// By default, all events will be exported to the "Log" ETW event.
-    pub fn new(provider_name: impl Into<Cow<'static, str>>) -> Self {
-        ProcessorBuilder {
-            options_builder: Options::builder(provider_name.into()),
-        }
-    }
-
-    /// Sets a user-defined callback that computes the ETW event name based on the log record.
-    ///
-    /// The resulting name must be a valid CommonSchema 4.0 TraceLoggingDynamic event name. Otherwise,
-    /// the default "Log" ETW event name will be used.
-    pub fn etw_event_name_from_callback(
-        mut self,
-        callback: impl Fn(&SdkLogRecord) -> &str + Send + Sync + 'static,
-    ) -> Self {
-        self.options_builder = self.options_builder.etw_event_name_from_callback(callback);
-        self
-    }
-
-    /// Validates the options given by consuming itself and returning the `Processor` or an error.
-    pub fn build(self) -> Result<Processor, ProcessorBuildError> {
-        match self.options_builder.build() {
-            Ok(options) => Ok(Processor::new(options)),
-            Err(error) => {
-                otel_warn!(name: "ETW.Processor.CreationFailed", reason = &error.to_string());
-                Err(error)
-            }
-        }
-    }
-}
-
-/// Processor for exporting logs to ETW.
+/// Processes and exports logs to ETW.
+///
+/// This processor exports logs without synchronization.
+/// It is specifically designed for the ETW exporter, where
+/// the underlying exporter is safe under concurrent calls.
 ///
 /// Implements the opentelemetry_sdk::logs::LogProcessor trait, so it can be used as a log processor in the OpenTelemetry SDK.
 #[derive(Debug)]
@@ -121,14 +21,26 @@ pub struct Processor {
 }
 
 impl Processor {
-    /// Creates a new instance of `ProcessorBuilder` with the given provider name.
+    /// Creates a new instance of [`ProcessorBuilder`] with the given provider name.
     ///
-    /// By default, all events will be exported to the "Log" ETW event. See `ProcessorBuilder` docs for details on how to override this behavior.
-    pub fn builder(provider_name: impl Into<Cow<'static, str>>) -> ProcessorBuilder {
+    /// The provider name must be:
+    ///
+    /// - non-empty,
+    /// - less than 234 characters long, and
+    /// - contain only ASCII alphanumeric characters, underscores (`_`), or hyphens (`-`).
+    ///
+    /// At the same time, it is recommended to use a provider name that is:
+    /// - short
+    /// - human-readable
+    /// - unique
+    /// - describing the application or service that is generating the logs
+    ///
+    /// By default, all events will be exported to the "Log" ETW event. See [`ProcessorBuilder`] for details on how to configure a different behavior.
+    pub fn builder(provider_name: &str) -> ProcessorBuilder {
         ProcessorBuilder::new(provider_name)
     }
 
-    /// Creates a new instance of the `Processor` using the given options.
+    /// Creates a new instance of the [`Processor`] using the given options.
     pub(crate) fn new(options: Options) -> Self {
         let exporter: ETWExporter = ETWExporter::new(options);
         Processor {
@@ -144,8 +56,7 @@ impl opentelemetry_sdk::logs::LogProcessor for Processor {
         let _ = futures_executor::block_on(self.event_exporter.export(LogBatch::new(log_tuple)));
     }
 
-    // This is a no-op as this processor doesn't keep anything
-    // in memory to be flushed out.
+    // Nothing to flush as this processor does not buffer
     fn force_flush(&self) -> OTelSdkResult {
         Ok(())
     }
@@ -168,6 +79,45 @@ impl opentelemetry_sdk::logs::LogProcessor for Processor {
 
     fn set_resource(&mut self, resource: &Resource) {
         self.event_exporter.set_resource(resource);
+    }
+}
+
+/// Builder for configuring and constructing a [`Processor`].
+#[derive(Debug)]
+pub struct ProcessorBuilder {
+    options_builder: OptionsBuilder,
+}
+
+impl ProcessorBuilder {
+    /// Creates a new instance of [`ProcessorBuilder`] with the given provider name.
+    ///
+    /// By default, all events will be exported to the "Log" ETW event.
+    pub(crate) fn new(provider_name: &str) -> Self {
+        ProcessorBuilder {
+            options_builder: Options::builder(provider_name.to_string()),
+        }
+    }
+
+    /// Sets a user-defined callback that returns the ETW event name, using the the [`SdkLogRecord`] as input.
+    ///
+    /// The resulting name must be a valid CommonSchema 4.0 TraceLoggingDynamic event name. Otherwise,
+    /// the default "Log" ETW event name will be used.
+    pub fn etw_event_name_from_callback(
+        mut self,
+        callback: impl Fn(&SdkLogRecord) -> &str + Send + Sync + 'static,
+    ) -> Self {
+        self.options_builder = self.options_builder.etw_event_name_from_callback(callback);
+        self
+    }
+
+    /// Validates the options given by consuming itself and returning the `Processor` or an error.
+    pub fn build(self) -> Result<Processor, Box<dyn Error>> {
+        match self.options_builder.build() {
+            Ok(options) => Ok(Processor::new(options)),
+            Err(error) => {
+                Err(error)
+            }
+        }
     }
 }
 
@@ -271,25 +221,31 @@ mod tests {
 
     #[test]
     fn test_validate_empty_name() {
-        assert!(Processor::builder("")
-            .build()
-            .unwrap_err()
-            .is_provider_name_empty());
+        assert_eq!(
+            Processor::builder("").build().unwrap_err().to_string(),
+            "Provider name must not be empty."
+        );
     }
 
     #[test]
     fn test_validate_name_longer_than_234_chars() {
-        assert!(Processor::builder("a".repeat(235))
-            .build()
-            .unwrap_err()
-            .is_provider_name_too_long());
+        assert_eq!(
+            Processor::builder("a".repeat(235).as_str())
+                .build()
+                .unwrap_err()
+                .to_string(),
+            "Provider name must be less than 234 characters long."
+        );
     }
 
     #[test]
     fn test_validate_name_uses_valid_chars() {
-        assert!(Processor::builder("i_have_a_?_")
-            .build()
-            .unwrap_err()
-            .is_provider_name_invalid());
+        assert_eq!(
+            Processor::builder("i_have_a_?_")
+                .build()
+                .unwrap_err()
+                .to_string(),
+            "Provider name must contain only ASCII alphanumeric characters, '_' or '-'."
+        );
     }
 }

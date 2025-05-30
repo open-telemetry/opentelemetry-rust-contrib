@@ -1,8 +1,6 @@
-use std::borrow::Cow;
-
 use opentelemetry_sdk::logs::SdkLogRecord;
-
-use crate::logs::processor::{ProcessorBuildError, ProcessorBuildErrorKind};
+use std::borrow::Cow;
+use std::error::Error;
 
 type BoxedEventNameCallback = Box<dyn EventNameCallback>;
 
@@ -67,7 +65,7 @@ impl OptionsBuilder {
         }
     }
 
-    pub(crate) fn build(self) -> Result<Options, ProcessorBuildError> {
+    pub(crate) fn build(self) -> Result<Options, Box<dyn Error>> {
         self.validate()?;
         Ok(self.options)
     }
@@ -80,39 +78,33 @@ impl OptionsBuilder {
         self
     }
 
-    fn validate(&self) -> Result<(), ProcessorBuildError> {
+    fn validate(&self) -> Result<(), Box<dyn Error>> {
         validate_provider_name(self.options.provider_name.as_ref())?;
         Ok(())
     }
 }
 
-fn validate_provider_name(provider_name: &str) -> Result<(), ProcessorBuildError> {
+fn validate_provider_name(provider_name: &str) -> Result<(), Box<dyn Error>> {
     if provider_name.is_empty() {
-        return Err(ProcessorBuildError::new(
-            ProcessorBuildErrorKind::ProviderNameEmpty,
-        ));
+        return Err("Provider name must not be empty.".into());
     }
     if provider_name.len() >= 234 {
-        return Err(ProcessorBuildError::new(
-            ProcessorBuildErrorKind::ProviderNameTooLong,
-        ));
+        return Err("Provider name must be less than 234 characters long.".into());
     }
     if !provider_name
         .chars()
         .all(|c| c.is_ascii_alphanumeric() || c == '_' || c == '-')
     {
-        return Err(ProcessorBuildError::new(
-            ProcessorBuildErrorKind::ProviderNameInvalid,
-        ));
+        return Err(
+            "Provider name must contain only ASCII alphanumeric characters, '_' or '-'.".into(),
+        );
     }
     Ok(())
 }
 
-fn validate_etw_event_name(event_name: &str) -> Result<(), ProcessorBuildError> {
+fn validate_etw_event_name(event_name: &str) -> Result<(), Box<dyn Error>> {
     if event_name.is_empty() {
-        return Err(ProcessorBuildError::new(
-            ProcessorBuildErrorKind::EventNameEmpty,
-        ));
+        return Err("Event name cannot be empty.".into());
     }
     // TODO: Finish validation for ETW event name
     Ok(())
