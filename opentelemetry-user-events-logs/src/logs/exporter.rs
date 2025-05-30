@@ -423,7 +423,7 @@ mod tests {
     use super::*;
     #[test]
     fn exporter_debug() {
-        let exporter = UserEventsExporter::new(options);
+        let exporter = UserEventsExporter::new("test_provider");
         assert_eq!(
             format!("{:?}", exporter),
             "user_events log exporter (provider name: test_provider)"
