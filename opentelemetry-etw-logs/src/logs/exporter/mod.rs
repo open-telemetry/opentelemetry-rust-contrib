@@ -241,7 +241,6 @@ mod tests {
     }
 
     #[tokio::test]
-    #[should_panic]
     async fn test_export_empty_batch_produces_failure() {
         use opentelemetry_sdk::logs::LogBatch;
         use opentelemetry_sdk::logs::LogExporter;
@@ -252,7 +251,7 @@ mod tests {
         let exporter = common::test_utils::new_etw_exporter();
         let result = exporter.export(batch);
 
-        assert!(result.await.is_ok());
+        assert!(result.await.is_err());
     }
 
     #[test]
