@@ -14,7 +14,7 @@ mod part_a;
 mod part_b;
 mod part_c;
 
-pub(crate) use options::{Options, OptionsBuilder};
+pub(crate) use options::Options;
 
 #[derive(Default)]
 struct Resource {

@@ -100,7 +100,7 @@ pub(crate) mod test_utils {
     }
 
     pub(crate) fn test_options() -> Options {
-        Options::builder("ContosoProvider").build().unwrap()
+        Options::new("ContosoProvider")
     }
 }
 

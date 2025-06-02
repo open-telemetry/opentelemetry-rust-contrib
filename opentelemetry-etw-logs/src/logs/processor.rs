@@ -84,7 +84,7 @@ impl opentelemetry_sdk::logs::LogProcessor for Processor {
 /// Builder for configuring and constructing a [`Processor`].
 #[derive(Debug)]
 pub struct ProcessorBuilder {
-    options_builder: OptionsBuilder,
+    options_builder: Options,
 }
 
 impl ProcessorBuilder {
@@ -93,7 +93,7 @@ impl ProcessorBuilder {
     /// By default, all events will be exported to the "Log" ETW event.
     pub(crate) fn new(provider_name: &str) -> Self {
         ProcessorBuilder {
-            options_builder: Options::builder(provider_name.to_string()),
+            options_builder: Options::new(provider_name.to_string()),
         }
     }
 
@@ -111,11 +111,33 @@ impl ProcessorBuilder {
 
     /// Validates the options given by consuming itself and returning the `Processor` or an error.
     pub fn build(self) -> Result<Processor, Box<dyn Error>> {
-        match self.options_builder.build() {
-            Ok(options) => Ok(Processor::new(options)),
-            Err(error) => Err(error),
-        }
+        self.validate()?;
+
+        Ok(Processor::new(self.options_builder))
     }
+
+    fn validate(&self) -> Result<(), Box<dyn Error>> {
+        validate_provider_name(self.options_builder.provider_name())?;
+        Ok(())
+    }
+}
+
+fn validate_provider_name(provider_name: &str) -> Result<(), Box<dyn Error>> {
+    if provider_name.is_empty() {
+        return Err("Provider name must not be empty.".into());
+    }
+    if provider_name.len() >= 234 {
+        return Err("Provider name must be less than 234 characters long.".into());
+    }
+    if !provider_name
+        .chars()
+        .all(|c| c.is_ascii_alphanumeric() || c == '_' || c == '-')
+    {
+        return Err(
+            "Provider name must contain only ASCII alphanumeric characters, '_' or '-'.".into(),
+        );
+    }
+    Ok(())
 }
 
 #[cfg(test)]
@@ -172,7 +194,7 @@ mod tests {
     }
 
     fn test_options() -> Options {
-        OptionsBuilder::new("test-provider-name").build().unwrap()
+        Options::new("test-provider-name")
     }
 
     #[test]
@@ -244,5 +266,37 @@ mod tests {
                 .to_string(),
             "Provider name must contain only ASCII alphanumeric characters, '_' or '-'."
         );
+    }
+
+    #[test]
+    fn test_validate_provider_name() {
+        let result = validate_provider_name("valid_provider_name");
+        assert!(result.is_ok());
+
+        let result = validate_provider_name("");
+        assert!(result.is_err());
+
+        let result = validate_provider_name("a".repeat(235).as_str());
+        assert!(result.is_err());
+
+        let result = validate_provider_name("i_have_a_-_");
+        assert!(result.is_ok());
+
+        let result = validate_provider_name("_?_");
+        assert!(result.is_err());
+
+        let result = validate_provider_name("abcdefghijklmnopqrstuvwxyz");
+        assert!(result.is_ok());
+
+        let result = validate_provider_name("ABCDEFGHIJKLMNOPQRSTUVWXYZ");
+        assert!(result.is_ok());
+
+        let result = validate_provider_name("1234567890");
+        assert!(result.is_ok());
+
+        let result = validate_provider_name(
+            "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ1234567890_",
+        );
+        assert!(result.is_ok());
     }
 }
