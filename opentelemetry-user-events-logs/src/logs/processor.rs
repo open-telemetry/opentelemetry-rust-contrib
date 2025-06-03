@@ -5,6 +5,7 @@ use opentelemetry_sdk::{
     error::OTelSdkResult,
     logs::{LogBatch, SdkLogRecord},
 };
+use std::error::Error;
 use std::fmt::Debug;
 
 use crate::logs::exporter::UserEventsExporter;
@@ -99,24 +100,21 @@ impl<'a> ProcessorBuilder<'a> {
     ///
     /// # Returns
     ///
-    /// A result containing the configured `Processor` or an error string if validation fails.
-    // TODO: Custom error struct instead of a string.
-    pub fn build(self) -> Result<Processor, String> {
+    /// A result containing the configured `Processor` or a boxed error if validation fails.
+    pub fn build(self) -> Result<Processor, Box<dyn Error>> {
         // Validate provider name
         if self.provider_name.is_empty() {
-            return Err("Provider name cannot be empty.".to_string());
+            return Err("Provider name cannot be empty.".into());
         }
         if self.provider_name.len() >= 234 {
-            return Err("Provider name must be less than 234 characters.".to_string());
+            return Err("Provider name must be less than 234 characters.".into());
         }
         if !self
             .provider_name
             .chars()
             .all(|c| c.is_ascii_alphanumeric() || c == '_')
         {
-            return Err(
-                "Provider name must contain only ASCII letters, digits, and '_'.".to_string(),
-            );
+            return Err("Provider name must contain only ASCII letters, digits, and '_'.".into());
         }
 
         let exporter = UserEventsExporter::new(self.provider_name);
@@ -127,6 +125,9 @@ impl<'a> ProcessorBuilder<'a> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use opentelemetry::logs::Logger;
+    use opentelemetry::logs::LoggerProvider;
+    use opentelemetry_sdk::logs::{LogProcessor, SdkLoggerProvider};
 
     #[test]
     fn test_processor_builder_with_valid_provider() {
@@ -138,7 +139,10 @@ mod tests {
     fn test_processor_builder_with_empty_provider_name() {
         let processor = Processor::builder("").build();
         assert!(processor.is_err());
-        assert_eq!(processor.unwrap_err(), "Provider name cannot be empty.");
+        assert_eq!(
+            processor.unwrap_err().to_string(),
+            "Provider name cannot be empty."
+        );
     }
 
     #[test]
@@ -195,8 +199,7 @@ mod tests {
         ];
 
         // Expected error message
-        let expected_error =
-            "Provider name must contain only ASCII letters, digits, and '_'.".to_string();
+        let expected_error = "Provider name must contain only ASCII letters, digits, and '_'.";
 
         // Test each invalid name
         for invalid_name in invalid_names {
@@ -210,11 +213,52 @@ mod tests {
 
             // Assert that the error message is as expected
             assert_eq!(
-                options.err().unwrap(),
+                options.err().unwrap().to_string(),
                 expected_error,
                 "Wrong error message for invalid name: '{}'",
                 invalid_name
             );
         }
+    }
+
+    #[test]
+    fn test_shutdown() {
+        let processor = Processor::builder("test_provider").build().unwrap();
+        assert!(processor.shutdown().is_ok());
+    }
+
+    #[test]
+    fn test_force_flush() {
+        let processor = Processor::builder("test_provider").build().unwrap();
+        assert!(processor.force_flush().is_ok());
+    }
+
+    #[test]
+    fn test_emit() {
+        let processor = Processor::builder("test_provider").build().unwrap();
+
+        let mut record = SdkLoggerProvider::builder()
+            .build()
+            .logger("test")
+            .create_log_record();
+        let instrumentation = Default::default();
+        // No assertions here, simply calling the function to ensure it doesn't panic
+        processor.emit(&mut record, &instrumentation);
+    }
+
+    #[test]
+    #[cfg(feature = "spec_unstable_logs_enabled")]
+    fn test_event_enabled() {
+        let processor = Processor::builder("test_provider").build().unwrap();
+
+        // No assertions here, simply calling the function to ensure it doesn't panic
+        let _info_enabled =
+            processor.event_enabled(opentelemetry::logs::Severity::Info, "test", Some("test"));
+        let _debug_enabled =
+            processor.event_enabled(opentelemetry::logs::Severity::Debug, "test", Some("test"));
+        let _error_enabled =
+            processor.event_enabled(opentelemetry::logs::Severity::Error, "test", Some("test"));
+
+        // Test completes if no panics occur
     }
 }

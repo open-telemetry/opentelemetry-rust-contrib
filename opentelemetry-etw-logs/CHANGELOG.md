@@ -5,6 +5,7 @@
 - Added validation to provider name
 - Added optional feature `serde_json` to serialize List and Maps.
 - Bump tracelogging crate to 1.2.4
+- Bump opentelemetry and opentelemetry_sdk versions to 0.30
 
 ## v0.8.0
 

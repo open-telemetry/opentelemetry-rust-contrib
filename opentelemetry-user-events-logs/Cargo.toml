@@ -1,7 +1,7 @@
 [package]
 name = "opentelemetry-user-events-logs"
 description = "OpenTelemetry Logs Exporter for Linux user_events"
-version = "0.12.0"
+version = "0.13.0"
 edition = "2021"
 homepage = "https://github.com/open-telemetry/opentelemetry-rust-contrib/tree/main/opentelemetry-user-events-logs"
 repository = "https://github.com/open-telemetry/opentelemetry-rust-contrib/tree/main/opentelemetry-user-events-logs"
@@ -13,15 +13,15 @@ license = "Apache-2.0"
 [dependencies]
 eventheader = "0.4.0"
 eventheader_dynamic = "0.4.0"
-opentelemetry = { workspace = true, features = ["logs"] }
-opentelemetry_sdk = { workspace = true, features = ["logs"] }
+opentelemetry = { version= "0.30", features = ["logs"] }
+opentelemetry_sdk = { version= "0.30", features = ["logs"] }
 chrono = { version = "0.4", default-features = false, features = ["std"] }
 tracing = { version = "0.1", optional = true }
 futures-executor = "0.3"
 
 [dev-dependencies]
-opentelemetry-appender-tracing = { workspace = true }
-opentelemetry_sdk = { workspace = true, features = ["logs", "trace"] }
+opentelemetry-appender-tracing = { version= "0.30" }
+opentelemetry_sdk = { version= "0.30", features = ["logs", "trace"] }
 tracing = { version = "0.1", default-features = false, features = ["std"] }
 tracing-core = "0.1.31"
 tracing-subscriber = { version = "0.3.0", default-features = false, features = ["env-filter", "fmt", "registry", "std"] }
@@ -35,6 +35,7 @@ internal-logs = ["tracing", "opentelemetry/internal-logs", "opentelemetry_sdk/in
 default = ["internal-logs"]
 
 [[bench]]
+
 name = "logs"
 harness = false
 required-features = ["spec_unstable_logs_enabled"]

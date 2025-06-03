@@ -1,23 +1,21 @@
-//! run with `$ cargo run --example basic --all-features
+//! run with `$ cargo run --example basic-metrics --all-features
 use opentelemetry::{metrics::MeterProvider as _, KeyValue};
-use opentelemetry_sdk::{
-    metrics::{PeriodicReader, SdkMeterProvider},
-    Resource,
-};
+use opentelemetry_sdk::{metrics::SdkMeterProvider, Resource};
 use opentelemetry_user_events_metrics::MetricsExporter;
 use std::thread;
 use std::time::Duration;
 use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt, EnvFilter, Layer};
 
+const SERVICE_NAME: &str = "metric-demo";
+
 fn init_metrics(exporter: MetricsExporter) -> SdkMeterProvider {
-    let reader = PeriodicReader::builder(exporter).build();
     SdkMeterProvider::builder()
         .with_resource(
-            Resource::builder_empty()
-                .with_attributes(vec![KeyValue::new("service.name", "metric-demo")])
+            Resource::builder()
+                .with_attributes(vec![KeyValue::new("service.name", SERVICE_NAME)])
                 .build(),
         )
-        .with_reader(reader)
+        .with_periodic_exporter(exporter)
         .build()
 }
 
@@ -58,6 +56,13 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .build();
     let updown_counter2 = meter
         .f64_up_down_counter("up_down_counter_f64_test")
+        .build();
+
+    let gauge1 = meter.f64_gauge("gauge_f64_test").build();
+
+    let gauge2 = meter
+        .u64_gauge("gauge_u64_test")
+        .with_unit("myunit")
         .build();
 
     // Create a Histogram Instrument.
@@ -102,13 +107,15 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .build();
 
     // Create a ObservableCounter instrument and register a callback that reports the measurement.
+    let counter_value = std::sync::Arc::new(std::sync::atomic::AtomicU64::new(100));
     let _observable_counter = meter
         .u64_observable_counter("observable_counter_u64_test")
         .with_description("test_description")
         .with_unit("test_unit")
-        .with_callback(|observer| {
+        .with_callback(move |observer| {
+            let value = counter_value.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
             observer.observe(
-                100,
+                value,
                 &[
                     KeyValue::new("mykey1", "myvalue1"),
                     KeyValue::new("mykey2", "myvalue2"),
@@ -117,13 +124,15 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         })
         .build();
 
+    let counter_value2 = std::sync::Arc::new(std::sync::atomic::AtomicU64::new(1));
     let _observable_counter2 = meter
         .f64_observable_counter("observable_counter_f64_test")
         .with_description("test_description")
         .with_unit("test_unit")
-        .with_callback(|observer| {
+        .with_callback(move |observer| {
+            let value = counter_value2.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
             observer.observe(
-                100.0,
+                value as f64 * 1.0,
                 &[
                     KeyValue::new("mykey1", "myvalue1"),
                     KeyValue::new("mykey2", "myvalue2"),
@@ -191,6 +200,22 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
         updown_counter2.add(
             10.0,
+            &[
+                KeyValue::new("mykey1", "myvalue1"),
+                KeyValue::new("mykey2", "myvalue2"),
+            ],
+        );
+
+        gauge1.record(
+            1.0,
+            &[
+                KeyValue::new("mykey1", "myvalue1"),
+                KeyValue::new("mykey2", "myvalue2"),
+            ],
+        );
+
+        gauge2.record(
+            10,
             &[
                 KeyValue::new("mykey1", "myvalue1"),
                 KeyValue::new("mykey2", "myvalue2"),

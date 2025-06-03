@@ -27,4 +27,3 @@ ignore:
   - "opentelemetry-dynatrace/examples"
   - "opentelemetry-http/examples"
   - "opentelemetry-prometheus/examples"
-  - "opentelemetry-zpages/examples"

@@ -2,40 +2,44 @@
 
 ## vNext
 
-### Changed
+## v0.13.0
 
-- Enhanced validation for the provider name in
-  `with_user_event_exporter(provider_name)`:
-  - Empty provider names are now disallowed.
+Released 2025-May-27
+
+### Changed
 
 - Event header name is changed to use "Log" instead of "LogRecord.EventName".
 - `ext_dt` and `ext_cloud` structs are flattened.
 - **BREAKING**
-  - Removed `with_user_events_exporter` extension method on   `LoggerProviderBuilder`.
-  - Introduced a builder pattern for the user_events exporter which improves configuration flexibility.
+  - Removed the `with_user_events_exporter` extension method from `LoggerProviderBuilder`.
+    - Instead, introduced a builder pattern for configuring the user events exporter, providing greater flexibility.
 
-  Before:
+    **Before:**
 
-  ```rust
-  use opentelemetry_sdk::logs::LoggerProviderBuilder;
-  use opentelemetry_user_events_logs::UserEventsLoggerProviderBuilderExt;
+    ```rust
+    use opentelemetry_sdk::logs::LoggerProviderBuilder;
+    use opentelemetry_user_events_logs::UserEventsLoggerProviderBuilderExt;
 
-  let logger_provider = LoggerProviderBuilder::default()
-    .with_user_events_exporter("myprovider")
-    .build();
-  ```
+    let logger_provider = LoggerProviderBuilder::default()
+      .with_user_events_exporter("myprovider")
+      .build();
+    ```
 
-  After:
-  
-  ```rust
-  use opentelemetry_sdk::logs::LoggerProviderBuilder;
-  let user_event_processor = opentelemetry_user_events_logs::Processor::builder("myprovider")
+    **After:**
+
+    ```rust
+    use opentelemetry_sdk::logs::LoggerProviderBuilder;
+    let user_event_processor = opentelemetry_user_events_logs::Processor::builder("myprovider")
         .build()
         .expect("Expected to have processor built");
     LoggerProviderBuilder::default()
         .with_log_processor(user_event_processor)
-        .build()
-  ```
+        .build();
+    ```
+
+    The `build()` method of `LoggerProviderBuilder` returns a `Result`, allowing users to handle errors as needed.
+    Additional validation: empty provider names are now disallowed.
+- Bump opentelemetry and opentelemetry_sdk versions to 0.30
 
 ## v0.12.0
 
