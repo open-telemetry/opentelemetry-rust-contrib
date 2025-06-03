@@ -2,7 +2,7 @@
 
 use crate::config_service::client::{AuthMethod, GenevaConfigClient, GenevaConfigClientConfig};
 use crate::ingestion_service::uploader::{GenevaUploader, GenevaUploaderConfig};
-use crate::payload_encoder::encoder::Encoder;
+use crate::payload_encoder::direct_otlp_encoder::DirectOtlpEncoder;
 use crate::payload_encoder::lz4_chunked_compression::lz4_chunked_compression;
 use opentelemetry_proto::tonic::logs::v1::ResourceLogs;
 use std::sync::Arc;
@@ -30,7 +30,7 @@ pub struct GenevaClientConfig {
 #[derive(Clone)]
 pub struct GenevaClient {
     uploader: Arc<GenevaUploader>,
-    encoder: Arc<Encoder>,
+    encoder: Arc<DirectOtlpEncoder>,
     metadata: String,
 }
 
@@ -81,7 +81,7 @@ impl GenevaClient {
         );
         Ok(Self {
             uploader: Arc::new(uploader),
-            encoder: Arc::new(Encoder::new()),
+            encoder: Arc::new(DirectOtlpEncoder::new()),
             metadata,
         })
     }
@@ -93,23 +93,12 @@ impl GenevaClient {
             for scope_log in &resource_log.scope_logs {
                 for log_record in &scope_log.log_records {
                     let event_name = &log_record.event_name;
-                    let mut fields: [crate::payload_encoder::encoder::EncoderField; 10] =
-                        std::array::from_fn(|_| {
-                            crate::payload_encoder::encoder::EncoderField::default()
-                        });
-                    let n = crate::payload_encoder::otlp_mapper::log_record_to_encoder_fields(
+                    let level = log_record.severity_number as u8; // Use actual severity from log record
+                    let encoded_blob = self.encoder.encode_log_record(
                         log_record,
-                        &mut fields,
-                    );
-                    let encoder_fields = &fields[..n];
-                    let level = 1u8; //TODO - find the actual value to be populated (severity?)
-
-                    // Encode using the encoder (could be part of uploader or a utility function)
-                    let encoded_blob = self.encoder.encode(
-                        encoder_fields,
                         event_name,
                         level,
-                        self.metadata.as_str(),
+                        &self.metadata,
                     );
                     File::create("/tmp/final_uncompressed.blob")
                         .unwrap()

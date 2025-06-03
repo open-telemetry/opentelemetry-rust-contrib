@@ -1,4 +1,5 @@
 pub(crate) mod central_blob;
+pub(crate) mod direct_otlp_encoder;
 pub(crate) mod encoder;
 pub(crate) mod ffi;
 pub(crate) mod lz4_chunked_compression;
