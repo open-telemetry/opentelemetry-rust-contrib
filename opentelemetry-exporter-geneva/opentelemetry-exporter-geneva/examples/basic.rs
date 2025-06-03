@@ -1,4 +1,3 @@
-
 //! run with `$ cargo run --example basic
 
 use geneva_uploader::client::{GenevaClient, GenevaClientConfig};
@@ -138,5 +137,4 @@ async fn main() {
     thread::sleep(Duration::from_secs(3));
     let _ = provider.shutdown();
     println!("Shutting down provider");
-
 }

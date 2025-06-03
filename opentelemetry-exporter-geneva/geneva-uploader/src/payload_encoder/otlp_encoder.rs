@@ -8,6 +8,7 @@ use std::sync::{Arc, RwLock};
 
 /// Direct encoder that skips intermediate EncoderField structure
 pub struct OtlpEncoder {
+    // TODO - limit cache size or use LRU eviction, and/or add feature flag for caching
     schema_cache: Arc<RwLock<HashMap<u64, (EncoderSchema, Vec<FieldInfo>)>>>,
 }
 
@@ -20,7 +21,7 @@ struct FieldInfo {
 
 impl OtlpEncoder {
     pub fn new() -> Self {
-        OtlpEncoders {
+        OtlpEncoder {
             schema_cache: Arc::new(RwLock::new(HashMap::new())),
         }
     }
@@ -207,8 +208,8 @@ impl OtlpEncoder {
 
         for field in sorted_fields {
             match field.name.as_str() {
-                "env_name" => Self::write_string(&mut buffer, "TestEnv"),
-                "env_ver" => Self::write_string(&mut buffer, "4.0"),
+                "env_name" => Self::write_string(&mut buffer, "TestEnv"), // TODO - placeholder for actual env name
+                "env_ver" => Self::write_string(&mut buffer, "4.0"), // TODO - placeholder for actual env name
                 "timestamp" | "env_time" => {
                     let dt = Self::format_timestamp(log.observed_time_unix_nano);
                     Self::write_string(&mut buffer, &dt);
@@ -242,6 +243,8 @@ impl OtlpEncoder {
                     }
                 }
                 "body" => {
+                    // TODO - handle all types of body values
+                    // For now, we only handle string values
                     if let Some(body) = &log.body {
                         if let Some(Value::StringValue(s)) = &body.value {
                             Self::write_string(&mut buffer, s);
@@ -305,7 +308,7 @@ impl OtlpEncoder {
                 (Some(Value::BoolValue(b)), 16) => {
                     Self::write_int32(buffer, if *b { 1 } else { 0 })
                 }
-                _ => {} // Type mismatch or unsupported type
+                _ => {} // TODO - handle more types
             }
         }
     }

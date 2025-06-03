@@ -2,8 +2,8 @@
 
 use crate::config_service::client::{AuthMethod, GenevaConfigClient, GenevaConfigClientConfig};
 use crate::ingestion_service::uploader::{GenevaUploader, GenevaUploaderConfig};
-use crate::payload_encoder::otlp_encoder::OtlpEncoder;
 use crate::payload_encoder::lz4_chunked_compression::lz4_chunked_compression;
+use crate::payload_encoder::otlp_encoder::OtlpEncoder;
 use opentelemetry_proto::tonic::logs::v1::ResourceLogs;
 use std::sync::Arc;
 
