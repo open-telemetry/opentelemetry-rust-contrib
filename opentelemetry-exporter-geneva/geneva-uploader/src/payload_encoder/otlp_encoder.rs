@@ -6,7 +6,7 @@ use opentelemetry_proto::tonic::logs::v1::LogRecord;
 use std::collections::HashMap;
 use std::sync::{Arc, RwLock};
 
-/// Direct encoder that skips intermediate EncoderField structure
+/// Encoder to write OTLP payload in bond form.
 pub struct OtlpEncoder {
     // TODO - limit cache size or use LRU eviction, and/or add feature flag for caching
     schema_cache: Arc<RwLock<HashMap<u64, (EncoderSchema, Vec<FieldInfo>)>>>,
@@ -26,7 +26,7 @@ impl OtlpEncoder {
         }
     }
 
-    /// Encode a LogRecord directly to bytes without intermediate structures
+    /// Encode a LogRecord directly to bytes
     pub fn encode_log_record(
         &self,
         log: &LogRecord,
