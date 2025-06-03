@@ -7,7 +7,7 @@ use std::collections::HashMap;
 use std::sync::{Arc, RwLock};
 
 /// Direct encoder that skips intermediate EncoderField structure
-pub struct DirectOtlpEncoder {
+pub struct OtlpEncoder {
     schema_cache: Arc<RwLock<HashMap<u64, (EncoderSchema, Vec<FieldInfo>)>>>,
 }
 
@@ -18,9 +18,9 @@ struct FieldInfo {
     order_id: u16,
 }
 
-impl DirectOtlpEncoder {
+impl OtlpEncoder {
     pub fn new() -> Self {
-        DirectOtlpEncoder {
+        OtlpEncoders {
             schema_cache: Arc::new(RwLock::new(HashMap::new())),
         }
     }
@@ -317,8 +317,8 @@ mod tests {
     use opentelemetry_proto::tonic::common::v1::{AnyValue, KeyValue};
 
     #[test]
-    fn test_direct_encoding() {
-        let encoder = DirectOtlpEncoder::new();
+    fn test_encoding() {
+        let encoder = OtlpEncoder::new();
 
         let mut log = LogRecord::default();
         log.observed_time_unix_nano = 1_700_000_000_000_000_000;
@@ -349,7 +349,7 @@ mod tests {
 
     #[test]
     fn test_schema_caching() {
-        let encoder = DirectOtlpEncoder::new();
+        let encoder = OtlpEncoder::new();
 
         let mut log1 = LogRecord::default();
         log1.observed_time_unix_nano = 1_700_000_000_000_000_000;

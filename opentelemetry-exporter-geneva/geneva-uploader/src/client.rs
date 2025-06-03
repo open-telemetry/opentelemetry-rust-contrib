@@ -2,7 +2,7 @@
 
 use crate::config_service::client::{AuthMethod, GenevaConfigClient, GenevaConfigClientConfig};
 use crate::ingestion_service::uploader::{GenevaUploader, GenevaUploaderConfig};
-use crate::payload_encoder::direct_otlp_encoder::DirectOtlpEncoder;
+use crate::payload_encoder::otlp_encoder::OtlpEncoder;
 use crate::payload_encoder::lz4_chunked_compression::lz4_chunked_compression;
 use opentelemetry_proto::tonic::logs::v1::ResourceLogs;
 use std::sync::Arc;
@@ -30,7 +30,7 @@ pub struct GenevaClientConfig {
 #[derive(Clone)]
 pub struct GenevaClient {
     uploader: Arc<GenevaUploader>,
-    encoder: Arc<DirectOtlpEncoder>,
+    encoder: Arc<OtlpEncoder>,
     metadata: String,
 }
 
@@ -81,7 +81,7 @@ impl GenevaClient {
         );
         Ok(Self {
             uploader: Arc::new(uploader),
-            encoder: Arc::new(DirectOtlpEncoder::new()),
+            encoder: Arc::new(OtlpEncoder::new()),
             metadata,
         })
     }
