@@ -12,6 +12,17 @@ mod benchmarks {
         data
     }
 
+    /*
+        - Criterion benchmarks (lz4_chunked_compression, lz4_flex backend):
+
+            | Input size  | Median time        | Throughput         |
+            |-------------|--------------------|--------------------|
+            | 1 byte      | ~711 ns            | ~1.3 MiB/s         |
+            | 1 KiB       | ~31.8 us           | ~30.6 MiB/s        |
+            | 1 MiB       | ~3.44 ms           | ~291 MiB/s         |
+        - No significant regressions or improvements detected.
+        - Machine: WSL2, Linux 6.6.36, AMD EPYC 7763 64-core (8 cores visible), 62GiB RAM, 16GiB swap.
+    */
     #[test]
     fn lz4_benchmark() {
         let mut criterion = Criterion::default()
