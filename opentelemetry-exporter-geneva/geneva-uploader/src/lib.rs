@@ -1,8 +1,11 @@
 mod config_service;
 pub mod ingestion_service;
-mod payload_encoder;
+pub(crate) mod payload_encoder;
 
 mod uploader;
+
+#[cfg(test)]
+mod bench;
 
 #[allow(unused_imports)]
 pub(crate) use config_service::client::{
