@@ -11,9 +11,9 @@ license = "Apache-2.0"
 rust-version = "1.75.0"
 
 [dependencies]
-opentelemetry = { workspace = true, features = ["metrics"] }
-opentelemetry_sdk = { workspace = true, features = ["metrics"] }
-opentelemetry-proto = { workspace = true, features = ["gen-tonic", "metrics"] }
+opentelemetry = { version = "0.29", features = ["metrics"] }
+opentelemetry_sdk = { version = "0.29", features = ["metrics"] }
+opentelemetry-proto = { version = "0.29", features = ["gen-tonic", "metrics"] }
 prost = "0.13"
 tracelogging = "1.2.4"
 tracing = { version = "0.1", optional = true }

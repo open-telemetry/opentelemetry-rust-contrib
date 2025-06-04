@@ -2,6 +2,11 @@
 
 ## vNext
 
+## v0.18.0
+
+- Bump opentelemetry and opentelemetry_sdk versions to 0.30
+- Bump opentelemetry-http and opentelemetry-semantic-conventions versions to 0.30
+
 ## v0.17.0
 
 - `DatadogExporter.export()` doesn't require mutability anymore
