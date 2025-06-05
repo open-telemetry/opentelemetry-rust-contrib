@@ -198,7 +198,7 @@ mod tests {
     }
 
     #[test]
-    fn tracing_test() {
+    fn tracing_integration_test() {
         use opentelemetry_appender_tracing::layer;
         use tracing::error;
         use tracing_subscriber::prelude::*;
