@@ -217,6 +217,7 @@ mod tests {
             })
             .expect("Event 'myprovider:Log' not found");
 
+        println!("Event: {:?}", event);
         // Validate event structure and fields
         assert_eq!(event["n"].as_str().unwrap(), "myprovider:Log");
         assert_eq!(event["__csver__"].as_i64().unwrap(), 1024);
