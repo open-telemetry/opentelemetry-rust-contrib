@@ -133,9 +133,7 @@ fn validate_provider_name(provider_name: &str) -> Result<(), Box<dyn Error>> {
         .chars()
         .all(|c| c.is_ascii_alphanumeric() || c == '_')
     {
-        return Err(
-            "Provider name must contain only ASCII alphanumeric characters or '_'.".into(),
-        );
+        return Err("Provider name must contain only ASCII alphanumeric characters or '_'.".into());
     }
     Ok(())
 }
