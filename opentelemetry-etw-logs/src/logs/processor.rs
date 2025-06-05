@@ -84,7 +84,7 @@ impl opentelemetry_sdk::logs::LogProcessor for Processor {
 /// Builder for configuring and constructing a [`Processor`].
 #[derive(Debug)]
 pub struct ProcessorBuilder {
-    options_builder: Options,
+    options: Options,
 }
 
 impl ProcessorBuilder {
@@ -93,7 +93,7 @@ impl ProcessorBuilder {
     /// By default, all events will be exported to the "Log" ETW event.
     pub(crate) fn new(provider_name: &str) -> Self {
         ProcessorBuilder {
-            options_builder: Options::new(provider_name.to_string()),
+            options: Options::new(provider_name.to_string()),
         }
     }
 
@@ -105,19 +105,19 @@ impl ProcessorBuilder {
         mut self,
         callback: impl Fn(&SdkLogRecord) -> &str + Send + Sync + 'static,
     ) -> Self {
-        self.options_builder = self.options_builder.etw_event_name_from_callback(callback);
+        self.options = self.options.etw_event_name_from_callback(callback);
         self
     }
 
-    /// Validates the options given by consuming itself and returning the `Processor` or an error.
+    /// Builds the processor with given options, returning `Error` if it fails.
     pub fn build(self) -> Result<Processor, Box<dyn Error>> {
         self.validate()?;
 
-        Ok(Processor::new(self.options_builder))
+        Ok(Processor::new(self.options))
     }
 
     fn validate(&self) -> Result<(), Box<dyn Error>> {
-        validate_provider_name(self.options_builder.provider_name())?;
+        validate_provider_name(self.options.provider_name())?;
         Ok(())
     }
 }
