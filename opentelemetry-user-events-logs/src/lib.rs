@@ -101,7 +101,7 @@ mod tests {
     use crate::Processor;
     use opentelemetry::trace::Tracer;
     use opentelemetry::trace::{TraceContextExt, TracerProvider};
-    use opentelemetry::Key;
+    use opentelemetry::{Key, KeyValue};
     use opentelemetry_appender_tracing::layer;
     use opentelemetry_sdk::Resource;
     use opentelemetry_sdk::{
@@ -124,10 +124,20 @@ mod tests {
 
         // Basic check if user_events are available
         check_user_events_available().expect("Kernel does not support user_events. Verify your distribution/kernel supports user_events: https://docs.kernel.org/trace/user_events.html.");
-        let user_event_processor = Processor::builder("myprovider").build().unwrap();
+        let user_event_processor = Processor::builder("myprovider")
+            .with_resource_attributes(vec!["resource_attribute1", "resource_attribute2"])
+            .build()
+            .unwrap();
 
         let logger_provider = LoggerProviderBuilder::default()
-            .with_resource(Resource::builder().with_service_name("myrolename").build())
+            .with_resource(
+                Resource::builder()
+                    .with_service_name("myrolename")
+                    .with_attribute(KeyValue::new("resource_attribute1", "v1"))
+                    .with_attribute(KeyValue::new("resource_attribute2", "v2"))
+                    .with_attribute(KeyValue::new("resource_attribute3", "v3"))
+                    .build(),
+            )
             .with_log_processor(user_event_processor)
             .build();
 
@@ -233,6 +243,8 @@ mod tests {
         // Validate PartC
         let part_c = &event["PartC"];
         assert_eq!(part_c["user_name"].as_str().unwrap(), "otel user");
+        assert_eq!(part_c["resource_attribute1"].as_str().unwrap(), "v1");
+        assert_eq!(part_c["resource_attribute2"].as_str().unwrap(), "v2");
         assert_eq!(
             part_c["user_email"].as_str().unwrap(),
             "otel.user@opentelemetry.com"

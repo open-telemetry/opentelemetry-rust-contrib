@@ -66,6 +66,7 @@ impl opentelemetry_sdk::logs::LogProcessor for Processor {
 #[derive(Debug)]
 pub struct ProcessorBuilder<'a> {
     provider_name: &'a str,
+    resource_attributes: Vec<&'a str>,
 }
 
 impl<'a> ProcessorBuilder<'a> {
@@ -93,7 +94,18 @@ impl<'a> ProcessorBuilder<'a> {
     /// For example the following will capture level 2 (Error) and 3(Warning) events:
     /// perf record -e user_events:myprovider_L2K1,user_events:myprovider_L3K1
     pub(crate) fn new(provider_name: &'a str) -> Self {
-        Self { provider_name }
+        Self {
+            provider_name,
+            resource_attributes: vec![],
+        }
+    }
+
+    /// Sets the resource attributes for the processor
+    /// This is the list of attribute keys, which, if present in Resource attributes,
+    /// will be exported with each log.
+    pub fn with_resource_attributes(mut self, attributes: Vec<&'a str>) -> Self {
+        self.resource_attributes = attributes;
+        self
     }
 
     /// Builds the processor with the configured options
@@ -117,7 +129,7 @@ impl<'a> ProcessorBuilder<'a> {
             return Err("Provider name must contain only ASCII letters, digits, and '_'.".into());
         }
 
-        let exporter = UserEventsExporter::new(self.provider_name);
+        let exporter = UserEventsExporter::new(self.provider_name, self.resource_attributes);
         Ok(Processor { exporter })
     }
 }
