@@ -101,7 +101,7 @@ mod tests {
         let mut log_record = test_utils::new_sdk_log_record();
 
         let options =
-            Options::new("test-provider-name").etw_event_name_from_callback(|_| "CustomEvent");
+            Options::new("test_provider_name").etw_event_name_from_callback(|_| "CustomEvent");
 
         let result = options.get_etw_event_name(&log_record);
         assert_eq!(result, "CustomEvent");
@@ -121,7 +121,7 @@ mod tests {
 
         let mut log_record = test_utils::new_sdk_log_record();
 
-        let options = Options::new("test-provider-name")
+        let options = Options::new("test_provider_name")
             .etw_event_name_from_callback(|log_record| log_record.event_name().unwrap_or_default());
 
         let result = options.get_etw_event_name(&log_record);
@@ -147,7 +147,7 @@ mod tests {
         let mut log_record = test_utils::new_sdk_log_record();
 
         let options =
-            Options::new("test-provider-name").etw_event_name_from_callback(|log_record| {
+            Options::new("test_provider_name").etw_event_name_from_callback(|log_record| {
                 log_record.target().map_or("", |target| target.as_ref())
             });
 

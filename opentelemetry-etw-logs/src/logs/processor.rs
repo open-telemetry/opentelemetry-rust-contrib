@@ -26,7 +26,7 @@ impl Processor {
     ///
     /// - non-empty,
     /// - less than 234 characters long, and
-    /// - contain only ASCII alphanumeric characters, underscores (`_`), or hyphens (`-`).
+    /// - contain only ASCII alphanumeric characters or underscores (`_`).
     ///
     /// At the same time, it is recommended to use a provider name that is:
     /// - short
@@ -131,10 +131,10 @@ fn validate_provider_name(provider_name: &str) -> Result<(), Box<dyn Error>> {
     }
     if !provider_name
         .chars()
-        .all(|c| c.is_ascii_alphanumeric() || c == '_' || c == '-')
+        .all(|c| c.is_ascii_alphanumeric() || c == '_')
     {
         return Err(
-            "Provider name must contain only ASCII alphanumeric characters, '_' or '-'.".into(),
+            "Provider name must contain only ASCII alphanumeric characters or '_'.".into(),
         );
     }
     Ok(())
@@ -194,7 +194,7 @@ mod tests {
     }
 
     fn test_options() -> Options {
-        Options::new("test-provider-name")
+        Options::new("test_provider_name")
     }
 
     #[test]
@@ -203,7 +203,7 @@ mod tests {
         use tracing::error;
         use tracing_subscriber::prelude::*;
 
-        let processor = Processor::builder("provider-name")
+        let processor = Processor::builder("provider_name")
             .etw_event_name_from_callback(|_| "CustomEvent")
             .build()
             .unwrap();
@@ -264,7 +264,7 @@ mod tests {
                 .build()
                 .unwrap_err()
                 .to_string(),
-            "Provider name must contain only ASCII alphanumeric characters, '_' or '-'."
+            "Provider name must contain only ASCII alphanumeric characters or '_'."
         );
     }
 
@@ -280,7 +280,7 @@ mod tests {
         assert!(result.is_err());
 
         let result = validate_provider_name("i_have_a_-_");
-        assert!(result.is_ok());
+        assert!(result.is_err());
 
         let result = validate_provider_name("_?_");
         assert!(result.is_err());
