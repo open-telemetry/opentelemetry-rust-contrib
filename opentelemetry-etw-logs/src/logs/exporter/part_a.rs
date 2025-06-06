@@ -95,7 +95,9 @@ fn populate_time(
     let timestamp: DateTime<Utc> = event_time.into();
     event.add_str8(
         "time",
-        timestamp.to_rfc3339_opts(chrono::SecondsFormat::AutoSi, true).as_str(),
+        timestamp
+            .to_rfc3339_opts(chrono::SecondsFormat::AutoSi, true)
+            .as_str(),
         tld::OutType::Default,
         field_tag,
     );
