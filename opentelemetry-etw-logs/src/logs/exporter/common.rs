@@ -21,7 +21,7 @@ pub fn add_attribute_to_event(event: &mut tld::EventBuilder, key: &Key, value: &
             event.add_str8(key.as_str(), s.as_str(), tld::OutType::Default, 0);
         }
         AnyValue::Bytes(b) => {
-            event.add_binaryc(key.as_str(), b.as_slice(), tld::OutType::Default, 0);
+            event.add_binary(key.as_str(), b.as_slice(), tld::OutType::Default, 0);
         }
         #[cfg(feature = "serde_json")]
         AnyValue::ListAny(_) => {
