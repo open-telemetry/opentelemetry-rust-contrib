@@ -1,5 +1,5 @@
 use crate::payload_encoder::central_blob::{CentralBlob, CentralEventEntry, CentralSchemaEntry};
-use crate::payload_encoder::{EncoderRow, EncoderSchema};
+use crate::payload_encoder::bond_encoder::{BondEncodedRow, BondEncodedSchema};
 use chrono::{TimeZone, Utc};
 use opentelemetry_proto::tonic::common::v1::any_value::Value;
 use opentelemetry_proto::tonic::logs::v1::LogRecord;
@@ -9,7 +9,7 @@ use std::sync::{Arc, RwLock};
 /// Encoder to write OTLP payload in bond form.
 pub struct OtlpEncoder {
     // TODO - limit cache size or use LRU eviction, and/or add feature flag for caching
-    schema_cache: Arc<RwLock<HashMap<u64, (EncoderSchema, Vec<FieldInfo>)>>>,
+    schema_cache: Arc<RwLock<HashMap<u64, (BondEncodedSchema, Vec<FieldInfo>)>>>,
 }
 
 #[derive(Clone, Debug)]
@@ -45,7 +45,7 @@ impl OtlpEncoder {
         let row_buffer = self.write_row_data(log, &field_info);
 
         // Step 4: Create the event and blob
-        let row_obj = EncoderRow::from_schema_and_row(&schema_entry.schema, &row_buffer);
+        let row_obj = BondEncodedRow::from_schema_and_row(&schema_entry.schema, &row_buffer);
 
         let event = CentralEventEntry {
             schema_id,
@@ -167,7 +167,7 @@ impl OtlpEncoder {
             .map(|(i, (name, type_id))| (name.as_str(), *type_id, (i + 1) as u16))
             .collect();
 
-        let schema = EncoderSchema::from_fields(&field_defs);
+        let schema = BondEncodedSchema::from_fields(&field_defs);
 
         // Create field info for ordered writing
         let field_info: Vec<FieldInfo> = field_defs

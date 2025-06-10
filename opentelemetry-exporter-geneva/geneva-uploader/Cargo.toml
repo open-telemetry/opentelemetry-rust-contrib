@@ -39,10 +39,6 @@ futures = "0.3"
 num_cpus = "1.16"
 lz4_flex = { version = "0.11" }
 
-[build-dependencies]
-cc = "1.0"
-
-
 [workspace.lints.rust]
 rust_2024_compatibility = { level = "warn", priority = -1 }
 # No need to enable those, because it is either unnecessary or results in ugly syntax

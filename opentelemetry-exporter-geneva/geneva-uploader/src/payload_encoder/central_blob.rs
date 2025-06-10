@@ -1,6 +1,6 @@
 //use md5;
 
-use crate::payload_encoder::{EncoderRow as FFiEncoderRow, EncoderSchema as FFiEncoderSchema};
+use crate::payload_encoder::bond_encoder::{BondEncodedRow, BondEncodedSchema};
 
 /// Helper to encode UTF-8 Rust str to UTF-16LE bytes
 #[allow(dead_code)]
@@ -20,7 +20,7 @@ fn utf8_to_utf16le_bytes(s: &str) -> Vec<u8> {
 pub(crate) struct CentralSchemaEntry {
     pub id: u64,
     pub md5: [u8; 16],
-    pub schema: FFiEncoderSchema,
+    pub schema: BondEncodedSchema,
 }
 
 /// Event/row entry for central blob
@@ -29,7 +29,7 @@ pub(crate) struct CentralEventEntry {
     pub schema_id: u64,
     pub level: u8,
     pub event_name: String,
-    pub row: FFiEncoderRow,
+    pub row: BondEncodedRow,
 }
 
 #[allow(dead_code)]
