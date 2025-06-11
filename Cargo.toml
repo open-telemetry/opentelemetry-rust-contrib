@@ -11,9 +11,9 @@ members = [
     "opentelemetry-user-events-logs",
     "opentelemetry-user-events-trace",
     "opentelemetry-user-events-metrics",
-    # "opentelemetry-exporter-geneva/geneva-uploader",
-    # "opentelemetry-exporter-geneva/geneva-uploader-ffi",
-    # "opentelemetry-exporter-geneva/opentelemetry-exporter-geneva",
+    "opentelemetry-exporter-geneva/geneva-uploader",
+    "opentelemetry-exporter-geneva/geneva-uploader-ffi",
+    "opentelemetry-exporter-geneva/opentelemetry-exporter-geneva",
     "examples/*",
     "stress",
 ]
