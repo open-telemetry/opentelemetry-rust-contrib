@@ -5,8 +5,8 @@ use std::io::{Result, Write};
 /// Bond data types
 #[derive(Clone, Copy, Debug)]
 #[repr(u8)]
-#[allow(non_camel_case_types)]  // Allow C-style naming for clarity with Bond protocol
-#[allow(dead_code)]  // These represent all possible Bond types, not all are used yet
+#[allow(non_camel_case_types)] // Allow C-style naming for clarity with Bond protocol
+#[allow(dead_code)] // These represent all possible Bond types, not all are used yet
 pub(crate) enum BondDataType {
     BT_STOP = 0,
     BT_STOP_BASE = 1,
@@ -173,7 +173,7 @@ fn write_field_def<W: Write>(writer: &mut W, field: &FieldDef, is_last: bool) ->
 }
 
 /// Encode a payload with dynamic fields
-/// #[allow(dead_code)]  // May be used in future
+#[allow(dead_code)] // May be used in future
 pub(crate) fn encode_dynamic_payload<W: Write>(
     writer: &mut W,
     fields: &[FieldDef],
@@ -184,7 +184,7 @@ pub(crate) fn encode_dynamic_payload<W: Write>(
     writer.write_all(&[0x01, 0x00])?; // Version 1
 
     // Create a map for quick lookup
-    let value_map: std::collections::HashMap<&str, &[u8]> = 
+    let value_map: std::collections::HashMap<&str, &[u8]> =
         values.iter().map(|(k, v)| (*k, v.as_slice())).collect();
 
     // Write values in field order
@@ -199,7 +199,7 @@ pub(crate) fn encode_dynamic_payload<W: Write>(
                 9 | 18 => writer.write_all(&0u32.to_le_bytes())?, // empty string
                 16 => writer.write_all(&0i32.to_le_bytes())?, // int32
                 17 => writer.write_all(&0i64.to_le_bytes())?, // int64
-                _ => {} // Handle other types as needed
+                _ => {}                                      // Handle other types as needed
             }
         }
     }
@@ -215,7 +215,7 @@ pub(crate) struct BondEncodedSchema {
 impl BondEncodedSchema {
     pub(crate) fn from_fields(fields: &[(&str, u8, u16)]) -> Self {
         let mut schema = DynamicSchema::new("OtlpLogRecord", "telemetry");
-        
+
         for (name, type_id, field_id) in fields {
             schema.add_field(name, *type_id, *field_id);
         }
@@ -256,8 +256,8 @@ impl BondEncodedRow {
         // The row data is already properly formatted by the OTLP encoder
         // For Simple Binary protocol, we don't add any additional encoding
         // The SP header will be added by CentralBlob when needed
-        Self { 
-            bytes: row.to_vec() 
+        Self {
+            bytes: row.to_vec(),
         }
     }
 

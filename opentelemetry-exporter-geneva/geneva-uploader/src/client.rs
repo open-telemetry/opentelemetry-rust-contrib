@@ -88,38 +88,39 @@ impl GenevaClient {
 
     /// Upload OTLP logs (as ResourceLogs).
     pub async fn upload_logs(&self, logs: Vec<ResourceLogs>) -> Result<(), String> {
-        // For each log, convert to EncoderField(s) and upload via GenevaUploader
-        for resource_log in logs {
-            for scope_log in &resource_log.scope_logs {
-                for log_record in &scope_log.log_records {
-                    let event_name = &log_record.event_name;
-                    let level = log_record.severity_number as u8; // Use actual severity from log record
-                    let encoded_blob = self.encoder.encode_log_record(
-                        log_record,
-                        event_name,
-                        level,
-                        &self.metadata,
-                    );
-                    File::create("/tmp/final_uncompressed.blob")
-                        .unwrap()
-                        .write_all(&encoded_blob)
-                        .unwrap();
+        println!("Uploading {} ResourceLogs", logs.len());
+        let log_iter = logs
+            .iter()
+            .flat_map(|resource_log| resource_log.scope_logs.iter())
+            .flat_map(|scope_log| scope_log.log_records.iter());
+        let blobs = self.encoder.encode_log_batch(log_iter, &self.metadata);
+        let mut idx = 0;
+        for (schema_id, event_name, encoded_blob, row_count) in blobs {
+            //encoded log to a unique file
+            let file_name = format!(
+                "encoded_log_schema_{}_event_{}_batch_{}.bin",
+                schema_id,
+                event_name.replace("/", "_"), // Replace slashes to avoid file path issues
+                idx
+            );
+            let mut file = File::create(&file_name)
+                .map_err(|e| format!("Failed to create file {file_name}: {e}"))?;
+            idx += 1;
+            file.write_all(&encoded_blob)
+                .map_err(|e| format!("Failed to write to file {file_name}: {e}"))?;
 
-                    let compressed_blob = lz4_chunked_compression(&encoded_blob)
-                        .map_err(|e| format!("LZ4 compression failed: {e}"))?; //TODO - error handling
-                    File::create("/tmp/final_compressed.blob")
-                        .unwrap()
-                        .write_all(&compressed_blob)
-                        .unwrap();
-                    // Upload using the internal uploader
-
-                    let event_version = "Ver2v0"; // TODO - find the actual value to be populated
-                    self.uploader
-                        .upload(compressed_blob, event_name, event_version)
-                        .await
-                        .map_err(|e| format!("Geneva upload failed: {e}"))?;
-                }
-            }
+            println!("Compressing and uploading {} rows", row_count);
+            let compressed_blob = lz4_chunked_compression(&encoded_blob)
+                .map_err(|e| format!("LZ4 compression failed: {e}"))?;
+            let event_version = "Ver2v0"; // TODO - find the actual value to be populated
+            self.uploader
+                .upload(compressed_blob, &event_name, event_version)
+                .await
+                .map_err(|e| format!("Geneva upload failed: {e}"))?;
+            println!(
+                "Uploaded {} rows for event '{}' in a single batch",
+                row_count, event_name
+            );
         }
         Ok(())
     }

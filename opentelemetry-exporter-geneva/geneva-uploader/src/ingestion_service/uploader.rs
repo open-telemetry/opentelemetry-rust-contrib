@@ -182,6 +182,10 @@ impl GenevaUploader {
         // Always get fresh auth info
         let (auth_info, moniker_info, monitoring_endpoint) =
             self.config_client.get_ingestion_info().await?;
+        println!(
+            "Using auth token: {}, moniker: {}, monitoring endpoint: {}",
+            auth_info.auth_token, moniker_info.name, monitoring_endpoint
+        );
         let data_size = data.len();
         let upload_uri = self.create_upload_uri(
             &monitoring_endpoint,
@@ -195,7 +199,7 @@ impl GenevaUploader {
             auth_info.endpoint.trim_end_matches('/'),
             upload_uri
         );
-
+        println!("Upload URL: {}", full_url);
         // Send the upload request
         let response = self
             .http_client
@@ -208,7 +212,7 @@ impl GenevaUploader {
             .send()
             .await
             .map_err(GenevaUploaderError::Http)?;
-
+        println!("Response status: {}", response.status());
         let status = response.status();
         let body = response.text().await.map_err(GenevaUploaderError::Http)?;
 

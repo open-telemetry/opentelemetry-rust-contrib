@@ -1,5 +1,5 @@
-use crate::payload_encoder::central_blob::{CentralBlob, CentralEventEntry, CentralSchemaEntry};
 use crate::payload_encoder::bond_encoder::{BondEncodedRow, BondEncodedSchema};
+use crate::payload_encoder::central_blob::{CentralBlob, CentralEventEntry, CentralSchemaEntry};
 use chrono::{TimeZone, Utc};
 use opentelemetry_proto::tonic::common::v1::any_value::Value;
 use opentelemetry_proto::tonic::logs::v1::LogRecord;
@@ -26,43 +26,67 @@ impl OtlpEncoder {
         }
     }
 
-    /// Encode a LogRecord directly to bytes
-    pub fn encode_log_record(
+    pub fn encode_log_batch<'a, I>(
         &self,
-        log: &LogRecord,
-        event_name: &str,
-        level: u8,
+        logs: I,
         metadata: &str,
-    ) -> Vec<u8> {
-        // Step 1: Determine what fields are present and calculate schema ID
-        let field_specs = self.determine_fields(log);
-        let schema_id = self.calculate_schema_id(&field_specs);
+    ) -> Vec<(u64, String, Vec<u8>, usize)>
+    where
+        I: Iterator<Item = &'a opentelemetry_proto::tonic::logs::v1::LogRecord>,
+    {
+        use std::collections::HashMap;
 
-        // Step 2: Get or create schema
-        let (schema_entry, field_info) = self.get_or_create_schema(schema_id, field_specs);
+        let mut batches: HashMap<(u64, String), (CentralSchemaEntry, Vec<(String, u8, Vec<u8>)>)> =
+            HashMap::new();
 
-        // Step 3: Write data directly to row buffer in schema order
-        let row_buffer = self.write_row_data(log, &field_info);
+        for log_record in logs {
+            // 1. Get schema
+            let field_specs = self.determine_fields(log_record);
+            let schema_id = self.calculate_schema_id(&field_specs);
+            let (schema_entry, field_info) = self.get_or_create_schema(schema_id, field_specs);
 
-        // Step 4: Create the event and blob
-        let row_obj = BondEncodedRow::from_schema_and_row(&schema_entry.schema, &row_buffer);
+            // 2. Encode row
+            let row_buffer = self.write_row_data(log_record, &field_info);
+            let event_name = if log_record.event_name.is_empty() {
+                "Log".to_string()
+            } else {
+                log_record.event_name.clone()
+            };
+            let level = log_record.severity_number as u8;
 
-        let event = CentralEventEntry {
-            schema_id,
-            level,
-            event_name: event_name.to_string(),
-            row: row_obj,
-        };
+            // 3. Insert into batches - Key is (schema_id, event_name)
+            batches
+                .entry((schema_id, event_name.clone()))
+                .or_insert_with(|| (schema_entry, Vec::new()))
+                .1
+                .push((event_name, level, row_buffer));
+        }
 
-        let blob = CentralBlob {
-            version: 1,
-            format: 2,
-            metadata: metadata.to_string(),
-            schemas: vec![schema_entry],
-            events: vec![event],
-        };
+        // 4. Encode blobs (one per schema AND event_name combination)
+        let mut blobs = Vec::new();
+        for ((schema_id, batch_event_name), (schema_entry, records)) in batches {
+            let events: Vec<CentralEventEntry> = records
+                .into_iter()
+                .map(|(event_name, level, row_buffer)| CentralEventEntry {
+                    schema_id,
+                    level,
+                    event_name,
+                    row: BondEncodedRow::from_schema_and_row(&schema_entry.schema, &row_buffer),
+                })
+                .collect();
+            let events_len = events.len();
 
-        blob.to_bytes()
+            let blob = CentralBlob {
+                version: 1,
+                format: 2,
+                metadata: metadata.to_string(),
+                schemas: vec![schema_entry],
+                events,
+            };
+            let bytes = blob.to_bytes();
+            blobs.push((schema_id, batch_event_name, bytes, events_len));
+        }
+        blobs
     }
 
     /// Determine which fields are present in the LogRecord

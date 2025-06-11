@@ -4,7 +4,12 @@ use geneva_uploader::client::{GenevaClient, GenevaClientConfig};
 use geneva_uploader::AuthMethod;
 use opentelemetry_appender_tracing::layer;
 use opentelemetry_exporter_geneva::GenevaExporter;
-use opentelemetry_sdk::{logs::SdkLoggerProvider, Resource};
+use opentelemetry_sdk::logs::log_processor_with_async_runtime::BatchLogProcessor;
+use opentelemetry_sdk::runtime::Tokio;
+use opentelemetry_sdk::{
+    logs::{BatchConfig, SdkLoggerProvider},
+    Resource,
+};
 use std::env;
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -66,6 +71,9 @@ async fn main() {
             .expect("Failed to create GenevaClient"),
     );
     let exporter = GenevaExporter::new(geneva_client);
+    let batch_processor = BatchLogProcessor::builder(exporter, Tokio)
+        .with_batch_config(BatchConfig::default())
+        .build();
 
     let provider: SdkLoggerProvider = SdkLoggerProvider::builder()
         .with_resource(
@@ -73,7 +81,7 @@ async fn main() {
                 .with_service_name("geneva-exporter-example")
                 .build(),
         )
-        .with_simple_exporter(exporter)
+        .with_log_processor(batch_processor)
         .build();
 
     // To prevent a telemetry-induced-telemetry loop, OpenTelemetry's own internal
