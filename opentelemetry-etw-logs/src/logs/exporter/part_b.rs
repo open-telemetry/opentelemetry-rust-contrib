@@ -1,7 +1,7 @@
 use opentelemetry::{logs::Severity, Key};
 use tracelogging_dynamic as tld;
 
-pub fn populate_part_b(
+pub(crate) fn populate_part_b(
     event: &mut tld::EventBuilder,
     log_record: &opentelemetry_sdk::logs::SdkLogRecord,
     level: Severity,
