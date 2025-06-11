@@ -41,7 +41,7 @@ Instructions using Powershell:
 1. Get the ETW Session Guid for the given provider (on this example `provider-name`):
 
     ```ps
-    $EtwSessionGuid = (new-object System.Diagnostics.Tracing.EventSource("provider-name")).Guid.ToString()`
+    $EtwSessionGuid = (new-object System.Diagnostics.Tracing.EventSource("provider-name")).Guid.ToString()
     ```
 
 1. Start Logman session:
