@@ -1,7 +1,8 @@
 use eventheader::{FieldFormat, Level};
 use eventheader_dynamic::{EventBuilder, EventSet, Provider};
-use opentelemetry::{otel_debug, otel_info};
+use opentelemetry::{otel_debug, otel_info, Value};
 use opentelemetry_sdk::Resource;
+use std::collections::HashSet;
 use std::sync::Arc;
 use std::{fmt::Debug, sync::Mutex};
 
@@ -18,6 +19,8 @@ pub(crate) struct UserEventsExporter {
     event_sets: Vec<Arc<EventSet>>,
     cloud_role: Option<String>,
     cloud_role_instance: Option<String>,
+    attributes_from_resource: Vec<(Key, AnyValue)>,
+    resource_attributes: HashSet<String>,
 }
 
 // Constants for the UserEventsExporter
@@ -114,7 +117,7 @@ const fn get_severity_level(severity: Severity) -> Level {
 
 impl UserEventsExporter {
     /// Create instance of the exporter
-    pub(crate) fn new(provider_name: &str) -> Self {
+    pub(crate) fn new(provider_name: &str, resource_attributes: Vec<&str>) -> Self {
         let mut eventheader_provider: Provider =
             Provider::new(provider_name, &Provider::new_options());
         let event_sets = register_events(&mut eventheader_provider);
@@ -126,6 +129,11 @@ impl UserEventsExporter {
             event_sets,
             cloud_role: None,
             cloud_role_instance: None,
+            resource_attributes: resource_attributes
+                .into_iter()
+                .map(|s| s.to_string())
+                .collect(),
+            attributes_from_resource: Vec::new(),
         }
     }
 
@@ -279,6 +287,15 @@ impl UserEventsExporter {
                     }
                 }
 
+                for (key, value) in &self.attributes_from_resource {
+                    if !is_part_c_present {
+                        eb.add_struct_with_bookmark("PartC", self.attributes_from_resource.len() as u8, 0, &mut cs_c_bookmark);
+                        is_part_c_present = true;
+                    }
+                    self.add_attribute_to_event(&mut eb, (key, value));
+                    cs_c_count += 1;
+                }
+
                 if is_part_c_present {
                     eb.set_struct_field_count(cs_c_bookmark, cs_c_count);
                 }
@@ -409,12 +426,30 @@ impl opentelemetry_sdk::logs::LogExporter for UserEventsExporter {
     }
 
     fn set_resource(&mut self, resource: &Resource) {
-        self.cloud_role = resource
-            .get(&Key::from_static_str("service.name"))
-            .map(|v| v.to_string());
-        self.cloud_role_instance = resource
-            .get(&Key::from_static_str("service.instance.id"))
-            .map(|v| v.to_string());
+        // add attributes from resource to the attributes_from_resource
+        for (key, value) in resource.iter() {
+            // special handling for cloud role and instance
+            // as they are used in PartA of the Common Schema format.
+            if key.as_str() == "service.name" {
+                self.cloud_role = Some(value.to_string());
+            } else if key.as_str() == "service.instance.id" {
+                self.cloud_role_instance = Some(value.to_string());
+            } else if self.resource_attributes.contains(key.as_str()) {
+                self.attributes_from_resource
+                    .push((key.clone(), val_to_any_value(value)));
+            }
+            // Other attributes are ignored
+        }
+    }
+}
+
+fn val_to_any_value(val: &Value) -> AnyValue {
+    match val {
+        Value::Bool(b) => AnyValue::Boolean(*b),
+        Value::I64(i) => AnyValue::Int(*i),
+        Value::F64(f) => AnyValue::Double(*f),
+        Value::String(s) => AnyValue::String(s.clone()),
+        _ => AnyValue::String("".into()),
     }
 }
 
@@ -423,7 +458,7 @@ mod tests {
     use super::*;
     #[test]
     fn exporter_debug() {
-        let exporter = UserEventsExporter::new("test_provider");
+        let exporter = UserEventsExporter::new("test_provider", vec![]);
         assert_eq!(
             format!("{:?}", exporter),
             "user_events log exporter (provider name: test_provider)"
