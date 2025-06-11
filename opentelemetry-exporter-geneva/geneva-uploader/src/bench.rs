@@ -27,9 +27,7 @@ mod benchmarks {
     #[ignore = "benchmark on crate private, ignored by default during normal test runs"]
     /// To run: $cargo test --release lz4_benchmark -- --nocapture --ignored
     fn lz4_benchmark() {
-        let mut criterion = Criterion::default()
-            .sample_size(100)
-            .measurement_time(std::time::Duration::from_secs(5));
+        let mut criterion = Criterion::default();
 
         let mut group = criterion.benchmark_group("lz4_compression");
 
