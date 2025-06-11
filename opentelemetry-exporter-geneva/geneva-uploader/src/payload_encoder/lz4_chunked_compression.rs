@@ -35,11 +35,6 @@ use lz4_flex::block::{compress_into, get_maximum_output_size};
 ///   but care must be taken: LZ4 does not natively support in-place compression, and the compressed size may be larger than the input.
 ///   If single-buffer "in-place" compression is possible (e.g., with unsafe or buffer aliasing), document or implement it here.
 /// - Consider passing output buffer as mutable slice to avoid reallocation, and provide another method to return the max size of the output buffer.
-///
-///
-/// Compresses input data in 64 KiB chunks using LZ4.
-/// Each chunk is prefixed with a 4-byte (little-endian) length header.
-/// See module documentation for layout and decompression notes.
 #[allow(dead_code)]
 pub(crate) fn lz4_chunked_compression(
     input: &[u8],
@@ -47,37 +42,47 @@ pub(crate) fn lz4_chunked_compression(
     lz4_chunked_compression_custom::<{ 64 * 1024 }>(input)
 }
 
-/// Compresses input data in user-defined chunk size using LZ4.
-/// Each chunk is prefixed with a 4-byte (little-endian) length header.
+#[allow(dead_code)]
 pub(crate) fn lz4_chunked_compression_custom<const CHUNK_SIZE: usize>(
     input: &[u8],
 ) -> Result<Vec<u8>, lz4_flex::block::CompressError> {
-    if input.len() == 0 {
-        return Ok(Vec::new());
-    }
-    // Special case: very small data (less than one chunk)
-    if input.len() <= CHUNK_SIZE {
-        let max_compressed = get_maximum_output_size(input.len());
-        let mut temp_buf = vec![0u8; max_compressed];
-        let compressed_size = compress_into(input, &mut temp_buf)?;
-        let mut output = Vec::with_capacity(4 + compressed_size);
-        output.extend_from_slice(&(compressed_size as u32).to_le_bytes());
-        output.extend_from_slice(&temp_buf[..compressed_size]);
-        return Ok(output);
-    }
-
     let max_chunk_compressed = get_maximum_output_size(CHUNK_SIZE);
-    let num_chunks = input.len().div_ceil(CHUNK_SIZE);
-    let mut output = Vec::with_capacity(num_chunks * (4 + max_chunk_compressed));
-    let mut temp_buf = vec![0u8; max_chunk_compressed];
+
+    // Pre-allocate an output buffer large enough for the worst-case total output size:
+    // Each chunk may require up to get_maximum_output_size(CHUNK_SIZE) bytes for compressed data,
+    // plus 4 bytes for the length header per chunk.
+    let mut output =
+        Vec::with_capacity(input.len().div_ceil(CHUNK_SIZE) * (4 + max_chunk_compressed));
 
     let mut offset = 0;
+    // Process the input in 64 KiB chunks.
     while offset < input.len() {
+        // Determine the end index for the current chunk.
         let end = usize::min(offset + CHUNK_SIZE, input.len());
+        // Get the current chunk from input.
         let chunk = &input[offset..end];
-        let compressed_size = compress_into(chunk, &mut temp_buf)?;
-        output.extend_from_slice(&(compressed_size as u32).to_le_bytes());
-        output.extend_from_slice(&temp_buf[..compressed_size]);
+
+        // Reserve space for the 4-byte header
+        let header_offset = output.len();
+        output.extend_from_slice(&[0u8; 4]); // Placeholder for length
+
+        // Reserve worst-case space for compressed data
+        let data_offset = output.len();
+        output.resize(data_offset + max_chunk_compressed, 0);
+
+        // Compress directly into the reserved slice
+        let compressed_size = compress_into(
+            chunk,
+            &mut output[data_offset..data_offset + max_chunk_compressed],
+        )?;
+
+        // Write the actual compressed length as little-endian u32
+        let compressed_size_le = (compressed_size as u32).to_le_bytes();
+        output[header_offset..header_offset + 4].copy_from_slice(&compressed_size_le);
+        // Truncate output to actual size (header + compressed)
+        // TODO - This can be optimized further without needing to resize and truncate during each iteration.
+        output.truncate(data_offset + compressed_size);
+
         offset = end;
     }
 

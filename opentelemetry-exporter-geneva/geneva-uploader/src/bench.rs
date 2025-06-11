@@ -17,13 +17,15 @@ mod benchmarks {
 
             | Input size  | Median time        | Throughput         |
             |-------------|--------------------|--------------------|
-            | 1 byte      | ~711 ns            | ~1.3 MiB/s         |
-            | 1 KiB       | ~31.8 us           | ~30.6 MiB/s        |
-            | 1 MiB       | ~3.44 ms           | ~291 MiB/s         |
+            | 1 byte      | ~533 ns            | ~1.6 MiB/s         |
+            | 1 KiB       | ~597 ns           | ~1.5 GiB/s        |
+            | 1 MiB       | ~42 us           | ~22.1 GiB/s         |
         - No significant regressions or improvements detected.
-        - Machine: WSL2, Linux 6.6.36, AMD EPYC 7763 64-core (8 cores visible), 62GiB RAM, 16GiB swap.
+        - Machine: Apple M4 Pro, 24 GB,  Total Number of Cores:	14 (10 performance and 4 efficiency)
     */
     #[test]
+    #[ignore = "benchmark on crate private, ignored by default during normal test runs"]
+    /// To run: $cargo test --release lz4_benchmark -- --nocapture --ignored
     fn lz4_benchmark() {
         let mut criterion = Criterion::default()
             .sample_size(100)
