@@ -2,7 +2,7 @@ use opentelemetry_sdk::logs::TraceContext;
 use std::time::SystemTime;
 use tracelogging_dynamic as tld;
 
-pub fn populate_part_a(
+pub(crate) fn populate_part_a(
     event: &mut tld::EventBuilder,
     resource: &super::Resource,
     log_record: &opentelemetry_sdk::logs::SdkLogRecord,

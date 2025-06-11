@@ -1,9 +1,9 @@
 use opentelemetry::logs::AnyValue;
 use tracelogging_dynamic as tld;
 
-pub const EVENT_ID: &str = "event_id";
+pub(crate) const EVENT_ID: &str = "event_id";
 
-pub fn populate_part_c(
+pub(crate) fn populate_part_c(
     event: &mut tld::EventBuilder,
     log_record: &opentelemetry_sdk::logs::SdkLogRecord,
     field_tag: u32,
