@@ -7,9 +7,8 @@ use tracelogging_dynamic as tld;
 use opentelemetry::logs::Severity;
 use opentelemetry::Key;
 use opentelemetry_sdk::error::{OTelSdkError, OTelSdkResult};
-use std::str;
 
-mod common;
+pub(crate) mod common;
 mod part_a;
 mod part_b;
 mod part_c;

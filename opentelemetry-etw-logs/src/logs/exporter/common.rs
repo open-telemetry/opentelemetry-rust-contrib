@@ -6,7 +6,7 @@ use opentelemetry::{
 };
 use tracelogging_dynamic as tld;
 
-pub fn add_attribute_to_event(event: &mut tld::EventBuilder, key: &Key, value: &AnyValue) {
+pub(crate) fn add_attribute_to_event(event: &mut tld::EventBuilder, key: &Key, value: &AnyValue) {
     match value {
         AnyValue::Boolean(b) => {
             event.add_bool32(key.as_str(), *b as i32, tld::OutType::Default, 0);
@@ -48,7 +48,7 @@ pub fn add_attribute_to_event(event: &mut tld::EventBuilder, key: &Key, value: &
     }
 }
 
-pub const fn convert_severity_to_level(severity: Severity) -> tld::Level {
+pub(crate) const fn convert_severity_to_level(severity: Severity) -> tld::Level {
     match severity {
         Severity::Debug
         | Severity::Debug2
@@ -80,22 +80,22 @@ pub fn get_event_name(log_record: &opentelemetry_sdk::logs::SdkLogRecord) -> &st
 }
 
 #[cfg(test)]
-pub mod test_utils {
+pub(crate) mod test_utils {
     use opentelemetry::logs::Logger;
     use opentelemetry::logs::LoggerProvider;
     use opentelemetry_sdk::logs::SdkLoggerProvider;
 
     use super::super::ETWExporter;
 
-    pub fn new_etw_exporter() -> ETWExporter {
+    pub(crate) fn new_etw_exporter() -> ETWExporter {
         ETWExporter::new("test-provider-name")
     }
 
-    pub fn new_instrumentation_scope() -> opentelemetry::InstrumentationScope {
+    pub(crate) fn new_instrumentation_scope() -> opentelemetry::InstrumentationScope {
         opentelemetry::InstrumentationScope::default()
     }
 
-    pub fn new_sdk_log_record() -> opentelemetry_sdk::logs::SdkLogRecord {
+    pub(crate) fn new_sdk_log_record() -> opentelemetry_sdk::logs::SdkLogRecord {
         SdkLoggerProvider::builder()
             .build()
             .logger("test")
