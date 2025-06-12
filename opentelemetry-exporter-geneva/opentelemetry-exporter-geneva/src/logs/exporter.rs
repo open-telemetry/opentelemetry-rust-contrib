@@ -34,7 +34,7 @@ impl opentelemetry_sdk::logs::LogExporter for GenevaExporter {
     async fn export(&self, batch: LogBatch<'_>) -> OTelSdkResult {
         let otlp = group_logs_by_resource_and_scope(batch, &self.resource);
         if let Err(e) = self.geneva_client.upload_logs(otlp).await {
-            return Err(OTelSdkError::InternalFailure(e.into()));
+            return Err(OTelSdkError::InternalFailure(e));
         }
         Ok(())
     }

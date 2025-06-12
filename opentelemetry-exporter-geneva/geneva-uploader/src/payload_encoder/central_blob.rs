@@ -32,15 +32,6 @@ pub(crate) struct CentralEventEntry {
     pub row: BondEncodedRow,
 }
 
-#[allow(dead_code)]
-pub(crate) struct CentralBlob {
-    pub version: u32,
-    pub format: u32,
-    pub metadata: String, // UTF-8, will be stored as UTF-16LE
-    pub schemas: Vec<CentralSchemaEntry>,
-    pub events: Vec<CentralEventEntry>,
-}
-
 const TERMINATOR: u64 = 0xdeadc0dedeadc0de;
 
 /// CentralBlob Protocol Payload Structure
@@ -80,6 +71,14 @@ const TERMINATOR: u64 = 0xdeadc0dedeadc0de;
 ///   - **Row Bytes**: `Vec<u8>` (variable length, row serialized as bytes)
 /// - **Terminator**: `u64` (8 bytes, constant `TERMINATOR`)
 ///
+#[allow(dead_code)]
+pub(crate) struct CentralBlob {
+    pub version: u32,
+    pub format: u32,
+    pub metadata: String, // UTF-8, will be stored as UTF-16LE
+    pub schemas: Vec<CentralSchemaEntry>,
+    pub events: Vec<CentralEventEntry>,
+}
 
 impl CentralBlob {
     #[allow(dead_code)]
@@ -161,17 +160,12 @@ impl CentralBlob {
             buf.extend_from_slice(&(evname_utf16.len() as u16).to_le_bytes());
             buf.extend_from_slice(&evname_utf16);
 
-            // Add the Simple Protocol header before the row data
             let row_bytes = event.row.as_bytes();
+            let total_len = 4 + row_bytes.len(); // SP header + data
 
-            // Create a new buffer with the SP header
-            let mut modified_row = Vec::with_capacity(row_bytes.len() + 4);
-            modified_row.extend_from_slice(&[0x53, 0x50, 0x01, 0x00]); // Simple Protocol header
-            modified_row.extend_from_slice(row_bytes);
-
-            // row (len, bytes)
-            buf.extend_from_slice(&(modified_row.len() as u32).to_le_bytes());
-            buf.extend_from_slice(&modified_row);
+            buf.extend_from_slice(&(total_len as u32).to_le_bytes());
+            buf.extend_from_slice(&[0x53, 0x50, 0x01, 0x00]); // Simple Protocol header
+            buf.extend_from_slice(row_bytes);
 
             buf.extend_from_slice(&TERMINATOR.to_le_bytes());
         }
@@ -184,8 +178,7 @@ impl CentralBlob {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::payload_encoder::{EncoderRow, EncoderSchema};
-    use md5;
+    use crate::payload_encoder::bond_encoder::{BondEncodedRow, BondEncodedSchema};
 
     //Helper to calculate MD5 hash, returns [u8;16]
     fn md5_bytes(data: &[u8]) -> [u8; 16] {
@@ -199,7 +192,7 @@ mod tests {
             ("foo", 16u8, 1u16), // BT_INT32
             ("bar", 9u8, 2u16),  // BT_STRING
         ];
-        let schema_obj = EncoderSchema::from_fields(fields);
+        let schema_obj = BondEncodedSchema::from_fields(fields);
         let schema_bytes = schema_obj.as_bytes().to_vec();
         let schema_md5 = md5_bytes(&schema_bytes);
         let schema_id = 1234u64;
@@ -217,7 +210,7 @@ mod tests {
         row.extend_from_slice(&(s.len() as u32).to_le_bytes());
         row.extend_from_slice(s.as_bytes());
 
-        let row_obj = EncoderRow::from_schema_and_row(&schema.schema, &row);
+        let row_obj = BondEncodedRow::from_schema_and_row(&schema.schema, &row);
 
         let event = CentralEventEntry {
             schema_id,

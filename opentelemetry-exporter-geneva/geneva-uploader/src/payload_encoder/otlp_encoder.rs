@@ -6,10 +6,16 @@ use opentelemetry_proto::tonic::logs::v1::LogRecord;
 use std::collections::HashMap;
 use std::sync::{Arc, RwLock};
 
+type SchemaCache = Arc<RwLock<HashMap<u64, (BondEncodedSchema, Vec<FieldInfo>)>>>;
+type BatchKey = (u64, String);
+type EncodedRow = (String, u8, Vec<u8>); // (event_name, level, row_buffer)
+type BatchValue = (CentralSchemaEntry, Vec<EncodedRow>);
+type LogBatches = HashMap<BatchKey, BatchValue>;
+
 /// Encoder to write OTLP payload in bond form.
 pub struct OtlpEncoder {
     // TODO - limit cache size or use LRU eviction, and/or add feature flag for caching
-    schema_cache: Arc<RwLock<HashMap<u64, (BondEncodedSchema, Vec<FieldInfo>)>>>,
+    schema_cache: SchemaCache,
 }
 
 #[derive(Clone, Debug)]
@@ -36,8 +42,7 @@ impl OtlpEncoder {
     {
         use std::collections::HashMap;
 
-        let mut batches: HashMap<(u64, String), (CentralSchemaEntry, Vec<(String, u8, Vec<u8>)>)> =
-            HashMap::new();
+        let mut batches: LogBatches = HashMap::new();
 
         for log_record in logs {
             // 1. Get schema
@@ -91,13 +96,12 @@ impl OtlpEncoder {
 
     /// Determine which fields are present in the LogRecord
     fn determine_fields(&self, log: &LogRecord) -> Vec<(String, u8)> {
-        let mut fields = Vec::new();
-
-        // Part A - Always present fields
-        fields.push(("env_name".to_string(), 9)); // BT_STRING
-        fields.push(("env_ver".to_string(), 9)); // BT_STRING
-        fields.push(("timestamp".to_string(), 9)); // BT_STRING
-        fields.push(("env_time".to_string(), 9)); // BT_STRING
+        let mut fields = vec![
+            ("env_name".to_string(), 9),  // BT_STRING
+            ("env_ver".to_string(), 9),   // BT_STRING
+            ("timestamp".to_string(), 9), // BT_STRING
+            ("env_time".to_string(), 9),  // BT_STRING
+        ];
 
         // Part A extension - Conditional fields
         if !log.trace_id.is_empty() {
@@ -347,11 +351,13 @@ mod tests {
     fn test_encoding() {
         let encoder = OtlpEncoder::new();
 
-        let mut log = LogRecord::default();
-        log.observed_time_unix_nano = 1_700_000_000_000_000_000;
-        log.event_name = "test_event".to_string();
-        log.severity_number = 9;
-        log.severity_text = "INFO".to_string();
+        let mut log = LogRecord {
+            observed_time_unix_nano: 1_700_000_000_000_000_000,
+            event_name: "test_event".to_string(),
+            severity_number: 9,
+            severity_text: "INFO".to_string(),
+            ..Default::default()
+        };
 
         // Add some attributes
         log.attributes.push(KeyValue {
@@ -369,7 +375,7 @@ mod tests {
         });
 
         let metadata = "namespace=testNamespace/eventVersion=Ver1v0";
-        let result = encoder.encode_log_record(&log, "test_event", 1, metadata);
+        let result = encoder.encode_log_batch([log].iter(), metadata);
 
         assert!(!result.is_empty());
     }
@@ -378,27 +384,31 @@ mod tests {
     fn test_schema_caching() {
         let encoder = OtlpEncoder::new();
 
-        let mut log1 = LogRecord::default();
-        log1.observed_time_unix_nano = 1_700_000_000_000_000_000;
-        log1.severity_number = 9;
+        let log1 = LogRecord {
+            observed_time_unix_nano: 1_700_000_000_000_000_000,
+            severity_number: 9,
+            ..Default::default()
+        };
 
-        let mut log2 = LogRecord::default();
-        log2.observed_time_unix_nano = 1_700_000_001_000_000_000;
-        log2.severity_number = 10;
+        let mut log2 = LogRecord {
+            observed_time_unix_nano: 1_700_000_001_000_000_000,
+            severity_number: 10,
+            ..Default::default()
+        };
 
         let metadata = "namespace=test";
 
         // First encoding creates schema
-        let _result1 = encoder.encode_log_record(&log1, "event1", 1, metadata);
+        let _result1 = encoder.encode_log_batch([log1].iter(), metadata);
         assert_eq!(encoder.schema_cache.read().unwrap().len(), 1);
 
         // Second encoding with same schema structure reuses schema
-        let _result2 = encoder.encode_log_record(&log2, "event2", 1, metadata);
+        let _result2 = encoder.encode_log_batch([log2.clone()].iter(), metadata);
         assert_eq!(encoder.schema_cache.read().unwrap().len(), 1);
 
         // Add trace_id to create different schema
         log2.trace_id = vec![1, 2, 3, 4];
-        let _result3 = encoder.encode_log_record(&log2, "event3", 1, metadata);
+        let _result3 = encoder.encode_log_batch([log2].iter(), metadata);
         assert_eq!(encoder.schema_cache.read().unwrap().len(), 2);
     }
 }

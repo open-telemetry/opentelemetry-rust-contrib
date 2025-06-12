@@ -7,9 +7,6 @@ use crate::payload_encoder::otlp_encoder::OtlpEncoder;
 use opentelemetry_proto::tonic::logs::v1::ResourceLogs;
 use std::sync::Arc;
 
-use std::fs::File;
-use std::io::Write;
-
 /// Configuration for GenevaClient (user-facing)
 #[derive(Clone, Debug)]
 pub struct GenevaClientConfig {
@@ -94,33 +91,16 @@ impl GenevaClient {
             .flat_map(|resource_log| resource_log.scope_logs.iter())
             .flat_map(|scope_log| scope_log.log_records.iter());
         let blobs = self.encoder.encode_log_batch(log_iter, &self.metadata);
-        let mut idx = 0;
-        for (schema_id, event_name, encoded_blob, row_count) in blobs {
-            //encoded log to a unique file
-            let file_name = format!(
-                "encoded_log_schema_{}_event_{}_batch_{}.bin",
-                schema_id,
-                event_name.replace("/", "_"), // Replace slashes to avoid file path issues
-                idx
-            );
-            let mut file = File::create(&file_name)
-                .map_err(|e| format!("Failed to create file {file_name}: {e}"))?;
-            idx += 1;
-            file.write_all(&encoded_blob)
-                .map_err(|e| format!("Failed to write to file {file_name}: {e}"))?;
-
-            println!("Compressing and uploading {} rows", row_count);
+        for (_schema_id, event_name, encoded_blob, _row_count) in blobs {
+            // TODO - log encoded_blob for debugging
             let compressed_blob = lz4_chunked_compression(&encoded_blob)
                 .map_err(|e| format!("LZ4 compression failed: {e}"))?;
+            // TODO - log compressed_blob for debugging
             let event_version = "Ver2v0"; // TODO - find the actual value to be populated
             self.uploader
                 .upload(compressed_blob, &event_name, event_version)
                 .await
                 .map_err(|e| format!("Geneva upload failed: {e}"))?;
-            println!(
-                "Uploaded {} rows for event '{}' in a single batch",
-                row_count, event_name
-            );
         }
         Ok(())
     }

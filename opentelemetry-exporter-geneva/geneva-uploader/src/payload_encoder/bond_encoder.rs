@@ -231,10 +231,6 @@ impl BondEncodedSchema {
     pub(crate) fn as_bytes(&self) -> &[u8] {
         &self.encoded_bytes
     }
-
-    pub(crate) fn get_fields(&self) -> &[FieldDef] {
-        &self.schema.fields
-    }
 }
 
 impl Clone for BondEncodedSchema {
@@ -289,7 +285,7 @@ mod tests {
             ("message", BondDataType::BT_STRING as u8, 3u16),
         ];
 
-        let schema = BondEncodedSchemaSchema::from_fields(fields);
+        let schema = BondEncodedSchema::from_fields(fields);
         let bytes = schema.as_bytes();
         assert!(!bytes.is_empty());
     }
