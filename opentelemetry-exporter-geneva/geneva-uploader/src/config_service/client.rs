@@ -414,7 +414,6 @@ impl GenevaConfigClient {
 
     /// Internal method that actually fetches data from Geneva Config Service
     async fn fetch_ingestion_info(&self) -> Result<(IngestionGatewayInfo, MonikerInfo)> {
-        println!("Fetching ingestion info from Geneva Config Service...");
         let tag_id = Uuid::new_v4().to_string(); //TODO - uuid is costly, check if counter is enough?
         let mut url = String::with_capacity(self.precomputed_url_prefix.len() + 50); // Pre-allocate with reasonable capacity
         write!(&mut url, "{}&TagId={}", self.precomputed_url_prefix, tag_id).map_err(|e| {
@@ -429,12 +428,10 @@ impl GenevaConfigClient {
             .headers(self.static_headers.clone()); // Clone only cheap references
 
         request = request.header("x-ms-client-request-id", req_id);
-        println!("Request URL: {:?}", request);
         let response = request
             .send()
             .await
             .map_err(GenevaConfigClientError::Http)?;
-        println!("Response status: {}", response.status());
         // Check if the response is successful
         let status = response.status();
         let body = response.text().await?;
