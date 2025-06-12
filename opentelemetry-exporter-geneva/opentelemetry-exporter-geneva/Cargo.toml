@@ -5,29 +5,18 @@ edition = "2021"
 license = "Apache-2.0"
 rust-version = "1.75.0"
 
-[workspace]
-
-[workspace.dependencies]
-
 [dependencies]
-opentelemetry_sdk = {default-features = false, features = ["logs"], version = "0.29" }
-opentelemetry-proto = {default-features = false, features = ["logs"], version = "0.29"}
+opentelemetry_sdk = {workspace = true, default-features = false, features = ["logs"]}
+opentelemetry-proto = {workspace = true, default-features = false, features = ["logs"]}
 geneva-uploader = {path = "../geneva-uploader/", version = "0.1.0"}
 
-
 [dev-dependencies]
-opentelemetry-appender-tracing = "0.29"
-opentelemetry_sdk = { version = "0.29", features = ["logs", "trace", "experimental_logs_batch_log_processor_with_async_runtime", "experimental_async_runtime", "rt-tokio"] }
+opentelemetry-appender-tracing = {workspace = true}
+opentelemetry_sdk = { workspace = true, features = ["logs", "trace", "experimental_logs_batch_log_processor_with_async_runtime", "experimental_async_runtime", "rt-tokio"] }
 tracing = { version = "0.1", default-features = false, features = ["std"] }
 tracing-core = "0.1.31"
 tracing-subscriber = { version = "0.3.0", default-features = false, features = ["env-filter", "fmt", "registry", "std"] }
 tokio = { version = "1", features = ["rt-multi-thread", "macros"] }
 
-[workspace.lints.rust]
-rust_2024_compatibility = { level = "warn", priority = -1 }
-# No need to enable those, because it is either unnecessary or results in ugly syntax
-if_let_rescope = "allow"
-tail_expr_drop_order = "allow"
-
-[workspace.lints.clippy]
-all = { level = "warn", priority = 1 }
+[lints]
+workspace = true
