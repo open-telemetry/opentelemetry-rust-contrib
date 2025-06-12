@@ -85,7 +85,6 @@ impl GenevaClient {
 
     /// Upload OTLP logs (as ResourceLogs).
     pub async fn upload_logs(&self, logs: Vec<ResourceLogs>) -> Result<(), String> {
-        println!("Uploading {} ResourceLogs", logs.len());
         let log_iter = logs
             .iter()
             .flat_map(|resource_log| resource_log.scope_logs.iter())
