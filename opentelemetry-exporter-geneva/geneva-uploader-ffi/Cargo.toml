@@ -5,15 +5,7 @@ edition = "2021"
 license = "Apache-2.0"
 rust-version = "1.75.0"
 
-[workspace]
+[dependencies]
 
-[workspace.dependencies]
-
-[workspace.lints.rust]
-rust_2024_compatibility = { level = "warn", priority = -1 }
-# No need to enable those, because it is either unnecessary or results in ugly syntax
-if_let_rescope = "allow"
-tail_expr_drop_order = "allow"
-
-[workspace.lints.clippy]
-all = { level = "warn", priority = 1 }
+[lints]
+workspace = true
