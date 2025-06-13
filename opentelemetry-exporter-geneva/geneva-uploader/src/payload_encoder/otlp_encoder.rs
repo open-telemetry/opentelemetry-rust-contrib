@@ -1,4 +1,6 @@
-use crate::payload_encoder::bond_encoder::{BondEncodedRow, BondEncodedSchema};
+use crate::payload_encoder::bond_encoder::{
+    BondDataType, BondEncodedRow, BondEncodedSchema, BondWriter,
+};
 use crate::payload_encoder::central_blob::{CentralBlob, CentralEventEntry, CentralSchemaEntry};
 use chrono::{TimeZone, Utc};
 use opentelemetry_proto::tonic::common::v1::any_value::Value;
@@ -97,34 +99,37 @@ impl OtlpEncoder {
     /// Determine which fields are present in the LogRecord
     fn determine_fields(&self, log: &LogRecord) -> Vec<(String, u8)> {
         let mut fields = vec![
-            ("env_name".to_string(), 9),  // BT_STRING
-            ("env_ver".to_string(), 9),   // BT_STRING
-            ("timestamp".to_string(), 9), // BT_STRING
-            ("env_time".to_string(), 9),  // BT_STRING
+            ("env_name".to_string(), BondDataType::BT_STRING as u8),
+            ("env_ver".to_string(), BondDataType::BT_STRING as u8),
+            ("timestamp".to_string(), BondDataType::BT_STRING as u8),
+            ("env_time".to_string(), BondDataType::BT_STRING as u8),
         ];
 
         // Part A extension - Conditional fields
         if !log.trace_id.is_empty() {
-            fields.push(("env_dt_traceId".to_string(), 9)); // BT_STRING
+            fields.push(("env_dt_traceId".to_string(), BondDataType::BT_STRING as u8));
         }
         if !log.span_id.is_empty() {
-            fields.push(("env_dt_spanId".to_string(), 9)); // BT_STRING
+            fields.push(("env_dt_spanId".to_string(), BondDataType::BT_STRING as u8));
         }
         if log.flags != 0 {
-            fields.push(("env_dt_traceFlags".to_string(), 16)); // BT_INT32
+            fields.push((
+                "env_dt_traceFlags".to_string(),
+                BondDataType::BT_INT32 as u8,
+            ));
         }
 
         // Part B - Core log fields
         if !log.event_name.is_empty() {
-            fields.push(("name".to_string(), 9)); // BT_STRING
+            fields.push(("name".to_string(), BondDataType::BT_STRING as u8));
         }
-        fields.push(("SeverityNumber".to_string(), 16)); // BT_INT32
+        fields.push(("SeverityNumber".to_string(), BondDataType::BT_INT32 as u8));
         if !log.severity_text.is_empty() {
-            fields.push(("SeverityText".to_string(), 9)); // BT_STRING
+            fields.push(("SeverityText".to_string(), BondDataType::BT_STRING as u8));
         }
         if let Some(body) = &log.body {
             if let Some(Value::StringValue(_)) = &body.value {
-                fields.push(("body".to_string(), 9)); // BT_STRING
+                fields.push(("body".to_string(), BondDataType::BT_STRING as u8));
             }
         }
 
@@ -132,10 +137,10 @@ impl OtlpEncoder {
         for attr in &log.attributes {
             if let Some(val) = attr.value.as_ref().and_then(|v| v.value.as_ref()) {
                 let type_id = match val {
-                    Value::StringValue(_) => 9, // BT_STRING
-                    Value::IntValue(_) => 16,   // BT_INT32
-                    Value::DoubleValue(_) => 7, // BT_FLOAT (using float for now)
-                    Value::BoolValue(_) => 16,  // BT_INT32 (representing bool as int)
+                    Value::StringValue(_) => BondDataType::BT_STRING as u8,
+                    Value::IntValue(_) => BondDataType::BT_INT32 as u8,
+                    Value::DoubleValue(_) => BondDataType::BT_FLOAT as u8, // using float for now
+                    Value::BoolValue(_) => BondDataType::BT_INT32 as u8, // representing bool as int
                     _ => continue,
                 };
                 fields.push((attr.key.clone(), type_id));
@@ -236,38 +241,38 @@ impl OtlpEncoder {
 
         for field in sorted_fields {
             match field.name.as_str() {
-                "env_name" => Self::write_string(&mut buffer, "TestEnv"), // TODO - placeholder for actual env name
-                "env_ver" => Self::write_string(&mut buffer, "4.0"), // TODO - placeholder for actual env name
+                "env_name" => BondWriter::write_string(&mut buffer, "TestEnv"), // TODO - placeholder for actual env name
+                "env_ver" => BondWriter::write_string(&mut buffer, "4.0"), // TODO - placeholder for actual env name
                 "timestamp" | "env_time" => {
                     let dt = Self::format_timestamp(log.observed_time_unix_nano);
-                    Self::write_string(&mut buffer, &dt);
+                    BondWriter::write_string(&mut buffer, &dt);
                 }
                 "env_dt_traceId" => {
                     if !log.trace_id.is_empty() {
                         let hex = hex::encode(&log.trace_id);
-                        Self::write_string(&mut buffer, &hex);
+                        BondWriter::write_string(&mut buffer, &hex);
                     }
                 }
                 "env_dt_spanId" => {
                     if !log.span_id.is_empty() {
                         let hex = hex::encode(&log.span_id);
-                        Self::write_string(&mut buffer, &hex);
+                        BondWriter::write_string(&mut buffer, &hex);
                     }
                 }
                 "env_dt_traceFlags" => {
                     if log.flags != 0 {
-                        Self::write_int32(&mut buffer, log.flags as i32);
+                        BondWriter::write_int32(&mut buffer, log.flags as i32);
                     }
                 }
                 "name" => {
                     if !log.event_name.is_empty() {
-                        Self::write_string(&mut buffer, &log.event_name);
+                        BondWriter::write_string(&mut buffer, &log.event_name);
                     }
                 }
-                "SeverityNumber" => Self::write_int32(&mut buffer, log.severity_number),
+                "SeverityNumber" => BondWriter::write_int32(&mut buffer, log.severity_number),
                 "SeverityText" => {
                     if !log.severity_text.is_empty() {
-                        Self::write_string(&mut buffer, &log.severity_text);
+                        BondWriter::write_string(&mut buffer, &log.severity_text);
                     }
                 }
                 "body" => {
@@ -275,7 +280,7 @@ impl OtlpEncoder {
                     // For now, we only handle string values
                     if let Some(body) = &log.body {
                         if let Some(Value::StringValue(s)) = &body.value {
-                            Self::write_string(&mut buffer, s);
+                            BondWriter::write_string(&mut buffer, s);
                         }
                     }
                 }
@@ -289,26 +294,6 @@ impl OtlpEncoder {
         }
 
         buffer
-    }
-
-    /// Write a string value to buffer
-    #[inline]
-    fn write_string(buffer: &mut Vec<u8>, s: &str) {
-        let bytes = s.as_bytes();
-        buffer.extend_from_slice(&(bytes.len() as u32).to_le_bytes());
-        buffer.extend_from_slice(bytes);
-    }
-
-    /// Write an int32 value to buffer
-    #[inline]
-    fn write_int32(buffer: &mut Vec<u8>, value: i32) {
-        buffer.extend_from_slice(&value.to_le_bytes());
-    }
-
-    /// Write a float value to buffer
-    #[inline]
-    fn write_float(buffer: &mut Vec<u8>, value: f32) {
-        buffer.extend_from_slice(&value.to_le_bytes());
     }
 
     /// Format timestamp from nanoseconds
@@ -330,11 +315,23 @@ impl OtlpEncoder {
     ) {
         if let Some(val) = &attr.value {
             match (&val.value, expected_type) {
-                (Some(Value::StringValue(s)), 9) => Self::write_string(buffer, s),
-                (Some(Value::IntValue(i)), 16) => Self::write_int32(buffer, *i as i32),
-                (Some(Value::DoubleValue(d)), 7) => Self::write_float(buffer, *d as f32),
-                (Some(Value::BoolValue(b)), 16) => {
-                    Self::write_int32(buffer, if *b { 1 } else { 0 })
+                (Some(Value::StringValue(s)), t) if t == BondDataType::BT_STRING as u8 => {
+                    BondWriter::write_string(buffer, s)
+                }
+                (Some(Value::StringValue(s)), t) if t == BondDataType::BT_WSTRING as u8 => {
+                    BondWriter::write_wstring(buffer, s)
+                }
+                (Some(Value::IntValue(i)), t) if t == BondDataType::BT_INT32 as u8 => {
+                    BondWriter::write_int32(buffer, *i as i32)
+                }
+                (Some(Value::DoubleValue(d)), t) if t == BondDataType::BT_FLOAT as u8 => {
+                    BondWriter::write_float(buffer, *d as f32)
+                }
+                (Some(Value::DoubleValue(d)), t) if t == BondDataType::BT_DOUBLE as u8 => {
+                    BondWriter::write_double(buffer, *d)
+                }
+                (Some(Value::BoolValue(b)), t) if t == BondDataType::BT_INT32 as u8 => {
+                    BondWriter::write_bool_as_int32(buffer, *b)
                 }
                 _ => {} // TODO - handle more types
             }

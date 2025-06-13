@@ -178,6 +178,7 @@ impl GenevaUploader {
         event_name: &str,
         event_version: &str,
     ) -> Result<IngestionResponse> {
+        println!("---> Uploading data to ingestion gateway");
         // Always get fresh auth info
         let (auth_info, moniker_info, monitoring_endpoint) =
             self.config_client.get_ingestion_info().await?;
@@ -194,6 +195,7 @@ impl GenevaUploader {
             auth_info.endpoint.trim_end_matches('/'),
             upload_uri
         );
+        println!("Upload URL: {}", full_url);
         // Send the upload request
         let response = self
             .http_client
@@ -207,11 +209,13 @@ impl GenevaUploader {
             .await
             .map_err(GenevaUploaderError::Http)?;
         let status = response.status();
+        println!("------>>> Status: {}", status);
         let body = response.text().await.map_err(GenevaUploaderError::Http)?;
-
+    
         if status == reqwest::StatusCode::ACCEPTED {
             let ingest_response: IngestionResponse =
                 serde_json::from_str(&body).map_err(GenevaUploaderError::SerdeJson)?;
+            
             Ok(ingest_response)
         } else {
             Err(GenevaUploaderError::UploadFailed {

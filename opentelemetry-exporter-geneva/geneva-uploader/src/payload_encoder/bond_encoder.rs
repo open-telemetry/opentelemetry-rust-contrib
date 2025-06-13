@@ -30,6 +30,48 @@ pub(crate) enum BondDataType {
     BT_UNAVAILABLE = 127,
 }
 
+/// Bond protocol writer for encoding values to buffers
+pub(crate) struct BondWriter;
+
+impl BondWriter {
+    /// Write a string value to buffer (Bond BT_STRING format)
+    pub fn write_string(buffer: &mut Vec<u8>, s: &str) {
+        let bytes = s.as_bytes();
+        buffer.extend_from_slice(&(bytes.len() as u32).to_le_bytes());
+        buffer.extend_from_slice(bytes);
+    }
+
+    /// Write an int32 value to buffer (Bond BT_INT32 format)
+    pub fn write_int32(buffer: &mut Vec<u8>, value: i32) {
+        buffer.extend_from_slice(&value.to_le_bytes());
+    }
+
+    /// Write a float value to buffer (Bond BT_FLOAT format)
+    pub fn write_float(buffer: &mut Vec<u8>, value: f32) {
+        buffer.extend_from_slice(&value.to_le_bytes());
+    }
+
+    /// Write a double value to buffer (Bond BT_DOUBLE format)
+    pub fn write_double(buffer: &mut Vec<u8>, value: f64) {
+        buffer.extend_from_slice(&value.to_le_bytes());
+    }
+
+    /// Write a WSTRING value to buffer (Bond BT_WSTRING format)
+    /// Character count prefix + UTF-16LE bytes
+    pub fn write_wstring(buffer: &mut Vec<u8>, s: &str) {
+        let utf16_bytes: Vec<u8> = s.encode_utf16().flat_map(|c| c.to_le_bytes()).collect();
+
+        // Character count (not byte count) - this was the key fix!
+        buffer.extend_from_slice(&(s.len() as u32).to_le_bytes());
+        buffer.extend_from_slice(&utf16_bytes);
+    }
+
+    /// Write a boolean as int32 (Bond doesn't have native bool in Simple Binary)
+    pub fn write_bool_as_int32(buffer: &mut Vec<u8>, value: bool) {
+        Self::write_int32(buffer, if value { 1 } else { 0 });
+    }
+}
+
 /// Field definition for dynamic schemas
 #[derive(Clone, Debug)]
 pub(crate) struct FieldDef {

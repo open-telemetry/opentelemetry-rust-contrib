@@ -5,11 +5,12 @@ pub(crate) mod otlp_encoder;
 
 #[cfg(test)]
 mod tests {
-    use crate::payload_encoder::bond_encoder::{BondEncodedRow, BondEncodedSchema};
+    use crate::payload_encoder::bond_encoder::{
+        BondDataType, BondEncodedRow, BondEncodedSchema, BondWriter,
+    };
     use crate::payload_encoder::central_blob::{
         CentralBlob, CentralEventEntry, CentralSchemaEntry,
     };
-    use crate::payload_encoder::lz4_chunked_compression::lz4_chunked_compression;
 
     fn create_payload(fields: &[(&str, u8, u16)], row_data: Vec<u8>) -> Vec<u8> {
         let schema_obj = BondEncodedSchema::from_fields(fields, "MdsContainer", "testNamespace");
@@ -48,11 +49,7 @@ mod tests {
 
     #[test]
     fn test_single_column_double() {
-        // TODO: Replace with C++ compressed bytes. Use either:
-        // Option 1: Include from file
-        // let expected = include_bytes!("../test_data/cpp_single_float.compressed");
-
-        // Option 2: Paste bytes directly (for binary data with escape sequences)
+        // The encoded value using official C++ Bond encoder
         let expected: &[u8] = &[
             0x01, 0x00, 0x00, 0x00, 0x02, 0x00, 0x00, 0x00, 0x96, 0x00, 0x00, 0x00, 0x6e, 0x00,
             0x61, 0x00, 0x6d, 0x00, 0x65, 0x00, 0x73, 0x00, 0x70, 0x00, 0x61, 0x00, 0x63, 0x00,
@@ -87,16 +84,16 @@ mod tests {
             0x00, 0x0c, 0x00, 0x00, 0x00, 0x53, 0x50, 0x01, 0x00, 0x6f, 0x12, 0x83, 0xc0, 0xca,
             0x21, 0x09, 0x40, 0xde, 0xc0, 0xad, 0xde, 0xde, 0xc0, 0xad, 0xde,
         ];
-        let fields = &[("FloatCol", 8u8, 1u16)];
+        let fields = &[("FloatCol", BondDataType::BT_DOUBLE as u8, 1u16)];
         let mut row_data = Vec::new();
-        row_data.extend_from_slice(&3.1415f64.to_le_bytes());
-
+        BondWriter::write_double(&mut row_data, 3.1415f64);
         let actual = create_payload(fields, row_data);
         assert_eq!(expected, actual);
     }
 
     #[test]
     fn test_single_column_int64() {
+        // The encoded value using official C++ Bond encoder
         let expected: &[u8] = &[
             0x01, 0x00, 0x00, 0x00, 0x02, 0x00, 0x00, 0x00, 0x96, 0x00, 0x00, 0x00, 0x6e, 0x00,
             0x61, 0x00, 0x6d, 0x00, 0x65, 0x00, 0x73, 0x00, 0x70, 0x00, 0x61, 0x00, 0x63, 0x00,
@@ -131,16 +128,16 @@ mod tests {
             0x00, 0x00, 0x00, 0x53, 0x50, 0x01, 0x00, 0x64, 0x00, 0x00, 0x00, 0xde, 0xc0, 0xad,
             0xde, 0xde, 0xc0, 0xad, 0xde,
         ];
-        let fields = &[("IntCol", 16u8, 1u16)];
+        let fields = &[("IntCol", BondDataType::BT_INT32 as u8, 1u16)];
         let mut row_data = Vec::new();
-        row_data.extend_from_slice(&100i32.to_le_bytes());
-
+        BondWriter::write_int32(&mut row_data, 100i32);
         let actual = create_payload(fields, row_data);
         assert_eq!(expected, actual);
     }
 
     #[test]
     fn test_mixed_types_compressed() {
+        // The encoded value for mixed schema using official C++ Bond encoder
         let expected: &[u8] = &[
             0x01, 0x00, 0x00, 0x00, 0x02, 0x00, 0x00, 0x00, 0x96, 0x00, 0x00, 0x00, 0x6e, 0x00,
             0x61, 0x00, 0x6d, 0x00, 0x65, 0x00, 0x73, 0x00, 0x70, 0x00, 0x61, 0x00, 0x63, 0x00,
@@ -195,24 +192,17 @@ mod tests {
             0x00, 0x64, 0x00, 0x21, 0x00, 0xde, 0xc0, 0xad, 0xde, 0xde, 0xc0, 0xad, 0xde,
         ];
         let fields = &[
-            ("FloatCol1", 8u8, 1u16),
-            ("FloatCol2", 8u8, 2u16),
-            ("FloatCol3", 8u8, 3u16),
-            ("StringCol", 18u8, 4u16), // BT_WSTRING
+            ("FloatCol1", BondDataType::BT_DOUBLE as u8, 1u16),
+            ("FloatCol2", BondDataType::BT_DOUBLE as u8, 2u16),
+            ("FloatCol3", BondDataType::BT_DOUBLE as u8, 3u16),
+            ("StringCol", BondDataType::BT_WSTRING as u8, 4u16),
         ];
 
         let mut row_data = Vec::new();
-        row_data.extend_from_slice(&3.1415f64.to_le_bytes());
-        row_data.extend_from_slice(&2.7182f64.to_le_bytes());
-        row_data.extend_from_slice(&1.6180f64.to_le_bytes());
-
-        let hello_str = "Hello Bond!";
-        let utf16_bytes: Vec<u8> = hello_str
-            .encode_utf16()
-            .flat_map(|c| c.to_le_bytes())
-            .collect();
-        row_data.extend_from_slice(&(hello_str.len() as u32).to_le_bytes());
-        row_data.extend_from_slice(&utf16_bytes);
+        BondWriter::write_double(&mut row_data, 3.1415f64);
+        BondWriter::write_double(&mut row_data, 2.7182f64);
+        BondWriter::write_double(&mut row_data, 1.6180f64);
+        BondWriter::write_wstring(&mut row_data, "Hello Bond!");
 
         let actual = create_payload(fields, row_data);
         assert_eq!(expected, actual);

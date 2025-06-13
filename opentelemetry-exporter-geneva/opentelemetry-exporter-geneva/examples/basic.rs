@@ -141,8 +141,8 @@ async fn main() {
     info!(name: "Log", target: "my-system", event_id = 54, user_name = "user2", user_email = "user2@opentelemetry.io", message = "Order shipped successfully");
 
     // sleep for a while
-    println!("Sleeping for 3 seconds...");
-    thread::sleep(Duration::from_secs(3));
+    println!("Sleeping for 5 seconds...");
+    thread::sleep(Duration::from_secs(5));
     let _ = provider.shutdown();
     println!("Shutting down provider");
 }
