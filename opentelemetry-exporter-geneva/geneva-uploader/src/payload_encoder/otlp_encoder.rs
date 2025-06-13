@@ -195,7 +195,7 @@ impl OtlpEncoder {
             .map(|(i, (name, type_id))| (name.as_str(), *type_id, (i + 1) as u16))
             .collect();
 
-        let schema = BondEncodedSchema::from_fields(&field_defs);
+        let schema = BondEncodedSchema::from_fields(&field_defs, "OtlpLogRecord", "telemetry"); //TODO - use actual struct name and namespace
 
         // Create field info for ordered writing
         let field_info: Vec<FieldInfo> = field_defs

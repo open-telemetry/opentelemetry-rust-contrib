@@ -192,7 +192,7 @@ mod tests {
             ("foo", 16u8, 1u16), // BT_INT32
             ("bar", 9u8, 2u16),  // BT_STRING
         ];
-        let schema_obj = BondEncodedSchema::from_fields(fields);
+        let schema_obj = BondEncodedSchema::from_fields(fields, "TestStruct", "test.namespace");
         let schema_bytes = schema_obj.as_bytes().to_vec();
         let schema_md5 = md5_bytes(&schema_bytes);
         let schema_id = 1234u64;

@@ -213,8 +213,12 @@ pub(crate) struct BondEncodedSchema {
 }
 
 impl BondEncodedSchema {
-    pub(crate) fn from_fields(fields: &[(&str, u8, u16)]) -> Self {
-        let mut schema = DynamicSchema::new("OtlpLogRecord", "telemetry");
+    pub(crate) fn from_fields(
+        fields: &[(&str, u8, u16)],
+        struct_name: &str,
+        namespace: &str,
+    ) -> Self {
+        let mut schema = DynamicSchema::new(struct_name, namespace); //"OtlpLogRecord", "telemetry");
 
         for (name, type_id, field_id) in fields {
             schema.add_field(name, *type_id, *field_id);
@@ -285,7 +289,7 @@ mod tests {
             ("message", BondDataType::BT_STRING as u8, 3u16),
         ];
 
-        let schema = BondEncodedSchema::from_fields(fields);
+        let schema = BondEncodedSchema::from_fields(fields, "OtlpLogRecord", "telemetry");
         let bytes = schema.as_bytes();
         assert!(!bytes.is_empty());
     }
