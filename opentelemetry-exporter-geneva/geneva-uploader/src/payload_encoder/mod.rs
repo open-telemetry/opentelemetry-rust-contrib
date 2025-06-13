@@ -48,6 +48,7 @@ mod tests {
     }
 
     #[test]
+    #[allow(clippy::approx_constant)]
     fn test_single_column_double() {
         // The encoded value using official C++ Bond encoder
         let expected: &[u8] = &[
@@ -92,6 +93,7 @@ mod tests {
     }
 
     #[test]
+    #[allow(clippy::approx_constant)]
     fn test_single_column_int64() {
         // The encoded value using official C++ Bond encoder
         let expected: &[u8] = &[
@@ -136,6 +138,7 @@ mod tests {
     }
 
     #[test]
+    #[allow(clippy::approx_constant)]
     fn test_mixed_types_compressed() {
         // The encoded value for mixed schema using official C++ Bond encoder
         let expected: &[u8] = &[
