@@ -139,7 +139,6 @@ impl GenevaUploader {
         // TODO - Maintain this as url-encoded in config service to avoid conversion here
         let encoded_monitoring_endpoint: String =
             byte_serialize(monitoring_endpoint.as_bytes()).collect();
-
         let encoded_source_identity: String =
             byte_serialize(self.config.source_identity.as_bytes()).collect();
 
@@ -195,7 +194,6 @@ impl GenevaUploader {
             auth_info.endpoint.trim_end_matches('/'),
             upload_uri
         );
-
         // Send the upload request
         let response = self
             .http_client
@@ -208,13 +206,13 @@ impl GenevaUploader {
             .send()
             .await
             .map_err(GenevaUploaderError::Http)?;
-
         let status = response.status();
         let body = response.text().await.map_err(GenevaUploaderError::Http)?;
 
         if status == reqwest::StatusCode::ACCEPTED {
             let ingest_response: IngestionResponse =
                 serde_json::from_str(&body).map_err(GenevaUploaderError::SerdeJson)?;
+
             Ok(ingest_response)
         } else {
             Err(GenevaUploaderError::UploadFailed {

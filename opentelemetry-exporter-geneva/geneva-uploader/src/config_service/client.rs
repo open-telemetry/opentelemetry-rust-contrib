@@ -46,7 +46,7 @@ use std::sync::RwLock;
 /// ```
 #[allow(dead_code)]
 #[derive(Clone, Debug)]
-pub(crate) enum AuthMethod {
+pub enum AuthMethod {
     /// Certificate-based authentication
     ///
     /// # Arguments
@@ -432,7 +432,7 @@ impl GenevaConfigClient {
             .send()
             .await
             .map_err(GenevaConfigClientError::Http)?;
-
+        // Check if the response is successful
         let status = response.status();
         let body = response.text().await?;
 
