@@ -96,7 +96,6 @@ impl GenevaClient {
                 .map_err(|e| format!("LZ4 compression failed: {e}"))?;
             // TODO - log compressed_blob for debugging
             let event_version = "Ver2v0"; // TODO - find the actual value to be populated
-            println!("--->> Uploading event: {event_name}");
             self.uploader
                 .upload(compressed_blob, &event_name, event_version)
                 .await
