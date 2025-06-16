@@ -16,6 +16,7 @@ RAM: 64.0 GB
 use opentelemetry::{InstrumentationScope, KeyValue};
 use opentelemetry_etw_metrics::MetricsExporter;
 
+use opentelemetry_proto::tonic::resource;
 use opentelemetry_sdk::{
     metrics::{
         data::{Metric, ResourceMetrics, ScopeMetrics, Sum, SumDataPoint},
@@ -31,52 +32,52 @@ async fn export(exporter: &MetricsExporter, resource_metrics: &mut ResourceMetri
     exporter.export(resource_metrics).await.unwrap();
 }
 
-fn create_resource_metrics() -> ResourceMetrics {
-    // Metric does not implement clone so this helper function is used to create a metric
-    fn create_metric() -> Metric {
-        let data_point = SumDataPoint {
-            attributes: vec![KeyValue::new("datapoint key", "datapoint value")],
-            value: 1.0_f64,
-            exemplars: vec![],
-        };
+// fn create_resource_metrics() -> ResourceMetrics {
+//     // Metric does not implement clone so this helper function is used to create a metric
+//     fn create_metric() -> Metric {
+//         let data_point = SumDataPoint {
+//             attributes: vec![KeyValue::new("datapoint key", "datapoint value")],
+//             value: 1.0_f64,
+//             exemplars: vec![],
+//         };
 
-        let sum: Sum<f64> = Sum {
-            data_points: vec![data_point.clone(); 2_000],
-            temporality: Temporality::Delta,
-            start_time: std::time::SystemTime::now(),
-            time: std::time::SystemTime::now(),
-            is_monotonic: true,
-        };
+//         let sum: Sum<f64> = Sum {
+//             data_points: vec![data_point.clone(); 2_000],
+//             temporality: Temporality::Delta,
+//             start_time: std::time::SystemTime::now(),
+//             time: std::time::SystemTime::now(),
+//             is_monotonic: true,
+//         };
 
-        Metric {
-            name: "metric_name".into(),
-            description: "metric description".into(),
-            unit: "metric unit".into(),
-            data: Box::new(sum),
-        }
-    }
+//         Metric {
+//             name: "metric_name".into(),
+//             description: "metric description".into(),
+//             unit: "metric unit".into(),
+//             data: Box::new(sum),
+//         }
+//     }
 
-    ResourceMetrics {
-        resource: Resource::builder()
-            .with_attributes(vec![KeyValue::new("service.name", "my-service")])
-            .build(),
-        scope_metrics: vec![ScopeMetrics {
-            scope: InstrumentationScope::default(),
-            metrics: vec![
-                create_metric(),
-                create_metric(),
-                create_metric(),
-                create_metric(),
-                create_metric(),
-                create_metric(),
-                create_metric(),
-                create_metric(),
-                create_metric(),
-                create_metric(),
-            ],
-        }],
-    }
-}
+//     ResourceMetrics {
+//         resource: Resource::builder()
+//             .with_attributes(vec![KeyValue::new("service.name", "my-service")])
+//             .build(),
+//         scope_metrics: vec![ScopeMetrics {
+//             scope: InstrumentationScope::default(),
+//             metrics: vec![
+//                 create_metric(),
+//                 create_metric(),
+//                 create_metric(),
+//                 create_metric(),
+//                 create_metric(),
+//                 create_metric(),
+//                 create_metric(),
+//                 create_metric(),
+//                 create_metric(),
+//                 create_metric(),
+//             ],
+//         }],
+//     }
+// }
 
 fn criterion_benchmark(c: &mut Criterion) {
     let runtime = tokio::runtime::Builder::new_multi_thread()
@@ -89,7 +90,9 @@ fn criterion_benchmark(c: &mut Criterion) {
         b.iter_custom(|iters| {
             let exporter = MetricsExporter::new();
 
-            let mut resource_metrics = create_resource_metrics();
+            // TODO: Fix this once we can use data without aggregation.
+            // let mut resource_metrics = create_resource_metrics();
+            let mut resource_metrics = ResourceMetrics::default();
 
             let start = std::time::Instant::now();
 

@@ -11,9 +11,9 @@ license = "Apache-2.0"
 rust-version = "1.75.0"
 
 [dependencies]
-opentelemetry = { version = "0.29", features = ["metrics"] }
-opentelemetry_sdk = { version = "0.29", features = ["metrics"] }
-opentelemetry-proto = { version = "0.29", features = ["gen-tonic", "metrics"] }
+opentelemetry = { version = "0.30", features = ["metrics"] }
+opentelemetry_sdk = { version = "0.30", features = ["metrics"] }
+opentelemetry-proto = { version = "0.30", features = ["gen-tonic", "metrics"] }
 prost = "0.13"
 tracelogging = "1.2.4"
 tracing = { version = "0.1", optional = true }
@@ -21,6 +21,7 @@ tracing = { version = "0.1", optional = true }
 tokio = { version = "1.0", features = ["full"] }
 criterion = { workspace = true, features = ["html_reports"] }
 tracing-subscriber = { version = "0.3", features = ["env-filter","registry", "std", "fmt"] }
+opentelemetry-proto = { version = "0.30", features = ["gen-tonic", "metrics", "gen-tonic-messages"] }
 
 [features]
 internal-logs = ["tracing", "opentelemetry/internal-logs", "opentelemetry_sdk/internal-logs", "opentelemetry-proto/internal-logs"]
@@ -29,9 +30,10 @@ default = ["internal-logs"]
 [package.metadata.cargo-machete]
 ignored = ["tracing"]
 
-[[bench]]
-name = "exporter"
-harness = false
+# TODO: Fix this once we can use data without aggregation.
+# [[bench]]
+# name = "exporter"
+# harness = false
 
 [lints]
 workspace = true
