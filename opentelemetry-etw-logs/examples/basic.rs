@@ -39,14 +39,18 @@
 //!
 
 use opentelemetry_appender_tracing::layer;
-use opentelemetry_etw_logs::ETWLoggerProviderBuilderExt;
+use opentelemetry_etw_logs::Processor;
 use opentelemetry_sdk::logs::SdkLoggerProvider;
 use tracing::error;
 use tracing_subscriber::prelude::*;
 
 fn init_logger() -> SdkLoggerProvider {
+    let processor = Processor::builder("provider-name")
+        .build()
+        .expect("Valid provider name is required to build an ETW Processor.");
+
     SdkLoggerProvider::builder()
-        .with_etw_exporter("provider-name")
+        .with_log_processor(processor)
         .build()
 }
 

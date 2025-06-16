@@ -2,7 +2,7 @@ use opentelemetry_sdk::logs::TraceContext;
 use std::time::SystemTime;
 use tracelogging_dynamic as tld;
 
-pub fn populate_part_a(
+pub(crate) fn populate_part_a(
     event: &mut tld::EventBuilder,
     resource: &super::Resource,
     log_record: &opentelemetry_sdk::logs::SdkLogRecord,
@@ -95,7 +95,9 @@ fn populate_time(
     let timestamp: DateTime<Utc> = event_time.into();
     event.add_str8(
         "time",
-        timestamp.to_rfc3339().as_str(),
+        timestamp
+            .to_rfc3339_opts(chrono::SecondsFormat::AutoSi, true)
+            .as_str(),
         tld::OutType::Default,
         field_tag,
     );

@@ -6,7 +6,7 @@ use opentelemetry::{
 };
 use tracelogging_dynamic as tld;
 
-pub fn add_attribute_to_event(event: &mut tld::EventBuilder, key: &Key, value: &AnyValue) {
+pub(crate) fn add_attribute_to_event(event: &mut tld::EventBuilder, key: &Key, value: &AnyValue) {
     match value {
         AnyValue::Boolean(b) => {
             event.add_bool32(key.as_str(), *b as i32, tld::OutType::Default, 0);
@@ -21,7 +21,7 @@ pub fn add_attribute_to_event(event: &mut tld::EventBuilder, key: &Key, value: &
             event.add_str8(key.as_str(), s.as_str(), tld::OutType::Default, 0);
         }
         AnyValue::Bytes(b) => {
-            event.add_binaryc(key.as_str(), b.as_slice(), tld::OutType::Default, 0);
+            event.add_binary(key.as_str(), b.as_slice(), tld::OutType::Default, 0);
         }
         #[cfg(feature = "serde_json")]
         AnyValue::ListAny(_) => {
@@ -48,7 +48,7 @@ pub fn add_attribute_to_event(event: &mut tld::EventBuilder, key: &Key, value: &
     }
 }
 
-pub const fn convert_severity_to_level(severity: Severity) -> tld::Level {
+pub(crate) const fn convert_severity_to_level(severity: Severity) -> tld::Level {
     match severity {
         Severity::Debug
         | Severity::Debug2
@@ -75,31 +75,32 @@ pub const fn convert_severity_to_level(severity: Severity) -> tld::Level {
     }
 }
 
-pub fn get_event_name(log_record: &opentelemetry_sdk::logs::SdkLogRecord) -> &str {
-    log_record.event_name().unwrap_or("Log")
-}
-
 #[cfg(test)]
-pub mod test_utils {
+pub(crate) mod test_utils {
     use opentelemetry::logs::Logger;
     use opentelemetry::logs::LoggerProvider;
     use opentelemetry_sdk::logs::SdkLoggerProvider;
 
-    use super::super::ETWExporter;
+    use crate::logs::exporter::options::Options;
+    use crate::logs::exporter::ETWExporter;
 
-    pub fn new_etw_exporter() -> ETWExporter {
-        ETWExporter::new("test-provider-name")
+    pub(crate) fn new_etw_exporter() -> ETWExporter {
+        ETWExporter::new(test_options())
     }
 
-    pub fn new_instrumentation_scope() -> opentelemetry::InstrumentationScope {
+    pub(crate) fn new_instrumentation_scope() -> opentelemetry::InstrumentationScope {
         opentelemetry::InstrumentationScope::default()
     }
 
-    pub fn new_sdk_log_record() -> opentelemetry_sdk::logs::SdkLogRecord {
+    pub(crate) fn new_sdk_log_record() -> opentelemetry_sdk::logs::SdkLogRecord {
         SdkLoggerProvider::builder()
             .build()
             .logger("test")
             .create_log_record()
+    }
+
+    pub(crate) fn test_options() -> Options {
+        Options::new("ContosoProvider")
     }
 }
 
@@ -119,18 +120,4 @@ fn test_get_severity_level() {
 
     let result = convert_severity_to_level(Severity::Warn);
     assert_eq!(result, tld::Level::Warning);
-}
-
-#[test]
-fn test_get_event_name() {
-    use opentelemetry::logs::LogRecord;
-
-    let mut log_record = test_utils::new_sdk_log_record();
-
-    let result = get_event_name(&log_record);
-    assert_eq!(result, "Log");
-
-    log_record.set_event_name("event-name");
-    let result = get_event_name(&log_record);
-    assert_eq!(result, "event-name");
 }
