@@ -9,6 +9,7 @@ use opentelemetry_proto::tonic::{
         ResourceMetrics as TonicResourceMetrics, ScopeMetrics as TonicScopeMetrics,
         Sum as TonicSum, Summary as TonicSummary,
     },
+    resource::v1::Resource,
 };
 use opentelemetry_sdk::error::{OTelSdkError, OTelSdkResult};
 use opentelemetry_sdk::metrics::{
@@ -45,16 +46,15 @@ impl Debug for MetricsExporter {
 
 fn emit_export_metric_service_request(
     export_metric_service_request: &ExportMetricsServiceRequest,
-    encoding_buffer: &mut Vec<u8>,
 ) -> OTelSdkResult {
     if (export_metric_service_request.encoded_len()) > etw::MAX_EVENT_SIZE {
         otel_warn!(name: "MetricExportFailedDueToMaxSizeLimit", size = export_metric_service_request.encoded_len(), max_size = etw::MAX_EVENT_SIZE);
     } else {
-        // `encoding_buffer` is assumed to be reused, so ensure it is empty before using it for encoding
-        encoding_buffer.clear();
+        let mut buffer = [0u8; etw::MAX_EVENT_SIZE];
+        let mut encoding_buffer = &mut buffer[..];
 
         export_metric_service_request
-            .encode(encoding_buffer)
+            .encode(&mut encoding_buffer)
             .map_err(|err| OTelSdkError::InternalFailure(err.to_string()))?;
 
         let result = etw::write(encoding_buffer);
@@ -78,8 +78,7 @@ impl PushMetricExporter for MetricsExporter {
             .map(Into::into)
             .unwrap_or_default();
 
-        // TODO: Reuse this vec across exports by storing it in `MetricsExporter`
-        let mut encoding_buffer = Vec::new();
+        let resource: Resource = metrics.resource().into();
 
         for scope_metric in metrics.scope_metrics() {
             for metric in scope_metric.metrics() {
@@ -92,7 +91,7 @@ impl PushMetricExporter for MetricsExporter {
                 // This ExportMetricsServiceRequest is created for each metric and will hold a single data point.
                 let mut export_metrics_service_request = ExportMetricsServiceRequest {
                     resource_metrics: vec![TonicResourceMetrics {
-                        resource: Some((metrics.resource()).into()),
+                        resource: Some(resource.clone()),
                         scope_metrics: vec![TonicScopeMetrics {
                             scope: Some((scope_metric.scope(), None).into()),
                             metrics: vec![TonicMetric {
@@ -117,10 +116,7 @@ impl PushMetricExporter for MetricsExporter {
                                 aggregation_temporality: hist.aggregation_temporality,
                                 data_points: vec![data_point],
                             }));
-                            emit_export_metric_service_request(
-                                &export_metrics_service_request,
-                                &mut encoding_buffer,
-                            )?;
+                            emit_export_metric_service_request(&export_metrics_service_request)?;
                         }
                     }
                     TonicMetricData::ExponentialHistogram(exp_hist) => {
@@ -133,10 +129,7 @@ impl PushMetricExporter for MetricsExporter {
                                     data_points: vec![data_point],
                                 },
                             ));
-                            emit_export_metric_service_request(
-                                &export_metrics_service_request,
-                                &mut encoding_buffer,
-                            )?;
+                            emit_export_metric_service_request(&export_metrics_service_request)?;
                         }
                     }
                     TonicMetricData::Gauge(gauge) => {
@@ -146,10 +139,7 @@ impl PushMetricExporter for MetricsExporter {
                                 .data = Some(TonicMetricData::Gauge(TonicGauge {
                                 data_points: vec![data_point],
                             }));
-                            emit_export_metric_service_request(
-                                &export_metrics_service_request,
-                                &mut encoding_buffer,
-                            )?;
+                            emit_export_metric_service_request(&export_metrics_service_request)?;
                         }
                     }
                     TonicMetricData::Sum(sum) => {
@@ -161,10 +151,7 @@ impl PushMetricExporter for MetricsExporter {
                                 aggregation_temporality: sum.aggregation_temporality,
                                 is_monotonic: sum.is_monotonic,
                             }));
-                            emit_export_metric_service_request(
-                                &export_metrics_service_request,
-                                &mut encoding_buffer,
-                            )?;
+                            emit_export_metric_service_request(&export_metrics_service_request)?;
                         }
                     }
                     TonicMetricData::Summary(summary) => {
@@ -174,10 +161,7 @@ impl PushMetricExporter for MetricsExporter {
                                 .data = Some(TonicMetricData::Summary(TonicSummary {
                                 data_points: vec![data],
                             }));
-                            emit_export_metric_service_request(
-                                &export_metrics_service_request,
-                                &mut encoding_buffer,
-                            )?;
+                            emit_export_metric_service_request(&export_metrics_service_request)?;
                         }
                     }
                 }
