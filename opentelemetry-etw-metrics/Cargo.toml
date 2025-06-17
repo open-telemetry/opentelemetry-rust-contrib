@@ -30,7 +30,7 @@ default = ["internal-logs"]
 [package.metadata.cargo-machete]
 ignored = ["tracing"]
 
-# TODO: Fix this once we can use data without aggregation.
+# TODO: Enabled this once we can use data without aggregation (git mv disabled_benches benches).
 # [[bench]]
 # name = "exporter"
 # harness = false

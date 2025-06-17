@@ -1,3 +1,5 @@
+// TODO: Enable this once we can use data without aggregation.
+
 //! run with `$ cargo bench --bench exporter -- --exact <test_name>` to run specific test for logs
 //! So to run test named "fibonacci" you would run `$ cargo bench --bench exporter -- --exact fibonacci`
 //! To run all tests for logs you would run `$ cargo bench --bench exporter`
