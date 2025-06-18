@@ -15,9 +15,7 @@ fn setup_meter_provider() -> SdkMeterProvider {
     SdkMeterProvider::builder()
         .with_resource(
             Resource::builder()
-                .with_attributes(vec![
-                    KeyValue::new("service.name", SERVICE_NAME),
-                ])
+                .with_attributes(vec![KeyValue::new("service.name", SERVICE_NAME)])
                 .build(),
         )
         .with_reader(reader)
