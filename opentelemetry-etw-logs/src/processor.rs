@@ -5,7 +5,7 @@ use opentelemetry_sdk::Resource;
 use std::error::Error;
 use std::fmt::Debug;
 
-use crate::logs::exporter::*;
+use crate::exporter::*;
 
 /// Processes and exports logs to ETW.
 ///
