@@ -203,8 +203,8 @@ mod tests {
         use tracing_subscriber::prelude::*;
 
         #[allow(
-            unused_mut,
-            reason = "We require this to be mut if the 'logs_unstable_etw_event_name_from_callback' feature is enabled"
+            unused_mut
+            //, reason = "We require this to be mut if the 'logs_unstable_etw_event_name_from_callback' feature is enabled"
         )]
         let mut processor_builder = Processor::builder("provider_name");
 
