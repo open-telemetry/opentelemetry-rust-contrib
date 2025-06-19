@@ -1,1 +1,1 @@
-mod lz4_chunked_compression;
+pub(crate) mod lz4_chunked_compression;
