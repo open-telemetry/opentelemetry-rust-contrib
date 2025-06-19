@@ -42,6 +42,10 @@ impl Options {
         self.default_event_name()
     }
 
+    #[allow(
+        dead_code
+        //, reason = "This method is only used in unstable feature 'logs_unstable_etw_event_name_from_callback'"
+    )]
     pub(crate) fn etw_event_name_from_callback(
         mut self,
         callback: impl Fn(&SdkLogRecord) -> &str + Send + Sync + 'static,

@@ -43,6 +43,7 @@ internal-logs = [
     "opentelemetry/internal-logs",
     "opentelemetry_sdk/internal-logs",
 ]
+logs_unstable_etw_event_name_from_callback = []
 serde_json = ["dep:serde_json"]
 default = ["internal-logs"]
 
