@@ -1,7 +1,7 @@
 [package]
 name = "opentelemetry-etw-logs"
 description = "OpenTelemetry logs exporter to ETW (Event Tracing for Windows)"
-version = "0.8.0"
+version = "0.9.0"
 edition = "2021"
 homepage = "https://github.com/open-telemetry/opentelemetry-rust-contrib/tree/main/opentelemetry-etw-logs"
 repository = "https://github.com/open-telemetry/opentelemetry-rust-contrib/tree/main/opentelemetry-etw-logs"

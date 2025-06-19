@@ -2,6 +2,10 @@
 
 ## vNext
 
+## v0.9.0
+
+Released 2025-Jun-19
+
 - Added validation to provider name.
 - Added optional feature `serde_json` to serialize List and Maps.
 - **BREAKING**

@@ -2,6 +2,12 @@
 
 ## vNext
 
+## v0.9.0
+
+Released 2025-Jun-19
+
+- Bump opentelemetry and opentelemetry_sdk versions to 0.30
+- Bump opentelemetry-proto version to 0.30
 - Bump tracelogging crate to 1.2.4
 
 ## v0.8.0
