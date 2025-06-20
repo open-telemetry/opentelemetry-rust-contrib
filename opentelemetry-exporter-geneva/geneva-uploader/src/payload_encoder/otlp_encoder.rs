@@ -104,7 +104,7 @@ impl OtlpEncoder {
     /// Determine which fields are present in the LogRecord
     fn determine_fields(&self, log: &LogRecord) -> Vec<FieldDef> {
         // Pre-allocate with estimated capacity to avoid reallocations
-        let estimated_capacity = 4 + 6 + log.attributes.len();
+        let estimated_capacity = 7 + 4 + log.attributes.len();
         let mut fields = Vec::with_capacity(estimated_capacity);
         fields.push((Cow::Borrowed(FIELD_ENV_NAME), BondDataType::BT_STRING as u8));
         fields.push((Cow::Borrowed(FIELD_ENV_VER), BondDataType::BT_STRING as u8));
