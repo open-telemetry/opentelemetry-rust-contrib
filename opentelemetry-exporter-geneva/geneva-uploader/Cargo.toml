@@ -23,6 +23,7 @@ lz4_flex = { version = "0.11", features = ["safe-encode"], default-features = fa
 
 [features]
 self_signed_certs = [] # Empty by default for security
+mock_auth = [] # Disabled by default. Not to be enabled in the prod release. 
 default = ["self_signed_certs"] # TODO - remove this feature before release
 
 [dev-dependencies]

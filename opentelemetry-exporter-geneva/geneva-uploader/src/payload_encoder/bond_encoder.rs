@@ -1,5 +1,6 @@
 // bond_encoder.rs - Pure Rust Bond encoder for dynamic OTLP schemas
 
+use std::borrow::Cow;
 use std::io::{Result, Write};
 
 /// Bond data types
@@ -37,6 +38,7 @@ impl BondWriter {
     /// Write a string value to buffer (Bond BT_STRING format)
     pub fn write_string(buffer: &mut Vec<u8>, s: &str) {
         let bytes = s.as_bytes();
+        //TODO - check if the length is less than 2^32-1
         buffer.extend_from_slice(&(bytes.len() as u32).to_le_bytes());
         buffer.extend_from_slice(bytes);
     }
@@ -61,7 +63,9 @@ impl BondWriter {
     pub fn write_wstring(buffer: &mut Vec<u8>, s: &str) {
         let utf16_bytes: Vec<u8> = s.encode_utf16().flat_map(|c| c.to_le_bytes()).collect();
 
-        // Character count (not byte count) - this was the key fix!
+        // Character count (not byte count)
+        // TODO - check if the length is less than 2^32-1
+        // TODO - check if length is number of bytes, or number of UTF-16 code units
         buffer.extend_from_slice(&(s.len() as u32).to_le_bytes());
         buffer.extend_from_slice(&utf16_bytes);
     }
@@ -75,7 +79,7 @@ impl BondWriter {
 /// Field definition for dynamic schemas
 #[derive(Clone, Debug)]
 pub(crate) struct FieldDef {
-    pub name: String,
+    pub name: Cow<'static, str>,
     pub field_id: u16,
     pub type_id: u8,
 }
@@ -89,20 +93,12 @@ pub(crate) struct DynamicSchema {
 }
 
 impl DynamicSchema {
-    pub(crate) fn new(name: &str, namespace: &str) -> Self {
+    pub(crate) fn new(name: &str, namespace: &str, fields: Vec<FieldDef>) -> Self {
         Self {
             struct_name: name.to_string(),
             qualified_name: format!("{}.{}", namespace, name),
-            fields: Vec::new(),
+            fields,
         }
-    }
-
-    pub(crate) fn add_field(&mut self, name: &str, type_id: u8, field_id: u16) {
-        self.fields.push(FieldDef {
-            name: name.to_string(),
-            field_id,
-            type_id,
-        });
     }
 
     /// Encode the schema to Bond format
@@ -171,7 +167,7 @@ fn write_bond_string<W: Write>(writer: &mut W, s: &str) -> Result<()> {
 
 fn write_field_def<W: Write>(writer: &mut W, field: &FieldDef, is_last: bool) -> Result<()> {
     // Field name
-    write_bond_string(writer, &field.name)?;
+    write_bond_string(writer, field.name.as_ref())?;
 
     // Empty qualified name
     write_bond_string(writer, "")?;
@@ -231,7 +227,7 @@ pub(crate) fn encode_dynamic_payload<W: Write>(
 
     // Write values in field order
     for field in fields {
-        if let Some(value_bytes) = value_map.get(field.name.as_str()) {
+        if let Some(value_bytes) = value_map.get(field.name.as_ref()) {
             writer.write_all(value_bytes)?;
         } else {
             // Write default value based on type
@@ -255,16 +251,8 @@ pub(crate) struct BondEncodedSchema {
 }
 
 impl BondEncodedSchema {
-    pub(crate) fn from_fields(
-        fields: &[(&str, u8, u16)],
-        struct_name: &str,
-        namespace: &str,
-    ) -> Self {
-        let mut schema = DynamicSchema::new(struct_name, namespace); //"OtlpLogRecord", "telemetry");
-
-        for (name, type_id, field_id) in fields {
-            schema.add_field(name, *type_id, *field_id);
-        }
+    pub(crate) fn from_fields(name: &str, namespace: &str, fields: Vec<FieldDef>) -> Self {
+        let schema = DynamicSchema::new(name, namespace, fields); //"OtlpLogRecord", "telemetry");
 
         let encoded_bytes = schema.encode().expect("Schema encoding failed");
 
@@ -288,50 +276,80 @@ impl Clone for BondEncodedSchema {
     }
 }
 
-// Replacement for EncoderRow
-pub(crate) struct BondEncodedRow {
-    bytes: Vec<u8>,
-}
-
-impl BondEncodedRow {
-    pub(crate) fn from_schema_and_row(_schema: &BondEncodedSchema, row: &[u8]) -> Self {
-        // The row data is already properly formatted by the OTLP encoder
-        // For Simple Binary protocol, we don't add any additional encoding
-        // The SP header will be added by CentralBlob when needed
-        Self {
-            bytes: row.to_vec(),
-        }
-    }
-
-    pub(crate) fn as_bytes(&self) -> &[u8] {
-        &self.bytes
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::borrow::Cow;
 
     #[test]
     fn test_dynamic_schema() {
-        let mut schema = DynamicSchema::new("TestStruct", "test.namespace");
-        schema.add_field("field1", BondDataType::BT_DOUBLE as u8, 1);
-        schema.add_field("field2", BondDataType::BT_STRING as u8, 2);
-        schema.add_field("field3", BondDataType::BT_INT32 as u8, 3);
+        // Create fields directly as FieldDef
+        let fields = vec![
+            FieldDef {
+                name: Cow::Borrowed("field1"),
+                type_id: BondDataType::BT_DOUBLE as u8,
+                field_id: 1,
+            },
+            FieldDef {
+                name: Cow::Borrowed("field2"),
+                type_id: BondDataType::BT_STRING as u8,
+                field_id: 2,
+            },
+            FieldDef {
+                name: Cow::Borrowed("field3"),
+                type_id: BondDataType::BT_INT32 as u8,
+                field_id: 3,
+            },
+        ];
 
+        let schema = DynamicSchema::new("TestStruct", "test.namespace", fields);
         let encoded = schema.encode().unwrap();
         assert!(!encoded.is_empty());
     }
 
     #[test]
     fn test_pure_rust_encoder_schema() {
-        let fields = &[
-            ("timestamp", BondDataType::BT_STRING as u8, 1u16),
-            ("severity", BondDataType::BT_INT32 as u8, 2u16),
-            ("message", BondDataType::BT_STRING as u8, 3u16),
+        let fields = vec![
+            FieldDef {
+                name: Cow::Borrowed("timestamp"),
+                type_id: BondDataType::BT_STRING as u8,
+                field_id: 1,
+            },
+            FieldDef {
+                name: Cow::Borrowed("severity"),
+                type_id: BondDataType::BT_INT32 as u8,
+                field_id: 2,
+            },
+            FieldDef {
+                name: Cow::Borrowed("message"),
+                type_id: BondDataType::BT_STRING as u8,
+                field_id: 3,
+            },
         ];
 
-        let schema = BondEncodedSchema::from_fields(fields, "OtlpLogRecord", "telemetry");
+        let schema = BondEncodedSchema::from_fields("OtlpLogRecord", "telemetry", fields);
+        let bytes = schema.as_bytes();
+        assert!(!bytes.is_empty());
+    }
+
+    #[test]
+    fn test_field_def_with_owned_strings() {
+        // Test that FieldDef works with owned strings too
+        let dynamic_field_name = format!("dynamic_{}", 123);
+        let fields = vec![
+            FieldDef {
+                name: Cow::Owned(dynamic_field_name),
+                type_id: BondDataType::BT_STRING as u8,
+                field_id: 1,
+            },
+            FieldDef {
+                name: Cow::Borrowed("static_field"),
+                type_id: BondDataType::BT_INT32 as u8,
+                field_id: 2,
+            },
+        ];
+
+        let schema = BondEncodedSchema::from_fields("TestStruct", "test.namespace", fields);
         let bytes = schema.as_bytes();
         assert!(!bytes.is_empty());
     }

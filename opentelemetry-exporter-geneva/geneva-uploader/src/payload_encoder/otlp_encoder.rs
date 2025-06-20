@@ -1,30 +1,37 @@
 use crate::payload_encoder::bond_encoder::{
-    BondDataType, BondEncodedRow, BondEncodedSchema, BondWriter,
+    BondDataType, BondEncodedSchema, BondWriter, FieldDef,
 };
 use crate::payload_encoder::central_blob::{CentralBlob, CentralEventEntry, CentralSchemaEntry};
 use chrono::{TimeZone, Utc};
 use opentelemetry_proto::tonic::common::v1::any_value::Value;
 use opentelemetry_proto::tonic::logs::v1::LogRecord;
+use std::borrow::Cow;
 use std::collections::HashMap;
 use std::sync::{Arc, RwLock};
 
-type SchemaCache = Arc<RwLock<HashMap<u64, (BondEncodedSchema, Vec<FieldInfo>)>>>;
+type SchemaCache = Arc<RwLock<HashMap<u64, (BondEncodedSchema, [u8; 16], Vec<FieldDef>)>>>;
 type BatchKey = (u64, String);
 type EncodedRow = (String, u8, Vec<u8>); // (event_name, level, row_buffer)
 type BatchValue = (CentralSchemaEntry, Vec<EncodedRow>);
 type LogBatches = HashMap<BatchKey, BatchValue>;
 
+const FIELD_ENV_NAME: &str = "env_name";
+const FIELD_ENV_VER: &str = "env_ver";
+const FIELD_TIMESTAMP: &str = "timestamp";
+const FIELD_ENV_TIME: &str = "env_time";
+const FIELD_TRACE_ID: &str = "env_dt_traceId";
+const FIELD_SPAN_ID: &str = "env_dt_spanId";
+const FIELD_TRACE_FLAGS: &str = "env_dt_traceFlags";
+const FIELD_NAME: &str = "name";
+const FIELD_SEVERITY_NUMBER: &str = "SeverityNumber";
+const FIELD_SEVERITY_TEXT: &str = "SeverityText";
+const FIELD_BODY: &str = "body";
+
 /// Encoder to write OTLP payload in bond form.
+#[derive(Clone)]
 pub struct OtlpEncoder {
     // TODO - limit cache size or use LRU eviction, and/or add feature flag for caching
     schema_cache: SchemaCache,
-}
-
-#[derive(Clone, Debug)]
-struct FieldInfo {
-    name: String,
-    type_id: u8,
-    order_id: u16,
 }
 
 impl OtlpEncoder {
@@ -49,7 +56,7 @@ impl OtlpEncoder {
         for log_record in logs {
             // 1. Get schema
             let field_specs = self.determine_fields(log_record);
-            let schema_id = self.calculate_schema_id(&field_specs);
+            let schema_id = Self::calculate_schema_id(&field_specs);
             let (schema_entry, field_info) = self.get_or_create_schema(schema_id, field_specs);
 
             // 2. Encode row
@@ -78,7 +85,7 @@ impl OtlpEncoder {
                     schema_id,
                     level,
                     event_name,
-                    row: BondEncodedRow::from_schema_and_row(&schema_entry.schema, &row_buffer),
+                    row: row_buffer,
                 })
                 .collect();
             let events_len = events.len();
@@ -97,40 +104,52 @@ impl OtlpEncoder {
     }
 
     /// Determine which fields are present in the LogRecord
-    fn determine_fields(&self, log: &LogRecord) -> Vec<(String, u8)> {
-        let mut fields = vec![
-            ("env_name".to_string(), BondDataType::BT_STRING as u8),
-            ("env_ver".to_string(), BondDataType::BT_STRING as u8),
-            ("timestamp".to_string(), BondDataType::BT_STRING as u8),
-            ("env_time".to_string(), BondDataType::BT_STRING as u8),
-        ];
+    fn determine_fields(&self, log: &LogRecord) -> Vec<FieldDef> {
+        // Pre-allocate with estimated capacity to avoid reallocations
+        let estimated_capacity = 4 + 6 + log.attributes.len();
+        let mut fields = Vec::with_capacity(estimated_capacity);
+        fields.push((Cow::Borrowed(FIELD_ENV_NAME), BondDataType::BT_STRING as u8));
+        fields.push((Cow::Borrowed(FIELD_ENV_VER), BondDataType::BT_STRING as u8));
+        fields.push((
+            Cow::Borrowed(FIELD_TIMESTAMP),
+            BondDataType::BT_STRING as u8,
+        ));
+        fields.push((Cow::Borrowed(FIELD_ENV_TIME), BondDataType::BT_STRING as u8));
 
         // Part A extension - Conditional fields
         if !log.trace_id.is_empty() {
-            fields.push(("env_dt_traceId".to_string(), BondDataType::BT_STRING as u8));
+            fields.push((Cow::Borrowed(FIELD_TRACE_ID), BondDataType::BT_STRING as u8));
         }
         if !log.span_id.is_empty() {
-            fields.push(("env_dt_spanId".to_string(), BondDataType::BT_STRING as u8));
+            fields.push((Cow::Borrowed(FIELD_SPAN_ID), BondDataType::BT_STRING as u8));
         }
         if log.flags != 0 {
             fields.push((
-                "env_dt_traceFlags".to_string(),
+                Cow::Borrowed(FIELD_TRACE_FLAGS),
                 BondDataType::BT_INT32 as u8,
             ));
         }
 
         // Part B - Core log fields
         if !log.event_name.is_empty() {
-            fields.push(("name".to_string(), BondDataType::BT_STRING as u8));
+            fields.push((Cow::Borrowed(FIELD_NAME), BondDataType::BT_STRING as u8));
         }
-        fields.push(("SeverityNumber".to_string(), BondDataType::BT_INT32 as u8));
+        fields.push((
+            Cow::Borrowed(FIELD_SEVERITY_NUMBER),
+            BondDataType::BT_INT32 as u8,
+        ));
         if !log.severity_text.is_empty() {
-            fields.push(("SeverityText".to_string(), BondDataType::BT_STRING as u8));
+            fields.push((
+                Cow::Borrowed(FIELD_SEVERITY_TEXT),
+                BondDataType::BT_STRING as u8,
+            ));
         }
         if let Some(body) = &log.body {
             if let Some(Value::StringValue(_)) = &body.value {
-                fields.push(("body".to_string(), BondDataType::BT_STRING as u8));
+                // Only included in schema when body is a string value
+                fields.push((Cow::Borrowed(FIELD_BODY), BondDataType::BT_STRING as u8));
             }
+            //TODO - handle other body types
         }
 
         // Part C - Dynamic attributes
@@ -139,31 +158,35 @@ impl OtlpEncoder {
                 let type_id = match val {
                     Value::StringValue(_) => BondDataType::BT_STRING as u8,
                     Value::IntValue(_) => BondDataType::BT_INT32 as u8,
-                    Value::DoubleValue(_) => BondDataType::BT_FLOAT as u8, // using float for now
+                    Value::DoubleValue(_) => BondDataType::BT_FLOAT as u8, // TODO - using float for now
                     Value::BoolValue(_) => BondDataType::BT_INT32 as u8, // representing bool as int
                     _ => continue,
                 };
-                fields.push((attr.key.clone(), type_id));
+                fields.push((Cow::Owned(attr.key.clone()), type_id));
             }
         }
-
+        fields.sort_by(|a, b| a.0.cmp(&b.0)); // Sort fields by name consistent schema ID generation
         fields
+            .into_iter()
+            .enumerate()
+            .map(|(i, (name, type_id))| FieldDef {
+                name,
+                type_id,
+                field_id: (i + 1) as u16,
+            })
+            .collect()
     }
 
     /// Calculate schema ID from field specifications
-    fn calculate_schema_id(&self, fields: &[(String, u8)]) -> u64 {
+    fn calculate_schema_id(fields: &[FieldDef]) -> u64 {
         use std::collections::hash_map::DefaultHasher;
         use std::hash::{Hash, Hasher};
 
         let mut hasher = DefaultHasher::new();
 
-        // Sort fields by name for consistent schema ID
-        let mut sorted_fields = fields.to_vec();
-        sorted_fields.sort_by(|a, b| a.0.cmp(&b.0));
-
-        for (name, type_id) in sorted_fields {
-            name.hash(&mut hasher);
-            type_id.hash(&mut hasher);
+        for field in fields {
+            field.name.hash(&mut hasher);
+            field.type_id.hash(&mut hasher);
         }
 
         hasher.finish()
@@ -173,49 +196,38 @@ impl OtlpEncoder {
     fn get_or_create_schema(
         &self,
         schema_id: u64,
-        field_specs: Vec<(String, u8)>,
-    ) -> (CentralSchemaEntry, Vec<FieldInfo>) {
+        field_info: Vec<FieldDef>,
+    ) -> (CentralSchemaEntry, Vec<FieldDef>) {
         // Check cache first
-        if let Some((schema, field_info)) = self.schema_cache.read().unwrap().get(&schema_id) {
-            let schema_bytes = schema.as_bytes();
-            let schema_md5 = md5::compute(schema_bytes).0;
-
+        if let Some((schema, schema_md5, field_info)) =
+            self.schema_cache.read().unwrap().get(&schema_id)
+        {
             return (
                 CentralSchemaEntry {
                     id: schema_id,
-                    md5: schema_md5,
+                    md5: *schema_md5,
                     schema: schema.clone(),
                 },
                 field_info.clone(),
             );
         }
 
-        // Create new schema
-        let mut sorted_specs = field_specs.clone();
-        sorted_specs.sort_by(|a, b| a.0.cmp(&b.0));
+        let schema =
+            BondEncodedSchema::from_fields("OtlpLogRecord", "telemetry", field_info.clone()); //TODO - use actual struct name and namespace
 
-        let field_defs: Vec<(&str, u8, u16)> = sorted_specs
-            .iter()
-            .enumerate()
-            .map(|(i, (name, type_id))| (name.as_str(), *type_id, (i + 1) as u16))
-            .collect();
-
-        let schema = BondEncodedSchema::from_fields(&field_defs, "OtlpLogRecord", "telemetry"); //TODO - use actual struct name and namespace
-
-        // Create field info for ordered writing
-        let field_info: Vec<FieldInfo> = field_defs
-            .iter()
-            .map(|(name, type_id, order_id)| FieldInfo {
-                name: name.to_string(),
-                type_id: *type_id,
-                order_id: *order_id,
-            })
-            .collect();
-
+        let schema_bytes = schema.as_bytes();
+        let schema_md5 = md5::compute(schema_bytes).0;
         // Cache the schema and field info
         {
             let mut cache = self.schema_cache.write().unwrap();
-            cache.insert(schema_id, (schema.clone(), field_info.clone()));
+            // TODO: Refactor to eliminate field_info duplication in cache
+            // The field information (name, type_id, order) is already stored in BondEncodedSchema's
+            // DynamicSchema.fields vector. We should:
+            // 1. Ensure DynamicSchema maintains fields in sorted order
+            // 2. Add a method to BondEncodedSchema to iterate fields for row encoding
+            // 3. Remove field_info from cache tuple to reduce memory usage and cloning overhead
+            // This would require updating write_row_data() to work with DynamicSchema fields directly
+            cache.insert(schema_id, (schema.clone(), schema_md5, field_info.clone()));
         }
 
         let schema_bytes = schema.as_bytes();
@@ -232,17 +244,13 @@ impl OtlpEncoder {
     }
 
     /// Write row data directly from LogRecord
-    fn write_row_data(&self, log: &LogRecord, field_info: &[FieldInfo]) -> Vec<u8> {
-        let mut buffer = Vec::with_capacity(1024);
-
-        // Sort by order_id to write in schema order
-        let mut sorted_fields = field_info.to_vec();
-        sorted_fields.sort_by_key(|f| f.order_id);
+    fn write_row_data(&self, log: &LogRecord, sorted_fields: &[FieldDef]) -> Vec<u8> {
+        let mut buffer = Vec::with_capacity(sorted_fields.len() * 50); //TODO - estimate better
 
         for field in sorted_fields {
-            match field.name.as_str() {
+            match field.name.as_ref() {
                 "env_name" => BondWriter::write_string(&mut buffer, "TestEnv"), // TODO - placeholder for actual env name
-                "env_ver" => BondWriter::write_string(&mut buffer, "4.0"), // TODO - placeholder for actual env name
+                "env_ver" => BondWriter::write_string(&mut buffer, "4.0"), // TODO - placeholder for actual env version
                 "timestamp" | "env_time" => {
                     let dt = Self::format_timestamp(log.observed_time_unix_nano);
                     BondWriter::write_string(&mut buffer, &dt);
@@ -276,8 +284,7 @@ impl OtlpEncoder {
                     }
                 }
                 "body" => {
-                    // TODO - handle all types of body values
-                    // For now, we only handle string values
+                    // TODO - handle all types of body values - For now, we only handle string values
                     if let Some(body) = &log.body {
                         if let Some(Value::StringValue(s)) = &body.value {
                             BondWriter::write_string(&mut buffer, s);
@@ -286,6 +293,7 @@ impl OtlpEncoder {
                 }
                 _ => {
                     // Handle dynamic attributes
+                    // TODO - optimize better - we could update determine_fields to also return a vec of bytes which has bond serialized attributes
                     if let Some(attr) = log.attributes.iter().find(|a| a.key == field.name) {
                         self.write_attribute_value(&mut buffer, attr, field.type_id);
                     }
@@ -313,24 +321,27 @@ impl OtlpEncoder {
         attr: &opentelemetry_proto::tonic::common::v1::KeyValue,
         expected_type: u8,
     ) {
+        const BT_STRING: u8 = BondDataType::BT_STRING as u8;
+        const BT_FLOAT: u8 = BondDataType::BT_FLOAT as u8;
+        const BT_DOUBLE: u8 = BondDataType::BT_DOUBLE as u8;
+        const BT_INT32: u8 = BondDataType::BT_INT32 as u8;
+        const BT_WSTRING: u8 = BondDataType::BT_WSTRING as u8;
+
         if let Some(val) = &attr.value {
             match (&val.value, expected_type) {
-                (Some(Value::StringValue(s)), t) if t == BondDataType::BT_STRING as u8 => {
-                    BondWriter::write_string(buffer, s)
-                }
-                (Some(Value::StringValue(s)), t) if t == BondDataType::BT_WSTRING as u8 => {
-                    BondWriter::write_wstring(buffer, s)
-                }
-                (Some(Value::IntValue(i)), t) if t == BondDataType::BT_INT32 as u8 => {
+                (Some(Value::StringValue(s)), BT_STRING) => BondWriter::write_string(buffer, s),
+                (Some(Value::StringValue(s)), BT_WSTRING) => BondWriter::write_wstring(buffer, s),
+                (Some(Value::IntValue(i)), BT_INT32) => {
+                    // TODO - handle i64 properly, for now we cast to i32
                     BondWriter::write_int32(buffer, *i as i32)
                 }
-                (Some(Value::DoubleValue(d)), t) if t == BondDataType::BT_FLOAT as u8 => {
+                (Some(Value::DoubleValue(d)), BT_FLOAT) => {
+                    // TODO - handle float values properly
                     BondWriter::write_float(buffer, *d as f32)
                 }
-                (Some(Value::DoubleValue(d)), t) if t == BondDataType::BT_DOUBLE as u8 => {
-                    BondWriter::write_double(buffer, *d)
-                }
-                (Some(Value::BoolValue(b)), t) if t == BondDataType::BT_INT32 as u8 => {
+                (Some(Value::DoubleValue(d)), BT_DOUBLE) => BondWriter::write_double(buffer, *d),
+                (Some(Value::BoolValue(b)), BT_INT32) => {
+                    // TODO - represent bool as BT_BOOL
                     BondWriter::write_bool_as_int32(buffer, *b)
                 }
                 _ => {} // TODO - handle more types

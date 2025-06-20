@@ -12,7 +12,6 @@ use opentelemetry_sdk::{
 };
 use std::env;
 use std::path::PathBuf;
-use std::sync::Arc;
 use std::thread;
 use std::time::Duration;
 use tracing::{error, info, warn};
@@ -65,11 +64,10 @@ async fn main() {
         role_instance,
     };
 
-    let geneva_client = Arc::new(
-        GenevaClient::new(config)
-            .await
-            .expect("Failed to create GenevaClient"),
-    );
+    let geneva_client = GenevaClient::new(config)
+        .await
+        .expect("Failed to create GenevaClient");
+
     let exporter = GenevaExporter::new(geneva_client);
     let batch_processor = BatchLogProcessor::builder(exporter, Tokio)
         .with_batch_config(BatchConfig::default())

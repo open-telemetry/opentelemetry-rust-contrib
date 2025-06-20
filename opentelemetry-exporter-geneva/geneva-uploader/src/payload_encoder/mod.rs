@@ -6,14 +6,27 @@ pub(crate) mod otlp_encoder;
 #[cfg(test)]
 mod tests {
     use crate::payload_encoder::bond_encoder::{
-        BondDataType, BondEncodedRow, BondEncodedSchema, BondWriter,
+        BondDataType, BondEncodedSchema, BondWriter,
     };
     use crate::payload_encoder::central_blob::{
         CentralBlob, CentralEventEntry, CentralSchemaEntry,
     };
 
+    use crate::payload_encoder::bond_encoder::FieldDef;
+    use std::borrow::Cow;
+
     fn create_payload(fields: &[(&str, u8, u16)], row_data: Vec<u8>) -> Vec<u8> {
-        let schema_obj = BondEncodedSchema::from_fields(fields, "MdsContainer", "testNamespace");
+        // Convert the input tuples to FieldDef
+        let field_defs: Vec<FieldDef> = fields
+            .iter()
+            .map(|(name, type_id, field_id)| FieldDef {
+                name: Cow::Owned(name.to_string()),
+                type_id: *type_id,
+                field_id: *field_id,
+            })
+            .collect();
+        let schema_obj =
+            BondEncodedSchema::from_fields("MdsContainer", "testNamespace", field_defs);
         let schema_bytes = schema_obj.as_bytes();
         let schema_md5 = md5::compute(schema_bytes).0;
         let schema_id = 1u64;
@@ -24,13 +37,11 @@ mod tests {
             schema: schema_obj,
         };
 
-        let row_obj = BondEncodedRow::from_schema_and_row(&schema_entry.schema, &row_data);
-
         let event = CentralEventEntry {
             schema_id,
             level: 5,
             event_name: "basename".to_string(),
-            row: row_obj,
+            row: row_data,
         };
 
         let metadata =

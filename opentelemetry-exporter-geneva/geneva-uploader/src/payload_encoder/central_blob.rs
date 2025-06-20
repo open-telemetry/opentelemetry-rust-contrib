@@ -1,8 +1,9 @@
 //use md5;
 
-use crate::payload_encoder::bond_encoder::{BondEncodedRow, BondEncodedSchema};
+use crate::payload_encoder::bond_encoder::BondEncodedSchema;
 
 /// Helper to encode UTF-8 Rust str to UTF-16LE bytes
+/// TODO - consider avoiding temporary allocation, by passing a mutable buffer
 #[allow(dead_code)]
 fn utf8_to_utf16le_bytes(s: &str) -> Vec<u8> {
     // Each UTF-16 code unit is 2 bytes. For ASCII strings, the UTF-16 representation
@@ -29,7 +30,7 @@ pub(crate) struct CentralEventEntry {
     pub schema_id: u64,
     pub level: u8,
     pub event_name: String,
-    pub row: BondEncodedRow,
+    pub row: Vec<u8>,
 }
 
 const TERMINATOR: u64 = 0xdeadc0dedeadc0de;
@@ -122,10 +123,9 @@ impl CentralBlob {
             .iter()
             .map(|(e, evname_utf16)| {
                 let row_len = {
-                    let row_bytes = e.row.as_bytes();
-                    4 + row_bytes.len() // SP header (4), row_bytes
+                    4 + &e.row.len() // SP header (4), row_bytes
                 };
-                2 + 8 + 1 + 2 + evname_utf16.len() + row_len + 8
+                2 + 8 + 1 + 2 + 4 + evname_utf16.len() + row_len + 8
             })
             .sum::<usize>();
 
@@ -145,7 +145,7 @@ impl CentralBlob {
             buf.extend_from_slice(&schema.id.to_le_bytes());
             buf.extend_from_slice(&schema.md5);
             let schema_bytes = schema.schema.as_bytes();
-            buf.extend_from_slice(&(schema_bytes.len() as u32).to_le_bytes());
+            buf.extend_from_slice(&(schema_bytes.len() as u32).to_le_bytes()); //TODO - check for overflow
             buf.extend_from_slice(schema_bytes);
             buf.extend_from_slice(&TERMINATOR.to_le_bytes());
         }
@@ -157,15 +157,14 @@ impl CentralBlob {
             buf.push(event.level);
 
             // event name (UTF-16LE, prefixed with u16 len in bytes)
-            buf.extend_from_slice(&(evname_utf16.len() as u16).to_le_bytes());
+            buf.extend_from_slice(&(evname_utf16.len() as u16).to_le_bytes()); // TODO - check for overflow
             buf.extend_from_slice(&evname_utf16);
 
-            let row_bytes = event.row.as_bytes();
-            let total_len = 4 + row_bytes.len(); // SP header + data
+            let total_len = 4 + &event.row.len(); // SP header + data
 
-            buf.extend_from_slice(&(total_len as u32).to_le_bytes());
+            buf.extend_from_slice(&(total_len as u32).to_le_bytes()); // TODO - check for overflow
             buf.extend_from_slice(&[0x53, 0x50, 0x01, 0x00]); // Simple Protocol header
-            buf.extend_from_slice(row_bytes);
+            buf.extend_from_slice(&event.row);
 
             buf.extend_from_slice(&TERMINATOR.to_le_bytes());
         }
@@ -178,7 +177,8 @@ impl CentralBlob {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::payload_encoder::bond_encoder::{BondEncodedRow, BondEncodedSchema};
+    use crate::payload_encoder::bond_encoder::{BondEncodedSchema, FieldDef};
+    use std::borrow::Cow;
 
     //Helper to calculate MD5 hash, returns [u8;16]
     fn md5_bytes(data: &[u8]) -> [u8; 16] {
@@ -188,11 +188,19 @@ mod tests {
     #[test]
     fn test_central_blob_creation() {
         // Prepare a schema
-        let fields = &[
-            ("foo", 16u8, 1u16), // BT_INT32
-            ("bar", 9u8, 2u16),  // BT_STRING
+        let fields = vec![
+            FieldDef {
+                name: Cow::Borrowed("foo"),
+                type_id: 16u8, // BT_INT32
+                field_id: 1u16,
+            },
+            FieldDef {
+                name: Cow::Borrowed("bar"),
+                type_id: 9u8, // BT_STRING
+                field_id: 2u16,
+            },
         ];
-        let schema_obj = BondEncodedSchema::from_fields(fields, "TestStruct", "test.namespace");
+        let schema_obj = BondEncodedSchema::from_fields("TestStruct", "test.namespace", fields);
         let schema_bytes = schema_obj.as_bytes().to_vec();
         let schema_md5 = md5_bytes(&schema_bytes);
         let schema_id = 1234u64;
@@ -210,13 +218,11 @@ mod tests {
         row.extend_from_slice(&(s.len() as u32).to_le_bytes());
         row.extend_from_slice(s.as_bytes());
 
-        let row_obj = BondEncodedRow::from_schema_and_row(&schema.schema, &row);
-
         let event = CentralEventEntry {
             schema_id,
             level: 0, // e.g. ETW verbose
             event_name: "eventname".to_string(),
-            row: row_obj,
+            row,
         };
 
         // Metadata

@@ -57,6 +57,8 @@ pub enum AuthMethod {
     ///
     /// Note(TODO): This is not yet implemented.
     ManagedIdentity,
+    #[cfg(feature = "mock_auth")]
+    MockAuth, // No authentication, used for testing purposes
 }
 
 #[derive(Debug, Error)]
@@ -248,6 +250,12 @@ impl GenevaConfigClient {
                 return Err(GenevaConfigClientError::AuthMethodNotImplemented(
                     "Managed Identity authentication is not implemented yet".into(),
                 ));
+            }
+            #[cfg(feature = "mock_auth")]
+            AuthMethod::MockAuth => {
+                // Mock authentication for testing purposes, no actual auth needed
+                // Just use the default client builder
+                eprintln!("WARNING: Using MockAuth for GenevaConfigClient. This should only be used in tests!");
             }
         }
 
