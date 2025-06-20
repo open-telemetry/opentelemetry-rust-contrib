@@ -5,9 +5,7 @@ pub(crate) mod otlp_encoder;
 
 #[cfg(test)]
 mod tests {
-    use crate::payload_encoder::bond_encoder::{
-        BondDataType, BondEncodedSchema, BondWriter,
-    };
+    use crate::payload_encoder::bond_encoder::{BondDataType, BondEncodedSchema, BondWriter};
     use crate::payload_encoder::central_blob::{
         CentralBlob, CentralEventEntry, CentralSchemaEntry,
     };

@@ -1,6 +1,4 @@
-use crate::payload_encoder::bond_encoder::{
-    BondDataType, BondEncodedSchema, BondWriter, FieldDef,
-};
+use crate::payload_encoder::bond_encoder::{BondDataType, BondEncodedSchema, BondWriter, FieldDef};
 use crate::payload_encoder::central_blob::{CentralBlob, CentralEventEntry, CentralSchemaEntry};
 use chrono::{TimeZone, Utc};
 use opentelemetry_proto::tonic::common::v1::any_value::Value;
@@ -256,32 +254,22 @@ impl OtlpEncoder {
                     BondWriter::write_string(&mut buffer, &dt);
                 }
                 "env_dt_traceId" => {
-                    if !log.trace_id.is_empty() {
-                        let hex = hex::encode(&log.trace_id);
-                        BondWriter::write_string(&mut buffer, &hex);
-                    }
+                    let hex = hex::encode(&log.trace_id);
+                    BondWriter::write_string(&mut buffer, &hex);
                 }
                 "env_dt_spanId" => {
-                    if !log.span_id.is_empty() {
-                        let hex = hex::encode(&log.span_id);
-                        BondWriter::write_string(&mut buffer, &hex);
-                    }
+                    let hex = hex::encode(&log.span_id);
+                    BondWriter::write_string(&mut buffer, &hex);
                 }
                 "env_dt_traceFlags" => {
-                    if log.flags != 0 {
-                        BondWriter::write_int32(&mut buffer, log.flags as i32);
-                    }
+                    BondWriter::write_int32(&mut buffer, log.flags as i32);
                 }
                 "name" => {
-                    if !log.event_name.is_empty() {
-                        BondWriter::write_string(&mut buffer, &log.event_name);
-                    }
+                    BondWriter::write_string(&mut buffer, &log.event_name);
                 }
                 "SeverityNumber" => BondWriter::write_int32(&mut buffer, log.severity_number),
                 "SeverityText" => {
-                    if !log.severity_text.is_empty() {
-                        BondWriter::write_string(&mut buffer, &log.severity_text);
-                    }
+                    BondWriter::write_string(&mut buffer, &log.severity_text);
                 }
                 "body" => {
                     // TODO - handle all types of body values - For now, we only handle string values
