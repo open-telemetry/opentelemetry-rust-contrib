@@ -29,6 +29,7 @@ pub(crate) fn populate_part_c(
     if cs_c_count > 0 {
         event.add_struct("PartC", cs_c_count, field_tag);
 
+        // TODO: This 2nd iteration is not optimal, and can be optimized
         for (key, value) in log_record.attributes_iter() {
             match (key.as_str(), &value) {
                 (EVENT_ID, _) => {
