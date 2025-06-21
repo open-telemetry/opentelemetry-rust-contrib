@@ -324,7 +324,7 @@ impl OtlpEncoder {
                     BondWriter::write_int32(buffer, *i as i32)
                 }
                 (Some(Value::DoubleValue(d)), BT_FLOAT) => {
-                    // TODO - handle float values properly
+                    // TODO - handle double values properly
                     BondWriter::write_float(buffer, *d as f32)
                 }
                 (Some(Value::DoubleValue(d)), BT_DOUBLE) => BondWriter::write_double(buffer, *d),
