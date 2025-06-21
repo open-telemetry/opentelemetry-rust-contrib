@@ -399,7 +399,7 @@ mod tests {
         assert_eq!(encoder.schema_cache.read().unwrap().len(), 1);
 
         // Add trace_id to create different schema
-        log2.trace_id = vec![1, 2, 3, 4];
+        log2.trace_id = vec![1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16];
         let _result3 = encoder.encode_log_batch([log2].iter(), metadata);
         assert_eq!(encoder.schema_cache.read().unwrap().len(), 2);
     }
