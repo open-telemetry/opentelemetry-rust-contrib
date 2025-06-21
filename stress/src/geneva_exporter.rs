@@ -7,17 +7,19 @@
 //!
 //! Hardware: MacBook Pro (Apple M4 Pro, 14 cores, 24 GB RAM)
 //! Stress Test Results (wiremock, MockAuth):
-//! Threads: 1  - Avg Throughput: ~9,100 iterations/sec
-//! Threads: 5  - Avg Throughput: ~31,400 iterations/sec
-//! Threads: 10 - Avg Throughput: ~50,500 iterations/sec
-//! Threads: 14 - Avg Throughput: ~58,000 iterations/sec
+//! Threads: 1  - Avg Throughput: ~13,100 iterations/sec
+//! Threads: 5  - Avg Throughput: ~50,400 iterations/sec
+//! Threads: 10 - Avg Throughput: ~60,500 iterations/sec
+//! Threads: 14 - Avg Throughput: ~61,000 iterations/sec
 
+use base64::{engine::general_purpose, Engine as _};
+use chrono::{Duration, Utc};
 use opentelemetry_proto::tonic::common::v1::any_value::Value;
 use opentelemetry_proto::tonic::common::v1::{AnyValue, KeyValue};
 use opentelemetry_proto::tonic::logs::v1::{LogRecord, ResourceLogs, ScopeLogs};
 use std::sync::Arc;
 use tokio::runtime::Runtime;
-use wiremock::matchers::{method, path};
+use wiremock::matchers::{method, path_regex};
 use wiremock::{Mock, MockServer, ResponseTemplate};
 
 use geneva_uploader::{AuthMethod, GenevaClient, GenevaClientConfig};
@@ -103,6 +105,15 @@ fn init_client(runtime: &Runtime) -> (GenevaClient, Option<String>) {
 
         // Setup mock server
         let mock_server = runtime.block_on(async { MockServer::start().await });
+        let ingestion_endpoint = format!("{}/ingestion", mock_server.uri());
+        println!(
+            "Embedding ingestion_endpoint in JWT: {}",
+            ingestion_endpoint
+        );
+        let (auth_token, auth_token_expiry) =
+            generate_mock_jwt_and_expiry(&ingestion_endpoint, 24 * 3600);
+
+        println!("MOCK JWT: {}", auth_token);
 
         // Mock config service (GET)
         runtime.block_on(async {
@@ -111,8 +122,8 @@ fn init_client(runtime: &Runtime) -> (GenevaClient, Option<String>) {
                     r#"{{
                                 "IngestionGatewayInfo": {{
                                     "Endpoint": "{}/ingestion",
-                                    "AuthToken": "test-token",
-                                    "AuthTokenExpiryTime": "2099-12-31T23:59:59Z"
+                                    "AuthToken": "{auth_token}",
+                                    "AuthTokenExpiryTime": "{auth_token_expiry}"
                                 }},
                                 "StorageAccountKeys": [{{
                                     "AccountMonikerName": "testdiagaccount",
@@ -130,10 +141,10 @@ fn init_client(runtime: &Runtime) -> (GenevaClient, Option<String>) {
         // Mock ingestion service (POST)
         runtime.block_on(async {
             Mock::given(method("POST"))
-                .and(path("/ingestion"))
-                .respond_with(
-                    ResponseTemplate::new(202).set_body_string(r#"{"ticket": "accepted"}"#),
-                )
+                .and(path_regex(r"^/ingestion.*"))
+                .respond_with({
+                    ResponseTemplate::new(202).set_body_string(r#"{"ticket": "accepted"}"#)
+                })
                 .mount(&mock_server)
                 .await;
         });
@@ -161,6 +172,34 @@ fn init_client(runtime: &Runtime) -> (GenevaClient, Option<String>) {
     }
 }
 
+pub fn generate_mock_jwt_and_expiry(endpoint: &str, ttl_secs: i64) -> (String, String) {
+    let header = r#"{"alg":"none","typ":"JWT"}"#;
+    let expiry = Utc::now() + Duration::seconds(ttl_secs);
+
+    let payload = format!(
+        r#"{{"Endpoint":"{}","exp":{}}}"#,
+        endpoint,
+        expiry.timestamp()
+    );
+
+    // Encode without padding
+    fn encode_no_pad(s: &str) -> String {
+        let mut out = general_purpose::URL_SAFE_NO_PAD.encode(s);
+        while out.ends_with('=') {
+            out.pop();
+        }
+        out
+    }
+
+    let token = format!(
+        "{}.{}.dummy",
+        encode_no_pad(header),
+        encode_no_pad(&payload)
+    );
+
+    (token, expiry.to_rfc3339())
+}
+
 fn main() {
     // Initialize runtime
     let runtime = Arc::new(Runtime::new().expect("Failed to create runtime"));
@@ -182,7 +221,11 @@ fn main() {
         // Execute one upload operation
         runtime.block_on(async {
             // Ignore errors for throughput testing
-            let _ = client.upload_logs(logs.to_vec()).await;
+            let res = client.upload_logs(&logs).await;
+            if let Err(e) = res {
+                eprintln!("Error during upload: {}", e);
+                std::process::exit(1); //we only test throughput for successful uploads
+            }
         });
     });
     println!("Stress test completed.");
