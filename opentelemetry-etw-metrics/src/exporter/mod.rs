@@ -9,10 +9,13 @@ use opentelemetry_proto::tonic::{
         ResourceMetrics as TonicResourceMetrics, ScopeMetrics as TonicScopeMetrics,
         Sum as TonicSum, Summary as TonicSummary,
     },
+    resource::v1::Resource,
 };
 use opentelemetry_sdk::error::{OTelSdkError, OTelSdkResult};
 use opentelemetry_sdk::metrics::{
-    data::ResourceMetrics, exporter::PushMetricExporter, Temporality,
+    data::{AggregatedMetrics, ResourceMetrics},
+    exporter::PushMetricExporter,
+    Temporality,
 };
 
 use std::fmt::{Debug, Formatter};
@@ -69,30 +72,34 @@ fn emit_export_metric_service_request(
 }
 
 impl PushMetricExporter for MetricsExporter {
-    async fn export(&self, metrics: &mut ResourceMetrics) -> OTelSdkResult {
+    async fn export(&self, metrics: &ResourceMetrics) -> OTelSdkResult {
         let schema_url: String = metrics
-            .resource
+            .resource()
             .schema_url()
             .map(Into::into)
             .unwrap_or_default();
 
-        // TODO: Reuse this vec across exports by storing it in `MetricsExporter`
-        let mut encoding_buffer = Vec::new();
+        let resource: Resource = metrics.resource().into();
+        let mut encoding_buffer = Vec::<u8>::with_capacity(etw::MAX_EVENT_SIZE);
 
-        for scope_metric in &metrics.scope_metrics {
-            for metric in &scope_metric.metrics {
-                let proto_data: Option<TonicMetricData> = metric.data.as_any().try_into().ok();
+        for scope_metric in metrics.scope_metrics() {
+            for metric in scope_metric.metrics() {
+                let proto_data: TonicMetricData = match metric.data() {
+                    AggregatedMetrics::F64(data) => data.into(),
+                    AggregatedMetrics::I64(data) => data.into(),
+                    AggregatedMetrics::U64(data) => data.into(),
+                };
 
                 // This ExportMetricsServiceRequest is created for each metric and will hold a single data point.
                 let mut export_metrics_service_request = ExportMetricsServiceRequest {
                     resource_metrics: vec![TonicResourceMetrics {
-                        resource: Some((&metrics.resource).into()),
+                        resource: Some(resource.clone()),
                         scope_metrics: vec![TonicScopeMetrics {
-                            scope: Some((&scope_metric.scope, None).into()),
+                            scope: Some((scope_metric.scope(), None).into()),
                             metrics: vec![TonicMetric {
-                                name: metric.name.to_string(),
-                                description: metric.description.to_string(),
-                                unit: metric.unit.to_string(),
+                                name: metric.name().to_string(),
+                                description: metric.description().to_string(),
+                                unit: metric.unit().to_string(),
                                 metadata: vec![],
                                 data: None, // Initially data is None, it will be set based on the type of metric
                             }],
@@ -102,83 +109,76 @@ impl PushMetricExporter for MetricsExporter {
                     }],
                 };
 
-                if let Some(proto_data) = proto_data {
-                    match proto_data {
-                        TonicMetricData::Histogram(hist) => {
-                            for data_point in hist.data_points {
-                                export_metrics_service_request.resource_metrics[0].scope_metrics
-                                    [0]
+                match proto_data {
+                    TonicMetricData::Histogram(hist) => {
+                        for data_point in hist.data_points {
+                            export_metrics_service_request.resource_metrics[0].scope_metrics[0]
                                 .metrics[0]
-                                    .data = Some(TonicMetricData::Histogram(TonicHistogram {
-                                    aggregation_temporality: hist.aggregation_temporality,
+                                .data = Some(TonicMetricData::Histogram(TonicHistogram {
+                                aggregation_temporality: hist.aggregation_temporality,
+                                data_points: vec![data_point],
+                            }));
+                            emit_export_metric_service_request(
+                                &export_metrics_service_request,
+                                &mut encoding_buffer,
+                            )?;
+                        }
+                    }
+                    TonicMetricData::ExponentialHistogram(exp_hist) => {
+                        for data_point in exp_hist.data_points {
+                            export_metrics_service_request.resource_metrics[0].scope_metrics[0]
+                                .metrics[0]
+                                .data = Some(TonicMetricData::ExponentialHistogram(
+                                TonicExponentialHistogram {
+                                    aggregation_temporality: exp_hist.aggregation_temporality,
                                     data_points: vec![data_point],
-                                }));
-                                emit_export_metric_service_request(
-                                    &export_metrics_service_request,
-                                    &mut encoding_buffer,
-                                )?;
-                            }
+                                },
+                            ));
+                            emit_export_metric_service_request(
+                                &export_metrics_service_request,
+                                &mut encoding_buffer,
+                            )?;
                         }
-                        TonicMetricData::ExponentialHistogram(exp_hist) => {
-                            for data_point in exp_hist.data_points {
-                                export_metrics_service_request.resource_metrics[0].scope_metrics
-                                    [0]
+                    }
+                    TonicMetricData::Gauge(gauge) => {
+                        for data_point in gauge.data_points {
+                            export_metrics_service_request.resource_metrics[0].scope_metrics[0]
                                 .metrics[0]
-                                    .data = Some(TonicMetricData::ExponentialHistogram(
-                                    TonicExponentialHistogram {
-                                        aggregation_temporality: exp_hist.aggregation_temporality,
-                                        data_points: vec![data_point],
-                                    },
-                                ));
-                                emit_export_metric_service_request(
-                                    &export_metrics_service_request,
-                                    &mut encoding_buffer,
-                                )?;
-                            }
+                                .data = Some(TonicMetricData::Gauge(TonicGauge {
+                                data_points: vec![data_point],
+                            }));
+                            emit_export_metric_service_request(
+                                &export_metrics_service_request,
+                                &mut encoding_buffer,
+                            )?;
                         }
-                        TonicMetricData::Gauge(gauge) => {
-                            for data_point in gauge.data_points {
-                                export_metrics_service_request.resource_metrics[0].scope_metrics
-                                    [0]
+                    }
+                    TonicMetricData::Sum(sum) => {
+                        for data_point in sum.data_points {
+                            export_metrics_service_request.resource_metrics[0].scope_metrics[0]
                                 .metrics[0]
-                                    .data = Some(TonicMetricData::Gauge(TonicGauge {
-                                    data_points: vec![data_point],
-                                }));
-                                emit_export_metric_service_request(
-                                    &export_metrics_service_request,
-                                    &mut encoding_buffer,
-                                )?;
-                            }
+                                .data = Some(TonicMetricData::Sum(TonicSum {
+                                data_points: vec![data_point],
+                                aggregation_temporality: sum.aggregation_temporality,
+                                is_monotonic: sum.is_monotonic,
+                            }));
+                            emit_export_metric_service_request(
+                                &export_metrics_service_request,
+                                &mut encoding_buffer,
+                            )?;
                         }
-                        TonicMetricData::Sum(sum) => {
-                            for data_point in sum.data_points {
-                                export_metrics_service_request.resource_metrics[0].scope_metrics
-                                    [0]
+                    }
+                    TonicMetricData::Summary(summary) => {
+                        for data in summary.data_points {
+                            export_metrics_service_request.resource_metrics[0].scope_metrics[0]
                                 .metrics[0]
-                                    .data = Some(TonicMetricData::Sum(TonicSum {
-                                    data_points: vec![data_point],
-                                    aggregation_temporality: sum.aggregation_temporality,
-                                    is_monotonic: sum.is_monotonic,
-                                }));
-                                emit_export_metric_service_request(
-                                    &export_metrics_service_request,
-                                    &mut encoding_buffer,
-                                )?;
-                            }
-                        }
-                        TonicMetricData::Summary(summary) => {
-                            for data in summary.data_points {
-                                export_metrics_service_request.resource_metrics[0].scope_metrics
-                                    [0]
-                                .metrics[0]
-                                    .data = Some(TonicMetricData::Summary(TonicSummary {
-                                    data_points: vec![data],
-                                }));
-                                emit_export_metric_service_request(
-                                    &export_metrics_service_request,
-                                    &mut encoding_buffer,
-                                )?;
-                            }
+                                .data = Some(TonicMetricData::Summary(TonicSummary {
+                                data_points: vec![data],
+                            }));
+                            emit_export_metric_service_request(
+                                &export_metrics_service_request,
+                                &mut encoding_buffer,
+                            )?;
                         }
                     }
                 }
@@ -196,6 +196,11 @@ impl PushMetricExporter for MetricsExporter {
         etw::unregister();
 
         Ok(())
+    }
+
+    fn shutdown_with_timeout(&self, _timeout: std::time::Duration) -> OTelSdkResult {
+        // ETW does not require a shutdown with timeout, so we can just call shutdown
+        self.shutdown()
     }
 
     fn temporality(&self) -> Temporality {

@@ -4,18 +4,18 @@ use opentelemetry_proto::transform::common::tonic::ResourceAttributesWithSchema;
 use opentelemetry_proto::transform::logs::tonic::group_logs_by_resource_and_scope;
 use opentelemetry_sdk::error::{OTelSdkError, OTelSdkResult};
 use opentelemetry_sdk::logs::LogBatch;
-use std::sync::{atomic, Arc};
+use std::sync::atomic;
 
 /// An OpenTelemetry exporter that writes logs to Geneva exporter
 pub struct GenevaExporter {
     resource: ResourceAttributesWithSchema,
     _is_shutdown: atomic::AtomicBool,
-    geneva_client: Arc<GenevaClient>,
+    geneva_client: GenevaClient,
 }
 
 impl GenevaExporter {
     /// Create a new GenavaExporter
-    pub fn new(geneva_client: Arc<GenevaClient>) -> Self {
+    pub fn new(geneva_client: GenevaClient) -> Self {
         Self {
             resource: ResourceAttributesWithSchema::default(),
             _is_shutdown: atomic::AtomicBool::new(false),
@@ -33,7 +33,7 @@ impl fmt::Debug for GenevaExporter {
 impl opentelemetry_sdk::logs::LogExporter for GenevaExporter {
     async fn export(&self, batch: LogBatch<'_>) -> OTelSdkResult {
         let otlp = group_logs_by_resource_and_scope(batch, &self.resource);
-        if let Err(e) = self.geneva_client.upload_logs(otlp).await {
+        if let Err(e) = self.geneva_client.upload_logs(&otlp).await {
             return Err(OTelSdkError::InternalFailure(e));
         }
         Ok(())

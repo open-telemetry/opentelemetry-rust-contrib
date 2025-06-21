@@ -27,7 +27,7 @@ pub struct GenevaClientConfig {
 #[derive(Clone)]
 pub struct GenevaClient {
     uploader: Arc<GenevaUploader>,
-    encoder: Arc<OtlpEncoder>,
+    encoder: OtlpEncoder,
     metadata: String,
 }
 
@@ -78,13 +78,13 @@ impl GenevaClient {
         );
         Ok(Self {
             uploader: Arc::new(uploader),
-            encoder: Arc::new(OtlpEncoder::new()),
+            encoder: OtlpEncoder::new(),
             metadata,
         })
     }
 
     /// Upload OTLP logs (as ResourceLogs).
-    pub async fn upload_logs(&self, logs: Vec<ResourceLogs>) -> Result<(), String> {
+    pub async fn upload_logs(&self, logs: &[ResourceLogs]) -> Result<(), String> {
         let log_iter = logs
             .iter()
             .flat_map(|resource_log| resource_log.scope_logs.iter())
