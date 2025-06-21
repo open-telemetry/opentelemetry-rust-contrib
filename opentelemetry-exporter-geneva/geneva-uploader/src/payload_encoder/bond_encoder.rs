@@ -1,6 +1,5 @@
 // bond_encoder.rs - Pure Rust Bond encoder for dynamic OTLP schemas
 
-
 use std::borrow::Cow;
 use std::io::{Result, Write};
 
