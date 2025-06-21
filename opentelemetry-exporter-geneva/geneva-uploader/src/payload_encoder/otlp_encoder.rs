@@ -107,45 +107,33 @@ impl OtlpEncoder {
         let estimated_capacity = 7 + 4 + log.attributes.len();
         let mut fields = Vec::with_capacity(estimated_capacity);
         fields.push((Cow::Borrowed(FIELD_ENV_NAME), BondDataType::BT_STRING as u8));
-        fields.push((Cow::Borrowed(FIELD_ENV_VER), BondDataType::BT_STRING as u8));
-        fields.push((
-            Cow::Borrowed(FIELD_TIMESTAMP),
-            BondDataType::BT_STRING as u8,
-        ));
-        fields.push((Cow::Borrowed(FIELD_ENV_TIME), BondDataType::BT_STRING as u8));
+        fields.push((FIELD_ENV_VER.into(), BondDataType::BT_STRING as u8));
+        fields.push((FIELD_TIMESTAMP.into(), BondDataType::BT_STRING as u8));
+        fields.push((FIELD_ENV_TIME.into(), BondDataType::BT_STRING as u8));
 
         // Part A extension - Conditional fields
         if !log.trace_id.is_empty() {
-            fields.push((Cow::Borrowed(FIELD_TRACE_ID), BondDataType::BT_STRING as u8));
+            fields.push((FIELD_TRACE_ID.into(), BondDataType::BT_STRING as u8));
         }
         if !log.span_id.is_empty() {
-            fields.push((Cow::Borrowed(FIELD_SPAN_ID), BondDataType::BT_STRING as u8));
+            fields.push((FIELD_SPAN_ID.into(), BondDataType::BT_STRING as u8));
         }
         if log.flags != 0 {
-            fields.push((
-                Cow::Borrowed(FIELD_TRACE_FLAGS),
-                BondDataType::BT_INT32 as u8,
-            ));
+            fields.push((FIELD_TRACE_FLAGS.into(), BondDataType::BT_INT32 as u8));
         }
 
         // Part B - Core log fields
         if !log.event_name.is_empty() {
-            fields.push((Cow::Borrowed(FIELD_NAME), BondDataType::BT_STRING as u8));
+            fields.push((FIELD_NAME.into(), BondDataType::BT_STRING as u8));
         }
-        fields.push((
-            Cow::Borrowed(FIELD_SEVERITY_NUMBER),
-            BondDataType::BT_INT32 as u8,
-        ));
+        fields.push((FIELD_SEVERITY_NUMBER.into(), BondDataType::BT_INT32 as u8));
         if !log.severity_text.is_empty() {
-            fields.push((
-                Cow::Borrowed(FIELD_SEVERITY_TEXT),
-                BondDataType::BT_STRING as u8,
-            ));
+            fields.push((FIELD_SEVERITY_TEXT.into(), BondDataType::BT_STRING as u8));
         }
         if let Some(body) = &log.body {
             if let Some(Value::StringValue(_)) = &body.value {
                 // Only included in schema when body is a string value
-                fields.push((Cow::Borrowed(FIELD_BODY), BondDataType::BT_STRING as u8));
+                fields.push((FIELD_BODY.into(), BondDataType::BT_STRING as u8));
             }
             //TODO - handle other body types
         }
@@ -160,7 +148,7 @@ impl OtlpEncoder {
                     Value::BoolValue(_) => BondDataType::BT_INT32 as u8, // representing bool as int
                     _ => continue,
                 };
-                fields.push((Cow::Owned(attr.key.clone()), type_id));
+                fields.push((attr.key.clone().into(), type_id));
             }
         }
         fields.sort_by(|a, b| a.0.cmp(&b.0)); // Sort fields by name consistent schema ID generation
@@ -247,31 +235,33 @@ impl OtlpEncoder {
 
         for field in sorted_fields {
             match field.name.as_ref() {
-                "env_name" => BondWriter::write_string(&mut buffer, "TestEnv"), // TODO - placeholder for actual env name
-                "env_ver" => BondWriter::write_string(&mut buffer, "4.0"), // TODO - placeholder for actual env version
-                "timestamp" | "env_time" => {
+                FIELD_ENV_NAME => BondWriter::write_string(&mut buffer, "TestEnv"), // TODO - placeholder for actual env name
+                FIELD_ENV_VER => BondWriter::write_string(&mut buffer, "4.0"), // TODO - placeholder for actual env version
+                FIELD_TIMESTAMP | FIELD_ENV_TIME => {
                     let dt = Self::format_timestamp(log.observed_time_unix_nano);
                     BondWriter::write_string(&mut buffer, &dt);
                 }
-                "env_dt_traceId" => {
-                    let hex = hex::encode(&log.trace_id);
-                    BondWriter::write_string(&mut buffer, &hex);
+                FIELD_TRACE_ID => {
+                    let hex_bytes = Self::encode_id_to_hex::<32>(&log.trace_id);
+                    let hex_str = std::str::from_utf8(&hex_bytes).unwrap();
+                    BondWriter::write_string(&mut buffer, hex_str);
                 }
-                "env_dt_spanId" => {
-                    let hex = hex::encode(&log.span_id);
-                    BondWriter::write_string(&mut buffer, &hex);
+                FIELD_SPAN_ID => {
+                    let hex_bytes = Self::encode_id_to_hex::<16>(&log.span_id);
+                    let hex_str = std::str::from_utf8(&hex_bytes).unwrap();
+                    BondWriter::write_string(&mut buffer, hex_str);
                 }
-                "env_dt_traceFlags" => {
+                FIELD_TRACE_FLAGS => {
                     BondWriter::write_int32(&mut buffer, log.flags as i32);
                 }
-                "name" => {
+                FIELD_NAME => {
                     BondWriter::write_string(&mut buffer, &log.event_name);
                 }
-                "SeverityNumber" => BondWriter::write_int32(&mut buffer, log.severity_number),
-                "SeverityText" => {
+                FIELD_SEVERITY_NUMBER => BondWriter::write_int32(&mut buffer, log.severity_number),
+                FIELD_SEVERITY_TEXT => {
                     BondWriter::write_string(&mut buffer, &log.severity_text);
                 }
-                "body" => {
+                FIELD_BODY => {
                     // TODO - handle all types of body values - For now, we only handle string values
                     if let Some(body) = &log.body {
                         if let Some(Value::StringValue(s)) = &body.value {
@@ -290,6 +280,12 @@ impl OtlpEncoder {
         }
 
         buffer
+    }
+
+    fn encode_id_to_hex<const N: usize>(id: &[u8]) -> [u8; N] {
+        let mut hex_bytes = [0u8; N];
+        hex::encode_to_slice(id, &mut hex_bytes).unwrap();
+        hex_bytes
     }
 
     /// Format timestamp from nanoseconds
