@@ -1,10 +1,32 @@
-// async_throughput.rs
 use futures::stream::{FuturesUnordered, StreamExt};
 use num_format::{Locale, ToFormattedString};
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
+//! # AsyncThroughputTest
+//!
+//! Measures the throughput and error rate of a user-provided asynchronous function under configurable load.
+//!
+//! ## What this measures
+//!
+//! - Number of successful and failed operations performed by an async function.
+//! - Throughput (operations per second), reported live and as a final average.
+//! - Success rate and error count during the test.
+//!
+//! ## How it works
+//!
+//! - Launches a configurable number of async worker tasks, each maintaining a set number of concurrent operations.
+//! - As each operation completes, a new one is started to maintain steady concurrency.
+//! - Successes and errors are tracked using atomic counters.
+//! - A separate reporter task prints throughput and errors every second.
+//! - The test can be stopped gracefully with Ctrl+C, allowing in-flight operations to finish.
+//!
+//! ## Typical use-cases
+//!
+//! - Load testing and benchmarking async functions, network clients, or service endpoints.
+//! - Observing how throughput and error rates change under varying concurrency settings.
+//! 
 pub struct AsyncThroughputTest {
     stats: Arc<SimpleStats>,
     stop: Arc<AtomicBool>,
