@@ -52,9 +52,8 @@ impl OtlpEncoder {
         let mut batches: LogBatches = HashMap::new();
 
         for log_record in logs {
-            // 1. Get schema
-            let field_specs = self.determine_fields(log_record);
-            let schema_id = Self::calculate_schema_id(&field_specs);
+            // 1. Get schema - optimized to calculate schema ID during field collection
+            let (field_specs, schema_id) = self.determine_fields_and_id(log_record);
             let (schema_entry, field_info) = self.get_or_create_schema(schema_id, field_specs);
 
             // 2. Encode row
@@ -161,6 +160,87 @@ impl OtlpEncoder {
                 field_id: (i + 1) as u16,
             })
             .collect()
+    }
+
+    /// Determine which fields are present in the LogRecord and calculate schema ID in single pass
+    fn determine_fields_and_id(&self, log: &LogRecord) -> (Vec<FieldDef>, u64) {
+        use std::collections::hash_map::DefaultHasher;
+        use std::hash::{Hash, Hasher};
+
+        // Pre-allocate with estimated capacity to avoid reallocations
+        let estimated_capacity = 7 + 4 + log.attributes.len();
+        let mut fields = Vec::with_capacity(estimated_capacity);
+        fields.push((Cow::Borrowed(FIELD_ENV_NAME), BondDataType::BT_STRING as u8));
+        fields.push((FIELD_ENV_VER.into(), BondDataType::BT_STRING as u8));
+        fields.push((FIELD_TIMESTAMP.into(), BondDataType::BT_STRING as u8));
+        fields.push((FIELD_ENV_TIME.into(), BondDataType::BT_STRING as u8));
+
+        // Part A extension - Conditional fields
+        if !log.trace_id.is_empty() {
+            fields.push((FIELD_TRACE_ID.into(), BondDataType::BT_STRING as u8));
+        }
+        if !log.span_id.is_empty() {
+            fields.push((FIELD_SPAN_ID.into(), BondDataType::BT_STRING as u8));
+        }
+        if log.flags != 0 {
+            fields.push((FIELD_TRACE_FLAGS.into(), BondDataType::BT_INT32 as u8));
+        }
+
+        // Part B - Core log fields
+        if !log.event_name.is_empty() {
+            fields.push((FIELD_NAME.into(), BondDataType::BT_STRING as u8));
+        }
+        fields.push((FIELD_SEVERITY_NUMBER.into(), BondDataType::BT_INT32 as u8));
+        if !log.severity_text.is_empty() {
+            fields.push((FIELD_SEVERITY_TEXT.into(), BondDataType::BT_STRING as u8));
+        }
+        if let Some(body) = &log.body {
+            if let Some(Value::StringValue(_)) = &body.value {
+                // Only included in schema when body is a string value
+                fields.push((FIELD_BODY.into(), BondDataType::BT_STRING as u8));
+            }
+            //TODO - handle other body types
+        }
+
+        // Part C - Dynamic attributes
+        for attr in &log.attributes {
+            if let Some(val) = attr.value.as_ref().and_then(|v| v.value.as_ref()) {
+                let type_id = match val {
+                    Value::StringValue(_) => BondDataType::BT_STRING as u8,
+                    Value::IntValue(_) => BondDataType::BT_INT32 as u8,
+                    Value::DoubleValue(_) => BondDataType::BT_FLOAT as u8, // TODO - using float for now
+                    Value::BoolValue(_) => BondDataType::BT_INT32 as u8, // representing bool as int
+                    _ => continue,
+                };
+                fields.push((attr.key.clone().into(), type_id));
+            }
+        }
+        
+        // Sort fields by name for consistent schema ID generation
+        fields.sort_by(|a, b| a.0.cmp(&b.0));
+        
+        // Initialize hasher for schema ID calculation
+        let mut hasher = DefaultHasher::new();
+        
+        // Convert to FieldDef and calculate hash in single pass
+        let field_defs: Vec<FieldDef> = fields
+            .into_iter()
+            .enumerate()
+            .map(|(i, (name, type_id))| {
+                // Hash the field name and type_id for schema ID calculation
+                name.hash(&mut hasher);
+                type_id.hash(&mut hasher);
+                
+                FieldDef {
+                    name,
+                    type_id,
+                    field_id: (i + 1) as u16,
+                }
+            })
+            .collect();
+            
+        let schema_id = hasher.finish();
+        (field_defs, schema_id)
     }
 
     /// Calculate schema ID from field specifications
@@ -370,6 +450,61 @@ mod tests {
         let result = encoder.encode_log_batch([log].iter(), metadata);
 
         assert!(!result.is_empty());
+    }
+
+    #[test]
+    fn test_optimized_field_and_id_calculation() {
+        let encoder = OtlpEncoder::new();
+
+        let mut log = LogRecord {
+            observed_time_unix_nano: 1_700_000_000_000_000_000,
+            event_name: "test_event".to_string(),
+            severity_number: 9,
+            severity_text: "INFO".to_string(),
+            trace_id: vec![1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16],
+            span_id: vec![1, 2, 3, 4, 5, 6, 7, 8],
+            flags: 1,
+            ..Default::default()
+        };
+
+        // Add some attributes to create a more complex schema
+        log.attributes.push(KeyValue {
+            key: "user_id".to_string(),
+            value: Some(AnyValue {
+                value: Some(Value::StringValue("user123".to_string())),
+            }),
+        });
+
+        log.attributes.push(KeyValue {
+            key: "request_count".to_string(),
+            value: Some(AnyValue {
+                value: Some(Value::IntValue(42)),
+            }),
+        });
+
+        log.attributes.push(KeyValue {
+            key: "is_success".to_string(),
+            value: Some(AnyValue {
+                value: Some(Value::BoolValue(true)),
+            }),
+        });
+
+        // Test that both methods produce identical results
+        let original_fields = encoder.determine_fields(&log);
+        let original_schema_id = OtlpEncoder::calculate_schema_id(&original_fields);
+        
+        let (optimized_fields, optimized_schema_id) = encoder.determine_fields_and_id(&log);
+
+        // Schema IDs should be identical
+        assert_eq!(original_schema_id, optimized_schema_id);
+        
+        // Field vectors should be identical
+        assert_eq!(original_fields.len(), optimized_fields.len());
+        for (orig, opt) in original_fields.iter().zip(optimized_fields.iter()) {
+            assert_eq!(orig.name, opt.name);
+            assert_eq!(orig.type_id, opt.type_id);
+            assert_eq!(orig.field_id, opt.field_id);
+        }
     }
 
     #[test]
