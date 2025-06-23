@@ -222,7 +222,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 Ok(val) => Ok(val),
                 Err(e) => {
                     //eprintln!("upload_logs failed: {e}");
-                    Err(io::Error::new(io::ErrorKind::Other, e))
+                    Err(io::Error::other(e))
                 }
             }
         }
