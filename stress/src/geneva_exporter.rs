@@ -18,19 +18,19 @@ use opentelemetry_proto::tonic::common::v1::any_value::Value;
 use opentelemetry_proto::tonic::common::v1::{AnyValue, KeyValue};
 use opentelemetry_proto::tonic::logs::v1::{LogRecord, ResourceLogs, ScopeLogs};
 use std::sync::Arc;
-use tokio::runtime::Runtime;
 use wiremock::matchers::{method, path_regex};
 use wiremock::{Mock, MockServer, ResponseTemplate};
 
 use geneva_uploader::{AuthMethod, GenevaClient, GenevaClientConfig};
 
-mod throughput;
+mod async_throughput;
+use async_throughput::AsyncThroughputTest;
 
 // Pre-generated test data to avoid allocation overhead
 fn create_test_logs() -> Vec<ResourceLogs> {
     let mut log_records = Vec::new();
 
-    // Create 10 simple log records
+    // Create 100 simple log records
     for i in 0..10 {
         let log = LogRecord {
             observed_time_unix_nano: 1700000000000000000 + i,
@@ -68,8 +68,7 @@ fn create_test_logs() -> Vec<ResourceLogs> {
     }]
 }
 
-// Function to initialize the Geneva client with mocked endpoints
-fn init_client(runtime: &Runtime) -> (GenevaClient, Option<String>) {
+async fn init_client() -> Result<(GenevaClient, Option<String>), Box<dyn std::error::Error>> {
     // Check if we should use real endpoints
     if let Ok(endpoint) = std::env::var("GENEVA_ENDPOINT") {
         println!("Using real Geneva endpoint: {}", endpoint);
@@ -93,18 +92,16 @@ fn init_client(runtime: &Runtime) -> (GenevaClient, Option<String>) {
             role_instance: std::env::var("GENEVA_INSTANCE").unwrap_or_else(|_| "test".to_string()),
         };
 
-        let client = runtime.block_on(async {
-            GenevaClient::new(config)
-                .await
-                .expect("Failed to create client")
-        });
+        let client = GenevaClient::new(config)
+            .await
+            .expect("Failed to create client");
 
-        (client, None)
+        Ok((client, None))
     } else {
         println!("Using mocked Geneva endpoints");
 
         // Setup mock server
-        let mock_server = runtime.block_on(async { MockServer::start().await });
+        let mock_server = MockServer::start().await;
         let ingestion_endpoint = format!("{}/ingestion", mock_server.uri());
         println!(
             "Embedding ingestion_endpoint in JWT: {}",
@@ -116,38 +113,34 @@ fn init_client(runtime: &Runtime) -> (GenevaClient, Option<String>) {
         println!("MOCK JWT: {}", auth_token);
 
         // Mock config service (GET)
-        runtime.block_on(async {
-            Mock::given(method("GET"))
-                .respond_with(ResponseTemplate::new(200).set_body_string(format!(
-                    r#"{{
-                                "IngestionGatewayInfo": {{
-                                    "Endpoint": "{}/ingestion",
-                                    "AuthToken": "{auth_token}",
-                                    "AuthTokenExpiryTime": "{auth_token_expiry}"
-                                }},
-                                "StorageAccountKeys": [{{
-                                    "AccountMonikerName": "testdiagaccount",
-                                    "AccountGroupName": "testgroup",
-                                    "IsPrimaryMoniker": true
-                                }}],
-                                "TagId": "test"
-                            }}"#,
-                    mock_server.uri()
-                )))
-                .mount(&mock_server)
-                .await;
-        });
+        Mock::given(method("GET"))
+            .respond_with(ResponseTemplate::new(200).set_body_string(format!(
+                r#"{{
+                    "IngestionGatewayInfo": {{
+                        "Endpoint": "{}/ingestion",
+                        "AuthToken": "{auth_token}",
+                        "AuthTokenExpiryTime": "{auth_token_expiry}"
+                    }},
+                    "StorageAccountKeys": [{{
+                        "AccountMonikerName": "testdiagaccount",
+                        "AccountGroupName": "testgroup",
+                        "IsPrimaryMoniker": true
+                    }}],
+                    "TagId": "test"
+                }}"#,
+                mock_server.uri()
+            )))
+            .mount(&mock_server)
+            .await;
 
         // Mock ingestion service (POST)
-        runtime.block_on(async {
-            Mock::given(method("POST"))
-                .and(path_regex(r"^/ingestion.*"))
-                .respond_with({
-                    ResponseTemplate::new(202).set_body_string(r#"{"ticket": "accepted"}"#)
-                })
-                .mount(&mock_server)
-                .await;
-        });
+        Mock::given(method("POST"))
+            .and(path_regex(r"^/ingestion.*"))
+            .respond_with({
+                ResponseTemplate::new(202).set_body_string(r#"{"ticket": "accepted"}"#)
+            })
+            .mount(&mock_server)
+            .await;
 
         let config = GenevaClientConfig {
             endpoint: mock_server.uri(),
@@ -162,13 +155,11 @@ fn init_client(runtime: &Runtime) -> (GenevaClient, Option<String>) {
             role_instance: "test".to_string(),
         };
 
-        let client = runtime.block_on(async {
-            GenevaClient::new(config)
-                .await
-                .expect("Failed to create client")
-        });
+        let client = GenevaClient::new(config)
+            .await
+            .expect("Failed to create client");
 
-        (client, Some(mock_server.uri()))
+        Ok((client, Some(mock_server.uri())))
     }
 }
 
@@ -200,33 +191,43 @@ pub fn generate_mock_jwt_and_expiry(endpoint: &str, ttl_secs: i64) -> (String, S
     (token, expiry.to_rfc3339())
 }
 
-fn main() {
-    // Initialize runtime
-    let runtime = Arc::new(Runtime::new().expect("Failed to create runtime"));
+#[tokio::main]
+async fn main() -> Result<(), Box<dyn std::error::Error>> {
+    let args: Vec<String> = std::env::args().collect();
 
-    // Initialize the client and optionally the mock server
-    let (client, _server_uri) = init_client(&runtime);
+    let workers = args
+        .get(1)
+        .and_then(|s| s.parse::<usize>().ok())
+        .unwrap_or_else(num_cpus::get);
+
+    let concurrency = args
+        .get(2)
+        .and_then(|s| s.parse::<usize>().ok())
+        .unwrap_or(100);
+
+    // Initialize your resources
+    let (client, _mock_uri) = init_client().await?;
     let client = Arc::new(client);
+    let logs = Arc::new(create_test_logs());
 
-    // Pre-generate test data
-    let test_logs = Arc::new(create_test_logs());
+    // Run the generic test
+    let test = AsyncThroughputTest::new();
+    use std::io;
 
-    // Use the provided stress test framework
-    println!("Starting stress test for Geneva Uploader...");
-    throughput::test_throughput(move || {
+    test.run::<_, _, io::Error>("Geneva Uploader", workers, concurrency, move || {
         let client = client.clone();
-        let logs = test_logs.clone();
-        let runtime = runtime.clone();
-
-        // Execute one upload operation
-        runtime.block_on(async {
-            // Ignore errors for throughput testing
-            let res = client.upload_logs(&logs).await;
-            if let Err(e) = res {
-                eprintln!("Error during upload: {}", e);
-                std::process::exit(1); //we only test throughput for successful uploads
+        let logs = logs.clone();
+        async move {
+            match client.upload_logs(&logs).await {
+                Ok(val) => Ok(val),
+                Err(e) => {
+                    //eprintln!("upload_logs failed: {e}");
+                    Err(io::Error::new(io::ErrorKind::Other, e))
+                }
             }
-        });
-    });
-    println!("Stress test completed.");
+        }
+    })
+    .await?;
+
+    Ok(())
 }

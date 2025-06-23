@@ -31,6 +31,8 @@ tokio = { version = "1", features = ["full", "test-util"] }
 wiremock = "0.6"
 chrono = "0.4"
 base64 = "0.22"
+hdrhistogram = "7"
+futures = "0.3"
 
 opentelemetry-appender-tracing = { version = "0.30", features= ["spec_unstable_logs_enabled"] }
 opentelemetry_sdk = { version = "0.30", features = ["logs", "spec_unstable_logs_enabled"] }
