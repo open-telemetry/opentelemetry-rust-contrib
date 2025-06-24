@@ -3,11 +3,11 @@ networks:
     name: "echo-server"
 
 services:
-  example-axum-echo-server:
+  example-axum-server:
     build:
-      context: ../
-      dockerfile: ./examples/axum-http-service/Dockerfile.axum
-    container_name: echo-server
+      context: ../../
+      dockerfile: ./opentelemetry-instrumentation-tower/examples/axum-http-service/Dockerfile.axum
+    container_name: http-server
     environment:
       - OTEL_EXPORTER_OTLP_ENDPOINT=http://otel-collector:4317
       - OTEL_METRIC_EXPORT_INTERVAL=10000
@@ -16,11 +16,11 @@ services:
     ports:
       - "5000:5000"
 
-  example-hyper-echo-server:
+  example-hyper-server:
     build:
-      context: ../
-      dockerfile: ./examples/hyper-http-service/Dockerfile.hyper
-    container_name: echo-server
+      context: ../../
+      dockerfile: ./opentelemetry-instrumentation-tower/examples/hyper-http-service/Dockerfile.hyper
+    container_name: http-server
     environment:
       - OTEL_EXPORTER_OTLP_ENDPOINT=http://otel-collector:4317
       - OTEL_METRIC_EXPORT_INTERVAL=10000

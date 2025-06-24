@@ -1,15 +1,15 @@
 FROM rust:1-bullseye AS builder
-WORKDIR /home/echo-server
+WORKDIR /home/opentelemetry-rust-contrib
 
 RUN apt-get update \
     && apt-get install -y protobuf-compiler
 
-COPY . /home
+COPY ./ /home/echo-server/opentelemetry-rust-contrib/
 
-WORKDIR /home/examples/axum-http-service
-RUN cargo build --locked --release
+WORKDIR /home/echo-server/opentelemetry-rust-contrib/opentelemetry-instrumentation-tower/examples/axum-http-service
+RUN cargo build --locked --release --target-dir ./target
 
 FROM debian:bullseye-slim
 
-COPY --from=builder /home/examples/axum-http-service/target/release/example-axum-http-service /usr/local/bin/echo-server
-CMD ["echo-server"]
+COPY --from=builder /home/echo-server/opentelemetry-rust-contrib/opentelemetry-instrumentation-tower/examples/axum-http-service/target/release/example-axum-http-service /usr/local/bin/http-server
+CMD ["http-server"]
