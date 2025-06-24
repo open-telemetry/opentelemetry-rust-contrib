@@ -208,7 +208,12 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Initialize your resources
     let (client, _mock_uri) = init_client().await?;
     let client = Arc::new(client);
+
     let logs = Arc::new(create_test_logs());
+
+    //populate the ingestion token cache once at start.,
+    let warmup_logs = logs.clone();
+    client.upload_logs(&warmup_logs).await?;
 
     // Run the generic test
     let test = AsyncThroughputTest::new();
@@ -221,8 +226,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             match client.upload_logs(&logs).await {
                 Ok(val) => Ok(val),
                 Err(e) => {
-                    //eprintln!("upload_logs failed: {e}");
-                    Err(io::Error::other(e))
+                    eprintln!("upload_logs failed: {e}");
+                    // proicess exit
+                    std::process::exit(1);
+                    //Err(io::Error::other(e))
                 }
             }
         }
