@@ -3,6 +3,10 @@
 
 #![warn(missing_debug_implementations, missing_docs)]
 
-mod logs;
+#[cfg(feature = "serde_json")]
+mod converters;
+mod exporter;
+mod processor;
 
-pub use logs::*;
+pub use processor::Processor;
+pub use processor::ProcessorBuilder;

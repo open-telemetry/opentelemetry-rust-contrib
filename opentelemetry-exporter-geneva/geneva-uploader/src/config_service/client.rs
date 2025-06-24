@@ -46,7 +46,7 @@ use std::sync::RwLock;
 /// ```
 #[allow(dead_code)]
 #[derive(Clone, Debug)]
-pub(crate) enum AuthMethod {
+pub enum AuthMethod {
     /// Certificate-based authentication
     ///
     /// # Arguments
@@ -57,6 +57,8 @@ pub(crate) enum AuthMethod {
     ///
     /// Note(TODO): This is not yet implemented.
     ManagedIdentity,
+    #[cfg(feature = "mock_auth")]
+    MockAuth, // No authentication, used for testing purposes
 }
 
 #[derive(Debug, Error)]
@@ -249,6 +251,12 @@ impl GenevaConfigClient {
                     "Managed Identity authentication is not implemented yet".into(),
                 ));
             }
+            #[cfg(feature = "mock_auth")]
+            AuthMethod::MockAuth => {
+                // Mock authentication for testing purposes, no actual auth needed
+                // Just use the default client builder
+                eprintln!("WARNING: Using MockAuth for GenevaConfigClient. This should only be used in tests!");
+            }
         }
 
         let agent_identity = "GenevaUploader";
@@ -432,7 +440,7 @@ impl GenevaConfigClient {
             .send()
             .await
             .map_err(GenevaConfigClientError::Http)?;
-
+        // Check if the response is successful
         let status = response.status();
         let body = response.text().await?;
 

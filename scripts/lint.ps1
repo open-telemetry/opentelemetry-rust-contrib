@@ -18,6 +18,7 @@ if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 cargo_feature opentelemetry-etw-logs "default"
 cargo_feature opentelemetry-etw-logs "spec_unstable_logs_enabled"
 cargo_feature opentelemetry-etw-logs "serde_json"
+cargo_feature opentelemetry-etw-logs "logs_unstable_etw_event_name_from_callback"
 
 cargo_feature opentelemetry-etw-metrics ""
 
