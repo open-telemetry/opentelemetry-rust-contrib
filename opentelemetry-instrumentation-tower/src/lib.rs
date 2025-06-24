@@ -190,7 +190,8 @@ enum ErrorKind {
 
 impl fmt::Debug for Error {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        f.debug_tuple("opentelemetry_instrumentation_tower::Error").finish()
+        f.debug_tuple("opentelemetry_instrumentation_tower::Error")
+            .finish()
     }
 }
 
@@ -367,7 +368,7 @@ pin_project! {
 }
 
 impl<S, ReqBody, ResBody, ReqExt, ResExt> Service<http::Request<ReqBody>>
-for HTTPMetricsService<S, ReqExt, ResExt>
+    for HTTPMetricsService<S, ReqExt, ResExt>
 where
     S: Service<http::Request<ReqBody>, Response = http::Response<ResBody>>,
     ResBody: http_body::Body,
