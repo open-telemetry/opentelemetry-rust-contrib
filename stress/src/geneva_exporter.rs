@@ -97,8 +97,30 @@ async fn init_client() -> Result<(GenevaClient, Option<String>), Box<dyn std::er
             .expect("Failed to create client");
 
         Ok((client, None))
+    } else if let Ok(mock_endpoint) = std::env::var("MOCK_SERVER_URL") {
+        println!("Using standalone mock server at: {}", mock_endpoint);
+        println!("If using nginx as a mock server, ensure it uses configuration from `nginx.conf` stress/src/nginx.conf.");
+
+        let config = GenevaClientConfig {
+            endpoint: mock_endpoint,
+            environment: "test".to_string(),
+            account: "test".to_string(),
+            namespace: "test".to_string(),
+            region: "test".to_string(),
+            config_major_version: 1,
+            auth_method: AuthMethod::MockAuth,
+            tenant: "test".to_string(),
+            role_name: "test".to_string(),
+            role_instance: "test".to_string(),
+        };
+
+        let client = GenevaClient::new(config)
+            .await
+            .expect("Failed to create client");
+
+        Ok((client, None))
     } else {
-        println!("Using mocked Geneva endpoints");
+        println!("Using wiremock Geneva endpoints");
 
         // Setup mock server
         let mock_server = MockServer::start().await;
