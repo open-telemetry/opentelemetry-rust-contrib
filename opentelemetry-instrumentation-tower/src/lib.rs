@@ -1,9 +1,3 @@
-#![doc = include_str!("../README.md")]
-//!
-//! [`Layer`]: tower_layer::Layer
-//! [`Service`]: tower_service::Service
-//! [`Future`]: tower_service::Future
-
 use std::borrow::Cow;
 use std::future::Future;
 use std::pin::Pin;
