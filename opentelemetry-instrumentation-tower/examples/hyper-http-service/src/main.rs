@@ -2,6 +2,7 @@ use http_body_util::Full;
 use hyper::body::Bytes;
 use hyper::{Request, Response};
 use opentelemetry::global;
+use opentelemetry_instrumentation_tower as otel_tower_metrics;
 use opentelemetry_otlp;
 use opentelemetry_sdk::metrics::PeriodicReader;
 use opentelemetry_sdk::Resource;

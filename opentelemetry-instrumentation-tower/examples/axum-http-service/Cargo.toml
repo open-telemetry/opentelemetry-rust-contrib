@@ -6,7 +6,7 @@ edition = "2021"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
-otel_tower_metrics = { path = "../../", package = "opentelemetry-instrumentation-tower", features = ["axum"], default-features = false }
+opentelemetry_instrumentation_tower = { path = "../../", package = "opentelemetry-instrumentation-tower", features = ["axum"], default-features = false }
 axum = { features = ["http1", "tokio"], version = "0.8", default-features = false }
 bytes = { version = "1", default-features = false }
 opentelemetry = { version = "0.30.0", default-features = false }

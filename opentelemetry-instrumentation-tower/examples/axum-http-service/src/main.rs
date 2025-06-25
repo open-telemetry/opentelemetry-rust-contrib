@@ -1,6 +1,7 @@
 use axum::routing::{get, post, put, Router};
 use bytes::Bytes;
 use opentelemetry::global;
+use opentelemetry_instrumentation_tower as otel_tower_metrics;
 use opentelemetry_otlp;
 use opentelemetry_sdk::metrics::PeriodicReader;
 use opentelemetry_sdk::Resource;
