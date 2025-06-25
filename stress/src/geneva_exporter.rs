@@ -99,7 +99,7 @@ async fn init_client() -> Result<(GenevaClient, Option<String>), Box<dyn std::er
         Ok((client, None))
     } else if let Ok(mock_endpoint) = std::env::var("MOCK_SERVER_URL") {
         println!("Using standalone mock server at: {}", mock_endpoint);
-        println!("If using nginx as a mock server, ensure it uses configuration from `nginx.conf` stress/src/nginx.conf.");
+        println!("If using nginx as a mock server, ensure it uses configuration from `nginx.conf` stress/config/nginx.conf.");
 
         let config = GenevaClientConfig {
             endpoint: mock_endpoint,
