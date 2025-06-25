@@ -3,9 +3,6 @@ use hyper::body::Bytes;
 use hyper::{Request, Response};
 use opentelemetry::global;
 use opentelemetry_instrumentation_tower as otel_tower_metrics;
-use opentelemetry_otlp;
-use opentelemetry_sdk::metrics::PeriodicReader;
-use opentelemetry_sdk::Resource;
 use std::convert::Infallible;
 use std::net::SocketAddr;
 use std::time::Duration;
@@ -21,8 +18,10 @@ const SERVICE_NAME: &str = "example-hyper-http-service";
 // OTEL SDKS also respect the env var `OTEL_METRIC_EXPORT_INTERVAL` (no underscore prefix).
 const _OTEL_METRIC_EXPORT_INTERVAL: Duration = Duration::from_secs(10);
 
-fn init_otel_resource() -> Resource {
-    Resource::builder().with_service_name(SERVICE_NAME).build()
+fn init_otel_resource() -> opentelemetry_sdk::Resource {
+    opentelemetry_sdk::Resource::builder()
+        .with_service_name(SERVICE_NAME)
+        .build()
 }
 
 // PCT_SLOW_REQUESTS and MAX_SLOW_REQUEST_SEC are used to inject latency into some responses
@@ -52,7 +51,7 @@ async fn main() {
         .build()
         .unwrap();
 
-    let reader = PeriodicReader::builder(exporter)
+    let reader = opentelemetry_sdk::metrics::PeriodicReader::builder(exporter)
         .with_interval(_OTEL_METRIC_EXPORT_INTERVAL)
         .build();
 
