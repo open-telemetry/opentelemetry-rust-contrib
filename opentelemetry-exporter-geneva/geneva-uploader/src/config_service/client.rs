@@ -373,7 +373,6 @@ impl GenevaConfigClient {
                 }
             }
         }
-
         // Cache miss or expired token, fetch fresh data
         // Perform actual fetch before acquiring write lock to minimize lock contention
         let (fresh_ingestion_gateway_info, fresh_moniker_info) =
@@ -443,7 +442,6 @@ impl GenevaConfigClient {
         // Check if the response is successful
         let status = response.status();
         let body = response.text().await?;
-
         if status.is_success() {
             let parsed = match serde_json::from_str::<GenevaResponse>(&body) {
                 Ok(response) => response,
@@ -498,7 +496,7 @@ fn extract_endpoint_from_token(token: &str) -> Result<String> {
 
     // Base64-decode the JWT payload (2nd segment of the token).
     // Some JWTs may omit padding ('='), so we restore it manually to ensure valid Base64.
-    // This is necessary because the decoder (URL_SAFE) expects properly padded input.
+    // This is necessary because the decoder (URL_SAFE_NO_PAD) expects properly padded input.
     let payload = parts[1];
     let payload = match payload.len() % 4 {
         0 => payload.to_string(),
@@ -513,9 +511,11 @@ fn extract_endpoint_from_token(token: &str) -> Result<String> {
     };
 
     // Decode the Base64-encoded payload into raw bytes
-    let decoded = general_purpose::URL_SAFE.decode(payload).map_err(|e| {
-        GenevaConfigClientError::JwtTokenError(format!("Failed to decode JWT: {}", e))
-    })?;
+    let decoded = general_purpose::URL_SAFE_NO_PAD
+        .decode(payload)
+        .map_err(|e| {
+            GenevaConfigClientError::JwtTokenError(format!("Failed to decode JWT: {}", e))
+        })?;
 
     // Convert the raw bytes into a UTF-8 string
     let decoded_str = String::from_utf8(decoded).map_err(|e| {
