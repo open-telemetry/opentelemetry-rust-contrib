@@ -70,7 +70,7 @@ you're more than welcome to participate!
 * [Lalit Kumar Bhasin](https://github.com/lalitb)
 * [Zhongyang Wu](https://github.com/TommyCpp)
 
-For more information about the maintainer role, see the [community repository](https://github.com/open-telemetry/community/blob/main/community-membership.md#maintainer).
+For more information about the maintainer role, see the [community repository](https://github.com/open-telemetry/community/blob/main/guides/contributor/membership.md#maintainer).
 
 ### Approvers
 
