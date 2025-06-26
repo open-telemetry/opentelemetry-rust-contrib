@@ -31,7 +31,7 @@ impl ThroughputStats {
 }
 
 /// Configuration for the throughput test
-pub struct StreamThroughputConfig {
+pub struct ThroughputConfig {
     /// Number of concurrent operations
     pub concurrency: usize,
     /// Reporting interval for continuous tests
@@ -40,7 +40,7 @@ pub struct StreamThroughputConfig {
     pub target_ops: Option<usize>,
 }
 
-impl Default for StreamThroughputConfig {
+impl Default for ThroughputConfig {
     fn default() -> Self {
         Self {
             concurrency: 100,
@@ -51,13 +51,13 @@ impl Default for StreamThroughputConfig {
 }
 
 /// Generic stream-based throughput tester
-pub struct StreamThroughputTest;
+pub struct ThroughputTest;
 
-impl StreamThroughputTest {
+impl ThroughputTest {
     /// Run a continuous throughput test (until interrupted)
     pub async fn run_continuous<F, Fut, T, E>(
         name: &str,
-        config: StreamThroughputConfig,
+        config: ThroughputConfig,
         operation_factory: F,
     ) -> ThroughputStats
     where
@@ -83,7 +83,7 @@ impl StreamThroughputTest {
         let report_interval = config.report_interval;
 
         // Spawn reporting thread
-        let reporting_handle = std::thread::spawn(move || loop {
+        let _reporting_handle = std::thread::spawn(move || loop {
             std::thread::sleep(report_interval);
             let ops = completed_clone.load(Ordering::Relaxed);
             let success = successful_clone.load(Ordering::Relaxed);
@@ -144,7 +144,7 @@ impl StreamThroughputTest {
     /// Run a fixed-target throughput test
     pub async fn run_fixed<F, Fut, T, E>(
         name: &str,
-        config: StreamThroughputConfig,
+        config: ThroughputConfig,
         operation_factory: F,
     ) -> ThroughputStats
     where
@@ -214,7 +214,7 @@ impl StreamThroughputTest {
         let mut results = Vec::new();
 
         for &concurrency in concurrency_levels {
-            let config = StreamThroughputConfig {
+            let config = ThroughputConfig {
                 concurrency,
                 target_ops: Some(target_ops),
                 ..Default::default()
@@ -243,16 +243,15 @@ mod tests {
 
     #[tokio::test]
     async fn test_fixed_throughput() {
-        let config = StreamThroughputConfig {
+        let config = ThroughputConfig {
             concurrency: 50,
             target_ops: Some(1000),
             ..Default::default()
         };
 
-        let stats = StreamThroughputTest::run_fixed("Example Operation", config, || {
-            example_async_operation()
-        })
-        .await;
+        let stats =
+            ThroughputTest::run_fixed("Example Operation", config, || example_async_operation())
+                .await;
 
         stats.print("Final Results");
         assert_eq!(stats.completed_ops, 1000);

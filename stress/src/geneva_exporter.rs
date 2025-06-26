@@ -10,7 +10,7 @@ use std::sync::Arc;
 
 // Import the generic stream throughput test module
 mod async_throughput;
-use async_throughput::{StreamThroughputConfig, StreamThroughputTest};
+use async_throughput::{ThroughputConfig, ThroughputTest};
 
 // Import mock server setup if needed
 use base64::{engine::general_purpose, Engine as _};
@@ -216,7 +216,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     match mode {
         "continuous" => {
             // Run continuous test
-            let config = StreamThroughputConfig {
+            let config = ThroughputConfig {
                 concurrency,
                 report_interval: std::time::Duration::from_secs(5),
                 target_ops: None,
@@ -225,7 +225,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             let client_clone = client.clone();
             let logs_clone = logs.clone();
 
-            let stats = StreamThroughputTest::run_continuous("Geneva Upload", config, move || {
+            let stats = ThroughputTest::run_continuous("Geneva Upload", config, move || {
                 let client = client_clone.clone();
                 let logs = logs_clone.clone();
                 async move {
@@ -246,7 +246,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 .and_then(|s| s.parse::<usize>().ok())
                 .unwrap_or(10_000);
 
-            let config = StreamThroughputConfig {
+            let config = ThroughputConfig {
                 concurrency,
                 target_ops: Some(target),
                 ..Default::default()
@@ -255,7 +255,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             let client_clone = client.clone();
             let logs_clone = logs.clone();
 
-            let stats = StreamThroughputTest::run_fixed("Geneva Upload", config, move || {
+            let stats = ThroughputTest::run_fixed("Geneva Upload", config, move || {
                 let client = client_clone.clone();
                 let logs = logs_clone.clone();
                 async move {
@@ -274,7 +274,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             let concurrency_levels = vec![5, 10, 15, 30, 50, 100, 200, 500, 750, 1000];
             let target_ops = 10_000;
 
-            let results = StreamThroughputTest::run_comparison(
+            let results = ThroughputTest::run_comparison(
                 "Geneva Upload",
                 &concurrency_levels,
                 target_ops,
