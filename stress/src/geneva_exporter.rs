@@ -2,6 +2,37 @@
 //!
 //! Run with: cargo run --bin geneva_stream_stress --release -- [concurrency]
 
+/*
+   ## Hardware & OS:
+    Hardware:
+     - CPU: 16 logical processors (8 physical cores), AMD EPYC 7763 @ 2.45 GHz
+     - L1/L2/L3 cache: 512 KB per core
+     - RAM: 64 GB
+     - OS: Ubuntu 6.6 (WSL2 on Windows 11), x86_64
+
+   ## Tokio Multi-thread Runtime (default)
+   Concurrency | Throughput (ops/sec)
+   ----------- | -------------------
+             5 | 11,582
+            10 | 15,582
+            30 | 18,822
+            50 | 18,752
+           100 | 17,237
+           500 | 12,544
+          1000 | 12,335
+
+   ## Tokio Current-thread Runtime
+   Concurrency | Throughput (ops/sec)
+   ----------- | -------------------
+             5 | 9,964
+            10 | 12,837
+            30 | 16,296
+            50 | 16,760
+           100 | 15,033
+           500 | 12,261
+          1000 | 13,080
+
+*/
 use geneva_uploader::{AuthMethod, GenevaClient, GenevaClientConfig};
 use opentelemetry_proto::tonic::common::v1::any_value::Value;
 use opentelemetry_proto::tonic::common::v1::{AnyValue, KeyValue};
@@ -189,8 +220,8 @@ async fn init_client() -> Result<(GenevaClient, Option<String>), Box<dyn std::er
     }
 }
 
-//#[tokio::main(flavor = "current_thread")]
-#[tokio::main(flavor = "multi_thread")]
+#[tokio::main(flavor = "current_thread")]
+//#[tokio::main(flavor = "multi_thread")]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let args: Vec<String> = std::env::args().collect();
     let concurrency = args
