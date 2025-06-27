@@ -52,9 +52,8 @@ impl OtlpEncoder {
         let mut batches: LogBatches = HashMap::new();
 
         for log_record in logs {
-            // 1. Get schema
-            let field_specs = self.determine_fields(log_record);
-            let schema_id = Self::calculate_schema_id(&field_specs);
+            // 1. Get schema - optimized to calculate schema ID during field collection
+            let (field_specs, schema_id) = self.determine_fields_and_id(log_record);
             let (schema_entry, field_info) = self.get_or_create_schema(schema_id, field_specs);
 
             // 2. Encode row
@@ -101,8 +100,11 @@ impl OtlpEncoder {
         blobs
     }
 
-    /// Determine which fields are present in the LogRecord
-    fn determine_fields(&self, log: &LogRecord) -> Vec<FieldDef> {
+    /// Determine which fields are present in the LogRecord and calculate schema ID in single pass
+    fn determine_fields_and_id(&self, log: &LogRecord) -> (Vec<FieldDef>, u64) {
+        use std::collections::hash_map::DefaultHasher;
+        use std::hash::{Hash, Hasher};
+
         // Pre-allocate with estimated capacity to avoid reallocations
         let estimated_capacity = 7 + 4 + log.attributes.len();
         let mut fields = Vec::with_capacity(estimated_capacity);
@@ -151,31 +153,32 @@ impl OtlpEncoder {
                 fields.push((attr.key.clone().into(), type_id));
             }
         }
-        fields.sort_by(|a, b| a.0.cmp(&b.0)); // Sort fields by name consistent schema ID generation
-        fields
-            .into_iter()
-            .enumerate()
-            .map(|(i, (name, type_id))| FieldDef {
-                name,
-                type_id,
-                field_id: (i + 1) as u16,
-            })
-            .collect()
-    }
 
-    /// Calculate schema ID from field specifications
-    fn calculate_schema_id(fields: &[FieldDef]) -> u64 {
-        use std::collections::hash_map::DefaultHasher;
-        use std::hash::{Hash, Hasher};
+        // Sort fields by name for consistent schema ID generation
+        fields.sort_by(|a, b| a.0.cmp(&b.0));
 
+        // Initialize hasher for schema ID calculation
         let mut hasher = DefaultHasher::new();
 
-        for field in fields {
-            field.name.hash(&mut hasher);
-            field.type_id.hash(&mut hasher);
-        }
+        // Convert to FieldDef and calculate hash in single pass
+        let field_defs: Vec<FieldDef> = fields
+            .into_iter()
+            .enumerate()
+            .map(|(i, (name, type_id))| {
+                // Hash the field name and type_id for schema ID calculation
+                name.hash(&mut hasher);
+                type_id.hash(&mut hasher);
 
-        hasher.finish()
+                FieldDef {
+                    name,
+                    type_id,
+                    field_id: (i + 1) as u16,
+                }
+            })
+            .collect();
+
+        let schema_id = hasher.finish();
+        (field_defs, schema_id)
     }
 
     /// Get or create schema with field ordering information
@@ -271,7 +274,7 @@ impl OtlpEncoder {
                 }
                 _ => {
                     // Handle dynamic attributes
-                    // TODO - optimize better - we could update determine_fields to also return a vec of bytes which has bond serialized attributes
+                    // TODO - optimize better - we could return a vec of bytes which has bond serialized attributes
                     if let Some(attr) = log.attributes.iter().find(|a| a.key == field.name) {
                         self.write_attribute_value(&mut buffer, attr, field.type_id);
                     }
