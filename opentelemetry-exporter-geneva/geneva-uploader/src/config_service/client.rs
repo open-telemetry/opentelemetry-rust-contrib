@@ -264,8 +264,7 @@ impl GenevaConfigClient {
         let static_headers = Self::build_static_headers(agent_identity, agent_version);
 
         let identity = format!(
-            "Tenant=Default/Role=GcsClient/RoleInstance={}",
-            agent_identity
+            "Tenant=Default/Role=GcsClient/RoleInstance={agent_identity}"
         );
 
         let encoded_identity = general_purpose::STANDARD.encode(&identity);
@@ -307,7 +306,7 @@ impl GenevaConfigClient {
 
     fn build_static_headers(agent_identity: &str, agent_version: &str) -> HeaderMap {
         let mut headers = HeaderMap::new();
-        let user_agent = format!("{}-{}", agent_identity, agent_version);
+        let user_agent = format!("{agent_identity}-{agent_version}");
         headers.insert(USER_AGENT, HeaderValue::from_str(&user_agent).unwrap());
         headers.insert(ACCEPT, HeaderValue::from_static("application/json"));
         headers
@@ -449,8 +448,7 @@ impl GenevaConfigClient {
                 Ok(response) => response,
                 Err(e) => {
                     return Err(GenevaConfigClientError::AuthInfoNotFound(format!(
-                        "Failed to parse response: {}",
-                        e
+                        "Failed to parse response: {e}"
                     )));
                 }
             };
@@ -502,8 +500,8 @@ fn extract_endpoint_from_token(token: &str) -> Result<String> {
     let payload = parts[1];
     let payload = match payload.len() % 4 {
         0 => payload.to_string(),
-        2 => format!("{}==", payload),
-        3 => format!("{}=", payload),
+        2 => format!("{payload}=="),
+        3 => format!("{payload}="),
         _ => payload.to_string(),
     };
 
@@ -511,12 +509,12 @@ fn extract_endpoint_from_token(token: &str) -> Result<String> {
     let decoded = general_purpose::URL_SAFE_NO_PAD
         .decode(payload)
         .map_err(|e| {
-            GenevaConfigClientError::JwtTokenError(format!("Failed to decode JWT: {}", e))
+            GenevaConfigClientError::JwtTokenError(format!("Failed to decode JWT: {e}"))
         })?;
 
     // Convert the raw bytes into a UTF-8 string
     let decoded_str = String::from_utf8(decoded).map_err(|e| {
-        GenevaConfigClientError::JwtTokenError(format!("Invalid UTF-8 in JWT: {}", e))
+        GenevaConfigClientError::JwtTokenError(format!("Invalid UTF-8 in JWT: {e}"))
     })?;
 
     // Parse as JSON and extract the Endpoint claim
