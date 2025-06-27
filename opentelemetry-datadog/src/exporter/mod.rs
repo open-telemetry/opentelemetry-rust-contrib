@@ -104,7 +104,7 @@ impl DatadogExporter {
                 &self.unified_tags,
                 self.resource.as_ref(),
             )
-            .map_err(|e| OTelSdkError::InternalFailure(format!("{:?}", e)))?;
+            .map_err(|e| OTelSdkError::InternalFailure(format!("{e:?}")))?;
         let req = Request::builder()
             .method(Method::POST)
             .uri(self.request_url.clone())
@@ -116,7 +116,7 @@ impl DatadogExporter {
                 env!("CARGO_PKG_VERSION"),
             )
             .body(data)
-            .map_err(|e| OTelSdkError::InternalFailure(format!("{:?}", e)));
+            .map_err(|e| OTelSdkError::InternalFailure(format!("{e:?}")));
         Ok(req)?
     }
 }
@@ -411,11 +411,11 @@ async fn send_request(
     let response = client
         .send(request)
         .await
-        .map_err(|e| OTelSdkError::InternalFailure(format!("HTTP request failed: {}", e)))?;
+        .map_err(|e| OTelSdkError::InternalFailure(format!("HTTP request failed: {e}")))?;
 
     response
         .error_for_status()
-        .map_err(|e| OTelSdkError::InternalFailure(format!("HTTP response error: {}", e)))?;
+        .map_err(|e| OTelSdkError::InternalFailure(format!("HTTP response error: {e}")))?;
 
     Ok(())
 }
