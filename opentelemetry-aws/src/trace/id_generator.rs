@@ -52,7 +52,7 @@ impl IdGenerator for XrayIdGenerator {
             .unwrap_or_else(|_| Duration::from_secs(0))
             .as_secs();
 
-        TraceId::from_hex(format!("{:08x}{}", epoch_time_seconds, default_trace_id).as_str())
+        TraceId::from_hex(format!("{epoch_time_seconds:08x}{default_trace_id}").as_str())
             .unwrap_or(TraceId::INVALID)
     }
 

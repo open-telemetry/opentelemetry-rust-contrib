@@ -57,7 +57,7 @@ pub(super) fn protocol_version(version: Version) -> Value {
         Version::HTTP_11 => "1.1".into(),
         Version::HTTP_2 => "2".into(),
         Version::HTTP_3 => "3".into(),
-        other => format!("{:?}", other).into(),
+        other => format!("{other:?}").into(),
     }
 }
 

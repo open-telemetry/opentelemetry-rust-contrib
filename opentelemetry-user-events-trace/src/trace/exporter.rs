@@ -169,8 +169,7 @@ impl UserEventsSpanExporter {
                     otel_debug!(name: "UserEvents.EventWriteFailed", result = result);
                 }
                 return Err(OTelSdkError::InternalFailure(format!(
-                    "Failed to write span event: result code {}",
-                    result
+                    "Failed to write span event: result code {result}"
                 )));
             }
         }

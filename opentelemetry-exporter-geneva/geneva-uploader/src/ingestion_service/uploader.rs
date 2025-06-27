@@ -33,7 +33,7 @@ pub(crate) enum GenevaUploaderError {
 impl From<GenevaConfigClientError> for GenevaUploaderError {
     fn from(err: GenevaConfigClientError) -> Self {
         // This preserves the original error message format from the code
-        GenevaUploaderError::ConfigClient(format!("GenevaConfigClient error: {}", err))
+        GenevaUploaderError::ConfigClient(format!("GenevaConfigClient error: {err}"))
     }
 }
 

@@ -62,7 +62,7 @@
 //! let user_event_processor = Processor::builder("myprovider")
 //!   .build()
 //!   .unwrap_or_else(|err| {
-//!     eprintln!("Failed to create user_events processor. Error: {}", err);
+//!     eprintln!("Failed to create user_events processor. Error: {err}");
 //!     panic!("exiting due to error during initialization");
 //!              });
 //!
@@ -360,11 +360,11 @@ mod tests {
         // Validate trace_id and span_id
         assert_eq!(
             part_a_ext_dt_trace_id.as_str().unwrap(),
-            format!("{:x}", trace_id_expected)
+            format!("{trace_id_expected:x}")
         );
         assert_eq!(
             part_a_ext_dt_span_id.as_str().unwrap(),
-            format!("{:x}", span_id_expected)
+            format!("{span_id_expected:x}")
         );
 
         // Validate PartB
@@ -549,7 +549,7 @@ mod tests {
             .arg("cat")
             .arg("/sys/kernel/tracing/user_events_status")
             .output()
-            .map_err(|e| format!("Failed to execute command: {}", e))?;
+            .map_err(|e| format!("Failed to execute command: {e}"))?;
 
         if output.status.success() {
             let status = String::from_utf8_lossy(&output.stdout);
