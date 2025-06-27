@@ -85,6 +85,6 @@ async fn main() {
     );
 
     if let Err(e) = meter_provider.shutdown() {
-        println!("Error shutting down meter provider: {:?}", e);
+        println!("Error shutting down meter provider: {e:?}");
     }
 }

@@ -62,7 +62,7 @@
 //! let user_event_processor = Processor::builder("myprovider")
 //!   .build()
 //!   .unwrap_or_else(|err| {
-//!     eprintln!("Failed to create user_events processor. Error: {}", err);
+//!     eprintln!("Failed to create user_events processor. Error: {err}");
 //!     panic!("exiting due to error during initialization");
 //!              });
 //!
