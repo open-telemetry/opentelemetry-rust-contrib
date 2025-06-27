@@ -21,7 +21,7 @@ axum = { features = ["matched-path", "macros"], version = "0.8", default-feature
 futures-util = { version = "0.3", default-features = false }
 http = { version = "1", features = ["std"], default-features = false }
 http-body = { version = "1", default-features = false }
-opentelemetry = { version = "0.30.0", features = ["futures-core", "futures-sink", "pin-project-lite", "metrics"], default-features = false }
+opentelemetry = { workspace = true, features = ["futures", "metrics"]}
 pin-project-lite = { version = "0.2", default-features = false }
 tower-service = { version = "0.3", default-features = false }
 tower-layer = { version = "0.3", default-features = false }
