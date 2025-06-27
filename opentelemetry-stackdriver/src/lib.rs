@@ -88,7 +88,7 @@ impl StackDriverExporter {
 impl SpanExporter for StackDriverExporter {
     async fn export(&self, batch: Vec<SpanData>) -> OTelSdkResult {
         match self.tx.clone().try_send(batch) {
-            Err(e) => Err(OTelSdkError::InternalFailure(format!("{:?}", e))),
+            Err(e) => Err(OTelSdkError::InternalFailure(format!("{e:?}"))),
             Ok(()) => {
                 self.pending_count.fetch_add(1, Ordering::Relaxed);
                 Ok(())
@@ -391,9 +391,9 @@ where
 
         self.pending_count.fetch_sub(1, Ordering::Relaxed);
         if let Err(e) = self.authorizer.authorize(&mut req, &self.scopes).await {
-            otel_error!(name: "ExportAuthorizeError", error = format!("{:?}", e));
+            otel_error!(name: "ExportAuthorizeError", error = format!("{e:?}"));
         } else if let Err(e) = self.trace_client.batch_write_spans(req).await {
-            otel_error!(name: "ExportTransportError", error = format!("{:?}", e));
+            otel_error!(name: "ExportTransportError", error = format!("{e:?}"));
         }
 
         let client = match &mut self.log_client {
@@ -415,9 +415,9 @@ where
         });
 
         if let Err(e) = self.authorizer.authorize(&mut req, &self.scopes).await {
-            otel_error!(name: "ExportAuthorizeError", error = format!("{:?}", e));
+            otel_error!(name: "ExportAuthorizeError", error = format!("{e:?}"));
         } else if let Err(e) = client.client.write_log_entries(req).await {
-            otel_error!(name: "ExportTransportError", error =  format!("{:?}", e));
+            otel_error!(name: "ExportTransportError", error =  format!("{e:?}"));
         }
     }
 }
@@ -1077,8 +1077,8 @@ mod tests {
         let mut attributes = Vec::with_capacity(32);
         for i in 0..32 {
             attributes.push(KeyValue::new(
-                format!("key{}", i),
-                Value::String(format!("value{}", i).into()),
+                format!("key{i}"),
+                Value::String(format!("value{i}").into()),
             ));
         }
 

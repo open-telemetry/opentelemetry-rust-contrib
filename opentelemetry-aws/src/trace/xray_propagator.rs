@@ -272,8 +272,7 @@ impl From<TraceId> for XrayTraceId<'static> {
         let (timestamp, xray_id) = trace_id_as_hex.split_at(8_usize);
 
         XrayTraceId(Cow::from(format!(
-            "{}-{}-{}",
-            AWS_XRAY_VERSION_KEY, timestamp, xray_id
+            "{AWS_XRAY_VERSION_KEY}-{timestamp}-{xray_id}"
         )))
     }
 }

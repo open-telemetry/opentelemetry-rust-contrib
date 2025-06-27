@@ -215,7 +215,7 @@ impl JaegerJsonRuntime for opentelemetry_sdk::runtime::Tokio {
         if tokio::fs::metadata(path).await.is_err() {
             tokio::fs::create_dir_all(path)
                 .await
-                .map_err(|e| OTelSdkError::InternalFailure(format!("{:?}", e)))?
+                .map_err(|e| OTelSdkError::InternalFailure(format!("{e:?}")))?
         }
 
         Ok(())
@@ -226,13 +226,13 @@ impl JaegerJsonRuntime for opentelemetry_sdk::runtime::Tokio {
 
         let mut file = tokio::fs::File::create(path)
             .await
-            .map_err(|e| OTelSdkError::InternalFailure(format!("{:?}", e)))?;
+            .map_err(|e| OTelSdkError::InternalFailure(format!("{e:?}")))?;
         file.write_all(content)
             .await
-            .map_err(|e| OTelSdkError::InternalFailure(format!("{:?}", e)))?;
+            .map_err(|e| OTelSdkError::InternalFailure(format!("{e:?}")))?;
         file.sync_data()
             .await
-            .map_err(|e| OTelSdkError::InternalFailure(format!("{:?}", e)))?;
+            .map_err(|e| OTelSdkError::InternalFailure(format!("{e:?}")))?;
 
         Ok(())
     }
@@ -244,7 +244,7 @@ impl JaegerJsonRuntime for opentelemetry_sdk::runtime::TokioCurrentThread {
         if tokio::fs::metadata(path).await.is_err() {
             tokio::fs::create_dir_all(path)
                 .await
-                .map_err(|e| OTelSdkError::InternalFailure(format!("{:?}", e)))?
+                .map_err(|e| OTelSdkError::InternalFailure(format!("{e:?}")))?
         }
 
         Ok(())
@@ -255,13 +255,13 @@ impl JaegerJsonRuntime for opentelemetry_sdk::runtime::TokioCurrentThread {
 
         let mut file = tokio::fs::File::create(path)
             .await
-            .map_err(|e| OTelSdkError::InternalFailure(format!("{:?}", e)))?;
+            .map_err(|e| OTelSdkError::InternalFailure(format!("{e:?}")))?;
         file.write_all(content)
             .await
-            .map_err(|e| OTelSdkError::InternalFailure(format!("{:?}", e)))?;
+            .map_err(|e| OTelSdkError::InternalFailure(format!("{e:?}")))?;
         file.sync_data()
             .await
-            .map_err(|e| OTelSdkError::InternalFailure(format!("{:?}", e)))?;
+            .map_err(|e| OTelSdkError::InternalFailure(format!("{e:?}")))?;
 
         Ok(())
     }
