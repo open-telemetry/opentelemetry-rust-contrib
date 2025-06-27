@@ -220,7 +220,7 @@ mod tests {
     #[test]
     fn test_debug() {
         let exporter = common::test_utils::new_etw_exporter();
-        let result = format!("{:?}", exporter);
+        let result = format!("{exporter:?}");
         assert_eq!(result, "ETW log exporter");
     }
 

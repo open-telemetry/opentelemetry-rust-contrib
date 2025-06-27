@@ -207,16 +207,14 @@ mod tests {
             // Assert that the result is an error
             assert!(
                 options.is_err(),
-                "Expected '{}' to be invalid, but it was accepted",
-                invalid_name
+                "Expected '{invalid_name}' to be invalid, but it was accepted"
             );
 
             // Assert that the error message is as expected
             assert_eq!(
                 options.err().unwrap().to_string(),
                 expected_error,
-                "Wrong error message for invalid name: '{}'",
-                invalid_name
+                "Wrong error message for invalid name: '{invalid_name}'"
             );
         }
     }
