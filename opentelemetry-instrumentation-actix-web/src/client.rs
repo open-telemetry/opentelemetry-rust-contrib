@@ -303,7 +303,7 @@ fn convert_status(status: http::StatusCode) -> Status {
         100..=399 => Status::Unset,
         // since we are the client, we MUST treat 4xx as error
         400..=599 => Status::error("Unexpected status code"),
-        code => Status::error(format!("Invalid HTTP status code {}", code)),
+        code => Status::error(format!("Invalid HTTP status code {code}")),
     }
 }
 
@@ -320,7 +320,7 @@ fn record_response<T>(response: &ClientResponse<T>, cx: &Context) {
 
 fn record_err<T: fmt::Debug>(err: T, cx: &Context) {
     let span = cx.span();
-    span.set_status(Status::error(format!("{:?}", err)));
+    span.set_status(Status::error(format!("{err:?}")));
     span.end();
 }
 

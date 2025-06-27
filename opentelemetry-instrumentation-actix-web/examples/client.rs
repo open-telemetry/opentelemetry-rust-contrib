@@ -42,7 +42,7 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync + 'static>> {
     let client = awc::Client::new();
     let response = execute_request(client).await?;
 
-    println!("Response: {}", response);
+    println!("Response: {response}");
 
     tracer.shutdown()?;
 

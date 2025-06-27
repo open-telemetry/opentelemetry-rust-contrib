@@ -88,7 +88,7 @@ impl StackDriverExporter {
 impl SpanExporter for StackDriverExporter {
     async fn export(&self, batch: Vec<SpanData>) -> OTelSdkResult {
         match self.tx.clone().try_send(batch) {
-            Err(e) => Err(OTelSdkError::InternalFailure(format!("{:?}", e))),
+            Err(e) => Err(OTelSdkError::InternalFailure(format!("{e:?}"))),
             Ok(()) => {
                 self.pending_count.fetch_add(1, Ordering::Relaxed);
                 Ok(())
@@ -1077,8 +1077,8 @@ mod tests {
         let mut attributes = Vec::with_capacity(32);
         for i in 0..32 {
             attributes.push(KeyValue::new(
-                format!("key{}", i),
-                Value::String(format!("value{}", i).into()),
+                format!("key{i}"),
+                Value::String(format!("value{i}").into()),
             ));
         }
 
