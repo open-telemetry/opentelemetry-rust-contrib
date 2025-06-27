@@ -430,7 +430,7 @@ impl MetricsExporter {
                     size = byte_array.len());
 
                 if byte_array.len() > MAX_EVENT_SIZE {
-                    let error_msg = format!("Encoded event size exceeds maximum allowed limit of {} bytes. Event will be dropped.", MAX_EVENT_SIZE);
+                    let error_msg = format!("Encoded event size exceeds maximum allowed limit of {MAX_EVENT_SIZE} bytes. Event will be dropped.");
                     otel_debug!(
                         name: "EventSizeExceeded",
                         reason = &error_msg,
@@ -452,7 +452,7 @@ impl MetricsExporter {
                 }
             }
             Err(err) => {
-                let error_msg = format!("Serialization failed: {}", err);
+                let error_msg = format!("Serialization failed: {err}");
                 otel_debug!(name: "SerializationFailed",
                     error = &error_msg,
                     metric_name = metric.name(),

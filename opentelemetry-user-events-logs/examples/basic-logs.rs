@@ -18,7 +18,7 @@ fn init_logger() -> SdkLoggerProvider {
     let user_event_processor = Processor::builder("myprovider")
         .build()
         .unwrap_or_else(|err| {
-            eprintln!("Failed to create processor: {}", err);
+            eprintln!("Failed to create processor: {err}");
             panic!("exiting due to error during initialization");
         });
     LoggerProviderBuilder::default()

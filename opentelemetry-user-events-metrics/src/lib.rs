@@ -99,7 +99,7 @@ mod tests {
                             decoded_metrics.push(metrics_request);
                         }
                         Err(e) => {
-                            eprintln!("Failed to decode OTLP metrics from buffer: {}", e);
+                            eprintln!("Failed to decode OTLP metrics from buffer: {e}");
                             // Continue processing other events instead of failing completely
                         }
                     }
@@ -114,7 +114,7 @@ mod tests {
                 .arg("cat")
                 .arg("/sys/kernel/tracing/user_events_status")
                 .output()
-                .map_err(|e| format!("Failed to execute command: {}", e))?;
+                .map_err(|e| format!("Failed to execute command: {e}"))?;
 
             if output.status.success() {
                 let status = String::from_utf8_lossy(&output.stdout);
@@ -342,7 +342,7 @@ mod tests {
         assert!(!json_content.is_empty());
 
         let formatted_output = json_content.trim().to_string();
-        println!("Formatted Output: {}", formatted_output);
+        println!("Formatted Output: {formatted_output}");
 
         // Extract and decode OTLP metrics from the JSON content
         let decoded_metrics = test_utils::extract_and_decode_otlp_metrics(&formatted_output)
@@ -491,13 +491,11 @@ mod tests {
 
         assert!(
             found_attributes_1,
-            "Should find data point with attributes: {:?}",
-            expected_attributes_1
+            "Should find data point with attributes: {expected_attributes_1:?}"
         );
         assert!(
             found_attributes_2,
-            "Should find data point with attributes: {:?}",
-            expected_attributes_2
+            "Should find data point with attributes: {expected_attributes_2:?}"
         );
 
         println!("Success!");
