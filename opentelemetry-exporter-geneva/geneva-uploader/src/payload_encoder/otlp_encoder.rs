@@ -9,7 +9,7 @@ use std::sync::{Arc, RwLock};
 
 type SchemaCache = Arc<RwLock<HashMap<u64, (BondEncodedSchema, [u8; 16], Vec<FieldDef>)>>>;
 type BatchKey = (u64, String);
-type EncodedRow = (String, u8, Vec<u8>); // (event_name, level, row_buffer)
+type EncodedRow = (u8, Vec<u8>); // (level, row_buffer) - event_name removed as it's in the key
 type BatchValue = (CentralSchemaEntry, Vec<EncodedRow>);
 type LogBatches = HashMap<BatchKey, BatchValue>;
 
@@ -71,7 +71,7 @@ impl OtlpEncoder {
                 .entry((schema_id, event_name.clone()))
                 .or_insert_with(|| (schema_entry, Vec::new()))
                 .1
-                .push((event_name, level, row_buffer));
+                .push((level, row_buffer));
         }
 
         // 4. Encode blobs (one per schema AND event_name combination)
@@ -79,10 +79,10 @@ impl OtlpEncoder {
         for ((schema_id, batch_event_name), (schema_entry, records)) in batches {
             let events: Vec<CentralEventEntry> = records
                 .into_iter()
-                .map(|(event_name, level, row_buffer)| CentralEventEntry {
+                .map(|(level, row_buffer)| CentralEventEntry {
                     schema_id,
                     level,
-                    event_name,
+                    event_name: batch_event_name.clone(), // Use event_name from batch key
                     row: row_buffer,
                 })
                 .collect();
@@ -178,24 +178,72 @@ impl OtlpEncoder {
         hasher.finish()
     }
 
+    /// Calculate schema ID with salt for collision resolution
+    fn calculate_schema_id_with_salt(fields: &[FieldDef], salt: u64) -> u64 {
+        use std::collections::hash_map::DefaultHasher;
+        use std::hash::{Hash, Hasher};
+
+        let mut hasher = DefaultHasher::new();
+        salt.hash(&mut hasher); // Add salt first
+
+        for field in fields {
+            field.name.hash(&mut hasher);
+            field.type_id.hash(&mut hasher);
+        }
+
+        hasher.finish()
+    }
+
+    /// Compare field names and types for schema equality beyond hash matching
+    fn fields_match(existing_fields: &[FieldDef], new_fields: &[FieldDef]) -> bool {
+        if existing_fields.len() != new_fields.len() {
+            return false;
+        }
+        
+        existing_fields.iter().zip(new_fields.iter()).all(|(existing, new)| {
+            existing.name == new.name && existing.type_id == new.type_id
+        })
+    }
+
     /// Get or create schema with field ordering information
     fn get_or_create_schema(
         &self,
-        schema_id: u64,
+        mut schema_id: u64,
         field_info: Vec<FieldDef>,
     ) -> (CentralSchemaEntry, Vec<FieldDef>) {
-        // Check cache first
-        if let Some((schema, schema_md5, field_info)) =
+        // Check cache first with hash collision protection
+        if let Some((schema, schema_md5, cached_field_info)) =
             self.schema_cache.read().unwrap().get(&schema_id)
         {
-            return (
-                CentralSchemaEntry {
-                    id: schema_id,
-                    md5: *schema_md5,
-                    schema: schema.clone(),
-                },
-                field_info.clone(),
-            );
+            // Verify field names match to avoid hash collisions
+            if Self::fields_match(cached_field_info, &field_info) {
+                return (
+                    CentralSchemaEntry {
+                        id: schema_id,
+                        md5: *schema_md5,
+                        schema: schema.clone(),
+                    },
+                    cached_field_info.clone(),
+                );
+            }
+            // Hash collision detected - generate new schema_id
+            schema_id = Self::calculate_schema_id_with_salt(&field_info, schema_id);
+            
+            // Check if the new schema_id exists and matches
+            if let Some((schema, schema_md5, cached_field_info)) =
+                self.schema_cache.read().unwrap().get(&schema_id)
+            {
+                if Self::fields_match(cached_field_info, &field_info) {
+                    return (
+                        CentralSchemaEntry {
+                            id: schema_id,
+                            md5: *schema_md5,
+                            schema: schema.clone(),
+                        },
+                        cached_field_info.clone(),
+                    );
+                }
+            }
         }
 
         let schema =
@@ -402,5 +450,129 @@ mod tests {
         log2.trace_id = vec![1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16];
         let _result3 = encoder.encode_log_batch([log2].iter(), metadata);
         assert_eq!(encoder.schema_cache.read().unwrap().len(), 2);
+    }
+
+    #[test]
+    fn test_schema_hash_collision_handling() {
+        let encoder = OtlpEncoder::new();
+
+        // Create two different field sets that might have the same hash
+        let fields1 = vec![
+            FieldDef {
+                name: "field_a".into(),
+                type_id: BondDataType::BT_STRING as u8,
+                field_id: 1,
+            },
+            FieldDef {
+                name: "field_b".into(),
+                type_id: BondDataType::BT_INT32 as u8,
+                field_id: 2,
+            },
+        ];
+
+        let fields2 = vec![
+            FieldDef {
+                name: "field_x".into(),
+                type_id: BondDataType::BT_STRING as u8,
+                field_id: 1,
+            },
+            FieldDef {
+                name: "field_y".into(),
+                type_id: BondDataType::BT_INT32 as u8,
+                field_id: 2,
+            },
+        ];
+
+        // Calculate schema IDs
+        let schema_id1 = OtlpEncoder::calculate_schema_id(&fields1);
+        let schema_id2 = OtlpEncoder::calculate_schema_id(&fields2);
+
+        // Get or create schemas
+        let (schema_entry1, _) = encoder.get_or_create_schema(schema_id1, fields1.clone());
+        let (schema_entry2, _) = encoder.get_or_create_schema(schema_id2, fields2.clone());
+
+        // Even if there was a hash collision, the schemas should be different
+        // because the field names are different
+        if schema_id1 == schema_id2 {
+            // This is a hash collision case
+            assert_ne!(schema_entry1.id, schema_entry2.id, "Schemas with different fields should have different IDs even with hash collision");
+        } else {
+            // Normal case - different hashes should create different schemas
+            assert_ne!(schema_entry1.id, schema_entry2.id, "Different field sets should have different schema IDs");
+        }
+
+        // Verify cache is working correctly - getting the same fields again should return same schema
+        let (schema_entry1_again, _) = encoder.get_or_create_schema(schema_id1, fields1);
+        assert_eq!(schema_entry1.id, schema_entry1_again.id, "Same fields should return same schema from cache");
+    }
+
+    #[test]
+    fn test_fields_match_helper() {
+        let fields1 = vec![
+            FieldDef {
+                name: "field_a".into(),
+                type_id: BondDataType::BT_STRING as u8,
+                field_id: 1,
+            },
+            FieldDef {
+                name: "field_b".into(),
+                type_id: BondDataType::BT_INT32 as u8,
+                field_id: 2,
+            },
+        ];
+
+        let fields2 = vec![
+            FieldDef {
+                name: "field_a".into(),
+                type_id: BondDataType::BT_STRING as u8,
+                field_id: 1,
+            },
+            FieldDef {
+                name: "field_b".into(),
+                type_id: BondDataType::BT_INT32 as u8,
+                field_id: 2,
+            },
+        ];
+
+        let fields3 = vec![
+            FieldDef {
+                name: "field_x".into(),
+                type_id: BondDataType::BT_STRING as u8,
+                field_id: 1,
+            },
+            FieldDef {
+                name: "field_b".into(),
+                type_id: BondDataType::BT_INT32 as u8,
+                field_id: 2,
+            },
+        ];
+
+        assert!(OtlpEncoder::fields_match(&fields1, &fields2), "Identical fields should match");
+        assert!(!OtlpEncoder::fields_match(&fields1, &fields3), "Different fields should not match");
+        assert!(!OtlpEncoder::fields_match(&fields1, &[]), "Different lengths should not match");
+    }
+
+    #[test]
+    fn test_event_name_not_duplicated_in_batch() {
+        let encoder = OtlpEncoder::new();
+
+        let log = LogRecord {
+            observed_time_unix_nano: 1_700_000_000_000_000_000,
+            event_name: "test_event".to_string(),
+            severity_number: 9,
+            severity_text: "INFO".to_string(),
+            ..Default::default()
+        };
+
+        let metadata = "namespace=testNamespace/eventVersion=Ver1v0";
+        let result = encoder.encode_log_batch([log].iter(), metadata);
+
+        assert!(!result.is_empty());
+        // Verify that the result contains the correct event name
+        assert_eq!(result[0].1, "test_event");
+        
+        // This test mainly verifies that the code compiles and runs without errors
+        // The optimization is that event_name is not stored redundantly in the batch values
+        // which should reduce memory usage and avoid unnecessary cloning
     }
 }
