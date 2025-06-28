@@ -106,7 +106,9 @@ impl OtlpEncoder {
         use std::hash::{Hash, Hasher};
 
         // Pre-allocate with estimated capacity to avoid reallocations
-        let estimated_capacity = 7 + 4 + log.attributes.len();
+        const FIXED_FIELDS_COUNT: usize = 7; // Number of fixed fields always included in the schema
+        const CONDITIONAL_FIELDS_COUNT: usize = 4; // Average number of conditional fields based on log properties
+        let estimated_capacity = FIXED_FIELDS_COUNT + CONDITIONAL_FIELDS_COUNT + log.attributes.len();
         let mut fields = Vec::with_capacity(estimated_capacity);
         fields.push((Cow::Borrowed(FIELD_ENV_NAME), BondDataType::BT_STRING as u8));
         fields.push((FIELD_ENV_VER.into(), BondDataType::BT_STRING as u8));
