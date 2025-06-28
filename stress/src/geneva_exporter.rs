@@ -130,8 +130,11 @@ async fn init_client() -> Result<(GenevaClient, Option<String>), Box<dyn std::er
             account: std::env::var("GENEVA_ACCOUNT").unwrap_or_else(|_| "test".to_string()),
             namespace: std::env::var("GENEVA_NAMESPACE").unwrap_or_else(|_| "test".to_string()),
             region: std::env::var("GENEVA_REGION").unwrap_or_else(|_| "test".to_string()),
-            config_major_version: 1,
-            auth_method: AuthMethod::Certificate {
+            config_major_version: std::env::var("GENEVA_CONFIG_MAJOR_VERSION")
+             .ok()
+             .and_then(|s| s.parse::<u32>().ok())
+             .unwrap_or(1),            
+           auth_method: AuthMethod::Certificate {
                 path: std::path::PathBuf::from(
                     std::env::var("GENEVA_CERT_PATH").unwrap_or_else(|_| "test.p12".to_string()),
                 ),
