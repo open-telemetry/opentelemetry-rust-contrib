@@ -263,13 +263,10 @@ impl GenevaConfigClient {
         let agent_version = "0.1";
         let static_headers = Self::build_static_headers(agent_identity, agent_version);
 
-        let identity = format!(
-            "Tenant=Default/Role=GcsClient/RoleInstance={}",
-            agent_identity
-        );
+        let identity = format!("Tenant=Default/Role=GcsClient/RoleInstance={agent_identity}");
 
         let encoded_identity = general_purpose::STANDARD.encode(&identity);
-        let version_str = format!("Ver{}v0", config.config_major_version);
+        let version_str = format!("Ver{0}v0", config.config_major_version);
 
         let mut pre_url = String::with_capacity(config.endpoint.len() + 200);
         write!(
@@ -307,7 +304,7 @@ impl GenevaConfigClient {
 
     fn build_static_headers(agent_identity: &str, agent_version: &str) -> HeaderMap {
         let mut headers = HeaderMap::new();
-        let user_agent = format!("{}-{}", agent_identity, agent_version);
+        let user_agent = format!("{agent_identity}-{agent_version}");
         headers.insert(USER_AGENT, HeaderValue::from_str(&user_agent).unwrap());
         headers.insert(ACCEPT, HeaderValue::from_static("application/json"));
         headers
@@ -423,7 +420,7 @@ impl GenevaConfigClient {
     async fn fetch_ingestion_info(&self) -> Result<(IngestionGatewayInfo, MonikerInfo)> {
         let tag_id = Uuid::new_v4().to_string(); //TODO - uuid is costly, check if counter is enough?
         let mut url = String::with_capacity(self.precomputed_url_prefix.len() + 50); // Pre-allocate with reasonable capacity
-        write!(&mut url, "{}&TagId={}", self.precomputed_url_prefix, tag_id).map_err(|e| {
+        write!(&mut url, "{}&TagId={tag_id}", self.precomputed_url_prefix).map_err(|e| {
             GenevaConfigClientError::InternalError(format!("Failed to write URL: {e}"))
         })?;
 
@@ -447,8 +444,7 @@ impl GenevaConfigClient {
                 Ok(response) => response,
                 Err(e) => {
                     return Err(GenevaConfigClientError::AuthInfoNotFound(format!(
-                        "Failed to parse response: {}",
-                        e
+                        "Failed to parse response: {e}"
                     )));
                 }
             };
@@ -514,12 +510,12 @@ fn extract_endpoint_from_token(token: &str) -> Result<String> {
     let decoded = general_purpose::URL_SAFE_NO_PAD
         .decode(payload)
         .map_err(|e| {
-            GenevaConfigClientError::JwtTokenError(format!("Failed to decode JWT: {}", e))
+            GenevaConfigClientError::JwtTokenError(format!("Failed to decode JWT: {e}"))
         })?;
 
     // Convert the raw bytes into a UTF-8 string
     let decoded_str = String::from_utf8(decoded).map_err(|e| {
-        GenevaConfigClientError::JwtTokenError(format!("Invalid UTF-8 in JWT: {}", e))
+        GenevaConfigClientError::JwtTokenError(format!("Invalid UTF-8 in JWT: {e}"))
     })?;
 
     // Parse as JSON and extract the Endpoint claim
