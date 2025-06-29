@@ -9,7 +9,7 @@ use std::sync::{Arc, RwLock};
 
 type SchemaCache = Arc<RwLock<HashMap<u64, (BondEncodedSchema, [u8; 16], Vec<FieldDef>)>>>;
 type BatchKey = (u64, String);
-type EncodedRow = (String, u8, Vec<u8>); // (event_name, level, row_buffer)
+type EncodedRow = (u8, Vec<u8>); // (level, row_buffer)
 type BatchValue = (CentralSchemaEntry, Vec<EncodedRow>);
 type LogBatches = HashMap<BatchKey, BatchValue>;
 
@@ -67,11 +67,15 @@ impl OtlpEncoder {
             let level = log_record.severity_number as u8;
 
             // 3. Insert into batches - Key is (schema_id, event_name)
-            batches
-                .entry((schema_id, event_name.clone()))
-                .or_insert_with(|| (schema_entry, Vec::new()))
-                .1
-                .push((event_name, level, row_buffer));
+            let entry = batches.entry((schema_id, event_name));
+            match entry {
+                std::collections::hash_map::Entry::Vacant(v) => {
+                    v.insert((schema_entry, vec![(level, row_buffer)]));
+                }
+                std::collections::hash_map::Entry::Occupied(mut o) => {
+                    o.get_mut().1.push((level, row_buffer));
+                }
+            }
         }
 
         // 4. Encode blobs (one per schema AND event_name combination)
@@ -79,10 +83,10 @@ impl OtlpEncoder {
         for ((schema_id, batch_event_name), (schema_entry, records)) in batches {
             let events: Vec<CentralEventEntry> = records
                 .into_iter()
-                .map(|(event_name, level, row_buffer)| CentralEventEntry {
+                .map(|(level, row_buffer)| CentralEventEntry {
                     schema_id,
                     level,
-                    event_name,
+                    event_name: batch_event_name.clone(),
                     row: row_buffer,
                 })
                 .collect();
@@ -402,5 +406,92 @@ mod tests {
         log2.trace_id = vec![1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16];
         let _result3 = encoder.encode_log_batch([log2].iter(), metadata);
         assert_eq!(encoder.schema_cache.read().unwrap().len(), 2);
+    }
+
+    #[test]
+    fn test_event_name_batching_optimization() {
+        let encoder = OtlpEncoder::new();
+
+        // Create logs with same schema but different event names
+        let mut log1 = LogRecord {
+            observed_time_unix_nano: 1_700_000_000_000_000_000,
+            event_name: "event_type_a".to_string(),
+            severity_number: 9,
+            severity_text: "INFO".to_string(),
+            ..Default::default()
+        };
+
+        let mut log2 = LogRecord {
+            observed_time_unix_nano: 1_700_000_001_000_000_000,
+            event_name: "event_type_b".to_string(),
+            severity_number: 9,
+            severity_text: "INFO".to_string(),
+            ..Default::default()
+        };
+
+        let mut log3 = LogRecord {
+            observed_time_unix_nano: 1_700_000_002_000_000_000,
+            event_name: "event_type_a".to_string(), // Same as log1
+            severity_number: 10,
+            severity_text: "WARN".to_string(),
+            ..Default::default()
+        };
+
+        // Add same attributes to ensure same schema
+        for log in [&mut log1, &mut log2, &mut log3] {
+            log.attributes.push(KeyValue {
+                key: "app_id".to_string(),
+                value: Some(AnyValue {
+                    value: Some(Value::StringValue("test_app".to_string())),
+                }),
+            });
+        }
+
+        let metadata = "namespace=testNamespace/eventVersion=Ver1v0";
+        let result = encoder.encode_log_batch([log1, log2, log3].iter(), metadata);
+
+        // Should have 2 blobs: one for event_type_a (2 logs) and one for event_type_b (1 log)
+        assert_eq!(result.len(), 2);
+
+        // Find the blob for event_type_a
+        let blob_a = result
+            .iter()
+            .find(|(_, event_name, _, _)| event_name == "event_type_a");
+        assert!(blob_a.is_some());
+        assert_eq!(blob_a.unwrap().3, 2); // Should contain 2 events
+
+        // Find the blob for event_type_b
+        let blob_b = result
+            .iter()
+            .find(|(_, event_name, _, _)| event_name == "event_type_b");
+        assert!(blob_b.is_some());
+        assert_eq!(blob_b.unwrap().3, 1); // Should contain 1 event
+
+        // Both should have the same schema_id since attributes are the same
+        assert_eq!(blob_a.unwrap().0, blob_b.unwrap().0);
+    }
+
+    #[test]
+    fn test_no_event_name_cloning_in_batch() {
+        let encoder = OtlpEncoder::new();
+
+        // Create multiple logs with the same event name
+        let logs: Vec<LogRecord> = (0..5)
+            .map(|i| LogRecord {
+                observed_time_unix_nano: 1_700_000_000_000_000_000 + i * 1_000_000_000,
+                event_name: "repeated_event".to_string(),
+                severity_number: 9,
+                severity_text: "INFO".to_string(),
+                ..Default::default()
+            })
+            .collect();
+
+        let metadata = "namespace=test";
+        let result = encoder.encode_log_batch(logs.iter(), metadata);
+
+        // Should have 1 blob with 5 events
+        assert_eq!(result.len(), 1);
+        assert_eq!(result[0].3, 5);
+        assert_eq!(result[0].1, "repeated_event");
     }
 }
