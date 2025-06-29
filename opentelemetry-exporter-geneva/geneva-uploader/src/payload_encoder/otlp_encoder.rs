@@ -409,7 +409,7 @@ mod tests {
     }
 
     #[test]
-    fn test_event_name_batching_optimization() {
+    fn test_event_name_batching() {
         let encoder = OtlpEncoder::new();
 
         // Create logs with same schema but different event names
