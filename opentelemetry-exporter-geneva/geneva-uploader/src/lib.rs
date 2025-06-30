@@ -4,6 +4,9 @@ mod payload_encoder;
 
 pub mod client;
 
+#[cfg(test)]
+mod bench;
+
 #[allow(unused_imports)]
 pub(crate) use config_service::client::{
     GenevaConfigClient, GenevaConfigClientConfig, GenevaConfigClientError, IngestionGatewayInfo,
