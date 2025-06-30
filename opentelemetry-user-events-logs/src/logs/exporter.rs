@@ -349,8 +349,7 @@ impl UserEventsExporter {
                     } else {
                         // For all other cases, return failure and include the result code.
                         Err(OTelSdkError::InternalFailure(format!(
-                            "Failed to write event to user_events tracepoint with result code: {}",
-                            result
+                            "Failed to write event to user_events tracepoint with result code: {result}"
                         )))
                     }
                 } else {
@@ -425,7 +424,7 @@ mod tests {
     fn exporter_debug() {
         let exporter = UserEventsExporter::new("test_provider");
         assert_eq!(
-            format!("{:?}", exporter),
+            format!("{exporter:?}"),
             "user_events log exporter (provider name: test_provider)"
         );
     }

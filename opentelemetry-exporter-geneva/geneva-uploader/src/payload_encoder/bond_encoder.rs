@@ -96,7 +96,7 @@ impl DynamicSchema {
     pub(crate) fn new(name: &str, namespace: &str, fields: Vec<FieldDef>) -> Self {
         Self {
             struct_name: name.to_string(),
-            qualified_name: format!("{}.{}", namespace, name),
+            qualified_name: format!("{namespace}.{name}"),
             fields,
         }
     }

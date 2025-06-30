@@ -109,7 +109,8 @@ mod tests {
     #[ignore]
     async fn test_upload_to_gig_real_server() {
         let ctx = test_helpers::build_test_upload_context().await;
-        println!("✅ Loaded blob ({} bytes)", ctx.data.len());
+        let blob_size = ctx.data.len();
+        println!("✅ Loaded blob ({blob_size} bytes)");
         // below call is only for logging purposes, to get endpoint and auth info.
         let (auth_info, _, _) = ctx
             .uploader
@@ -126,9 +127,9 @@ mod tests {
             .await
             .expect("Upload failed");
 
+        let elapsed = start.elapsed();
         println!(
-            "✅ Upload complete in {:.2?}. Ticket: {}",
-            start.elapsed(),
+            "✅ Upload complete in {elapsed:.2?}. Ticket: {}",
             response.ticket
         );
     }
@@ -183,10 +184,8 @@ mod tests {
             .upload(ctx.data.clone(), &ctx.event_name, &ctx.event_version)
             .await
             .expect("Warm-up upload failed");
-        println!(
-            "🔥 Warm-up upload complete in {:.2?}",
-            start_warmup.elapsed()
-        );
+        let warmup_elapsed = start_warmup.elapsed();
+        println!("🔥 Warm-up upload complete in {warmup_elapsed:.2?}");
 
         println!("🚀 Launching {parallel_uploads} parallel uploads...");
 
@@ -204,11 +203,11 @@ mod tests {
                 let resp = uploader
                     .upload(data, &event_name, &event_version)
                     .await
-                    .unwrap_or_else(|_| panic!("Upload {} failed", i));
+                    .unwrap_or_else(|_| panic!("Upload {i} failed"));
                 let elapsed = start.elapsed();
                 println!(
-                    "✅ Upload {} complete in {:.2?}. Ticket: {}",
-                    i, elapsed, resp.ticket
+                    "✅ Upload {i} complete in {elapsed:.2?}. Ticket: {}",
+                    resp.ticket
                 );
                 elapsed
             });
@@ -226,11 +225,8 @@ mod tests {
 
         let avg_ms =
             durations.iter().map(|d| d.as_millis()).sum::<u128>() as f64 / durations.len() as f64;
-        println!("📊 Average upload duration: {:.2} ms", avg_ms);
+        println!("📊 Average upload duration: {avg_ms:.2} ms");
 
-        println!(
-            "⏱️ Total elapsed for {} parallel uploads: {:.2?}",
-            parallel_uploads, total_time
-        );
+        println!("⏱️ Total elapsed for {parallel_uploads} parallel uploads: {total_time:.2?}");
     }
 }
