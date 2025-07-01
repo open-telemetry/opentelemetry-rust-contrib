@@ -496,8 +496,8 @@ fn extract_endpoint_from_token(token: &str) -> Result<String> {
     let payload = parts[1];
     let payload = match payload.len() % 4 {
         0 => payload.to_string(),
-        2 => format!("{}==", payload),
-        3 => format!("{}=", payload),
+        2 => format!("{payload}=="),
+        3 => format!("{payload}="),
         1 => {
             return Err(GenevaConfigClientError::JwtTokenError(
                 "Invalid JWT payload length".into(),
