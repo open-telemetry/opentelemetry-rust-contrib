@@ -61,7 +61,7 @@ impl ThroughputTest {
         operation_factory: F,
     ) -> ThroughputStats
     where
-        F: Fn() -> Fut + Send + Sync + 'static,
+        F: Fn() -> Fut + Send + 'static,
         Fut: Future<Output = Result<T, E>> + Send + 'static,
         T: Send + 'static,
         E: std::fmt::Display + Send + 'static,
