@@ -88,7 +88,7 @@ async fn main() {
                     .serve_connection(io, service_clone)
                     .await
             {
-                eprintln!("server error: {}", err);
+                eprintln!("server error: {err}");
             }
         });
     }
