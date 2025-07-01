@@ -17,11 +17,18 @@ pub struct ThroughputStats {
 
 impl ThroughputStats {
     pub fn print(&self, label: &str) {
+        let success_percentage = if self.completed_ops > 0 {
+            (self.successful_ops as f64 / self.completed_ops as f64) * 100.0
+        } else {
+            0.0
+        };
+
         println!(
-            "{}: {} ops ({} successful) in {:.2}s = {:.2} ops/sec",
+            "{}: {} ops ({} successful, {:.1}%) in {:.2}s = {:.2} ops/sec",
             label,
             self.completed_ops,
             self.successful_ops,
+            success_percentage,
             self.duration.as_secs_f64(),
             self.throughput
         );
@@ -86,10 +93,17 @@ impl ThroughputTest {
             let elapsed = start_time.elapsed();
             let throughput = ops as f64 / elapsed.as_secs_f64();
 
+            let success_percentage = if ops > 0 {
+                (success as f64 / ops as f64) * 100.0
+            } else {
+                0.0
+            };
+
             println!(
-                "Progress: {} ops completed ({} successful) in {:.2}s = {:.2} ops/sec",
+                "Progress: {} ops completed ({} successful, {:.1}%) in {:.2}s = {:.2} ops/sec",
                 ops,
                 success,
+                success_percentage,
                 elapsed.as_secs_f64(),
                 throughput
             );
@@ -149,9 +163,6 @@ impl ThroughputTest {
         let start_time = Instant::now();
         let mut completed_ops = 0;
         let mut successful_ops = 0;
-
-        // Create operation factory Arc for sharing
-        let operation_factory = Arc::new(operation_factory);
 
         let mut operation_stream = stream::iter(0..target)
             .map(|_| tokio::task::spawn(operation_factory()))
