@@ -67,8 +67,7 @@ impl ThroughputTest {
         name: &str,
         config: ThroughputConfig,
         operation_factory: F,
-    ) -> ThroughputStats
-    where
+    ) where
         F: Fn() -> Fut + Send + 'static,
         Fut: Future<Output = Result<T, E>> + Send + 'static,
         T: Send + 'static,
@@ -152,18 +151,6 @@ impl ThroughputTest {
                     }
                 }
             }
-        }
-
-        // Return final stats
-        let duration = start_time.elapsed();
-        let final_completed = completed_ops.load(Ordering::Relaxed);
-        let final_successful = successful_ops.load(Ordering::Relaxed);
-
-        ThroughputStats {
-            completed_ops: final_completed,
-            successful_ops: final_successful,
-            duration,
-            throughput: final_completed as f64 / duration.as_secs_f64(),
         }
     }
 
@@ -286,8 +273,7 @@ mod tests {
         };
 
         let stats =
-            ThroughputTest::run_fixed("Example Operation", config, example_async_operation)
-                .await;
+            ThroughputTest::run_fixed("Example Operation", config, example_async_operation).await;
 
         stats.print("Final Results");
         assert_eq!(stats.completed_ops, 1000);

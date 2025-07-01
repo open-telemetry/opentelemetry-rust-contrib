@@ -15,7 +15,7 @@
     WARNING: Using MockAuth for GenevaConfigClient. This should only be used in tests!
     Warming up token cache...
 
-    $ cargo run --bin geneva_exporter --release -- multi 500  continuous
+    $ cargo run --bin geneva_exporter --release -- multi 500  continuous # 16 cores / workers
     Testing Geneva Upload with concurrency level: 500
         Progress: 288092 ops completed (288092 successful, 100.0%) in 5.00s = 57580.46 ops/sec
         Progress: 594529 ops completed (594529 successful, 100.0%) in 10.00s = 59427.39 ops/sec
@@ -284,14 +284,12 @@ async fn async_main(
                 use_spawn: runtime_type != "current", // Use task spawning for multi-thread runtime
             };
 
-            let stats = ThroughputTest::run_continuous("Geneva Upload", config, move || {
+            ThroughputTest::run_continuous("Geneva Upload", config, move || {
                 let client = client.clone();
                 let logs = logs.clone();
                 async move { client.upload_logs(&logs).await }
             })
             .await;
-
-            stats.print("Final Results");
         }
         "fixed" => {
             // Run fixed test
