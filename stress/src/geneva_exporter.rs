@@ -10,21 +10,27 @@
      - RAM: 64 GB
      - OS: Ubuntu 6.6 (WSL2 on Windows 11), x86_64
 
+     Using Tokio multi-thread runtime
+    Using standalone mock server at: http://localhost:8080
+    WARNING: Using MockAuth for GenevaConfigClient. This should only be used in tests!
+    Warming up token cache...
+
     $ cargo run --bin geneva_exporter --release -- multi 500  continuous
     Testing Geneva Upload with concurrency level: 500
-        Progress: 217596 ops completed (217596 successful, 100.0%) in 5.00s = 43509.05 ops/sec
-        Progress: 441949 ops completed (441949 successful, 100.0%) in 10.00s = 44185.62 ops/sec
-        Progress: 665824 ops completed (665824 successful, 100.0%) in 15.00s = 44379.07 ops/sec
-        Progress: 880941 ops completed (880941 successful, 100.0%) in 20.00s = 44037.77 ops/sec
-        Progress: 1096677 ops completed (1096677 successful, 100.0%) in 25.01s = 43857.92 ops/sec
+        Progress: 288092 ops completed (288092 successful, 100.0%) in 5.00s = 57580.46 ops/sec
+        Progress: 594529 ops completed (594529 successful, 100.0%) in 10.00s = 59427.39 ops/sec
+        Progress: 905048 ops completed (905048 successful, 100.0%) in 15.01s = 60315.43 ops/sec
+        Progress: 1215825 ops completed (1215825 successful, 100.0%) in 20.01s = 60772.70 ops/sec
+        Progress: 1521028 ops completed (1521028 successful, 100.0%) in 25.01s = 60824.08 ops/sec
 
     $ cargo run --bin geneva_exporter --release -- current 500  continuous
     Testing Geneva Upload with concurrency level: 500
-        Progress: 68296 ops completed (68296 successful, 100.0%) in 5.01s = 13641.68 ops/sec
-        Progress: 138357 ops completed (138357 successful, 100.0%) in 10.01s = 13816.53 ops/sec
-        Progress: 209546 ops completed (209546 successful, 100.0%) in 15.02s = 13955.42 ops/sec
-        Progress: 281304 ops completed (281304 successful, 100.0%) in 20.02s = 14053.73 ops/sec
-        Progress: 351334 ops completed (351334 successful, 100.0%) in 25.02s = 14043.67 ops/sec
+        Progress: 74247 ops completed (74247 successful, 100.0%) in 5.00s = 14845.95 ops/sec
+        Progress: 151466 ops completed (151466 successful, 100.0%) in 10.00s = 15143.45 ops/sec
+        Progress: 228674 ops completed (228674 successful, 100.0%) in 15.00s = 15241.91 ops/sec
+        Progress: 299853 ops completed (299853 successful, 100.0%) in 20.00s = 14990.25 ops/sec
+        Progress: 372788 ops completed (372788 successful, 100.0%) in 25.00s = 14909.05 ops/sec
+        Progress: 449360 ops completed (449360 successful, 100.0%) in 30.01s = 14976.14 ops/sec
 
 */
 use geneva_uploader::{AuthMethod, GenevaClient, GenevaClientConfig};
@@ -236,12 +242,13 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     };
 
     // Run the async main function
-    runtime.block_on(async_main(args, args_start_idx))
+    runtime.block_on(async_main(args, args_start_idx, runtime_type))
 }
 
 async fn async_main(
     args: Vec<String>,
     args_start_idx: usize,
+    runtime_type: &str,
 ) -> Result<(), Box<dyn std::error::Error>> {
     // Get concurrency from the appropriate position
     let concurrency = args
@@ -274,6 +281,7 @@ async fn async_main(
                 concurrency,
                 report_interval: std::time::Duration::from_secs(5),
                 target_ops: None,
+                use_spawn: runtime_type != "current", // Use task spawning for multi-thread runtime
             };
 
             let stats = ThroughputTest::run_continuous("Geneva Upload", config, move || {
@@ -295,18 +303,14 @@ async fn async_main(
             let config = ThroughputConfig {
                 concurrency,
                 target_ops: Some(target),
+                use_spawn: runtime_type != "current", // Use task spawning for multi-thread runtime
                 ..Default::default()
             };
 
             let stats = ThroughputTest::run_fixed("Geneva Upload", config, move || {
                 let client = client.clone();
                 let logs = logs.clone();
-                async move {
-                    client
-                        .upload_logs(&logs)
-                        .await
-                        .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e))
-                }
+                async move { client.upload_logs(&logs).await }
             })
             .await;
 

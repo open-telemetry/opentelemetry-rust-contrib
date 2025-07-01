@@ -43,6 +43,8 @@ pub struct ThroughputConfig {
     pub report_interval: Duration,
     /// Optional target number of operations (None for continuous)
     pub target_ops: Option<usize>,
+    /// Whether to use task spawning (for multi-thread runtime)
+    pub use_spawn: bool,
 }
 
 impl Default for ThroughputConfig {
@@ -51,6 +53,7 @@ impl Default for ThroughputConfig {
             concurrency: 100,
             report_interval: Duration::from_secs(5),
             target_ops: None,
+            use_spawn: true,
         }
     }
 }
@@ -110,19 +113,43 @@ impl ThroughputTest {
         });
 
         // Create infinite stream of operations
-        let mut operation_stream = stream::iter(0..)
-            .map(|_| tokio::task::spawn(operation_factory()))
-            .buffer_unordered(config.concurrency);
+        if config.use_spawn {
+            // Create infinite stream of operations with spawning
+            let mut operation_stream = stream::iter(0..)
+                .map(|_| tokio::task::spawn(operation_factory()))
+                .buffer_unordered(config.concurrency);
 
-        // Process stream until interrupted
-        while let Some(result) = operation_stream.next().await {
-            completed_ops.fetch_add(1, Ordering::Relaxed);
-            match result {
-                Ok(_) => {
-                    successful_ops.fetch_add(1, Ordering::Relaxed);
+            // Process stream until interrupted
+            while let Some(result) = operation_stream.next().await {
+                completed_ops.fetch_add(1, Ordering::Relaxed);
+                match result {
+                    Ok(Ok(_)) => {
+                        successful_ops.fetch_add(1, Ordering::Relaxed);
+                    }
+                    Ok(Err(e)) => {
+                        eprintln!("Operation failed: {}", e);
+                    }
+                    Err(e) => {
+                        eprintln!("Task join error: {}", e);
+                    }
                 }
-                Err(e) => {
-                    eprintln!("Operation failed: {}", e);
+            }
+        } else {
+            // Create infinite stream of operations without spawning
+            let mut operation_stream = stream::iter(0..)
+                .map(|_| operation_factory())
+                .buffer_unordered(config.concurrency);
+
+            // Process stream until interrupted
+            while let Some(result) = operation_stream.next().await {
+                completed_ops.fetch_add(1, Ordering::Relaxed);
+                match result {
+                    Ok(_) => {
+                        successful_ops.fetch_add(1, Ordering::Relaxed);
+                    }
+                    Err(e) => {
+                        eprintln!("Operation failed: {}", e);
+                    }
                 }
             }
         }
@@ -164,16 +191,35 @@ impl ThroughputTest {
         let mut completed_ops = 0;
         let mut successful_ops = 0;
 
-        let mut operation_stream = stream::iter(0..target)
-            .map(|_| tokio::task::spawn(operation_factory()))
-            .buffer_unordered(config.concurrency);
+        if config.use_spawn {
+            let mut operation_stream = stream::iter(0..target)
+                .map(|_| tokio::task::spawn(operation_factory()))
+                .buffer_unordered(config.concurrency);
 
-        while let Some(result) = operation_stream.next().await {
-            completed_ops += 1;
-            match result {
-                Ok(_) => successful_ops += 1,
-                Err(e) => {
-                    eprintln!("Operation failed: {}", e);
+            while let Some(result) = operation_stream.next().await {
+                completed_ops += 1;
+                match result {
+                    Ok(Ok(_)) => successful_ops += 1,
+                    Ok(Err(e)) => {
+                        eprintln!("Operation failed: {}", e);
+                    }
+                    Err(e) => {
+                        eprintln!("Task join error: {}", e);
+                    }
+                }
+            }
+        } else {
+            let mut operation_stream = stream::iter(0..target)
+                .map(|_| operation_factory())
+                .buffer_unordered(config.concurrency);
+
+            while let Some(result) = operation_stream.next().await {
+                completed_ops += 1;
+                match result {
+                    Ok(_) => successful_ops += 1,
+                    Err(e) => {
+                        eprintln!("Operation failed: {}", e);
+                    }
                 }
             }
         }
