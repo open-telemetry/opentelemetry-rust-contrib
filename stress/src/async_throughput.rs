@@ -11,7 +11,6 @@ use std::time::{Duration, Instant};
 pub struct ThroughputStats {
     pub completed_ops: u64,
     pub successful_ops: u64,
-    pub failed_ops: u64,
     pub duration: Duration,
     pub throughput: f64,
 }
@@ -19,11 +18,10 @@ pub struct ThroughputStats {
 impl ThroughputStats {
     pub fn print(&self, label: &str) {
         println!(
-            "{}: {} ops ({} successful, {} failed) in {:.2}s = {:.2} ops/sec",
+            "{}: {} ops ({} successful) in {:.2}s = {:.2} ops/sec",
             label,
             self.completed_ops,
             self.successful_ops,
-            self.failed_ops,
             self.duration.as_secs_f64(),
             self.throughput
         );
@@ -73,12 +71,10 @@ impl ThroughputTest {
 
         let completed_ops = Arc::new(AtomicU64::new(0));
         let successful_ops = Arc::new(AtomicU64::new(0));
-        let failed_ops = Arc::new(AtomicU64::new(0));
 
         // Clone for reporting thread
         let completed_clone = Arc::clone(&completed_ops);
         let successful_clone = Arc::clone(&successful_ops);
-        let failed_clone = Arc::clone(&failed_ops);
         let start_time = Instant::now();
         let report_interval = config.report_interval;
 
@@ -87,29 +83,21 @@ impl ThroughputTest {
             std::thread::sleep(report_interval);
             let ops = completed_clone.load(Ordering::Relaxed);
             let success = successful_clone.load(Ordering::Relaxed);
-            let failed = failed_clone.load(Ordering::Relaxed);
             let elapsed = start_time.elapsed();
             let throughput = ops as f64 / elapsed.as_secs_f64();
 
             println!(
-                "Progress: {} ops completed ({} successful, {} failed) in {:.2}s = {:.2} ops/sec",
+                "Progress: {} ops completed ({} successful) in {:.2}s = {:.2} ops/sec",
                 ops,
                 success,
-                failed,
                 elapsed.as_secs_f64(),
                 throughput
             );
         });
 
-        // Create operation factory Arc for sharing
-        let operation_factory = Arc::new(operation_factory);
-
         // Create infinite stream of operations
         let mut operation_stream = stream::iter(0..)
-            .map(move |_| {
-                let factory = Arc::clone(&operation_factory);
-                async move { factory().await }
-            })
+            .map(|_| tokio::task::spawn(operation_factory()))
             .buffer_unordered(config.concurrency);
 
         // Process stream until interrupted
@@ -120,7 +108,6 @@ impl ThroughputTest {
                     successful_ops.fetch_add(1, Ordering::Relaxed);
                 }
                 Err(e) => {
-                    failed_ops.fetch_add(1, Ordering::Relaxed);
                     eprintln!("Operation failed: {}", e);
                 }
             }
@@ -130,12 +117,10 @@ impl ThroughputTest {
         let duration = start_time.elapsed();
         let final_completed = completed_ops.load(Ordering::Relaxed);
         let final_successful = successful_ops.load(Ordering::Relaxed);
-        let final_failed = failed_ops.load(Ordering::Relaxed);
 
         ThroughputStats {
             completed_ops: final_completed,
             successful_ops: final_successful,
-            failed_ops: final_failed,
             duration,
             throughput: final_completed as f64 / duration.as_secs_f64(),
         }
@@ -164,16 +149,12 @@ impl ThroughputTest {
         let start_time = Instant::now();
         let mut completed_ops = 0;
         let mut successful_ops = 0;
-        let mut failed_ops = 0;
 
         // Create operation factory Arc for sharing
         let operation_factory = Arc::new(operation_factory);
 
         let mut operation_stream = stream::iter(0..target)
-            .map(move |_| {
-                let factory = Arc::clone(&operation_factory);
-                async move { factory().await }
-            })
+            .map(|_| tokio::task::spawn(operation_factory()))
             .buffer_unordered(config.concurrency);
 
         while let Some(result) = operation_stream.next().await {
@@ -181,7 +162,6 @@ impl ThroughputTest {
             match result {
                 Ok(_) => successful_ops += 1,
                 Err(e) => {
-                    failed_ops += 1;
                     eprintln!("Operation failed: {}", e);
                 }
             }
@@ -191,7 +171,6 @@ impl ThroughputTest {
         ThroughputStats {
             completed_ops,
             successful_ops,
-            failed_ops,
             duration,
             throughput: completed_ops as f64 / duration.as_secs_f64(),
         }

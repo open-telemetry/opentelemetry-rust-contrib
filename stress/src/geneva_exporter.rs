@@ -44,8 +44,6 @@ mod async_throughput;
 use async_throughput::{ThroughputConfig, ThroughputTest};
 
 // Import mock server setup if needed
-use base64::{engine::general_purpose, Engine as _};
-use chrono::{Duration, Utc};
 use wiremock::matchers::{method, path_regex};
 use wiremock::{Mock, MockServer, ResponseTemplate};
 
@@ -91,32 +89,13 @@ fn create_test_logs() -> Vec<ResourceLogs> {
     }]
 }
 
-fn generate_mock_jwt_and_expiry(endpoint: &str, ttl_secs: i64) -> (String, String) {
-    let header = r#"{"alg":"none","typ":"JWT"}"#;
-    let expiry = Utc::now() + Duration::seconds(ttl_secs);
+fn generate_mock_jwt_and_expiry(_endpoint: &str, _ttl_secs: i64) -> (String, String) {
+    // This is the working token nginx config, updated with 1 year expiry
+    // Expires: June 30, 2026 (timestamp: 1782936000)
+    let token = "eyJhbGciOiJub25lIiwidHlwIjoiSldUIn0.eyJFbmRwb2ludCI6Imh0dHA6Ly9sb2NhbGhvc3Q6ODA4MC9pbmdlc3Rpb24iLCJleHAiOjE3ODI5MzYwMDB9.dummy";
+    let expiry = "2026-06-30T12:00:00+00:00";
 
-    let payload = format!(
-        r#"{{"Endpoint":"{}","exp":{}}}"#,
-        endpoint,
-        expiry.timestamp()
-    );
-
-    // Encode without padding
-    fn encode_no_pad(s: &str) -> String {
-        let mut out = general_purpose::URL_SAFE_NO_PAD.encode(s);
-        while out.ends_with('=') {
-            out.pop();
-        }
-        out
-    }
-
-    let token = format!(
-        "{}.{}.dummy",
-        encode_no_pad(header),
-        encode_no_pad(&payload)
-    );
-
-    (token, expiry.to_rfc3339())
+    (token.to_string(), expiry.to_string())
 }
 
 async fn init_client() -> Result<(GenevaClient, Option<String>), Box<dyn std::error::Error>> {
@@ -223,14 +202,64 @@ async fn init_client() -> Result<(GenevaClient, Option<String>), Box<dyn std::er
     }
 }
 
-#[tokio::main(flavor = "current_thread")]
-//#[tokio::main(flavor = "multi_thread")]
-async fn main() -> Result<(), Box<dyn std::error::Error>> {
+// Usage examples:
+// # Use multi-thread runtime (default)
+// cargo run --bin geneva_stream_stress --release -- 100
+//
+// # Use current-thread runtime
+// cargo run --bin geneva_stream_stress --release -- current 100
+//
+// # Explicitly use multi-thread runtime
+// cargo run --bin geneva_stream_stress --release -- multi 100
+fn main() -> Result<(), Box<dyn std::error::Error>> {
     let args: Vec<String> = std::env::args().collect();
+
+    // Check if first argument is runtime type
+    let (runtime_type, args_start_idx) = if args.len() > 1 {
+        match args[1].as_str() {
+            "current" => ("current", 2),
+            "multi" => ("multi", 2),
+            _ => ("multi", 1), // default to multi, first arg is not runtime type
+        }
+    } else {
+        ("multi", 1)
+    };
+
+    // Build the appropriate runtime
+    let runtime = match runtime_type {
+        "current" => {
+            println!("Using Tokio current-thread runtime");
+            tokio::runtime::Builder::new_current_thread()
+                .enable_all()
+                .build()?
+        }
+        _ => {
+            println!("Using Tokio multi-thread runtime");
+            tokio::runtime::Builder::new_multi_thread()
+                .enable_all()
+                .build()?
+        }
+    };
+
+    // Run the async main function
+    runtime.block_on(async_main(args, args_start_idx))
+}
+
+async fn async_main(
+    args: Vec<String>,
+    args_start_idx: usize,
+) -> Result<(), Box<dyn std::error::Error>> {
+    // Get concurrency from the appropriate position
     let concurrency = args
-        .get(1)
+        .get(args_start_idx)
         .and_then(|s| s.parse::<usize>().ok())
         .unwrap_or(100);
+
+    // Get mode from the next position
+    let mode = args
+        .get(args_start_idx + 1)
+        .map(|s| s.as_str())
+        .unwrap_or("comparison");
 
     // Initialize client and test data
     let (client, _mock_uri) = init_client().await?;
@@ -244,9 +273,6 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!("\nStarting Geneva exporter stress test using stream-based approach");
     println!("Press Ctrl+C to stop continuous tests\n");
 
-    // Test mode based on second argument
-    let mode = args.get(2).map(|s| s.as_str()).unwrap_or("comparison");
-
     match mode {
         "continuous" => {
             // Run continuous test
@@ -256,18 +282,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 target_ops: None,
             };
 
-            let client_clone = client.clone();
-            let logs_clone = logs.clone();
-
             let stats = ThroughputTest::run_continuous("Geneva Upload", config, move || {
-                let client = client_clone.clone();
-                let logs = logs_clone.clone();
-                async move {
-                    client
-                        .upload_logs(&logs)
-                        .await
-                        .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e))
-                }
+                let client = client.clone();
+                let logs = logs.clone();
+                async move { client.upload_logs(&logs).await }
             })
             .await;
 
@@ -286,12 +304,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 ..Default::default()
             };
 
-            let client_clone = client.clone();
-            let logs_clone = logs.clone();
-
             let stats = ThroughputTest::run_fixed("Geneva Upload", config, move || {
-                let client = client_clone.clone();
-                let logs = logs_clone.clone();
+                let client = client.clone();
+                let logs = logs.clone();
                 async move {
                     client
                         .upload_logs(&logs)
