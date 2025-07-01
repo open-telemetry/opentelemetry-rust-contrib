@@ -22,7 +22,7 @@ doc = false
 ctrlc = "3.2.5"
 num_cpus = "1.15.0"
 num-format = "0.4.4"
-sysinfo = { version = "0.32", optional = true }
+sysinfo = { version = "0.35", optional = true }
 
 opentelemetry-appender-tracing = { version = "0.30", features= ["spec_unstable_logs_enabled"] }
 opentelemetry_sdk = { version = "0.30", features = ["logs", "spec_unstable_logs_enabled"] }
