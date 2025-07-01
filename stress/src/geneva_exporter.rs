@@ -1,6 +1,6 @@
-//! Geneva exporter stress test using the generic stream throughput tester
-//!
-//! Run with: cargo run --bin geneva_stream_stress --release -- [concurrency]
+// Geneva exporter stress test using the generic stream throughput tester
+//
+// Run with: cargo run --bin geneva_stream_stress --release -- [multi|current] [concurrency] [fixed|continuous|comparison]
 
 /*
    ## Hardware & OS:
