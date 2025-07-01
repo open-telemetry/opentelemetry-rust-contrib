@@ -127,10 +127,10 @@ impl ThroughputTest {
                         successful_ops.fetch_add(1, Ordering::Relaxed);
                     }
                     Ok(Err(e)) => {
-                        eprintln!("Operation failed: {}", e);
+                        eprintln!("Operation failed: {e}");
                     }
                     Err(e) => {
-                        eprintln!("Task join error: {}", e);
+                        eprintln!("Task join error: {e}");
                     }
                 }
             }
@@ -148,7 +148,7 @@ impl ThroughputTest {
                         successful_ops.fetch_add(1, Ordering::Relaxed);
                     }
                     Err(e) => {
-                        eprintln!("Operation failed: {}", e);
+                        eprintln!("Operation failed: {e}");
                     }
                 }
             }
@@ -182,9 +182,9 @@ impl ThroughputTest {
         let target = config
             .target_ops
             .expect("Target ops must be specified for fixed test");
+        let config_concurrency = config.concurrency;
         println!(
-            "Testing {} to run {} operations with concurrency level: {}",
-            name, target, config.concurrency
+            "Testing {name} to run {target} operations with concurrency level: {config_concurrency}"
         );
 
         let start_time = Instant::now();
@@ -201,10 +201,10 @@ impl ThroughputTest {
                 match result {
                     Ok(Ok(_)) => successful_ops += 1,
                     Ok(Err(e)) => {
-                        eprintln!("Operation failed: {}", e);
+                        eprintln!("Operation failed: {e}");
                     }
                     Err(e) => {
-                        eprintln!("Task join error: {}", e);
+                        eprintln!("Task join error: {e}");
                     }
                 }
             }
@@ -218,7 +218,7 @@ impl ThroughputTest {
                 match result {
                     Ok(_) => successful_ops += 1,
                     Err(e) => {
-                        eprintln!("Operation failed: {}", e);
+                        eprintln!("Operation failed: {e}");
                     }
                 }
             }
@@ -246,7 +246,7 @@ impl ThroughputTest {
         T: Send + 'static,
         E: std::fmt::Display + Send + 'static,
     {
-        println!("Concurrency Level Comparison for {}:", name);
+        println!("Concurrency Level Comparison for {name}:");
         let mut results = Vec::new();
 
         for &concurrency in concurrency_levels {
@@ -257,7 +257,7 @@ impl ThroughputTest {
             };
 
             let stats = Self::run_fixed(name, config, operation_factory.clone()).await;
-            stats.print(&format!("   Concurrency {}", concurrency));
+            stats.print(&format!("   Concurrency {concurrency}"));
             results.push((concurrency, stats));
         }
 
@@ -286,7 +286,7 @@ mod tests {
         };
 
         let stats =
-            ThroughputTest::run_fixed("Example Operation", config, || example_async_operation())
+            ThroughputTest::run_fixed("Example Operation", config, example_async_operation)
                 .await;
 
         stats.print("Final Results");

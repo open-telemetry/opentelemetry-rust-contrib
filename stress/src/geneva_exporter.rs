@@ -101,7 +101,7 @@ fn generate_mock_jwt_and_expiry(_endpoint: &str, _ttl_secs: i64) -> (String, Str
 async fn init_client() -> Result<(GenevaClient, Option<String>), Box<dyn std::error::Error>> {
     // Check if we should use real endpoints
     if let Ok(endpoint) = std::env::var("GENEVA_ENDPOINT") {
-        println!("Using real Geneva endpoint: {}", endpoint);
+        println!("Using real Geneva endpoint: {endpoint}");
 
         let config = GenevaClientConfig {
             endpoint,
@@ -128,7 +128,7 @@ async fn init_client() -> Result<(GenevaClient, Option<String>), Box<dyn std::er
         let client = GenevaClient::new(config).await?;
         Ok((client, None))
     } else if let Ok(mock_endpoint) = std::env::var("MOCK_SERVER_URL") {
-        println!("Using standalone mock server at: {}", mock_endpoint);
+        println!("Using standalone mock server at: {mock_endpoint}");
 
         let config = GenevaClientConfig {
             endpoint: mock_endpoint,
@@ -332,7 +332,7 @@ async fn async_main(
                         client
                             .upload_logs(&logs)
                             .await
-                            .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e))
+                            .map_err(std::io::Error::other)
                     }
                 },
             )
