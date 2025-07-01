@@ -10,27 +10,21 @@
      - RAM: 64 GB
      - OS: Ubuntu 6.6 (WSL2 on Windows 11), x86_64
 
-   ## Tokio Multi-thread Runtime (default)
-   Concurrency | Throughput (ops/sec)
-   ----------- | -------------------
-             5 | 11,582
-            10 | 15,582
-            30 | 18,822
-            50 | 18,752
-           100 | 17,237
-           500 | 12,544
-          1000 | 12,335
+    $ cargo run --bin geneva_exporter --release -- multi 500  continuous
+    Testing Geneva Upload with concurrency level: 500
+        Progress: 217596 ops completed (217596 successful, 100.0%) in 5.00s = 43509.05 ops/sec
+        Progress: 441949 ops completed (441949 successful, 100.0%) in 10.00s = 44185.62 ops/sec
+        Progress: 665824 ops completed (665824 successful, 100.0%) in 15.00s = 44379.07 ops/sec
+        Progress: 880941 ops completed (880941 successful, 100.0%) in 20.00s = 44037.77 ops/sec
+        Progress: 1096677 ops completed (1096677 successful, 100.0%) in 25.01s = 43857.92 ops/sec
 
-   ## Tokio Current-thread Runtime
-   Concurrency | Throughput (ops/sec)
-   ----------- | -------------------
-             5 | 9,964
-            10 | 12,837
-            30 | 16,296
-            50 | 16,760
-           100 | 15,033
-           500 | 12,261
-          1000 | 13,080
+    $ cargo run --bin geneva_exporter --release -- current 500  continuous
+    Testing Geneva Upload with concurrency level: 500
+        Progress: 68296 ops completed (68296 successful, 100.0%) in 5.01s = 13641.68 ops/sec
+        Progress: 138357 ops completed (138357 successful, 100.0%) in 10.01s = 13816.53 ops/sec
+        Progress: 209546 ops completed (209546 successful, 100.0%) in 15.02s = 13955.42 ops/sec
+        Progress: 281304 ops completed (281304 successful, 100.0%) in 20.02s = 14053.73 ops/sec
+        Progress: 351334 ops completed (351334 successful, 100.0%) in 25.02s = 14043.67 ops/sec
 
 */
 use geneva_uploader::{AuthMethod, GenevaClient, GenevaClientConfig};
