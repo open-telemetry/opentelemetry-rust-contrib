@@ -30,7 +30,6 @@ sysinfo = { version = "0.35", optional = true }
 tokio = { version = "1", features = ["full", "test-util"] }
 wiremock = "0.6"
 futures = "0.3"
-console-subscriber = "0.4"
 
 opentelemetry-appender-tracing = { version = "0.30", features= ["spec_unstable_logs_enabled"] }
 opentelemetry_sdk = { version = "0.30", features = ["logs", "spec_unstable_logs_enabled"] }
