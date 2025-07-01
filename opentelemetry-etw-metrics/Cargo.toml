@@ -14,7 +14,7 @@ rust-version = "1.75.0"
 opentelemetry = { version = "0.30", features = ["metrics"] }
 opentelemetry_sdk = { version = "0.30", features = ["metrics"] }
 opentelemetry-proto = { version = "0.30", features = ["gen-tonic", "metrics"] }
-prost = "0.13"
+prost = "0.14"
 tracelogging = "1.2.4"
 tracing = { version = "0.1", optional = true }
 [dev-dependencies]

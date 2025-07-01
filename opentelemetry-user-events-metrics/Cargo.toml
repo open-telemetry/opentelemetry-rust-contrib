@@ -15,7 +15,7 @@ opentelemetry = { version= "0.30", features = ["metrics"] }
 opentelemetry_sdk = { version= "0.30", features = ["metrics"] }
 opentelemetry-proto = { version= "0.30", features = ["gen-tonic", "metrics"] }
 eventheader = { version = "= 0.4.1" }
-prost = "0.13"
+prost = "0.14"
 tracing = {version = "0.1", optional = true}
 
 [dev-dependencies]
