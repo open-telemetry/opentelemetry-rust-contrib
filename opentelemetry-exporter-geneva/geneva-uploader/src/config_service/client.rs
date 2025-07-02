@@ -370,7 +370,6 @@ impl GenevaConfigClient {
                 }
             }
         }
-
         // Cache miss or expired token, fetch fresh data
         // Perform actual fetch before acquiring write lock to minimize lock contention
         let (fresh_ingestion_gateway_info, fresh_moniker_info) =
@@ -440,7 +439,6 @@ impl GenevaConfigClient {
         // Check if the response is successful
         let status = response.status();
         let body = response.text().await?;
-
         if status.is_success() {
             let parsed = match serde_json::from_str::<GenevaResponse>(&body) {
                 Ok(response) => response,
@@ -500,6 +498,11 @@ fn extract_endpoint_from_token(token: &str) -> Result<String> {
         0 => payload.to_string(),
         2 => format!("{payload}=="),
         3 => format!("{payload}="),
+        1 => {
+            return Err(GenevaConfigClientError::JwtTokenError(
+                "Invalid JWT payload length".into(),
+            ))
+        }
         _ => payload.to_string(),
     };
 
