@@ -6,6 +6,7 @@ use reqwest::{header, Client};
 use serde::Deserialize;
 use serde_json::Value;
 use std::collections::HashMap;
+use std::error::Error as StdError;
 use std::fmt::Write;
 use std::sync::Arc;
 use std::time::Duration;
@@ -17,7 +18,7 @@ use uuid::Uuid;
 #[derive(Debug, Error)]
 pub(crate) enum GenevaUploaderError {
     #[error("HTTP error: {0}")]
-    Http(#[from] reqwest::Error),
+    Http(String),
     #[error("JSON error: {0}")]
     SerdeJson(#[from] serde_json::Error),
     #[error("Config service error: {0}")]
@@ -34,6 +35,22 @@ impl From<GenevaConfigClientError> for GenevaUploaderError {
     fn from(err: GenevaConfigClientError) -> Self {
         // This preserves the original error message format from the code
         GenevaUploaderError::ConfigClient(format!("GenevaConfigClient error: {err}"))
+    }
+}
+
+impl From<reqwest::Error> for GenevaUploaderError {
+    fn from(err: reqwest::Error) -> Self {
+        let mut msg = format!("{:?}", err);
+        if let Some(url) = err.url() {
+            msg.push_str(&format!(", url: {}", url));
+        }
+        if let Some(status) = err.status() {
+            msg.push_str(&format!(", status: {}", status));
+        }
+        if let Some(source) = err.source() {
+            msg.push_str(&format!(", source: {}", source));
+        }
+        GenevaUploaderError::Http(msg)
     }
 }
 
@@ -204,10 +221,9 @@ impl GenevaUploader {
             )
             .body(data)
             .send()
-            .await
-            .map_err(GenevaUploaderError::Http)?;
+            .await?;
         let status = response.status();
-        let body = response.text().await.map_err(GenevaUploaderError::Http)?;
+        let body = response.text().await?;
 
         if status == reqwest::StatusCode::ACCEPTED {
             let ingest_response: IngestionResponse =
