@@ -90,17 +90,28 @@ impl GenevaClient {
             .flat_map(|resource_log| resource_log.scope_logs.iter())
             .flat_map(|scope_log| scope_log.log_records.iter());
         let blobs = self.encoder.encode_log_batch(log_iter, &self.metadata);
-        for (_schema_id, event_name, encoded_blob, _row_count) in blobs {
-            // TODO - log encoded_blob for debugging
-            let compressed_blob = lz4_chunked_compression(&encoded_blob)
-                .map_err(|e| format!("LZ4 compression failed: {e}"))?;
-            // TODO - log compressed_blob for debugging
-            let event_version = "Ver2v0"; // TODO - find the actual value to be populated
-            self.uploader
-                .upload(compressed_blob, &event_name, event_version)
-                .await
-                .map_err(|e| format!("Geneva upload failed: {e}"))?;
-        }
+        
+        // Create futures for concurrent uploads
+        let upload_futures = blobs.into_iter().map(|(_schema_id, event_name, encoded_blob, _row_count)| {
+            let uploader = Arc::clone(&self.uploader);
+            let event_name = event_name.clone();
+            async move {
+                // TODO - log encoded_blob for debugging
+                let compressed_blob = lz4_chunked_compression(&encoded_blob)
+                    .map_err(|e| format!("LZ4 compression failed: {e}"))?;
+                // TODO - log compressed_blob for debugging
+                let event_version = "Ver2v0"; // TODO - find the actual value to be populated
+                uploader
+                    .upload(compressed_blob, &event_name, event_version)
+                    .await
+                    .map_err(|e| format!("Geneva upload failed: {e}"))
+            }
+        });
+        
+        // Execute all uploads concurrently using try_join_all which stops on first error
+        use futures_util::future::try_join_all;
+        try_join_all(upload_futures).await?;
+        
         Ok(())
     }
 }
