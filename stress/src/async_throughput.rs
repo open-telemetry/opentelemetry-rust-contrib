@@ -88,27 +88,48 @@ impl ThroughputTest {
         let report_interval = config.report_interval;
 
         // Spawn reporting thread
-        let _reporting_handle = std::thread::spawn(move || loop {
-            std::thread::sleep(report_interval);
-            let ops = completed_clone.load(Ordering::Relaxed);
-            let success = successful_clone.load(Ordering::Relaxed);
-            let elapsed = start_time.elapsed();
-            let throughput = ops as f64 / elapsed.as_secs_f64();
+        let _reporting_handle = std::thread::spawn(move || {
+            #[cfg(feature = "stats")]
+            let pid = sysinfo::Pid::from(std::process::id() as usize);
+            #[cfg(feature = "stats")]
+            let mut system = sysinfo::System::new_all();
 
-            let success_percentage = if ops > 0 {
-                (success as f64 / ops as f64) * 100.0
-            } else {
-                0.0
-            };
+            loop {
+                std::thread::sleep(report_interval);
+                let ops = completed_clone.load(Ordering::Relaxed);
+                let success = successful_clone.load(Ordering::Relaxed);
+                let elapsed = start_time.elapsed();
+                let throughput = ops as f64 / elapsed.as_secs_f64();
 
-            println!(
-                "Progress: {} ops completed ({} successful, {:.1}%) in {:.2}s = {:.2} ops/sec",
-                ops,
-                success,
-                success_percentage,
-                elapsed.as_secs_f64(),
-                throughput
-            );
+                let success_percentage = if ops > 0 {
+                    (success as f64 / ops as f64) * 100.0
+                } else {
+                    0.0
+                };
+
+                println!(
+                    "Progress: {} ops completed ({} successful, {:.1}%) in {:.2}s = {:.2} ops/sec",
+                    ops,
+                    success,
+                    success_percentage,
+                    elapsed.as_secs_f64(),
+                    throughput
+                );
+                #[cfg(feature = "stats")]
+                {
+                    system.refresh_all();
+                    if let Some(process) = system.process(pid) {
+                        println!(
+                            "Memory: {:.2} MB | CPU: {:.1}% | Virtual Memory: {:.2} MB",
+                            process.memory() as f64 / (1024.0 * 1024.0),
+                            process.cpu_usage(),
+                            process.virtual_memory() as f64 / (1024.0 * 1024.0)
+                        );
+                    } else {
+                        println!("Process not found");
+                    }
+                }
+            }
         });
 
         // Create infinite stream of operations
