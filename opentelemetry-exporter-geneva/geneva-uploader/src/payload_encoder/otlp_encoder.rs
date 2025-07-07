@@ -144,7 +144,7 @@ impl OtlpEncoder {
                 let type_id = match val {
                     Value::StringValue(_) => BondDataType::BT_STRING,
                     Value::IntValue(_) => BondDataType::BT_INT64,
-                    Value::DoubleValue(_) => BondDataType::BT_DOUBLE, // Updated to use BT_DOUBLE
+                    Value::DoubleValue(_) => BondDataType::BT_DOUBLE,
                     Value::BoolValue(_) => BondDataType::BT_BOOL,
                     _ => continue,
                 };
