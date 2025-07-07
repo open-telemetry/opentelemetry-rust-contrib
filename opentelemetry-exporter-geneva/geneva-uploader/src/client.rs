@@ -7,6 +7,9 @@ use crate::payload_encoder::otlp_encoder::OtlpEncoder;
 use opentelemetry_proto::tonic::logs::v1::ResourceLogs;
 use std::sync::Arc;
 
+use futures::stream::{self, StreamExt};
+use tokio::task;
+
 /// Configuration for GenevaClient (user-facing)
 #[derive(Clone, Debug)]
 pub struct GenevaClientConfig {
@@ -90,17 +93,47 @@ impl GenevaClient {
             .flat_map(|resource_log| resource_log.scope_logs.iter())
             .flat_map(|scope_log| scope_log.log_records.iter());
         let blobs = self.encoder.encode_log_batch(log_iter, &self.metadata);
-        for (event_name, encoded_blob, _row_count) in blobs {
-            // TODO - log encoded_blob for debugging
-            let compressed_blob = lz4_chunked_compression(&encoded_blob)
-                .map_err(|e| format!("LZ4 compression failed: {e}"))?;
-            // TODO - log compressed_blob for debugging
-            let event_version = "Ver2v0"; // TODO - find the actual value to be populated
-            self.uploader
-                .upload(compressed_blob, &event_name, event_version)
-                .await
-                .map_err(|e| format!("Geneva upload failed: {e}"))?;
+        if blobs.is_empty() {
+            return Ok(());
         }
+
+        // Create a stream from the blobs and process them in parallel
+        let results: Vec<Result<(), String>> = stream::iter(blobs)
+            .map(|(event_name, encoded_blob, _row_count)| {
+                let uploader = Arc::clone(&self.uploader);
+
+                task::spawn(async move {
+                    // Compress the blob
+                    let compressed_blob = lz4_chunked_compression(&encoded_blob)
+                        .map_err(|e| format!("LZ4 compression failed: {e}"))?;
+
+                    let event_version = "Ver2v0"; // TODO - find the actual value to be populated
+
+                    // Upload
+                    uploader
+                        .upload(compressed_blob, &event_name, event_version)
+                        .await
+                        .map(|_response| ()) // Convert IngestionResponse to ()
+                        .map_err(|e| format!("Geneva upload failed for {}: {e}", event_name))
+                })
+            })
+            .buffer_unordered(10) // Process up to 10 uploads concurrently
+            .collect::<Vec<_>>()
+            .await
+            .into_iter()
+            .map(|join_result| {
+                // Handle task join errors first
+                join_result
+                    .map_err(|e| format!("Upload task failed: {e}"))
+                    .and_then(|upload_result| upload_result)
+            })
+            .collect();
+
+        // Check for any errors
+        for result in results {
+            result?;
+        }
+
         Ok(())
     }
 }
