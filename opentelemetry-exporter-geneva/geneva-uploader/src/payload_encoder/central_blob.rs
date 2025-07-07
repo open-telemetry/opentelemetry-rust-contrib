@@ -191,12 +191,12 @@ mod tests {
         let fields = vec![
             FieldDef {
                 name: Cow::Borrowed("foo"),
-                type_id: 16u8, // BT_INT32
+                type_id: crate::payload_encoder::bond_encoder::BondDataType::BT_INT32,
                 field_id: 1u16,
             },
             FieldDef {
                 name: Cow::Borrowed("bar"),
-                type_id: 9u8, // BT_STRING
+                type_id: crate::payload_encoder::bond_encoder::BondDataType::BT_STRING,
                 field_id: 2u16,
             },
         ];

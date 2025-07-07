@@ -13,15 +13,21 @@ mod tests {
     use crate::payload_encoder::bond_encoder::FieldDef;
     use std::borrow::Cow;
 
-    fn create_payload(fields: &[(&str, u8, u16)], row_data: Vec<u8>) -> Vec<u8> {
+    fn create_payload(fields: &[FieldDef], row_data: Vec<u8>) -> Vec<u8> {
         // Convert the input tuples to FieldDef
         let field_defs: Vec<FieldDef> = fields
             .iter()
-            .map(|(name, type_id, field_id)| FieldDef {
-                name: Cow::Owned(name.to_string()),
-                type_id: *type_id,
-                field_id: *field_id,
-            })
+            .map(
+                |FieldDef {
+                     name,
+                     type_id,
+                     field_id,
+                 }| FieldDef {
+                    name: Cow::Owned(name.to_string()),
+                    type_id: *type_id,
+                    field_id: *field_id,
+                },
+            )
             .collect();
         let schema_obj =
             BondEncodedSchema::from_fields("MdsContainer", "testNamespace", field_defs);
@@ -119,12 +125,32 @@ mod tests {
             0x64, 0x00, 0x21, 0x00, 0xde, 0xc0, 0xad, 0xde, 0xde, 0xc0, 0xad, 0xde,
         ];
 
-        let fields = &[
-            ("Float64Col", BondDataType::BT_DOUBLE as u8, 1u16),
-            ("Int32Col", BondDataType::BT_INT32 as u8, 2u16),
-            ("Int64Col", BondDataType::BT_INT64 as u8, 3u16),
-            ("BoolCol", BondDataType::BT_BOOL as u8, 4u16),
-            ("StringCol", BondDataType::BT_WSTRING as u8, 5u16),
+        let fields: &[FieldDef] = &[
+            FieldDef {
+                name: "Float64Col".into(),
+                type_id: BondDataType::BT_DOUBLE,
+                field_id: 1u16,
+            },
+            FieldDef {
+                name: "Int32Col".into(),
+                type_id: BondDataType::BT_INT32,
+                field_id: 2u16,
+            },
+            FieldDef {
+                name: "Int64Col".into(),
+                type_id: BondDataType::BT_INT64,
+                field_id: 3u16,
+            },
+            FieldDef {
+                name: "BoolCol".into(),
+                type_id: BondDataType::BT_BOOL,
+                field_id: 4u16,
+            },
+            FieldDef {
+                name: "StringCol".into(),
+                type_id: BondDataType::BT_WSTRING,
+                field_id: 5u16,
+            },
         ];
 
         let mut row_data = Vec::new();

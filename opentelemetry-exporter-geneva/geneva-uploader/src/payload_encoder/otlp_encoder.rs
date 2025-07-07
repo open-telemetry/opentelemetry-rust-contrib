@@ -25,15 +25,6 @@ const FIELD_SEVERITY_NUMBER: &str = "SeverityNumber";
 const FIELD_SEVERITY_TEXT: &str = "SeverityText";
 const FIELD_BODY: &str = "body";
 
-const BT_STRING: u8 = BondDataType::BT_STRING as u8;
-const BT_FLOAT: u8 = BondDataType::BT_FLOAT as u8;
-const BT_DOUBLE: u8 = BondDataType::BT_DOUBLE as u8;
-const BT_INT32: u8 = BondDataType::BT_INT32 as u8;
-const BT_INT64: u8 = BondDataType::BT_INT64 as u8;
-const BT_BOOL: u8 = BondDataType::BT_BOOL as u8;
-const BT_WSTRING: u8 = BondDataType::BT_WSTRING as u8;
-// TODO - add more types as needed
-
 /// Encoder to write OTLP payload in bond form.
 #[derive(Clone)]
 pub struct OtlpEncoder {
@@ -115,34 +106,34 @@ impl OtlpEncoder {
         // Pre-allocate with estimated capacity to avoid reallocations
         let estimated_capacity = 7 + 4 + log.attributes.len();
         let mut fields = Vec::with_capacity(estimated_capacity);
-        fields.push((Cow::Borrowed(FIELD_ENV_NAME), BT_STRING));
-        fields.push((FIELD_ENV_VER.into(), BT_STRING));
-        fields.push((FIELD_TIMESTAMP.into(), BT_STRING));
-        fields.push((FIELD_ENV_TIME.into(), BT_STRING));
+        fields.push((Cow::Borrowed(FIELD_ENV_NAME), BondDataType::BT_STRING));
+        fields.push((FIELD_ENV_VER.into(), BondDataType::BT_STRING));
+        fields.push((FIELD_TIMESTAMP.into(), BondDataType::BT_STRING));
+        fields.push((FIELD_ENV_TIME.into(), BondDataType::BT_STRING));
 
         // Part A extension - Conditional fields
         if !log.trace_id.is_empty() {
-            fields.push((FIELD_TRACE_ID.into(), BT_STRING));
+            fields.push((FIELD_TRACE_ID.into(), BondDataType::BT_STRING));
         }
         if !log.span_id.is_empty() {
-            fields.push((FIELD_SPAN_ID.into(), BT_STRING));
+            fields.push((FIELD_SPAN_ID.into(), BondDataType::BT_STRING));
         }
         if log.flags != 0 {
-            fields.push((FIELD_TRACE_FLAGS.into(), BT_INT32));
+            fields.push((FIELD_TRACE_FLAGS.into(), BondDataType::BT_INT32));
         }
 
         // Part B - Core log fields
         if !log.event_name.is_empty() {
-            fields.push((FIELD_NAME.into(), BT_STRING));
+            fields.push((FIELD_NAME.into(), BondDataType::BT_STRING));
         }
-        fields.push((FIELD_SEVERITY_NUMBER.into(), BT_INT32));
+        fields.push((FIELD_SEVERITY_NUMBER.into(), BondDataType::BT_INT32));
         if !log.severity_text.is_empty() {
-            fields.push((FIELD_SEVERITY_TEXT.into(), BT_STRING));
+            fields.push((FIELD_SEVERITY_TEXT.into(), BondDataType::BT_STRING));
         }
         if let Some(body) = &log.body {
             if let Some(Value::StringValue(_)) = &body.value {
                 // Only included in schema when body is a string value
-                fields.push((FIELD_BODY.into(), BT_STRING));
+                fields.push((FIELD_BODY.into(), BondDataType::BT_STRING));
             }
             //TODO - handle other body types
         }
@@ -151,10 +142,10 @@ impl OtlpEncoder {
         for attr in &log.attributes {
             if let Some(val) = attr.value.as_ref().and_then(|v| v.value.as_ref()) {
                 let type_id = match val {
-                    Value::StringValue(_) => BondDataType::BT_STRING as u8,
-                    Value::IntValue(_) => BondDataType::BT_INT64 as u8,
-                    Value::DoubleValue(_) => BondDataType::BT_FLOAT as u8, // TODO - using float for now
-                    Value::BoolValue(_) => BondDataType::BT_BOOL as u8, // representing bool as int
+                    Value::StringValue(_) => BondDataType::BT_STRING,
+                    Value::IntValue(_) => BondDataType::BT_INT64,
+                    Value::DoubleValue(_) => BondDataType::BT_FLOAT, // TODO - using float for now
+                    Value::BoolValue(_) => BondDataType::BT_BOOL,
                     _ => continue,
                 };
                 fields.push((attr.key.clone().into(), type_id));
@@ -312,19 +303,27 @@ impl OtlpEncoder {
         &self,
         buffer: &mut Vec<u8>,
         attr: &opentelemetry_proto::tonic::common::v1::KeyValue,
-        expected_type: u8,
+        expected_type: BondDataType,
     ) {
         if let Some(val) = &attr.value {
             match (&val.value, expected_type) {
-                (Some(Value::StringValue(s)), BT_STRING) => BondWriter::write_string(buffer, s),
-                (Some(Value::StringValue(s)), BT_WSTRING) => BondWriter::write_wstring(buffer, s),
-                (Some(Value::IntValue(i)), BT_INT64) => BondWriter::write_int64(buffer, *i),
-                (Some(Value::DoubleValue(d)), BT_FLOAT) => {
+                (Some(Value::StringValue(s)), BondDataType::BT_STRING) => {
+                    BondWriter::write_string(buffer, s)
+                }
+                (Some(Value::StringValue(s)), BondDataType::BT_WSTRING) => {
+                    BondWriter::write_wstring(buffer, s)
+                }
+                (Some(Value::IntValue(i)), BondDataType::BT_INT64) => {
+                    BondWriter::write_int64(buffer, *i)
+                }
+                (Some(Value::DoubleValue(d)), BondDataType::BT_FLOAT) => {
                     // TODO - handle double values properly
                     BondWriter::write_float(buffer, *d as f32)
                 }
-                (Some(Value::DoubleValue(d)), BT_DOUBLE) => BondWriter::write_double(buffer, *d),
-                (Some(Value::BoolValue(b)), BT_BOOL) => {
+                (Some(Value::DoubleValue(d)), BondDataType::BT_DOUBLE) => {
+                    BondWriter::write_double(buffer, *d)
+                }
+                (Some(Value::BoolValue(b)), BondDataType::BT_BOOL) => {
                     // TODO - represent bool as BT_BOOL
                     BondWriter::write_bool(buffer, *b)
                 }

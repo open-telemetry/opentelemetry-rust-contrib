@@ -4,7 +4,7 @@ use std::borrow::Cow;
 use std::io::{Result, Write};
 
 /// Bond data types
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Copy, Debug, Hash, PartialEq, Eq)]
 #[repr(u8)]
 #[allow(non_camel_case_types)] // Allow C-style naming for clarity with Bond protocol
 #[allow(dead_code)] // These represent all possible Bond types, not all are used yet
@@ -119,7 +119,7 @@ impl BondWriter {
 pub(crate) struct FieldDef {
     pub name: Cow<'static, str>,
     pub field_id: u16,
-    pub type_id: u8,
+    pub type_id: BondDataType,
 }
 
 /// Schema definition that can be built dynamically
@@ -231,7 +231,7 @@ fn write_field_def<W: Write>(writer: &mut W, field: &FieldDef, is_last: bool) ->
     writer.write_all(&field.field_id.to_le_bytes())?;
 
     // Type
-    writer.write_all(&[field.type_id])?;
+    writer.write_all(&[field.type_id as u8])?;
 
     // Additional type info (all zeros for primitives)
     writer.write_all(&0u16.to_le_bytes())?; // struct_def
@@ -270,13 +270,15 @@ pub(crate) fn encode_dynamic_payload<W: Write>(
         } else {
             // Write default value based on type
             match field.type_id {
-                2 => writer.write_all(&[0u8])?,              // bool - single byte
-                7 => writer.write_all(&0f32.to_le_bytes())?, // float
-                8 => writer.write_all(&0f64.to_le_bytes())?, // double
-                9 | 18 => writer.write_all(&0u32.to_le_bytes())?, // empty string
-                16 => writer.write_all(&0i32.to_le_bytes())?, // int32
-                17 => writer.write_all(&0i64.to_le_bytes())?, // int64
-                _ => {}                                      // Handle other types as needed
+                BondDataType::BT_BOOL => writer.write_all(&[0u8])?, // bool - single byte
+                BondDataType::BT_FLOAT => writer.write_all(&0f32.to_le_bytes())?, // float
+                BondDataType::BT_DOUBLE => writer.write_all(&0f64.to_le_bytes())?, // double
+                BondDataType::BT_STRING | BondDataType::BT_WSTRING => {
+                    writer.write_all(&0u32.to_le_bytes())?
+                } // empty string
+                BondDataType::BT_INT32 => writer.write_all(&0i32.to_le_bytes())?, // int32
+                BondDataType::BT_INT64 => writer.write_all(&0i64.to_le_bytes())?, // int64
+                _ => {}                                             // Handle other types as needed
             }
         }
     }
@@ -326,17 +328,17 @@ mod tests {
         let fields = vec![
             FieldDef {
                 name: Cow::Borrowed("field1"),
-                type_id: BondDataType::BT_DOUBLE as u8,
+                type_id: BondDataType::BT_DOUBLE,
                 field_id: 1,
             },
             FieldDef {
                 name: Cow::Borrowed("field2"),
-                type_id: BondDataType::BT_STRING as u8,
+                type_id: BondDataType::BT_STRING,
                 field_id: 2,
             },
             FieldDef {
                 name: Cow::Borrowed("field3"),
-                type_id: BondDataType::BT_INT32 as u8,
+                type_id: BondDataType::BT_INT32,
                 field_id: 3,
             },
         ];
@@ -351,17 +353,17 @@ mod tests {
         let fields = vec![
             FieldDef {
                 name: Cow::Borrowed("timestamp"),
-                type_id: BondDataType::BT_STRING as u8,
+                type_id: BondDataType::BT_STRING,
                 field_id: 1,
             },
             FieldDef {
                 name: Cow::Borrowed("severity"),
-                type_id: BondDataType::BT_INT32 as u8,
+                type_id: BondDataType::BT_INT32,
                 field_id: 2,
             },
             FieldDef {
                 name: Cow::Borrowed("message"),
-                type_id: BondDataType::BT_STRING as u8,
+                type_id: BondDataType::BT_STRING,
                 field_id: 3,
             },
         ];
@@ -378,12 +380,12 @@ mod tests {
         let fields = vec![
             FieldDef {
                 name: Cow::Owned(dynamic_field_name),
-                type_id: BondDataType::BT_STRING as u8,
+                type_id: BondDataType::BT_STRING,
                 field_id: 1,
             },
             FieldDef {
                 name: Cow::Borrowed("static_field"),
-                type_id: BondDataType::BT_INT32 as u8,
+                type_id: BondDataType::BT_INT32,
                 field_id: 2,
             },
         ];
