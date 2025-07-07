@@ -90,7 +90,7 @@ impl GenevaClient {
             .flat_map(|resource_log| resource_log.scope_logs.iter())
             .flat_map(|scope_log| scope_log.log_records.iter());
         let blobs = self.encoder.encode_log_batch(log_iter, &self.metadata);
-        for (_schema_id, event_name, encoded_blob, _row_count) in blobs {
+        for (event_name, encoded_blob, _row_count) in blobs {
             // TODO - log encoded_blob for debugging
             let compressed_blob = lz4_chunked_compression(&encoded_blob)
                 .map_err(|e| format!("LZ4 compression failed: {e}"))?;

@@ -8,9 +8,9 @@ use std::collections::HashMap;
 use std::sync::{Arc, RwLock};
 
 type SchemaCache = Arc<RwLock<HashMap<u64, (BondEncodedSchema, [u8; 16], Vec<FieldDef>)>>>;
-type BatchKey = (u64, String);
-type EncodedRow = (String, u8, Vec<u8>); // (event_name, level, row_buffer)
-type BatchValue = (CentralSchemaEntry, Vec<EncodedRow>);
+type BatchKey = String; //event_name
+type EncodedRow = (String, u8, u64, Vec<u8>); // (event_name, level, schema_id, row_buffer)
+type BatchValue = (Vec<CentralSchemaEntry>, Vec<EncodedRow>); // (schemas, rows)
 type LogBatches = HashMap<BatchKey, BatchValue>;
 
 const FIELD_ENV_NAME: &str = "env_name";
@@ -39,13 +39,10 @@ impl OtlpEncoder {
         }
     }
 
-    pub fn encode_log_batch<'a, I>(
-        &self,
-        logs: I,
-        metadata: &str,
-    ) -> Vec<(u64, String, Vec<u8>, usize)>
+    pub fn encode_log_batch<'a, I>(&self, logs: I, metadata: &str) -> Vec<(String, Vec<u8>, usize)>
+    //(event_name, bytes, events_count)
     where
-        I: Iterator<Item = &'a opentelemetry_proto::tonic::logs::v1::LogRecord>,
+        I: IntoIterator<Item = &'a opentelemetry_proto::tonic::logs::v1::LogRecord>,
     {
         use std::collections::HashMap;
 
@@ -54,37 +51,49 @@ impl OtlpEncoder {
         for log_record in logs {
             // 1. Get schema
             let field_specs = self.determine_fields(log_record);
-            let schema_id = Self::calculate_schema_id(&field_specs);
-            let (schema_entry, field_info) = self.get_or_create_schema(schema_id, field_specs);
-
-            // 2. Encode row
-            let row_buffer = self.write_row_data(log_record, &field_info);
             let event_name = if log_record.event_name.is_empty() {
                 "Log".to_string()
             } else {
                 log_record.event_name.clone()
             };
+            let schema_id = Self::calculate_schema_id(&event_name, &field_specs);
+
+            let (schema_entry, field_info) = self.get_or_create_schema(schema_id, field_specs);
+
+            // 2. Encode row
+            let row_buffer = self.write_row_data(log_record, &field_info);
             let level = log_record.severity_number as u8;
 
-            // 3. Insert into batches - Key is (schema_id, event_name)
-            batches
-                .entry((schema_id, event_name.clone()))
-                .or_insert_with(|| (schema_entry, Vec::new()))
-                .1
-                .push((event_name, level, row_buffer));
+            // 3. Create batch key
+            let batch_key = event_name.clone();
+
+            // 4. Create or get existing batch entry
+            let entry = batches
+                .entry(batch_key)
+                .or_insert_with(|| (Vec::new(), Vec::new()));
+
+            // 5. Add schema entry if not already present (multiple schemas per event_name batch)
+            if !entry.0.iter().any(|s| s.id == schema_id) {
+                entry.0.push(schema_entry);
+            }
+
+            // 6. Add encoded row to batch
+            entry.1.push((event_name, level, schema_id, row_buffer));
         }
 
-        // 4. Encode blobs (one per schema AND event_name combination)
+        // 4. Encode blobs (one per event_name, potentially multiple schemas per blob)
         let mut blobs = Vec::new();
-        for ((schema_id, batch_event_name), (schema_entry, records)) in batches {
+        for (batch_event_name, (schema_entries, records)) in batches {
             let events: Vec<CentralEventEntry> = records
                 .into_iter()
-                .map(|(event_name, level, row_buffer)| CentralEventEntry {
-                    schema_id,
-                    level,
-                    event_name,
-                    row: row_buffer,
-                })
+                .map(
+                    |(event_name, level, schema_id, row_buffer)| CentralEventEntry {
+                        schema_id,
+                        level,
+                        event_name,
+                        row: row_buffer,
+                    },
+                )
                 .collect();
             let events_len = events.len();
 
@@ -92,11 +101,12 @@ impl OtlpEncoder {
                 version: 1,
                 format: 2,
                 metadata: metadata.to_string(),
-                schemas: vec![schema_entry],
+                schemas: schema_entries,
                 events,
             };
             let bytes = blob.to_bytes();
-            blobs.push((schema_id, batch_event_name, bytes, events_len));
+            // The return type is now (0, batch_event_name, bytes, events_len)
+            blobs.push((batch_event_name, bytes, events_len));
         }
         blobs
     }
@@ -164,12 +174,14 @@ impl OtlpEncoder {
     }
 
     /// Calculate schema ID from field specifications
-    fn calculate_schema_id(fields: &[FieldDef]) -> u64 {
+    fn calculate_schema_id(event_name: &str, fields: &[FieldDef]) -> u64 {
         use std::collections::hash_map::DefaultHasher;
         use std::hash::{Hash, Hasher};
 
         let mut hasher = DefaultHasher::new();
 
+        // Hash the event name and field definitions
+        event_name.hash(&mut hasher);
         for field in fields {
             field.name.hash(&mut hasher);
             field.type_id.hash(&mut hasher);
@@ -402,5 +414,175 @@ mod tests {
         log2.trace_id = vec![1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16];
         let _result3 = encoder.encode_log_batch([log2].iter(), metadata);
         assert_eq!(encoder.schema_cache.read().unwrap().len(), 2);
+    }
+
+    #[test]
+    fn test_single_event_single_schema() {
+        let encoder = OtlpEncoder::new();
+
+        let log = LogRecord {
+            observed_time_unix_nano: 1_700_000_000_000_000_000,
+            event_name: "test_event".to_string(),
+            severity_number: 9,
+            ..Default::default()
+        };
+
+        let result = encoder.encode_log_batch([log].iter(), "test");
+
+        assert_eq!(result.len(), 1);
+        assert_eq!(result[0].0, "test_event");
+        assert_eq!(result[0].2, 1); // events_count
+    }
+
+    #[test]
+    fn test_same_event_name_multiple_schemas() {
+        let encoder = OtlpEncoder::new();
+
+        // Schema 1: Basic log
+        let log1 = LogRecord {
+            event_name: "user_action".to_string(),
+            severity_number: 9,
+            ..Default::default()
+        };
+
+        // Schema 2: With trace_id
+        let mut log2 = LogRecord {
+            event_name: "user_action".to_string(),
+            severity_number: 10,
+            ..Default::default()
+        };
+        log2.trace_id = vec![1; 16];
+
+        // Schema 3: With attributes
+        let mut log3 = LogRecord {
+            event_name: "user_action".to_string(),
+            severity_number: 11,
+            ..Default::default()
+        };
+        log3.attributes.push(KeyValue {
+            key: "user_id".to_string(),
+            value: Some(AnyValue {
+                value: Some(Value::StringValue("user123".to_string())),
+            }),
+        });
+
+        let result = encoder.encode_log_batch([log1, log2, log3].iter(), "test");
+
+        // All should be in one batch with same event_name
+        assert_eq!(result.len(), 1);
+        assert_eq!(result[0].0, "user_action");
+        assert_eq!(result[0].2, 3); // events_count
+
+        // Should have 3 different schemas cached
+        assert_eq!(encoder.schema_cache.read().unwrap().len(), 3);
+    }
+
+    #[test]
+    fn test_different_event_names() {
+        let encoder = OtlpEncoder::new();
+
+        let log1 = LogRecord {
+            event_name: "login".to_string(),
+            severity_number: 9,
+            ..Default::default()
+        };
+
+        let log2 = LogRecord {
+            event_name: "logout".to_string(),
+            severity_number: 10,
+            ..Default::default()
+        };
+
+        let result = encoder.encode_log_batch([log1, log2].iter(), "test");
+
+        // Should create 2 separate batches
+        assert_eq!(result.len(), 2);
+
+        let event_names: Vec<&String> = result.iter().map(|(name, _, _)| name).collect();
+        assert!(event_names.contains(&&"login".to_string()));
+        assert!(event_names.contains(&&"logout".to_string()));
+
+        // Each batch should have 1 event
+        assert!(result.iter().all(|(_, _, count)| *count == 1));
+    }
+
+    #[test]
+    fn test_empty_event_name_defaults_to_log() {
+        let encoder = OtlpEncoder::new();
+
+        let log = LogRecord {
+            event_name: "".to_string(),
+            severity_number: 9,
+            ..Default::default()
+        };
+
+        let result = encoder.encode_log_batch([log].iter(), "test");
+
+        assert_eq!(result.len(), 1);
+        assert_eq!(result[0].0, "Log"); // Should default to "Log"
+        assert_eq!(result[0].2, 1);
+    }
+
+    #[test]
+    fn test_mixed_scenario() {
+        let encoder = OtlpEncoder::new();
+
+        // event_name1 with schema1
+        let log1 = LogRecord {
+            event_name: "user_action".to_string(),
+            severity_number: 9,
+            ..Default::default()
+        };
+
+        // event_name1 with schema2 (different schema, same event)
+        let mut log2 = LogRecord {
+            event_name: "user_action".to_string(),
+            severity_number: 10,
+            ..Default::default()
+        };
+        log2.trace_id = vec![1; 16];
+
+        // event_name2 with schema3
+        let log3 = LogRecord {
+            event_name: "system_alert".to_string(),
+            severity_number: 11,
+            ..Default::default()
+        };
+
+        // empty event_name (defaults to "Log") with schema4
+        let mut log4 = LogRecord {
+            event_name: "".to_string(),
+            severity_number: 12,
+            ..Default::default()
+        };
+        log4.attributes.push(KeyValue {
+            key: "error_code".to_string(),
+            value: Some(AnyValue {
+                value: Some(Value::IntValue(404)),
+            }),
+        });
+
+        let result = encoder.encode_log_batch([log1, log2, log3, log4].iter(), "test");
+
+        // Should create 3 batches: "user_action", "system_alert", "Log"
+        assert_eq!(result.len(), 3);
+
+        // Find each batch and verify counts
+        let user_action = result
+            .iter()
+            .find(|(name, _, _)| name == "user_action")
+            .unwrap();
+        let system_alert = result
+            .iter()
+            .find(|(name, _, _)| name == "system_alert")
+            .unwrap();
+        let log_batch = result.iter().find(|(name, _, _)| name == "Log").unwrap();
+
+        assert_eq!(user_action.2, 2); // 2 events with different schemas
+        assert_eq!(system_alert.2, 1); // 1 event
+        assert_eq!(log_batch.2, 1); // 1 event
+
+        // Should have 4 different schemas cached
+        assert_eq!(encoder.schema_cache.read().unwrap().len(), 4);
     }
 }
