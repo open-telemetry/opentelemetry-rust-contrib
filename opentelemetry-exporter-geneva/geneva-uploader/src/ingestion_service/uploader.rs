@@ -6,6 +6,7 @@ use reqwest::{header, Client};
 use serde::Deserialize;
 use serde_json::Value;
 use std::collections::HashMap;
+use std::error::Error as StdError;
 use std::fmt::Write;
 use std::sync::Arc;
 use std::time::Duration;
@@ -17,7 +18,7 @@ use uuid::Uuid;
 #[derive(Debug, Error)]
 pub(crate) enum GenevaUploaderError {
     #[error("HTTP error: {0}")]
-    Http(#[from] reqwest::Error),
+    Http(String),
     #[error("JSON error: {0}")]
     SerdeJson(#[from] serde_json::Error),
     #[error("Config service error: {0}")]
@@ -34,6 +35,56 @@ impl From<GenevaConfigClientError> for GenevaUploaderError {
     fn from(err: GenevaConfigClientError) -> Self {
         // This preserves the original error message format from the code
         GenevaUploaderError::ConfigClient(format!("GenevaConfigClient error: {err}"))
+    }
+}
+
+impl From<reqwest::Error> for GenevaUploaderError {
+    fn from(err: reqwest::Error) -> Self {
+        use std::fmt::Write;
+        let mut msg = String::new();
+        write!(&mut msg, "{err}").ok();
+
+        if let Some(url) = err.url() {
+            write!(msg, ", url: {url}").ok();
+        }
+        if let Some(status) = err.status() {
+            write!(msg, ", status: {status}").ok();
+        }
+
+        // Print high-level error types
+        if err.is_timeout() {
+            write!(&mut msg, ", kind: timeout").ok();
+        } else if err.is_connect() {
+            write!(&mut msg, ", kind: connect").ok();
+        } else if err.is_body() {
+            write!(&mut msg, ", kind: body").ok();
+        } else if err.is_decode() {
+            write!(&mut msg, ", kind: decode").ok();
+        } else if err.is_request() {
+            write!(&mut msg, ", kind: request").ok();
+        }
+
+        // Traverse the whole source chain for detail
+        let mut source = err.source();
+        let mut idx = 0;
+        let mut found_io = false;
+        while let Some(s) = source {
+            write!(msg, ", cause[{idx}]: {s}").ok();
+
+            // Surface io::ErrorKind if found
+            if let Some(io_err) = s.downcast_ref::<std::io::Error>() {
+                write!(msg, " (io::ErrorKind::{:?})", io_err.kind()).ok();
+                found_io = true;
+            }
+            source = s.source();
+            idx += 1;
+        }
+
+        if !found_io {
+            write!(&mut msg, ", (no io::Error in source chain)").ok();
+        }
+
+        GenevaUploaderError::Http(msg)
     }
 }
 
@@ -204,10 +255,9 @@ impl GenevaUploader {
             )
             .body(data)
             .send()
-            .await
-            .map_err(GenevaUploaderError::Http)?;
+            .await?;
         let status = response.status();
-        let body = response.text().await.map_err(GenevaUploaderError::Http)?;
+        let body = response.text().await?;
 
         if status == reqwest::StatusCode::ACCEPTED {
             let ingest_response: IngestionResponse =
