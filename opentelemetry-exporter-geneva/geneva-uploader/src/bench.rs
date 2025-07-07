@@ -161,6 +161,7 @@ mod benchmarks {
         // Benchmark 1: Different numbers of attributes
         let mut group = criterion.benchmark_group("encode_log_batch_attributes");
         for num_attrs in [0, 4, 8, 16].iter() {
+            group.throughput(Throughput::Elements(*num_attrs as u64));
             group.bench_with_input(
                 BenchmarkId::new("attributes", num_attrs),
                 num_attrs,
