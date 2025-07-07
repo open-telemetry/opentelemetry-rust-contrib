@@ -11,26 +11,9 @@ mod tests {
     };
 
     use crate::payload_encoder::bond_encoder::FieldDef;
-    use std::borrow::Cow;
 
-    fn create_payload(fields: &[FieldDef], row_data: Vec<u8>) -> Vec<u8> {
-        // Convert the input tuples to FieldDef
-        let field_defs: Vec<FieldDef> = fields
-            .iter()
-            .map(
-                |FieldDef {
-                     name,
-                     type_id,
-                     field_id,
-                 }| FieldDef {
-                    name: Cow::Owned(name.to_string()),
-                    type_id: *type_id,
-                    field_id: *field_id,
-                },
-            )
-            .collect();
-        let schema_obj =
-            BondEncodedSchema::from_fields("MdsContainer", "testNamespace", field_defs);
+    fn create_payload(fields: Vec<FieldDef>, row_data: Vec<u8>) -> Vec<u8> {
+        let schema_obj = BondEncodedSchema::from_fields("MdsContainer", "testNamespace", fields);
         let schema_bytes = schema_obj.as_bytes();
         let schema_md5 = md5::compute(schema_bytes).0;
         let schema_id = 1u64;
@@ -125,7 +108,7 @@ mod tests {
             0x64, 0x00, 0x21, 0x00, 0xde, 0xc0, 0xad, 0xde, 0xde, 0xc0, 0xad, 0xde,
         ];
 
-        let fields: &[FieldDef] = &[
+        let fields = vec![
             FieldDef {
                 name: "Float64Col".into(),
                 type_id: BondDataType::BT_DOUBLE,
