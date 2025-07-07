@@ -86,6 +86,7 @@ impl BondWriter {
     }
 
     /// Write a float value to buffer (Bond BT_FLOAT format)
+    #[allow(dead_code)]
     pub fn write_float(buffer: &mut Vec<u8>, value: f32) {
         Self::write_numeric(buffer, value);
     }

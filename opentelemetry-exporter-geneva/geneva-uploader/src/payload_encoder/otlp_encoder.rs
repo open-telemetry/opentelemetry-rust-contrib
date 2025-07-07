@@ -316,10 +316,6 @@ impl OtlpEncoder {
                 (Some(Value::IntValue(i)), BondDataType::BT_INT64) => {
                     BondWriter::write_int64(buffer, *i)
                 }
-                (Some(Value::DoubleValue(d)), BondDataType::BT_FLOAT) => {
-                    // TODO - handle double values properly
-                    BondWriter::write_float(buffer, *d as f32)
-                }
                 (Some(Value::DoubleValue(d)), BondDataType::BT_DOUBLE) => {
                     BondWriter::write_double(buffer, *d)
                 }
