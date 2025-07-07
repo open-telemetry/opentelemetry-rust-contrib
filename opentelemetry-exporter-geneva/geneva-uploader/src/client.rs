@@ -97,6 +97,21 @@ impl GenevaClient {
             return Ok(());
         }
 
+        // Fast path for single payload
+        if blobs.len() == 1 {
+            let (event_name, encoded_blob, _row_count) = blobs.into_iter().next().unwrap();
+
+            let compressed_blob = lz4_chunked_compression(&encoded_blob)
+                .map_err(|e| format!("LZ4 compression failed: {e}"))?;
+
+            return self
+                .uploader
+                .upload(compressed_blob, &event_name, "Ver2v0")
+                .await
+                .map(|_| ())
+                .map_err(|e| format!("Geneva upload failed for {}: {e}", event_name));
+        }
+
         // Create a stream from the blobs and process them in parallel
         let results: Vec<Result<(), String>> = stream::iter(blobs)
             .map(|(event_name, encoded_blob, _row_count)| {
