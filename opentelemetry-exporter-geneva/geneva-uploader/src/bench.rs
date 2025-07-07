@@ -2,7 +2,7 @@
 mod benchmarks {
     use crate::payload_encoder::lz4_chunked_compression::lz4_chunked_compression;
     use crate::payload_encoder::otlp_encoder::OtlpEncoder;
-    use criterion::{BatchSize, BenchmarkId, Criterion, Throughput};
+    use criterion::{BenchmarkId, Criterion, Throughput};
     use opentelemetry_proto::tonic::common::v1::{AnyValue, KeyValue};
     use opentelemetry_proto::tonic::logs::v1::LogRecord;
     use rand::{rngs::StdRng, Rng, SeedableRng};
