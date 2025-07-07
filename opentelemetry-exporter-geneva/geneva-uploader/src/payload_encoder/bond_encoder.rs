@@ -34,28 +34,71 @@ pub(crate) enum BondDataType {
 /// Bond protocol writer for encoding values to buffers
 pub(crate) struct BondWriter;
 
+// Trait for types that can be converted to little-endian bytes
+/// This is automatically implemented for all primitive numeric types
+trait ToLeBytes {
+    type ByteArray: AsRef<[u8]>;
+    fn to_le_bytes(self) -> Self::ByteArray;
+}
+
+// Implement for all standard numeric types
+macro_rules! impl_to_le_bytes {
+    ($($t:ty),*) => {
+        $(
+            impl ToLeBytes for $t {
+                type ByteArray = [u8; std::mem::size_of::<$t>()];
+                fn to_le_bytes(self) -> Self::ByteArray {
+                    <$t>::to_le_bytes(self)
+                }
+            }
+        )*
+    };
+}
+
+impl_to_le_bytes!(i8, i16, i32, i64, u8, u16, u32, u64, f32, f64);
+
 impl BondWriter {
+    /// Write any primitive numeric type to buffer in little-endian format
+    /// Works for i32, i64, f32, f64, u32, u64, etc.
+    fn write_numeric<T>(buffer: &mut Vec<u8>, value: T)
+    where
+        T: ToLeBytes,
+    {
+        buffer.extend_from_slice(value.to_le_bytes().as_ref());
+    }
+
     /// Write a string value to buffer (Bond BT_STRING format)
     pub fn write_string(buffer: &mut Vec<u8>, s: &str) {
         let bytes = s.as_bytes();
         //TODO - check if the length is less than 2^32-1
-        buffer.extend_from_slice(&(bytes.len() as u32).to_le_bytes());
+        Self::write_numeric(buffer, bytes.len() as u32);
         buffer.extend_from_slice(bytes);
     }
 
     /// Write an int32 value to buffer (Bond BT_INT32 format)
     pub fn write_int32(buffer: &mut Vec<u8>, value: i32) {
-        buffer.extend_from_slice(&value.to_le_bytes());
+        Self::write_numeric(buffer, value);
+    }
+
+    /// Write an int64 value to buffer (Bond BT_INT64 format)
+    pub fn write_int64(buffer: &mut Vec<u8>, value: i64) {
+        Self::write_numeric(buffer, value);
     }
 
     /// Write a float value to buffer (Bond BT_FLOAT format)
     pub fn write_float(buffer: &mut Vec<u8>, value: f32) {
-        buffer.extend_from_slice(&value.to_le_bytes());
+        Self::write_numeric(buffer, value);
     }
 
     /// Write a double value to buffer (Bond BT_DOUBLE format)
     pub fn write_double(buffer: &mut Vec<u8>, value: f64) {
-        buffer.extend_from_slice(&value.to_le_bytes());
+        Self::write_numeric(buffer, value);
+    }
+
+    /// Write a boolean value to buffer (Bond BT_BOOL format)
+    /// In Simple Binary protocol, booleans are encoded as single bytes
+    pub fn write_bool(buffer: &mut Vec<u8>, value: bool) {
+        buffer.push(if value { 1u8 } else { 0u8 });
     }
 
     /// Write a WSTRING value to buffer (Bond BT_WSTRING format)
@@ -66,13 +109,8 @@ impl BondWriter {
         // Character count (not byte count)
         // TODO - check if the length is less than 2^32-1
         // TODO - check if length is number of bytes, or number of UTF-16 code units
-        buffer.extend_from_slice(&(s.len() as u32).to_le_bytes());
+        Self::write_numeric(buffer, s.len() as u32);
         buffer.extend_from_slice(&utf16_bytes);
-    }
-
-    /// Write a boolean as int32 (Bond doesn't have native bool in Simple Binary)
-    pub fn write_bool_as_int32(buffer: &mut Vec<u8>, value: bool) {
-        Self::write_int32(buffer, if value { 1 } else { 0 });
     }
 }
 
@@ -232,6 +270,7 @@ pub(crate) fn encode_dynamic_payload<W: Write>(
         } else {
             // Write default value based on type
             match field.type_id {
+                2 => writer.write_all(&[0u8])?,              // bool - single byte
                 7 => writer.write_all(&0f32.to_le_bytes())?, // float
                 8 => writer.write_all(&0f64.to_le_bytes())?, // double
                 9 | 18 => writer.write_all(&0u32.to_le_bytes())?, // empty string
