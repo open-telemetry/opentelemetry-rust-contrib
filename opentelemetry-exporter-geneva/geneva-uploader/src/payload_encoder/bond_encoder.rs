@@ -84,6 +84,7 @@ impl BondWriter {
 
     /// Write a WSTRING value to buffer (Bond BT_WSTRING format)
     /// Character count prefix + UTF-16LE bytes
+    #[allow(dead_code)] // May be used in future, for now used in tests
     pub fn write_wstring(buffer: &mut Vec<u8>, s: &str) {
         let utf16_bytes: Vec<u8> = s.encode_utf16().flat_map(|c| c.to_le_bytes()).collect();
 
