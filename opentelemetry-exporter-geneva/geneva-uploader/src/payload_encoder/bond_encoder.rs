@@ -36,7 +36,7 @@ pub(crate) struct BondWriter;
 
 // Trait for types that can be converted to little-endian bytes
 /// This is automatically implemented for all primitive numeric types
-trait ToLeBytes {
+pub(crate) trait ToLeBytes {
     type ByteArray: AsRef<[u8]>;
     fn to_le_bytes(self) -> Self::ByteArray;
 }
@@ -55,13 +55,13 @@ macro_rules! impl_to_le_bytes {
     };
 }
 
-impl_to_le_bytes!(i8, i16, i32, i64, u8, u16, u32, u64, f32, f64);
+impl_to_le_bytes!(i32, i64, u32, f64);
 
 impl BondWriter {
     /// Write any primitive numeric type to buffer in little-endian format
     /// Works for i32, i64, f32, f64, u32, u64, etc.
     #[inline]
-    fn write_numeric<T>(buffer: &mut Vec<u8>, value: T)
+    pub fn write_numeric<T>(buffer: &mut Vec<u8>, value: T)
     where
         T: ToLeBytes,
     {
@@ -74,27 +74,6 @@ impl BondWriter {
         //TODO - check if the length is less than 2^32-1
         Self::write_numeric(buffer, bytes.len() as u32);
         buffer.extend_from_slice(bytes);
-    }
-
-    /// Write an int32 value to buffer (Bond BT_INT32 format)
-    pub fn write_int32(buffer: &mut Vec<u8>, value: i32) {
-        Self::write_numeric(buffer, value);
-    }
-
-    /// Write an int64 value to buffer (Bond BT_INT64 format)
-    pub fn write_int64(buffer: &mut Vec<u8>, value: i64) {
-        Self::write_numeric(buffer, value);
-    }
-
-    /// Write a float value to buffer (Bond BT_FLOAT format)
-    #[allow(dead_code)]
-    pub fn write_float(buffer: &mut Vec<u8>, value: f32) {
-        Self::write_numeric(buffer, value);
-    }
-
-    /// Write a double value to buffer (Bond BT_DOUBLE format)
-    pub fn write_double(buffer: &mut Vec<u8>, value: f64) {
-        Self::write_numeric(buffer, value);
     }
 
     /// Write a boolean value to buffer (Bond BT_BOOL format)

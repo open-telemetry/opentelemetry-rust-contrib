@@ -252,12 +252,14 @@ impl OtlpEncoder {
                     BondWriter::write_string(&mut buffer, hex_str);
                 }
                 FIELD_TRACE_FLAGS => {
-                    BondWriter::write_int32(&mut buffer, log.flags as i32);
+                    BondWriter::write_numeric(&mut buffer, log.flags as i32);
                 }
                 FIELD_NAME => {
                     BondWriter::write_string(&mut buffer, &log.event_name);
                 }
-                FIELD_SEVERITY_NUMBER => BondWriter::write_int32(&mut buffer, log.severity_number),
+                FIELD_SEVERITY_NUMBER => {
+                    BondWriter::write_numeric(&mut buffer, log.severity_number)
+                }
                 FIELD_SEVERITY_TEXT => {
                     BondWriter::write_string(&mut buffer, &log.severity_text);
                 }
@@ -314,10 +316,10 @@ impl OtlpEncoder {
                     BondWriter::write_wstring(buffer, s)
                 }
                 (Some(Value::IntValue(i)), BondDataType::BT_INT64) => {
-                    BondWriter::write_int64(buffer, *i)
+                    BondWriter::write_numeric(buffer, *i)
                 }
                 (Some(Value::DoubleValue(d)), BondDataType::BT_DOUBLE) => {
-                    BondWriter::write_double(buffer, *d)
+                    BondWriter::write_numeric(buffer, *d)
                 }
                 (Some(Value::BoolValue(b)), BondDataType::BT_BOOL) => {
                     // TODO - represent bool as BT_BOOL

@@ -137,9 +137,9 @@ mod tests {
         ];
 
         let mut row_data = Vec::new();
-        BondWriter::write_double(&mut row_data, 3.1415f64);
-        BondWriter::write_int32(&mut row_data, 42);
-        BondWriter::write_int64(&mut row_data, 123456789012345);
+        BondWriter::write_numeric(&mut row_data, 3.1415f64);
+        BondWriter::write_numeric(&mut row_data, 42);
+        BondWriter::write_numeric(&mut row_data, 123456789012345i64);
         BondWriter::write_bool(&mut row_data, true);
         BondWriter::write_wstring(&mut row_data, "Hello Bond!");
 
