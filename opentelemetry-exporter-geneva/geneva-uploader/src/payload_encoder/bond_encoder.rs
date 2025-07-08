@@ -60,6 +60,7 @@ impl_to_le_bytes!(i8, i16, i32, i64, u8, u16, u32, u64, f32, f64);
 impl BondWriter {
     /// Write any primitive numeric type to buffer in little-endian format
     /// Works for i32, i64, f32, f64, u32, u64, etc.
+    #[inline]
     fn write_numeric<T>(buffer: &mut Vec<u8>, value: T)
     where
         T: ToLeBytes,
