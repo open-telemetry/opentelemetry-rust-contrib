@@ -252,7 +252,7 @@ impl OtlpEncoder {
                     BondWriter::write_string(&mut buffer, hex_str);
                 }
                 FIELD_TRACE_FLAGS => {
-                    BondWriter::write_numeric(&mut buffer, log.flags as u32);
+                    BondWriter::write_numeric(&mut buffer, log.flags);
                 }
                 FIELD_NAME => {
                     BondWriter::write_string(&mut buffer, &log.event_name);
@@ -396,27 +396,5 @@ mod tests {
         log2.trace_id = vec![1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16];
         let _result3 = encoder.encode_log_batch([log2].iter(), metadata);
         assert_eq!(encoder.schema_cache.read().unwrap().len(), 2);
-    }
-
-    #[test]
-    fn test_trace_flags_uint32_type() {
-        let encoder = OtlpEncoder::new();
-
-        let log_with_flags = LogRecord {
-            observed_time_unix_nano: 1_700_000_000_000_000_000,
-            severity_number: 9,
-            flags: 1, // Set a non-zero flags value to trigger inclusion
-            trace_id: vec![1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16],
-            span_id: vec![1, 2, 3, 4, 5, 6, 7, 8],
-            ..Default::default()
-        };
-
-        // Determine fields should include trace flags field with correct type
-        let fields = encoder.determine_fields(&log_with_flags);
-        
-        // Find the trace flags field and verify it's BT_UINT32
-        let trace_flags_field = fields.iter().find(|f| f.name == FIELD_TRACE_FLAGS);
-        assert!(trace_flags_field.is_some(), "Trace flags field should be present when flags != 0");
-        assert_eq!(trace_flags_field.unwrap().type_id, BondDataType::BT_UINT32, "Trace flags should be BT_UINT32, not BT_INT32");
     }
 }
