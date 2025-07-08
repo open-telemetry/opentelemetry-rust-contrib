@@ -312,9 +312,6 @@ impl OtlpEncoder {
                 (Some(Value::StringValue(s)), BondDataType::BT_STRING) => {
                     BondWriter::write_string(buffer, s)
                 }
-                (Some(Value::StringValue(s)), BondDataType::BT_WSTRING) => {
-                    BondWriter::write_wstring(buffer, s)
-                }
                 (Some(Value::IntValue(i)), BondDataType::BT_INT64) => {
                     BondWriter::write_numeric(buffer, *i)
                 }
