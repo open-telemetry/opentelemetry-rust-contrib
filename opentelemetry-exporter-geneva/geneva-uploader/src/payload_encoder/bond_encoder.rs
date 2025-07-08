@@ -58,8 +58,8 @@ macro_rules! impl_to_le_bytes {
 impl_to_le_bytes!(i32, i64, u32, f64);
 
 impl BondWriter {
-    /// Write any primitive numeric type to buffer in little-endian format
-    /// Works for i32, i64, f32, f64, u32, u64, etc.
+    /// Write primitive numeric type to buffer in little-endian format
+    /// Works for i32, i64, u32, f64.
     #[inline]
     pub fn write_numeric<T>(buffer: &mut Vec<u8>, value: T)
     where
