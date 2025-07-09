@@ -22,9 +22,9 @@
 
 use criterion::{criterion_group, criterion_main, Criterion};
 use opentelemetry_appender_tracing::layer as tracing_layer;
+use opentelemetry_etw_logs::Processor;
 use opentelemetry_sdk::logs::SdkLoggerProvider;
 use opentelemetry_sdk::Resource;
-use opentelemetry_etw_logs::Processor;
 use tracing::error;
 use tracing_subscriber::prelude::*;
 use tracing_subscriber::Registry;
