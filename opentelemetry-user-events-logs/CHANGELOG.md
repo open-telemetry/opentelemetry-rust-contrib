@@ -20,6 +20,7 @@
   ```rust
   let processor = Processor::builder("myprovider")
       .with_event_name_callback(|record| {
+          // event_name() returns a &'static str
           record.event_name().unwrap_or("DefaultEvent")
       })
       .build()
