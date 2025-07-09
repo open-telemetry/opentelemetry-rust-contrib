@@ -11,8 +11,6 @@ name = "user_events"
 path = "src/user_events.rs"
 doc = false
 
-# below build is failing with otel v0.30. this needs to be enabled
-# while building for otel-v30
 [[bin]]
 name = "etw"
 path = "src/etw_logs.rs"
