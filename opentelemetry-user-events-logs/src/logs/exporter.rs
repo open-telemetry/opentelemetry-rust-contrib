@@ -159,7 +159,7 @@ impl UserEventsExporter {
     }
 
     /// Gets the event name from the log record using the provided callback or returns "Log" if no callback is set
-    fn get_event_name<'a>(&self, record: &'a opentelemetry_sdk::logs::SdkLogRecord) -> &'a str {
+    fn get_event_name(&self, record: &opentelemetry_sdk::logs::SdkLogRecord) -> &'static str {
         match &self.event_name_callback {
             // TODO: Add validation that the name is valid.
             Some(callback) => (callback)(record),
