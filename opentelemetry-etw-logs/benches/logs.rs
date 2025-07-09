@@ -2,7 +2,7 @@
     The benchmark results:
     criterion = "0.5.1"
 
-    Hardware: Apple M4 Pro
+    Hardware: AMD EPYC 7763 64-Core Processor 2.44 GHz, 64GB RAM, Cores:8 , Logical processors: 16
     Total Number of Cores:	16
     // When no listener
     | Test                        | Average time|
@@ -13,12 +13,12 @@
     // When listener is enabled
     | Test                        | Average time|
     |-----------------------------|-------------|
-    | Etw_4_Attributes            | 530 ns      |
-    | Etw_6_Attributes            | 586 ns      |
+    | Etw_4_Attributes            | 1.3659 µs   |
+    | Etw_6_Attributes            | 1.6487 µs   |
 */
 
 // running the following from the current directory
-// sudo -E ~/.cargo/bin/cargo bench --bench logs --all-features
+// cargo bench --bench logs --all-features
 
 use criterion::{criterion_group, criterion_main, Criterion};
 use opentelemetry_appender_tracing::layer as tracing_layer;
@@ -30,7 +30,7 @@ use tracing_subscriber::prelude::*;
 use tracing_subscriber::Registry;
 
 fn benchmark_with_ot_layer(c: &mut Criterion, name: &str, num_attributes: usize) {
-    let etw_processor = Processor::builder("myprovider").build().unwrap();
+    let etw_processor = Processor::builder("provider_name").build().unwrap();
     let provider = SdkLoggerProvider::builder()
         .with_resource(
             Resource::builder_empty()
