@@ -145,11 +145,10 @@ mod benchmarks {
 
         - Mixed event names (100 logs, 3 different event names, 4 attributes each):
             - ~168 µs/op
-
-        - To run: $cargo test --release encode_log_batch_benchmark -- --nocapture --ignored
     */
     #[test]
     #[ignore = "benchmark on crate private, ignored by default during normal test runs"]
+    // To run: $cargo test --release encode_log_batch_benchmark -- --nocapture --ignored
     fn encode_log_batch_benchmark() {
         let mut criterion = Criterion::default();
         let encoder = OtlpEncoder::new();
@@ -217,9 +216,7 @@ mod benchmarks {
         }
         group.finish();
 
-        // Benchmark 3: Schema caching effectiveness
-        let mut group = criterion.benchmark_group("encode_log_batch_schema_caching");
-
+        // Benchmark 3: Mixed event names
         let mut group = criterion.benchmark_group("encode_log_batch_mixed_event_names");
         group.bench_function("mixed_event_names", |b| {
             let mut rng = StdRng::seed_from_u64(42);
