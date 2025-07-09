@@ -137,7 +137,7 @@ mod benchmarks {
             - 8 attrs:   ~24.3 µs/op
             - 16 attrs:  ~44.1 µs/op
 
-        - Batch size scaling (each log with 4 attributes):
+        - Batch size scaling (each log with 4 attributes, all same schema):
             - 1 log:     ~1.63 µs/op
             - 10 logs:   ~16.4 µs/op
             - 100 logs:  ~161 µs/op
