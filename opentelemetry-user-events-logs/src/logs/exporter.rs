@@ -433,7 +433,7 @@ mod tests {
     fn exporter_debug() {
         let exporter = UserEventsExporter::new("test_provider", Some(Box::new(|_| "Test")));
         assert_eq!(
-            format!("{:?}", exporter),
+            format!("{exporter:?}"),
             "user_events log exporter (provider name: test_provider)"
         );
     }

@@ -516,7 +516,7 @@ mod tests {
                         false
                     }
                 })
-                .unwrap_or_else(|| panic!("Event '{}' not found", expected_name))
+                .unwrap_or_else(|| panic!("Event '{expected_name}' not found"))
         } else {
             // Just get first event when using custom callback
             events.first().expect("No events found in perf output")
