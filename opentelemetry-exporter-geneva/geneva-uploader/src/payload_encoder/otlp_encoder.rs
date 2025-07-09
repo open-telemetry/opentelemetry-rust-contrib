@@ -9,7 +9,7 @@ use std::sync::{Arc, RwLock};
 
 type SchemaCache = Arc<RwLock<HashMap<u64, (BondEncodedSchema, [u8; 16], Vec<FieldDef>)>>>;
 type BatchKey = String; //event_name
-type EncodedRow = (String, u8, u64, Vec<u8>); // (event_name, level, schema_id, row_buffer)
+type EncodedRow = (u8, u64, Vec<u8>); // (level, schema_id, row_buffer)
 type BatchValue = (Vec<CentralSchemaEntry>, Vec<EncodedRow>); // (schemas, rows)
 type LogBatches = HashMap<BatchKey, BatchValue>;
 
@@ -49,14 +49,14 @@ impl OtlpEncoder {
         let mut batches: LogBatches = HashMap::new();
 
         for log_record in logs {
-            // 1. Get schema
-            let field_specs = self.determine_fields(log_record);
+            // 1. Get schema with optimized single-pass field collection and schema ID calculation
             let event_name = if log_record.event_name.is_empty() {
                 "Log".to_string()
             } else {
                 log_record.event_name.clone()
             };
-            let schema_id = Self::calculate_schema_id(&event_name, &field_specs);
+            let (field_specs, schema_id) =
+                self.determine_fields_and_schema_id(log_record, &event_name);
 
             let (schema_entry, field_info) = self.get_or_create_schema(schema_id, field_specs);
 
@@ -78,7 +78,7 @@ impl OtlpEncoder {
             }
 
             // 6. Add encoded row to batch
-            entry.1.push((event_name, level, schema_id, row_buffer));
+            entry.1.push((level, schema_id, row_buffer));
         }
 
         // 4. Encode blobs (one per event_name, potentially multiple schemas per blob)
@@ -86,14 +86,12 @@ impl OtlpEncoder {
         for (batch_event_name, (schema_entries, records)) in batches {
             let events: Vec<CentralEventEntry> = records
                 .into_iter()
-                .map(
-                    |(event_name, level, schema_id, row_buffer)| CentralEventEntry {
-                        schema_id,
-                        level,
-                        event_name,
-                        row: row_buffer,
-                    },
-                )
+                .map(|(level, schema_id, row_buffer)| CentralEventEntry {
+                    schema_id,
+                    level,
+                    event_name: batch_event_name.clone(),
+                    row: row_buffer,
+                })
                 .collect();
             let events_len = events.len();
 
@@ -111,11 +109,24 @@ impl OtlpEncoder {
         blobs
     }
 
-    /// Determine which fields are present in the LogRecord
-    fn determine_fields(&self, log: &LogRecord) -> Vec<FieldDef> {
+    /// Determine fields and calculate schema ID in a single pass for optimal performance
+    fn determine_fields_and_schema_id(
+        &self,
+        log: &LogRecord,
+        event_name: &str,
+    ) -> (Vec<FieldDef>, u64) {
+        use std::collections::hash_map::DefaultHasher;
+        use std::hash::{Hash, Hasher};
+
         // Pre-allocate with estimated capacity to avoid reallocations
         let estimated_capacity = 7 + 4 + log.attributes.len();
         let mut fields = Vec::with_capacity(estimated_capacity);
+
+        // Initialize hasher for schema ID calculation
+        let mut hasher = DefaultHasher::new();
+        event_name.hash(&mut hasher);
+
+        // Part A - Always present fields
         fields.push((Cow::Borrowed(FIELD_ENV_NAME), BondDataType::BT_STRING as u8));
         fields.push((FIELD_ENV_VER.into(), BondDataType::BT_STRING as u8));
         fields.push((FIELD_TIMESTAMP.into(), BondDataType::BT_STRING as u8));
@@ -161,33 +172,29 @@ impl OtlpEncoder {
                 fields.push((attr.key.clone().into(), type_id));
             }
         }
-        fields.sort_by(|a, b| a.0.cmp(&b.0)); // Sort fields by name consistent schema ID generation
-        fields
+
+        // Sort fields by name for consistent schema ID generation
+        fields.sort_by(|a, b| a.0.cmp(&b.0));
+
+        // Hash field names and types while converting to FieldDef
+        let field_defs: Vec<FieldDef> = fields
             .into_iter()
             .enumerate()
-            .map(|(i, (name, type_id))| FieldDef {
-                name,
-                type_id,
-                field_id: (i + 1) as u16,
+            .map(|(i, (name, type_id))| {
+                // Hash field name and type for schema ID
+                name.hash(&mut hasher);
+                type_id.hash(&mut hasher);
+
+                FieldDef {
+                    name,
+                    type_id,
+                    field_id: (i + 1) as u16,
+                }
             })
-            .collect()
-    }
+            .collect();
 
-    /// Calculate schema ID from field specifications
-    fn calculate_schema_id(event_name: &str, fields: &[FieldDef]) -> u64 {
-        use std::collections::hash_map::DefaultHasher;
-        use std::hash::{Hash, Hasher};
-
-        let mut hasher = DefaultHasher::new();
-
-        // Hash the event name and field definitions
-        event_name.hash(&mut hasher);
-        for field in fields {
-            field.name.hash(&mut hasher);
-            field.type_id.hash(&mut hasher);
-        }
-
-        hasher.finish()
+        let schema_id = hasher.finish();
+        (field_defs, schema_id)
     }
 
     /// Get or create schema with field ordering information
