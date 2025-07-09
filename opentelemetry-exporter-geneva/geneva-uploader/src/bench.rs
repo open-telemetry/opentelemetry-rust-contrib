@@ -143,7 +143,8 @@ mod benchmarks {
             - 100 logs:  ~161 µs/op
             - 1000 logs: ~1.59 ms/op
 
-        - Schema cache effectiveness (100 log records, each with 4 attributes, all same schema):
+        - Schema cache effectiveness (100 log records, all same schema, 4 attributes each):
+            (warm cache)
             - ~165 µs/op
 
         - Mixed event names (100 logs, 3 different event names, 4 attributes each):
@@ -182,7 +183,8 @@ mod benchmarks {
                         .collect();
 
                     b.iter(|| {
-                        let res = encoder.encode_log_batch(black_box(logs.iter()), black_box(metadata));
+                        let res =
+                            encoder.encode_log_batch(black_box(logs.iter()), black_box(metadata));
                         black_box(res); // double sure the return value is generated
                     });
                 },
@@ -209,7 +211,9 @@ mod benchmarks {
                         .collect();
 
                     b.iter(|| {
-                        let res = black_box(encoder.encode_log_batch(logs.iter(), metadata));
+                        let res = black_box(
+                            encoder.encode_log_batch(black_box(logs.iter()), black_box(metadata)),
+                        );
                         black_box(res); // double sure the return value is generated
                     });
                 },
@@ -232,7 +236,9 @@ mod benchmarks {
             let _ = encoder.encode_log_batch(logs.iter().take(1), metadata);
 
             b.iter(|| {
-                let res = black_box(encoder.encode_log_batch(logs.iter(), metadata));
+                let res = black_box(
+                    encoder.encode_log_batch(black_box(logs.iter()), black_box(metadata)),
+                );
                 black_box(res); // ensure the value is used
             });
         });
@@ -252,7 +258,9 @@ mod benchmarks {
                 .collect();
 
             b.iter(|| {
-                let res = black_box(encoder.encode_log_batch(logs.iter(), metadata));
+                let res = black_box(
+                    encoder.encode_log_batch(black_box(logs.iter()), black_box(metadata)),
+                );
                 black_box(res);
             });
         });
