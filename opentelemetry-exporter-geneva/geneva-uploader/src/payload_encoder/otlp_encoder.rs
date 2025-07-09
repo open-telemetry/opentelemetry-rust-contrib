@@ -58,10 +58,10 @@ impl OtlpEncoder {
             let (field_specs, schema_id) =
                 self.determine_fields_and_schema_id(log_record, &event_name);
 
-            let (schema_entry, field_info) = self.get_or_create_schema(schema_id, field_specs);
+            let schema_entry = self.get_or_create_schema(schema_id, field_specs.clone());
 
             // 2. Encode row
-            let row_buffer = self.write_row_data(log_record, &field_info);
+            let row_buffer = self.write_row_data(log_record, &field_specs);
             let level = log_record.severity_number as u8;
 
             // 3. Create batch key
@@ -197,47 +197,39 @@ impl OtlpEncoder {
         (field_defs, schema_id)
     }
 
-    /// Get or create schema with field ordering information
+    /// Get or create schema - fields are accessible via returned schema entry
     fn get_or_create_schema(
         &self,
         schema_id: u64,
         field_info: Vec<FieldDef>,
-    ) -> (CentralSchemaEntry, Vec<FieldDef>) {
+    ) -> CentralSchemaEntry {
         // Check cache first
         {
             if let Some((schema, schema_md5)) = self.schema_cache.read().unwrap().get(&schema_id) {
-                let cached_fields = schema.fields().to_vec(); // Clone fields from cached schema
-                return (
-                    CentralSchemaEntry {
-                        id: schema_id,
-                        md5: *schema_md5,
-                        schema: schema.clone(),
-                    },
-                    cached_fields, // Return cloned fields from schema
-                );
+                return CentralSchemaEntry {
+                    id: schema_id,
+                    md5: *schema_md5,
+                    schema: schema.clone(),
+                };
             }
         }
 
-        let schema =
-            BondEncodedSchema::from_fields("OtlpLogRecord", "telemetry", field_info.clone()); //TODO - use actual struct name and namespace
+        let schema = BondEncodedSchema::from_fields("OtlpLogRecord", "telemetry", field_info); //TODO - use actual struct name and namespace
 
         let schema_bytes = schema.as_bytes();
         let schema_md5 = md5::compute(schema_bytes).0;
-        
+
         // Cache only schema and MD5 - field info is accessible via schema.fields()
         {
             let mut cache = self.schema_cache.write().unwrap();
             cache.insert(schema_id, (schema.clone(), schema_md5));
         }
 
-        (
-            CentralSchemaEntry {
-                id: schema_id,
-                md5: schema_md5,
-                schema: schema.clone(),
-            },
-            field_info, // Return the input field_info for new schemas
-        )
+        CentralSchemaEntry {
+            id: schema_id,
+            md5: schema_md5,
+            schema,
+        }
     }
 
     /// Write row data directly from LogRecord
