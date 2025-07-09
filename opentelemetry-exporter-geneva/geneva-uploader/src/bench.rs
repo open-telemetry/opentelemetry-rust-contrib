@@ -143,10 +143,6 @@ mod benchmarks {
             - 100 logs:  ~161 µs/op
             - 1000 logs: ~1.59 ms/op
 
-        - Schema cache effectiveness (100 log records, all same schema, 4 attributes each):
-            (warm cache)
-            - ~165 µs/op
-
         - Mixed event names (100 logs, 3 different event names, 4 attributes each):
             - ~168 µs/op
 
@@ -223,26 +219,6 @@ mod benchmarks {
 
         // Benchmark 3: Schema caching effectiveness
         let mut group = criterion.benchmark_group("encode_log_batch_schema_caching");
-
-        // Same schema (should hit cache)
-        // All logs have 4 attributes, same schema
-        group.bench_function("same_schema", |b| {
-            let mut rng = StdRng::seed_from_u64(42);
-            let logs: Vec<LogRecord> = (0..100)
-                .map(|i| create_log_with_attributes(1_700_000_000_000_000_000 + i, 4, &mut rng))
-                .collect();
-
-            // Warm up the cache
-            let _ = encoder.encode_log_batch(logs.iter().take(1), metadata);
-
-            b.iter(|| {
-                let res = black_box(
-                    encoder.encode_log_batch(black_box(logs.iter()), black_box(metadata)),
-                );
-                black_box(res); // ensure the value is used
-            });
-        });
-        group.finish();
 
         let mut group = criterion.benchmark_group("encode_log_batch_mixed_event_names");
         group.bench_function("mixed_event_names", |b| {
