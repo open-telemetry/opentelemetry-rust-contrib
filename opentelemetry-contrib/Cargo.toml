@@ -1,6 +1,6 @@
 [package]
 name = "opentelemetry-contrib"
-version = "0.21.0"
+version = "0.22.0"
 description = "Rust contrib repo for OpenTelemetry"
 homepage = "https://github.com/open-telemetry/opentelemetry-rust-contrib/tree/main/opentelemetry-contrib"
 repository = "https://github.com/open-telemetry/opentelemetry-rust-contrib/tree/main/opentelemetry-contrib"
@@ -40,7 +40,7 @@ futures-util = { version = "0.3", default-features = false, features = ["std"] }
 opentelemetry_sdk = { workspace = true, features = ["trace", "testing"] }
 
 [target.'cfg(not(target_os = "windows"))'.dev-dependencies]
-pprof = { version = "0.14", features = ["flamegraph", "criterion"] }
+pprof = { version = "0.15", features = ["flamegraph", "criterion"] }
 
 [[bench]]
 name = "new_span"

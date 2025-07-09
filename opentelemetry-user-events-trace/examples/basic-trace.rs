@@ -48,6 +48,6 @@ fn main() {
 
     let status = tracer_provider.shutdown();
     if let Err(e) = status {
-        println!("Error shutting down: {:?}", e);
+        println!("Error shutting down: {e:?}");
     }
 }

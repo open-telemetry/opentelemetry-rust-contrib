@@ -2,6 +2,14 @@
 
 ## vNext
 
+## v0.11.0
+
+Released 2025-May-27
+
+- Bump opentelemetry and opentelemetry_sdk versions to 0.30
+- Bump opentelemetry-proto version to 0.30
+- Optimize proto transformations to reduce allocations
+
 ## v0.10.0
 
 - Bump opentelemetry and opentelemetry_sdk versions to 0.29

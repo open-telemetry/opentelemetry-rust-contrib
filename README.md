@@ -70,9 +70,13 @@ you're more than welcome to participate!
 * [Lalit Kumar Bhasin](https://github.com/lalitb)
 * [Zhongyang Wu](https://github.com/TommyCpp)
 
+For more information about the maintainer role, see the [community repository](https://github.com/open-telemetry/community/blob/main/guides/contributor/membership.md#maintainer).
+
 ### Approvers
 
 * [Shaun Cox](https://github.com/shaun-cox)
+
+For more information about the approver role, see the [community repository](https://github.com/open-telemetry/community/blob/main/guides/contributor/membership.md#approver).
 
 ### Emeritus
 
@@ -80,6 +84,8 @@ you're more than welcome to participate!
 * [Jan Kühle](https://github.com/frigus02)
 * [Isobel Redelmeier](https://github.com/iredelmeier)
 * [Mike Goldsmith](https://github.com/MikeGoldsmith)
+
+For more information about the emeritus role, see the [community repository](https://github.com/open-telemetry/community/blob/main/guides/contributor/membership.md#emeritus-maintainerapprovertriager).
 
 ### Thanks to all the people who have contributed
 

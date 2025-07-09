@@ -39,7 +39,13 @@ use lz4_flex::block::{compress_into, get_maximum_output_size};
 pub(crate) fn lz4_chunked_compression(
     input: &[u8],
 ) -> Result<Vec<u8>, lz4_flex::block::CompressError> {
-    const CHUNK_SIZE: usize = 64 * 1024;
+    lz4_chunked_compression_custom::<{ 64 * 1024 }>(input)
+}
+
+#[allow(dead_code)]
+pub(crate) fn lz4_chunked_compression_custom<const CHUNK_SIZE: usize>(
+    input: &[u8],
+) -> Result<Vec<u8>, lz4_flex::block::CompressError> {
     let max_chunk_compressed = get_maximum_output_size(CHUNK_SIZE);
 
     // Pre-allocate an output buffer large enough for the worst-case total output size:
