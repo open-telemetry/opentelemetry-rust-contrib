@@ -104,7 +104,7 @@ impl ProcessorBuilder {
     #[cfg(feature = "logs_unstable_etw_event_name_from_callback")]
     pub fn etw_event_name_from_callback(
         mut self,
-        callback: impl Fn(&SdkLogRecord) -> &str + Send + Sync + 'static,
+        callback: impl Fn(&SdkLogRecord) -> &'static str + Send + Sync + 'static,
     ) -> Self {
         self.options = self.options.etw_event_name_from_callback(callback);
         self
