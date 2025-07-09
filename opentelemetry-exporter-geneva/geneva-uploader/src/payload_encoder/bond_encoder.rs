@@ -4,7 +4,7 @@ use std::borrow::Cow;
 use std::io::{Result, Write};
 
 /// Bond data types
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Copy, Debug, Hash, PartialEq, Eq)]
 #[repr(u8)]
 #[allow(non_camel_case_types)] // Allow C-style naming for clarity with Bond protocol
 #[allow(dead_code)] // These represent all possible Bond types, not all are used yet
@@ -34,45 +34,65 @@ pub(crate) enum BondDataType {
 /// Bond protocol writer for encoding values to buffers
 pub(crate) struct BondWriter;
 
+// Trait for types that can be converted to little-endian bytes
+/// This is automatically implemented for all primitive numeric types
+pub(crate) trait ToLeBytes {
+    type ByteArray: AsRef<[u8]>;
+    fn to_le_bytes(self) -> Self::ByteArray;
+}
+
+// Implement for all standard numeric types
+macro_rules! impl_to_le_bytes {
+    ($($t:ty),*) => {
+        $(
+            impl ToLeBytes for $t {
+                type ByteArray = [u8; std::mem::size_of::<$t>()];
+                fn to_le_bytes(self) -> Self::ByteArray {
+                    <$t>::to_le_bytes(self)
+                }
+            }
+        )*
+    };
+}
+
+impl_to_le_bytes!(i32, i64, u32, f64);
+
 impl BondWriter {
+    /// Write primitive numeric type to buffer in little-endian format
+    /// Works for i32, i64, u32, f64.
+    #[inline]
+    pub fn write_numeric<T>(buffer: &mut Vec<u8>, value: T)
+    where
+        T: ToLeBytes,
+    {
+        buffer.extend_from_slice(value.to_le_bytes().as_ref());
+    }
+
     /// Write a string value to buffer (Bond BT_STRING format)
     pub fn write_string(buffer: &mut Vec<u8>, s: &str) {
         let bytes = s.as_bytes();
         //TODO - check if the length is less than 2^32-1
-        buffer.extend_from_slice(&(bytes.len() as u32).to_le_bytes());
+        Self::write_numeric(buffer, bytes.len() as u32);
         buffer.extend_from_slice(bytes);
     }
 
-    /// Write an int32 value to buffer (Bond BT_INT32 format)
-    pub fn write_int32(buffer: &mut Vec<u8>, value: i32) {
-        buffer.extend_from_slice(&value.to_le_bytes());
-    }
-
-    /// Write a float value to buffer (Bond BT_FLOAT format)
-    pub fn write_float(buffer: &mut Vec<u8>, value: f32) {
-        buffer.extend_from_slice(&value.to_le_bytes());
-    }
-
-    /// Write a double value to buffer (Bond BT_DOUBLE format)
-    pub fn write_double(buffer: &mut Vec<u8>, value: f64) {
-        buffer.extend_from_slice(&value.to_le_bytes());
+    /// Write a boolean value to buffer (Bond BT_BOOL format)
+    /// In Simple Binary protocol, booleans are encoded as single bytes
+    pub fn write_bool(buffer: &mut Vec<u8>, value: bool) {
+        buffer.push(if value { 1u8 } else { 0u8 });
     }
 
     /// Write a WSTRING value to buffer (Bond BT_WSTRING format)
     /// Character count prefix + UTF-16LE bytes
+    #[allow(dead_code)] // May be used in future, for now used in tests
     pub fn write_wstring(buffer: &mut Vec<u8>, s: &str) {
         let utf16_bytes: Vec<u8> = s.encode_utf16().flat_map(|c| c.to_le_bytes()).collect();
 
         // Character count (not byte count)
         // TODO - check if the length is less than 2^32-1
         // TODO - check if length is number of bytes, or number of UTF-16 code units
-        buffer.extend_from_slice(&(s.len() as u32).to_le_bytes());
+        Self::write_numeric(buffer, s.len() as u32);
         buffer.extend_from_slice(&utf16_bytes);
-    }
-
-    /// Write a boolean as int32 (Bond doesn't have native bool in Simple Binary)
-    pub fn write_bool_as_int32(buffer: &mut Vec<u8>, value: bool) {
-        Self::write_int32(buffer, if value { 1 } else { 0 });
     }
 }
 
@@ -81,7 +101,7 @@ impl BondWriter {
 pub(crate) struct FieldDef {
     pub name: Cow<'static, str>,
     pub field_id: u16,
-    pub type_id: u8,
+    pub type_id: BondDataType,
 }
 
 /// Schema definition that can be built dynamically
@@ -193,7 +213,7 @@ fn write_field_def<W: Write>(writer: &mut W, field: &FieldDef, is_last: bool) ->
     writer.write_all(&field.field_id.to_le_bytes())?;
 
     // Type
-    writer.write_all(&[field.type_id])?;
+    writer.write_all(&[field.type_id as u8])?;
 
     // Additional type info (all zeros for primitives)
     writer.write_all(&0u16.to_le_bytes())?; // struct_def
@@ -232,12 +252,15 @@ pub(crate) fn encode_dynamic_payload<W: Write>(
         } else {
             // Write default value based on type
             match field.type_id {
-                7 => writer.write_all(&0f32.to_le_bytes())?, // float
-                8 => writer.write_all(&0f64.to_le_bytes())?, // double
-                9 | 18 => writer.write_all(&0u32.to_le_bytes())?, // empty string
-                16 => writer.write_all(&0i32.to_le_bytes())?, // int32
-                17 => writer.write_all(&0i64.to_le_bytes())?, // int64
-                _ => {}                                      // Handle other types as needed
+                BondDataType::BT_BOOL => writer.write_all(&[0u8])?, // bool - single byte
+                BondDataType::BT_FLOAT => writer.write_all(&0f32.to_le_bytes())?, // float
+                BondDataType::BT_DOUBLE => writer.write_all(&0f64.to_le_bytes())?, // double
+                BondDataType::BT_STRING | BondDataType::BT_WSTRING => {
+                    writer.write_all(&0u32.to_le_bytes())?
+                } // empty string
+                BondDataType::BT_INT32 => writer.write_all(&0i32.to_le_bytes())?, // int32
+                BondDataType::BT_INT64 => writer.write_all(&0i64.to_le_bytes())?, // int64
+                _ => {}                                             // Handle other types as needed
             }
         }
     }
@@ -287,17 +310,17 @@ mod tests {
         let fields = vec![
             FieldDef {
                 name: Cow::Borrowed("field1"),
-                type_id: BondDataType::BT_DOUBLE as u8,
+                type_id: BondDataType::BT_DOUBLE,
                 field_id: 1,
             },
             FieldDef {
                 name: Cow::Borrowed("field2"),
-                type_id: BondDataType::BT_STRING as u8,
+                type_id: BondDataType::BT_STRING,
                 field_id: 2,
             },
             FieldDef {
                 name: Cow::Borrowed("field3"),
-                type_id: BondDataType::BT_INT32 as u8,
+                type_id: BondDataType::BT_INT32,
                 field_id: 3,
             },
         ];
@@ -312,17 +335,17 @@ mod tests {
         let fields = vec![
             FieldDef {
                 name: Cow::Borrowed("timestamp"),
-                type_id: BondDataType::BT_STRING as u8,
+                type_id: BondDataType::BT_STRING,
                 field_id: 1,
             },
             FieldDef {
                 name: Cow::Borrowed("severity"),
-                type_id: BondDataType::BT_INT32 as u8,
+                type_id: BondDataType::BT_INT32,
                 field_id: 2,
             },
             FieldDef {
                 name: Cow::Borrowed("message"),
-                type_id: BondDataType::BT_STRING as u8,
+                type_id: BondDataType::BT_STRING,
                 field_id: 3,
             },
         ];
@@ -339,12 +362,12 @@ mod tests {
         let fields = vec![
             FieldDef {
                 name: Cow::Owned(dynamic_field_name),
-                type_id: BondDataType::BT_STRING as u8,
+                type_id: BondDataType::BT_STRING,
                 field_id: 1,
             },
             FieldDef {
                 name: Cow::Borrowed("static_field"),
-                type_id: BondDataType::BT_INT32 as u8,
+                type_id: BondDataType::BT_INT32,
                 field_id: 2,
             },
         ];
