@@ -288,6 +288,11 @@ impl BondEncodedSchema {
     pub(crate) fn as_bytes(&self) -> &[u8] {
         &self.encoded_bytes
     }
+
+    /// Access the fields from the schema (eliminates need for separate field storage)
+    pub(crate) fn fields(&self) -> &[FieldDef] {
+        &self.schema.fields
+    }
 }
 
 impl Clone for BondEncodedSchema {

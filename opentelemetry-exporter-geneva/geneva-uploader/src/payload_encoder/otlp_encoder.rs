@@ -7,7 +7,7 @@ use std::borrow::Cow;
 use std::collections::HashMap;
 use std::sync::{Arc, RwLock};
 
-type SchemaCache = Arc<RwLock<HashMap<u64, (BondEncodedSchema, [u8; 16], Vec<FieldDef>)>>>;
+type SchemaCache = Arc<RwLock<HashMap<u64, (BondEncodedSchema, [u8; 16])>>>;
 type BatchKey = String; //event_name
 type EncodedRow = (u8, u64, Vec<u8>); // (level, schema_id, row_buffer)
 type BatchValue = (Vec<CentralSchemaEntry>, Vec<EncodedRow>); // (schemas, rows)
@@ -204,17 +204,18 @@ impl OtlpEncoder {
         field_info: Vec<FieldDef>,
     ) -> (CentralSchemaEntry, Vec<FieldDef>) {
         // Check cache first
-        if let Some((schema, schema_md5, field_info)) =
-            self.schema_cache.read().unwrap().get(&schema_id)
         {
-            return (
-                CentralSchemaEntry {
-                    id: schema_id,
-                    md5: *schema_md5,
-                    schema: schema.clone(),
-                },
-                field_info.clone(),
-            );
+            if let Some((schema, schema_md5)) = self.schema_cache.read().unwrap().get(&schema_id) {
+                let cached_fields = schema.fields().to_vec(); // Clone fields from cached schema
+                return (
+                    CentralSchemaEntry {
+                        id: schema_id,
+                        md5: *schema_md5,
+                        schema: schema.clone(),
+                    },
+                    cached_fields, // Return cloned fields from schema
+                );
+            }
         }
 
         let schema =
@@ -222,29 +223,20 @@ impl OtlpEncoder {
 
         let schema_bytes = schema.as_bytes();
         let schema_md5 = md5::compute(schema_bytes).0;
-        // Cache the schema and field info
+        
+        // Cache only schema and MD5 - field info is accessible via schema.fields()
         {
             let mut cache = self.schema_cache.write().unwrap();
-            // TODO: Refactor to eliminate field_info duplication in cache
-            // The field information (name, type_id, order) is already stored in BondEncodedSchema's
-            // DynamicSchema.fields vector. We should:
-            // 1. Ensure DynamicSchema maintains fields in sorted order
-            // 2. Add a method to BondEncodedSchema to iterate fields for row encoding
-            // 3. Remove field_info from cache tuple to reduce memory usage and cloning overhead
-            // This would require updating write_row_data() to work with DynamicSchema fields directly
-            cache.insert(schema_id, (schema.clone(), schema_md5, field_info.clone()));
+            cache.insert(schema_id, (schema.clone(), schema_md5));
         }
-
-        let schema_bytes = schema.as_bytes();
-        let schema_md5 = md5::compute(schema_bytes).0;
 
         (
             CentralSchemaEntry {
                 id: schema_id,
                 md5: schema_md5,
-                schema,
+                schema: schema.clone(),
             },
-            field_info,
+            field_info, // Return the input field_info for new schemas
         )
     }
 
