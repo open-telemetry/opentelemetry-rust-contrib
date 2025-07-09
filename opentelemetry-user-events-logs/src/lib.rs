@@ -391,7 +391,7 @@ mod tests {
         trace_point: &str,
         event_name_callback: Option<F>,
     ) where
-        F: Fn(&opentelemetry_sdk::logs::SdkLogRecord) -> &str + Send + Sync + 'static,
+        F: Fn(&opentelemetry_sdk::logs::SdkLogRecord) -> &'static str + Send + Sync + 'static,
     {
         use opentelemetry::logs::AnyValue;
         use opentelemetry::logs::LogRecord;
@@ -559,7 +559,7 @@ mod tests {
         // sudo -E ~/.cargo/bin/cargo test integration_test_direct -- --nocapture --ignored
 
         // Specify None with explicit type for the event name callback
-        let none_callback: Option<fn(&opentelemetry_sdk::logs::SdkLogRecord) -> &str> = None;
+        let none_callback: Option<fn(&opentelemetry_sdk::logs::SdkLogRecord) -> &'static str> = None;
 
         integration_test_direct_helper(
             Severity::Debug,
@@ -597,12 +597,12 @@ mod tests {
         // sudo -E ~/.cargo/bin/cargo test integration_test_direct_with_custom_event_name -- --nocapture --ignored
 
         // Simple callback that returns a hardcoded event name
-        fn custom_event_name_callback(_record: &opentelemetry_sdk::logs::SdkLogRecord) -> &str {
+        fn custom_event_name_callback(_record: &opentelemetry_sdk::logs::SdkLogRecord) -> &'static str {
             "CustomEventName"
         }
 
         // Test with a single severity level using the custom callback
-        integration_test_direct_helper::<fn(&opentelemetry_sdk::logs::SdkLogRecord) -> &str>(
+        integration_test_direct_helper::<fn(&opentelemetry_sdk::logs::SdkLogRecord) -> &'static str>(
             Severity::Error, // Using ERROR severity
             "user_events:myprovider_L2K1",
             Some(custom_event_name_callback),

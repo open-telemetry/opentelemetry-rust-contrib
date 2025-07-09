@@ -13,7 +13,7 @@ thread_local! { static EBW: RefCell<EventBuilder> = RefCell::new(EventBuilder::n
 
 /// Type alias for the event name callback function
 pub(crate) type EventNameCallback =
-    Box<dyn Fn(&opentelemetry_sdk::logs::SdkLogRecord) -> &str + Send + Sync + 'static>;
+    Box<dyn Fn(&opentelemetry_sdk::logs::SdkLogRecord) -> &'static str + Send + Sync + 'static>;
 
 /// UserEventsExporter is a log exporter that exports logs in EventHeader format to user_events tracepoint.
 pub(crate) struct UserEventsExporter {
