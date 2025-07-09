@@ -417,7 +417,7 @@ mod tests {
         let mut processor_builder = Processor::builder("myprovider");
         #[cfg(not(feature = "experimental_eventname_callback"))]
         let processor_builder = Processor::builder("myprovider");
-        
+
         #[cfg(feature = "experimental_eventname_callback")]
         if let Some(callback) = event_name_callback {
             processor_builder = processor_builder.with_event_name_callback(callback);
@@ -564,7 +564,8 @@ mod tests {
         // sudo -E ~/.cargo/bin/cargo test integration_test_direct -- --nocapture --ignored
 
         // Specify None with explicit type for the event name callback
-        let none_callback: Option<fn(&opentelemetry_sdk::logs::SdkLogRecord) -> &'static str> = None;
+        let none_callback: Option<fn(&opentelemetry_sdk::logs::SdkLogRecord) -> &'static str> =
+            None;
 
         integration_test_direct_helper(
             Severity::Debug,
@@ -602,7 +603,9 @@ mod tests {
         // sudo -E ~/.cargo/bin/cargo test integration_test_direct_with_custom_event_name -- --nocapture --ignored
 
         // Simple callback that returns a hardcoded event name
-        fn custom_event_name_callback(_record: &opentelemetry_sdk::logs::SdkLogRecord) -> &'static str {
+        fn custom_event_name_callback(
+            _record: &opentelemetry_sdk::logs::SdkLogRecord,
+        ) -> &'static str {
             "CustomEventName"
         }
 
