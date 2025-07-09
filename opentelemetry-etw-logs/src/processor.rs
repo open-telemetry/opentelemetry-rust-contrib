@@ -85,16 +85,28 @@ impl opentelemetry_sdk::logs::LogProcessor for Processor {
 #[derive(Debug)]
 pub struct ProcessorBuilder {
     options: Options,
+    cross_compat_provider_name: bool,
 }
 
 impl ProcessorBuilder {
     /// Creates a new instance of [`ProcessorBuilder`] with the given provider name.
     ///
+    /// The provider name must contain only ASCII alphanumeric characters or '_'.
+    ///
     /// By default, all events will be exported to the "Log" ETW event.
     pub(crate) fn new(provider_name: &str) -> Self {
         ProcessorBuilder {
             options: Options::new(provider_name.to_string()),
+            cross_compat_provider_name: true,
         }
+    }
+
+    /// Disables the cross-compatibility provider name with UserEvents (Linux).
+    ///
+    /// Allows the processor to use a provider name that is not compatible with UserEvents, but conforming with ETW requirements which allows hyphens (`-`).
+    pub fn disable_cross_compat_provider_name(mut self) -> Self {
+        self.cross_compat_provider_name = false;
+        self
     }
 
     /// Sets a user-defined callback that returns the ETW event name, using the the [`SdkLogRecord`] as input.
@@ -118,21 +130,32 @@ impl ProcessorBuilder {
     }
 
     fn validate(&self) -> Result<(), Box<dyn Error>> {
-        validate_provider_name(self.options.provider_name())?;
+        validate_provider_name(
+            self.options.provider_name(),
+            self.cross_compat_provider_name,
+        )?;
         Ok(())
     }
 }
 
-fn validate_provider_name(provider_name: &str) -> Result<(), Box<dyn Error>> {
+fn validate_provider_name(
+    provider_name: &str,
+    cross_compat_provider_name: bool,
+) -> Result<(), Box<dyn Error>> {
     if provider_name.is_empty() {
         return Err("Provider name must not be empty.".into());
     }
     if provider_name.len() >= 234 {
         return Err("Provider name must be less than 234 characters long.".into());
     }
+
+    if cross_compat_provider_name && provider_name.contains('-') {
+        return Err("Provider name must not contain hyphens ('-') when cross-compatibility with UserEvents is enabled (default).".into());
+    }
+
     if !provider_name
         .chars()
-        .all(|c| c.is_ascii_alphanumeric() || c == '_')
+        .all(|c| c.is_ascii_alphanumeric() || c == '_' || (!cross_compat_provider_name && c == '-'))
     {
         return Err("Provider name must contain only ASCII alphanumeric characters or '_'.".into());
     }
@@ -276,33 +299,82 @@ mod tests {
     }
 
     #[test]
-    fn test_validate_provider_name() {
-        let result = validate_provider_name("valid_provider_name");
+    fn test_validate_cross_compat_name_not_using_hyphens() {
+        assert_eq!(
+            Processor::builder("i_have_a_-_")
+                .build()
+                .unwrap_err()
+                .to_string(),
+            "Provider name must not contain hyphens ('-') when cross-compatibility with UserEvents is enabled (default)."
+        );
+    }
+
+    #[test]
+    fn test_validate_provider_name_cross_compat_enabled() {
+        let cross_compat: bool = true;
+
+        let result = validate_provider_name("valid_provider_name", cross_compat);
         assert!(result.is_ok());
 
-        let result = validate_provider_name("");
+        let result = validate_provider_name("", cross_compat);
         assert!(result.is_err());
 
-        let result = validate_provider_name("a".repeat(235).as_str());
+        let result = validate_provider_name("a".repeat(235).as_str(), cross_compat);
         assert!(result.is_err());
 
-        let result = validate_provider_name("i_have_a_-_");
+        let result = validate_provider_name("i_have_a_-_", cross_compat);
         assert!(result.is_err());
 
-        let result = validate_provider_name("_?_");
+        let result = validate_provider_name("_?_", cross_compat);
         assert!(result.is_err());
 
-        let result = validate_provider_name("abcdefghijklmnopqrstuvwxyz");
+        let result = validate_provider_name("abcdefghijklmnopqrstuvwxyz", cross_compat);
         assert!(result.is_ok());
 
-        let result = validate_provider_name("ABCDEFGHIJKLMNOPQRSTUVWXYZ");
+        let result = validate_provider_name("ABCDEFGHIJKLMNOPQRSTUVWXYZ", cross_compat);
         assert!(result.is_ok());
 
-        let result = validate_provider_name("1234567890");
+        let result = validate_provider_name("1234567890", cross_compat);
         assert!(result.is_ok());
 
         let result = validate_provider_name(
             "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ1234567890_",
+            cross_compat,
+        );
+        assert!(result.is_ok());
+    }
+
+    #[test]
+    fn test_validate_provider_name_cross_compat_disabled() {
+        let cross_compat: bool = false;
+
+        let result = validate_provider_name("valid_provider_name", cross_compat);
+        assert!(result.is_ok());
+
+        let result = validate_provider_name("", cross_compat);
+        assert!(result.is_err());
+
+        let result = validate_provider_name("a".repeat(235).as_str(), cross_compat);
+        assert!(result.is_err());
+
+        let result = validate_provider_name("i_have_a_-_", cross_compat);
+        assert!(result.is_ok());
+
+        let result = validate_provider_name("_?_", cross_compat);
+        assert!(result.is_err());
+
+        let result = validate_provider_name("abcdefghijklmnopqrstuvwxyz", cross_compat);
+        assert!(result.is_ok());
+
+        let result = validate_provider_name("ABCDEFGHIJKLMNOPQRSTUVWXYZ", cross_compat);
+        assert!(result.is_ok());
+
+        let result = validate_provider_name("1234567890", cross_compat);
+        assert!(result.is_ok());
+
+        let result = validate_provider_name(
+            "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ1234567890_",
+            cross_compat,
         );
         assert!(result.is_ok());
     }
