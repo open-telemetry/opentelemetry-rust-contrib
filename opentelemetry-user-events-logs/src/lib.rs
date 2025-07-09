@@ -413,7 +413,12 @@ mod tests {
         };
 
         // Create processor builder and add callback if provided
+        #[cfg(feature = "experimental_eventname_callback")]
         let mut processor_builder = Processor::builder("myprovider");
+        #[cfg(not(feature = "experimental_eventname_callback"))]
+        let processor_builder = Processor::builder("myprovider");
+        
+        #[cfg(feature = "experimental_eventname_callback")]
         if let Some(callback) = event_name_callback {
             processor_builder = processor_builder.with_event_name_callback(callback);
         }

@@ -134,6 +134,7 @@ impl<'a> ProcessorBuilder<'a> {
     ///     .build()
     ///     .unwrap();
     /// ```
+    #[cfg(feature = "experimental_eventname_callback")]
     pub fn with_event_name_callback(
         mut self,
         callback: impl Fn(&opentelemetry_sdk::logs::SdkLogRecord) -> &'static str + Send + Sync + 'static,
@@ -307,6 +308,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg(feature = "experimental_eventname_callback")]
     fn test_event_name_callback() {
         use opentelemetry::logs::LogRecord;
 
