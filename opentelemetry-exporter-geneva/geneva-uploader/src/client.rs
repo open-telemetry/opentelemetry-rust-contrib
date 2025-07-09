@@ -7,9 +7,6 @@ use crate::payload_encoder::otlp_encoder::OtlpEncoder;
 use opentelemetry_proto::tonic::logs::v1::ResourceLogs;
 use std::sync::Arc;
 
-use futures::stream::{self, StreamExt};
-use tokio::task;
-
 /// Configuration for GenevaClient (user-facing)
 #[derive(Clone, Debug)]
 pub struct GenevaClientConfig {
