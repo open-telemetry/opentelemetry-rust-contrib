@@ -74,7 +74,7 @@ mod benchmarks {
             observed_time_unix_nano: timestamp,
             severity_number: 9,
             severity_text: "INFO".to_string(),
-            event_name: format!("Event_{}Attrs", num_attributes),
+            event_name: format!("Event_{num_attributes}Attrs"),
             body: Some(AnyValue {
                 value: Some(
                     opentelemetry_proto::tonic::common::v1::any_value::Value::StringValue(
@@ -87,7 +87,7 @@ mod benchmarks {
 
         // Add attributes with different types
         for i in 0..num_attributes {
-            let key = format!("attr_{}", i);
+            let key = format!("attr_{i}");
             let value = match i % 4 {
                 0 => AnyValue {
                     value: Some(
