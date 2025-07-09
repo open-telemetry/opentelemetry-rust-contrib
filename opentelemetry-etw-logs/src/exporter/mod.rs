@@ -1,3 +1,4 @@
+use std::cell::RefCell;
 use std::fmt::Debug;
 use std::pin::Pin;
 use std::sync::Arc;
@@ -15,6 +16,11 @@ mod part_b;
 mod part_c;
 
 pub(crate) use options::Options;
+
+// Thread-local EventBuilder to avoid heap allocations on every export.
+thread_local! {
+    static EVENT_BUILDER: RefCell<tld::EventBuilder> = RefCell::new(tld::EventBuilder::new());
+}
 
 #[derive(Default)]
 struct Resource {
@@ -90,33 +96,36 @@ impl ETWExporter {
 
         let event_tags: u32 = 0; // TBD name and event_tag values
         let field_tag: u32 = 0;
-        let mut event = tld::EventBuilder::new();
 
-        // reset
-        event.reset(
-            self.options.get_etw_event_name(log_record),
-            level,
-            Self::KEYWORD,
-            event_tags,
-        );
+        EVENT_BUILDER.with(|event_builder| {
+            let mut event = event_builder.borrow_mut();
 
-        event.add_u16("__csver__", 1024, tld::OutType::Unsigned, field_tag); // 0x400 hex
+            // reset
+            event.reset(
+                self.options.get_etw_event_name(log_record),
+                level,
+                Self::KEYWORD,
+                event_tags,
+            );
 
-        part_a::populate_part_a(&mut event, &self.resource, log_record, field_tag);
+            event.add_u16("__csver__", 1024, tld::OutType::Unsigned, field_tag); // 0x400 hex
 
-        let event_id = part_c::populate_part_c(&mut event, log_record, field_tag);
+            part_a::populate_part_a(&mut event, &self.resource, log_record, field_tag);
 
-        part_b::populate_part_b(&mut event, log_record, otel_level, event_id);
+            let event_id = part_c::populate_part_c(&mut event, log_record, field_tag);
 
-        // Write event to ETW
-        let result = event.write(&self.provider, None, None);
+            part_b::populate_part_b(&mut event, log_record, otel_level, event_id);
 
-        match result {
-            0 => Ok(()),
-            _ => Err(OTelSdkError::InternalFailure(format!(
-                "Failed to write event to ETW. ETW reason: {result}"
-            ))),
-        }
+            // Write event to ETW
+            let result = event.write(&self.provider, None, None);
+
+            match result {
+                0 => Ok(()),
+                _ => Err(OTelSdkError::InternalFailure(format!(
+                    "Failed to write event to ETW. ETW reason: {result}"
+                ))),
+            }
+        })
     }
 }
 
