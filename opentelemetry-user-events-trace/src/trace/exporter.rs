@@ -85,7 +85,7 @@ impl UserEventsSpanExporter {
         let mut eventheader_provider = Provider::new(provider_name, &Provider::new_options());
         let keyword = 1;
         let event_set = eventheader_provider.register_set(Level::Informational, keyword);
-        otel_debug!(name: "UserEvents.Created", provider_name = provider_name);
+        otel_debug!(name: "UserEvents.Created", provider_name = provider_name, event_set = format!("{:?}", event_set));
         let name = eventheader_provider.name().to_string();
 
         Ok(UserEventsSpanExporter {
