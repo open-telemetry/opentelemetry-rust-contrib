@@ -33,7 +33,7 @@ use opentelemetry_sdk::trace::SpanExporter;
 
 impl SpanExporter for UserEventsSpanExporter {
     async fn export(&self, batch: Vec<SpanData>) -> OTelSdkResult {
-        if let Some(span) = batch.iter().next() {
+        if let Some(span) = batch.first() {
             self.export_span(span)
         } else {
             Err(OTelSdkError::InternalFailure(
