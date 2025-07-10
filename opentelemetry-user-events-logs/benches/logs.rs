@@ -43,7 +43,7 @@ fn setup_provider() -> SdkLoggerProvider {
                 .build(),
         )
         .with_log_processor(user_event_processor)
-        .build();
+        .build()
 }
 
 fn benchmark_4_attributes(c: &mut Criterion) {
