@@ -334,7 +334,9 @@ mod tests {
 
     #[test]
     fn test_validate_etw_compat_name_using_hyphens() {
-        assert!(Processor::builder_etw_compat_only("i_have_a_-_").build().is_ok());
+        assert!(Processor::builder_etw_compat_only("i_have_a_-_")
+            .build()
+            .is_ok());
     }
 
     #[test]
