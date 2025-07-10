@@ -48,16 +48,16 @@ impl Options {
     )]
     pub(crate) fn etw_event_name_from_callback(
         mut self,
-        callback: impl Fn(&SdkLogRecord) -> &str + Send + Sync + 'static,
+        callback: impl Fn(&SdkLogRecord) -> &'static str + Send + Sync + 'static,
     ) -> Self {
         self.event_name_callback = Some(Box::new(callback));
         self
     }
 }
 
-trait EventNameCallback: Fn(&SdkLogRecord) -> &str + Send + Sync + 'static {}
+trait EventNameCallback: Fn(&SdkLogRecord) -> &'static str + Send + Sync + 'static {}
 
-impl<F> EventNameCallback for F where F: Fn(&SdkLogRecord) -> &str + Send + Sync + 'static {}
+impl<F> EventNameCallback for F where F: Fn(&SdkLogRecord) -> &'static str + Send + Sync + 'static {}
 
 impl std::fmt::Debug for dyn EventNameCallback {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -152,7 +152,10 @@ mod tests {
 
         let options =
             Options::new("test_provider_name").etw_event_name_from_callback(|log_record| {
-                log_record.target().map_or("", |target| target.as_ref())
+                match log_record.target() {
+                    Some(target) if target == "target-name" => "target-name",
+                    _ => "Log",
+                }
             });
 
         let result = options.get_etw_event_name(&log_record);
