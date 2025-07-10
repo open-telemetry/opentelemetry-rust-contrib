@@ -144,8 +144,8 @@ impl UserEventsSpanExporter {
             );
 
             if let Some(cloud_role) = &self.cloud_role {
-            cs_a_count += 1;
-            eb.add_str("ext_cloud_role", cloud_role, FieldFormat::Default, 0);
+                cs_a_count += 1;
+                eb.add_str("ext_cloud_role", cloud_role, FieldFormat::Default, 0);
             }
 
             if let Some(cloud_role_instance) = &self.cloud_role_instance {
