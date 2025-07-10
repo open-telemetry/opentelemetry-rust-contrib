@@ -97,7 +97,7 @@ impl ETWExporter {
         let event_tags: u32 = 0; // TBD name and event_tag values
         let field_tag: u32 = 0;
 
-        EVENT_BUILDER.with_borrow_mut(|event| {
+        EVENT_BUILDER.with_borrow_mut(|mut event| {
             // reset
             event.reset(
                 self.options.get_etw_event_name(log_record),
