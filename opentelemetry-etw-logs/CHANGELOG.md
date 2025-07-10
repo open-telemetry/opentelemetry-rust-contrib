@@ -3,6 +3,7 @@
 ## vNext
 
 - Added `Processor::builder_etw_compat_only()` method that builds a processor using a provider name that is fully compatible with ETW requirements (dropping UserEvents provider name compatibility) by allowing hyphens (`_`).
+- **EXPERIMENTAL**: `logs_unstable_etw_event_name_from_callback` feature flag now requires callbacks to return a `&'static str` instead of `&' str` for the event name.
 
 ## v0.9.0
 
