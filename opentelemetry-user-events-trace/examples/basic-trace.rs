@@ -1,6 +1,6 @@
 //! run with `$ sudo -E ~/.cargo/bin/cargo run --example basic-trace`
 //! to listen for events, as root:
-//! $perf record -e user_events:myprovider_L4K1
+//! $perf record -e user_events:opentelemetry_traces_L4K1
 
 use opentelemetry::global;
 use opentelemetry::trace::Span;
@@ -20,7 +20,7 @@ fn init_tracer() -> SdkTracerProvider {
                 .with_service_name("user-events-trace-example")
                 .build(),
         )
-        .with_user_events_exporter("myprovider")
+        .with_user_events_exporter("opentelemetry_traces")
         .build();
     global::set_tracer_provider(provider.clone());
     provider
