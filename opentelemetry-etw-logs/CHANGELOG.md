@@ -2,7 +2,7 @@
 
 ## vNext
 
-- Added `Processor::builder_etw_compat_only()` method that builds a processor using a provider name that is fully compatible with ETW requirements (but noy UserEvents) by allowing hyphens (`_`).
+- Added `Processor::builder_etw_compat_only()` method that builds a processor using a provider name that is fully compatible with ETW requirements (dropping UserEvents provider name compatibility) by allowing hyphens (`_`).
 
 ## v0.9.0
 
