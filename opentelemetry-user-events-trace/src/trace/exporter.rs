@@ -58,10 +58,6 @@ impl SpanExporter for UserEventsSpanExporter {
 
     /// Set the resource for the exporter.
     fn set_resource(&mut self, resource: &Resource) {
-        println!(
-            "Setting resource for UserEventsSpanExporter: {:?}",
-            resource
-        );
         self.cloud_role = resource
             .get(&Key::from_static_str("service.name"))
             .map(|v| v.to_string());
