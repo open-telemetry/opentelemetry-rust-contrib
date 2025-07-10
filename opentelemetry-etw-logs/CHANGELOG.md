@@ -2,7 +2,7 @@
 
 ## vNext
 
-- **EXPERIMENTAL**: `logs_unstable_etw_event_name_from_callback` feature flag now returns a `&'static str` instead of `&' str` for the event name.
+- **EXPERIMENTAL**: `logs_unstable_etw_event_name_from_callback` feature flag now requires callbacks to return a `&'static str` instead of `&' str` for the event name.
 
 ## v0.9.0
 
