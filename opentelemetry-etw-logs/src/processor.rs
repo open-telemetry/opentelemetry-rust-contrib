@@ -22,7 +22,7 @@ pub struct Processor {
 impl Processor {
     /// Creates a new instance of [`ProcessorBuilder`] with the given provider name.
     ///
-    /// The provider name must be:
+    /// The provider name must be cross-compatible with UserEvents (Linux) and must conform to the following requirements:
     ///
     /// - non-empty,
     /// - less than 234 characters long, and
@@ -37,6 +37,25 @@ impl Processor {
     /// By default, all events will be exported to the "Log" ETW event. See [`ProcessorBuilder`] for details on how to configure a different behavior.
     pub fn builder(provider_name: &str) -> ProcessorBuilder {
         ProcessorBuilder::new(provider_name)
+    }
+
+    /// Creates a new instance of [`ProcessorBuilder`] with the given provider name conforming to ETW requirements.
+    ///
+    /// Cross-compatibility with UserEvents (Linux) is not guaranteed. Following are the explicit requirements:
+    ///
+    /// - non-empty,
+    /// - less than 234 characters long, and
+    /// - contain only ASCII alphanumeric characters, underscores (`_`) or hyphens (`-`).
+    ///
+    /// At the same time, it is recommended to use a provider name that is:
+    /// - short
+    /// - human-readable
+    /// - unique
+    /// - describing the application or service that is generating the logs
+    ///
+    /// By default, all events will be exported to the "Log" ETW event. See [`ProcessorBuilder`] for details on how to configure a different behavior.
+    pub fn builder_etw_compat_only(provider_name: &str) -> ProcessorBuilder {
+        ProcessorBuilder::new_etw_compat_only(provider_name)
     }
 
     /// Creates a new instance of the [`Processor`] using the given options.
@@ -101,12 +120,16 @@ impl ProcessorBuilder {
         }
     }
 
-    /// Disables the cross-compatibility provider name with UserEvents (Linux).
+    /// Creates a new instance of [`ProcessorBuilder`] with the given provider name.
     ///
-    /// Allows the processor to use a provider name that is not compatible with UserEvents, but conforming with ETW requirements which allows hyphens (`-`).
-    pub fn disable_cross_compat_provider_name(mut self) -> Self {
-        self.cross_compat_provider_name = false;
-        self
+    /// The provider name must contain only ASCII alphanumeric characters, '_' or '-'.
+    ///
+    /// By default, all events will be exported to the "Log" ETW event.
+    pub(crate) fn new_etw_compat_only(provider_name: &str) -> Self {
+        ProcessorBuilder {
+            options: Options::new(provider_name.to_string()),
+            cross_compat_provider_name: false,
+        }
     }
 
     /// Sets a user-defined callback that returns the ETW event name, using the the [`SdkLogRecord`] as input.
@@ -150,7 +173,7 @@ fn validate_provider_name(
     }
 
     if cross_compat_provider_name && provider_name.contains('-') {
-        return Err("Provider name must not contain hyphens ('-') when cross-compatibility with UserEvents is enabled (default).".into());
+        return Err("Provider name must not contain hyphens ('-') when cross-compatibility with UserEvents is enabled. Use ProviderBuilder::builder_etw_compat_only() to enable ETW only compatibility instead.".into());
     }
 
     if !provider_name
@@ -305,8 +328,13 @@ mod tests {
                 .build()
                 .unwrap_err()
                 .to_string(),
-            "Provider name must not contain hyphens ('-') when cross-compatibility with UserEvents is enabled (default)."
+            "Provider name must not contain hyphens ('-') when cross-compatibility with UserEvents is enabled. Use ProviderBuilder::builder_etw_compat_only() to enable ETW only compatibility instead."
         );
+    }
+
+    #[test]
+    fn test_validate_etw_compat_name_using_hyphens() {
+        assert!(Processor::builder_etw_compat_only("i_have_a_-_").build().is_ok());
     }
 
     #[test]
