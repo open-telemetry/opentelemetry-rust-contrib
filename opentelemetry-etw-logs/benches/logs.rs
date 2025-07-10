@@ -29,51 +29,65 @@ use tracing::error;
 use tracing_subscriber::prelude::*;
 use tracing_subscriber::Registry;
 
-fn benchmark_with_ot_layer(c: &mut Criterion, name: &str, num_attributes: usize) {
+fn setup_otel_provider() -> SdkLoggerProvider {
     let etw_processor = Processor::builder("provider_name").build().unwrap();
-    let provider = SdkLoggerProvider::builder()
+    SdkLoggerProvider::builder()
         .with_resource(
             Resource::builder_empty()
                 .with_service_name("benchmark")
                 .build(),
         )
         .with_log_processor(etw_processor)
-        .build();
+        .build()
+}
+
+fn benchmark_with_ot_layer_4_attributes(c: &mut Criterion) {
+    let provider = setup_otel_provider();
     let ot_layer = tracing_layer::OpenTelemetryTracingBridge::new(&provider);
     let subscriber = Registry::default().with(ot_layer);
 
     tracing::subscriber::with_default(subscriber, || {
-        c.bench_function(name, |b| {
+        c.bench_function("Etw_4_Attributes", |b| {
             b.iter(|| {
-                if num_attributes == 4 {
-                    error!(
-                        name : "CheckoutFailed",
-                        field1 = "field1",
-                        field2 = "field2",
-                        field3 = "field3",
-                        field4 = "field4",
-                        message = "Unable to process checkout."
-                    );
-                } else if num_attributes == 6 {
-                    error!(
-                        name : "CheckoutFailed",
-                        field1 = "field1",
-                        field2 = "field2",
-                        field3 = "field3",
-                        field4 = "field4",
-                        field5 = "field5",
-                        field6 = "field6",
-                        message = "Unable to process checkout."
-                    );
-                }
+                error!(
+                    name : "CheckoutFailed",
+                    field1 = "field1",
+                    field2 = "field2",
+                    field3 = "field3",
+                    field4 = "field4",
+                    message = "Unable to process checkout."
+                );
+            });
+        });
+    });
+}
+
+fn benchmark_with_ot_layer_6_attributes(c: &mut Criterion) {
+    let provider = setup_otel_provider();
+    let ot_layer = tracing_layer::OpenTelemetryTracingBridge::new(&provider);
+    let subscriber = Registry::default().with(ot_layer);
+
+    tracing::subscriber::with_default(subscriber, || {
+        c.bench_function("Etw_6_Attributes", |b| {
+            b.iter(|| {
+                error!(
+                    name : "CheckoutFailed",
+                    field1 = "field1",
+                    field2 = "field2",
+                    field3 = "field3",
+                    field4 = "field4",
+                    field5 = "field5",
+                    field6 = "field6",
+                    message = "Unable to process checkout."
+                );
             });
         });
     });
 }
 
 fn criterion_benchmark(c: &mut Criterion) {
-    benchmark_with_ot_layer(c, "Etw_4_Attributes", 4);
-    benchmark_with_ot_layer(c, "Etw_6_Attributes", 6);
+    benchmark_with_ot_layer_4_attributes(c);
+    benchmark_with_ot_layer_6_attributes(c);
 }
 
 criterion_group! {
