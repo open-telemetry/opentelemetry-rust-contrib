@@ -2,7 +2,7 @@
 
 ## vNext
 
-- Added `ProcessorBuilder::disable_cross_compat_provider_name()` method that allows the processor to use a provider name that is not compatible with UserEvents, but conforming with ETW requirements which allows hyphens (`-`).
+- Added `Processor::builder_etw_compat_only()` method that builds a processor using a provider name that is fully compatible with ETW requirements (but noy UserEvents) by allowing hyphens (`_`).
 
 ## v0.9.0
 
