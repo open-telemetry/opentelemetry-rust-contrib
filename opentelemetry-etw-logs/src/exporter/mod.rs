@@ -97,7 +97,7 @@ impl ETWExporter {
         let event_tags: u32 = 0; // TBD name and event_tag values
         let field_tag: u32 = 0;
 
-        EVENT_BUILDER.with_borrow_mut(|mut event| {
+        EVENT_BUILDER.with_borrow_mut(|event| {
             // reset
             event.reset(
                 self.options.get_etw_event_name(log_record),
@@ -108,11 +108,11 @@ impl ETWExporter {
 
             event.add_u16("__csver__", 1024, tld::OutType::Unsigned, field_tag); // 0x400 hex
 
-            part_a::populate_part_a(&mut event, &self.resource, log_record, field_tag);
+            part_a::populate_part_a(event, &self.resource, log_record, field_tag);
 
-            let event_id = part_c::populate_part_c(&mut event, log_record, field_tag);
+            let event_id = part_c::populate_part_c(event, log_record, field_tag);
 
-            part_b::populate_part_b(&mut event, log_record, otel_level, event_id);
+            part_b::populate_part_b(event, log_record, otel_level, event_id);
 
             // Write event to ETW
             let result = event.write(&self.provider, None, None);
