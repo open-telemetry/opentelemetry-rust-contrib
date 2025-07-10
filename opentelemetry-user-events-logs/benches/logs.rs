@@ -36,7 +36,7 @@ use tracing_subscriber::Registry;
 
 fn setup_provider() -> SdkLoggerProvider {
     let user_event_processor = Processor::builder("myprovider").build().unwrap();
-    let provider = SdkLoggerProvider::builder()
+    SdkLoggerProvider::builder()
         .with_resource(
             Resource::builder_empty()
                 .with_service_name("benchmark")
@@ -44,7 +44,6 @@ fn setup_provider() -> SdkLoggerProvider {
         )
         .with_log_processor(user_event_processor)
         .build();
-    provider
 }
 
 fn benchmark_4_attributes(c: &mut Criterion) {
