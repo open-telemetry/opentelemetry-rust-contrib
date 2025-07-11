@@ -2,6 +2,9 @@
 
 ## vNext
 
+- Add support for RoleName,RoleInstance population from Resource.
+- Add mapping of well-known (OTel Semantic Conventions) attributes to PartB.
+
 ## v0.2.0
 
 Released 2025-May-27
