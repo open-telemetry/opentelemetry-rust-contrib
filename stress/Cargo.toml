@@ -11,25 +11,32 @@ name = "user_events"
 path = "src/user_events.rs"
 doc = false
 
-# below build is failing with otel v0.30. this needs to be enabled
-# while building for otel-v30
-#[[bin]]
-#name = "etw"
-#path = "src/etw_logs.rs"
-#doc = false
+[[bin]]
+name = "etw"
+path = "src/etw_logs.rs"
+doc = false
+
+[[bin]]
+name = "geneva_exporter"
+path = "src/geneva_exporter.rs"
 
 [dependencies]
 ctrlc = "3.2.5"
 num_cpus = "1.15.0"
 num-format = "0.4.4"
-sysinfo = { version = "0.32", optional = true }
+sysinfo = { version = "0.35", optional = true }
+tokio = { version = "1", features = ["full", "test-util"] }
+wiremock = "0.6"
+futures = "0.3"
 
 opentelemetry-appender-tracing = { version = "0.30", features= ["spec_unstable_logs_enabled"] }
 opentelemetry_sdk = { version = "0.30", features = ["logs", "spec_unstable_logs_enabled"] }
+opentelemetry-proto = { version = "0.30"}
 opentelemetry-user-events-logs = { path = "../opentelemetry-user-events-logs", features = ["spec_unstable_logs_enabled"]}
 opentelemetry-etw-logs = { path = "../opentelemetry-etw-logs"}
 tracing = { version = "0.1", default-features = false, features = ["std"] }
 tracing-subscriber = { version = "0.3.0", default-features = false, features = ["env-filter","registry", "std"] }
+geneva-uploader = { version = "0.1.0", path = "../opentelemetry-exporter-geneva/geneva-uploader", features = ["mock_auth"]}
 
 [features]
 stats = ["sysinfo"]

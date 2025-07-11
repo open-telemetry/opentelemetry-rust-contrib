@@ -3,10 +3,12 @@ use eventheader::{FieldFormat, Level, Opcode};
 use eventheader_dynamic::{EventBuilder, EventSet, Provider};
 use opentelemetry::trace::SpanKind;
 use opentelemetry::trace::Status;
+use opentelemetry::Key;
 use opentelemetry::{otel_debug, otel_info};
 use opentelemetry::{KeyValue, Value};
 use opentelemetry_sdk::error::{OTelSdkError, OTelSdkResult};
 use opentelemetry_sdk::trace::SpanData;
+use opentelemetry_sdk::Resource;
 use std::{
     fmt::Debug,
     sync::{Arc, Mutex},
@@ -17,6 +19,8 @@ pub(crate) struct UserEventsSpanExporter {
     provider: Mutex<Provider>,
     name: String,
     event_set: Arc<EventSet>,
+    cloud_role: Option<String>,
+    cloud_role_instance: Option<String>,
 }
 
 impl Debug for UserEventsSpanExporter {
@@ -29,8 +33,13 @@ use opentelemetry_sdk::trace::SpanExporter;
 
 impl SpanExporter for UserEventsSpanExporter {
     async fn export(&self, batch: Vec<SpanData>) -> OTelSdkResult {
-        // Using try_for_each is safe here as we do not expect the batch to have more than one span.
-        batch.iter().try_for_each(|span| self.export_span(span))
+        if let Some(span) = batch.first() {
+            self.export_span(span)
+        } else {
+            Err(OTelSdkError::InternalFailure(
+                "Batch is expected to have one and only one record, but none was found".to_string(),
+            ))
+        }
     }
 
     fn shutdown(&mut self) -> OTelSdkResult {
@@ -45,6 +54,16 @@ impl SpanExporter for UserEventsSpanExporter {
                 "Failed to acquire lock on provider".to_string(),
             ))
         }
+    }
+
+    /// Set the resource for the exporter.
+    fn set_resource(&mut self, resource: &Resource) {
+        self.cloud_role = resource
+            .get(&Key::from_static_str("service.name"))
+            .map(|v| v.to_string());
+        self.cloud_role_instance = resource
+            .get(&Key::from_static_str("service.instance.id"))
+            .map(|v| v.to_string());
     }
 }
 
@@ -66,13 +85,15 @@ impl UserEventsSpanExporter {
         let mut eventheader_provider = Provider::new(provider_name, &Provider::new_options());
         let keyword = 1;
         let event_set = eventheader_provider.register_set(Level::Informational, keyword);
-        otel_debug!(name: "UserEvents.Created", provider_name = provider_name);
+        otel_debug!(name: "UserEvents.Created", provider_name = provider_name, event_set = format!("{:?}", event_set));
         let name = eventheader_provider.name().to_string();
 
         Ok(UserEventsSpanExporter {
             provider: Mutex::new(eventheader_provider),
             name,
             event_set,
+            cloud_role: None,
+            cloud_role_instance: None,
         })
     }
 
@@ -103,9 +124,12 @@ impl UserEventsSpanExporter {
             eb.opcode(Opcode::Info);
             eb.add_value("__csver__", 1024, FieldFormat::UnsignedInt, 0);
 
-            eb.add_struct("PartA", 3, 0); // time, ext_dt_traceId, ext_dt_spanId
+            let mut cs_a_count = 3; // time, ext_dt_traceId, ext_dt_spanId
+            let mut cs_a_bookmark: usize = 0;
+            eb.add_struct_with_bookmark("PartA", 3, 0, &mut cs_a_bookmark);
             let datetime: DateTime<Utc> = span.end_time.into();
             eb.add_str("time", datetime.to_rfc3339(), FieldFormat::Default, 0);
+
             eb.add_str(
                 "ext_dt_traceId",
                 span.span_context.trace_id().to_string(),
@@ -118,6 +142,22 @@ impl UserEventsSpanExporter {
                 FieldFormat::Default,
                 0,
             );
+
+            if let Some(cloud_role) = &self.cloud_role {
+                cs_a_count += 1;
+                eb.add_str("ext_cloud_role", cloud_role, FieldFormat::Default, 0);
+            }
+
+            if let Some(cloud_role_instance) = &self.cloud_role_instance {
+                cs_a_count += 1;
+                eb.add_str(
+                    "ext_cloud_roleInstance",
+                    cloud_role_instance,
+                    FieldFormat::Default,
+                    0,
+                );
+            }
+            eb.set_struct_field_count(cs_a_bookmark, cs_a_count);
 
             eb.add_struct("PartB", 6, 0); // _typeName, name, parentId, startTime, success, kind
             eb.add_str("_typeName", "Span", FieldFormat::Default, 0);
@@ -169,8 +209,7 @@ impl UserEventsSpanExporter {
                     otel_debug!(name: "UserEvents.EventWriteFailed", result = result);
                 }
                 return Err(OTelSdkError::InternalFailure(format!(
-                    "Failed to write span event: result code {}",
-                    result
+                    "Failed to write span event: result code {result}"
                 )));
             }
         }

@@ -1,6 +1,6 @@
-//! run with `$ cargo run --example basic-trace`
+//! run with `$ sudo -E ~/.cargo/bin/cargo run --example basic-trace`
 //! to listen for events, as root:
-//! $perf record -e user_events:myprovider_L4K1
+//! $perf record -e user_events:opentelemetry_traces_L4K1
 
 use opentelemetry::global;
 use opentelemetry::trace::Span;
@@ -15,7 +15,12 @@ use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt, EnvFilte
 
 fn init_tracer() -> SdkTracerProvider {
     let provider = SdkTracerProvider::builder()
-        .with_user_events_exporter("myprovider")
+        .with_resource(
+            opentelemetry_sdk::Resource::builder()
+                .with_service_name("user-events-trace-example")
+                .build(),
+        )
+        .with_user_events_exporter("opentelemetry_traces")
         .build();
     global::set_tracer_provider(provider.clone());
     provider
@@ -39,7 +44,7 @@ fn main() {
 
     while running.load(Ordering::SeqCst) {
         let mut span = tracer
-            .span_builder("my-event-name")
+            .span_builder("my-span-name")
             .with_attributes([opentelemetry::KeyValue::new("my-key", "my-value")])
             .start(&tracer);
         span.end();
@@ -48,6 +53,6 @@ fn main() {
 
     let status = tracer_provider.shutdown();
     if let Err(e) = status {
-        println!("Error shutting down: {:?}", e);
+        println!("Error shutting down: {e:?}");
     }
 }

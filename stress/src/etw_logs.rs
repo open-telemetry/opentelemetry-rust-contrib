@@ -27,7 +27,7 @@ mod throughput;
 
 // Function to initialize the logger
 fn init_logger() -> SdkLoggerProvider {
-    let processor = Processor::builder("provider-name").build().unwrap();
+    let processor = Processor::builder("provider_name").build().unwrap();
 
     SdkLoggerProvider::builder()
         .with_log_processor(processor)

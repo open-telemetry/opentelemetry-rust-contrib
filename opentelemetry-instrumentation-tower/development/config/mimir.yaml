@@ -1,0 +1,10 @@
+multitenancy_enabled: false
+
+server:
+  log_level: debug
+  http_listen_port: 8001
+  grpc_listen_port: 9001
+
+ingester:
+  ring:
+    replication_factor: 1

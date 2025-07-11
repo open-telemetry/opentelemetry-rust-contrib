@@ -1,3 +1,4 @@
+use std::cell::RefCell;
 use std::fmt::Debug;
 use std::pin::Pin;
 use std::sync::Arc;
@@ -15,6 +16,11 @@ mod part_b;
 mod part_c;
 
 pub(crate) use options::Options;
+
+// Thread-local EventBuilder to avoid heap allocations on every export.
+thread_local! {
+    static EVENT_BUILDER: RefCell<tld::EventBuilder> = RefCell::new(tld::EventBuilder::new());
+}
 
 #[derive(Default)]
 struct Resource {
@@ -80,6 +86,7 @@ impl ETWExporter {
         log_record: &opentelemetry_sdk::logs::SdkLogRecord,
         _instrumentation: &opentelemetry::InstrumentationScope,
     ) -> opentelemetry_sdk::error::OTelSdkResult {
+        // TODO: If severity_number is not set, then fail the export than assuming Debug.
         let otel_level = log_record.severity_number().unwrap_or(Severity::Debug);
         let level = common::convert_severity_to_level(otel_level);
 
@@ -89,33 +96,34 @@ impl ETWExporter {
 
         let event_tags: u32 = 0; // TBD name and event_tag values
         let field_tag: u32 = 0;
-        let mut event = tld::EventBuilder::new();
 
-        // reset
-        event.reset(
-            self.options.get_etw_event_name(log_record),
-            level,
-            Self::KEYWORD,
-            event_tags,
-        );
+        EVENT_BUILDER.with_borrow_mut(|event| {
+            // reset
+            event.reset(
+                self.options.get_etw_event_name(log_record),
+                level,
+                Self::KEYWORD,
+                event_tags,
+            );
 
-        event.add_u16("__csver__", 1024, tld::OutType::Unsigned, field_tag); // 0x400 hex
+            event.add_u16("__csver__", 1024, tld::OutType::Unsigned, field_tag); // 0x400 hex
 
-        part_a::populate_part_a(&mut event, &self.resource, log_record, field_tag);
+            part_a::populate_part_a(event, &self.resource, log_record, field_tag);
 
-        let event_id = part_c::populate_part_c(&mut event, log_record, field_tag);
+            let event_id = part_c::populate_part_c(event, log_record, field_tag);
 
-        part_b::populate_part_b(&mut event, log_record, otel_level, event_id);
+            part_b::populate_part_b(event, log_record, otel_level, event_id);
 
-        // Write event to ETW
-        let result = event.write(&self.provider, None, None);
+            // Write event to ETW
+            let result = event.write(&self.provider, None, None);
 
-        match result {
-            0 => Ok(()),
-            _ => Err(OTelSdkError::InternalFailure(format!(
-                "Failed to write event to ETW. ETW reason: {result}"
-            ))),
-        }
+            match result {
+                0 => Ok(()),
+                _ => Err(OTelSdkError::InternalFailure(format!(
+                    "Failed to write event to ETW. ETW reason: {result}"
+                ))),
+            }
+        })
     }
 }
 
@@ -219,7 +227,7 @@ mod tests {
     #[test]
     fn test_debug() {
         let exporter = common::test_utils::new_etw_exporter();
-        let result = format!("{:?}", exporter);
+        let result = format!("{exporter:?}");
         assert_eq!(result, "ETW log exporter");
     }
 

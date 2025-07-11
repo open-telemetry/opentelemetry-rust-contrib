@@ -4,6 +4,7 @@ use std::sync::{Arc, Mutex};
 use opentelemetry::Context;
 use opentelemetry_sdk::trace::Span;
 use opentelemetry_sdk::trace::SpanExporter;
+use opentelemetry_sdk::Resource;
 use opentelemetry_sdk::{error::OTelSdkResult, trace::SpanData};
 
 /// This export processor exports without synchronization.
@@ -41,6 +42,12 @@ impl<T: SpanExporter> opentelemetry_sdk::trace::SpanProcessor for ReentrantSpanP
             exporter.force_flush()
         } else {
             Ok(())
+        }
+    }
+
+    fn set_resource(&mut self, _resource: &Resource) {
+        if let Ok(mut exporter) = self.exporter.lock() {
+            exporter.set_resource(_resource);
         }
     }
 

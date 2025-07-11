@@ -214,7 +214,7 @@ where
                 }
                 Err(err) => {
                     let span = cx.span();
-                    span.set_status(Status::error(format!("{:?}", err)));
+                    span.set_status(Status::error(format!("{err:?}")));
                     span.end();
                     Err(err)
                 }

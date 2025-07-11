@@ -7,6 +7,5 @@ rust-version = "1.75.0"
 
 [dependencies]
 
-
 [lints]
 workspace = true

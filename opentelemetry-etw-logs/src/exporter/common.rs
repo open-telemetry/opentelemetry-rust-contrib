@@ -1,5 +1,5 @@
 #[cfg(feature = "serde_json")]
-use crate::logs::converters::IntoJson;
+use crate::converters::IntoJson;
 use opentelemetry::{
     logs::{AnyValue, Severity},
     Key,
@@ -81,8 +81,8 @@ pub(crate) mod test_utils {
     use opentelemetry::logs::LoggerProvider;
     use opentelemetry_sdk::logs::SdkLoggerProvider;
 
-    use crate::logs::exporter::options::Options;
-    use crate::logs::exporter::ETWExporter;
+    use crate::exporter::options::Options;
+    use crate::exporter::ETWExporter;
 
     pub(crate) fn new_etw_exporter() -> ETWExporter {
         ETWExporter::new(test_options())

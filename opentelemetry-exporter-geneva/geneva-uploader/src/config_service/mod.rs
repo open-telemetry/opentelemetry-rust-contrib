@@ -53,7 +53,8 @@ mod tests {
             .to_der()
             .unwrap();
 
-        println!("PKCS#12 size: {}", pkcs12.len());
+        let pkcs12_size = pkcs12.len();
+        println!("PKCS#12 size: {pkcs12_size}");
         let mut file = NamedTempFile::new().unwrap();
         file.write_all(&pkcs12).unwrap();
         println!("Temp file path: {:?}", file.path());
@@ -164,7 +165,7 @@ mod tests {
         {
             assert_eq!(status, 403);
         } else {
-            panic!("Expected RequestFailed with 403, got: {:?}", result);
+            panic!("Expected RequestFailed with 403, got: {result:?}");
         }
     }
 
@@ -210,7 +211,7 @@ mod tests {
                 crate::config_service::client::GenevaConfigClientError::AuthInfoNotFound(_) => {
                     // Test passed
                 }
-                _ => panic!("Expected AuthInfoNotFound error, got: {:?}", err),
+                _ => panic!("Expected AuthInfoNotFound error, got: {err:?}"),
             },
             _ => panic!("Expected error, got success"),
         }
@@ -240,7 +241,7 @@ mod tests {
                 crate::config_service::client::GenevaConfigClientError::Certificate(_) => {
                     // Test passed
                 }
-                _ => panic!("Expected Io error, got: {:?}", err),
+                _ => panic!("Expected Io error, got: {err:?}"),
             },
             _ => panic!("Expected error, got success"),
         }
@@ -320,7 +321,8 @@ mod tests {
 
         println!("Successfully connected to real server");
         println!("Endpoint: {}", ingestion_info.endpoint);
-        println!("Auth token length: {}", ingestion_info.auth_token.len());
+        let token_len = ingestion_info.auth_token.len();
+        println!("Auth token length: {token_len}");
         println!("Moniker name: {}", moniker.name);
     }
 }

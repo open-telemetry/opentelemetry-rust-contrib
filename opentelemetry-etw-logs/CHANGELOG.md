@@ -2,6 +2,12 @@
 
 ## vNext
 
+- **EXPERIMENTAL**: `logs_unstable_etw_event_name_from_callback` feature flag now requires callbacks to return a `&'static str` instead of `&' str` for the event name.
+
+## v0.9.0
+
+Released 2025-Jun-19
+
 - Added validation to provider name.
 - Added optional feature `serde_json` to serialize List and Maps.
 - **BREAKING**

@@ -5,7 +5,7 @@ use opentelemetry_sdk::Resource;
 use std::error::Error;
 use std::fmt::Debug;
 
-use crate::logs::exporter::*;
+use crate::exporter::*;
 
 /// Processes and exports logs to ETW.
 ///
@@ -101,9 +101,10 @@ impl ProcessorBuilder {
     ///
     /// The resulting name must be a valid CommonSchema 4.0 TraceLoggingDynamic event name. Otherwise,
     /// the default "Log" ETW event name will be used.
+    #[cfg(feature = "logs_unstable_etw_event_name_from_callback")]
     pub fn etw_event_name_from_callback(
         mut self,
-        callback: impl Fn(&SdkLogRecord) -> &str + Send + Sync + 'static,
+        callback: impl Fn(&SdkLogRecord) -> &'static str + Send + Sync + 'static,
     ) -> Self {
         self.options = self.options.etw_event_name_from_callback(callback);
         self
@@ -201,10 +202,18 @@ mod tests {
         use tracing::error;
         use tracing_subscriber::prelude::*;
 
-        let processor = Processor::builder("provider_name")
-            .etw_event_name_from_callback(|_| "CustomEvent")
-            .build()
-            .unwrap();
+        #[allow(
+            unused_mut
+            //, reason = "We require this to be mut if the 'logs_unstable_etw_event_name_from_callback' feature is enabled"
+        )]
+        let mut processor_builder = Processor::builder("provider_name");
+
+        #[cfg(feature = "logs_unstable_etw_event_name_from_callback")]
+        {
+            processor_builder = processor_builder.etw_event_name_from_callback(|_| "CustomEvent")
+        }
+
+        let processor = processor_builder.build().unwrap();
         let logger_provider = SdkLoggerProvider::builder()
             .with_log_processor(processor)
             .build();
