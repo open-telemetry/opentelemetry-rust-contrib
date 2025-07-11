@@ -17,15 +17,9 @@
     |-----------------------------------|--------------|
     | User_Event_4_Attributes_Enabled   | X ns         |
     | User_Event_6_Attributes_Enabled   | X ns         |
-    
-    // Fallback tests (when user_events is not available)
-    | Test                        | Average time |
-    |-----------------------------|--------------|
-    | User_Event_4_Attributes     | X ns         |
-    | User_Event_6_Attributes     | X ns         |
 
-    Note: The benchmark now automatically enables and disables the user-events listener.
-    If user_events is not available on the system, it falls back to the original test names.
+    Note: The benchmark automatically enables and disables the user-events listener
+    to compare performance between the two states.
 */
 
 // running the following from the current directory
@@ -76,11 +70,6 @@ fn set_user_events_listener(enabled: bool) -> bool {
     }
 }
 
-/// Checks if user_events is available on the system
-fn is_user_events_available() -> bool {
-    fs::metadata("/sys/kernel/debug/tracing/events/user_events/myprovider_L2K1/enable").is_ok()
-}
-
 fn setup_provider() -> SdkLoggerProvider {
     let user_event_processor = Processor::builder("myprovider").build().unwrap();
     SdkLoggerProvider::builder()
@@ -100,53 +89,37 @@ fn benchmark_4_attributes(c: &mut Criterion) {
 
     tracing::subscriber::with_default(subscriber, || {
         // Test with listener disabled
-        if is_user_events_available() {
-            set_user_events_listener(false);
-            c.bench_function("User_Event_4_Attributes_Disabled", |b| {
-                b.iter(|| {
-                    error!(
-                        name : "CheckoutFailed",
-                        field1 = "field1",
-                        field2 = "field2",
-                        field3 = "field3",
-                        field4 = "field4",
-                        message = "Unable to process checkout."
-                    );
-                });
+        set_user_events_listener(false);
+        c.bench_function("User_Event_4_Attributes_Disabled", |b| {
+            b.iter(|| {
+                error!(
+                    name : "CheckoutFailed",
+                    field1 = "field1",
+                    field2 = "field2",
+                    field3 = "field3",
+                    field4 = "field4",
+                    message = "Unable to process checkout."
+                );
             });
+        });
 
-            // Test with listener enabled
-            set_user_events_listener(true);
-            c.bench_function("User_Event_4_Attributes_Enabled", |b| {
-                b.iter(|| {
-                    error!(
-                        name : "CheckoutFailed",
-                        field1 = "field1",
-                        field2 = "field2",
-                        field3 = "field3",
-                        field4 = "field4",
-                        message = "Unable to process checkout."
-                    );
-                });
+        // Test with listener enabled
+        set_user_events_listener(true);
+        c.bench_function("User_Event_4_Attributes_Enabled", |b| {
+            b.iter(|| {
+                error!(
+                    name : "CheckoutFailed",
+                    field1 = "field1",
+                    field2 = "field2",
+                    field3 = "field3",
+                    field4 = "field4",
+                    message = "Unable to process checkout."
+                );
             });
+        });
 
-            // Cleanup: disable listener
-            set_user_events_listener(false);
-        } else {
-            // Fallback for systems without user_events support
-            c.bench_function("User_Event_4_Attributes", |b| {
-                b.iter(|| {
-                    error!(
-                        name : "CheckoutFailed",
-                        field1 = "field1",
-                        field2 = "field2",
-                        field3 = "field3",
-                        field4 = "field4",
-                        message = "Unable to process checkout."
-                    );
-                });
-            });
-        }
+        // Cleanup: disable listener
+        set_user_events_listener(false);
     });
 }
 
@@ -157,59 +130,41 @@ fn benchmark_6_attributes(c: &mut Criterion) {
 
     tracing::subscriber::with_default(subscriber, || {
         // Test with listener disabled
-        if is_user_events_available() {
-            set_user_events_listener(false);
-            c.bench_function("User_Event_6_Attributes_Disabled", |b| {
-                b.iter(|| {
-                    error!(
-                        name : "CheckoutFailed",
-                        field1 = "field1",
-                        field2 = "field2",
-                        field3 = "field3",
-                        field4 = "field4",
-                        field5 = "field5",
-                        field6 = "field6",
-                        message = "Unable to process checkout."
-                    );
-                });
+        set_user_events_listener(false);
+        c.bench_function("User_Event_6_Attributes_Disabled", |b| {
+            b.iter(|| {
+                error!(
+                    name : "CheckoutFailed",
+                    field1 = "field1",
+                    field2 = "field2",
+                    field3 = "field3",
+                    field4 = "field4",
+                    field5 = "field5",
+                    field6 = "field6",
+                    message = "Unable to process checkout."
+                );
             });
+        });
 
-            // Test with listener enabled
-            set_user_events_listener(true);
-            c.bench_function("User_Event_6_Attributes_Enabled", |b| {
-                b.iter(|| {
-                    error!(
-                        name : "CheckoutFailed",
-                        field1 = "field1",
-                        field2 = "field2",
-                        field3 = "field3",
-                        field4 = "field4",
-                        field5 = "field5",
-                        field6 = "field6",
-                        message = "Unable to process checkout."
-                    );
-                });
+        // Test with listener enabled
+        set_user_events_listener(true);
+        c.bench_function("User_Event_6_Attributes_Enabled", |b| {
+            b.iter(|| {
+                error!(
+                    name : "CheckoutFailed",
+                    field1 = "field1",
+                    field2 = "field2",
+                    field3 = "field3",
+                    field4 = "field4",
+                    field5 = "field5",
+                    field6 = "field6",
+                    message = "Unable to process checkout."
+                );
             });
+        });
 
-            // Cleanup: disable listener
-            set_user_events_listener(false);
-        } else {
-            // Fallback for systems without user_events support
-            c.bench_function("User_Event_6_Attributes", |b| {
-                b.iter(|| {
-                    error!(
-                        name : "CheckoutFailed",
-                        field1 = "field1",
-                        field2 = "field2",
-                        field3 = "field3",
-                        field4 = "field4",
-                        field5 = "field5",
-                        field6 = "field6",
-                        message = "Unable to process checkout."
-                    );
-                });
-            });
-        }
+        // Cleanup: disable listener
+        set_user_events_listener(false);
     });
 }
 
