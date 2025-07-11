@@ -36,13 +36,11 @@ mod tests {
             .with_user_events_exporter("opentelemetry_traces")
             .build();
 
-        // Validate that the TracePoints are created.
+        // Validate that the TracePoint is created.
+        // There is no notion of Severity for Spans in OTel,
+        // so we use the default severity level of 4 (Info).
         let user_event_status = check_user_events_available().expect("Kernel does not support user_events. Verify your distribution/kernel supports user_events: https://docs.kernel.org/trace/user_events.html.");
-        assert!(user_event_status.contains("opentelemetry_traces_L1K1"));
-        assert!(user_event_status.contains("opentelemetry_traces_L2K1"));
-        assert!(user_event_status.contains("opentelemetry_traces_L3K1"));
         assert!(user_event_status.contains("opentelemetry_traces_L4K1"));
-        assert!(user_event_status.contains("opentelemetry_traces_L5K1"));
 
         // Start perf recording in a separate thread and emit logs in parallel.
         let perf_thread =
