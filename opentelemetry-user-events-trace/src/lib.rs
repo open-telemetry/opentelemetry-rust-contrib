@@ -171,7 +171,7 @@ mod tests {
         );
         assert!(part_b["success"].as_bool().unwrap());
         assert_eq!(part_b["kind"].as_i64().unwrap(), 0);
-        
+
         // Validate attributes that become PartB
         assert_eq!(part_b["dbSystem"].as_str().unwrap(), "postgresql");
         assert_eq!(part_b["dbName"].as_str().unwrap(), "inventory");

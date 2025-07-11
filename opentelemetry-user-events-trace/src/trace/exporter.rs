@@ -12,30 +12,34 @@ use opentelemetry_sdk::Resource;
 use std::{
     collections::HashMap,
     fmt::Debug,
-    sync::{Arc, LazyLock, Mutex},
+    sync::{Arc, Mutex, OnceLock},
 };
 
-// Well-known attributes mapping - created once at compile time
-static WELL_KNOWN_ATTRIBUTES: LazyLock<HashMap<&'static str, &'static str>> = LazyLock::new(|| {
-    let mut map = HashMap::new();
+// Well-known attributes mapping - created once at runtime
+static WELL_KNOWN_ATTRIBUTES: OnceLock<HashMap<&'static str, &'static str>> = OnceLock::new();
 
-    // Database attributes
-    map.insert("db.system", "dbSystem");
-    map.insert("db.name", "dbName");
-    map.insert("db.statement", "dbStatement");
+fn get_well_known_attributes() -> &'static HashMap<&'static str, &'static str> {
+    WELL_KNOWN_ATTRIBUTES.get_or_init(|| {
+        let mut map = HashMap::new();
 
-    // HTTP attributes
-    map.insert("http.request.method", "httpMethod");
-    map.insert("url.full", "httpUrl");
-    map.insert("http.response.status_code", "httpStatusCode");
+        // Database attributes
+        map.insert("db.system", "dbSystem");
+        map.insert("db.name", "dbName");
+        map.insert("db.statement", "dbStatement");
 
-    // Messaging attributes
-    map.insert("messaging.system", "messagingSystem");
-    map.insert("messaging.destination", "messagingDestination");
-    map.insert("messaging.url", "messagingUrl");
+        // HTTP attributes
+        map.insert("http.request.method", "httpMethod");
+        map.insert("url.full", "httpUrl");
+        map.insert("http.response.status_code", "httpStatusCode");
 
-    map
-});
+        // Messaging attributes
+        map.insert("messaging.system", "messagingSystem");
+        map.insert("messaging.destination", "messagingDestination");
+        map.insert("messaging.url", "messagingUrl");
+
+        map
+    })
+}
 
 /// UserEventsSpanExporter exports spans in EventHeader format to user_events tracepoint.
 pub(crate) struct UserEventsSpanExporter {
@@ -230,7 +234,7 @@ impl UserEventsSpanExporter {
             let mut partc_attribute_count = 0;
 
             for kv in span.attributes.iter() {
-                if let Some(well_known_key) = WELL_KNOWN_ATTRIBUTES.get(kv.key.as_str()) {
+                if let Some(well_known_key) = get_well_known_attributes().get(kv.key.as_str()) {
                     self.add_attribute_to_event(&mut eb, well_known_key, &kv.value);
                     partb_count_from_attributes += 1;
                 } else {
@@ -245,7 +249,7 @@ impl UserEventsSpanExporter {
             if partc_attribute_count > 0 {
                 eb.add_struct("PartC", partc_attribute_count, 0);
                 for kv in span.attributes.iter() {
-                    if !WELL_KNOWN_ATTRIBUTES.contains_key(kv.key.as_str()) {
+                    if !get_well_known_attributes().contains_key(kv.key.as_str()) {
                         self.add_attribute_to_event(&mut eb, kv.key.as_str(), &kv.value);
                     }
                 }
