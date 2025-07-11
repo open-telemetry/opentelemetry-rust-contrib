@@ -246,7 +246,10 @@ impl UserEventsSpanExporter {
             }
 
             // Update PartB field count with the number of well-known attributes found.
-            eb.set_struct_field_count(part_b_bookmark, BASE_PARTB_FIELD_COUNT + partb_count_from_attributes);
+            eb.set_struct_field_count(
+                part_b_bookmark,
+                BASE_PARTB_FIELD_COUNT + partb_count_from_attributes,
+            );
 
             // Add regular attributes to PartC if any.
             if partc_attribute_count > 0 {
