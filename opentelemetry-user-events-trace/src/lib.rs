@@ -11,7 +11,10 @@ pub use trace::*;
 mod tests {
 
     use crate::UserEventsTracerProviderBuilderExt;
-    use opentelemetry::trace::{Span, Tracer, TracerProvider};
+    use opentelemetry::{
+        trace::{Span, TraceContextExt, Tracer, TracerProvider},
+        KeyValue,
+    };
     use opentelemetry_sdk::trace::SdkTracerProvider;
     use serde_json::{from_str, Value};
     use std::process::Command;
@@ -51,11 +54,39 @@ mod tests {
 
         // ACT
         let tracer = provider.tracer("user-events-tracer");
-        let mut span = tracer
-            .span_builder("my-span-name")
-            .with_attributes([opentelemetry::KeyValue::new("my-key", "my-value")])
-            .start(&tracer);
-        span.end();
+        let (trace_id_expected, span_id_expected) = tracer.in_span("my-span-name", |cx| {
+            let span = cx.span();
+            let trace_id = span.span_context().trace_id();
+            let span_id = span.span_context().span_id();
+
+            // Set PartB attributes
+            // Database attributes
+            span.set_attribute(KeyValue::new("db.system", "postgresql"));
+            span.set_attribute(KeyValue::new("db.name", "inventory"));
+            span.set_attribute(KeyValue::new(
+                "db.statement",
+                "SELECT * FROM products WHERE price > 100",
+            ));
+            // HTTP attributes
+            span.set_attribute(KeyValue::new("http.request.method", "GET"));
+            span.set_attribute(KeyValue::new(
+                "url.full",
+                "https://api.example.com/products?min_price=100",
+            ));
+            span.set_attribute(KeyValue::new("http.response.status_code", 200));
+            // Messaging attributes
+            span.set_attribute(KeyValue::new("messaging.system", "kafka"));
+            span.set_attribute(KeyValue::new("messaging.destination", "product-updates"));
+            span.set_attribute(KeyValue::new(
+                "messaging.url",
+                "kafka://broker1.example.com:9092",
+            ));
+
+            // Set PartC attributes
+            span.set_attribute(KeyValue::new("my-key", "my-value"));
+
+            (trace_id, span_id)
+        });
 
         // Wait for the perf thread to complete and get the results
         let result = perf_thread.join().expect("Perf thread panicked");
@@ -106,6 +137,23 @@ mod tests {
         // Only check if the time field exists, not the actual value
         assert!(part_a.get("time").is_some(), "PartA.time is missing");
 
+        let part_a_ext_dt_trace_id = part_a
+            .get("ext_dt_traceId")
+            .expect("PartA.ext_dt_traceId is missing");
+        let part_a_ext_dt_span_id = part_a
+            .get("ext_dt_spanId")
+            .expect("PartA.ext_dt_spanId is missing");
+
+        // Validate trace_id and span_id
+        assert_eq!(
+            part_a_ext_dt_trace_id.as_str().unwrap(),
+            format!("{trace_id_expected:x}")
+        );
+        assert_eq!(
+            part_a_ext_dt_span_id.as_str().unwrap(),
+            format!("{span_id_expected:x}")
+        );
+
         let role = part_a
             .get("ext_cloud_role")
             .expect("PartA.ext_cloud_role is missing");
@@ -115,6 +163,37 @@ mod tests {
         let part_b = &event["PartB"];
         assert_eq!(part_b["_typeName"].as_str().unwrap(), "Span");
         assert_eq!(part_b["name"].as_str().unwrap(), "my-span-name");
+        assert_eq!(part_b["parentId"].as_str().unwrap(), "");
+        // Check if startTime exists, not the actual value
+        assert!(
+            part_b.get("startTime").is_some(),
+            "PartB.startTime is missing"
+        );
+        assert_eq!(part_b["success"].as_bool().unwrap(), true);
+        assert_eq!(part_b["kind"].as_i64().unwrap(), 0);
+        
+        // Validate attributes that become PartB
+        assert_eq!(part_b["dbSystem"].as_str().unwrap(), "postgresql");
+        assert_eq!(part_b["dbName"].as_str().unwrap(), "inventory");
+        assert_eq!(
+            part_b["dbStatement"].as_str().unwrap(),
+            "SELECT * FROM products WHERE price > 100"
+        );
+        assert_eq!(part_b["httpMethod"].as_str().unwrap(), "GET");
+        assert_eq!(
+            part_b["httpUrl"].as_str().unwrap(),
+            "https://api.example.com/products?min_price=100"
+        );
+        assert_eq!(part_b["httpStatusCode"].as_i64().unwrap(), 200);
+        assert_eq!(part_b["messagingSystem"].as_str().unwrap(), "kafka");
+        assert_eq!(
+            part_b["messagingDestination"].as_str().unwrap(),
+            "product-updates"
+        );
+        assert_eq!(
+            part_b["messagingUrl"].as_str().unwrap(),
+            "kafka://broker1.example.com:9092"
+        );
 
         // Validate PartC
         let part_c = &event["PartC"];
