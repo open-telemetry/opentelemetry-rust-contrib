@@ -2,6 +2,8 @@
 
 ## vNext
 
+- Add support for RoleName,RoleInstance population from Resource.
+
 ## v0.2.0
 
 Released 2025-May-27
