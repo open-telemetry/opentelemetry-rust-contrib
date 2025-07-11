@@ -8,8 +8,8 @@
     // When no listener
     | Test                        | Average time|
     |-----------------------------|-------------|
-    | User_Event_4_Attributes     | 8 ns        |
-    | User_Event_6_Attributes     | 8 ns        |
+    | SimpleSpan                  | 160 ns      |
+
 
     // When listener is enabled
     // Run below to enable
@@ -18,8 +18,7 @@
     //  echo 0 | sudo tee /sys/kernel/debug/tracing/events/user_events/opentelemetry_traces_L4K1/enable
     | Test                        | Average time|
     |-----------------------------|-------------|
-    | User_Event_4_Attributes     | 530 ns      |
-    | User_Event_6_Attributes     | 586 ns      |
+    | SimpleSpan                  | 160 ns      |
 */
 
 // running the following from the current directory
@@ -49,7 +48,14 @@ fn benchmark_simple_span(c: &mut Criterion) {
         b.iter(|| {
             let mut span = tracer
                 .span_builder("my-span-name")
-                .with_attributes([opentelemetry::KeyValue::new("my-key", "my-value")])
+                .with_attributes([
+                    opentelemetry::KeyValue::new("key1", "value1"),
+                    opentelemetry::KeyValue::new("key2", "value2"),
+                    opentelemetry::KeyValue::new("key3", "value3"),
+                    opentelemetry::KeyValue::new("key4", "value4"),
+                    opentelemetry::KeyValue::new("key5", "value5"),
+                    opentelemetry::KeyValue::new("key6", "value6"),
+                ])
                 .start(&tracer);
             span.end();
         });
