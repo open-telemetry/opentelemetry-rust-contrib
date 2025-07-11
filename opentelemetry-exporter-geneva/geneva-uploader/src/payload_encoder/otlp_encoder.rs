@@ -61,6 +61,7 @@ impl OtlpEncoder {
 
         for log_record in logs {
             // 1. Get schema with optimized single-pass field collection and schema ID calculation
+            // TODO - optimize this to use Cow<'static, str> to avoid allocation
             let event_name = if log_record.event_name.is_empty() {
                 "Log".to_string()
             } else {
