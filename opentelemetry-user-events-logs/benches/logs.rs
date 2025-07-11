@@ -82,6 +82,35 @@ fn setup_provider() -> SdkLoggerProvider {
         .build()
 }
 
+/// Helper function to emit a log event with the specified number of attributes
+fn emit_log_event(attribute_count: u8) {
+    match attribute_count {
+        4 => {
+            error!(
+                name : "CheckoutFailed",
+                field1 = "field1",
+                field2 = "field2",
+                field3 = "field3",
+                field4 = "field4",
+                message = "Unable to process checkout."
+            );
+        }
+        6 => {
+            error!(
+                name : "CheckoutFailed",
+                field1 = "field1",
+                field2 = "field2",
+                field3 = "field3",
+                field4 = "field4",
+                field5 = "field5",
+                field6 = "field6",
+                message = "Unable to process checkout."
+            );
+        }
+        _ => panic!("Unsupported attribute count: {}", attribute_count),
+    }
+}
+
 fn benchmark_user_events(c: &mut Criterion) {
     let mut group = c.benchmark_group("User_Events");
     
@@ -90,69 +119,26 @@ fn benchmark_user_events(c: &mut Criterion) {
     let subscriber = Registry::default().with(ot_layer);
 
     tracing::subscriber::with_default(subscriber, || {
-        // Test 4 attributes with listener disabled
-        set_user_events_listener(false);
-        group.bench_function("4_Attributes_Disabled", |b| {
-            b.iter(|| {
-                error!(
-                    name : "CheckoutFailed",
-                    field1 = "field1",
-                    field2 = "field2",
-                    field3 = "field3",
-                    field4 = "field4",
-                    message = "Unable to process checkout."
-                );
-            });
-        });
+        // Test configurations: (attribute_count, listener_enabled)
+        let test_configs = [
+            (4, false),
+            (4, true),
+            (6, false),
+            (6, true),
+        ];
 
-        // Test 4 attributes with listener enabled
-        set_user_events_listener(true);
-        group.bench_function("4_Attributes_Enabled", |b| {
-            b.iter(|| {
-                error!(
-                    name : "CheckoutFailed",
-                    field1 = "field1",
-                    field2 = "field2",
-                    field3 = "field3",
-                    field4 = "field4",
-                    message = "Unable to process checkout."
-                );
-            });
-        });
+        for (attribute_count, listener_enabled) in test_configs {
+            let test_name = format!(
+                "{}_Attributes_{}",
+                attribute_count,
+                if listener_enabled { "Enabled" } else { "Disabled" }
+            );
 
-        // Test 6 attributes with listener disabled
-        set_user_events_listener(false);
-        group.bench_function("6_Attributes_Disabled", |b| {
-            b.iter(|| {
-                error!(
-                    name : "CheckoutFailed",
-                    field1 = "field1",
-                    field2 = "field2",
-                    field3 = "field3",
-                    field4 = "field4",
-                    field5 = "field5",
-                    field6 = "field6",
-                    message = "Unable to process checkout."
-                );
+            set_user_events_listener(listener_enabled);
+            group.bench_function(&test_name, |b| {
+                b.iter(|| emit_log_event(attribute_count));
             });
-        });
-
-        // Test 6 attributes with listener enabled
-        set_user_events_listener(true);
-        group.bench_function("6_Attributes_Enabled", |b| {
-            b.iter(|| {
-                error!(
-                    name : "CheckoutFailed",
-                    field1 = "field1",
-                    field2 = "field2",
-                    field3 = "field3",
-                    field4 = "field4",
-                    field5 = "field5",
-                    field6 = "field6",
-                    message = "Unable to process checkout."
-                );
-            });
-        });
+        }
 
         // Cleanup: disable listener
         set_user_events_listener(false);
