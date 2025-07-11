@@ -30,7 +30,7 @@ mod tests {
         let provider = SdkTracerProvider::builder()
             .with_resource(
                 opentelemetry_sdk::Resource::builder()
-                    .with_service_name("user-events-trace-tests")
+                    .with_service_name("myrolename")
                     .build(),
             )
             .with_user_events_exporter("opentelemetry_traces")
