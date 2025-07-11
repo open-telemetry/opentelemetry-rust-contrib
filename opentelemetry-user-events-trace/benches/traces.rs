@@ -8,7 +8,7 @@
     // When no listener
     | Test                        | Average time|
     |-----------------------------|-------------|
-    | SimpleSpan                  | 160 ns      |
+    | SimpleSpan                  | 175 ns      |
 
 
     // When listener is enabled
@@ -18,7 +18,7 @@
     //  echo 0 | sudo tee /sys/kernel/debug/tracing/events/user_events/opentelemetry_traces_L4K1/enable
     | Test                        | Average time|
     |-----------------------------|-------------|
-    | SimpleSpan                  | 160 ns      |
+    | SimpleSpan                  | 922 ns      |
 */
 
 // running the following from the current directory
