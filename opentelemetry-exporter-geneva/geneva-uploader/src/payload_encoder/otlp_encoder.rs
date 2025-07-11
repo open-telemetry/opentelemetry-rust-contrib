@@ -220,6 +220,7 @@ impl OtlpEncoder {
         }
 
         // Only clone field_info when we actually need to create a new schema
+        // Investigate if we can avoid cloning by using Cow using Arc<BondEncodedSchema>
         let schema =
             BondEncodedSchema::from_fields("OtlpLogRecord", "telemetry", field_info.to_vec()); //TODO - use actual struct name and namespace
 
