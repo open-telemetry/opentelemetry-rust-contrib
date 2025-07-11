@@ -1,6 +1,7 @@
 //use md5;
 
 use crate::payload_encoder::bond_encoder::BondEncodedSchema;
+use std::sync::Arc;
 
 /// Helper to encode UTF-8 Rust str to UTF-16LE bytes
 /// TODO - consider avoiding temporary allocation, by passing a mutable buffer
@@ -29,7 +30,7 @@ pub(crate) struct CentralSchemaEntry {
 pub(crate) struct CentralEventEntry {
     pub schema_id: u64,
     pub level: u8,
-    pub event_name: String,
+    pub event_name: Arc<String>,
     pub row: Vec<u8>,
 }
 
@@ -221,7 +222,7 @@ mod tests {
         let event = CentralEventEntry {
             schema_id,
             level: 0, // e.g. ETW verbose
-            event_name: "eventname".to_string(),
+            event_name: Arc::new("eventname".to_string()),
             row,
         };
 
