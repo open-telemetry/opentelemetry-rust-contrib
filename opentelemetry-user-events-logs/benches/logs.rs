@@ -9,14 +9,14 @@
     // When no listener (automatically set by benchmark)
     | Test                              | Average time |
     |-----------------------------------|--------------|
-    | User_Event_4_Attributes_Disabled  | X ns         |
-    | User_Event_6_Attributes_Disabled  | X ns         |
+    | User_Events/4_Attributes_Disabled | X ns         |
+    | User_Events/6_Attributes_Disabled | X ns         |
 
     // When listener is enabled (automatically set by benchmark)
     | Test                              | Average time |
     |-----------------------------------|--------------|
-    | User_Event_4_Attributes_Enabled   | X ns         |
-    | User_Event_6_Attributes_Enabled   | X ns         |
+    | User_Events/4_Attributes_Enabled  | X ns         |
+    | User_Events/6_Attributes_Enabled  | X ns         |
 
     Note: The benchmark automatically enables and disables the user-events listener
     to compare performance between the two states.
@@ -82,15 +82,17 @@ fn setup_provider() -> SdkLoggerProvider {
         .build()
 }
 
-fn benchmark_4_attributes(c: &mut Criterion) {
+fn benchmark_user_events(c: &mut Criterion) {
+    let mut group = c.benchmark_group("User_Events");
+    
     let provider = setup_provider();
     let ot_layer = tracing_layer::OpenTelemetryTracingBridge::new(&provider);
     let subscriber = Registry::default().with(ot_layer);
 
     tracing::subscriber::with_default(subscriber, || {
-        // Test with listener disabled
+        // Test 4 attributes with listener disabled
         set_user_events_listener(false);
-        c.bench_function("User_Event_4_Attributes_Disabled", |b| {
+        group.bench_function("4_Attributes_Disabled", |b| {
             b.iter(|| {
                 error!(
                     name : "CheckoutFailed",
@@ -103,9 +105,9 @@ fn benchmark_4_attributes(c: &mut Criterion) {
             });
         });
 
-        // Test with listener enabled
+        // Test 4 attributes with listener enabled
         set_user_events_listener(true);
-        c.bench_function("User_Event_4_Attributes_Enabled", |b| {
+        group.bench_function("4_Attributes_Enabled", |b| {
             b.iter(|| {
                 error!(
                     name : "CheckoutFailed",
@@ -118,20 +120,9 @@ fn benchmark_4_attributes(c: &mut Criterion) {
             });
         });
 
-        // Cleanup: disable listener
+        // Test 6 attributes with listener disabled
         set_user_events_listener(false);
-    });
-}
-
-fn benchmark_6_attributes(c: &mut Criterion) {
-    let provider = setup_provider();
-    let ot_layer = tracing_layer::OpenTelemetryTracingBridge::new(&provider);
-    let subscriber = Registry::default().with(ot_layer);
-
-    tracing::subscriber::with_default(subscriber, || {
-        // Test with listener disabled
-        set_user_events_listener(false);
-        c.bench_function("User_Event_6_Attributes_Disabled", |b| {
+        group.bench_function("6_Attributes_Disabled", |b| {
             b.iter(|| {
                 error!(
                     name : "CheckoutFailed",
@@ -146,9 +137,9 @@ fn benchmark_6_attributes(c: &mut Criterion) {
             });
         });
 
-        // Test with listener enabled
+        // Test 6 attributes with listener enabled
         set_user_events_listener(true);
-        c.bench_function("User_Event_6_Attributes_Enabled", |b| {
+        group.bench_function("6_Attributes_Enabled", |b| {
             b.iter(|| {
                 error!(
                     name : "CheckoutFailed",
@@ -166,16 +157,13 @@ fn benchmark_6_attributes(c: &mut Criterion) {
         // Cleanup: disable listener
         set_user_events_listener(false);
     });
-}
-
-fn criterion_benchmark(c: &mut Criterion) {
-    benchmark_4_attributes(c);
-    benchmark_6_attributes(c);
+    
+    group.finish();
 }
 
 criterion_group! {
     name = benches;
     config = Criterion::default();
-    targets = criterion_benchmark
+    targets = benchmark_user_events
 }
 criterion_main!(benches);
