@@ -1,6 +1,6 @@
 mod config_service;
 mod ingestion_service;
-mod payload_encoder;
+pub mod payload_encoder;
 
 pub mod client;
 

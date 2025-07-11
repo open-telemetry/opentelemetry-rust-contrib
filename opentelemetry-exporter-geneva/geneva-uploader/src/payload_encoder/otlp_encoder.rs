@@ -7,10 +7,9 @@ use std::borrow::Cow;
 use std::collections::HashMap;
 use std::sync::{Arc, RwLock};
 
-type SchemaCache = Arc<RwLock<HashMap<u64, (BondEncodedSchema, [u8; 16])>>>;
+type SchemaCache = Arc<RwLock<HashMap<u64, (Arc<BondEncodedSchema>, [u8; 16])>>>;
 type BatchKey = String; //event_name
-type EncodedRow = (u8, u64, Vec<u8>); // (level, schema_id, row_buffer)
-type BatchValue = (Vec<CentralSchemaEntry>, Vec<EncodedRow>); // (schemas, rows)
+type BatchValue = (Vec<CentralSchemaEntry>, Vec<CentralEventEntry>); // (schemas, events)
 type LogBatches = HashMap<BatchKey, BatchValue>;
 
 const FIELD_ENV_NAME: &str = "env_name";
@@ -32,11 +31,22 @@ pub struct OtlpEncoder {
     schema_cache: SchemaCache,
 }
 
+impl Default for OtlpEncoder {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl OtlpEncoder {
     pub fn new() -> Self {
         OtlpEncoder {
             schema_cache: Arc::new(RwLock::new(HashMap::new())),
         }
+    }
+
+    /// Get the number of cached schemas (for testing/debugging purposes)
+    pub fn schema_cache_size(&self) -> usize {
+        self.schema_cache.read().unwrap().len()
     }
 
     pub fn encode_log_batch<'a, I>(&self, logs: I, metadata: &str) -> Vec<(String, Vec<u8>, usize)>
@@ -55,17 +65,18 @@ impl OtlpEncoder {
             } else {
                 log_record.event_name.clone()
             };
-            let (field_specs, schema_id) =
-                self.determine_fields_and_schema_id(log_record, &event_name);
+            let event_name_arc = Arc::new(event_name.clone());
+            let (field_info, schema_id) =
+                Self::determine_fields_and_schema_id(log_record, &event_name);
 
-            let schema_entry = self.get_or_create_schema(schema_id, field_specs.clone());
+            let schema_entry = self.get_or_create_schema(schema_id, field_info.as_slice());
 
             // 2. Encode row
-            let row_buffer = self.write_row_data(log_record, &field_specs);
+            let row_buffer = self.write_row_data(log_record, &field_info);
             let level = log_record.severity_number as u8;
 
             // 3. Create batch key
-            let batch_key = event_name.clone();
+            let batch_key = event_name;
 
             // 4. Create or get existing batch entry
             let entry = batches
@@ -73,26 +84,25 @@ impl OtlpEncoder {
                 .or_insert_with(|| (Vec::new(), Vec::new()));
 
             // 5. Add schema entry if not already present (multiple schemas per event_name batch)
+            // TODO: Consider HashMap for schema lookup if typical schema count per batch grows beyond ~10
+            //       Currently optimized for 4-5 schemas where linear search is faster than HashMap overhead
             if !entry.0.iter().any(|s| s.id == schema_id) {
                 entry.0.push(schema_entry);
             }
 
-            // 6. Add encoded row to batch
-            entry.1.push((level, schema_id, row_buffer));
+            // 6. Create CentralEventEntry directly (optimization: no intermediate EncodedRow)
+            let central_event = CentralEventEntry {
+                schema_id,
+                level,
+                event_name: event_name_arc,
+                row: row_buffer,
+            };
+            entry.1.push(central_event);
         }
 
         // 4. Encode blobs (one per event_name, potentially multiple schemas per blob)
         let mut blobs = Vec::new();
-        for (batch_event_name, (schema_entries, records)) in batches {
-            let events: Vec<CentralEventEntry> = records
-                .into_iter()
-                .map(|(level, schema_id, row_buffer)| CentralEventEntry {
-                    schema_id,
-                    level,
-                    event_name: batch_event_name.clone(),
-                    row: row_buffer,
-                })
-                .collect();
+        for (batch_event_name, (schema_entries, events)) in batches {
             let events_len = events.len();
 
             let blob = CentralBlob {
@@ -103,18 +113,13 @@ impl OtlpEncoder {
                 events,
             };
             let bytes = blob.to_bytes();
-            // The return type is now (0, batch_event_name, bytes, events_len)
             blobs.push((batch_event_name, bytes, events_len));
         }
         blobs
     }
 
     /// Determine fields and calculate schema ID in a single pass for optimal performance
-    fn determine_fields_and_schema_id(
-        &self,
-        log: &LogRecord,
-        event_name: &str,
-    ) -> (Vec<FieldDef>, u64) {
+    fn determine_fields_and_schema_id(log: &LogRecord, event_name: &str) -> (Vec<FieldDef>, u64) {
         use std::collections::hash_map::DefaultHasher;
         use std::hash::{Hash, Hasher};
 
@@ -198,31 +203,34 @@ impl OtlpEncoder {
     }
 
     /// Get or create schema - fields are accessible via returned schema entry
-    fn get_or_create_schema(
-        &self,
-        schema_id: u64,
-        field_info: Vec<FieldDef>,
-    ) -> CentralSchemaEntry {
-        // Check cache first
+    /// Now accepts a reference to avoid unnecessary cloning when schema is cached
+    /// Uses Arc to eliminate expensive BondEncodedSchema cloning on cache hits
+    fn get_or_create_schema(&self, schema_id: u64, field_info: &[FieldDef]) -> CentralSchemaEntry {
+        // Check cache first - only Arc cloning needed if schema exists (very cheap)
         {
-            if let Some((schema, schema_md5)) = self.schema_cache.read().unwrap().get(&schema_id) {
+            if let Some((schema_arc, schema_md5)) =
+                self.schema_cache.read().unwrap().get(&schema_id)
+            {
                 return CentralSchemaEntry {
                     id: schema_id,
                     md5: *schema_md5,
-                    schema: schema.clone(),
+                    schema: (**schema_arc).clone(), // Dereference Arc and clone BondEncodedSchema
                 };
             }
         }
 
-        let schema = BondEncodedSchema::from_fields("OtlpLogRecord", "telemetry", field_info); //TODO - use actual struct name and namespace
+        // Only clone field_info when we actually need to create a new schema
+        let schema =
+            BondEncodedSchema::from_fields("OtlpLogRecord", "telemetry", field_info.to_vec()); //TODO - use actual struct name and namespace
 
         let schema_bytes = schema.as_bytes();
         let schema_md5 = md5::compute(schema_bytes).0;
 
-        // Cache only schema and MD5 - field info is accessible via schema.fields()
+        // Cache Arc<BondEncodedSchema> to avoid cloning large structures
+        let schema_arc = Arc::new(schema.clone());
         {
             let mut cache = self.schema_cache.write().unwrap();
-            cache.insert(schema_id, (schema.clone(), schema_md5));
+            cache.insert(schema_id, (schema_arc, schema_md5));
         }
 
         CentralSchemaEntry {
