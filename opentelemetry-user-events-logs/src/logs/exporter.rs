@@ -20,7 +20,7 @@ pub(crate) struct UserEventsExporter {
     cloud_role: Option<String>,
     cloud_role_instance: Option<String>,
     attributes_from_resource: Vec<(Key, AnyValue)>,
-    resource_attributes: HashSet<String>,
+    resource_attribute_keys: HashSet<String>,
 }
 
 // Constants for the UserEventsExporter
@@ -129,7 +129,7 @@ impl UserEventsExporter {
             event_sets,
             cloud_role: None,
             cloud_role_instance: None,
-            resource_attributes: resource_attributes.into_iter().collect(),
+            resource_attribute_keys: resource_attributes.into_iter().collect(),
             attributes_from_resource: Vec::new(),
         }
     }
@@ -430,7 +430,7 @@ impl opentelemetry_sdk::logs::LogExporter for UserEventsExporter {
                 self.cloud_role = Some(value.to_string());
             } else if key.as_str() == "service.instance.id" {
                 self.cloud_role_instance = Some(value.to_string());
-            } else if self.resource_attributes.contains(key.as_str()) {
+            } else if self.resource_attribute_keys.contains(key.as_str()) {
                 self.attributes_from_resource
                     .push((key.clone(), val_to_any_value(value)));
             }

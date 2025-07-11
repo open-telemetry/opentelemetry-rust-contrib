@@ -2,8 +2,14 @@
 
 ## vNext
 
-- Add `with_resource_attributes` method to processor builder for specifying
-  which resource attribute keys should be exported with each log record.
+- Added a `with_resource_attributes` method to the processor builder, allowing
+  users to specify which resource attribute keys are exported with each log
+  record.
+  - By default, the Resource attributes `"service.name"` and
+    `"service.instance.id"` continue to be exported as `cloud.roleName` and
+    `cloud.roleInstance`.
+  - This feature enables exporting additional resource attributes beyond the
+    defaults.
 
 ## v0.13.0
 

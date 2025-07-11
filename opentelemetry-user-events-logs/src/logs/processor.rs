@@ -66,7 +66,7 @@ impl opentelemetry_sdk::logs::LogProcessor for Processor {
 #[derive(Debug)]
 pub struct ProcessorBuilder<'a> {
     provider_name: &'a str,
-    resource_attributes: Vec<String>,
+    resource_attribute_keys: Vec<String>,
 }
 
 impl<'a> ProcessorBuilder<'a> {
@@ -96,7 +96,7 @@ impl<'a> ProcessorBuilder<'a> {
     pub(crate) fn new(provider_name: &'a str) -> Self {
         Self {
             provider_name,
-            resource_attributes: vec![],
+            resource_attribute_keys: vec![],
         }
     }
 
@@ -104,7 +104,7 @@ impl<'a> ProcessorBuilder<'a> {
     /// This is the list of attribute keys, which, if present in Resource attributes,
     /// will be exported with each log.
     pub fn with_resource_attributes<S: Into<String>>(mut self, attributes: Vec<S>) -> Self {
-        self.resource_attributes = attributes.into_iter().map(|s| s.into()).collect();
+        self.resource_attribute_keys = attributes.into_iter().map(|s| s.into()).collect();
         self
     }
 
@@ -129,7 +129,7 @@ impl<'a> ProcessorBuilder<'a> {
             return Err("Provider name must contain only ASCII letters, digits, and '_'.".into());
         }
 
-        let exporter = UserEventsExporter::new(self.provider_name, self.resource_attributes);
+        let exporter = UserEventsExporter::new(self.provider_name, self.resource_attribute_keys);
         Ok(Processor { exporter })
     }
 }
