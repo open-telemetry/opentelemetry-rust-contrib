@@ -26,31 +26,30 @@ const FIELD_BODY: &str = "body";
 
 /// Encoder to write OTLP payload in bond form.
 #[derive(Clone)]
-pub struct OtlpEncoder {
+pub(crate) struct OtlpEncoder {
     // TODO - limit cache size or use LRU eviction, and/or add feature flag for caching
     schema_cache: SchemaCache,
 }
 
-impl Default for OtlpEncoder {
-    fn default() -> Self {
-        Self::new()
-    }
-}
-
 impl OtlpEncoder {
-    pub fn new() -> Self {
+    pub(crate) fn new() -> Self {
         OtlpEncoder {
             schema_cache: Arc::new(RwLock::new(HashMap::new())),
         }
     }
 
     /// Get the number of cached schemas (for testing/debugging purposes)
-    pub fn schema_cache_size(&self) -> usize {
+    #[allow(dead_code)]
+    pub(crate) fn schema_cache_size(&self) -> usize {
         self.schema_cache.read().unwrap().len()
     }
 
     /// Encode a batch of logs into a vector of (event_name, bytes, events_count)
-    pub fn encode_log_batch<'a, I>(&self, logs: I, metadata: &str) -> Vec<(String, Vec<u8>, usize)>
+    pub(crate) fn encode_log_batch<'a, I>(
+        &self,
+        logs: I,
+        metadata: &str,
+    ) -> Vec<(String, Vec<u8>, usize)>
     //(event_name, bytes, events_count)
     where
         I: IntoIterator<Item = &'a opentelemetry_proto::tonic::logs::v1::LogRecord>,
