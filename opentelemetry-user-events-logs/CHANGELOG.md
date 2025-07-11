@@ -2,6 +2,9 @@
 
 ## vNext
 
+- Add `with_resource_attributes` method to processor builder for specifying
+  which resource attribute keys should be exported with each log record.
+
 ## v0.13.0
 
 Released 2025-May-27
