@@ -15,6 +15,9 @@ use std::{
     sync::{Arc, Mutex, OnceLock},
 };
 
+// Base number of fields in PartB (before adding well-known attributes)
+const BASE_PARTB_FIELD_COUNT: u8 = 6;
+
 // Well-known attributes mapping - created once at runtime
 static WELL_KNOWN_ATTRIBUTES: OnceLock<HashMap<&'static str, &'static str>> = OnceLock::new();
 
@@ -191,7 +194,7 @@ impl UserEventsSpanExporter {
             // Create PartB with initial base fields. Count will be updated later
             // based on the number of well-known attributes found.
             let mut part_b_bookmark: usize = 0;
-            eb.add_struct_with_bookmark("PartB", 6, 0, &mut part_b_bookmark); // Start with base 6 fields
+            eb.add_struct_with_bookmark("PartB", BASE_PARTB_FIELD_COUNT, 0, &mut part_b_bookmark);
 
             // Add base fields
             eb.add_str("_typeName", "Span", FieldFormat::Default, 0);
@@ -243,7 +246,7 @@ impl UserEventsSpanExporter {
             }
 
             // Update PartB field count with the number of well-known attributes found.
-            eb.set_struct_field_count(part_b_bookmark, 6 + partb_count_from_attributes);
+            eb.set_struct_field_count(part_b_bookmark, BASE_PARTB_FIELD_COUNT + partb_count_from_attributes);
 
             // Add regular attributes to PartC if any.
             if partc_attribute_count > 0 {
