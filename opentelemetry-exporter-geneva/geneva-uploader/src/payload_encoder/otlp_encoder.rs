@@ -49,6 +49,7 @@ impl OtlpEncoder {
         self.schema_cache.read().unwrap().len()
     }
 
+    /// Encode a batch of logs into a vector of (event_name, bytes, events_count)
     pub fn encode_log_batch<'a, I>(&self, logs: I, metadata: &str) -> Vec<(String, Vec<u8>, usize)>
     //(event_name, bytes, events_count)
     where
@@ -203,10 +204,7 @@ impl OtlpEncoder {
     }
 
     /// Get or create schema - fields are accessible via returned schema entry
-    /// Now accepts a reference to avoid unnecessary cloning when schema is cached
-    /// Uses Arc to eliminate expensive BondEncodedSchema cloning on cache hits
     fn get_or_create_schema(&self, schema_id: u64, field_info: &[FieldDef]) -> CentralSchemaEntry {
-        // Check cache first - only Arc cloning needed if schema exists (very cheap)
         {
             if let Some((schema_arc, schema_md5)) =
                 self.schema_cache.read().unwrap().get(&schema_id)
@@ -220,7 +218,7 @@ impl OtlpEncoder {
         }
 
         // Only clone field_info when we actually need to create a new schema
-        // Investigate if we can avoid cloning by using Cow using Arc<BondEncodedSchema>
+        // Investigate if we can avoid cloning by using Cow using Arc to fields_info
         let schema =
             BondEncodedSchema::from_fields("OtlpLogRecord", "telemetry", field_info.to_vec()); //TODO - use actual struct name and namespace
 
