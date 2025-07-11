@@ -270,10 +270,8 @@ pub(crate) fn encode_dynamic_payload<W: Write>(
 }
 
 /// Arc-wrapped schema data to avoid expensive cloning
-#[derive(Clone)]
-struct BondSchemaData {
-    encoded_bytes: Vec<u8>,
-}
+
+type BondSchemaData = Vec<u8>;
 
 pub(crate) struct BondEncodedSchema {
     data: Arc<BondSchemaData>,
@@ -285,12 +283,12 @@ impl BondEncodedSchema {
         let encoded_bytes = schema.encode().expect("Schema encoding failed");
 
         Self {
-            data: Arc::new(BondSchemaData { encoded_bytes }),
+            data: Arc::new(encoded_bytes),
         }
     }
 
     pub(crate) fn as_bytes(&self) -> &[u8] {
-        &self.data.encoded_bytes
+        &self.data
     }
 }
 
