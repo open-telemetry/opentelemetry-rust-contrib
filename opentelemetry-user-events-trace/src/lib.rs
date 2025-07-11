@@ -12,7 +12,7 @@ mod tests {
 
     use crate::UserEventsTracerProviderBuilderExt;
     use opentelemetry::{
-        trace::{Span, TraceContextExt, Tracer, TracerProvider},
+        trace::{TraceContextExt, Tracer, TracerProvider},
         KeyValue,
     };
     use opentelemetry_sdk::trace::SdkTracerProvider;
@@ -169,7 +169,7 @@ mod tests {
             part_b.get("startTime").is_some(),
             "PartB.startTime is missing"
         );
-        assert_eq!(part_b["success"].as_bool().unwrap(), true);
+        assert!(part_b["success"].as_bool().unwrap());
         assert_eq!(part_b["kind"].as_i64().unwrap(), 0);
         
         // Validate attributes that become PartB

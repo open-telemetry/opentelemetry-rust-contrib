@@ -246,7 +246,7 @@ impl UserEventsSpanExporter {
                 eb.add_struct("PartC", partc_attribute_count, 0);
                 for kv in span.attributes.iter() {
                     if !WELL_KNOWN_ATTRIBUTES.contains_key(kv.key.as_str()) {
-                        self.add_attribute_to_event(&mut eb, &kv.key.as_str(), &kv.value);
+                        self.add_attribute_to_event(&mut eb, kv.key.as_str(), &kv.value);
                     }
                 }
             }
