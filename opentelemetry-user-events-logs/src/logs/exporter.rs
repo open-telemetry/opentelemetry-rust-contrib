@@ -117,7 +117,7 @@ const fn get_severity_level(severity: Severity) -> Level {
 
 impl UserEventsExporter {
     /// Create instance of the exporter
-    pub(crate) fn new(provider_name: &str, resource_attributes: Vec<&str>) -> Self {
+    pub(crate) fn new(provider_name: &str, resource_attributes: Vec<String>) -> Self {
         let mut eventheader_provider: Provider =
             Provider::new(provider_name, &Provider::new_options());
         let event_sets = register_events(&mut eventheader_provider);
@@ -129,10 +129,7 @@ impl UserEventsExporter {
             event_sets,
             cloud_role: None,
             cloud_role_instance: None,
-            resource_attributes: resource_attributes
-                .into_iter()
-                .map(|s| s.to_string())
-                .collect(),
+            resource_attributes: resource_attributes.into_iter().collect(),
             attributes_from_resource: Vec::new(),
         }
     }

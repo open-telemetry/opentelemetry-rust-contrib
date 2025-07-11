@@ -246,6 +246,10 @@ mod tests {
         assert_eq!(part_c["user_name"].as_str().unwrap(), "otel user");
         assert_eq!(part_c["resource_attribute1"].as_str().unwrap(), "v1");
         assert_eq!(part_c["resource_attribute2"].as_str().unwrap(), "v2");
+        assert!(
+            part_c.get("resource_attribute3").is_none(),
+            "resource_attribute3 should not be present"
+        );
         assert_eq!(
             part_c["user_email"].as_str().unwrap(),
             "otel.user@opentelemetry.com"

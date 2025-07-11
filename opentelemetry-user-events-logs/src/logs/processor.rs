@@ -66,7 +66,7 @@ impl opentelemetry_sdk::logs::LogProcessor for Processor {
 #[derive(Debug)]
 pub struct ProcessorBuilder<'a> {
     provider_name: &'a str,
-    resource_attributes: Vec<&'a str>,
+    resource_attributes: Vec<String>,
 }
 
 impl<'a> ProcessorBuilder<'a> {
@@ -103,8 +103,8 @@ impl<'a> ProcessorBuilder<'a> {
     /// Sets the resource attributes for the processor
     /// This is the list of attribute keys, which, if present in Resource attributes,
     /// will be exported with each log.
-    pub fn with_resource_attributes(mut self, attributes: Vec<&'a str>) -> Self {
-        self.resource_attributes = attributes;
+    pub fn with_resource_attributes<S: Into<String>>(mut self, attributes: Vec<S>) -> Self {
+        self.resource_attributes = attributes.into_iter().map(|s| s.into()).collect();
         self
     }
 
