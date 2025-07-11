@@ -31,6 +31,12 @@ pub struct OtlpEncoder {
     schema_cache: SchemaCache,
 }
 
+impl Default for OtlpEncoder {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl OtlpEncoder {
     pub fn new() -> Self {
         OtlpEncoder {

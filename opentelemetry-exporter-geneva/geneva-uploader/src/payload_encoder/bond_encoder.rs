@@ -270,9 +270,7 @@ pub(crate) fn encode_dynamic_payload<W: Write>(
 }
 
 /// Arc-wrapped schema data to avoid expensive cloning
-
 type BondSchemaData = Vec<u8>;
-
 pub(crate) struct BondEncodedSchema {
     data: Arc<BondSchemaData>,
 }
