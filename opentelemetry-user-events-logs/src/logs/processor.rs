@@ -102,12 +102,31 @@ impl<'a> ProcessorBuilder<'a> {
         }
     }
 
-    /// Sets the resource attributes for the processor This is the list of
-    /// attribute keys, which, if present in Resource attributes, will be
-    /// exported with each log. Without this, Resource attributes (except
-    /// service.name and service.instance.id, which are exported as
-    /// cloud.roleName, cloud.roleInstance respectively) are ignored and are not
-    /// exported.
+    /// Sets the resource attributes for the processor.
+    ///
+    /// This specifies which resource attributes should be exported with each log record.
+    ///
+    /// # Performance Considerations
+    ///
+    /// **Warning**: Each specified resource attribute will be serialized and sent
+    /// with EVERY log record. This is different from OTLP exporters where resource
+    /// attributes are serialized once per batch. Consider the performance impact
+    /// when selecting which attributes to export.
+    ///
+    /// # Best Practices for user_events
+    ///
+    /// **Recommendation**: Be selective about which resource attributes to export.
+    /// Since user_events writes to a local kernel buffer and requires a local
+    /// listener/agent, the agent can often deduce many resource attributes without
+    /// requiring them to be sent with each log:
+    ///
+    /// - **Infrastructure attributes** (datacenter, region, availability zone) can
+    ///   be determined by the local agent
+    /// - **Host attributes** (hostname, IP address, OS version) are available locally
+    /// - **Deployment attributes** (environment, cluster) may be known to the agent
+    ///
+    /// Focus on attributes that are truly specific to your application instance
+    /// and cannot be easily determined by the local agent.
     pub fn with_resource_attributes<I, S>(mut self, attributes: I) -> Self
     where
         I: IntoIterator<Item = S>,
