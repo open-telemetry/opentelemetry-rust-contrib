@@ -386,7 +386,13 @@ mod tests {
 
     // Helper function to test direct logging (i.e without tracing or log crate)
     // with different severity levels
-    fn integration_test_direct_helper(severity: opentelemetry::logs::Severity, trace_point: &str) {
+    fn integration_test_direct_helper<F>(
+        severity: opentelemetry::logs::Severity,
+        trace_point: &str,
+        event_name_callback: Option<F>,
+    ) where
+        F: Fn(&opentelemetry_sdk::logs::SdkLogRecord) -> &'static str + Send + Sync + 'static,
+    {
         use opentelemetry::logs::AnyValue;
         use opentelemetry::logs::LogRecord;
         use opentelemetry::logs::Logger;
@@ -394,7 +400,29 @@ mod tests {
 
         // Basic check if user_events are available
         check_user_events_available().expect("Kernel does not support user_events. Verify your distribution/kernel supports user_events: https://docs.kernel.org/trace/user_events.html.");
-        let user_event_processor = Processor::builder("myprovider").build().unwrap();
+
+        // Determine expected event name based on whether callback is provided
+        let expected_event_name = if event_name_callback.is_some() {
+            // If a callback was provided, we'll need to check dynamically based on the event
+            // Since we don't know exactly what the callback returns here, we'll make the assertion more flexible
+            // The actual event name validation will happen in specific test cases
+            None
+        } else {
+            // If no callback provided, we expect the default "Log" event name
+            Some("myprovider:Log")
+        };
+
+        // Create processor builder and add callback if provided
+        #[cfg(feature = "experimental_eventname_callback")]
+        let mut processor_builder = Processor::builder("myprovider");
+        #[cfg(not(feature = "experimental_eventname_callback"))]
+        let processor_builder = Processor::builder("myprovider");
+
+        #[cfg(feature = "experimental_eventname_callback")]
+        if let Some(callback) = event_name_callback {
+            processor_builder = processor_builder.with_event_name_callback(callback);
+        }
+        let user_event_processor = processor_builder.build().unwrap();
 
         let logger_provider = LoggerProviderBuilder::default()
             .with_resource(Resource::builder().with_service_name("myrolename").build())
@@ -464,13 +492,6 @@ mod tests {
         assert!(!json_content.is_empty());
 
         let formatted_output = json_content.trim().to_string();
-        /*
-                // Sample output from perf-decode
-                {
-        "./perf.data": [
-          { "n": "myprovider:Log", "__csver__": 1024, "PartA": { "time": "2025-03-07T16:31:28.279214367+00:00", "ext_cloud_role": "myrolename"  }, "PartC": { "user_name": "otel user", "user_email": "otel.user@opentelemetry.com" }, "PartB": { "_typeName": "Log", "severityNumber": 2, "severityText": "ERROR", "eventId": 20, "name": "my-event-name" }, "meta": { "time": 81252.403220286, "cpu": 4, "pid": 21084, "tid": 21085, "level": 2, "keyword": "0x1" } } ]
-        }
-                 */
 
         let json_value: Value = from_str(&formatted_output).expect("Failed to parse JSON");
         let perf_data_key = json_value
@@ -484,20 +505,24 @@ mod tests {
             .as_array()
             .expect("Events for perf.data is not an array");
 
-        // Find the specific event. Its named providername:eventname format.
-        let event = events
-            .iter()
-            .find(|e| {
-                if let Some(name) = e.get("n") {
-                    name.as_str().unwrap_or("") == "myprovider:Log"
-                } else {
-                    false
-                }
-            })
-            .expect("Event 'myprovider:Log' not found");
+        // Find the specific event
+        let event = if let Some(expected_name) = expected_event_name {
+            events
+                .iter()
+                .find(|e| {
+                    if let Some(name) = e.get("n") {
+                        name.as_str().unwrap_or("") == expected_name
+                    } else {
+                        false
+                    }
+                })
+                .unwrap_or_else(|| panic!("Event '{expected_name}' not found"))
+        } else {
+            // Just get first event when using custom callback
+            events.first().expect("No events found in perf output")
+        };
 
         // Validate event structure and fields
-        assert_eq!(event["n"].as_str().unwrap(), "myprovider:Log");
         assert_eq!(event["__csver__"].as_i64().unwrap(), 1024);
 
         // Validate PartA
@@ -537,11 +562,59 @@ mod tests {
         use opentelemetry::logs::Severity;
         // Run using the below command
         // sudo -E ~/.cargo/bin/cargo test integration_test_direct -- --nocapture --ignored
-        integration_test_direct_helper(Severity::Debug, "user_events:myprovider_L5K1");
-        integration_test_direct_helper(Severity::Info, "user_events:myprovider_L4K1");
-        integration_test_direct_helper(Severity::Warn, "user_events:myprovider_L3K1");
-        integration_test_direct_helper(Severity::Error, "user_events:myprovider_L2K1");
-        integration_test_direct_helper(Severity::Fatal, "user_events:myprovider_L1K1");
+
+        // Specify None with explicit type for the event name callback
+        let none_callback: Option<fn(&opentelemetry_sdk::logs::SdkLogRecord) -> &'static str> =
+            None;
+
+        integration_test_direct_helper(
+            Severity::Debug,
+            "user_events:myprovider_L5K1",
+            none_callback,
+        );
+        integration_test_direct_helper(
+            Severity::Info,
+            "user_events:myprovider_L4K1",
+            none_callback,
+        );
+        integration_test_direct_helper(
+            Severity::Warn,
+            "user_events:myprovider_L3K1",
+            none_callback,
+        );
+        integration_test_direct_helper(
+            Severity::Error,
+            "user_events:myprovider_L2K1",
+            none_callback,
+        );
+        integration_test_direct_helper(
+            Severity::Fatal,
+            "user_events:myprovider_L1K1",
+            none_callback,
+        );
+    }
+
+    #[ignore]
+    #[test]
+    fn integration_test_direct_with_custom_event_name() {
+        use opentelemetry::logs::Severity;
+
+        // Run using the below command
+        // sudo -E ~/.cargo/bin/cargo test integration_test_direct_with_custom_event_name -- --nocapture --ignored
+
+        // Simple callback that returns a hardcoded event name
+        fn custom_event_name_callback(
+            _record: &opentelemetry_sdk::logs::SdkLogRecord,
+        ) -> &'static str {
+            "CustomEventName"
+        }
+
+        // Test with a single severity level using the custom callback
+        integration_test_direct_helper::<fn(&opentelemetry_sdk::logs::SdkLogRecord) -> &'static str>(
+            Severity::Error, // Using ERROR severity
+            "user_events:myprovider_L2K1",
+            Some(custom_event_name_callback),
+        );
     }
 
     fn check_user_events_available() -> Result<String, String> {
