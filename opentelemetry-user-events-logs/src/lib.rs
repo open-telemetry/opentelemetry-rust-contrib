@@ -78,6 +78,46 @@
 //!
 //! This will create a logger provider with the `user_events` exporter enabled.
 //!
+//! ## Resource Attribute Handling
+//!
+//! **Important**: By default, resource attributes are NOT exported with log records.
+//! The user_events exporter only automatically exports these specific resource attributes:
+//!
+//! - **`service.name`** → Exported as `cloud.roleName` in PartA of Common Schema
+//! - **`service.instance.id`** → Exported as `cloud.roleInstance` in PartA of Common Schema
+//!
+//! All other resource attributes are ignored unless explicitly specified.
+//!
+//! ### Opting in to Additional Resource Attributes
+//!
+//! To export additional resource attributes, use the `with_resource_attributes()` method:
+//!
+//! ```rust
+//! use opentelemetry_sdk::logs::SdkLoggerProvider;
+//! use opentelemetry_sdk::Resource;
+//! use opentelemetry_user_events_logs::Processor;
+//! use opentelemetry::KeyValue;
+//!
+//! let user_event_processor = Processor::builder("myprovider")
+//!     // Only export specific resource attributes
+//!     .with_resource_attributes(["custom_attribute1", "custom_attribute2"])
+//!     .build()
+//!     .unwrap();
+//!
+//! let provider = SdkLoggerProvider::builder()
+//!     .with_resource(
+//!         Resource::builder_empty()
+//!             .with_service_name("example")
+//!             .with_attribute(KeyValue::new("custom_attribute1", "value1"))
+//!             .with_attribute(KeyValue::new("custom_attribute2", "value2"))
+//!             .with_attribute(KeyValue::new("custom_attribute2", "value3"))  // This won't be exported
+//!             .build(),
+//!     )
+//!     .with_log_processor(user_event_processor)
+//!     .build();
+//! ```
+//!
+//!
 //! ## Listening to Exported Events
 //!
 //! Tools like `perf` or `ftrace` can be used to listen to the exported events.
@@ -101,7 +141,7 @@ mod tests {
     use crate::Processor;
     use opentelemetry::trace::Tracer;
     use opentelemetry::trace::{TraceContextExt, TracerProvider};
-    use opentelemetry::Key;
+    use opentelemetry::{Key, KeyValue};
     use opentelemetry_appender_tracing::layer;
     use opentelemetry_sdk::Resource;
     use opentelemetry_sdk::{
@@ -124,10 +164,20 @@ mod tests {
 
         // Basic check if user_events are available
         check_user_events_available().expect("Kernel does not support user_events. Verify your distribution/kernel supports user_events: https://docs.kernel.org/trace/user_events.html.");
-        let user_event_processor = Processor::builder("myprovider").build().unwrap();
+        let user_event_processor = Processor::builder("myprovider")
+            .with_resource_attributes(vec!["resource_attribute1", "resource_attribute2"])
+            .build()
+            .unwrap();
 
         let logger_provider = LoggerProviderBuilder::default()
-            .with_resource(Resource::builder().with_service_name("myrolename").build())
+            .with_resource(
+                Resource::builder()
+                    .with_service_name("myrolename")
+                    .with_attribute(KeyValue::new("resource_attribute1", "v1"))
+                    .with_attribute(KeyValue::new("resource_attribute2", "v2"))
+                    .with_attribute(KeyValue::new("resource_attribute3", "v3"))
+                    .build(),
+            )
             .with_log_processor(user_event_processor)
             .build();
 
@@ -233,6 +283,12 @@ mod tests {
         // Validate PartC
         let part_c = &event["PartC"];
         assert_eq!(part_c["user_name"].as_str().unwrap(), "otel user");
+        assert_eq!(part_c["resource_attribute1"].as_str().unwrap(), "v1");
+        assert_eq!(part_c["resource_attribute2"].as_str().unwrap(), "v2");
+        assert!(
+            part_c.get("resource_attribute3").is_none(),
+            "resource_attribute3 should not be present"
+        );
         assert_eq!(
             part_c["user_email"].as_str().unwrap(),
             "otel.user@opentelemetry.com"
