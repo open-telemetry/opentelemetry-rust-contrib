@@ -151,6 +151,7 @@ impl UserEventsSpanExporter {
 
     pub(crate) fn export_span(&self, span: &SpanData) -> OTelSdkResult {
         if self.event_set.enabled() {
+            let well_known_attrs = get_well_known_attributes();
             let mut eb = EventBuilder::new();
             eb.reset("Span", 0);
             eb.opcode(Opcode::Info);
@@ -237,7 +238,7 @@ impl UserEventsSpanExporter {
             let mut partc_attribute_count = 0;
 
             for kv in span.attributes.iter() {
-                if let Some(well_known_key) = get_well_known_attributes().get(kv.key.as_str()) {
+                if let Some(well_known_key) = well_known_attrs.get(kv.key.as_str()) {
                     self.add_attribute_to_event(&mut eb, well_known_key, &kv.value);
                     partb_count_from_attributes += 1;
                 } else {
@@ -255,7 +256,7 @@ impl UserEventsSpanExporter {
             if partc_attribute_count > 0 {
                 eb.add_struct("PartC", partc_attribute_count, 0);
                 for kv in span.attributes.iter() {
-                    if !get_well_known_attributes().contains_key(kv.key.as_str()) {
+                    if !well_known_attrs.contains_key(kv.key.as_str()) {
                         self.add_attribute_to_event(&mut eb, kv.key.as_str(), &kv.value);
                     }
                 }
