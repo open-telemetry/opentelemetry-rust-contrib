@@ -5,6 +5,7 @@ use opentelemetry_sdk::{
     error::OTelSdkResult,
     logs::{LogBatch, SdkLogRecord},
 };
+use std::borrow::Cow;
 use std::collections::HashSet;
 use std::error::Error;
 use std::fmt::Debug;
@@ -101,11 +102,18 @@ impl<'a> ProcessorBuilder<'a> {
         }
     }
 
-    /// Sets the resource attributes for the processor
-    /// This is the list of attribute keys, which, if present in Resource attributes,
-    /// will be exported with each log.
-    pub fn with_resource_attributes<S: Into<String>>(mut self, attributes: Vec<S>) -> Self {
-        self.resource_attribute_keys = attributes.into_iter().map(|s| s.into()).collect();
+    /// Sets the resource attributes for the processor This is the list of
+    /// attribute keys, which, if present in Resource attributes, will be
+    /// exported with each log. Without this, Resource attributes (except
+    /// service.name and service.instance.id, which are exported as
+    /// cloud.roleName, cloud.roleInstance respectively) are ignored and are not
+    /// exported.
+    pub fn with_resource_attributes<I, S>(mut self, attributes: I) -> Self
+    where
+        I: IntoIterator<Item = S>,
+        S: Into<Cow<'static, str>>,
+    {
+        self.resource_attribute_keys = attributes.into_iter().map(|s| s.into().into_owned()).collect();
         self
     }
 
