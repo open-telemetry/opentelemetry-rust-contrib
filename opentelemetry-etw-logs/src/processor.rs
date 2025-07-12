@@ -22,7 +22,7 @@ pub struct Processor {
 impl Processor {
     /// Creates a new instance of [`ProcessorBuilder`] with the given provider name.
     ///
-    /// The provider name must be:
+    /// The provider name must be cross-compatible with UserEvents (Linux) and must conform to the following requirements:
     ///
     /// - non-empty,
     /// - less than 234 characters long, and
@@ -39,6 +39,25 @@ impl Processor {
         ProcessorBuilder::new(provider_name)
     }
 
+    /// Creates a new instance of [`ProcessorBuilder`] with the given provider name conforming to ETW requirements.
+    ///
+    /// Cross-compatibility with UserEvents (Linux) is not guaranteed. Following are the explicit requirements:
+    ///
+    /// - non-empty,
+    /// - less than 234 characters long, and
+    /// - contain only ASCII alphanumeric characters, underscores (`_`) or hyphens (`-`).
+    ///
+    /// At the same time, it is recommended to use a provider name that is:
+    /// - short
+    /// - human-readable
+    /// - unique
+    /// - describing the application or service that is generating the logs
+    ///
+    /// By default, all events will be exported to the "Log" ETW event. See [`ProcessorBuilder`] for details on how to configure a different behavior.
+    pub fn builder_etw_compat_only(provider_name: &str) -> ProcessorBuilder {
+        ProcessorBuilder::new_etw_compat_only(provider_name)
+    }
+
     /// Creates a new instance of the [`Processor`] using the given options.
     pub(crate) fn new(options: Options) -> Self {
         let exporter: ETWExporter = ETWExporter::new(options);
@@ -46,6 +65,14 @@ impl Processor {
             event_exporter: exporter,
         }
     }
+}
+
+#[derive(Debug, Copy, Clone)]
+enum ProviderNameCompatMode {
+    /// Cross-compatible with UserEvents (Linux).
+    CrossCompat,
+    /// ETW only compatible.
+    EtwCompatOnly,
 }
 
 impl opentelemetry_sdk::logs::LogProcessor for Processor {
@@ -85,15 +112,31 @@ impl opentelemetry_sdk::logs::LogProcessor for Processor {
 #[derive(Debug)]
 pub struct ProcessorBuilder {
     options: Options,
+    provider_name_compat_mode: ProviderNameCompatMode,
 }
 
 impl ProcessorBuilder {
     /// Creates a new instance of [`ProcessorBuilder`] with the given provider name.
     ///
+    /// The provider name must contain only ASCII alphanumeric characters or '_'.
+    ///
     /// By default, all events will be exported to the "Log" ETW event.
     pub(crate) fn new(provider_name: &str) -> Self {
         ProcessorBuilder {
             options: Options::new(provider_name.to_string()),
+            provider_name_compat_mode: ProviderNameCompatMode::CrossCompat,
+        }
+    }
+
+    /// Creates a new instance of [`ProcessorBuilder`] with the given provider name.
+    ///
+    /// The provider name must contain only ASCII alphanumeric characters, '_' or '-'.
+    ///
+    /// By default, all events will be exported to the "Log" ETW event.
+    pub(crate) fn new_etw_compat_only(provider_name: &str) -> Self {
+        ProcessorBuilder {
+            options: Options::new(provider_name.to_string()),
+            provider_name_compat_mode: ProviderNameCompatMode::EtwCompatOnly,
         }
     }
 
@@ -118,24 +161,46 @@ impl ProcessorBuilder {
     }
 
     fn validate(&self) -> Result<(), Box<dyn Error>> {
-        validate_provider_name(self.options.provider_name())?;
+        validate_provider_name(self.options.provider_name(), self.provider_name_compat_mode)?;
         Ok(())
     }
 }
 
-fn validate_provider_name(provider_name: &str) -> Result<(), Box<dyn Error>> {
+fn validate_provider_name(
+    provider_name: &str,
+    compat_mode: ProviderNameCompatMode,
+) -> Result<(), Box<dyn Error>> {
     if provider_name.is_empty() {
         return Err("Provider name must not be empty.".into());
     }
     if provider_name.len() >= 234 {
         return Err("Provider name must be less than 234 characters long.".into());
     }
-    if !provider_name
-        .chars()
-        .all(|c| c.is_ascii_alphanumeric() || c == '_')
-    {
-        return Err("Provider name must contain only ASCII alphanumeric characters or '_'.".into());
+
+    match compat_mode {
+        ProviderNameCompatMode::CrossCompat => {
+            if !provider_name
+                .chars()
+                .all(|c| c.is_ascii_alphanumeric() || c == '_')
+            {
+                return Err(
+                    "Provider name must contain only ASCII alphanumeric characters or '_'.".into(),
+                );
+            }
+        }
+        ProviderNameCompatMode::EtwCompatOnly => {
+            if !provider_name
+                .chars()
+                .all(|c| c.is_ascii_alphanumeric() || c == '_' || c == '-')
+            {
+                return Err(
+                    "Provider name must contain only ASCII alphanumeric characters, '_' or '-'."
+                        .into(),
+                );
+            }
+        }
     }
+
     Ok(())
 }
 
@@ -276,33 +341,89 @@ mod tests {
     }
 
     #[test]
-    fn test_validate_provider_name() {
-        let result = validate_provider_name("valid_provider_name");
+    fn test_validate_cross_compat_name_not_using_hyphens() {
+        assert_eq!(
+            Processor::builder("i_have_a_-_")
+                .build()
+                .unwrap_err()
+                .to_string(),
+            "Provider name must contain only ASCII alphanumeric characters or '_'."
+        );
+    }
+
+    #[test]
+    fn test_validate_etw_compat_name_using_hyphens() {
+        assert!(Processor::builder_etw_compat_only("i_have_a_-_")
+            .build()
+            .is_ok());
+    }
+
+    #[test]
+    fn test_validate_provider_name_cross_compat() {
+        let compat_mode: ProviderNameCompatMode = ProviderNameCompatMode::CrossCompat;
+
+        let result = validate_provider_name("valid_provider_name", compat_mode);
         assert!(result.is_ok());
 
-        let result = validate_provider_name("");
+        let result = validate_provider_name("", compat_mode);
         assert!(result.is_err());
 
-        let result = validate_provider_name("a".repeat(235).as_str());
+        let result = validate_provider_name("a".repeat(235).as_str(), compat_mode);
         assert!(result.is_err());
 
-        let result = validate_provider_name("i_have_a_-_");
+        let result = validate_provider_name("i_have_a_-_", compat_mode);
         assert!(result.is_err());
 
-        let result = validate_provider_name("_?_");
+        let result = validate_provider_name("_?_", compat_mode);
         assert!(result.is_err());
 
-        let result = validate_provider_name("abcdefghijklmnopqrstuvwxyz");
+        let result = validate_provider_name("abcdefghijklmnopqrstuvwxyz", compat_mode);
         assert!(result.is_ok());
 
-        let result = validate_provider_name("ABCDEFGHIJKLMNOPQRSTUVWXYZ");
+        let result = validate_provider_name("ABCDEFGHIJKLMNOPQRSTUVWXYZ", compat_mode);
         assert!(result.is_ok());
 
-        let result = validate_provider_name("1234567890");
+        let result = validate_provider_name("1234567890", compat_mode);
         assert!(result.is_ok());
 
         let result = validate_provider_name(
             "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ1234567890_",
+            compat_mode,
+        );
+        assert!(result.is_ok());
+    }
+
+    #[test]
+    fn test_validate_provider_name_etw_compat() {
+        let compat_mode: ProviderNameCompatMode = ProviderNameCompatMode::EtwCompatOnly;
+
+        let result = validate_provider_name("valid_provider_name", compat_mode);
+        assert!(result.is_ok());
+
+        let result = validate_provider_name("", compat_mode);
+        assert!(result.is_err());
+
+        let result = validate_provider_name("a".repeat(235).as_str(), compat_mode);
+        assert!(result.is_err());
+
+        let result = validate_provider_name("i_have_a_-_", compat_mode);
+        assert!(result.is_ok());
+
+        let result = validate_provider_name("_?_", compat_mode);
+        assert!(result.is_err());
+
+        let result = validate_provider_name("abcdefghijklmnopqrstuvwxyz", compat_mode);
+        assert!(result.is_ok());
+
+        let result = validate_provider_name("ABCDEFGHIJKLMNOPQRSTUVWXYZ", compat_mode);
+        assert!(result.is_ok());
+
+        let result = validate_provider_name("1234567890", compat_mode);
+        assert!(result.is_ok());
+
+        let result = validate_provider_name(
+            "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ1234567890_",
+            compat_mode,
         );
         assert!(result.is_ok());
     }
