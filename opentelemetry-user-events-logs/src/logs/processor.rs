@@ -113,7 +113,10 @@ impl<'a> ProcessorBuilder<'a> {
         I: IntoIterator<Item = S>,
         S: Into<Cow<'static, str>>,
     {
-        self.resource_attribute_keys = attributes.into_iter().map(|s| s.into().into_owned()).collect();
+        self.resource_attribute_keys = attributes
+            .into_iter()
+            .map(|s| s.into().into_owned())
+            .collect();
         self
     }
 

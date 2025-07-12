@@ -284,13 +284,16 @@ impl UserEventsExporter {
                     }
                 }
 
-                for (key, value) in &self.attributes_from_resource {
+                if !self.attributes_from_resource.is_empty() {
                     if !is_part_c_present {
-                        eb.add_struct_with_bookmark("PartC", self.attributes_from_resource.len() as u8, 0, &mut cs_c_bookmark);
+                        eb.add_struct_with_bookmark("PartC", 1, 0, &mut cs_c_bookmark);
                         is_part_c_present = true;
                     }
-                    self.add_attribute_to_event(&mut eb, (key, value));
-                    cs_c_count += 1;
+
+                    for (key, value) in &self.attributes_from_resource {
+                        self.add_attribute_to_event(&mut eb, (key, value));
+                        cs_c_count += 1;
+                    }
                 }
 
                 if is_part_c_present {
