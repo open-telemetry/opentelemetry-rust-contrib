@@ -5,6 +5,7 @@ use opentelemetry_sdk::{
     error::OTelSdkResult,
     logs::{LogBatch, SdkLogRecord},
 };
+use std::collections::HashSet;
 use std::error::Error;
 use std::fmt::Debug;
 
@@ -66,7 +67,7 @@ impl opentelemetry_sdk::logs::LogProcessor for Processor {
 #[derive(Debug)]
 pub struct ProcessorBuilder<'a> {
     provider_name: &'a str,
-    resource_attribute_keys: Vec<String>,
+    resource_attribute_keys: HashSet<String>,
 }
 
 impl<'a> ProcessorBuilder<'a> {
@@ -96,7 +97,7 @@ impl<'a> ProcessorBuilder<'a> {
     pub(crate) fn new(provider_name: &'a str) -> Self {
         Self {
             provider_name,
-            resource_attribute_keys: vec![],
+            resource_attribute_keys: HashSet::new(),
         }
     }
 

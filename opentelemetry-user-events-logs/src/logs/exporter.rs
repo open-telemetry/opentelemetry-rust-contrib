@@ -117,7 +117,7 @@ const fn get_severity_level(severity: Severity) -> Level {
 
 impl UserEventsExporter {
     /// Create instance of the exporter
-    pub(crate) fn new(provider_name: &str, resource_attributes: Vec<String>) -> Self {
+    pub(crate) fn new(provider_name: &str, resource_attributes: HashSet<String>) -> Self {
         let mut eventheader_provider: Provider =
             Provider::new(provider_name, &Provider::new_options());
         let event_sets = register_events(&mut eventheader_provider);
@@ -129,7 +129,7 @@ impl UserEventsExporter {
             event_sets,
             cloud_role: None,
             cloud_role_instance: None,
-            resource_attribute_keys: resource_attributes.into_iter().collect(),
+            resource_attribute_keys: resource_attributes,
             attributes_from_resource: Vec::new(),
         }
     }
@@ -454,7 +454,7 @@ mod tests {
     use super::*;
     #[test]
     fn exporter_debug() {
-        let exporter = UserEventsExporter::new("test_provider", vec![]);
+        let exporter = UserEventsExporter::new("test_provider", HashSet::new());
         assert_eq!(
             format!("{exporter:?}"),
             "user_events log exporter (provider name: test_provider)"
