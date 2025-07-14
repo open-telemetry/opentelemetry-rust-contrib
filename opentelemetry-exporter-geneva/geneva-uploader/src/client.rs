@@ -104,32 +104,29 @@ impl GenevaClient {
         let blobs = self.encoder.encode_log_batch(log_iter, &self.metadata);
 
         // create an iterator that yields futures for each upload
-        let upload_futures =
-            blobs
-                .into_iter()
-                .map(|(_schema_id, event_name, encoded_blob, _row_count)| {
-                    let uploader = Arc::clone(&self.uploader);
-                    let event_version = "Ver2v0"; // TODO - find the actual value to be populated
-                    async move {
-                        // TODO: Investigate using tokio::spawn_blocking for LZ4 compression to avoid blocking
-                        // the async executor thread for CPU-intensive work.
-                        let compressed_blob = match lz4_chunked_compression(&encoded_blob) {
-                            Ok(blob) => blob,
-                            Err(e) => {
-                                return Err(format!(
-                                    "LZ4 compression failed: {e} Event: {event_name}"
-                                ))
-                            }
-                        };
-                        match uploader
-                            .upload(compressed_blob, &event_name, event_version)
-                            .await
-                        {
-                            Ok(_) => Ok(()),
-                            Err(e) => Err(format!("Geneva upload failed: {e} Event: {event_name}")),
+        let upload_futures = blobs
+            .into_iter()
+            .map(|(event_name, encoded_blob, _row_count)| {
+                let uploader = Arc::clone(&self.uploader);
+                let event_version = "Ver2v0"; // TODO - find the actual value to be populated
+                async move {
+                    // TODO: Investigate using tokio::spawn_blocking for LZ4 compression to avoid blocking
+                    // the async executor thread for CPU-intensive work.
+                    let compressed_blob = match lz4_chunked_compression(&encoded_blob) {
+                        Ok(blob) => blob,
+                        Err(e) => {
+                            return Err(format!("LZ4 compression failed: {e} Event: {event_name}"))
                         }
+                    };
+                    match uploader
+                        .upload(compressed_blob, &event_name, event_version)
+                        .await
+                    {
+                        Ok(_) => Ok(()),
+                        Err(e) => Err(format!("Geneva upload failed: {e} Event: {event_name}")),
                     }
-                });
+                }
+            });
         // Execute uploads concurrently with configurable concurrency
         let results: Vec<Result<(), String>> = stream::iter(upload_futures)
             .buffer_unordered(self.max_concurrent_uploads)
