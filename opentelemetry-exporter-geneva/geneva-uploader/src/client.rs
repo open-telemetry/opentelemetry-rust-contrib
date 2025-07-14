@@ -99,6 +99,8 @@ impl GenevaClient {
             .iter()
             .flat_map(|resource_log| resource_log.scope_logs.iter())
             .flat_map(|scope_log| scope_log.log_records.iter());
+        // TODO: Investigate using tokio::spawn_blocking for event encoding to avoid blocking
+        // the async executor thread for CPU-intensive work.
         let blobs = self.encoder.encode_log_batch(log_iter, &self.metadata);
 
         // create an iterator that yields futures for each upload
@@ -109,6 +111,8 @@ impl GenevaClient {
                     let uploader = Arc::clone(&self.uploader);
                     let event_version = "Ver2v0"; // TODO - find the actual value to be populated
                     async move {
+                        // TODO: Investigate using tokio::spawn_blocking for LZ4 compression to avoid blocking
+                        // the async executor thread for CPU-intensive work.
                         let compressed_blob = match lz4_chunked_compression(&encoded_blob) {
                             Ok(blob) => blob,
                             Err(e) => {
