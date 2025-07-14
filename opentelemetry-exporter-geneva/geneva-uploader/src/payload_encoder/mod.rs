@@ -1,7 +1,7 @@
 pub(crate) mod bond_encoder;
 pub(crate) mod central_blob;
 pub(crate) mod lz4_chunked_compression;
-pub(crate) mod otlp_encoder;
+pub mod otlp_encoder;
 
 #[cfg(test)]
 mod tests {
@@ -27,7 +27,7 @@ mod tests {
         let event = CentralEventEntry {
             schema_id,
             level: 5,
-            event_name: "basename".to_string(),
+            event_name: std::sync::Arc::new("basename".to_string()),
             row: row_data,
         };
 
