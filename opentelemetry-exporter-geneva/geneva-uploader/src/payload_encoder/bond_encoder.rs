@@ -2,6 +2,7 @@
 
 use std::borrow::Cow;
 use std::io::{Result, Write};
+use std::sync::Arc;
 
 /// Bond data types
 #[derive(Clone, Copy, Debug, Hash, PartialEq, Eq)]
@@ -268,33 +269,31 @@ pub(crate) fn encode_dynamic_payload<W: Write>(
     Ok(())
 }
 
+/// Arc-wrapped schema data to avoid expensive cloning
+type BondSchemaData = Vec<u8>;
 pub(crate) struct BondEncodedSchema {
-    schema: DynamicSchema,
-    encoded_bytes: Vec<u8>,
+    data: Arc<BondSchemaData>,
 }
 
 impl BondEncodedSchema {
     pub(crate) fn from_fields(name: &str, namespace: &str, fields: Vec<FieldDef>) -> Self {
-        let schema = DynamicSchema::new(name, namespace, fields); //"OtlpLogRecord", "telemetry");
-
+        let schema = DynamicSchema::new(name, namespace, fields);
         let encoded_bytes = schema.encode().expect("Schema encoding failed");
 
         Self {
-            schema,
-            encoded_bytes,
+            data: Arc::new(encoded_bytes),
         }
     }
 
     pub(crate) fn as_bytes(&self) -> &[u8] {
-        &self.encoded_bytes
+        &self.data
     }
 }
 
 impl Clone for BondEncodedSchema {
     fn clone(&self) -> Self {
         Self {
-            schema: self.schema.clone(),
-            encoded_bytes: self.encoded_bytes.clone(),
+            data: Arc::clone(&self.data),
         }
     }
 }
