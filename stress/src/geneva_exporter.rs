@@ -51,11 +51,11 @@ use wiremock::{Mock, MockServer, ResponseTemplate};
 fn create_test_logs() -> Vec<ResourceLogs> {
     let mut log_records = Vec::new();
 
-    // Create 10 simple log records
+    // Create 10 simple log records (5 records for each of two different events)
     for i in 0..10 {
         let log = LogRecord {
             observed_time_unix_nano: 1700000000000000000 + i,
-            event_name: "StressTestEvent".to_string(),
+            event_name: format!("StressTestEvent_{}", i % 2),
             severity_number: 9,
             severity_text: "INFO".to_string(),
             body: Some(AnyValue {
@@ -123,6 +123,7 @@ async fn init_client() -> Result<(GenevaClient, Option<String>), Box<dyn std::er
             tenant: std::env::var("GENEVA_TENANT").unwrap_or_else(|_| "test".to_string()),
             role_name: std::env::var("GENEVA_ROLE").unwrap_or_else(|_| "test".to_string()),
             role_instance: std::env::var("GENEVA_INSTANCE").unwrap_or_else(|_| "test".to_string()),
+            max_concurrent_uploads: None, // Use default
         };
 
         let client = GenevaClient::new(config).await?;
@@ -141,6 +142,7 @@ async fn init_client() -> Result<(GenevaClient, Option<String>), Box<dyn std::er
             tenant: "test".to_string(),
             role_name: "test".to_string(),
             role_instance: "test".to_string(),
+            max_concurrent_uploads: None, // Use default
         };
 
         let client = GenevaClient::new(config).await?;
@@ -195,6 +197,7 @@ async fn init_client() -> Result<(GenevaClient, Option<String>), Box<dyn std::er
             tenant: "test".to_string(),
             role_name: "test".to_string(),
             role_instance: "test".to_string(),
+            max_concurrent_uploads: None, // Use default
         };
 
         let client = GenevaClient::new(config).await?;

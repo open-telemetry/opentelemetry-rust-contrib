@@ -4,6 +4,7 @@ use crate::config_service::client::{AuthMethod, GenevaConfigClient, GenevaConfig
 use crate::ingestion_service::uploader::{GenevaUploader, GenevaUploaderConfig};
 use crate::payload_encoder::lz4_chunked_compression::lz4_chunked_compression;
 use crate::payload_encoder::otlp_encoder::OtlpEncoder;
+use futures::stream::{self, StreamExt};
 use opentelemetry_proto::tonic::logs::v1::ResourceLogs;
 use std::sync::Arc;
 
@@ -20,6 +21,8 @@ pub struct GenevaClientConfig {
     pub tenant: String,
     pub role_name: String,
     pub role_instance: String,
+    /// Maximum number of concurrent uploads. If None, defaults to number of CPU cores.
+    pub max_concurrent_uploads: Option<usize>,
     // Add event name/version here if constant, or per-upload if you want them per call.
 }
 
@@ -29,6 +32,7 @@ pub struct GenevaClient {
     uploader: Arc<GenevaUploader>,
     encoder: OtlpEncoder,
     metadata: String,
+    max_concurrent_uploads: usize,
 }
 
 impl GenevaClient {
@@ -76,10 +80,16 @@ impl GenevaClient {
             cfg.role_name,
             cfg.role_instance,
         );
+        let max_concurrent_uploads = cfg.max_concurrent_uploads.unwrap_or_else(|| {
+            std::thread::available_parallelism()
+                .map(|p| p.get())
+                .unwrap_or(4)
+        });
         Ok(Self {
             uploader: Arc::new(uploader),
             encoder: OtlpEncoder::new(),
             metadata,
+            max_concurrent_uploads,
         })
     }
 
@@ -90,16 +100,47 @@ impl GenevaClient {
             .flat_map(|resource_log| resource_log.scope_logs.iter())
             .flat_map(|scope_log| scope_log.log_records.iter());
         let blobs = self.encoder.encode_log_batch(log_iter, &self.metadata);
-        for (_schema_id, event_name, encoded_blob, _row_count) in blobs {
-            // TODO - log encoded_blob for debugging
-            let compressed_blob = lz4_chunked_compression(&encoded_blob)
-                .map_err(|e| format!("LZ4 compression failed: {e}"))?;
-            // TODO - log compressed_blob for debugging
-            let event_version = "Ver2v0"; // TODO - find the actual value to be populated
-            self.uploader
-                .upload(compressed_blob, &event_name, event_version)
-                .await
-                .map_err(|e| format!("Geneva upload failed: {e}"))?;
+
+        // create an iterator that yields futures for each upload
+        let upload_futures =
+            blobs
+                .into_iter()
+                .map(|(_schema_id, event_name, encoded_blob, _row_count)| {
+                    let uploader = Arc::clone(&self.uploader);
+                    let event_version = "Ver2v0"; // TODO - find the actual value to be populated
+                    async move {
+                        let compressed_blob = match lz4_chunked_compression(&encoded_blob) {
+                            Ok(blob) => blob,
+                            Err(e) => {
+                                return Err(format!(
+                                    "LZ4 compression failed: {e} Event: {event_name}"
+                                ))
+                            }
+                        };
+                        match uploader
+                            .upload(compressed_blob, &event_name, event_version)
+                            .await
+                        {
+                            Ok(_) => Ok(()),
+                            Err(e) => Err(format!("Geneva upload failed: {e} Event: {event_name}")),
+                        }
+                    }
+                });
+        // Execute uploads concurrently with configurable concurrency
+        let results: Vec<Result<(), String>> = stream::iter(upload_futures)
+            .buffer_unordered(self.max_concurrent_uploads)
+            .collect()
+            .await;
+
+        // Collect any errors
+        let errors: Vec<String> = results
+            .into_iter()
+            .filter_map(|result| result.err())
+            .collect();
+
+        // Return error if any uploads failed
+        if !errors.is_empty() {
+            return Err(format!("Upload failures: {}", errors.join("; ")));
         }
         Ok(())
     }
