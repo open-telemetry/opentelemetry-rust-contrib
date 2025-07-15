@@ -55,7 +55,7 @@ fn create_test_logs() -> Vec<ResourceLogs> {
     for i in 0..10 {
         let log = LogRecord {
             observed_time_unix_nano: 1700000000000000000 + i,
-            event_name: format!("StressTestEvent_{}", i % 2),
+            event_name: "StressTestEvent".to_string(),
             severity_number: 9,
             severity_text: "INFO".to_string(),
             body: Some(AnyValue {
