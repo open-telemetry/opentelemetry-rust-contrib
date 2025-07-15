@@ -581,6 +581,438 @@ mod tests {
     use crate::payload_encoder::central_blob_decoder::CentralBlobDecoder;
 
     #[test]
+    fn test_decoded_blob_structure_validation() {
+        let encoder = OtlpEncoder::new();
+        let metadata = "namespace=testNamespace/eventVersion=Ver1v0";
+
+        // Test comprehensive log with all field types
+        let mut comprehensive_log = LogRecord {
+            observed_time_unix_nano: 1_700_000_123_456_789_000,
+            event_name: "validation_test".to_string(),
+            severity_number: 9,
+            severity_text: "INFO".to_string(),
+            trace_id: vec![1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16],
+            span_id: vec![1, 2, 3, 4, 5, 6, 7, 8],
+            flags: 1,
+            body: Some(AnyValue {
+                value: Some(Value::StringValue("Test log body message".to_string())),
+            }),
+            ..Default::default()
+        };
+
+        // Add various attribute types
+        comprehensive_log.attributes.push(KeyValue {
+            key: "string_attr".to_string(),
+            value: Some(AnyValue {
+                value: Some(Value::StringValue("test_string_value".to_string())),
+            }),
+        });
+
+        comprehensive_log.attributes.push(KeyValue {
+            key: "int_attr".to_string(),
+            value: Some(AnyValue {
+                value: Some(Value::IntValue(42)),
+            }),
+        });
+
+        comprehensive_log.attributes.push(KeyValue {
+            key: "double_attr".to_string(),
+            value: Some(AnyValue {
+                value: Some(Value::DoubleValue(3.14159)),
+            }),
+        });
+
+        comprehensive_log.attributes.push(KeyValue {
+            key: "bool_attr".to_string(),
+            value: Some(AnyValue {
+                value: Some(Value::BoolValue(true)),
+            }),
+        });
+
+        // Encode the log
+        let result = encoder.encode_log_batch([comprehensive_log.clone()].iter(), metadata);
+        assert_eq!(result.len(), 1);
+
+        let (event_name, encoded_blob, events_count) = &result[0];
+        assert_eq!(event_name, "validation_test");
+        assert_eq!(*events_count, 1);
+
+        // Decode the blob
+        let decoded = CentralBlobDecoder::decode(encoded_blob).expect("Failed to decode blob");
+
+        // Verify basic structure
+        assert_eq!(decoded.version, 1);
+        assert_eq!(decoded.format, 2);
+        assert_eq!(decoded.metadata, metadata);
+        assert_eq!(decoded.schemas.len(), 1);
+        assert_eq!(decoded.events.len(), 1);
+
+        let schema = &decoded.schemas[0];
+        let event = &decoded.events[0];
+
+        // Verify event basic properties
+        assert_eq!(event.event_name, "validation_test");
+        assert_eq!(event.level, 9);
+        assert_eq!(event.schema_id, schema.id);
+
+        // Verify schema has content
+        assert!(!schema.schema_bytes.is_empty());
+
+        // Verify row data has content
+        assert!(!event.row_data.is_empty());
+
+        println!("Successfully validated comprehensive log structure");
+    }
+
+    #[test]
+    fn test_decoded_blob_minimal_log() {
+        let encoder = OtlpEncoder::new();
+        let metadata = "namespace=testNamespace/eventVersion=Ver1v0";
+
+        // Test minimal log with only required fields
+        let minimal_log = LogRecord {
+            observed_time_unix_nano: 1_600_000_000_000_000_000,
+            event_name: "minimal_test".to_string(),
+            severity_number: 5,
+            severity_text: "DEBUG".to_string(),
+            ..Default::default()
+        };
+
+        let result = encoder.encode_log_batch([minimal_log.clone()].iter(), metadata);
+        assert_eq!(result.len(), 1);
+
+        let (_, encoded_blob, _) = &result[0];
+        let decoded = CentralBlobDecoder::decode(encoded_blob).expect("Failed to decode blob");
+
+        let schema = &decoded.schemas[0];
+        let event = &decoded.events[0];
+
+        // Verify event properties
+        assert_eq!(event.event_name, "minimal_test");
+        assert_eq!(event.level, 5);
+        assert_eq!(event.schema_id, schema.id);
+
+        // Verify schema and row data have content
+        assert!(!schema.schema_bytes.is_empty());
+        assert!(!event.row_data.is_empty());
+
+        println!("Successfully validated minimal log structure");
+    }
+
+    #[test]
+    fn test_decoded_blob_empty_event_name() {
+        let encoder = OtlpEncoder::new();
+        let metadata = "namespace=testNamespace/eventVersion=Ver1v0";
+
+        // Test log with empty event name (should default to "Log")
+        let empty_name_log = LogRecord {
+            observed_time_unix_nano: 1_500_000_000_000_000_000,
+            event_name: "".to_string(),
+            severity_number: 12,
+            severity_text: "ERROR".to_string(),
+            ..Default::default()
+        };
+
+        let result = encoder.encode_log_batch([empty_name_log.clone()].iter(), metadata);
+        assert_eq!(result.len(), 1);
+
+        let (event_name, encoded_blob, _) = &result[0];
+        assert_eq!(event_name, "Log"); // Should default to "Log"
+
+        let decoded = CentralBlobDecoder::decode(encoded_blob).expect("Failed to decode blob");
+
+        let schema = &decoded.schemas[0];
+        let event = &decoded.events[0];
+
+        assert_eq!(event.event_name, "Log"); // Event name should be "Log"
+        assert_eq!(event.level, 12); // Severity level should be preserved
+        assert_eq!(event.schema_id, schema.id);
+
+        // Verify schema and row data have content
+        assert!(!schema.schema_bytes.is_empty());
+        assert!(!event.row_data.is_empty());
+
+        println!("Successfully validated empty event name log structure");
+    }
+
+    #[test]
+    fn test_decoded_blob_attribute_types() {
+        let encoder = OtlpEncoder::new();
+        let metadata = "namespace=testNamespace/eventVersion=Ver1v0";
+
+        // Test log with various attribute types
+        let mut attr_log = LogRecord {
+            observed_time_unix_nano: 1_400_000_000_000_000_000,
+            event_name: "attr_test".to_string(),
+            severity_number: 8,
+            severity_text: "WARN".to_string(),
+            ..Default::default()
+        };
+
+        // Add attributes of different types
+        attr_log.attributes.push(KeyValue {
+            key: "service_name".to_string(),
+            value: Some(AnyValue {
+                value: Some(Value::StringValue("test-service".to_string())),
+            }),
+        });
+
+        attr_log.attributes.push(KeyValue {
+            key: "request_id".to_string(),
+            value: Some(AnyValue {
+                value: Some(Value::IntValue(123456)),
+            }),
+        });
+
+        attr_log.attributes.push(KeyValue {
+            key: "response_time_ms".to_string(),
+            value: Some(AnyValue {
+                value: Some(Value::DoubleValue(456.789)),
+            }),
+        });
+
+        attr_log.attributes.push(KeyValue {
+            key: "is_success".to_string(),
+            value: Some(AnyValue {
+                value: Some(Value::BoolValue(false)),
+            }),
+        });
+
+        let result = encoder.encode_log_batch([attr_log.clone()].iter(), metadata);
+        assert_eq!(result.len(), 1);
+
+        let (_, encoded_blob, _) = &result[0];
+        let decoded = CentralBlobDecoder::decode(encoded_blob).expect("Failed to decode blob");
+
+        let schema = &decoded.schemas[0];
+        let event = &decoded.events[0];
+
+        // Verify event properties
+        assert_eq!(event.event_name, "attr_test");
+        assert_eq!(event.level, 8);
+        assert_eq!(event.schema_id, schema.id);
+
+        // Verify schema and row data have content
+        assert!(!schema.schema_bytes.is_empty());
+        assert!(!event.row_data.is_empty());
+
+        println!("Successfully validated attribute types log structure");
+    }
+
+    #[test]
+    fn test_decoded_blob_trace_context() {
+        let encoder = OtlpEncoder::new();
+        let metadata = "namespace=testNamespace/eventVersion=Ver1v0";
+
+        // Test log with trace context
+        let trace_log = LogRecord {
+            observed_time_unix_nano: 1_300_000_000_000_000_000,
+            event_name: "trace_test".to_string(),
+            severity_number: 6,
+            severity_text: "INFO".to_string(),
+            trace_id: vec![
+                0x12, 0x34, 0x56, 0x78, 0x9a, 0xbc, 0xde, 0xf0, 0x11, 0x22, 0x33, 0x44, 0x55, 0x66,
+                0x77, 0x88,
+            ],
+            span_id: vec![0xaa, 0xbb, 0xcc, 0xdd, 0xee, 0xff, 0x00, 0x11],
+            flags: 3,
+            ..Default::default()
+        };
+
+        let result = encoder.encode_log_batch([trace_log.clone()].iter(), metadata);
+        assert_eq!(result.len(), 1);
+
+        let (_, encoded_blob, _) = &result[0];
+        let decoded = CentralBlobDecoder::decode(encoded_blob).expect("Failed to decode blob");
+
+        let schema = &decoded.schemas[0];
+        let event = &decoded.events[0];
+
+        // Verify event properties
+        assert_eq!(event.event_name, "trace_test");
+        assert_eq!(event.level, 6);
+        assert_eq!(event.schema_id, schema.id);
+
+        // Verify schema and row data have content
+        assert!(!schema.schema_bytes.is_empty());
+        assert!(!event.row_data.is_empty());
+
+        println!("Successfully validated trace context log structure");
+    }
+
+    #[test]
+    fn test_decoded_blob_multiple_logs_same_batch() {
+        let encoder = OtlpEncoder::new();
+        let metadata = "namespace=testNamespace/eventVersion=Ver1v0";
+
+        // Create multiple logs with same schema (same event name and fields)
+        let log1 = LogRecord {
+            observed_time_unix_nano: 1_200_000_000_000_000_000,
+            event_name: "batch_test".to_string(),
+            severity_number: 4,
+            severity_text: "WARN".to_string(),
+            ..Default::default()
+        };
+
+        let log2 = LogRecord {
+            observed_time_unix_nano: 1_200_000_001_000_000_000,
+            event_name: "batch_test".to_string(),
+            severity_number: 8,
+            severity_text: "ERROR".to_string(),
+            ..Default::default()
+        };
+
+        let result = encoder.encode_log_batch([log1.clone(), log2.clone()].iter(), metadata);
+        assert_eq!(result.len(), 1); // Should be batched together
+
+        let (_, encoded_blob, events_count) = &result[0];
+        assert_eq!(*events_count, 2);
+
+        let decoded = CentralBlobDecoder::decode(encoded_blob).expect("Failed to decode blob");
+
+        assert_eq!(decoded.schemas.len(), 1); // Same schema
+        assert_eq!(decoded.events.len(), 2); // Two events
+
+        let schema = &decoded.schemas[0];
+
+        // Validate first event
+        let event1 = &decoded.events[0];
+        assert_eq!(event1.event_name, "batch_test");
+        assert_eq!(event1.level, 4);
+        assert_eq!(event1.schema_id, schema.id);
+        assert!(!event1.row_data.is_empty());
+
+        // Validate second event
+        let event2 = &decoded.events[1];
+        assert_eq!(event2.event_name, "batch_test");
+        assert_eq!(event2.level, 8);
+        assert_eq!(event2.schema_id, schema.id);
+        assert!(!event2.row_data.is_empty());
+
+        println!("Successfully validated multiple logs in same batch structure");
+    }
+
+    #[test]
+    fn test_decoded_blob_data_consistency() {
+        let encoder = OtlpEncoder::new();
+        let metadata = "namespace=testNamespace/eventVersion=Ver1v0";
+
+        // Test that the same input produces the same output
+        let log = LogRecord {
+            observed_time_unix_nano: 1_700_000_000_000_000_000,
+            event_name: "consistency_test".to_string(),
+            severity_number: 9,
+            severity_text: "INFO".to_string(),
+            trace_id: vec![1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16],
+            span_id: vec![1, 2, 3, 4, 5, 6, 7, 8],
+            flags: 1,
+            ..Default::default()
+        };
+
+        // Encode the same log twice
+        let result1 = encoder.encode_log_batch([log.clone()].iter(), metadata);
+        let result2 = encoder.encode_log_batch([log.clone()].iter(), metadata);
+
+        assert_eq!(result1.len(), 1);
+        assert_eq!(result2.len(), 1);
+
+        // Decode both blobs
+        let decoded1 = CentralBlobDecoder::decode(&result1[0].1).expect("Failed to decode blob 1");
+        let decoded2 = CentralBlobDecoder::decode(&result2[0].1).expect("Failed to decode blob 2");
+
+        // Verify they produce the same structure
+        assert_eq!(decoded1.version, decoded2.version);
+        assert_eq!(decoded1.format, decoded2.format);
+        assert_eq!(decoded1.metadata, decoded2.metadata);
+        assert_eq!(decoded1.schemas.len(), decoded2.schemas.len());
+        assert_eq!(decoded1.events.len(), decoded2.events.len());
+
+        // Verify schema consistency
+        assert_eq!(decoded1.schemas[0].id, decoded2.schemas[0].id);
+        assert_eq!(decoded1.schemas[0].md5, decoded2.schemas[0].md5);
+        assert_eq!(
+            decoded1.schemas[0].schema_bytes,
+            decoded2.schemas[0].schema_bytes
+        );
+
+        // Verify event consistency
+        assert_eq!(decoded1.events[0].schema_id, decoded2.events[0].schema_id);
+        assert_eq!(decoded1.events[0].level, decoded2.events[0].level);
+        assert_eq!(decoded1.events[0].event_name, decoded2.events[0].event_name);
+        assert_eq!(decoded1.events[0].row_data, decoded2.events[0].row_data);
+
+        println!("Successfully validated data consistency between encodings");
+    }
+
+    #[test]
+    fn test_decoded_blob_different_schemas_same_event_name() {
+        let encoder = OtlpEncoder::new();
+        let metadata = "namespace=testNamespace/eventVersion=Ver1v0";
+
+        // Create logs with same event name but different schemas
+        let log1 = LogRecord {
+            observed_time_unix_nano: 1_100_000_000_000_000_000,
+            event_name: "mixed_schema_test".to_string(),
+            severity_number: 5,
+            severity_text: "DEBUG".to_string(),
+            ..Default::default()
+        };
+
+        let mut log2 = LogRecord {
+            observed_time_unix_nano: 1_100_000_001_000_000_000,
+            event_name: "mixed_schema_test".to_string(),
+            severity_number: 6,
+            severity_text: "INFO".to_string(),
+            ..Default::default()
+        };
+
+        // Add trace context to create different schema
+        log2.trace_id = vec![1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16];
+
+        let result = encoder.encode_log_batch([log1, log2].iter(), metadata);
+        assert_eq!(result.len(), 1); // Same event name, so batched together
+
+        let (_, encoded_blob, events_count) = &result[0];
+        assert_eq!(*events_count, 2);
+
+        let decoded = CentralBlobDecoder::decode(encoded_blob).expect("Failed to decode blob");
+
+        // Should have 2 different schemas
+        assert_eq!(decoded.schemas.len(), 2);
+        assert_eq!(decoded.events.len(), 2);
+
+        // Verify schema IDs are different
+        assert_ne!(decoded.schemas[0].id, decoded.schemas[1].id);
+
+        // Verify events reference different schemas
+        assert_ne!(decoded.events[0].schema_id, decoded.events[1].schema_id);
+
+        // Verify both events have same event name
+        assert_eq!(decoded.events[0].event_name, "mixed_schema_test");
+        assert_eq!(decoded.events[1].event_name, "mixed_schema_test");
+
+        // Verify each event references a valid schema
+        let event1_schema_exists = decoded
+            .schemas
+            .iter()
+            .any(|s| s.id == decoded.events[0].schema_id);
+        let event2_schema_exists = decoded
+            .schemas
+            .iter()
+            .any(|s| s.id == decoded.events[1].schema_id);
+        assert!(
+            event1_schema_exists,
+            "Event 1 schema should exist in schemas"
+        );
+        assert!(
+            event2_schema_exists,
+            "Event 2 schema should exist in schemas"
+        );
+
+        println!("Successfully validated different schemas with same event name");
+    }
+
+    #[test]
     fn test_comprehensive_encoding_decode_scenarios() {
         let encoder = OtlpEncoder::new();
         let metadata = "namespace=testNamespace/eventVersion=Ver1v0";
@@ -1206,96 +1638,173 @@ mod tests {
             }),
         });
 
+        // Schema 7: Log with different event_name (should be batched separately)
+        let log7 = LogRecord {
+            observed_time_unix_nano: 1_700_000_006_000_000_000,
+            event_name: "system_alert".to_string(),
+            severity_number: 15,
+            severity_text: "CRITICAL".to_string(),
+            ..Default::default()
+        };
+
         // Encode all logs together
-        let logs = vec![&log1, &log2, &log3, &log4, &log5, &log6];
+        let logs = vec![&log1, &log2, &log3, &log4, &log5, &log6, &log7];
         let result = encoder.encode_log_batch(logs.iter().copied(), metadata);
 
-        // Verify all logs are batched together under the same event_name
+        // Verify logs are batched correctly: same event_name together, different event_name separate
         assert_eq!(
             result.len(),
+            2,
+            "Should have 2 batches: one for 'user_action' and one for 'system_alert'"
+        );
+
+        // Find the batches
+        let user_action_batch = result
+            .iter()
+            .find(|(name, _, _)| name == "user_action")
+            .unwrap();
+        let system_alert_batch = result
+            .iter()
+            .find(|(name, _, _)| name == "system_alert")
+            .unwrap();
+
+        assert_eq!(
+            user_action_batch.2, 6,
+            "user_action batch should contain 6 logs"
+        );
+        assert_eq!(
+            system_alert_batch.2, 1,
+            "system_alert batch should contain 1 log"
+        );
+
+        // Decode both blobs to verify internal structure
+        let user_action_decoded = CentralBlobDecoder::decode(&user_action_batch.1)
+            .expect("Failed to decode user_action blob");
+        let system_alert_decoded = CentralBlobDecoder::decode(&system_alert_batch.1)
+            .expect("Failed to decode system_alert blob");
+
+        // Verify user_action blob structure
+        assert_eq!(user_action_decoded.version, 1);
+        assert_eq!(user_action_decoded.format, 2);
+        assert_eq!(user_action_decoded.metadata, metadata);
+        assert_eq!(
+            user_action_decoded.events.len(),
+            6,
+            "user_action batch should contain 6 events"
+        );
+
+        // Verify system_alert blob structure
+        assert_eq!(system_alert_decoded.version, 1);
+        assert_eq!(system_alert_decoded.format, 2);
+        assert_eq!(system_alert_decoded.metadata, metadata);
+        assert_eq!(
+            system_alert_decoded.events.len(),
             1,
-            "All logs should be batched together under same event_name"
+            "system_alert batch should contain 1 event"
         );
-        let (event_name, encoded_blob, events_count) = &result[0];
-        assert_eq!(event_name, "user_action");
-        assert_eq!(*events_count, 6, "Should contain all 6 logs");
 
-        // Decode the blob to verify internal structure
-        let decoded = CentralBlobDecoder::decode(encoded_blob).expect("Failed to decode blob");
-
-        // Verify blob structure
-        assert_eq!(decoded.version, 1);
-        assert_eq!(decoded.format, 2);
-        assert_eq!(decoded.metadata, metadata);
-        assert_eq!(decoded.events.len(), 6, "Should contain 6 events");
-
-        // Verify multiple schemas are present (since logs have different field combinations)
+        // Verify multiple schemas are present in user_action batch (since logs have different field combinations)
         assert!(
-            decoded.schemas.len() >= 5,
-            "Should have at least 5 different schemas due to different field combinations"
+            user_action_decoded.schemas.len() >= 5,
+            "user_action batch should have at least 5 different schemas due to different field combinations"
         );
 
-        // Verify schema IDs are different for different field combinations
-        let schema_ids: std::collections::HashSet<u64> =
-            decoded.schemas.iter().map(|s| s.id).collect();
+        // Verify schema IDs are different for different field combinations in user_action batch
+        let user_action_schema_ids: std::collections::HashSet<u64> =
+            user_action_decoded.schemas.iter().map(|s| s.id).collect();
         assert!(
-            schema_ids.len() >= 5,
-            "Should have at least 5 unique schema IDs"
+            user_action_schema_ids.len() >= 5,
+            "user_action batch should have at least 5 unique schema IDs"
         );
 
-        // Verify all events have the same event_name
-        for (i, event) in decoded.events.iter().enumerate() {
+        // Verify all events in user_action batch have the same event_name
+        for (i, event) in user_action_decoded.events.iter().enumerate() {
             assert_eq!(
                 event.event_name, "user_action",
-                "Event {} should have event_name 'user_action'",
+                "user_action batch event {} should have event_name 'user_action'",
                 i
             );
             assert!(
                 !event.row_data.is_empty(),
-                "Event {} should have non-empty row data",
+                "user_action batch event {} should have non-empty row data",
                 i
             );
         }
 
-        // Verify each event references a valid schema
-        for (i, event) in decoded.events.iter().enumerate() {
-            let schema_exists = decoded.schemas.iter().any(|s| s.id == event.schema_id);
+        // Verify system_alert batch event has correct event_name
+        assert_eq!(
+            system_alert_decoded.events[0].event_name, "system_alert",
+            "system_alert batch event should have event_name 'system_alert'"
+        );
+        assert!(
+            !system_alert_decoded.events[0].row_data.is_empty(),
+            "system_alert batch event should have non-empty row data"
+        );
+
+        // Verify each event references a valid schema in their respective batches
+        for (i, event) in user_action_decoded.events.iter().enumerate() {
+            let schema_exists = user_action_decoded
+                .schemas
+                .iter()
+                .any(|s| s.id == event.schema_id);
             assert!(
                 schema_exists,
-                "Event {} references a schema that doesn't exist in the blob",
+                "user_action batch event {} references a schema that doesn't exist in the blob",
                 i
             );
         }
 
-        // Verify different severity levels are preserved
-        let severity_levels: Vec<u8> = decoded.events.iter().map(|e| e.level).collect();
-        assert_eq!(
-            severity_levels,
-            vec![9, 10, 11, 12, 13, 14],
-            "Severity levels should be preserved"
-        );
-
-        // Verify that different schemas are created for different field combinations
-        // We can't directly inspect schema fields, but we can verify that logs with different
-        // field combinations produce different schema IDs
-        let event_schema_ids: Vec<u64> = decoded.events.iter().map(|e| e.schema_id).collect();
-
-        // At minimum, we should have different schema IDs for:
-        // - Basic log (log1)
-        // - Log with trace context (log2)
-        // - Log with string attributes (log3)
-        // - Log with different attribute types (log4)
-        // - Log with body (log5)
-        // - Log with trace + attributes (log6)
-        let unique_schema_ids: std::collections::HashSet<u64> =
-            event_schema_ids.iter().cloned().collect();
+        let system_alert_schema_exists = system_alert_decoded
+            .schemas
+            .iter()
+            .any(|s| s.id == system_alert_decoded.events[0].schema_id);
         assert!(
-            unique_schema_ids.len() >= 5,
-            "Should have at least 5 unique schema IDs for different field combinations"
+            system_alert_schema_exists,
+            "system_alert batch event references a schema that doesn't exist in the blob"
         );
 
-        println!("Successfully tested batching of {} logs with {} different schemas under event_name '{}'", 
-                 decoded.events.len(), decoded.schemas.len(), event_name);
-        println!("Schema IDs: {:?}", unique_schema_ids);
+        // Verify different severity levels are preserved in user_action batch
+        let user_action_severity_levels: Vec<u8> =
+            user_action_decoded.events.iter().map(|e| e.level).collect();
+        assert_eq!(
+            user_action_severity_levels,
+            vec![9, 10, 11, 12, 13, 14],
+            "user_action batch severity levels should be preserved"
+        );
+
+        // Verify system_alert batch severity level
+        assert_eq!(
+            system_alert_decoded.events[0].level, 15,
+            "system_alert batch event should have severity level 15"
+        );
+
+        // Verify that different schemas are created for different field combinations in user_action batch
+        let user_action_event_schema_ids: Vec<u64> = user_action_decoded
+            .events
+            .iter()
+            .map(|e| e.schema_id)
+            .collect();
+        let unique_user_action_schema_ids: std::collections::HashSet<u64> =
+            user_action_event_schema_ids.iter().cloned().collect();
+        assert!(
+            unique_user_action_schema_ids.len() >= 5,
+            "user_action batch should have at least 5 unique schema IDs for different field combinations"
+        );
+
+        println!("Successfully tested batching with mixed event names:");
+        println!(
+            "- user_action batch: {} logs with {} different schemas",
+            user_action_decoded.events.len(),
+            user_action_decoded.schemas.len()
+        );
+        println!(
+            "- system_alert batch: {} logs with {} different schemas",
+            system_alert_decoded.events.len(),
+            system_alert_decoded.schemas.len()
+        );
+        println!(
+            "user_action Schema IDs: {:?}",
+            unique_user_action_schema_ids
+        );
     }
 }
