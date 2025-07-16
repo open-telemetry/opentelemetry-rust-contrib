@@ -323,7 +323,7 @@ mod tests {
         }
 
         /// Get an i64 field value by name
-        pub fn get_int64_field(&self, field_name: &str) -> Option<i64> {
+        pub(crate) fn get_int64_field(&self, field_name: &str) -> Option<i64> {
             let fields = self.parse_fields();
             match fields.get(field_name) {
                 Some(FieldValue::Int64(i)) => Some(*i),
@@ -332,7 +332,8 @@ mod tests {
         }
 
         /// Get a double field value by name
-        pub fn get_double_field(&self, field_name: &str) -> Option<f64> {
+        #[allow(dead_code)]
+        pub(crate) fn get_double_field(&self, field_name: &str) -> Option<f64> {
             let fields = self.parse_fields();
             match fields.get(field_name) {
                 Some(FieldValue::Double(d)) => Some(*d),
@@ -341,7 +342,7 @@ mod tests {
         }
 
         /// Get a bool field value by name
-        pub fn get_bool_field(&self, field_name: &str) -> Option<bool> {
+        pub(crate) fn get_bool_field(&self, field_name: &str) -> Option<bool> {
             let fields = self.parse_fields();
             match fields.get(field_name) {
                 Some(FieldValue::Bool(b)) => Some(*b),
@@ -350,47 +351,50 @@ mod tests {
         }
 
         /// Convenience methods for known fields from otlp_encoder
-        pub fn get_env_name(&self) -> Option<String> {
+        pub(crate) fn get_env_name(&self) -> Option<String> {
             self.get_string_field("env_name")
         }
 
-        pub fn get_env_ver(&self) -> Option<String> {
+        pub(crate) fn get_env_ver(&self) -> Option<String> {
             self.get_string_field("env_ver")
         }
 
-        pub fn get_timestamp(&self) -> Option<String> {
+        pub(crate) fn get_timestamp(&self) -> Option<String> {
             self.get_string_field("timestamp")
         }
 
-        pub fn get_env_time(&self) -> Option<String> {
+        pub(crate) fn get_env_time(&self) -> Option<String> {
             self.get_string_field("env_time")
         }
 
-        pub fn get_trace_id(&self) -> Option<String> {
+        pub(crate) fn get_trace_id(&self) -> Option<String> {
             self.get_string_field("env_dt_traceId")
         }
 
-        pub fn get_span_id(&self) -> Option<String> {
+        pub(crate) fn get_span_id(&self) -> Option<String> {
             self.get_string_field("env_dt_spanId")
         }
 
-        pub fn get_trace_flags(&self) -> Option<i32> {
+        pub(crate) fn get_trace_flags(&self) -> Option<i32> {
             self.get_int32_field("env_dt_traceFlags")
         }
 
-        pub fn get_name(&self) -> Option<String> {
+        pub(crate) fn get_name(&self) -> Option<String> {
             self.get_string_field("name")
         }
 
-        pub fn get_severity_number(&self) -> Option<i32> {
+        #[allow(dead_code)]
+        pub(crate) fn get_severity_number(&self) -> Option<i32> {
             self.get_int32_field("SeverityNumber")
         }
 
-        pub fn get_severity_text(&self) -> Option<String> {
+        #[allow(dead_code)]
+        pub(crate) fn get_severity_text(&self) -> Option<String> {
             self.get_string_field("SeverityText")
         }
 
-        pub fn get_body(&self) -> Option<String> {
+        #[allow(dead_code)]
+        pub(crate) fn get_body(&self) -> Option<String> {
             self.get_string_field("body")
         }
 
