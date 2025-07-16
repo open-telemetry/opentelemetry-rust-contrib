@@ -107,7 +107,6 @@ impl GenevaClient {
         let upload_futures = blobs
             .into_iter()
             .map(|(event_name, encoded_blob, _row_count)| {
-                let uploader = Arc::clone(&self.uploader);
                 let event_version = "Ver2v0"; // TODO - find the actual value to be populated
                 async move {
                     // TODO: Investigate using tokio::spawn_blocking for LZ4 compression to avoid blocking
