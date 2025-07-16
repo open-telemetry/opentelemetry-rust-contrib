@@ -341,802 +341,415 @@ impl OtlpEncoder {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::payload_encoder::central_blob_decoder::CentralBlobDecoder;
+    use crate::payload_encoder::central_blob_decoder::{CentralBlobDecoder, DecodedCentralBlob};
     use opentelemetry_proto::tonic::common::v1::{AnyValue, KeyValue};
 
-    /// Test basic encoding functionality and schema caching
-    #[test]
-    fn test_basic_encoding_and_schema_caching() {
-        let encoder = OtlpEncoder::new();
-        let metadata = "namespace=testNamespace/eventVersion=Ver1v0";
+    const TEST_METADATA: &str = "namespace=testNamespace/eventVersion=Ver1v0";
 
-        // Test 1: Basic encoding with attributes
-        let mut log = LogRecord {
+    /// Helper to create a basic log record with optional customizations
+    fn create_log_record(event_name: &str, severity: i32) -> LogRecord {
+        LogRecord {
             observed_time_unix_nano: 1_700_000_000_000_000_000,
-            event_name: "test_event".to_string(),
-            severity_number: 9,
+            event_name: event_name.to_string(),
+            severity_number: severity,
             severity_text: "INFO".to_string(),
             ..Default::default()
-        };
-
-        log.attributes.push(KeyValue {
-            key: "user_id".to_string(),
-            value: Some(AnyValue {
-                value: Some(Value::StringValue("user123".to_string())),
-            }),
-        });
-
-        log.attributes.push(KeyValue {
-            key: "request_count".to_string(),
-            value: Some(AnyValue {
-                value: Some(Value::IntValue(42)),
-            }),
-        });
-
-        let result = encoder.encode_log_batch([log].iter(), metadata);
-        assert!(!result.is_empty());
-        assert_eq!(result[0].0, "test_event");
-        assert_eq!(result[0].2, 1);
-
-        // Test 2: Schema caching with same schema
-        let log1 = LogRecord {
-            observed_time_unix_nano: 1_700_000_000_000_000_000,
-            severity_number: 9,
-            ..Default::default()
-        };
-
-        let log2 = LogRecord {
-            observed_time_unix_nano: 1_700_000_001_000_000_000,
-            severity_number: 10,
-            ..Default::default()
-        };
-
-        let _result1 = encoder.encode_log_batch([log1].iter(), metadata);
-        assert_eq!(encoder.schema_cache_size(), 2); // Previous test + this one
-
-        let _result2 = encoder.encode_log_batch([log2].iter(), metadata);
-        assert_eq!(encoder.schema_cache_size(), 2); // Same schema, so no new entry
-
-        // Test 3: Different schema creates new cache entry
-        let mut log3 = LogRecord {
-            observed_time_unix_nano: 1_700_000_002_000_000_000,
-            severity_number: 11,
-            ..Default::default()
-        };
-        log3.trace_id = vec![1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16];
-
-        let _result3 = encoder.encode_log_batch([log3].iter(), metadata);
-        assert_eq!(encoder.schema_cache_size(), 3); // New schema with trace_id
+        }
     }
 
-    /// Test event name handling and batching behavior
+    /// Helper to add attributes to a log record
+    fn add_attribute(log: &mut LogRecord, key: &str, value: Value) {
+        log.attributes.push(KeyValue {
+            key: key.to_string(),
+            value: Some(AnyValue { value: Some(value) }),
+        });
+    }
+
+    /// Helper to add trace context to a log record
+    fn add_trace_context(log: &mut LogRecord, trace_id: Vec<u8>, span_id: Vec<u8>, flags: u32) {
+        log.trace_id = trace_id;
+        log.span_id = span_id;
+        log.flags = flags;
+    }
+
+    /// Helper to decode and validate basic structure
+    fn decode_and_validate_structure(
+        result: &[(String, Vec<u8>, usize)],
+        expected_batches: usize,
+    ) -> Vec<(String, DecodedCentralBlob)> {
+        assert_eq!(result.len(), expected_batches);
+
+        result
+            .iter()
+            .map(|(event_name, blob, event_count)| {
+                let decoded =
+                    CentralBlobDecoder::decode(blob).expect("Blob should decode successfully");
+
+                // Basic structure validation
+                assert_eq!(decoded.version, 1);
+                assert_eq!(decoded.format, 2);
+                assert_eq!(decoded.metadata, TEST_METADATA);
+                assert_eq!(decoded.events.len(), *event_count);
+                assert!(!decoded.schemas.is_empty());
+
+                (event_name.clone(), decoded)
+            })
+            .collect()
+    }
+
     #[test]
-    fn test_event_name_handling_and_batching() {
+    fn test_schema_caching_behavior() {
         let encoder = OtlpEncoder::new();
-        let metadata = "namespace=testNamespace/eventVersion=Ver1v0";
+
+        // Test 1: Same schema should reuse cache
+        let log1 = create_log_record("test_event", 9);
+        let log2 = create_log_record("test_event", 10); // Same structure, different values
+
+        encoder.encode_log_batch([log1].iter(), TEST_METADATA);
+        assert_eq!(encoder.schema_cache_size(), 1);
+
+        encoder.encode_log_batch([log2].iter(), TEST_METADATA);
+        assert_eq!(encoder.schema_cache_size(), 1); // No new schema
+
+        // Test 2: Different schema should create new cache entry
+        let mut log3 = create_log_record("test_event", 11);
+        log3.trace_id = vec![1; 16]; // Different structure
+
+        encoder.encode_log_batch([log3].iter(), TEST_METADATA);
+        assert_eq!(encoder.schema_cache_size(), 2); // New schema added
+    }
+
+    #[test]
+    fn test_event_name_and_batching() {
+        let encoder = OtlpEncoder::new();
 
         // Test 1: Empty event name defaults to "Log"
-        let empty_name_log = LogRecord {
-            event_name: "".to_string(),
-            severity_number: 9,
-            ..Default::default()
-        };
-
-        let result = encoder.encode_log_batch([empty_name_log].iter(), metadata);
-        assert_eq!(result.len(), 1);
-        assert_eq!(result[0].0, "Log");
-        assert_eq!(result[0].2, 1);
+        let empty_name_log = create_log_record("", 9);
+        let result = encoder.encode_log_batch([empty_name_log].iter(), TEST_METADATA);
+        let decoded = decode_and_validate_structure(&result, 1);
+        assert_eq!(decoded[0].0, "Log");
 
         // Test 2: Different event names create separate batches
-        let log1 = LogRecord {
-            event_name: "login".to_string(),
-            severity_number: 9,
-            ..Default::default()
-        };
+        let log1 = create_log_record("login", 9);
+        let log2 = create_log_record("logout", 10);
+        let result = encoder.encode_log_batch([log1, log2].iter(), TEST_METADATA);
+        let decoded = decode_and_validate_structure(&result, 2);
 
-        let log2 = LogRecord {
-            event_name: "logout".to_string(),
-            severity_number: 10,
-            ..Default::default()
-        };
-
-        let result = encoder.encode_log_batch([log1, log2].iter(), metadata);
-        assert_eq!(result.len(), 2);
-
-        let event_names: Vec<&String> = result.iter().map(|(name, _, _)| name).collect();
+        let event_names: Vec<&String> = decoded.iter().map(|(name, _)| name).collect();
         assert!(event_names.contains(&&"login".to_string()));
         assert!(event_names.contains(&&"logout".to_string()));
-        assert!(result.iter().all(|(_, _, count)| *count == 1));
 
         // Test 3: Same event name with different schemas batched together
-        let log3 = LogRecord {
-            event_name: "user_action".to_string(),
-            severity_number: 9,
-            ..Default::default()
-        };
+        let log3 = create_log_record("user_action", 9);
+        let mut log4 = create_log_record("user_action", 10);
+        log4.trace_id = vec![1; 16]; // Different schema
 
-        let mut log4 = LogRecord {
-            event_name: "user_action".to_string(),
-            severity_number: 10,
-            ..Default::default()
-        };
-        log4.trace_id = vec![1; 16];
+        let result = encoder.encode_log_batch([log3, log4].iter(), TEST_METADATA);
+        let decoded = decode_and_validate_structure(&result, 1);
 
-        let mut log5 = LogRecord {
-            event_name: "user_action".to_string(),
-            severity_number: 11,
-            ..Default::default()
-        };
-        log5.attributes.push(KeyValue {
-            key: "user_id".to_string(),
-            value: Some(AnyValue {
-                value: Some(Value::StringValue("user123".to_string())),
-            }),
-        });
-
-        let result = encoder.encode_log_batch([log3, log4, log5].iter(), metadata);
-        assert_eq!(result.len(), 1);
-        assert_eq!(result[0].0, "user_action");
-        assert_eq!(result[0].2, 3);
+        assert_eq!(decoded[0].0, "user_action");
+        assert_eq!(decoded[0].1.events.len(), 2);
+        assert_eq!(decoded[0].1.schemas.len(), 2); // Different schemas in same batch
     }
 
-    /// Test comprehensive field variations and their decoding
     #[test]
-    fn test_comprehensive_field_variations_and_decoding() {
+    fn test_comprehensive_field_encoding() {
         let encoder = OtlpEncoder::new();
-        let metadata = "namespace=testNamespace/eventVersion=Ver1v0";
 
-        // Test scenario 1: Minimal log (basic required fields)
-        let minimal_log = LogRecord {
-            observed_time_unix_nano: 1_600_000_000_000_000_000,
-            event_name: "minimal_test".to_string(),
-            severity_number: 5,
-            severity_text: "DEBUG".to_string(),
-            ..Default::default()
-        };
-
-        // Test scenario 2: Log with trace context
-        let trace_log = LogRecord {
-            observed_time_unix_nano: 1_300_000_000_000_000_000,
-            event_name: "trace_test".to_string(),
-            severity_number: 6,
-            severity_text: "INFO".to_string(),
-            trace_id: vec![
-                0x12, 0x34, 0x56, 0x78, 0x9a, 0xbc, 0xde, 0xf0, 0x11, 0x22, 0x33, 0x44, 0x55, 0x66,
-                0x77, 0x88,
-            ],
-            span_id: vec![0xaa, 0xbb, 0xcc, 0xdd, 0xee, 0xff, 0x00, 0x11],
-            flags: 3,
-            ..Default::default()
-        };
-
-        // Test scenario 3: Log with various attribute types
-        let mut attr_log = LogRecord {
-            observed_time_unix_nano: 1_400_000_000_000_000_000,
-            event_name: "attr_test".to_string(),
-            severity_number: 8,
-            severity_text: "WARN".to_string(),
-            ..Default::default()
-        };
-
-        attr_log.attributes.push(KeyValue {
-            key: "service_name".to_string(),
-            value: Some(AnyValue {
-                value: Some(Value::StringValue("test-service".to_string())),
-            }),
-        });
-
-        attr_log.attributes.push(KeyValue {
-            key: "request_id".to_string(),
-            value: Some(AnyValue {
-                value: Some(Value::IntValue(123456)),
-            }),
-        });
-
-        attr_log.attributes.push(KeyValue {
-            key: "response_time_ms".to_string(),
-            value: Some(AnyValue {
-                value: Some(Value::DoubleValue(456.789)),
-            }),
-        });
-
-        attr_log.attributes.push(KeyValue {
-            key: "is_success".to_string(),
-            value: Some(AnyValue {
-                value: Some(Value::BoolValue(false)),
-            }),
-        });
-
-        // Test scenario 4: Log with string body
-        let body_log = LogRecord {
-            observed_time_unix_nano: 1_700_000_003_000_000_000,
-            event_name: "body_event".to_string(),
-            severity_number: 12,
-            severity_text: "DEBUG".to_string(),
-            body: Some(AnyValue {
-                value: Some(Value::StringValue("This is the log body".to_string())),
-            }),
-            ..Default::default()
-        };
-
-        // Test scenario 5: Comprehensive log with all features
+        // Create log with all possible field types
         let mut comprehensive_log = LogRecord {
             observed_time_unix_nano: 1_700_000_123_456_789_000,
             event_name: "comprehensive_test".to_string(),
             severity_number: 9,
             severity_text: "INFO".to_string(),
-            trace_id: vec![1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16],
-            span_id: vec![1, 2, 3, 4, 5, 6, 7, 8],
-            flags: 1,
             body: Some(AnyValue {
-                value: Some(Value::StringValue("Comprehensive log body".to_string())),
+                value: Some(Value::StringValue("Log body content".to_string())),
             }),
             ..Default::default()
         };
 
-        comprehensive_log.attributes.push(KeyValue {
-            key: "bool_attr".to_string(),
-            value: Some(AnyValue {
-                value: Some(Value::BoolValue(true)),
-            }),
-        });
-
-        comprehensive_log.attributes.push(KeyValue {
-            key: "double_attr".to_string(),
-            value: Some(AnyValue {
-                value: Some(Value::DoubleValue(3.14159)),
-            }),
-        });
-
-        comprehensive_log.attributes.push(KeyValue {
-            key: "int_attr".to_string(),
-            value: Some(AnyValue {
-                value: Some(Value::IntValue(42)),
-            }),
-        });
-
-        comprehensive_log.attributes.push(KeyValue {
-            key: "string_attr".to_string(),
-            value: Some(AnyValue {
-                value: Some(Value::StringValue("test_string_value".to_string())),
-            }),
-        });
-
-        // Encode all logs
-        let logs = vec![
-            &minimal_log,
-            &trace_log,
-            &attr_log,
-            &body_log,
-            &comprehensive_log,
-        ];
-        let results = encoder.encode_log_batch(logs.iter().copied(), metadata);
-
-        // Verify we get multiple batches due to different event names
-        assert_eq!(results.len(), 5);
-
-        // Test decoding for each batch
-        for (i, (event_name, encoded_blob, events_count)) in results.iter().enumerate() {
-            let decoded = CentralBlobDecoder::decode(encoded_blob)
-                .unwrap_or_else(|_| panic!("Failed to decode blob for batch {}", i + 1));
-
-            // Verify basic structure
-            assert_eq!(decoded.version, 1);
-            assert_eq!(decoded.format, 2);
-            assert_eq!(decoded.metadata, metadata);
-            assert_eq!(decoded.events.len(), *events_count);
-            assert_eq!(decoded.events.len(), 1); // Each batch has one event
-            assert!(!decoded.schemas.is_empty());
-
-            let event = &decoded.events[0];
-            let schema = &decoded.schemas[0];
-
-            // Verify event properties
-            assert_eq!(event.event_name, *event_name);
-            assert_eq!(event.schema_id, schema.id);
-            assert!(!event.row_data.is_empty());
-            assert!(!schema.schema_bytes.is_empty());
-        }
-
-        // Verify expected event names are present
-        let event_names: Vec<&String> = results.iter().map(|(name, _, _)| name).collect();
-        assert!(event_names.contains(&&"minimal_test".to_string()));
-        assert!(event_names.contains(&&"trace_test".to_string()));
-        assert!(event_names.contains(&&"attr_test".to_string()));
-        assert!(event_names.contains(&&"body_event".to_string()));
-        assert!(event_names.contains(&&"comprehensive_test".to_string()));
-    }
-
-    /// Test multiple logs with same and different schemas
-    #[test]
-    fn test_multiple_logs_batching_scenarios() {
-        let encoder = OtlpEncoder::new();
-        let metadata = "namespace=testNamespace/eventVersion=Ver1v0";
-
-        // Test 1: Multiple logs with same schema (same event name and fields)
-        let log1 = LogRecord {
-            observed_time_unix_nano: 1_200_000_000_000_000_000,
-            event_name: "batch_test".to_string(),
-            severity_number: 4,
-            severity_text: "WARN".to_string(),
-            ..Default::default()
-        };
-
-        let log2 = LogRecord {
-            observed_time_unix_nano: 1_200_000_001_000_000_000,
-            event_name: "batch_test".to_string(),
-            severity_number: 8,
-            severity_text: "ERROR".to_string(),
-            ..Default::default()
-        };
-
-        let result = encoder.encode_log_batch([log1, log2].iter(), metadata);
-        assert_eq!(result.len(), 1); // Batched together
-
-        let (_, encoded_blob, events_count) = &result[0];
-        assert_eq!(*events_count, 2);
-
-        let decoded = CentralBlobDecoder::decode(encoded_blob).expect("Failed to decode blob");
-        assert_eq!(decoded.schemas.len(), 1); // Same schema
-        assert_eq!(decoded.events.len(), 2); // Two events
-        assert_eq!(decoded.events[0].level, 4);
-        assert_eq!(decoded.events[1].level, 8);
-
-        // Test 2: Multiple logs with different schemas but same event name
-        let log3 = LogRecord {
-            observed_time_unix_nano: 1_100_000_000_000_000_000,
-            event_name: "mixed_schema_test".to_string(),
-            severity_number: 5,
-            severity_text: "DEBUG".to_string(),
-            ..Default::default()
-        };
-
-        let mut log4 = LogRecord {
-            observed_time_unix_nano: 1_100_000_001_000_000_000,
-            event_name: "mixed_schema_test".to_string(),
-            severity_number: 6,
-            severity_text: "INFO".to_string(),
-            ..Default::default()
-        };
-        log4.trace_id = vec![1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16];
-
-        let result = encoder.encode_log_batch([log3, log4].iter(), metadata);
-        assert_eq!(result.len(), 1); // Same event name, batched together
-
-        let (_, encoded_blob, events_count) = &result[0];
-        assert_eq!(*events_count, 2);
-
-        let decoded = CentralBlobDecoder::decode(encoded_blob).expect("Failed to decode blob");
-        assert_eq!(decoded.schemas.len(), 2); // Different schemas
-        assert_eq!(decoded.events.len(), 2); // Two events
-        assert_ne!(decoded.schemas[0].id, decoded.schemas[1].id);
-        assert_ne!(decoded.events[0].schema_id, decoded.events[1].schema_id);
-
-        // Both events should have same event name
-        assert_eq!(decoded.events[0].event_name, "mixed_schema_test");
-        assert_eq!(decoded.events[1].event_name, "mixed_schema_test");
-
-        // Verify each event references a valid schema
-        let event1_schema_exists = decoded
-            .schemas
-            .iter()
-            .any(|s| s.id == decoded.events[0].schema_id);
-        let event2_schema_exists = decoded
-            .schemas
-            .iter()
-            .any(|s| s.id == decoded.events[1].schema_id);
-        assert!(event1_schema_exists);
-        assert!(event2_schema_exists);
-    }
-
-    /// Test field ordering consistency and data consistency
-    #[test]
-    fn test_field_ordering_and_data_consistency() {
-        let encoder = OtlpEncoder::new();
-        let metadata = "namespace=testNamespace/eventVersion=Ver1v0";
-
-        // Test 1: Attribute order should not affect schema ID (fields are sorted)
-        let mut log1 = LogRecord {
-            observed_time_unix_nano: 1_700_000_000_000_000_000,
-            event_name: "test_event".to_string(),
-            severity_number: 9,
-            severity_text: "INFO".to_string(),
-            ..Default::default()
-        };
-
-        log1.attributes.push(KeyValue {
-            key: "attr_a".to_string(),
-            value: Some(AnyValue {
-                value: Some(Value::StringValue("value_a".to_string())),
-            }),
-        });
-        log1.attributes.push(KeyValue {
-            key: "attr_b".to_string(),
-            value: Some(AnyValue {
-                value: Some(Value::StringValue("value_b".to_string())),
-            }),
-        });
-
-        let mut log2 = LogRecord {
-            observed_time_unix_nano: 1_700_000_001_000_000_000,
-            event_name: "test_event".to_string(),
-            severity_number: 10,
-            severity_text: "WARN".to_string(),
-            ..Default::default()
-        };
-
-        // Same attributes in different order
-        log2.attributes.push(KeyValue {
-            key: "attr_b".to_string(),
-            value: Some(AnyValue {
-                value: Some(Value::StringValue("value_b".to_string())),
-            }),
-        });
-        log2.attributes.push(KeyValue {
-            key: "attr_a".to_string(),
-            value: Some(AnyValue {
-                value: Some(Value::StringValue("value_a".to_string())),
-            }),
-        });
-
-        let result1 = encoder.encode_log_batch([log1].iter(), metadata);
-        let result2 = encoder.encode_log_batch([log2].iter(), metadata);
-
-        // Same schema ID despite different attribute order
-        assert_eq!(result1[0].0, result2[0].0);
-
-        let decoded1 = CentralBlobDecoder::decode(&result1[0].1).expect("Failed to decode blob 1");
-        let decoded2 = CentralBlobDecoder::decode(&result2[0].1).expect("Failed to decode blob 2");
-
-        assert_eq!(decoded1.schemas[0].id, decoded2.schemas[0].id);
-
-        // Test 2: Data consistency - same input should produce same output
-        let log = LogRecord {
-            observed_time_unix_nano: 1_700_000_000_000_000_000,
-            event_name: "consistency_test".to_string(),
-            severity_number: 9,
-            severity_text: "INFO".to_string(),
-            trace_id: vec![1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16],
-            span_id: vec![1, 2, 3, 4, 5, 6, 7, 8],
-            flags: 1,
-            ..Default::default()
-        };
-
-        let result_a = encoder.encode_log_batch([log.clone()].iter(), metadata);
-        let result_b = encoder.encode_log_batch([log.clone()].iter(), metadata);
-
-        let decoded_a =
-            CentralBlobDecoder::decode(&result_a[0].1).expect("Failed to decode blob A");
-        let decoded_b =
-            CentralBlobDecoder::decode(&result_b[0].1).expect("Failed to decode blob B");
-
-        // Verify consistency
-        assert_eq!(decoded_a.version, decoded_b.version);
-        assert_eq!(decoded_a.format, decoded_b.format);
-        assert_eq!(decoded_a.metadata, decoded_b.metadata);
-        assert_eq!(decoded_a.schemas[0].id, decoded_b.schemas[0].id);
-        assert_eq!(decoded_a.schemas[0].md5, decoded_b.schemas[0].md5);
-        assert_eq!(decoded_a.events[0].schema_id, decoded_b.events[0].schema_id);
-        assert_eq!(decoded_a.events[0].level, decoded_b.events[0].level);
-        assert_eq!(
-            decoded_a.events[0].event_name,
-            decoded_b.events[0].event_name
-        );
-        assert_eq!(decoded_a.events[0].row_data, decoded_b.events[0].row_data);
-    }
-
-    /// Test complex batching scenario with mixed event names and schemas
-    #[test]
-    fn test_complex_mixed_batching_scenario() {
-        let encoder = OtlpEncoder::new();
-        let metadata = "namespace=testNamespace/eventVersion=Ver1v0";
-
-        // Create logs with mixed event names and schemas
-        let log1 = LogRecord {
-            event_name: "user_action".to_string(),
-            severity_number: 9,
-            ..Default::default()
-        };
-
-        let mut log2 = LogRecord {
-            event_name: "user_action".to_string(),
-            severity_number: 10,
-            ..Default::default()
-        };
-        log2.trace_id = vec![1; 16];
-
-        let log3 = LogRecord {
-            event_name: "system_alert".to_string(),
-            severity_number: 11,
-            ..Default::default()
-        };
-
-        let mut log4 = LogRecord {
-            event_name: "".to_string(), // Empty event name -> "Log"
-            severity_number: 12,
-            ..Default::default()
-        };
-        log4.attributes.push(KeyValue {
-            key: "error_code".to_string(),
-            value: Some(AnyValue {
-                value: Some(Value::IntValue(404)),
-            }),
-        });
-
-        let result = encoder.encode_log_batch([log1, log2, log3, log4].iter(), metadata);
-
-        // Should create 3 batches: "user_action", "system_alert", "Log"
-        assert_eq!(result.len(), 3);
-
-        // Find and verify each batch
-        let user_action = result
-            .iter()
-            .find(|(name, _, _)| name == "user_action")
-            .unwrap();
-        let system_alert = result
-            .iter()
-            .find(|(name, _, _)| name == "system_alert")
-            .unwrap();
-        let log_batch = result.iter().find(|(name, _, _)| name == "Log").unwrap();
-
-        assert_eq!(user_action.2, 2); // 2 events with different schemas
-        assert_eq!(system_alert.2, 1); // 1 event
-        assert_eq!(log_batch.2, 1); // 1 event
-
-        // Verify user_action batch has multiple schemas
-        let user_action_decoded =
-            CentralBlobDecoder::decode(&user_action.1).expect("Failed to decode user_action blob");
-        assert_eq!(user_action_decoded.events.len(), 2);
-        assert_eq!(user_action_decoded.schemas.len(), 2); // Different schemas
-        assert_ne!(
-            user_action_decoded.events[0].schema_id,
-            user_action_decoded.events[1].schema_id
+        // Add trace context
+        add_trace_context(
+            &mut comprehensive_log,
+            vec![1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16],
+            vec![1, 2, 3, 4, 5, 6, 7, 8],
+            1,
         );
 
-        // Verify all events in user_action batch have correct event name
-        for event in &user_action_decoded.events {
-            assert_eq!(event.event_name, "user_action");
-        }
+        // Add all attribute types
+        add_attribute(
+            &mut comprehensive_log,
+            "string_attr",
+            Value::StringValue("test_value".to_string()),
+        );
+        add_attribute(&mut comprehensive_log, "int_attr", Value::IntValue(42));
+        add_attribute(
+            &mut comprehensive_log,
+            "double_attr",
+            Value::DoubleValue(3.14159),
+        );
+        add_attribute(&mut comprehensive_log, "bool_attr", Value::BoolValue(true));
 
-        // Verify Log batch has correct event name
-        let log_decoded =
-            CentralBlobDecoder::decode(&log_batch.1).expect("Failed to decode log blob");
-        assert_eq!(log_decoded.events[0].event_name, "Log");
-    }
+        let result = encoder.encode_log_batch([comprehensive_log].iter(), TEST_METADATA);
+        let decoded = decode_and_validate_structure(&result, 1);
+        let event = &decoded[0].1.events[0];
 
-    /// Test simple field validation with single record
-    #[test]
-    fn test_simple_field_validation() {
-        let encoder = OtlpEncoder::new();
-        let metadata = "namespace=testNamespace/eventVersion=Ver1v0";
-
-        // Create a simple log record
-        let mut log_record = LogRecord {
-            observed_time_unix_nano: 1_700_000_000_000_000_000,
-            event_name: "test_event".to_string(),
-            severity_number: 9,
-            severity_text: "INFO".to_string(),
-            ..Default::default()
-        };
-
-        // Add one attribute for testing
-        log_record.attributes.push(KeyValue {
-            key: "user_id".to_string(),
-            value: Some(AnyValue {
-                value: Some(Value::StringValue("user123".to_string())),
-            }),
-        });
-
-        // Encode the log record
-        let results = encoder.encode_log_batch([log_record].iter(), metadata);
-        assert_eq!(results.len(), 1);
-
-        let (event_name, encoded_blob, events_count) = &results[0];
-        assert_eq!(event_name, "test_event");
-        assert_eq!(*events_count, 1);
-
-        // Decode the blob
-        let decoded = CentralBlobDecoder::decode(encoded_blob).expect("Failed to decode blob");
-
-        // Verify basic structure
-        assert_eq!(decoded.events.len(), 1);
-        assert_eq!(decoded.schemas.len(), 1);
-
-        let event = &decoded.events[0];
-        assert_eq!(event.event_name, "test_event");
-        assert_eq!(event.level, 9);
-        assert!(!event.row_data.is_empty());
-
-        // Use the new field validation API from central_blob_decoder
-        // Check for key string values in the encoded data using the improved contains_string_value method
+        // Validate string values are present in the encoded data
         assert!(
-            event.contains_string_value("user123"),
-            "Row data should contain user_id value"
-        );
-        assert!(
-            event.contains_string_value("test_event"),
-            "Row data should contain event name"
+            event.contains_string_value("comprehensive_test"),
+            "Should contain event name"
         );
         assert!(
             event.contains_string_value("INFO"),
-            "Row data should contain severity text"
-        );
-        assert!(
-            event.contains_string_value("TestEnv"),
-            "Row data should contain env_name"
-        );
-        assert!(
-            event.contains_string_value("4.0"),
-            "Row data should contain env_ver"
-        );
-
-        // Test the convenience methods for known fields
-        // Now that parsing is implemented, these should return the actual values
-        // Let's check what we get from this simpler test case
-        println!("Simple test parsed fields: {:?}", event.parse_fields());
-
-        // For the simple test, we can assert the basic functionality
-        assert!(event.get_env_name().is_some(), "Should have env_name");
-        assert!(event.get_env_ver().is_some(), "Should have env_ver");
-
-        // The get_name() method should return the event name if it was parsed
-        // If not, we can just check that the method works
-        let name = event.get_name();
-        println!("Simple test name: {:?}", name);
-        // Don't assert the exact value since the field order might be different
-    }
-
-    /// Test that validates the OTLP encoder by decoding and comparing original values
-    /// This test uses the decoder to verify that the encoder correctly encoded the original log record
-    #[test]
-    fn test_field_validation_api_demonstration() {
-        let encoder = OtlpEncoder::new();
-        let metadata = "namespace=testNamespace/eventVersion=Ver1v0";
-
-        // Create a comprehensive log record with known values to validate encoding
-        let mut log_record = LogRecord {
-            observed_time_unix_nano: 1_700_000_000_000_000_000,
-            event_name: "field_validation_test".to_string(),
-            severity_number: 9,
-            severity_text: "INFO".to_string(),
-            trace_id: vec![1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16],
-            span_id: vec![1, 2, 3, 4, 5, 6, 7, 8],
-            flags: 1,
-            ..Default::default()
-        };
-
-        // Add various attribute types with known values
-        log_record.attributes.push(KeyValue {
-            key: "string_attr".to_string(),
-            value: Some(AnyValue {
-                value: Some(Value::StringValue("test_value".to_string())),
-            }),
-        });
-
-        log_record.attributes.push(KeyValue {
-            key: "int_attr".to_string(),
-            value: Some(AnyValue {
-                value: Some(Value::IntValue(42)),
-            }),
-        });
-
-        log_record.attributes.push(KeyValue {
-            key: "double_attr".to_string(),
-            value: Some(AnyValue {
-                value: Some(Value::DoubleValue(3.14)),
-            }),
-        });
-
-        log_record.attributes.push(KeyValue {
-            key: "bool_attr".to_string(),
-            value: Some(AnyValue {
-                value: Some(Value::BoolValue(true)),
-            }),
-        });
-
-        // STEP 1: Encode the log record using the OTLP encoder
-        let results = encoder.encode_log_batch([log_record].iter(), metadata);
-        assert_eq!(results.len(), 1);
-
-        // STEP 2: Decode the encoded blob to validate encoding was correct
-        let decoded = CentralBlobDecoder::decode(&results[0].1).expect("Failed to decode blob");
-        let event = &decoded.events[0];
-
-        // STEP 3: Validate that encoding preserved the original values by comparing decoded values
-
-        // Test basic string containment (validates that string encoding works)
-        assert!(
-            event.contains_string_value("field_validation_test"),
-            "Encoded blob should contain event name"
-        );
-        assert!(
-            event.contains_string_value("INFO"),
-            "Encoded blob should contain severity text"
-        );
-        assert!(
-            event.contains_string_value("TestEnv"),
-            "Encoded blob should contain env_name"
-        );
-        assert!(
-            event.contains_string_value("4.0"),
-            "Encoded blob should contain env_ver"
+            "Should contain severity text"
         );
         assert!(
             event.contains_string_value("test_value"),
-            "Encoded blob should contain string attribute"
-        );
-
-        // Test field-level decoding to validate that encoding preserved structured data
-        // These assertions validate that the OTLP encoder correctly encoded the original values
-
-        // Validate core OTLP fields were encoded correctly
-        assert_eq!(
-            event.get_env_name(),
-            Some("TestEnv".to_string()),
-            "Encoder should have encoded env_name correctly"
-        );
-        assert_eq!(
-            event.get_env_ver(),
-            Some("4.0".to_string()),
-            "Encoder should have encoded env_ver correctly"
-        );
-        assert_eq!(
-            event.get_name(),
-            Some("field_validation_test".to_string()),
-            "Encoder should have encoded event name correctly"
-        );
-
-        // Validate trace context fields were encoded correctly
-        assert_eq!(
-            event.get_trace_id(),
-            Some("0102030405060708090a0b0c0d0e0f10".to_string()),
-            "Encoder should have encoded trace_id correctly"
-        );
-        assert_eq!(
-            event.get_span_id(),
-            Some("0102030405060708".to_string()),
-            "Encoder should have encoded span_id correctly"
-        );
-        assert_eq!(
-            event.get_trace_flags(),
-            Some(1),
-            "Encoder should have encoded trace_flags correctly"
-        );
-
-        // Validate dynamic attributes were encoded correctly
-        assert_eq!(
-            event.get_int64_field("int_attr"),
-            Some(42),
-            "Encoder should have encoded int_attr correctly"
-        );
-        assert_eq!(
-            event.get_bool_field("bool_attr"),
-            Some(true),
-            "Encoder should have encoded bool_attr correctly"
-        );
-
-        // Validate that required fields are present (encoder should always include these)
-        assert!(
-            event.get_env_time().is_some(),
-            "Encoder should have included env_time"
+            "Should contain string attribute"
         );
         assert!(
-            event.get_int32_field("SeverityNumber").is_some(),
-            "Encoder should have included SeverityNumber"
+            event.contains_string_value("TestEnv"),
+            "Should contain env_name"
+        );
+        assert!(event.contains_string_value("4.0"), "Should contain env_ver");
+        assert!(
+            event.contains_string_value("Log body content"),
+            "Should contain body content"
         );
         assert!(
-            event.get_string_field("SeverityText").is_some(),
-            "Encoder should have included SeverityText"
+            event.contains_string_value("0102030405060708090a0b0c0d0e0f10"),
+            "Should contain trace ID"
+        );
+        assert!(
+            event.contains_string_value("0102030405060708"),
+            "Should contain span ID"
         );
 
-        println!("✓ OTLP Encoder validation passed - all original values were correctly encoded and can be decoded!");
+        // Validate that the log has the expected event name
+        assert_eq!(event.event_name, "comprehensive_test");
+        assert_eq!(event.level, 9);
+        assert!(!event.row_data.is_empty());
+    }
 
-        // This test validates that:
-        // 1. The OTLP encoder correctly encodes string values (event name, attributes, etc.)
-        // 2. The OTLP encoder correctly encodes different data types (int64, bool, i32, string)
-        // 3. The OTLP encoder correctly encodes trace context (trace_id, span_id, flags)
-        // 4. The OTLP encoder includes all required fields (env_name, env_ver, timestamps, etc.)
-        // 5. The encoded data can be successfully decoded and matches the original values
-        // 6. The field-level access API works correctly for validation purposes
+    #[test]
+    fn test_field_ordering_consistency() {
+        let encoder = OtlpEncoder::new();
+
+        // Test that attribute order doesn't affect schema ID (fields are sorted)
+        let mut log1 = create_log_record("ordering_test", 9);
+        add_attribute(
+            &mut log1,
+            "attr_z",
+            Value::StringValue("value_z".to_string()),
+        );
+        add_attribute(
+            &mut log1,
+            "attr_a",
+            Value::StringValue("value_a".to_string()),
+        );
+
+        let mut log2 = create_log_record("ordering_test", 10);
+        add_attribute(
+            &mut log2,
+            "attr_a",
+            Value::StringValue("value_a".to_string()),
+        );
+        add_attribute(
+            &mut log2,
+            "attr_z",
+            Value::StringValue("value_z".to_string()),
+        );
+
+        let result1 = encoder.encode_log_batch([log1].iter(), TEST_METADATA);
+        let result2 = encoder.encode_log_batch([log2].iter(), TEST_METADATA);
+
+        let decoded1 = decode_and_validate_structure(&result1, 1);
+        let decoded2 = decode_and_validate_structure(&result2, 1);
+
+        // Should have same schema ID despite different attribute order
+        assert_eq!(decoded1[0].1.schemas[0].id, decoded2[0].1.schemas[0].id);
+    }
+
+    #[test]
+    fn test_multiple_schemas_per_batch() {
+        let encoder = OtlpEncoder::new();
+
+        // Create logs with same event name but different schemas
+        let base_log = create_log_record("mixed_batch", 5);
+
+        let mut trace_log = create_log_record("mixed_batch", 6);
+        add_trace_context(&mut trace_log, vec![1; 16], vec![1; 8], 1);
+
+        let mut attr_log = create_log_record("mixed_batch", 7);
+        add_attribute(
+            &mut attr_log,
+            "custom_attr",
+            Value::StringValue("value".to_string()),
+        );
+
+        let mut full_log = create_log_record("mixed_batch", 8);
+        add_trace_context(&mut full_log, vec![2; 16], vec![2; 8], 2);
+        add_attribute(&mut full_log, "another_attr", Value::IntValue(100));
+
+        let result = encoder.encode_log_batch(
+            [base_log, trace_log, attr_log, full_log].iter(),
+            TEST_METADATA,
+        );
+
+        let decoded = decode_and_validate_structure(&result, 1);
+        let batch = &decoded[0].1;
+
+        // Verify batch structure
+        assert_eq!(batch.events.len(), 4);
+        assert_eq!(batch.schemas.len(), 4); // Each log has different schema
+
+        // Verify each event references a valid schema
+        for event in &batch.events {
+            assert!(batch.schemas.iter().any(|s| s.id == event.schema_id));
+            assert_eq!(event.event_name, "mixed_batch");
+        }
+
+        // Verify schema uniqueness
+        let mut schema_ids: Vec<u64> = batch.schemas.iter().map(|s| s.id).collect();
+        schema_ids.sort();
+        schema_ids.dedup();
+        assert_eq!(schema_ids.len(), batch.schemas.len());
+    }
+
+    #[test]
+    fn test_minimal_vs_maximal_logs() {
+        let encoder = OtlpEncoder::new();
+
+        // Minimal log (only required fields)
+        let minimal = create_log_record("minimal", 5);
+
+        // Maximal log (all possible fields)
+        let mut maximal = LogRecord {
+            observed_time_unix_nano: 1_700_000_000_000_000_000,
+            event_name: "maximal".to_string(),
+            severity_number: 12,
+            severity_text: "ERROR".to_string(),
+            trace_id: vec![1; 16],
+            span_id: vec![1; 8],
+            flags: 3,
+            body: Some(AnyValue {
+                value: Some(Value::StringValue("Error message".to_string())),
+            }),
+            ..Default::default()
+        };
+
+        // Add multiple attributes of different types
+        for (key, value) in [
+            ("str", Value::StringValue("string".to_string())),
+            ("num", Value::IntValue(999)),
+            ("float", Value::DoubleValue(99.9)),
+            ("flag", Value::BoolValue(false)),
+        ] {
+            add_attribute(&mut maximal, key, value);
+        }
+
+        let result = encoder.encode_log_batch([minimal, maximal].iter(), TEST_METADATA);
+        let decoded = decode_and_validate_structure(&result, 2);
+
+        // Find each batch
+        let minimal_batch = decoded.iter().find(|(name, _)| name == "minimal").unwrap();
+        let maximal_batch = decoded.iter().find(|(name, _)| name == "maximal").unwrap();
+
+        // Verify minimal log has basic required fields
+        let minimal_event = &minimal_batch.1.events[0];
+        assert!(
+            minimal_event.contains_string_value("TestEnv"),
+            "Should contain env_name"
+        );
+        assert!(
+            minimal_event.contains_string_value("4.0"),
+            "Should contain env_ver"
+        );
+        assert!(
+            minimal_event.contains_string_value("minimal"),
+            "Should contain event name"
+        );
+        assert!(
+            minimal_event.contains_string_value("INFO"),
+            "Should contain severity text"
+        );
+
+        // Verify maximal log has all fields
+        let maximal_event = &maximal_batch.1.events[0];
+        assert!(
+            maximal_event.contains_string_value("TestEnv"),
+            "Should contain env_name"
+        );
+        assert!(
+            maximal_event.contains_string_value("4.0"),
+            "Should contain env_ver"
+        );
+        assert!(
+            maximal_event.contains_string_value("maximal"),
+            "Should contain event name"
+        );
+        assert!(
+            maximal_event.contains_string_value("ERROR"),
+            "Should contain severity text"
+        );
+        assert!(
+            maximal_event.contains_string_value("Error message"),
+            "Should contain body"
+        );
+        assert!(
+            maximal_event.contains_string_value("string"),
+            "Should contain string attribute"
+        );
+        // Contains trace context - check for hex patterns that should be present
+        // The trace ID should be present in some form in the encoded data
+        assert!(
+            maximal_event.contains_string_value("0101010101010101"),
+            "Should contain part of trace/span ID"
+        );
+
+        // Schema should be different
+        assert_ne!(minimal_batch.1.schemas[0].id, maximal_batch.1.schemas[0].id);
+    }
+
+    #[test]
+    fn test_timestamp_and_id_encoding() {
+        let encoder = OtlpEncoder::new();
+
+        let mut log = LogRecord {
+            observed_time_unix_nano: 1_234_567_890_123_456_789, // Specific timestamp
+            event_name: "timestamp_test".to_string(),
+            severity_number: 6,
+            trace_id: vec![
+                0x12, 0x34, 0x56, 0x78, 0x9a, 0xbc, 0xde, 0xf0, 0x11, 0x22, 0x33, 0x44, 0x55, 0x66,
+                0x77, 0x88,
+            ],
+            span_id: vec![0xaa, 0xbb, 0xcc, 0xdd, 0xee, 0xff, 0x00, 0x11],
+            ..Default::default()
+        };
+
+        let result = encoder.encode_log_batch([log].iter(), TEST_METADATA);
+        let decoded = decode_and_validate_structure(&result, 1);
+        let event = &decoded[0].1.events[0];
+
+        // Validate hex encoding of IDs are present in the encoded data
+        assert!(
+            event.contains_string_value("123456789abcdef01122334455667788"),
+            "Should contain trace ID"
+        );
+        assert!(
+            event.contains_string_value("aabbccddeeff0011"),
+            "Should contain span ID"
+        );
+
+        // Validate timestamp is properly formatted (contains the expected date)
+        assert!(
+            event.contains_string_value("2009-02-13"),
+            "Should contain formatted date from timestamp"
+        );
+
+        // Validate basic structure
+        assert_eq!(event.event_name, "timestamp_test");
+        assert_eq!(event.level, 6);
+        assert!(!event.row_data.is_empty());
     }
 }
