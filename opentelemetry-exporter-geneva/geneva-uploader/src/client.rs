@@ -82,6 +82,7 @@ impl GenevaClient {
         );
         let max_concurrent_uploads = cfg.max_concurrent_uploads.unwrap_or_else(|| {
             // TODO - Use a more sophisticated method to determine concurrency if needed
+            // currently using number of CPU cores
             std::thread::available_parallelism()
                 .map(|p| p.get())
                 .unwrap_or(4)
