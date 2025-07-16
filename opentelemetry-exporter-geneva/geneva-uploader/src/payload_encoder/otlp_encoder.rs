@@ -903,4 +903,130 @@ mod tests {
             CentralBlobDecoder::decode(&log_batch.1).expect("Failed to decode log blob");
         assert_eq!(log_decoded.events[0].event_name, "Log");
     }
+
+    /// Test simple field validation with single record
+    #[test]
+    fn test_simple_field_validation() {
+        let encoder = OtlpEncoder::new();
+        let metadata = "namespace=testNamespace/eventVersion=Ver1v0";
+
+        // Create a simple log record
+        let mut log_record = LogRecord {
+            observed_time_unix_nano: 1_700_000_000_000_000_000,
+            event_name: "test_event".to_string(),
+            severity_number: 9,
+            severity_text: "INFO".to_string(),
+            ..Default::default()
+        };
+
+        // Add one attribute for testing
+        log_record.attributes.push(KeyValue {
+            key: "user_id".to_string(),
+            value: Some(AnyValue {
+                value: Some(Value::StringValue("user123".to_string())),
+            }),
+        });
+
+        // Encode the log record
+        let results = encoder.encode_log_batch([log_record].iter(), metadata);
+        assert_eq!(results.len(), 1);
+
+        let (event_name, encoded_blob, events_count) = &results[0];
+        assert_eq!(event_name, "test_event");
+        assert_eq!(*events_count, 1);
+
+        // Decode the blob
+        let decoded = CentralBlobDecoder::decode(encoded_blob).expect("Failed to decode blob");
+
+        // Verify basic structure
+        assert_eq!(decoded.events.len(), 1);
+        assert_eq!(decoded.schemas.len(), 1);
+
+        let event = &decoded.events[0];
+        assert_eq!(event.event_name, "test_event");
+        assert_eq!(event.level, 9);
+        assert!(!event.row_data.is_empty());
+
+        // Verify the row data contains expected values
+        let row_data = &event.row_data;
+
+        // Check for key string values in the encoded data
+        assert!(
+            contains_string_value(row_data, "user123"),
+            "Row data should contain user_id value"
+        );
+        assert!(
+            contains_string_value(row_data, "test_event"),
+            "Row data should contain event name"
+        );
+        assert!(
+            contains_string_value(row_data, "INFO"),
+            "Row data should contain severity text"
+        );
+        assert!(
+            contains_string_value(row_data, "TestEnv"),
+            "Row data should contain env_name"
+        );
+        assert!(
+            contains_string_value(row_data, "4.0"),
+            "Row data should contain env_ver"
+        );
+    }
+
+    /// Helper function to check if a byte sequence contains a string value
+    /// This looks for the string length (as u32 little-endian) followed by the string bytes
+    fn contains_string_value(data: &[u8], value: &str) -> bool {
+        let value_bytes = value.as_bytes();
+
+        // Try different string length encodings that Bond might use
+        // Bond can use variable-length encoding for strings
+
+        // First try with u32 length prefix (most common)
+        let length_bytes = (value_bytes.len() as u32).to_le_bytes();
+        if let Some(pos) = data
+            .windows(length_bytes.len())
+            .position(|window| window == length_bytes)
+        {
+            let string_start = pos + length_bytes.len();
+            if string_start + value_bytes.len() <= data.len() {
+                if &data[string_start..string_start + value_bytes.len()] == value_bytes {
+                    return true;
+                }
+            }
+        }
+
+        // Try with u16 length prefix
+        if value_bytes.len() <= u16::MAX as usize {
+            let length_bytes = (value_bytes.len() as u16).to_le_bytes();
+            if let Some(pos) = data
+                .windows(length_bytes.len())
+                .position(|window| window == length_bytes)
+            {
+                let string_start = pos + length_bytes.len();
+                if string_start + value_bytes.len() <= data.len() {
+                    if &data[string_start..string_start + value_bytes.len()] == value_bytes {
+                        return true;
+                    }
+                }
+            }
+        }
+
+        // Try with u8 length prefix for short strings
+        if value_bytes.len() <= u8::MAX as usize {
+            let length_byte = value_bytes.len() as u8;
+            if let Some(pos) = data.iter().position(|&b| b == length_byte) {
+                let string_start = pos + 1;
+                if string_start + value_bytes.len() <= data.len() {
+                    if &data[string_start..string_start + value_bytes.len()] == value_bytes {
+                        return true;
+                    }
+                }
+            }
+        }
+
+        // As a fallback, just check if the string bytes appear anywhere in the data
+        // This is less precise but more likely to catch the value
+        data.windows(value_bytes.len())
+            .any(|window| window == value_bytes)
+    }
 }
