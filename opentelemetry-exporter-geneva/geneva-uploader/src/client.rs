@@ -81,6 +81,7 @@ impl GenevaClient {
             cfg.role_instance,
         );
         let max_concurrent_uploads = cfg.max_concurrent_uploads.unwrap_or_else(|| {
+            // TODO - Use a more sophisticated method to determine concurrency if needed
             std::thread::available_parallelism()
                 .map(|p| p.get())
                 .unwrap_or(4)
@@ -111,32 +112,21 @@ impl GenevaClient {
                 async move {
                     // TODO: Investigate using tokio::spawn_blocking for LZ4 compression to avoid blocking
                     // the async executor thread for CPU-intensive work.
-                    let compressed_blob = match lz4_chunked_compression(&encoded_blob) {
-                        Ok(blob) => blob,
-                        Err(e) => {
-                            return Err(format!("LZ4 compression failed: {e} Event: {event_name}"))
-                        }
-                    };
-                    match uploader
+                    let compressed_blob = lz4_chunked_compression(&encoded_blob)
+                        .map_err(|e| format!("LZ4 compression failed: {e} Event: {event_name}"))?;
+                    self.uploader
                         .upload(compressed_blob, &event_name, event_version)
                         .await
-                    {
-                        Ok(_) => Ok(()),
-                        Err(e) => Err(format!("Geneva upload failed: {e} Event: {event_name}")),
-                    }
+                        .map(|_| ())
+                        .map_err(|e| format!("Geneva upload failed: {e} Event: {event_name}"))
                 }
             });
         // Execute uploads concurrently with configurable concurrency
-        let results: Vec<Result<(), String>> = stream::iter(upload_futures)
+        let errors: Vec<String> = stream::iter(upload_futures)
             .buffer_unordered(self.max_concurrent_uploads)
+            .filter_map(|result| async move { result.err() })
             .collect()
             .await;
-
-        // Collect any errors
-        let errors: Vec<String> = results
-            .into_iter()
-            .filter_map(|result| result.err())
-            .collect();
 
         // Return error if any uploads failed
         if !errors.is_empty() {
