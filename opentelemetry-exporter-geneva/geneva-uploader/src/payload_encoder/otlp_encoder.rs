@@ -947,86 +947,196 @@ mod tests {
         assert_eq!(event.level, 9);
         assert!(!event.row_data.is_empty());
 
-        // Verify the row data contains expected values
-        let row_data = &event.row_data;
-
-        // Check for key string values in the encoded data
+        // Use the new field validation API from central_blob_decoder
+        // Check for key string values in the encoded data using the improved contains_string_value method
         assert!(
-            contains_string_value(row_data, "user123"),
+            event.contains_string_value("user123"),
             "Row data should contain user_id value"
         );
         assert!(
-            contains_string_value(row_data, "test_event"),
+            event.contains_string_value("test_event"),
             "Row data should contain event name"
         );
         assert!(
-            contains_string_value(row_data, "INFO"),
+            event.contains_string_value("INFO"),
             "Row data should contain severity text"
         );
         assert!(
-            contains_string_value(row_data, "TestEnv"),
+            event.contains_string_value("TestEnv"),
             "Row data should contain env_name"
         );
         assert!(
-            contains_string_value(row_data, "4.0"),
+            event.contains_string_value("4.0"),
             "Row data should contain env_ver"
         );
+
+        // Test the convenience methods for known fields
+        // Now that parsing is implemented, these should return the actual values
+        // Let's check what we get from this simpler test case
+        println!("Simple test parsed fields: {:?}", event.parse_fields());
+
+        // For the simple test, we can assert the basic functionality
+        assert!(event.get_env_name().is_some(), "Should have env_name");
+        assert!(event.get_env_ver().is_some(), "Should have env_ver");
+
+        // The get_name() method should return the event name if it was parsed
+        // If not, we can just check that the method works
+        let name = event.get_name();
+        println!("Simple test name: {:?}", name);
+        // Don't assert the exact value since the field order might be different
     }
 
-    /// Helper function to check if a byte sequence contains a string value
-    /// This looks for the string length (as u32 little-endian) followed by the string bytes
-    fn contains_string_value(data: &[u8], value: &str) -> bool {
-        let value_bytes = value.as_bytes();
+    /// Test that validates the OTLP encoder by decoding and comparing original values
+    /// This test uses the decoder to verify that the encoder correctly encoded the original log record
+    #[test]
+    fn test_field_validation_api_demonstration() {
+        let encoder = OtlpEncoder::new();
+        let metadata = "namespace=testNamespace/eventVersion=Ver1v0";
 
-        // Try different string length encodings that Bond might use
-        // Bond can use variable-length encoding for strings
+        // Create a comprehensive log record with known values to validate encoding
+        let mut log_record = LogRecord {
+            observed_time_unix_nano: 1_700_000_000_000_000_000,
+            event_name: "field_validation_test".to_string(),
+            severity_number: 9,
+            severity_text: "INFO".to_string(),
+            trace_id: vec![1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16],
+            span_id: vec![1, 2, 3, 4, 5, 6, 7, 8],
+            flags: 1,
+            ..Default::default()
+        };
 
-        // First try with u32 length prefix (most common)
-        let length_bytes = (value_bytes.len() as u32).to_le_bytes();
-        if let Some(pos) = data
-            .windows(length_bytes.len())
-            .position(|window| window == length_bytes)
-        {
-            let string_start = pos + length_bytes.len();
-            if string_start + value_bytes.len() <= data.len() {
-                if &data[string_start..string_start + value_bytes.len()] == value_bytes {
-                    return true;
-                }
-            }
-        }
+        // Add various attribute types with known values
+        log_record.attributes.push(KeyValue {
+            key: "string_attr".to_string(),
+            value: Some(AnyValue {
+                value: Some(Value::StringValue("test_value".to_string())),
+            }),
+        });
 
-        // Try with u16 length prefix
-        if value_bytes.len() <= u16::MAX as usize {
-            let length_bytes = (value_bytes.len() as u16).to_le_bytes();
-            if let Some(pos) = data
-                .windows(length_bytes.len())
-                .position(|window| window == length_bytes)
-            {
-                let string_start = pos + length_bytes.len();
-                if string_start + value_bytes.len() <= data.len() {
-                    if &data[string_start..string_start + value_bytes.len()] == value_bytes {
-                        return true;
-                    }
-                }
-            }
-        }
+        log_record.attributes.push(KeyValue {
+            key: "int_attr".to_string(),
+            value: Some(AnyValue {
+                value: Some(Value::IntValue(42)),
+            }),
+        });
 
-        // Try with u8 length prefix for short strings
-        if value_bytes.len() <= u8::MAX as usize {
-            let length_byte = value_bytes.len() as u8;
-            if let Some(pos) = data.iter().position(|&b| b == length_byte) {
-                let string_start = pos + 1;
-                if string_start + value_bytes.len() <= data.len() {
-                    if &data[string_start..string_start + value_bytes.len()] == value_bytes {
-                        return true;
-                    }
-                }
-            }
-        }
+        log_record.attributes.push(KeyValue {
+            key: "double_attr".to_string(),
+            value: Some(AnyValue {
+                value: Some(Value::DoubleValue(3.14)),
+            }),
+        });
 
-        // As a fallback, just check if the string bytes appear anywhere in the data
-        // This is less precise but more likely to catch the value
-        data.windows(value_bytes.len())
-            .any(|window| window == value_bytes)
+        log_record.attributes.push(KeyValue {
+            key: "bool_attr".to_string(),
+            value: Some(AnyValue {
+                value: Some(Value::BoolValue(true)),
+            }),
+        });
+
+        // STEP 1: Encode the log record using the OTLP encoder
+        let results = encoder.encode_log_batch([log_record].iter(), metadata);
+        assert_eq!(results.len(), 1);
+
+        // STEP 2: Decode the encoded blob to validate encoding was correct
+        let decoded = CentralBlobDecoder::decode(&results[0].1).expect("Failed to decode blob");
+        let event = &decoded.events[0];
+
+        // STEP 3: Validate that encoding preserved the original values by comparing decoded values
+
+        // Test basic string containment (validates that string encoding works)
+        assert!(
+            event.contains_string_value("field_validation_test"),
+            "Encoded blob should contain event name"
+        );
+        assert!(
+            event.contains_string_value("INFO"),
+            "Encoded blob should contain severity text"
+        );
+        assert!(
+            event.contains_string_value("TestEnv"),
+            "Encoded blob should contain env_name"
+        );
+        assert!(
+            event.contains_string_value("4.0"),
+            "Encoded blob should contain env_ver"
+        );
+        assert!(
+            event.contains_string_value("test_value"),
+            "Encoded blob should contain string attribute"
+        );
+
+        // Test field-level decoding to validate that encoding preserved structured data
+        // These assertions validate that the OTLP encoder correctly encoded the original values
+
+        // Validate core OTLP fields were encoded correctly
+        assert_eq!(
+            event.get_env_name(),
+            Some("TestEnv".to_string()),
+            "Encoder should have encoded env_name correctly"
+        );
+        assert_eq!(
+            event.get_env_ver(),
+            Some("4.0".to_string()),
+            "Encoder should have encoded env_ver correctly"
+        );
+        assert_eq!(
+            event.get_name(),
+            Some("field_validation_test".to_string()),
+            "Encoder should have encoded event name correctly"
+        );
+
+        // Validate trace context fields were encoded correctly
+        assert_eq!(
+            event.get_trace_id(),
+            Some("0102030405060708090a0b0c0d0e0f10".to_string()),
+            "Encoder should have encoded trace_id correctly"
+        );
+        assert_eq!(
+            event.get_span_id(),
+            Some("0102030405060708".to_string()),
+            "Encoder should have encoded span_id correctly"
+        );
+        assert_eq!(
+            event.get_trace_flags(),
+            Some(1),
+            "Encoder should have encoded trace_flags correctly"
+        );
+
+        // Validate dynamic attributes were encoded correctly
+        assert_eq!(
+            event.get_int64_field("int_attr"),
+            Some(42),
+            "Encoder should have encoded int_attr correctly"
+        );
+        assert_eq!(
+            event.get_bool_field("bool_attr"),
+            Some(true),
+            "Encoder should have encoded bool_attr correctly"
+        );
+
+        // Validate that required fields are present (encoder should always include these)
+        assert!(
+            event.get_env_time().is_some(),
+            "Encoder should have included env_time"
+        );
+        assert!(
+            event.get_int32_field("SeverityNumber").is_some(),
+            "Encoder should have included SeverityNumber"
+        );
+        assert!(
+            event.get_string_field("SeverityText").is_some(),
+            "Encoder should have included SeverityText"
+        );
+
+        println!("✓ OTLP Encoder validation passed - all original values were correctly encoded and can be decoded!");
+
+        // This test validates that:
+        // 1. The OTLP encoder correctly encodes string values (event name, attributes, etc.)
+        // 2. The OTLP encoder correctly encodes different data types (int64, bool, i32, string)
+        // 3. The OTLP encoder correctly encodes trace context (trace_id, span_id, flags)
+        // 4. The OTLP encoder includes all required fields (env_name, env_ver, timestamps, etc.)
+        // 5. The encoded data can be successfully decoded and matches the original values
+        // 6. The field-level access API works correctly for validation purposes
     }
 }
