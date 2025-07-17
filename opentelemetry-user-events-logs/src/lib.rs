@@ -311,7 +311,7 @@ mod tests {
     #[test]
     fn integration_test_callback_event_name_from_logrecord() {
         // Run using the below command
-        // sudo -E ~/.cargo/bin/cargo test integration_test_callback_event_name -- --nocapture --ignored
+        // sudo -E ~/.cargo/bin/cargo test integration_test_callback_event_name_from_logrecord -- --nocapture --ignored
         let callback: fn(&opentelemetry_sdk::logs::SdkLogRecord) -> &'static str =
             |log_record| log_record.event_name().unwrap_or("MyEventName");
         integration_test_callback_event_name_helper(callback, "myprovider:my-event-name");
