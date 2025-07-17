@@ -406,8 +406,6 @@ mod tests {
             .as_array()
             .expect("Events for perf.data is not an array");
 
-        println!("{:?}", events);
-
         // Find the specific event
         let event = events
             .iter()
