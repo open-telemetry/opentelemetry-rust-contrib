@@ -14,8 +14,7 @@ use std::{cell::RefCell, str, time::SystemTime};
 thread_local! { static EBW: RefCell<EventBuilder> = RefCell::new(EventBuilder::new());}
 
 /// Type alias for the event name callback function
-pub(crate) type EventNameCallback =
-    Box<dyn Fn(&opentelemetry_sdk::logs::SdkLogRecord) -> &'static str + Send + Sync>;
+pub(crate) type EventNameCallback = fn(&opentelemetry_sdk::logs::SdkLogRecord) -> &'static str;
 
 /// UserEventsExporter is a log exporter that exports logs in EventHeader format to user_events tracepoint.
 pub(crate) struct UserEventsExporter {
@@ -169,12 +168,11 @@ impl UserEventsExporter {
     }
 
     /// Gets the event name from the log record using the provided callback or returns "Log" if no callback is set
+    #[inline]
     fn get_event_name(&self, record: &opentelemetry_sdk::logs::SdkLogRecord) -> &'static str {
-        if let Some(callback) = &self.event_name_callback {
-            // TODO: Add validation that the name is valid and fall back to "Log" if not.
-            callback(record)
-        } else {
-            "Log"
+        match self.event_name_callback {
+            Some(callback_fn) => callback_fn(record),
+            None => "Log",
         }
     }
 

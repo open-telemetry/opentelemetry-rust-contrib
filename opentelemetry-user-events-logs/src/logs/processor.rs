@@ -180,12 +180,9 @@ impl<'a> ProcessorBuilder<'a> {
     #[cfg(feature = "experimental_eventname_callback")]
     pub fn with_event_name_callback(
         mut self,
-        callback: impl Fn(&opentelemetry_sdk::logs::SdkLogRecord) -> &'static str
-            + Send
-            + Sync
-            + 'static,
+        callback: fn(&opentelemetry_sdk::logs::SdkLogRecord) -> &'static str,
     ) -> Self {
-        self.event_name_callback = Some(Box::new(callback));
+        self.event_name_callback = Some(callback);
         self
     }
 
