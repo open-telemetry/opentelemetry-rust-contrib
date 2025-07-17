@@ -307,6 +307,16 @@ mod tests {
         integration_test_callback_event_name_helper(callback, "myprovider:MyEventName");
     }
 
+     #[ignore]
+    #[test]
+    fn integration_test_callback_event_name_from_logrecord() {
+        // Run using the below command
+        // sudo -E ~/.cargo/bin/cargo test integration_test_callback_event_name -- --nocapture --ignored
+        let callback: fn(&opentelemetry_sdk::logs::SdkLogRecord) -> &'static str =
+            |log_record| log_record.event_name().unwrap_or("MyEventName");
+        integration_test_callback_event_name_helper(callback, "myprovider:my-event-name");
+    }
+
     fn integration_test_callback_event_name_helper<F>(
         event_name_callback: F,
         expected_event_name: &'static str,
