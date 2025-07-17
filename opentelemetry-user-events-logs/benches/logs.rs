@@ -34,8 +34,18 @@ use tracing::error;
 use tracing_subscriber::prelude::*;
 use tracing_subscriber::Registry;
 
-fn setup_provider() -> SdkLoggerProvider {
-    let user_event_processor = Processor::builder("myprovider").build().unwrap();
+fn setup_provider(
+    event_name_callback: Option<fn(&opentelemetry_sdk::logs::SdkLogRecord) -> &'static str>,
+) -> SdkLoggerProvider {
+    let user_event_processor = if let Some(callback_fn) = event_name_callback {
+        Processor::builder("myprovider")
+            .with_event_name_callback(callback_fn)
+            .build()
+            .unwrap()
+    } else {
+        Processor::builder("myprovider").build().unwrap()
+    };
+
     SdkLoggerProvider::builder()
         .with_resource(
             Resource::builder_empty()
@@ -47,7 +57,7 @@ fn setup_provider() -> SdkLoggerProvider {
 }
 
 fn benchmark_4_attributes(c: &mut Criterion) {
-    let provider = setup_provider();
+    let provider = setup_provider(None);
     let ot_layer = tracing_layer::OpenTelemetryTracingBridge::new(&provider);
     let subscriber = Registry::default().with(ot_layer);
 
@@ -67,8 +77,32 @@ fn benchmark_4_attributes(c: &mut Criterion) {
     });
 }
 
+#[cfg(feature = "experimental_eventname_callback")]
+fn benchmark_4_attributes_custom_event_name(c: &mut Criterion) {
+    let provider = setup_provider(Some(|record: &opentelemetry_sdk::logs::SdkLogRecord| {
+        record.event_name().unwrap_or("Log")
+    }));
+    let ot_layer = tracing_layer::OpenTelemetryTracingBridge::new(&provider);
+    let subscriber = Registry::default().with(ot_layer);
+
+    tracing::subscriber::with_default(subscriber, || {
+        c.bench_function("User_Event_4_Attributes_EventName_Callback", |b| {
+            b.iter(|| {
+                error!(
+                    name : "CheckoutFailed",
+                    field1 = "field1",
+                    field2 = "field2",
+                    field3 = "field3",
+                    field4 = "field4",
+                    message = "Unable to process checkout."
+                );
+            });
+        });
+    });
+}
+
 fn benchmark_6_attributes(c: &mut Criterion) {
-    let provider = setup_provider();
+    let provider = setup_provider(None);
     let ot_layer = tracing_layer::OpenTelemetryTracingBridge::new(&provider);
     let subscriber = Registry::default().with(ot_layer);
 
@@ -93,6 +127,8 @@ fn benchmark_6_attributes(c: &mut Criterion) {
 fn criterion_benchmark(c: &mut Criterion) {
     benchmark_4_attributes(c);
     benchmark_6_attributes(c);
+    #[cfg(feature = "experimental_eventname_callback")]
+    benchmark_4_attributes_custom_event_name(c);
 }
 
 criterion_group! {
