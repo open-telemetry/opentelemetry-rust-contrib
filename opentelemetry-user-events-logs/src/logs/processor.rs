@@ -68,7 +68,7 @@ impl opentelemetry_sdk::logs::LogProcessor for Processor {
 #[derive(Debug)]
 pub struct ProcessorBuilder<'a> {
     provider_name: &'a str,
-    resource_attribute_keys: HashSet<String>,
+    resource_attribute_keys: HashSet<Cow<'static, str>>,
 }
 
 impl<'a> ProcessorBuilder<'a> {
@@ -121,21 +121,22 @@ impl<'a> ProcessorBuilder<'a> {
     /// requiring them to be sent with each log:
     ///
     /// - **Infrastructure attributes** (datacenter, region, availability zone) can
-    ///   be determined by the local agent
-    /// - **Host attributes** (hostname, IP address, OS version) are available locally
-    /// - **Deployment attributes** (environment, cluster) may be known to the agent
+    ///   be determined by the local agent.
+    /// - **Host attributes** (hostname, IP address, OS version) are available locally.
+    /// - **Deployment attributes** (environment, cluster) may be known to the agent.
     ///
     /// Focus on attributes that are truly specific to your application instance
     /// and cannot be easily determined by the local agent.
+    ///
+    /// Nevertheless, if there are attributes that are fixed and must be emitted
+    /// with every log, modeling them as Resource attributes and using this method
+    /// is much more efficient than emitting them explicitly with every log.
     pub fn with_resource_attributes<I, S>(mut self, attributes: I) -> Self
     where
         I: IntoIterator<Item = S>,
         S: Into<Cow<'static, str>>,
     {
-        self.resource_attribute_keys = attributes
-            .into_iter()
-            .map(|s| s.into().into_owned())
-            .collect();
+        self.resource_attribute_keys = attributes.into_iter().map(|s| s.into()).collect();
         self
     }
 

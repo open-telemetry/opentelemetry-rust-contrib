@@ -2,6 +2,7 @@ use eventheader::{FieldFormat, Level};
 use eventheader_dynamic::{EventBuilder, EventSet, Provider};
 use opentelemetry::{otel_debug, otel_info, Value};
 use opentelemetry_sdk::Resource;
+use std::borrow::Cow;
 use std::collections::HashSet;
 use std::sync::Arc;
 use std::{fmt::Debug, sync::Mutex};
@@ -20,7 +21,7 @@ pub(crate) struct UserEventsExporter {
     cloud_role: Option<String>,
     cloud_role_instance: Option<String>,
     attributes_from_resource: Vec<(Key, AnyValue)>,
-    resource_attribute_keys: HashSet<String>,
+    resource_attribute_keys: HashSet<Cow<'static, str>>,
 }
 
 // Constants for the UserEventsExporter
@@ -117,7 +118,10 @@ const fn get_severity_level(severity: Severity) -> Level {
 
 impl UserEventsExporter {
     /// Create instance of the exporter
-    pub(crate) fn new(provider_name: &str, resource_attributes: HashSet<String>) -> Self {
+    pub(crate) fn new(
+        provider_name: &str,
+        resource_attributes: HashSet<Cow<'static, str>>,
+    ) -> Self {
         let mut eventheader_provider: Provider =
             Provider::new(provider_name, &Provider::new_options());
         let event_sets = register_events(&mut eventheader_provider);
