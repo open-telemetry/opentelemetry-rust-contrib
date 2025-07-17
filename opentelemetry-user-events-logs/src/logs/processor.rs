@@ -5,6 +5,8 @@ use opentelemetry_sdk::{
     error::OTelSdkResult,
     logs::{LogBatch, SdkLogRecord},
 };
+use std::borrow::Cow;
+use std::collections::HashSet;
 use std::error::Error;
 use std::fmt::Debug;
 
@@ -66,6 +68,7 @@ impl opentelemetry_sdk::logs::LogProcessor for Processor {
 #[derive(Debug)]
 pub struct ProcessorBuilder<'a> {
     provider_name: &'a str,
+    resource_attribute_keys: HashSet<Cow<'static, str>>,
 }
 
 impl<'a> ProcessorBuilder<'a> {
@@ -93,7 +96,48 @@ impl<'a> ProcessorBuilder<'a> {
     /// For example the following will capture level 2 (Error) and 3(Warning) events:
     /// perf record -e user_events:myprovider_L2K1,user_events:myprovider_L3K1
     pub(crate) fn new(provider_name: &'a str) -> Self {
-        Self { provider_name }
+        Self {
+            provider_name,
+            resource_attribute_keys: HashSet::new(),
+        }
+    }
+
+    /// Sets the resource attributes for the processor.
+    ///
+    /// This specifies which resource attributes should be exported with each log record.
+    ///
+    /// # Performance Considerations
+    ///
+    /// **Warning**: Each specified resource attribute will be serialized and sent
+    /// with EVERY log record. This is different from OTLP exporters where resource
+    /// attributes are serialized once per batch. Consider the performance impact
+    /// when selecting which attributes to export.
+    ///
+    /// # Best Practices for user_events
+    ///
+    /// **Recommendation**: Be selective about which resource attributes to export.
+    /// Since user_events writes to a local kernel buffer and requires a local
+    /// listener/agent, the agent can often deduce many resource attributes without
+    /// requiring them to be sent with each log:
+    ///
+    /// - **Infrastructure attributes** (datacenter, region, availability zone) can
+    ///   be determined by the local agent.
+    /// - **Host attributes** (hostname, IP address, OS version) are available locally.
+    /// - **Deployment attributes** (environment, cluster) may be known to the agent.
+    ///
+    /// Focus on attributes that are truly specific to your application instance
+    /// and cannot be easily determined by the local agent.
+    ///
+    /// Nevertheless, if there are attributes that are fixed and must be emitted
+    /// with every log, modeling them as Resource attributes and using this method
+    /// is much more efficient than emitting them explicitly with every log.
+    pub fn with_resource_attributes<I, S>(mut self, attributes: I) -> Self
+    where
+        I: IntoIterator<Item = S>,
+        S: Into<Cow<'static, str>>,
+    {
+        self.resource_attribute_keys = attributes.into_iter().map(|s| s.into()).collect();
+        self
     }
 
     /// Builds the processor with the configured options
@@ -117,7 +161,7 @@ impl<'a> ProcessorBuilder<'a> {
             return Err("Provider name must contain only ASCII letters, digits, and '_'.".into());
         }
 
-        let exporter = UserEventsExporter::new(self.provider_name);
+        let exporter = UserEventsExporter::new(self.provider_name, self.resource_attribute_keys);
         Ok(Processor { exporter })
     }
 }
