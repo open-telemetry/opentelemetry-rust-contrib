@@ -304,7 +304,7 @@ mod tests {
         // sudo -E ~/.cargo/bin/cargo test integration_test_callback_event_name -- --nocapture --ignored
         let callback: fn(&opentelemetry_sdk::logs::SdkLogRecord) -> &'static str =
             |_| "MyEventName";
-        integration_test_callback_event_name_helper(callback, "MyEventName");
+        integration_test_callback_event_name_helper(callback, "myprovider:MyEventName");
     }
 
     fn integration_test_callback_event_name_helper<F>(
