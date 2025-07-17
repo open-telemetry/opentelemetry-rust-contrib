@@ -307,7 +307,7 @@ mod tests {
         integration_test_callback_event_name_helper(callback, "myprovider:MyEventName");
     }
 
-     #[ignore]
+    #[ignore]
     #[test]
     fn integration_test_callback_event_name_from_logrecord() {
         // Run using the below command
