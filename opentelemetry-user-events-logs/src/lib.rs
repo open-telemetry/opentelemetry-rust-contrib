@@ -299,6 +299,7 @@ mod tests {
 
     #[ignore]
     #[test]
+    #[cfg(feature = "experimental_eventname_callback")]
     fn integration_test_callback_event_name() {
         // Run using the below command
         // sudo -E ~/.cargo/bin/cargo test integration_test_callback_event_name -- --nocapture --ignored
@@ -309,6 +310,7 @@ mod tests {
 
     #[ignore]
     #[test]
+    #[cfg(feature = "experimental_eventname_callback")]
     fn integration_test_callback_event_name_from_logrecord() {
         // Run using the below command
         // sudo -E ~/.cargo/bin/cargo test integration_test_callback_event_name_from_logrecord -- --nocapture --ignored
@@ -317,6 +319,7 @@ mod tests {
         integration_test_callback_event_name_helper(callback, "myprovider:my-event-name");
     }
 
+    #[cfg(feature = "experimental_eventname_callback")]
     fn integration_test_callback_event_name_helper<F>(
         event_name_callback: F,
         expected_event_name: &'static str,
