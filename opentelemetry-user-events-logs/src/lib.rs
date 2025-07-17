@@ -320,12 +320,10 @@ mod tests {
     }
 
     #[cfg(feature = "experimental_eventname_callback")]
-    fn integration_test_callback_event_name_helper<F>(
-        event_name_callback: F,
+    fn integration_test_callback_event_name_helper(
+        event_name_callback: fn(&opentelemetry_sdk::logs::SdkLogRecord) -> &'static str,
         expected_event_name: &'static str,
-    ) where
-        F: Fn(&opentelemetry_sdk::logs::SdkLogRecord) -> &'static str + Send + Sync + 'static,
-    {
+    ) {
         // Basic check if user_events are available
         check_user_events_available().expect("Kernel does not support user_events. Verify your distribution/kernel supports user_events: https://docs.kernel.org/trace/user_events.html.");
         let user_event_processor = Processor::builder("myprovider")
