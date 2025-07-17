@@ -77,7 +77,6 @@ fn benchmark_4_attributes(c: &mut Criterion) {
     });
 }
 
-#[cfg(feature = "experimental_eventname_callback")]
 fn benchmark_4_attributes_custom_event_name(c: &mut Criterion) {
     let provider = setup_provider(Some(|record: &opentelemetry_sdk::logs::SdkLogRecord| {
         record.event_name().unwrap_or("Log")
@@ -127,7 +126,6 @@ fn benchmark_6_attributes(c: &mut Criterion) {
 fn criterion_benchmark(c: &mut Criterion) {
     benchmark_4_attributes(c);
     benchmark_6_attributes(c);
-    #[cfg(feature = "experimental_eventname_callback")]
     benchmark_4_attributes_custom_event_name(c);
 }
 

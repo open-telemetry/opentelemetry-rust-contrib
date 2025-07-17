@@ -39,7 +39,7 @@ default = ["internal-logs"]
 
 name = "logs"
 harness = false
-required-features = ["spec_unstable_logs_enabled"]
+required-features = ["spec_unstable_logs_enabled", "experimental_eventname_callback"]
 
 [lints]
 workspace = true
