@@ -149,6 +149,7 @@ impl GenevaUploader {
 
     /// Creates the GIG upload URI with required parameters
     #[allow(dead_code)]
+    #[allow(clippy::too_many_arguments)]
     fn create_upload_uri(
         &self,
         monitoring_endpoint: &str,
@@ -166,7 +167,7 @@ impl GenevaUploader {
             let nsec = (start_time_nanos % 1_000_000_000) as u32;
             Utc.timestamp_opt(secs, nsec)
                 .single()
-                .unwrap_or_else(|| Utc::now())
+                .unwrap_or_else(Utc::now)
         } else {
             Utc::now()
         };

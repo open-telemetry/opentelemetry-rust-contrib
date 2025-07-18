@@ -102,50 +102,42 @@ impl GenevaClient {
         let blobs = self.encoder.encode_log_batch(log_iter, &self.metadata);
 
         // create an iterator that yields futures for each upload
-        let upload_futures = blobs.into_iter().map(
-            |(
-                event_name,
-                encoded_blob,
-                _row_count,
-                schema_ids,
-                start_time_nanos,
-                end_time_nanos,
-            )| {
-                let event_version = "Ver2v0"; // TODO - find the actual value to be populated
+        let upload_futures = blobs.into_iter().map(|batch| {
+            let event_version = "Ver2v0"; // TODO - find the actual value to be populated
 
-                // Convert schema IDs to semicolon-separated string for the upload
-                // Use pre-allocated capacity and write directly to avoid intermediate allocations
-                let mut schema_ids_str = String::with_capacity(
-                    schema_ids.len() * 16 + schema_ids.len().saturating_sub(1),
-                );
-                for (i, id) in schema_ids.iter().enumerate() {
-                    if i > 0 {
-                        schema_ids_str.push(';');
-                    }
-                    use std::fmt::Write;
-                    write!(&mut schema_ids_str, "{id:x}").unwrap();
+            // Convert schema IDs to semicolon-separated string for the upload
+            // Use pre-allocated capacity and write directly to avoid intermediate allocations
+            let mut schema_ids_str = String::with_capacity(
+                batch.schema_ids.len() * 16 + batch.schema_ids.len().saturating_sub(1),
+            );
+            for (i, id) in batch.schema_ids.iter().enumerate() {
+                if i > 0 {
+                    schema_ids_str.push(';');
                 }
+                use std::fmt::Write;
+                write!(&mut schema_ids_str, "{id:x}").unwrap();
+            }
 
-                async move {
-                    // TODO: Investigate using tokio::spawn_blocking for LZ4 compression to avoid blocking
-                    // the async executor thread for CPU-intensive work.
-                    let compressed_blob = lz4_chunked_compression(&encoded_blob)
-                        .map_err(|e| format!("LZ4 compression failed: {e} Event: {event_name}"))?;
-                    self.uploader
-                        .upload(
-                            compressed_blob,
-                            &event_name,
-                            event_version,
-                            &schema_ids_str,
-                            start_time_nanos,
-                            end_time_nanos,
-                        )
-                        .await
-                        .map(|_| ())
-                        .map_err(|e| format!("Geneva upload failed: {e} Event: {event_name}"))
-                }
-            },
-        );
+            async move {
+                // TODO: Investigate using tokio::spawn_blocking for LZ4 compression to avoid blocking
+                // the async executor thread for CPU-intensive work.
+                let compressed_blob = lz4_chunked_compression(&batch.data).map_err(|e| {
+                    format!("LZ4 compression failed: {e} Event: {}", batch.event_name)
+                })?;
+                self.uploader
+                    .upload(
+                        compressed_blob,
+                        &batch.event_name,
+                        event_version,
+                        &schema_ids_str,
+                        batch.start_time_nanos,
+                        batch.end_time_nanos,
+                    )
+                    .await
+                    .map(|_| ())
+                    .map_err(|e| format!("Geneva upload failed: {e} Event: {}", batch.event_name))
+            }
+        });
         // Execute uploads concurrently with configurable concurrency
         let errors: Vec<String> = stream::iter(upload_futures)
             .buffer_unordered(self.max_concurrent_uploads)

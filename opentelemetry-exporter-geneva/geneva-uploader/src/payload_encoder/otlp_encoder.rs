@@ -12,6 +12,23 @@ type BatchKey = String; //event_name
 type BatchValue = (Vec<CentralSchemaEntry>, Vec<CentralEventEntry>); // (schemas, events)
 type LogBatches = HashMap<BatchKey, BatchValue>;
 
+/// Represents an encoded batch with all necessary metadata
+#[derive(Debug, Clone)]
+pub struct EncodedBatch {
+    /// The event name for this batch
+    pub event_name: String,
+    /// The encoded binary data
+    pub data: Vec<u8>,
+    /// Number of events in this batch
+    pub events_count: usize,
+    /// List of schema IDs present in this batch
+    pub schema_ids: Vec<u64>,
+    /// Start time of the earliest event in nanoseconds since Unix epoch
+    pub start_time_nanos: u64,
+    /// End time of the latest event in nanoseconds since Unix epoch
+    pub end_time_nanos: u64,
+}
+
 const FIELD_ENV_NAME: &str = "env_name";
 const FIELD_ENV_VER: &str = "env_ver";
 const FIELD_TIMESTAMP: &str = "timestamp";
@@ -45,12 +62,7 @@ impl OtlpEncoder {
     }
 
     /// Encode a batch of logs into a vector of (event_name, bytes, events_count, schema_ids, start_time_nanos, end_time_nanos)
-    pub(crate) fn encode_log_batch<'a, I>(
-        &self,
-        logs: I,
-        metadata: &str,
-    ) -> Vec<(String, Vec<u8>, usize, Vec<u64>, u64, u64)>
-    //(event_name, bytes, events_count, schema_ids, start_time_nanos, end_time_nanos)
+    pub(crate) fn encode_log_batch<'a, I>(&self, logs: I, metadata: &str) -> Vec<EncodedBatch>
     where
         I: IntoIterator<Item = &'a opentelemetry_proto::tonic::logs::v1::LogRecord>,
     {
@@ -151,14 +163,14 @@ impl OtlpEncoder {
                 events,
             };
             let bytes = blob.to_bytes();
-            blobs.push((
-                batch_event_name,
-                bytes,
-                events_len,
+            blobs.push(EncodedBatch {
+                event_name: batch_event_name,
+                data: bytes,
+                events_count: events_len,
                 schema_ids,
-                start_time,
-                end_time,
-            ));
+                start_time_nanos: start_time,
+                end_time_nanos: end_time,
+            });
         }
         blobs
     }
@@ -472,9 +484,9 @@ mod tests {
         let result = encoder.encode_log_batch([log].iter(), "test");
 
         assert_eq!(result.len(), 1);
-        assert_eq!(result[0].0, "test_event");
-        assert_eq!(result[0].2, 1); // events_count
-        assert!(!result[0].3.is_empty()); // schema_ids should not be empty
+        assert_eq!(result[0].event_name, "test_event");
+        assert_eq!(result[0].events_count, 1);
+        assert!(!result[0].schema_ids.is_empty()); // schema_ids should not be empty
     }
 
     #[test]
@@ -513,8 +525,8 @@ mod tests {
 
         // All should be in one batch with same event_name
         assert_eq!(result.len(), 1);
-        assert_eq!(result[0].0, "user_action");
-        assert_eq!(result[0].2, 3); // events_count
+        assert_eq!(result[0].event_name, "user_action");
+        assert_eq!(result[0].events_count, 3);
 
         // Should have 3 different schemas cached
         assert_eq!(encoder.schema_cache.read().unwrap().len(), 3);
@@ -541,12 +553,12 @@ mod tests {
         // Should create 2 separate batches
         assert_eq!(result.len(), 2);
 
-        let event_names: Vec<&String> = result.iter().map(|(name, _, _, _, _, _)| name).collect();
+        let event_names: Vec<&String> = result.iter().map(|batch| &batch.event_name).collect();
         assert!(event_names.contains(&&"login".to_string()));
         assert!(event_names.contains(&&"logout".to_string()));
 
         // Each batch should have 1 event
-        assert!(result.iter().all(|(_, _, count, _, _, _)| *count == 1));
+        assert!(result.iter().all(|batch| batch.events_count == 1));
     }
 
     #[test]
@@ -562,8 +574,8 @@ mod tests {
         let result = encoder.encode_log_batch([log].iter(), "test");
 
         assert_eq!(result.len(), 1);
-        assert_eq!(result[0].0, "Log"); // Should default to "Log"
-        assert_eq!(result[0].2, 1);
+        assert_eq!(result[0].event_name, "Log"); // Should default to "Log"
+        assert_eq!(result[0].events_count, 1);
     }
 
     #[test]
@@ -613,20 +625,20 @@ mod tests {
         // Find each batch and verify counts
         let user_action = result
             .iter()
-            .find(|(name, _, _, _, _, _)| name == "user_action")
+            .find(|batch| batch.event_name == "user_action")
             .unwrap();
         let system_alert = result
             .iter()
-            .find(|(name, _, _, _, _, _)| name == "system_alert")
+            .find(|batch| batch.event_name == "system_alert")
             .unwrap();
         let log_batch = result
             .iter()
-            .find(|(name, _, _, _, _, _)| name == "Log")
+            .find(|batch| batch.event_name == "Log")
             .unwrap();
 
-        assert_eq!(user_action.2, 2); // 2 events with different schemas
-        assert_eq!(system_alert.2, 1); // 1 event
-        assert_eq!(log_batch.2, 1); // 1 event
+        assert_eq!(user_action.events_count, 2); // 2 events with different schemas
+        assert_eq!(system_alert.events_count, 1); // 1 event
+        assert_eq!(log_batch.events_count, 1); // 1 event
 
         // Should have 4 different schemas cached
         assert_eq!(encoder.schema_cache.read().unwrap().len(), 4);
