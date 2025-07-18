@@ -44,19 +44,23 @@ fn main() {
     .expect("Error setting Ctrl-C handler");
 
     while running.load(Ordering::SeqCst) {
-        // Parent HTTP span
-        tracer.in_span("http-request", |http_cx| {
-            let http_span = http_cx.span();
-            http_span.set_attribute(opentelemetry::KeyValue::new("http.method", "GET"));
-            http_span.set_attribute(opentelemetry::KeyValue::new("http.url", "/api/users"));
+        let mut http_span = tracer
+            .span_builder("http-request")
+            .with_attributes(vec![
+                opentelemetry::KeyValue::new("http.method", "GET"),
+                opentelemetry::KeyValue::new("http.url", "/api/users"),
+            ])
+            .start(&tracer);
+        let mut db_span = tracer
+            .span_builder("db-query")
+            .with_attributes(vec![
+                opentelemetry::KeyValue::new("db.system", "mssql"),
+                opentelemetry::KeyValue::new("db.statement", "SELECT * FROM users"),
+            ])
+            .start(&tracer);
 
-            // Child Database span
-            tracer.in_span("db-query", |db_cx| {
-            let db_span = db_cx.span();
-            db_span.set_attribute(opentelemetry::KeyValue::new("db.system", "mssql"));
-            db_span.set_attribute(opentelemetry::KeyValue::new("db.statement", "SELECT * FROM users"));
-            });
-        });
+        db_span.end();
+        http_span.end();
         thread::sleep(Duration::from_secs(1));
     }
 

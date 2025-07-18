@@ -223,7 +223,12 @@ impl UserEventsSpanExporter {
 
             let has_parent_id = span.parent_span_id != opentelemetry::SpanId::INVALID;
             if has_parent_id {
-                eb.add_str("parentId", span.parent_span_id.to_string(), FieldFormat::Default, 0);
+                eb.add_str(
+                    "parentId",
+                    span.parent_span_id.to_string(),
+                    FieldFormat::Default,
+                    0,
+                );
             }
 
             // Well-known attributes go into PartB.
@@ -247,9 +252,7 @@ impl UserEventsSpanExporter {
             // Update PartB field count with the number of well-known attributes found.
             eb.set_struct_field_count(
                 part_b_bookmark,
-                BASE_PARTB_FIELD_COUNT
-                    + partb_count_from_attributes
-                    + u8::from(has_parent_id),
+                BASE_PARTB_FIELD_COUNT + partb_count_from_attributes + u8::from(has_parent_id),
             );
 
             // Add regular attributes to PartC if any.
