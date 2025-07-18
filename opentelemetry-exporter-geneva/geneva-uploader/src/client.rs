@@ -123,7 +123,7 @@ impl GenevaClient {
                         schema_ids_str.push(';');
                     }
                     use std::fmt::Write;
-                        write!(&mut schema_ids_str, "{id:x}").unwrap();
+                    write!(&mut schema_ids_str, "{id:x}").unwrap();
                 }
 
                 async move {
