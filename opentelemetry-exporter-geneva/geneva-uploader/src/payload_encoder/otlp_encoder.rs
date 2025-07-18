@@ -44,13 +44,13 @@ impl OtlpEncoder {
         self.schema_cache.read().unwrap().len()
     }
 
-    /// Encode a batch of logs into a vector of (event_name, bytes, events_count)
+    /// Encode a batch of logs into a vector of (event_name, bytes, events_count, schema_ids)
     pub(crate) fn encode_log_batch<'a, I>(
         &self,
         logs: I,
         metadata: &str,
-    ) -> Vec<(String, Vec<u8>, usize)>
-    //(event_name, bytes, events_count)
+    ) -> Vec<(String, Vec<u8>, usize, Vec<u64>)>
+    //(event_name, bytes, events_count, schema_ids)
     where
         I: IntoIterator<Item = &'a opentelemetry_proto::tonic::logs::v1::LogRecord>,
     {
@@ -106,6 +106,9 @@ impl OtlpEncoder {
         for (batch_event_name, (schema_entries, events)) in batches {
             let events_len = events.len();
 
+            // Extract schema IDs from the schema entries
+            let schema_ids: Vec<u64> = schema_entries.iter().map(|s| s.id).collect();
+
             let blob = CentralBlob {
                 version: 1,
                 format: 2,
@@ -114,7 +117,7 @@ impl OtlpEncoder {
                 events,
             };
             let bytes = blob.to_bytes();
-            blobs.push((batch_event_name, bytes, events_len));
+            blobs.push((batch_event_name, bytes, events_len, schema_ids));
         }
         blobs
     }
@@ -424,6 +427,7 @@ mod tests {
         assert_eq!(result.len(), 1);
         assert_eq!(result[0].0, "test_event");
         assert_eq!(result[0].2, 1); // events_count
+        assert!(!result[0].3.is_empty()); // schema_ids should not be empty
     }
 
     #[test]
@@ -490,12 +494,12 @@ mod tests {
         // Should create 2 separate batches
         assert_eq!(result.len(), 2);
 
-        let event_names: Vec<&String> = result.iter().map(|(name, _, _)| name).collect();
+        let event_names: Vec<&String> = result.iter().map(|(name, _, _, _)| name).collect();
         assert!(event_names.contains(&&"login".to_string()));
         assert!(event_names.contains(&&"logout".to_string()));
 
         // Each batch should have 1 event
-        assert!(result.iter().all(|(_, _, count)| *count == 1));
+        assert!(result.iter().all(|(_, _, count, _)| *count == 1));
     }
 
     #[test]
@@ -562,13 +566,13 @@ mod tests {
         // Find each batch and verify counts
         let user_action = result
             .iter()
-            .find(|(name, _, _)| name == "user_action")
+            .find(|(name, _, _, _)| name == "user_action")
             .unwrap();
         let system_alert = result
             .iter()
-            .find(|(name, _, _)| name == "system_alert")
+            .find(|(name, _, _, _)| name == "system_alert")
             .unwrap();
-        let log_batch = result.iter().find(|(name, _, _)| name == "Log").unwrap();
+        let log_batch = result.iter().find(|(name, _, _, _)| name == "Log").unwrap();
 
         assert_eq!(user_action.2, 2); // 2 events with different schemas
         assert_eq!(system_alert.2, 1); // 1 event

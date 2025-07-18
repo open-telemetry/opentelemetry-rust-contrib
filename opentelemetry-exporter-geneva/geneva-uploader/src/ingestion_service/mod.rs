@@ -44,15 +44,12 @@ mod tests {
             let source_identity = env::var("GENEVA_SOURCE_IDENTITY").unwrap_or_else(|_| {
                 "Tenant=Default/Role=Uploader/RoleInstance=devhost".to_string()
             });
-            let schema_ids =
-                "c1ce0ecea020359624c493bbe97f9e80;0da22cabbee419e000541a5eda732eb3".to_string();
 
             // Define uploader config
             let uploader_config = GenevaUploaderConfig {
                 namespace: namespace.clone(),
                 source_identity,
                 environment: environment.clone(),
-                schema_ids,
             };
 
             let config = GenevaConfigClientConfig {
@@ -123,7 +120,12 @@ mod tests {
         let start = Instant::now();
         let response = ctx
             .uploader
-            .upload(ctx.data, &ctx.event_name, &ctx.event_version)
+            .upload(
+                ctx.data,
+                &ctx.event_name,
+                &ctx.event_version,
+                "test_schema_id",
+            )
             .await
             .expect("Upload failed");
 
@@ -181,7 +183,12 @@ mod tests {
         let start_warmup = Instant::now();
         let _ = ctx
             .uploader
-            .upload(ctx.data.clone(), &ctx.event_name, &ctx.event_version)
+            .upload(
+                ctx.data.clone(),
+                &ctx.event_name,
+                &ctx.event_version,
+                "test_schema_id",
+            )
             .await
             .expect("Warm-up upload failed");
         let warmup_elapsed = start_warmup.elapsed();
@@ -201,7 +208,7 @@ mod tests {
             let handle = tokio::spawn(async move {
                 let start = Instant::now();
                 let resp = uploader
-                    .upload(data, &event_name, &event_version)
+                    .upload(data, &event_name, &event_version, "test_schema_id")
                     .await
                     .unwrap_or_else(|_| panic!("Upload {i} failed"));
                 let elapsed = start.elapsed();

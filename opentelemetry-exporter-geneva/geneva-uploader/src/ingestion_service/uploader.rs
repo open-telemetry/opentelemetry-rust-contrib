@@ -106,7 +106,6 @@ pub(crate) struct GenevaUploaderConfig {
     pub source_identity: String,
     #[allow(dead_code)]
     pub environment: String,
-    pub schema_ids: String,
 }
 
 /// Client for uploading data to Geneva Ingestion Gateway (GIG)
@@ -157,6 +156,7 @@ impl GenevaUploader {
         data_size: usize,
         event_name: &str,
         event_version: &str,
+        schema_ids: &str,
     ) -> Result<String> {
         let now: DateTime<Utc> = Utc::now(); //TODO - this need to be calculated from the bond data
         let end_time = now + ChronoDuration::minutes(5); //TODO - this need to be calculated from the bond data
@@ -210,7 +210,7 @@ impl GenevaUploader {
             end_time,
             data_size,
             2,
-            self.config.schema_ids
+            schema_ids
         ).map_err(|e| GenevaUploaderError::InternalError(format!("Failed to write query string: {e}")))?;
         Ok(query)
     }
@@ -219,6 +219,9 @@ impl GenevaUploader {
     ///
     /// # Arguments
     /// * `data` - The encoded data to upload (already in the required format)
+    /// * `event_name` - Name of the event
+    /// * `event_version` - Version of the event
+    /// * `schema_ids` - Semicolon-separated string of schema IDs present in the payload
     ///
     /// # Returns
     /// * `Result<IngestionResponse>` - The response containing the ticket ID or an error
@@ -228,6 +231,7 @@ impl GenevaUploader {
         data: Vec<u8>,
         event_name: &str,
         event_version: &str,
+        schema_ids: &str,
     ) -> Result<IngestionResponse> {
         // Always get fresh auth info
         let (auth_info, moniker_info, monitoring_endpoint) =
@@ -239,6 +243,7 @@ impl GenevaUploader {
             data_size,
             event_name,
             event_version,
+            schema_ids,
         )?;
         let full_url = format!(
             "{}/{}",
