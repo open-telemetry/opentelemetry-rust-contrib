@@ -4,6 +4,7 @@
 
 use opentelemetry::global;
 use opentelemetry::trace::Span;
+use opentelemetry::trace::TraceContextExt;
 use opentelemetry::trace::Tracer;
 use opentelemetry_sdk::trace::SdkTracerProvider;
 use opentelemetry_user_events_trace::UserEventsTracerProviderBuilderExt;
@@ -43,11 +44,19 @@ fn main() {
     .expect("Error setting Ctrl-C handler");
 
     while running.load(Ordering::SeqCst) {
-        let mut span = tracer
-            .span_builder("my-span-name")
-            .with_attributes([opentelemetry::KeyValue::new("my-key", "my-value")])
-            .start(&tracer);
-        span.end();
+        // Parent HTTP span
+        tracer.in_span("http-request", |http_cx| {
+            let http_span = http_cx.span();
+            http_span.set_attribute(opentelemetry::KeyValue::new("http.method", "GET"));
+            http_span.set_attribute(opentelemetry::KeyValue::new("http.url", "/api/users"));
+
+            // Child Database span
+            tracer.in_span("db-query", |db_cx| {
+            let db_span = db_cx.span();
+            db_span.set_attribute(opentelemetry::KeyValue::new("db.system", "mssql"));
+            db_span.set_attribute(opentelemetry::KeyValue::new("db.statement", "SELECT * FROM users"));
+            });
+        });
         thread::sleep(Duration::from_secs(1));
     }
 
