@@ -46,8 +46,8 @@ fn main() {
         // Parent HTTP span
         tracer.in_span("http-request", |http_cx| {
             let http_span = http_cx.span();
-            http_span.set_attribute(opentelemetry::KeyValue::new("http.method", "GET"));
-            http_span.set_attribute(opentelemetry::KeyValue::new("http.url", "/api/users"));
+            http_span.set_attribute(opentelemetry::KeyValue::new("http.request.method", "GET"));
+            http_span.set_attribute(opentelemetry::KeyValue::new("url.full", "/api/users"));
 
             // Child Database span
             tracer.in_span("db-query", |db_cx| {
