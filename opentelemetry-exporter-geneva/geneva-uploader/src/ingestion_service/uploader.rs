@@ -1,4 +1,4 @@
-use chrono::{DateTime, Duration as ChronoDuration, Utc};
+use chrono::{Duration as ChronoDuration, TimeZone, Utc};
 
 use crate::config_service::client::{GenevaConfigClient, GenevaConfigClientError};
 use chrono::{Datelike, Timelike};
@@ -157,25 +157,45 @@ impl GenevaUploader {
         event_name: &str,
         event_version: &str,
         schema_ids: &str,
+        start_time_nanos: u64,
+        end_time_nanos: u64,
     ) -> Result<String> {
-        let now: DateTime<Utc> = Utc::now(); //TODO - this need to be calculated from the bond data
-        let end_time = now + ChronoDuration::minutes(5); //TODO - this need to be calculated from the bond data
+        // Convert nanoseconds to DateTime
+        let start_time = if start_time_nanos > 0 {
+            let secs = (start_time_nanos / 1_000_000_000) as i64;
+            let nsec = (start_time_nanos % 1_000_000_000) as u32;
+            Utc.timestamp_opt(secs, nsec)
+                .single()
+                .unwrap_or_else(|| Utc::now())
+        } else {
+            Utc::now()
+        };
+
+        let end_time = if end_time_nanos > 0 {
+            let secs = (end_time_nanos / 1_000_000_000) as i64;
+            let nsec = (end_time_nanos % 1_000_000_000) as u32;
+            Utc.timestamp_opt(secs, nsec)
+                .single()
+                .unwrap_or_else(|| Utc::now() + ChronoDuration::minutes(5))
+        } else {
+            start_time + ChronoDuration::minutes(5)
+        };
 
         // Format times in ISO 8601 format with fixed precision
         // Using .NET compatible format (matches DateTime.ToString("O"))
 
-        let start_time = format!(
+        let start_time_str = format!(
             "{:04}-{:02}-{:02}T{:02}:{:02}:{:02}.{:07}Z",
-            now.year(),
-            now.month(),
-            now.day(),
-            now.hour(),
-            now.minute(),
-            now.second(),
-            now.nanosecond() / 100 // Convert nanoseconds to 7-digit precision
+            start_time.year(),
+            start_time.month(),
+            start_time.day(),
+            start_time.hour(),
+            start_time.minute(),
+            start_time.second(),
+            start_time.nanosecond() / 100 // Convert nanoseconds to 7-digit precision
         );
 
-        let end_time = format!(
+        let end_time_str = format!(
             "{:04}-{:02}-{:02}T{:02}:{:02}:{:02}.{:07}Z",
             end_time.year(),
             end_time.month(),
@@ -206,8 +226,8 @@ impl GenevaUploader {
             event_version,
             source_unique_id,
             encoded_source_identity,
-            start_time,
-            end_time,
+            start_time_str,
+            end_time_str,
             data_size,
             2,
             schema_ids
@@ -222,6 +242,8 @@ impl GenevaUploader {
     /// * `event_name` - Name of the event
     /// * `event_version` - Version of the event
     /// * `schema_ids` - Semicolon-separated string of schema IDs present in the payload
+    /// * `start_time_nanos` - Start time of the event range in nanoseconds since Unix epoch
+    /// * `end_time_nanos` - End time of the event range in nanoseconds since Unix epoch
     ///
     /// # Returns
     /// * `Result<IngestionResponse>` - The response containing the ticket ID or an error
@@ -232,6 +254,8 @@ impl GenevaUploader {
         event_name: &str,
         event_version: &str,
         schema_ids: &str,
+        start_time_nanos: u64,
+        end_time_nanos: u64,
     ) -> Result<IngestionResponse> {
         // Always get fresh auth info
         let (auth_info, moniker_info, monitoring_endpoint) =
@@ -244,6 +268,8 @@ impl GenevaUploader {
             event_name,
             event_version,
             schema_ids,
+            start_time_nanos,
+            end_time_nanos,
         )?;
         let full_url = format!(
             "{}/{}",

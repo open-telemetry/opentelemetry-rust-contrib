@@ -125,6 +125,8 @@ mod tests {
                 &ctx.event_name,
                 &ctx.event_version,
                 "test_schema_id",
+                1_700_000_000_000_000_000, // start_time_nanos
+                1_700_000_300_000_000_000, // end_time_nanos (5 minutes later)
             )
             .await
             .expect("Upload failed");
@@ -188,6 +190,8 @@ mod tests {
                 &ctx.event_name,
                 &ctx.event_version,
                 "test_schema_id",
+                1_700_000_000_000_000_000, // start_time_nanos
+                1_700_000_300_000_000_000, // end_time_nanos (5 minutes later)
             )
             .await
             .expect("Warm-up upload failed");
@@ -208,7 +212,14 @@ mod tests {
             let handle = tokio::spawn(async move {
                 let start = Instant::now();
                 let resp = uploader
-                    .upload(data, &event_name, &event_version, "test_schema_id")
+                    .upload(
+                        data,
+                        &event_name,
+                        &event_version,
+                        "test_schema_id",
+                        1_700_000_000_000_000_000,
+                        1_700_000_300_000_000_000,
+                    )
                     .await
                     .unwrap_or_else(|_| panic!("Upload {i} failed"));
                 let elapsed = start.elapsed();
