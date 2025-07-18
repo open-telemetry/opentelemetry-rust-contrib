@@ -106,8 +106,12 @@ impl OtlpEncoder {
         for (batch_event_name, (schema_entries, events)) in batches {
             let events_len = events.len();
 
-            // Extract schema IDs from the schema entries
-            let schema_ids: Vec<u64> = schema_entries.iter().map(|s| s.id).collect();
+            // Pre-allocate schema_ids Vec and build it directly from schema_entries
+            // This avoids the intermediate .collect() allocation
+            let mut schema_ids = Vec::with_capacity(schema_entries.len());
+            for schema_entry in &schema_entries {
+                schema_ids.push(schema_entry.id);
+            }
 
             let blob = CentralBlob {
                 version: 1,

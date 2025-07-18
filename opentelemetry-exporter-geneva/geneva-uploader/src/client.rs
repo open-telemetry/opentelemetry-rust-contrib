@@ -109,11 +109,17 @@ impl GenevaClient {
                     let event_version = "Ver2v0"; // TODO - find the actual value to be populated
 
                     // Convert schema IDs to semicolon-separated string for the upload
-                    let schema_ids_str = schema_ids
-                        .iter()
-                        .map(|id| format!("{:x}", id))
-                        .collect::<Vec<_>>()
-                        .join(";");
+                    // Use pre-allocated capacity and write directly to avoid intermediate allocations
+                    let mut schema_ids_str = String::with_capacity(
+                        schema_ids.len() * 16 + schema_ids.len().saturating_sub(1),
+                    );
+                    for (i, id) in schema_ids.iter().enumerate() {
+                        if i > 0 {
+                            schema_ids_str.push(';');
+                        }
+                        use std::fmt::Write;
+                        write!(&mut schema_ids_str, "{:x}", id).unwrap();
+                    }
 
                     async move {
                         // TODO: Investigate using tokio::spawn_blocking for LZ4 compression to avoid blocking
