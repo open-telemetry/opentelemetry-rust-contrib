@@ -13,6 +13,9 @@ use std::{cell::RefCell, str, time::SystemTime};
 
 thread_local! { static EBW: RefCell<EventBuilder> = RefCell::new(EventBuilder::new());}
 
+/// Type alias for the event name callback function
+pub(crate) type EventNameCallback = fn(&opentelemetry_sdk::logs::SdkLogRecord) -> &'static str;
+
 /// UserEventsExporter is a log exporter that exports logs in EventHeader format to user_events tracepoint.
 pub(crate) struct UserEventsExporter {
     provider: Mutex<Provider>,
@@ -22,6 +25,7 @@ pub(crate) struct UserEventsExporter {
     cloud_role_instance: Option<String>,
     attributes_from_resource: Vec<(Key, AnyValue)>,
     resource_attribute_keys: HashSet<Cow<'static, str>>,
+    event_name_callback: Option<EventNameCallback>,
 }
 
 // Constants for the UserEventsExporter
@@ -121,6 +125,7 @@ impl UserEventsExporter {
     pub(crate) fn new(
         provider_name: &str,
         resource_attributes: HashSet<Cow<'static, str>>,
+        event_name_callback: Option<EventNameCallback>,
     ) -> Self {
         let mut eventheader_provider: Provider =
             Provider::new(provider_name, &Provider::new_options());
@@ -135,6 +140,7 @@ impl UserEventsExporter {
             cloud_role_instance: None,
             resource_attribute_keys: resource_attributes,
             attributes_from_resource: Vec::new(),
+            event_name_callback,
         }
     }
 
@@ -161,10 +167,13 @@ impl UserEventsExporter {
         }
     }
 
-    /// Gets the event name from the log record
-    fn get_event_name<'a>(&self, _record: &'a opentelemetry_sdk::logs::SdkLogRecord) -> &'a str {
-        // TODO: Add callback to get event name from the log record
-        "Log"
+    /// Gets the event name from the log record using the provided callback or returns "Log" if no callback is set
+    #[inline]
+    fn get_event_name(&self, record: &opentelemetry_sdk::logs::SdkLogRecord) -> &'static str {
+        match self.event_name_callback {
+            Some(callback_fn) => callback_fn(record),
+            None => "Log",
+        }
     }
 
     /// Builds Part A of the Common Schema format
@@ -461,7 +470,7 @@ mod tests {
     use super::*;
     #[test]
     fn exporter_debug() {
-        let exporter = UserEventsExporter::new("test_provider", HashSet::new());
+        let exporter = UserEventsExporter::new("test_provider", HashSet::new(), None);
         assert_eq!(
             format!("{exporter:?}"),
             "user_events log exporter (provider name: test_provider)"

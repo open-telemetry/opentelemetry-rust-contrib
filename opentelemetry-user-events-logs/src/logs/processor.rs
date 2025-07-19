@@ -65,10 +65,27 @@ impl opentelemetry_sdk::logs::LogProcessor for Processor {
 }
 
 /// Builder for configuring and constructing a user_events Processor
-#[derive(Debug)]
 pub struct ProcessorBuilder<'a> {
     provider_name: &'a str,
     resource_attribute_keys: HashSet<Cow<'static, str>>,
+    event_name_callback: Option<crate::logs::exporter::EventNameCallback>,
+}
+
+impl<'a> std::fmt::Debug for ProcessorBuilder<'a> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("ProcessorBuilder")
+            .field("provider_name", &self.provider_name)
+            .field("resource_attribute_keys", &self.resource_attribute_keys)
+            .field(
+                "event_name_callback",
+                &if self.event_name_callback.is_some() {
+                    "Some(...)"
+                } else {
+                    "None"
+                },
+            )
+            .finish()
+    }
 }
 
 impl<'a> ProcessorBuilder<'a> {
@@ -99,6 +116,7 @@ impl<'a> ProcessorBuilder<'a> {
         Self {
             provider_name,
             resource_attribute_keys: HashSet::new(),
+            event_name_callback: None,
         }
     }
 
@@ -140,6 +158,34 @@ impl<'a> ProcessorBuilder<'a> {
         self
     }
 
+    /// Sets a callback function to determine the event name for each log record
+    ///
+    /// The callback receives a reference to the log record and returns a string
+    /// that will be used as the event name in the user_events tracepoint.
+    ///
+    /// # Example
+    ///
+    /// ```
+    /// use opentelemetry_user_events_logs::Processor;
+    /// use opentelemetry_sdk::logs::SdkLogRecord;
+    ///
+    /// let processor = Processor::builder("myprovider")
+    ///     .with_event_name_callback(|record| {
+    ///         // Use the event name from the record if available, otherwise use "DefaultEvent"
+    ///         record.event_name().unwrap_or("DefaultEvent")
+    ///     })
+    ///     .build()
+    ///     .unwrap();
+    /// ```
+    #[cfg(feature = "experimental_eventname_callback")]
+    pub fn with_event_name_callback(
+        mut self,
+        callback: fn(&opentelemetry_sdk::logs::SdkLogRecord) -> &'static str,
+    ) -> Self {
+        self.event_name_callback = Some(callback);
+        self
+    }
+
     /// Builds the processor with the configured options
     ///
     /// # Returns
@@ -161,7 +207,11 @@ impl<'a> ProcessorBuilder<'a> {
             return Err("Provider name must contain only ASCII letters, digits, and '_'.".into());
         }
 
-        let exporter = UserEventsExporter::new(self.provider_name, self.resource_attribute_keys);
+        let exporter = UserEventsExporter::new(
+            self.provider_name,
+            self.resource_attribute_keys,
+            self.event_name_callback,
+        );
         Ok(Processor { exporter })
     }
 }
