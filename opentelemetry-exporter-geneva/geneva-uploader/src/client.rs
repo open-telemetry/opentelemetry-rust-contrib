@@ -58,15 +58,11 @@ impl GenevaClient {
             cfg.tenant, cfg.role_name, cfg.role_instance
         );
 
-        let schema_ids =
-            "c1ce0ecea020359624c493bbe97f9e80;0da22cabbee419e000541a5eda732eb3".to_string(); // TODO - find the actual value to be populated
-
         // Uploader config
         let uploader_config = GenevaUploaderConfig {
             namespace: cfg.namespace.clone(),
             source_identity,
             environment: cfg.environment,
-            schema_ids,
         };
 
         let uploader = GenevaUploader::from_config_client(config_client, uploader_config)
@@ -106,22 +102,42 @@ impl GenevaClient {
         let blobs = self.encoder.encode_log_batch(log_iter, &self.metadata);
 
         // create an iterator that yields futures for each upload
-        let upload_futures = blobs
-            .into_iter()
-            .map(|(event_name, encoded_blob, _row_count)| {
-                let event_version = "Ver2v0"; // TODO - find the actual value to be populated
-                async move {
-                    // TODO: Investigate using tokio::spawn_blocking for LZ4 compression to avoid blocking
-                    // the async executor thread for CPU-intensive work.
-                    let compressed_blob = lz4_chunked_compression(&encoded_blob)
-                        .map_err(|e| format!("LZ4 compression failed: {e} Event: {event_name}"))?;
-                    self.uploader
-                        .upload(compressed_blob, &event_name, event_version)
-                        .await
-                        .map(|_| ())
-                        .map_err(|e| format!("Geneva upload failed: {e} Event: {event_name}"))
+        let upload_futures = blobs.into_iter().map(|batch| {
+            let event_version = "Ver2v0"; // TODO - find the actual value to be populated
+
+            // Convert schema IDs to semicolon-separated string for the upload
+            // Use pre-allocated capacity and write directly to avoid intermediate allocations
+            let mut schema_ids_str = String::with_capacity(
+                batch.schema_ids.len() * 16 + batch.schema_ids.len().saturating_sub(1),
+            );
+            for (i, id) in batch.schema_ids.iter().enumerate() {
+                if i > 0 {
+                    schema_ids_str.push(';');
                 }
-            });
+                use std::fmt::Write;
+                write!(&mut schema_ids_str, "{id:x}").unwrap();
+            }
+
+            async move {
+                // TODO: Investigate using tokio::spawn_blocking for LZ4 compression to avoid blocking
+                // the async executor thread for CPU-intensive work.
+                let compressed_blob = lz4_chunked_compression(&batch.data).map_err(|e| {
+                    format!("LZ4 compression failed: {e} Event: {}", batch.event_name)
+                })?;
+                self.uploader
+                    .upload(
+                        compressed_blob,
+                        &batch.event_name,
+                        event_version,
+                        &schema_ids_str,
+                        batch.start_time_nanos,
+                        batch.end_time_nanos,
+                    )
+                    .await
+                    .map(|_| ())
+                    .map_err(|e| format!("Geneva upload failed: {e} Event: {}", batch.event_name))
+            }
+        });
         // Execute uploads concurrently with configurable concurrency
         let errors: Vec<String> = stream::iter(upload_futures)
             .buffer_unordered(self.max_concurrent_uploads)
