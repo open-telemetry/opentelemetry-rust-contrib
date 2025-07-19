@@ -16,7 +16,7 @@ use std::{
 };
 
 // Base number of fields in PartB (before adding well-known attributes)
-const BASE_PARTB_FIELD_COUNT: u8 = 6;
+const BASE_PARTB_FIELD_COUNT: u8 = 5;
 
 // Well-known attributes mapping - created once at runtime
 static WELL_KNOWN_ATTRIBUTES: OnceLock<HashMap<&'static str, &'static str>> = OnceLock::new();
@@ -200,13 +200,6 @@ impl UserEventsSpanExporter {
             // Add base fields
             eb.add_str("_typeName", "Span", FieldFormat::Default, 0);
             eb.add_str("name", span.name.as_ref(), FieldFormat::Default, 0);
-            let parent_span_id_str = if span.parent_span_id != opentelemetry::SpanId::INVALID {
-                span.parent_span_id.to_string()
-            } else {
-                // TODO - Not to emit for root span
-                "".to_string()
-            };
-            eb.add_str("parentId", parent_span_id_str, FieldFormat::Default, 0);
             let datetime: DateTime<Utc> = span.start_time.into();
             eb.add_str("startTime", datetime.to_rfc3339(), FieldFormat::Default, 0);
             eb.add_value(
@@ -227,6 +220,16 @@ impl UserEventsSpanExporter {
                 FieldFormat::UnsignedInt,
                 0,
             );
+
+            let has_parent_id = span.parent_span_id != opentelemetry::SpanId::INVALID;
+            if has_parent_id {
+                eb.add_str(
+                    "parentId",
+                    span.parent_span_id.to_string(),
+                    FieldFormat::Default,
+                    0,
+                );
+            }
 
             // Well-known attributes go into PartB.
             // Regular attributes are collected for PartC.
@@ -249,7 +252,7 @@ impl UserEventsSpanExporter {
             // Update PartB field count with the number of well-known attributes found.
             eb.set_struct_field_count(
                 part_b_bookmark,
-                BASE_PARTB_FIELD_COUNT + partb_count_from_attributes,
+                BASE_PARTB_FIELD_COUNT + partb_count_from_attributes + u8::from(has_parent_id),
             );
 
             // Add regular attributes to PartC if any.
