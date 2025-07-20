@@ -108,9 +108,9 @@ impl GenevaClient {
             // Convert schema IDs to semicolon-separated string for the upload
             // Use pre-allocated capacity and write directly to avoid intermediate allocations
             let mut schema_ids_str = String::with_capacity(
-                batch.schema_ids.len() * 16 + batch.schema_ids.len().saturating_sub(1),
+                batch.metadata.schema_ids.len() * 16 + batch.metadata.schema_ids.len().saturating_sub(1),
             );
-            for (i, id) in batch.schema_ids.iter().enumerate() {
+            for (i, id) in batch.metadata.schema_ids.iter().enumerate() {
                 if i > 0 {
                     schema_ids_str.push(';');
                 }
@@ -130,8 +130,8 @@ impl GenevaClient {
                         &batch.event_name,
                         event_version,
                         &schema_ids_str,
-                        batch.start_time_nanos,
-                        batch.end_time_nanos,
+                        batch.metadata.start_time,
+                        batch.metadata.end_time,
                     )
                     .await
                     .map(|_| ())

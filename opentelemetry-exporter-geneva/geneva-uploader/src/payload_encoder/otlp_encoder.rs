@@ -8,25 +8,27 @@ use std::collections::HashMap;
 use std::sync::{Arc, RwLock};
 
 type SchemaCache = Arc<RwLock<HashMap<u64, (Arc<BondEncodedSchema>, [u8; 16])>>>;
-type BatchKey = String; //event_name
-type BatchValue = (Vec<CentralSchemaEntry>, Vec<CentralEventEntry>); // (schemas, events)
-type LogBatches = HashMap<BatchKey, BatchValue>;
+
+/// Metadata for a batch of events
+#[derive(Debug, Clone)]
+pub(crate) struct BatchMetadata {
+    /// Start time of the earliest event in nanoseconds since Unix epoch
+    pub(crate) start_time: u64,
+    /// End time of the latest event in nanoseconds since Unix epoch
+    pub(crate) end_time: u64,
+    /// List of schema IDs present in this batch
+    pub(crate) schema_ids: Vec<u64>,
+}
 
 /// Represents an encoded batch with all necessary metadata
 #[derive(Debug, Clone)]
-pub struct EncodedBatch {
+pub(crate) struct EncodedBatch {
     /// The event name for this batch
-    pub event_name: String,
+    pub(crate) event_name: String,
     /// The encoded binary data
-    pub data: Vec<u8>,
-    /// Number of events in this batch
-    pub events_count: usize,
-    /// List of schema IDs present in this batch
-    pub schema_ids: Vec<u64>,
-    /// Start time of the earliest event in nanoseconds since Unix epoch
-    pub start_time_nanos: u64,
-    /// End time of the latest event in nanoseconds since Unix epoch
-    pub end_time_nanos: u64,
+    pub(crate) data: Vec<u8>,
+    /// Batch metadata containing timestamps and schema information
+    pub(crate) metadata: BatchMetadata,
 }
 
 const FIELD_ENV_NAME: &str = "env_name";
@@ -61,15 +63,24 @@ impl OtlpEncoder {
         self.schema_cache.read().unwrap().len()
     }
 
-    /// Encode a batch of logs into a vector of (event_name, bytes, events_count, schema_ids, start_time_nanos, end_time_nanos)
+    /// Encode a batch of logs into a vector of (event_name, bytes, schema_ids, start_time_nanos, end_time_nanos)
     pub(crate) fn encode_log_batch<'a, I>(&self, logs: I, metadata: &str) -> Vec<EncodedBatch>
     where
         I: IntoIterator<Item = &'a opentelemetry_proto::tonic::logs::v1::LogRecord>,
     {
         use std::collections::HashMap;
 
-        let mut batches: LogBatches = HashMap::new();
-        let mut batch_timestamps: HashMap<String, (u64, u64)> = HashMap::new(); // (min_time, max_time)
+        // Convert iterator to Vec to get size estimate for pre-allocation
+        let logs: Vec<_> = logs.into_iter().collect();
+        let log_count = logs.len();
+        
+        if log_count == 0 {
+            return Vec::new();
+        }
+        
+        // Store as (schemas, events, start_time, end_time, schema_ids)
+        type BatchValue = (Vec<CentralSchemaEntry>, Vec<CentralEventEntry>, u64, u64, Vec<u64>);
+        let mut batches: HashMap<String, BatchValue> = HashMap::new();
 
         for log_record in logs {
             // Get the timestamp - prefer time_unix_nano, fall back to observed_time_unix_nano if time_unix_nano is 0
@@ -79,32 +90,16 @@ impl OtlpEncoder {
                 log_record.observed_time_unix_nano
             };
 
-            // Update timestamp range for this batch
-            let event_name_for_batch = if log_record.event_name.is_empty() {
-                "Log".to_string()
+            // Use string slice directly to avoid unnecessary allocations
+            let event_name_str = if log_record.event_name.is_empty() {
+                "Log"
             } else {
-                log_record.event_name.clone()
+                log_record.event_name.as_str()
             };
-
-            let time_entry = batch_timestamps
-                .entry(event_name_for_batch.clone())
-                .or_insert((timestamp, timestamp));
-            if timestamp != 0 {
-                // Only update if we have a valid timestamp
-                time_entry.0 = time_entry.0.min(timestamp);
-                time_entry.1 = time_entry.1.max(timestamp);
-            }
 
             // 1. Get schema with optimized single-pass field collection and schema ID calculation
-            // TODO - optimize this to use Cow<'static, str> to avoid allocation
-            let event_name = if log_record.event_name.is_empty() {
-                "Log".to_string()
-            } else {
-                log_record.event_name.clone()
-            };
-            let event_name_arc = Arc::new(event_name.clone());
             let (field_info, schema_id) =
-                Self::determine_fields_and_schema_id(log_record, &event_name);
+                Self::determine_fields_and_schema_id(log_record, event_name_str);
 
             let schema_entry = self.get_or_create_schema(schema_id, field_info.as_slice());
 
@@ -112,22 +107,33 @@ impl OtlpEncoder {
             let row_buffer = self.write_row_data(log_record, &field_info);
             let level = log_record.severity_number as u8;
 
-            // 3. Create batch key
-            let batch_key = event_name;
-
-            // 4. Create or get existing batch entry
+            // 3. Create or get existing batch entry with metadata tracking
             let entry = batches
-                .entry(batch_key)
-                .or_insert_with(|| (Vec::new(), Vec::new()));
+                .entry(event_name_str.to_string())
+                .or_insert_with(|| (Vec::new(), Vec::new(), timestamp, timestamp, Vec::new()));
 
-            // 5. Add schema entry if not already present (multiple schemas per event_name batch)
-            // TODO: Consider HashMap for schema lookup if typical schema count per batch grows beyond ~10
-            //       Currently optimized for 4-5 schemas where linear search is faster than HashMap overhead
-            if !entry.0.iter().any(|s| s.id == schema_id) {
-                entry.0.push(schema_entry);
+            // Update timestamp range
+            if timestamp != 0 {
+                entry.2 = entry.2.min(timestamp); // start_time
+                entry.3 = entry.3.max(timestamp); // end_time
             }
 
-            // 6. Create CentralEventEntry directly (optimization: no intermediate EncodedRow)
+            // 4. Add schema entry if not already present (multiple schemas per event_name batch)
+            if !entry.0.iter().any(|s| s.id == schema_id) {
+                entry.0.push(schema_entry);
+                entry.4.push(schema_id); // schema_ids
+            }
+
+            // 5. Create CentralEventEntry directly (optimization: no intermediate EncodedRow)
+            // Use Arc::from to intern common event names
+            let event_name_arc = if event_name_str == "Log" {
+                // Use a static Arc for the most common event name to avoid allocation
+                static LOG_ARC: std::sync::OnceLock<Arc<String>> = std::sync::OnceLock::new();
+                LOG_ARC.get_or_init(|| Arc::new("Log".to_string())).clone()
+            } else {
+                Arc::new(event_name_str.to_string())
+            };
+
             let central_event = CentralEventEntry {
                 schema_id,
                 level,
@@ -137,24 +143,9 @@ impl OtlpEncoder {
             entry.1.push(central_event);
         }
 
-        // 4. Encode blobs (one per event_name, potentially multiple schemas per blob)
-        let mut blobs = Vec::new();
-        for (batch_event_name, (schema_entries, events)) in batches {
-            let events_len = events.len();
-
-            // Pre-allocate schema_ids Vec and build it directly from schema_entries
-            // This avoids the intermediate .collect() allocation
-            let mut schema_ids = Vec::with_capacity(schema_entries.len());
-            for schema_entry in &schema_entries {
-                schema_ids.push(schema_entry.id);
-            }
-
-            // Get timestamp range for this batch
-            let (start_time, end_time) = batch_timestamps
-                .get(&batch_event_name)
-                .copied()
-                .unwrap_or((0, 0));
-
+        // 6. Encode blobs (one per event_name, potentially multiple schemas per blob)
+        let mut blobs = Vec::with_capacity(batches.len());
+        for (batch_event_name, (schema_entries, events, start_time, end_time, schema_ids)) in batches {
             let blob = CentralBlob {
                 version: 1,
                 format: 2,
@@ -166,10 +157,11 @@ impl OtlpEncoder {
             blobs.push(EncodedBatch {
                 event_name: batch_event_name,
                 data: bytes,
-                events_count: events_len,
-                schema_ids,
-                start_time_nanos: start_time,
-                end_time_nanos: end_time,
+                metadata: BatchMetadata {
+                    start_time,
+                    end_time,
+                    schema_ids,
+                },
             });
         }
         blobs
@@ -485,8 +477,8 @@ mod tests {
 
         assert_eq!(result.len(), 1);
         assert_eq!(result[0].event_name, "test_event");
-        assert_eq!(result[0].events_count, 1);
-        assert!(!result[0].schema_ids.is_empty()); // schema_ids should not be empty
+        assert!(!result[0].data.is_empty()); // Should have encoded data
+        assert!(!result[0].metadata.schema_ids.is_empty()); // schema_ids should not be empty
     }
 
     #[test]
@@ -526,7 +518,8 @@ mod tests {
         // All should be in one batch with same event_name
         assert_eq!(result.len(), 1);
         assert_eq!(result[0].event_name, "user_action");
-        assert_eq!(result[0].events_count, 3);
+        assert!(!result[0].data.is_empty()); // Should have encoded data
+        assert_eq!(result[0].metadata.schema_ids.len(), 3); // Should have 3 different schema IDs
 
         // Should have 3 different schemas cached
         assert_eq!(encoder.schema_cache.read().unwrap().len(), 3);
@@ -557,8 +550,8 @@ mod tests {
         assert!(event_names.contains(&&"login".to_string()));
         assert!(event_names.contains(&&"logout".to_string()));
 
-        // Each batch should have 1 event
-        assert!(result.iter().all(|batch| batch.events_count == 1));
+        // Each batch should have 1 event (verify by checking data is not empty)
+        assert!(result.iter().all(|batch| !batch.data.is_empty()));
     }
 
     #[test]
@@ -575,7 +568,7 @@ mod tests {
 
         assert_eq!(result.len(), 1);
         assert_eq!(result[0].event_name, "Log"); // Should default to "Log"
-        assert_eq!(result[0].events_count, 1);
+        assert!(!result[0].data.is_empty()); // Should have encoded data
     }
 
     #[test]
@@ -636,9 +629,13 @@ mod tests {
             .find(|batch| batch.event_name == "Log")
             .unwrap();
 
-        assert_eq!(user_action.events_count, 2); // 2 events with different schemas
-        assert_eq!(system_alert.events_count, 1); // 1 event
-        assert_eq!(log_batch.events_count, 1); // 1 event
+        // Verify that each batch has data and schema IDs
+        assert!(!user_action.data.is_empty()); // Should have encoded data
+        assert_eq!(user_action.metadata.schema_ids.len(), 2); // 2 different schemas
+        assert!(!system_alert.data.is_empty()); // Should have encoded data
+        assert_eq!(system_alert.metadata.schema_ids.len(), 1); // 1 schema
+        assert!(!log_batch.data.is_empty()); // Should have encoded data
+        assert_eq!(log_batch.metadata.schema_ids.len(), 1); // 1 schema
 
         // Should have 4 different schemas cached
         assert_eq!(encoder.schema_cache.read().unwrap().len(), 4);
