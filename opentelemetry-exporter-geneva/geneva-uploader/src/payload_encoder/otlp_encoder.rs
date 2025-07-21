@@ -60,17 +60,27 @@ impl OtlpEncoder {
         impl BatchData {
             fn format_schema_ids(&self) -> String {
                 use std::fmt::Write;
-                self.schemas
-                    .iter()
-                    .enumerate()
-                    .fold(String::new(), |mut acc, (i, s)| {
+
+                if self.schemas.is_empty() {
+                    return String::new();
+                }
+
+                // Pre-allocate capacity: Each MD5 hash is 32 hex chars + 1 semicolon (except last)
+                // Total: (32 chars per hash * num_schemas) + (semicolons = num_schemas - 1)
+                let estimated_capacity =
+                    self.schemas.len() * 32 + self.schemas.len().saturating_sub(1);
+
+                self.schemas.iter().enumerate().fold(
+                    String::with_capacity(estimated_capacity),
+                    |mut acc, (i, s)| {
                         if i > 0 {
                             acc.push(';');
                         }
                         let md5_hash = md5::compute(s.id.to_le_bytes());
                         write!(&mut acc, "{md5_hash:x}").unwrap();
                         acc
-                    })
+                    },
+                )
             }
         }
 
