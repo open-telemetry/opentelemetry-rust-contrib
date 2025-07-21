@@ -20,7 +20,7 @@ fn utf8_to_utf16le_bytes(s: &str) -> Vec<u8> {
 /// Schema entry for central blob
 #[allow(dead_code)]
 pub(crate) struct CentralSchemaEntry {
-    pub id: u64, // u64 schema ID - converted to hex only for URLs
+    pub id: u64,
     pub md5: [u8; 16],
     pub schema: BondEncodedSchema,
 }
@@ -28,7 +28,7 @@ pub(crate) struct CentralSchemaEntry {
 /// Event/row entry for central blob
 #[allow(dead_code)]
 pub(crate) struct CentralEventEntry {
-    pub schema_id: u64, // u64 schema ID - converted to hex only for URLs
+    pub schema_id: u64,
     pub level: u8,
     pub event_name: Arc<String>,
     pub row: Vec<u8>,
@@ -143,7 +143,6 @@ impl CentralBlob {
         // SCHEMAS (type 0)
         for schema in &self.schemas {
             buf.extend_from_slice(&0u16.to_le_bytes()); // entity type 0
-                                                        // Use u64 schema ID directly
             buf.extend_from_slice(&schema.id.to_le_bytes());
             buf.extend_from_slice(&schema.md5);
             let schema_bytes = schema.schema.as_bytes();
@@ -155,7 +154,6 @@ impl CentralBlob {
         // EVENTS (type 2)
         for (event, evname_utf16) in events_with_utf16 {
             buf.extend_from_slice(&2u16.to_le_bytes()); // entity type 2
-                                                        // Use u64 schema ID directly
             buf.extend_from_slice(&event.schema_id.to_le_bytes());
             buf.push(event.level);
 
@@ -207,10 +205,10 @@ mod tests {
         let schema_bytes = schema_obj.as_bytes().to_vec();
         let schema_md5 = md5_bytes(&schema_bytes);
         // Use u64 for schema ID
-        let schema_id_u64 = 1234u64;
+        let schema_id = 1234u64;
 
         let schema = CentralSchemaEntry {
-            id: schema_id_u64,
+            id: schema_id,
             md5: schema_md5,
             schema: schema_obj,
         };
@@ -223,7 +221,7 @@ mod tests {
         row.extend_from_slice(s.as_bytes());
 
         let event = CentralEventEntry {
-            schema_id: schema_id_u64,
+            schema_id,
             level: 0, // e.g. ETW verbose
             event_name: Arc::new("eventname".to_string()),
             row,
