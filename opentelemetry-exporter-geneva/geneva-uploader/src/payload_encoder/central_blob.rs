@@ -11,35 +11,11 @@ pub struct BatchMetadata {
     pub start_time: u64,
     /// End time of the latest event in nanoseconds since Unix epoch
     pub end_time: u64,
-    /// List of schema IDs present in this batch
-    pub schema_ids: Vec<u64>,
+    /// Schema IDs present in this batch formatted as MD5 hashes separated by semicolons
+    pub schema_ids: String,
 }
 
 impl BatchMetadata {
-    /// Format schema IDs as MD5 hashes separated by semicolons
-    pub(crate) fn format_schema_ids(&self) -> String {
-        use std::fmt::Write;
-
-        if self.schema_ids.is_empty() {
-            return String::new();
-        }
-
-        // Estimate capacity: Each MD5 hash is 32 hex chars + 1 semicolon (except last)
-        // Total: (32 chars per hash * num_ids) + (semicolons = num_ids - 1)
-        let estimated_capacity =
-            self.schema_ids.len() * 32 + self.schema_ids.len().saturating_sub(1);
-        let mut result = String::with_capacity(estimated_capacity);
-
-        for (i, id) in self.schema_ids.iter().enumerate() {
-            if i > 0 {
-                result.push(';');
-            }
-            let md5_hash = md5::compute(id.to_le_bytes());
-            write!(&mut result, "{md5_hash:x}").expect("Writing to String should not fail");
-        }
-        result
-    }
-
     /// Format start timestamp in ISO 8601 format with 7-digit precision (.NET compatible)
     #[inline]
     pub(crate) fn format_start_timestamp(&self) -> String {

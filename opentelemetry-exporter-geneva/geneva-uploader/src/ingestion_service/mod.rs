@@ -123,7 +123,7 @@ mod tests {
         let metadata = BatchMetadata {
             start_time: 1_700_000_000_000_000_000,
             end_time: 1_700_000_300_000_000_000,
-            schema_ids: vec![123456789], // Example schema ID
+            schema_ids: "075bcd15e5b2ed60f26e66085ac2b2e8".to_string(), // Example MD5 hash
         };
 
         let response = ctx
@@ -190,7 +190,7 @@ mod tests {
         let warmup_metadata = BatchMetadata {
             start_time: 1_700_000_000_000_000_000,
             end_time: 1_700_000_300_000_000_000,
-            schema_ids: vec![123456789], // Example schema ID
+            schema_ids: "075bcd15e5b2ed60f26e66085ac2b2e8".to_string(), // Example MD5 hash
         };
 
         let _ = ctx
@@ -217,7 +217,7 @@ mod tests {
                 let metadata = BatchMetadata {
                     start_time: 1_700_000_000_000_000_000,
                     end_time: 1_700_000_300_000_000_000,
-                    schema_ids: vec![123456789], // Example schema ID
+                    schema_ids: "075bcd15e5b2ed60f26e66085ac2b2e8".to_string(), // Example MD5 hash
                 };
 
                 let resp = uploader

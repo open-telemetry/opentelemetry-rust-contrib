@@ -57,6 +57,23 @@ impl OtlpEncoder {
             metadata: BatchMetadata,
         }
 
+        impl BatchData {
+            fn format_schema_ids(&self) -> String {
+                use std::fmt::Write;
+                self.schemas
+                    .iter()
+                    .enumerate()
+                    .fold(String::new(), |mut acc, (i, s)| {
+                        if i > 0 {
+                            acc.push(';');
+                        }
+                        let md5_hash = md5::compute(s.id.to_le_bytes());
+                        write!(&mut acc, "{md5_hash:x}").unwrap();
+                        acc
+                    })
+            }
+        }
+
         let mut batches: HashMap<String, BatchData> = HashMap::new();
 
         for log_record in logs {
@@ -92,7 +109,7 @@ impl OtlpEncoder {
                     metadata: BatchMetadata {
                         start_time: timestamp,
                         end_time: timestamp,
-                        schema_ids: Vec::new(),
+                        schema_ids: String::new(),
                     },
                 });
 
@@ -105,7 +122,6 @@ impl OtlpEncoder {
             // 4. Add schema entry if not already present (multiple schemas per event_name batch)
             if !entry.schemas.iter().any(|s| s.id == schema_id) {
                 entry.schemas.push(schema_entry);
-                entry.metadata.schema_ids.push(schema_id);
             }
 
             // 5. Create CentralEventEntry directly (optimization: no intermediate EncodedRow)
@@ -120,7 +136,10 @@ impl OtlpEncoder {
 
         // 6. Encode blobs (one per event_name, potentially multiple schemas per blob)
         let mut blobs = Vec::with_capacity(batches.len());
-        for (batch_event_name, batch_data) in batches {
+        for (batch_event_name, mut batch_data) in batches {
+            let schema_ids_string = batch_data.format_schema_ids();
+            batch_data.metadata.schema_ids = schema_ids_string;
+
             let blob = CentralBlob {
                 version: 1,
                 format: 2,
@@ -490,7 +509,8 @@ mod tests {
         assert_eq!(result.len(), 1);
         assert_eq!(result[0].event_name, "user_action");
         assert!(!result[0].data.is_empty()); // Should have encoded data
-        assert_eq!(result[0].metadata.schema_ids.len(), 3); // Should have 3 different schema IDs
+                                             // Should have 3 different schema IDs (semicolon-separated)
+        assert_eq!(result[0].metadata.schema_ids.matches(';').count(), 2); // 3 schemas = 2 semicolons
 
         // Should have 3 different schemas cached
         assert_eq!(encoder.schema_cache.read().unwrap().len(), 3);
@@ -602,11 +622,11 @@ mod tests {
 
         // Verify that each batch has data and schema IDs
         assert!(!user_action.data.is_empty()); // Should have encoded data
-        assert_eq!(user_action.metadata.schema_ids.len(), 2); // 2 different schemas
+        assert_eq!(user_action.metadata.schema_ids.matches(';').count(), 1); // 2 schemas = 1 semicolon
         assert!(!system_alert.data.is_empty()); // Should have encoded data
-        assert_eq!(system_alert.metadata.schema_ids.len(), 1); // 1 schema
+        assert_eq!(system_alert.metadata.schema_ids.matches(';').count(), 0); // 1 schema = 0 semicolons
         assert!(!log_batch.data.is_empty()); // Should have encoded data
-        assert_eq!(log_batch.metadata.schema_ids.len(), 1); // 1 schema
+        assert_eq!(log_batch.metadata.schema_ids.matches(';').count(), 0); // 1 schema = 0 semicolons
 
         // Should have 4 different schemas cached
         assert_eq!(encoder.schema_cache.read().unwrap().len(), 4);

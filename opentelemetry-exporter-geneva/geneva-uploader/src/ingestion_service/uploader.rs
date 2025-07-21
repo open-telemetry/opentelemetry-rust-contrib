@@ -156,8 +156,8 @@ impl GenevaUploader {
         event_name: &str,
         metadata: &BatchMetadata,
     ) -> Result<String> {
-        // Format schema IDs and timestamps using BatchMetadata methods
-        let schema_ids = metadata.format_schema_ids();
+        // Get already formatted schema IDs and format timestamps using BatchMetadata methods
+        let schema_ids = &metadata.schema_ids;
         let start_time_str = metadata.format_start_timestamp();
         let end_time_str = metadata.format_end_timestamp();
 
