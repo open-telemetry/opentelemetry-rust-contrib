@@ -61,25 +61,27 @@ impl GenevaClient {
         let schema_ids =
             "c1ce0ecea020359624c493bbe97f9e80;0da22cabbee419e000541a5eda732eb3".to_string(); // TODO - find the actual value to be populated
 
+        // Define config_version before using it
+        let config_version = format!("Ver{}v0", cfg.config_major_version);
+
+        // Metadata string for the blob
+        let metadata = format!(
+            "namespace={}/eventVersion={}/tenant={}/role={}/roleinstance={}",
+            cfg.namespace, config_version, cfg.tenant, cfg.role_name, cfg.role_instance,
+        );
+
         // Uploader config
         let uploader_config = GenevaUploaderConfig {
             namespace: cfg.namespace.clone(),
             source_identity,
             environment: cfg.environment,
             schema_ids,
+            config_version: config_version.clone(),
         };
 
         let uploader = GenevaUploader::from_config_client(config_client, uploader_config)
             .await
             .map_err(|e| format!("GenevaUploader init failed: {e}"))?;
-        let metadata = format!(
-            "namespace={}/eventVersion={}/tenant={}/role={}/roleinstance={}",
-            cfg.namespace,
-            "Ver1v0", // You can replace this with a cfg field if version should be dynamic
-            cfg.tenant,
-            cfg.role_name,
-            cfg.role_instance,
-        );
         let max_concurrent_uploads = cfg.max_concurrent_uploads.unwrap_or_else(|| {
             // TODO - Use a more sophisticated method to determine concurrency if needed
             // currently using number of CPU cores
@@ -109,14 +111,13 @@ impl GenevaClient {
         let upload_futures = blobs
             .into_iter()
             .map(|(event_name, encoded_blob, _row_count)| {
-                let event_version = "Ver2v0"; // TODO - find the actual value to be populated
                 async move {
                     // TODO: Investigate using tokio::spawn_blocking for LZ4 compression to avoid blocking
                     // the async executor thread for CPU-intensive work.
                     let compressed_blob = lz4_chunked_compression(&encoded_blob)
                         .map_err(|e| format!("LZ4 compression failed: {e} Event: {event_name}"))?;
                     self.uploader
-                        .upload(compressed_blob, &event_name, event_version)
+                        .upload(compressed_blob, &event_name)
                         .await
                         .map(|_| ())
                         .map_err(|e| format!("Geneva upload failed: {e} Event: {event_name}"))

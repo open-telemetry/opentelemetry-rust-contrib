@@ -107,6 +107,7 @@ pub(crate) struct GenevaUploaderConfig {
     #[allow(dead_code)]
     pub environment: String,
     pub schema_ids: String,
+    pub config_version: String,
 }
 
 /// Client for uploading data to Geneva Ingestion Gateway (GIG)
@@ -156,7 +157,6 @@ impl GenevaUploader {
         moniker: &str,
         data_size: usize,
         event_name: &str,
-        event_version: &str,
     ) -> Result<String> {
         let now: DateTime<Utc> = Utc::now(); //TODO - this need to be calculated from the bond data
         let end_time = now + ChronoDuration::minutes(5); //TODO - this need to be calculated from the bond data
@@ -203,7 +203,7 @@ impl GenevaUploader {
             moniker,
             self.config.namespace,
             event_name,
-            event_version,
+            self.config.config_version,
             source_unique_id,
             encoded_source_identity,
             start_time,
@@ -227,7 +227,6 @@ impl GenevaUploader {
         &self,
         data: Vec<u8>,
         event_name: &str,
-        event_version: &str,
     ) -> Result<IngestionResponse> {
         // Always get fresh auth info
         let (auth_info, moniker_info, monitoring_endpoint) =
@@ -238,7 +237,6 @@ impl GenevaUploader {
             &moniker_info.name,
             data_size,
             event_name,
-            event_version,
         )?;
         let full_url = format!(
             "{}/{}",
