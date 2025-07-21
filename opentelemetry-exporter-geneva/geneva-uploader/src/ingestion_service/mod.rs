@@ -48,11 +48,13 @@ mod tests {
                 "c1ce0ecea020359624c493bbe97f9e80;0da22cabbee419e000541a5eda732eb3".to_string();
 
             // Define uploader config
+            let config_version = format!("Ver{}v0", config_major_version);
             let uploader_config = GenevaUploaderConfig {
                 namespace: namespace.clone(),
                 source_identity,
                 environment: environment.clone(),
                 schema_ids,
+                config_version,
             };
 
             let config = GenevaConfigClientConfig {
@@ -123,7 +125,7 @@ mod tests {
         let start = Instant::now();
         let response = ctx
             .uploader
-            .upload(ctx.data, &ctx.event_name, &ctx.event_version)
+            .upload(ctx.data, &ctx.event_name)
             .await
             .expect("Upload failed");
 
@@ -181,7 +183,7 @@ mod tests {
         let start_warmup = Instant::now();
         let _ = ctx
             .uploader
-            .upload(ctx.data.clone(), &ctx.event_name, &ctx.event_version)
+            .upload(ctx.data.clone(), &ctx.event_name)
             .await
             .expect("Warm-up upload failed");
         let warmup_elapsed = start_warmup.elapsed();
@@ -196,12 +198,10 @@ mod tests {
             let uploader = ctx.uploader.clone();
             let data = ctx.data.clone();
             let event_name = ctx.event_name.to_string();
-            let event_version = ctx.event_version.to_string();
-
             let handle = tokio::spawn(async move {
                 let start = Instant::now();
                 let resp = uploader
-                    .upload(data, &event_name, &event_version)
+                    .upload(data, &event_name)
                     .await
                     .unwrap_or_else(|_| panic!("Upload {i} failed"));
                 let elapsed = start.elapsed();
