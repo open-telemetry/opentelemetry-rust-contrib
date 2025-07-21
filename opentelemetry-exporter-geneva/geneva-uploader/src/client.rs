@@ -61,8 +61,20 @@ impl GenevaClient {
         let schema_ids =
             "c1ce0ecea020359624c493bbe97f9e80;0da22cabbee419e000541a5eda732eb3".to_string(); // TODO - find the actual value to be populated
 
-        // Uploader config
+        // Define config_version before using it
         let config_version = format!("Ver{}v0", cfg.config_major_version);
+
+        // Metadata string for the blob
+        let metadata = format!(
+            "namespace={}/eventVersion={}/tenant={}/role={}/roleinstance={}",
+            cfg.namespace,
+            config_version,
+            cfg.tenant,
+            cfg.role_name,
+            cfg.role_instance,
+        );
+
+        // Uploader config
         let uploader_config = GenevaUploaderConfig {
             namespace: cfg.namespace.clone(),
             source_identity,
@@ -74,14 +86,6 @@ impl GenevaClient {
         let uploader = GenevaUploader::from_config_client(config_client, uploader_config)
             .await
             .map_err(|e| format!("GenevaUploader init failed: {e}"))?;
-        let metadata = format!(
-            "namespace={}/eventVersion={}/tenant={}/role={}/roleinstance={}",
-            cfg.namespace,
-            config_version,
-            cfg.tenant,
-            cfg.role_name,
-            cfg.role_instance,
-        );
         let max_concurrent_uploads = cfg.max_concurrent_uploads.unwrap_or_else(|| {
             // TODO - Use a more sophisticated method to determine concurrency if needed
             // currently using number of CPU cores
