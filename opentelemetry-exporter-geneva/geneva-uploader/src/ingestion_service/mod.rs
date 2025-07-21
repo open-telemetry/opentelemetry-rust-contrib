@@ -5,7 +5,6 @@ mod tests {
     use std::time::Instant;
 
     mod test_helpers {
-        use crate::payload_encoder::otlp_encoder::BatchMetadata;
         use crate::{
             AuthMethod, GenevaConfigClient, GenevaConfigClientConfig, GenevaUploader,
             GenevaUploaderConfig,
@@ -106,7 +105,7 @@ mod tests {
     /// ```
     #[ignore]
     async fn test_upload_to_gig_real_server() {
-        use crate::payload_encoder::otlp_encoder::BatchMetadata;
+        use crate::payload_encoder::central_blob::BatchMetadata;
         let ctx = test_helpers::build_test_upload_context().await;
         let blob_size = ctx.data.len();
         println!("✅ Loaded blob ({blob_size} bytes)");
@@ -172,7 +171,7 @@ mod tests {
     #[tokio::test(flavor = "multi_thread")]
     #[ignore]
     async fn test_parallel_uploads() {
-        use crate::payload_encoder::otlp_encoder::BatchMetadata;
+        use crate::payload_encoder::central_blob::BatchMetadata;
         use std::env;
         use std::time::Instant;
 

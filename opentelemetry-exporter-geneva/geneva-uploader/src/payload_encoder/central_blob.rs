@@ -1,7 +1,95 @@
 //use md5;
 
 use crate::payload_encoder::bond_encoder::BondEncodedSchema;
+use chrono::{DateTime, Datelike, Duration as ChronoDuration, TimeZone, Timelike, Utc};
 use std::sync::Arc;
+
+/// Metadata for a batch of events
+#[derive(Debug, Clone)]
+pub struct BatchMetadata {
+    /// Start time of the earliest event in nanoseconds since Unix epoch
+    pub start_time: u64,
+    /// End time of the latest event in nanoseconds since Unix epoch
+    pub end_time: u64,
+    /// List of schema IDs present in this batch
+    pub schema_ids: Vec<u64>,
+}
+
+impl BatchMetadata {
+    /// Format schema IDs as MD5 hashes separated by semicolons
+    pub(crate) fn format_schema_ids(&self) -> String {
+        self.schema_ids
+            .iter()
+            .map(|id| {
+                let md5_hash = md5::compute(id.to_le_bytes());
+                format!("{md5_hash:x}")
+            })
+            .collect::<Vec<String>>()
+            .join(";")
+    }
+
+    /// Convert nanoseconds timestamp to DateTime<Utc>
+    fn nanos_to_chrono(nanos: u64) -> DateTime<Utc> {
+        if nanos > 0 {
+            let secs = (nanos / 1_000_000_000) as i64;
+            let nsec = (nanos % 1_000_000_000) as u32;
+            Utc.timestamp_opt(secs, nsec)
+                .single()
+                .unwrap_or_else(Utc::now)
+        } else {
+            Utc::now()
+        }
+    }
+
+    /// Format DateTime as ISO 8601 with 7-digit precision (.NET compatible)
+    fn format_datetime(datetime: DateTime<Utc>) -> String {
+        format!(
+            "{:04}-{:02}-{:02}T{:02}:{:02}:{:02}.{:07}Z",
+            datetime.year(),
+            datetime.month(),
+            datetime.day(),
+            datetime.hour(),
+            datetime.minute(),
+            datetime.second(),
+            datetime.nanosecond() / 100 // Convert nanoseconds to 7-digit precision
+        )
+    }
+
+    /// Convert start time from nanoseconds to DateTime<Utc>
+    fn start_time_chrono(&self) -> DateTime<Utc> {
+        Self::nanos_to_chrono(self.start_time)
+    }
+
+    /// Convert end time from nanoseconds to DateTime<Utc>
+    fn end_time_chrono(&self) -> DateTime<Utc> {
+        if self.end_time > 0 {
+            Self::nanos_to_chrono(self.end_time)
+        } else {
+            self.start_time_chrono() + ChronoDuration::minutes(5)
+        }
+    }
+
+    /// Format start timestamp in ISO 8601 format with 7-digit precision (.NET compatible)
+    pub(crate) fn format_start_timestamp(&self) -> String {
+        Self::format_datetime(self.start_time_chrono())
+    }
+
+    /// Format end timestamp in ISO 8601 format with 7-digit precision (.NET compatible)
+    pub(crate) fn format_end_timestamp(&self) -> String {
+        Self::format_datetime(self.end_time_chrono())
+    }
+}
+
+/// Represents an encoded batch with all necessary metadata
+#[derive(Debug, Clone)]
+pub(crate) struct EncodedBatch {
+    /// The event name for this batch
+    pub(crate) event_name: String,
+    /// The encoded binary data
+    pub(crate) data: Vec<u8>,
+    /// Batch metadata containing timestamps and schema information
+    pub(crate) metadata: BatchMetadata,
+}
 
 /// Helper to encode UTF-8 Rust str to UTF-16LE bytes
 /// TODO - consider avoiding temporary allocation, by passing a mutable buffer

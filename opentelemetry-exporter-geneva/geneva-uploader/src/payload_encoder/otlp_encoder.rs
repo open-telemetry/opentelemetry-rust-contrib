@@ -1,5 +1,7 @@
 use crate::payload_encoder::bond_encoder::{BondDataType, BondEncodedSchema, BondWriter, FieldDef};
-use crate::payload_encoder::central_blob::{CentralBlob, CentralEventEntry, CentralSchemaEntry};
+use crate::payload_encoder::central_blob::{
+    BatchMetadata, CentralBlob, CentralEventEntry, CentralSchemaEntry, EncodedBatch,
+};
 use chrono::{TimeZone, Utc};
 use opentelemetry_proto::tonic::common::v1::any_value::Value;
 use opentelemetry_proto::tonic::logs::v1::LogRecord;
@@ -8,42 +10,6 @@ use std::collections::HashMap;
 use std::sync::{Arc, RwLock};
 
 type SchemaCache = Arc<RwLock<HashMap<u64, (Arc<BondEncodedSchema>, [u8; 16])>>>;
-
-/// Metadata for a batch of events
-#[derive(Debug, Clone)]
-pub(crate) struct BatchMetadata {
-    /// Start time of the earliest event in nanoseconds since Unix epoch
-    pub(crate) start_time: u64,
-    /// End time of the latest event in nanoseconds since Unix epoch
-    pub(crate) end_time: u64,
-    /// List of schema IDs present in this batch
-    pub(crate) schema_ids: Vec<u64>,
-}
-
-impl BatchMetadata {
-    /// Format schema IDs as MD5 hashes separated by semicolons
-    pub(crate) fn format_schema_ids(&self) -> String {
-        self.schema_ids
-            .iter()
-            .map(|id| {
-                let md5_hash = md5::compute(id.to_le_bytes());
-                format!("{md5_hash:x}")
-            })
-            .collect::<Vec<String>>()
-            .join(";")
-    }
-}
-
-/// Represents an encoded batch with all necessary metadata
-#[derive(Debug, Clone)]
-pub(crate) struct EncodedBatch {
-    /// The event name for this batch
-    pub(crate) event_name: String,
-    /// The encoded binary data
-    pub(crate) data: Vec<u8>,
-    /// Batch metadata containing timestamps and schema information
-    pub(crate) metadata: BatchMetadata,
-}
 
 const FIELD_ENV_NAME: &str = "env_name";
 const FIELD_ENV_VER: &str = "env_ver";

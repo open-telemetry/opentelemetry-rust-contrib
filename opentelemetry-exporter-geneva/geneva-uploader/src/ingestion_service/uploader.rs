@@ -1,8 +1,5 @@
-use chrono::{Duration as ChronoDuration, TimeZone, Utc};
-
 use crate::config_service::client::{GenevaConfigClient, GenevaConfigClientError};
-use crate::payload_encoder::otlp_encoder::BatchMetadata;
-use chrono::{Datelike, Timelike};
+use crate::payload_encoder::central_blob::BatchMetadata;
 use reqwest::{header, Client};
 use serde::Deserialize;
 use serde_json::Value;
@@ -159,54 +156,10 @@ impl GenevaUploader {
         event_version: &str,
         metadata: &BatchMetadata,
     ) -> Result<String> {
-        // Format schema IDs using the helper method
+        // Format schema IDs and timestamps using BatchMetadata methods
         let schema_ids = metadata.format_schema_ids();
-
-        // Convert nanoseconds to DateTime
-        let start_time = if metadata.start_time > 0 {
-            let secs = (metadata.start_time / 1_000_000_000) as i64;
-            let nsec = (metadata.start_time % 1_000_000_000) as u32;
-            Utc.timestamp_opt(secs, nsec)
-                .single()
-                .unwrap_or_else(Utc::now)
-        } else {
-            Utc::now()
-        };
-
-        let end_time = if metadata.end_time > 0 {
-            let secs = (metadata.end_time / 1_000_000_000) as i64;
-            let nsec = (metadata.end_time % 1_000_000_000) as u32;
-            Utc.timestamp_opt(secs, nsec)
-                .single()
-                .unwrap_or_else(|| Utc::now() + ChronoDuration::minutes(5))
-        } else {
-            start_time + ChronoDuration::minutes(5)
-        };
-
-        // Format times in ISO 8601 format with fixed precision
-        // Using .NET compatible format (matches DateTime.ToString("O"))
-
-        let start_time_str = format!(
-            "{:04}-{:02}-{:02}T{:02}:{:02}:{:02}.{:07}Z",
-            start_time.year(),
-            start_time.month(),
-            start_time.day(),
-            start_time.hour(),
-            start_time.minute(),
-            start_time.second(),
-            start_time.nanosecond() / 100 // Convert nanoseconds to 7-digit precision
-        );
-
-        let end_time_str = format!(
-            "{:04}-{:02}-{:02}T{:02}:{:02}:{:02}.{:07}Z",
-            end_time.year(),
-            end_time.month(),
-            end_time.day(),
-            end_time.hour(),
-            end_time.minute(),
-            end_time.second(),
-            end_time.nanosecond() / 100 // Convert nanoseconds to 7-digit precision
-        );
+        let start_time_str = metadata.format_start_timestamp();
+        let end_time_str = metadata.format_end_timestamp();
 
         // URL encode parameters
         // TODO - Maintain this as url-encoded in config service to avoid conversion here
