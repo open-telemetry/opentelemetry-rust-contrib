@@ -111,8 +111,8 @@ impl GenevaClient {
                 .schema_ids
                 .iter()
                 .map(|id| {
-                    let md5_hash = md5::compute(&id.to_le_bytes());
-                    format!("{:x}", md5_hash)
+                    let md5_hash = md5::compute(id.to_le_bytes());
+                    format!("{md5_hash:x}")
                 })
                 .collect::<Vec<String>>()
                 .join(";");
