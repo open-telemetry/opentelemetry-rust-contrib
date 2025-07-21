@@ -67,11 +67,7 @@ impl GenevaClient {
         // Metadata string for the blob
         let metadata = format!(
             "namespace={}/eventVersion={}/tenant={}/role={}/roleinstance={}",
-            cfg.namespace,
-            config_version,
-            cfg.tenant,
-            cfg.role_name,
-            cfg.role_instance,
+            cfg.namespace, config_version, cfg.tenant, cfg.role_name, cfg.role_instance,
         );
 
         // Uploader config
