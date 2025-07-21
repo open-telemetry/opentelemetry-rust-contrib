@@ -129,19 +129,10 @@ impl OtlpEncoder {
             }
 
             // 5. Create CentralEventEntry directly (optimization: no intermediate EncodedRow)
-            // Use Arc::from to intern common event names
-            let event_name_arc = if event_name_str == "Log" {
-                // Use a static Arc for the most common event name to avoid allocation
-                static LOG_ARC: std::sync::OnceLock<Arc<String>> = std::sync::OnceLock::new();
-                LOG_ARC.get_or_init(|| Arc::new("Log".to_string())).clone()
-            } else {
-                Arc::new(event_name_str.to_string())
-            };
-
             let central_event = CentralEventEntry {
                 schema_id,
                 level,
-                event_name: event_name_arc,
+                event_name: Arc::new(event_name_str.to_string()),
                 row: row_buffer,
             };
             entry.events.push(central_event);
