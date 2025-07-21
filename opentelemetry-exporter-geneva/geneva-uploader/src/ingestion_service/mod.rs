@@ -17,7 +17,6 @@ mod tests {
             pub data: Vec<u8>,
             pub uploader: GenevaUploader,
             pub event_name: String,
-            pub event_version: String,
         }
 
         pub async fn build_test_upload_context() -> TestUploadContext {
@@ -46,10 +45,12 @@ mod tests {
             });
 
             // Define uploader config
+            let config_version = format!("Ver{config_major_version}v0");
             let uploader_config = GenevaUploaderConfig {
                 namespace: namespace.clone(),
                 source_identity,
                 environment: environment.clone(),
+                config_version,
             };
 
             let config = GenevaConfigClientConfig {
@@ -75,13 +76,11 @@ mod tests {
 
             // Event name/version
             let event_name = "Log".to_string();
-            let event_version = "Ver2v0".to_string();
 
             TestUploadContext {
                 data,
                 uploader,
                 event_name,
-                event_version,
             }
         }
     }
@@ -129,7 +128,7 @@ mod tests {
 
         let response = ctx
             .uploader
-            .upload(ctx.data, &ctx.event_name, &ctx.event_version, &metadata)
+            .upload(ctx.data, &ctx.event_name, &metadata)
             .await
             .expect("Upload failed");
 
@@ -199,7 +198,6 @@ mod tests {
             .upload(
                 ctx.data.clone(),
                 &ctx.event_name,
-                &ctx.event_version,
                 &warmup_metadata,
             )
             .await
@@ -216,8 +214,6 @@ mod tests {
             let uploader = ctx.uploader.clone();
             let data = ctx.data.clone();
             let event_name = ctx.event_name.to_string();
-            let event_version = ctx.event_version.to_string();
-
             let handle = tokio::spawn(async move {
                 let start = Instant::now();
 
@@ -229,7 +225,8 @@ mod tests {
                 };
 
                 let resp = uploader
-                    .upload(data, &event_name, &event_version, &metadata)
+                    .upload(data, &event_name, &metadata)
+
                     .await
                     .unwrap_or_else(|_| panic!("Upload {i} failed"));
                 let elapsed = start.elapsed();

@@ -104,6 +104,7 @@ pub(crate) struct GenevaUploaderConfig {
     pub source_identity: String,
     #[allow(dead_code)]
     pub environment: String,
+    pub config_version: String,
 }
 
 /// Client for uploading data to Geneva Ingestion Gateway (GIG)
@@ -153,7 +154,6 @@ impl GenevaUploader {
         moniker: &str,
         data_size: usize,
         event_name: &str,
-        event_version: &str,
         metadata: &BatchMetadata,
     ) -> Result<String> {
         // Format schema IDs and timestamps using BatchMetadata methods
@@ -178,7 +178,7 @@ impl GenevaUploader {
             moniker,
             self.config.namespace,
             event_name,
-            event_version,
+            self.config.config_version,
             source_unique_id,
             encoded_source_identity,
             start_time_str,
@@ -205,7 +205,6 @@ impl GenevaUploader {
         &self,
         data: Vec<u8>,
         event_name: &str,
-        event_version: &str,
         metadata: &BatchMetadata,
     ) -> Result<IngestionResponse> {
         // Always get fresh auth info
@@ -217,7 +216,6 @@ impl GenevaUploader {
             &moniker_info.name,
             data_size,
             event_name,
-            event_version,
             metadata,
         )?;
         let full_url = format!(

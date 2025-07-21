@@ -58,24 +58,26 @@ impl GenevaClient {
             cfg.tenant, cfg.role_name, cfg.role_instance
         );
 
+        // Define config_version before using it
+        let config_version = format!("Ver{}v0", cfg.config_major_version);
+
+        // Metadata string for the blob
+        let metadata = format!(
+            "namespace={}/eventVersion={}/tenant={}/role={}/roleinstance={}",
+            cfg.namespace, config_version, cfg.tenant, cfg.role_name, cfg.role_instance,
+        );
+
         // Uploader config
         let uploader_config = GenevaUploaderConfig {
             namespace: cfg.namespace.clone(),
             source_identity,
             environment: cfg.environment,
+            config_version: config_version.clone(),
         };
 
         let uploader = GenevaUploader::from_config_client(config_client, uploader_config)
             .await
             .map_err(|e| format!("GenevaUploader init failed: {e}"))?;
-        let metadata = format!(
-            "namespace={}/eventVersion={}/tenant={}/role={}/roleinstance={}",
-            cfg.namespace,
-            "Ver1v0", // You can replace this with a cfg field if version should be dynamic
-            cfg.tenant,
-            cfg.role_name,
-            cfg.role_instance,
-        );
         let max_concurrent_uploads = cfg.max_concurrent_uploads.unwrap_or_else(|| {
             // TODO - Use a more sophisticated method to determine concurrency if needed
             // currently using number of CPU cores
@@ -103,8 +105,6 @@ impl GenevaClient {
 
         // create an iterator that yields futures for each upload
         let upload_futures = blobs.into_iter().map(|batch| {
-            let event_version = "Ver2v0"; // TODO - find the actual value to be populated
-
             async move {
                 // TODO: Investigate using tokio::spawn_blocking for LZ4 compression to avoid blocking
                 // the async executor thread for CPU-intensive work.
@@ -115,7 +115,6 @@ impl GenevaClient {
                     .upload(
                         compressed_blob,
                         &batch.event_name,
-                        event_version,
                         &batch.metadata,
                     )
                     .await
