@@ -70,23 +70,14 @@ impl OtlpEncoder {
     {
         use std::collections::HashMap;
 
-        // Convert iterator to Vec to get size estimate for pre-allocation
-        let logs: Vec<_> = logs.into_iter().collect();
-        let log_count = logs.len();
-
-        if log_count == 0 {
-            return Vec::new();
+        // Internal struct to accumulate batch data before encoding
+        struct BatchData {
+            schemas: Vec<CentralSchemaEntry>,
+            events: Vec<CentralEventEntry>,
+            metadata: BatchMetadata,
         }
 
-        // Store as (schemas, events, start_time, end_time, schema_ids)
-        type BatchValue = (
-            Vec<CentralSchemaEntry>,
-            Vec<CentralEventEntry>,
-            u64,
-            u64,
-            Vec<u64>,
-        );
-        let mut batches: HashMap<String, BatchValue> = HashMap::new();
+        let mut batches: HashMap<String, BatchData> = HashMap::new();
 
         for log_record in logs {
             // Get the timestamp - prefer time_unix_nano, fall back to observed_time_unix_nano if time_unix_nano is 0
@@ -115,18 +106,26 @@ impl OtlpEncoder {
             // 3. Create or get existing batch entry with metadata tracking
             let entry = batches
                 .entry(event_name_str.to_string())
-                .or_insert_with(|| (Vec::new(), Vec::new(), timestamp, timestamp, Vec::new()));
+                .or_insert_with(|| BatchData {
+                    schemas: Vec::new(),
+                    events: Vec::new(),
+                    metadata: BatchMetadata {
+                        start_time: timestamp,
+                        end_time: timestamp,
+                        schema_ids: Vec::new(),
+                    },
+                });
 
             // Update timestamp range
             if timestamp != 0 {
-                entry.2 = entry.2.min(timestamp); // start_time
-                entry.3 = entry.3.max(timestamp); // end_time
+                entry.metadata.start_time = entry.metadata.start_time.min(timestamp);
+                entry.metadata.end_time = entry.metadata.end_time.max(timestamp);
             }
 
             // 4. Add schema entry if not already present (multiple schemas per event_name batch)
-            if !entry.0.iter().any(|s| s.id == schema_id) {
-                entry.0.push(schema_entry);
-                entry.4.push(schema_id); // schema_ids
+            if !entry.schemas.iter().any(|s| s.id == schema_id) {
+                entry.schemas.push(schema_entry);
+                entry.metadata.schema_ids.push(schema_id);
             }
 
             // 5. Create CentralEventEntry directly (optimization: no intermediate EncodedRow)
@@ -145,30 +144,24 @@ impl OtlpEncoder {
                 event_name: event_name_arc,
                 row: row_buffer,
             };
-            entry.1.push(central_event);
+            entry.events.push(central_event);
         }
 
         // 6. Encode blobs (one per event_name, potentially multiple schemas per blob)
         let mut blobs = Vec::with_capacity(batches.len());
-        for (batch_event_name, (schema_entries, events, start_time, end_time, schema_ids)) in
-            batches
-        {
+        for (batch_event_name, batch_data) in batches {
             let blob = CentralBlob {
                 version: 1,
                 format: 2,
                 metadata: metadata.to_string(),
-                schemas: schema_entries,
-                events,
+                schemas: batch_data.schemas,
+                events: batch_data.events,
             };
             let bytes = blob.to_bytes();
             blobs.push(EncodedBatch {
                 event_name: batch_event_name,
                 data: bytes,
-                metadata: BatchMetadata {
-                    start_time,
-                    end_time,
-                    schema_ids,
-                },
+                metadata: batch_data.metadata,
             });
         }
         blobs
