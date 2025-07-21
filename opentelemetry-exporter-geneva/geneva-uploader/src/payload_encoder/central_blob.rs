@@ -1,7 +1,7 @@
 //use md5;
 
 use crate::payload_encoder::bond_encoder::BondEncodedSchema;
-use chrono::{DateTime, Datelike, Duration as ChronoDuration, TimeZone, Timelike, Utc};
+use chrono::{DateTime, Datelike, Timelike, Utc};
 use std::sync::Arc;
 
 /// Metadata for a batch of events
@@ -18,30 +18,50 @@ pub struct BatchMetadata {
 impl BatchMetadata {
     /// Format schema IDs as MD5 hashes separated by semicolons
     pub(crate) fn format_schema_ids(&self) -> String {
-        self.schema_ids
-            .iter()
-            .map(|id| {
-                let md5_hash = md5::compute(id.to_le_bytes());
-                format!("{md5_hash:x}")
-            })
-            .collect::<Vec<String>>()
-            .join(";")
-    }
+        use std::fmt::Write;
 
-    /// Convert nanoseconds timestamp to DateTime<Utc>
-    fn nanos_to_chrono(nanos: u64) -> DateTime<Utc> {
-        if nanos > 0 {
-            let secs = (nanos / 1_000_000_000) as i64;
-            let nsec = (nanos % 1_000_000_000) as u32;
-            Utc.timestamp_opt(secs, nsec)
-                .single()
-                .unwrap_or_else(Utc::now)
-        } else {
-            Utc::now()
+        if self.schema_ids.is_empty() {
+            return String::new();
         }
+
+        // Estimate capacity: Each MD5 hash is 32 hex chars + 1 semicolon (except last)
+        // Total: (32 chars per hash * num_ids) + (semicolons = num_ids - 1)
+        let estimated_capacity =
+            self.schema_ids.len() * 32 + self.schema_ids.len().saturating_sub(1);
+        let mut result = String::with_capacity(estimated_capacity);
+
+        for (i, id) in self.schema_ids.iter().enumerate() {
+            if i > 0 {
+                result.push(';');
+            }
+            let md5_hash = md5::compute(id.to_le_bytes());
+            write!(&mut result, "{md5_hash:x}").expect("Writing to String should not fail");
+        }
+        result
     }
 
-    /// Format DateTime as ISO 8601 with 7-digit precision (.NET compatible)
+    /// Format start timestamp in ISO 8601 format with 7-digit precision (.NET compatible)
+    #[inline]
+    pub(crate) fn format_start_timestamp(&self) -> String {
+        Self::format_timestamp(self.start_time)
+    }
+
+    /// Format end timestamp in ISO 8601 format with 7-digit precision (.NET compatible)
+    #[inline]
+    pub(crate) fn format_end_timestamp(&self) -> String {
+        Self::format_timestamp(self.end_time)
+    }
+
+    /// Format timestamp using DateTime::from_timestamp_nanos
+    #[inline]
+    fn format_timestamp(timestamp_nanos: u64) -> String {
+        let datetime = DateTime::from_timestamp_nanos(timestamp_nanos as i64);
+        Self::format_datetime(datetime)
+    }
+
+    /// Format datetime as ISO 8601 with 7-digit precision
+    /// TODO: Revisit using datetime.format("%Y-%m-%dT%H:%M:%S%.7fZ") once chrono Display implementation is fixed
+    #[inline]
     fn format_datetime(datetime: DateTime<Utc>) -> String {
         format!(
             "{:04}-{:02}-{:02}T{:02}:{:02}:{:02}.{:07}Z",
@@ -53,30 +73,6 @@ impl BatchMetadata {
             datetime.second(),
             datetime.nanosecond() / 100 // Convert nanoseconds to 7-digit precision
         )
-    }
-
-    /// Convert start time from nanoseconds to DateTime<Utc>
-    fn start_time_chrono(&self) -> DateTime<Utc> {
-        Self::nanos_to_chrono(self.start_time)
-    }
-
-    /// Convert end time from nanoseconds to DateTime<Utc>
-    fn end_time_chrono(&self) -> DateTime<Utc> {
-        if self.end_time > 0 {
-            Self::nanos_to_chrono(self.end_time)
-        } else {
-            self.start_time_chrono() + ChronoDuration::minutes(5)
-        }
-    }
-
-    /// Format start timestamp in ISO 8601 format with 7-digit precision (.NET compatible)
-    pub(crate) fn format_start_timestamp(&self) -> String {
-        Self::format_datetime(self.start_time_chrono())
-    }
-
-    /// Format end timestamp in ISO 8601 format with 7-digit precision (.NET compatible)
-    pub(crate) fn format_end_timestamp(&self) -> String {
-        Self::format_datetime(self.end_time_chrono())
     }
 }
 
