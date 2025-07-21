@@ -137,7 +137,7 @@ async fn main() {
     info!(name: "Log", target: "my-system", event_id = 32, user_name = "user1", user_email = "user1@opentelemetry.io", message = "Password reset requested");
 
     // Order shipped
-    info!(name: "Log", target: "my-system", event_id1 = 54, user_name = "user2", user_email = "user2@opentelemetry.io", message = "Order shipped successfully");
+    info!(name: "Log", target: "my-system", event_id = 54, user_name = "user2", user_email = "user2@opentelemetry.io", message = "Order shipped successfully");
 
     // sleep for a while
     println!("Sleeping for 5 seconds...");

@@ -204,7 +204,6 @@ mod tests {
         let schema_obj = BondEncodedSchema::from_fields("TestStruct", "test.namespace", fields);
         let schema_bytes = schema_obj.as_bytes().to_vec();
         let schema_md5 = md5_bytes(&schema_bytes);
-        // Use u64 for schema ID
         let schema_id = 1234u64;
 
         let schema = CentralSchemaEntry {

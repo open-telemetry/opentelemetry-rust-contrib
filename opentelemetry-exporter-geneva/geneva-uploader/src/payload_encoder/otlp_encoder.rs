@@ -238,7 +238,6 @@ impl OtlpEncoder {
             })
             .collect();
 
-        // Return the raw u64 hash - no MD5 conversion needed
         let schema_id = hasher.finish();
         (field_defs, schema_id)
     }
