@@ -112,11 +112,7 @@ impl GenevaClient {
                     format!("LZ4 compression failed: {e} Event: {}", batch.event_name)
                 })?;
                 self.uploader
-                    .upload(
-                        compressed_blob,
-                        &batch.event_name,
-                        &batch.metadata,
-                    )
+                    .upload(compressed_blob, &batch.event_name, &batch.metadata)
                     .await
                     .map(|_| ())
                     .map_err(|e| format!("Geneva upload failed: {e} Event: {}", batch.event_name))

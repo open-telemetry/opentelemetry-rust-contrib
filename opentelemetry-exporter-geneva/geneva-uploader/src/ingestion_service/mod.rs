@@ -195,11 +195,7 @@ mod tests {
 
         let _ = ctx
             .uploader
-            .upload(
-                ctx.data.clone(),
-                &ctx.event_name,
-                &warmup_metadata,
-            )
+            .upload(ctx.data.clone(), &ctx.event_name, &warmup_metadata)
             .await
             .expect("Warm-up upload failed");
         let warmup_elapsed = start_warmup.elapsed();
@@ -226,7 +222,6 @@ mod tests {
 
                 let resp = uploader
                     .upload(data, &event_name, &metadata)
-
                     .await
                     .unwrap_or_else(|_| panic!("Upload {i} failed"));
                 let elapsed = start.elapsed();
