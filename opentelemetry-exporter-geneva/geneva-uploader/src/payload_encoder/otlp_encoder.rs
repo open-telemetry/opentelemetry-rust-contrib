@@ -73,13 +73,19 @@ impl OtlpEncoder {
         // Convert iterator to Vec to get size estimate for pre-allocation
         let logs: Vec<_> = logs.into_iter().collect();
         let log_count = logs.len();
-        
+
         if log_count == 0 {
             return Vec::new();
         }
-        
+
         // Store as (schemas, events, start_time, end_time, schema_ids)
-        type BatchValue = (Vec<CentralSchemaEntry>, Vec<CentralEventEntry>, u64, u64, Vec<u64>);
+        type BatchValue = (
+            Vec<CentralSchemaEntry>,
+            Vec<CentralEventEntry>,
+            u64,
+            u64,
+            Vec<u64>,
+        );
         let mut batches: HashMap<String, BatchValue> = HashMap::new();
 
         for log_record in logs {
@@ -102,7 +108,6 @@ impl OtlpEncoder {
                 Self::determine_fields_and_schema_id(log_record, event_name_str);
 
             let schema_entry = self.get_or_create_schema(schema_id, field_info.as_slice());
-
             // 2. Encode row
             let row_buffer = self.write_row_data(log_record, &field_info);
             let level = log_record.severity_number as u8;
@@ -145,7 +150,9 @@ impl OtlpEncoder {
 
         // 6. Encode blobs (one per event_name, potentially multiple schemas per blob)
         let mut blobs = Vec::with_capacity(batches.len());
-        for (batch_event_name, (schema_entries, events, start_time, end_time, schema_ids)) in batches {
+        for (batch_event_name, (schema_entries, events, start_time, end_time, schema_ids)) in
+            batches
+        {
             let blob = CentralBlob {
                 version: 1,
                 format: 2,
@@ -247,6 +254,7 @@ impl OtlpEncoder {
             })
             .collect();
 
+        // Return the raw u64 hash - no MD5 conversion needed
         let schema_id = hasher.finish();
         (field_defs, schema_id)
     }

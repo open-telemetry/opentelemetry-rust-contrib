@@ -105,18 +105,17 @@ impl GenevaClient {
         let upload_futures = blobs.into_iter().map(|batch| {
             let event_version = "Ver2v0"; // TODO - find the actual value to be populated
 
-            // Convert schema IDs to semicolon-separated string for the upload
-            // Use pre-allocated capacity and write directly to avoid intermediate allocations
-            let mut schema_ids_str = String::with_capacity(
-                batch.metadata.schema_ids.len() * 16 + batch.metadata.schema_ids.len().saturating_sub(1),
-            );
-            for (i, id) in batch.metadata.schema_ids.iter().enumerate() {
-                if i > 0 {
-                    schema_ids_str.push(';');
-                }
-                use std::fmt::Write;
-                write!(&mut schema_ids_str, "{id:x}").unwrap();
-            }
+            // Convert u64 schema IDs to MD5 hashes for the upload URL
+            let schema_ids_str = batch
+                .metadata
+                .schema_ids
+                .iter()
+                .map(|id| {
+                    let md5_hash = md5::compute(&id.to_le_bytes());
+                    format!("{:x}", md5_hash)
+                })
+                .collect::<Vec<String>>()
+                .join(";");
 
             async move {
                 // TODO: Investigate using tokio::spawn_blocking for LZ4 compression to avoid blocking
