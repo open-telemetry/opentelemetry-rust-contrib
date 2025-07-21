@@ -1,6 +1,7 @@
 use chrono::{Duration as ChronoDuration, TimeZone, Utc};
 
 use crate::config_service::client::{GenevaConfigClient, GenevaConfigClientError};
+use crate::payload_encoder::otlp_encoder::BatchMetadata;
 use chrono::{Datelike, Timelike};
 use reqwest::{header, Client};
 use serde::Deserialize;
@@ -149,7 +150,6 @@ impl GenevaUploader {
 
     /// Creates the GIG upload URI with required parameters
     #[allow(dead_code)]
-    #[allow(clippy::too_many_arguments)]
     fn create_upload_uri(
         &self,
         monitoring_endpoint: &str,
@@ -157,14 +157,15 @@ impl GenevaUploader {
         data_size: usize,
         event_name: &str,
         event_version: &str,
-        schema_ids: &str,
-        start_time_nanos: u64,
-        end_time_nanos: u64,
+        metadata: &BatchMetadata,
     ) -> Result<String> {
+        // Format schema IDs using the helper method
+        let schema_ids = metadata.format_schema_ids();
+
         // Convert nanoseconds to DateTime
-        let start_time = if start_time_nanos > 0 {
-            let secs = (start_time_nanos / 1_000_000_000) as i64;
-            let nsec = (start_time_nanos % 1_000_000_000) as u32;
+        let start_time = if metadata.start_time > 0 {
+            let secs = (metadata.start_time / 1_000_000_000) as i64;
+            let nsec = (metadata.start_time % 1_000_000_000) as u32;
             Utc.timestamp_opt(secs, nsec)
                 .single()
                 .unwrap_or_else(Utc::now)
@@ -172,9 +173,9 @@ impl GenevaUploader {
             Utc::now()
         };
 
-        let end_time = if end_time_nanos > 0 {
-            let secs = (end_time_nanos / 1_000_000_000) as i64;
-            let nsec = (end_time_nanos % 1_000_000_000) as u32;
+        let end_time = if metadata.end_time > 0 {
+            let secs = (metadata.end_time / 1_000_000_000) as i64;
+            let nsec = (metadata.end_time % 1_000_000_000) as u32;
             Utc.timestamp_opt(secs, nsec)
                 .single()
                 .unwrap_or_else(|| Utc::now() + ChronoDuration::minutes(5))
@@ -242,9 +243,7 @@ impl GenevaUploader {
     /// * `data` - The encoded data to upload (already in the required format)
     /// * `event_name` - Name of the event
     /// * `event_version` - Version of the event
-    /// * `schema_ids` - Semicolon-separated string of schema IDs present in the payload
-    /// * `start_time_nanos` - Start time of the event range in nanoseconds since Unix epoch
-    /// * `end_time_nanos` - End time of the event range in nanoseconds since Unix epoch
+    /// * `metadata` - Batch metadata containing timestamps and schema information
     ///
     /// # Returns
     /// * `Result<IngestionResponse>` - The response containing the ticket ID or an error
@@ -254,9 +253,7 @@ impl GenevaUploader {
         data: Vec<u8>,
         event_name: &str,
         event_version: &str,
-        schema_ids: &str,
-        start_time_nanos: u64,
-        end_time_nanos: u64,
+        metadata: &BatchMetadata,
     ) -> Result<IngestionResponse> {
         // Always get fresh auth info
         let (auth_info, moniker_info, monitoring_endpoint) =
@@ -268,9 +265,7 @@ impl GenevaUploader {
             data_size,
             event_name,
             event_version,
-            schema_ids,
-            start_time_nanos,
-            end_time_nanos,
+            metadata,
         )?;
         let full_url = format!(
             "{}/{}",

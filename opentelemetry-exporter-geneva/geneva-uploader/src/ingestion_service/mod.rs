@@ -5,6 +5,7 @@ mod tests {
     use std::time::Instant;
 
     mod test_helpers {
+        use crate::payload_encoder::otlp_encoder::BatchMetadata;
         use crate::{
             AuthMethod, GenevaConfigClient, GenevaConfigClientConfig, GenevaUploader,
             GenevaUploaderConfig,
@@ -105,6 +106,7 @@ mod tests {
     /// ```
     #[ignore]
     async fn test_upload_to_gig_real_server() {
+        use crate::payload_encoder::otlp_encoder::BatchMetadata;
         let ctx = test_helpers::build_test_upload_context().await;
         let blob_size = ctx.data.len();
         println!("✅ Loaded blob ({blob_size} bytes)");
@@ -118,16 +120,17 @@ mod tests {
         println!("🚀 Uploading to: {}", auth_info.endpoint);
 
         let start = Instant::now();
+
+        // Create test metadata
+        let metadata = BatchMetadata {
+            start_time: 1_700_000_000_000_000_000,
+            end_time: 1_700_000_300_000_000_000,
+            schema_ids: vec![123456789], // Example schema ID
+        };
+
         let response = ctx
             .uploader
-            .upload(
-                ctx.data,
-                &ctx.event_name,
-                &ctx.event_version,
-                "test_schema_id",
-                1_700_000_000_000_000_000, // start_time_nanos
-                1_700_000_300_000_000_000, // end_time_nanos (5 minutes later)
-            )
+            .upload(ctx.data, &ctx.event_name, &ctx.event_version, &metadata)
             .await
             .expect("Upload failed");
 
@@ -169,6 +172,7 @@ mod tests {
     #[tokio::test(flavor = "multi_thread")]
     #[ignore]
     async fn test_parallel_uploads() {
+        use crate::payload_encoder::otlp_encoder::BatchMetadata;
         use std::env;
         use std::time::Instant;
 
@@ -183,15 +187,21 @@ mod tests {
         // --- Warm-up: do the first upload to populate the token cache ---
         println!("🔥 Performing warm-up upload...");
         let start_warmup = Instant::now();
+
+        // Create test metadata for warm-up
+        let warmup_metadata = BatchMetadata {
+            start_time: 1_700_000_000_000_000_000,
+            end_time: 1_700_000_300_000_000_000,
+            schema_ids: vec![123456789], // Example schema ID
+        };
+
         let _ = ctx
             .uploader
             .upload(
                 ctx.data.clone(),
                 &ctx.event_name,
                 &ctx.event_version,
-                "test_schema_id",
-                1_700_000_000_000_000_000, // start_time_nanos
-                1_700_000_300_000_000_000, // end_time_nanos (5 minutes later)
+                &warmup_metadata,
             )
             .await
             .expect("Warm-up upload failed");
@@ -211,15 +221,16 @@ mod tests {
 
             let handle = tokio::spawn(async move {
                 let start = Instant::now();
+
+                // Create test metadata for this upload
+                let metadata = BatchMetadata {
+                    start_time: 1_700_000_000_000_000_000,
+                    end_time: 1_700_000_300_000_000_000,
+                    schema_ids: vec![123456789], // Example schema ID
+                };
+
                 let resp = uploader
-                    .upload(
-                        data,
-                        &event_name,
-                        &event_version,
-                        "test_schema_id",
-                        1_700_000_000_000_000_000,
-                        1_700_000_300_000_000_000,
-                    )
+                    .upload(data, &event_name, &event_version, &metadata)
                     .await
                     .unwrap_or_else(|_| panic!("Upload {i} failed"));
                 let elapsed = start.elapsed();

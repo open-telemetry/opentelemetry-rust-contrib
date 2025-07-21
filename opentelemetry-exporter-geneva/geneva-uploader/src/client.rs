@@ -105,18 +105,6 @@ impl GenevaClient {
         let upload_futures = blobs.into_iter().map(|batch| {
             let event_version = "Ver2v0"; // TODO - find the actual value to be populated
 
-            // Convert u64 schema IDs to MD5 hashes for the upload URL
-            let schema_ids_str = batch
-                .metadata
-                .schema_ids
-                .iter()
-                .map(|id| {
-                    let md5_hash = md5::compute(id.to_le_bytes());
-                    format!("{md5_hash:x}")
-                })
-                .collect::<Vec<String>>()
-                .join(";");
-
             async move {
                 // TODO: Investigate using tokio::spawn_blocking for LZ4 compression to avoid blocking
                 // the async executor thread for CPU-intensive work.
@@ -128,9 +116,7 @@ impl GenevaClient {
                         compressed_blob,
                         &batch.event_name,
                         event_version,
-                        &schema_ids_str,
-                        batch.metadata.start_time,
-                        batch.metadata.end_time,
+                        &batch.metadata,
                     )
                     .await
                     .map(|_| ())

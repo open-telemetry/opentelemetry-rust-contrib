@@ -20,6 +20,20 @@ pub(crate) struct BatchMetadata {
     pub(crate) schema_ids: Vec<u64>,
 }
 
+impl BatchMetadata {
+    /// Format schema IDs as MD5 hashes separated by semicolons
+    pub(crate) fn format_schema_ids(&self) -> String {
+        self.schema_ids
+            .iter()
+            .map(|id| {
+                let md5_hash = md5::compute(id.to_le_bytes());
+                format!("{md5_hash:x}")
+            })
+            .collect::<Vec<String>>()
+            .join(";")
+    }
+}
+
 /// Represents an encoded batch with all necessary metadata
 #[derive(Debug, Clone)]
 pub(crate) struct EncodedBatch {
