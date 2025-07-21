@@ -17,7 +17,6 @@ mod tests {
             pub data: Vec<u8>,
             pub uploader: GenevaUploader,
             pub event_name: String,
-            pub event_version: String,
         }
 
         pub async fn build_test_upload_context() -> TestUploadContext {
@@ -48,7 +47,7 @@ mod tests {
                 "c1ce0ecea020359624c493bbe97f9e80;0da22cabbee419e000541a5eda732eb3".to_string();
 
             // Define uploader config
-            let config_version = format!("Ver{}v0", config_major_version);
+            let config_version = format!("Ver{config_major_version}v0");
             let uploader_config = GenevaUploaderConfig {
                 namespace: namespace.clone(),
                 source_identity,
@@ -80,13 +79,11 @@ mod tests {
 
             // Event name/version
             let event_name = "Log".to_string();
-            let event_version = "Ver2v0".to_string();
 
             TestUploadContext {
                 data,
                 uploader,
                 event_name,
-                event_version,
             }
         }
     }
