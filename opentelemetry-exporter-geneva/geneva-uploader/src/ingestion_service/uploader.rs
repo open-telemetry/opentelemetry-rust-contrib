@@ -1,7 +1,5 @@
-use chrono::{DateTime, Duration as ChronoDuration, Utc};
-
 use crate::config_service::client::{GenevaConfigClient, GenevaConfigClientError};
-use chrono::{Datelike, Timelike};
+use crate::payload_encoder::central_blob::BatchMetadata;
 use reqwest::{header, Client};
 use serde::Deserialize;
 use serde_json::Value;
@@ -106,7 +104,6 @@ pub(crate) struct GenevaUploaderConfig {
     pub source_identity: String,
     #[allow(dead_code)]
     pub environment: String,
-    pub schema_ids: String,
     pub config_version: String,
 }
 
@@ -157,34 +154,12 @@ impl GenevaUploader {
         moniker: &str,
         data_size: usize,
         event_name: &str,
+        metadata: &BatchMetadata,
     ) -> Result<String> {
-        let now: DateTime<Utc> = Utc::now(); //TODO - this need to be calculated from the bond data
-        let end_time = now + ChronoDuration::minutes(5); //TODO - this need to be calculated from the bond data
-
-        // Format times in ISO 8601 format with fixed precision
-        // Using .NET compatible format (matches DateTime.ToString("O"))
-
-        let start_time = format!(
-            "{:04}-{:02}-{:02}T{:02}:{:02}:{:02}.{:07}Z",
-            now.year(),
-            now.month(),
-            now.day(),
-            now.hour(),
-            now.minute(),
-            now.second(),
-            now.nanosecond() / 100 // Convert nanoseconds to 7-digit precision
-        );
-
-        let end_time = format!(
-            "{:04}-{:02}-{:02}T{:02}:{:02}:{:02}.{:07}Z",
-            end_time.year(),
-            end_time.month(),
-            end_time.day(),
-            end_time.hour(),
-            end_time.minute(),
-            end_time.second(),
-            end_time.nanosecond() / 100 // Convert nanoseconds to 7-digit precision
-        );
+        // Get already formatted schema IDs and format timestamps using BatchMetadata methods
+        let schema_ids = &metadata.schema_ids;
+        let start_time_str = metadata.format_start_timestamp();
+        let end_time_str = metadata.format_end_timestamp();
 
         // URL encode parameters
         // TODO - Maintain this as url-encoded in config service to avoid conversion here
@@ -206,11 +181,11 @@ impl GenevaUploader {
             self.config.config_version,
             source_unique_id,
             encoded_source_identity,
-            start_time,
-            end_time,
+            start_time_str,
+            end_time_str,
             data_size,
             2,
-            self.config.schema_ids
+            schema_ids
         ).map_err(|e| GenevaUploaderError::InternalError(format!("Failed to write query string: {e}")))?;
         Ok(query)
     }
@@ -219,6 +194,9 @@ impl GenevaUploader {
     ///
     /// # Arguments
     /// * `data` - The encoded data to upload (already in the required format)
+    /// * `event_name` - Name of the event
+    /// * `event_version` - Version of the event
+    /// * `metadata` - Batch metadata containing timestamps and schema information
     ///
     /// # Returns
     /// * `Result<IngestionResponse>` - The response containing the ticket ID or an error
@@ -227,6 +205,7 @@ impl GenevaUploader {
         &self,
         data: Vec<u8>,
         event_name: &str,
+        metadata: &BatchMetadata,
     ) -> Result<IngestionResponse> {
         // Always get fresh auth info
         let (auth_info, moniker_info, monitoring_endpoint) =
@@ -237,6 +216,7 @@ impl GenevaUploader {
             &moniker_info.name,
             data_size,
             event_name,
+            metadata,
         )?;
         let full_url = format!(
             "{}/{}",

@@ -1,7 +1,67 @@
 //use md5;
 
 use crate::payload_encoder::bond_encoder::BondEncodedSchema;
+use chrono::{DateTime, Datelike, Timelike, Utc};
 use std::sync::Arc;
+
+/// Metadata for a batch of events
+#[derive(Debug, Clone)]
+pub struct BatchMetadata {
+    /// Start time of the earliest event in nanoseconds since Unix epoch
+    pub start_time: u64,
+    /// End time of the latest event in nanoseconds since Unix epoch
+    pub end_time: u64,
+    /// Schema IDs present in this batch formatted as MD5 hashes separated by semicolons
+    pub schema_ids: String,
+}
+
+impl BatchMetadata {
+    /// Format start timestamp in ISO 8601 format with 7-digit precision (.NET compatible)
+    #[inline]
+    pub(crate) fn format_start_timestamp(&self) -> String {
+        Self::format_timestamp(self.start_time)
+    }
+
+    /// Format end timestamp in ISO 8601 format with 7-digit precision (.NET compatible)
+    #[inline]
+    pub(crate) fn format_end_timestamp(&self) -> String {
+        Self::format_timestamp(self.end_time)
+    }
+
+    /// Format timestamp using DateTime::from_timestamp_nanos
+    #[inline]
+    fn format_timestamp(timestamp_nanos: u64) -> String {
+        let datetime = DateTime::from_timestamp_nanos(timestamp_nanos as i64);
+        Self::format_datetime(datetime)
+    }
+
+    /// Format datetime as ISO 8601 with 7-digit precision
+    /// TODO: Revisit using datetime.format("%Y-%m-%dT%H:%M:%S%.7fZ") once chrono Display implementation is fixed
+    #[inline]
+    fn format_datetime(datetime: DateTime<Utc>) -> String {
+        format!(
+            "{:04}-{:02}-{:02}T{:02}:{:02}:{:02}.{:07}Z",
+            datetime.year(),
+            datetime.month(),
+            datetime.day(),
+            datetime.hour(),
+            datetime.minute(),
+            datetime.second(),
+            datetime.nanosecond() / 100 // Convert nanoseconds to 7-digit precision
+        )
+    }
+}
+
+/// Represents an encoded batch with all necessary metadata
+#[derive(Debug, Clone)]
+pub(crate) struct EncodedBatch {
+    /// The event name for this batch
+    pub(crate) event_name: String,
+    /// The encoded binary data
+    pub(crate) data: Vec<u8>,
+    /// Batch metadata containing timestamps and schema information
+    pub(crate) metadata: BatchMetadata,
+}
 
 /// Helper to encode UTF-8 Rust str to UTF-16LE bytes
 /// TODO - consider avoiding temporary allocation, by passing a mutable buffer
