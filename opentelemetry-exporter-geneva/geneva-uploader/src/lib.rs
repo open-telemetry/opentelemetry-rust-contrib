@@ -1,6 +1,7 @@
 mod config_service;
 mod ingestion_service;
 pub mod payload_encoder;
+mod msi;
 
 pub mod client;
 
@@ -18,4 +19,4 @@ pub(crate) use ingestion_service::uploader::{
 };
 
 pub use client::{GenevaClient, GenevaClientConfig};
-pub use config_service::client::AuthMethod;
+pub use config_service::client::{AuthMethod, MsiIdentityType};

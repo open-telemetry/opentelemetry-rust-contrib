@@ -25,6 +25,7 @@ futures = "0.3"
 [features]
 self_signed_certs = [] # Empty by default for security
 mock_auth = [] # Disabled by default. Not to be enabled in the prod release. 
+msi_auth = [] # Enable MSI authentication support (requires MSINATIVE_LIB_PATH at build time)
 default = ["self_signed_certs"] # TODO - remove this feature before release
 
 [dev-dependencies]
@@ -38,6 +39,8 @@ num_cpus = "1.16"
 lz4_flex = { version = "0.11" }
 criterion = {version = "0.6"}
 rand = {version = "0.9"}
+
+# No build dependencies needed for the simplified MSI integration
 
 [lints]
 workspace = true
