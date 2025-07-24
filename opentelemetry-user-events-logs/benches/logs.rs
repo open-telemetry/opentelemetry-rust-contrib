@@ -98,37 +98,26 @@ fn benchmark_4_attributes(c: &mut Criterion) {
     });
 }
 
+#[cfg(feature = "experimental_eventname_callback")]
 fn benchmark_4_attributes_custom_event_name(c: &mut Criterion) {
-    #[cfg(feature = "experimental_eventname_callback")]
-    {
-        let provider = setup_provider_with_callback();
-        let ot_layer = tracing_layer::OpenTelemetryTracingBridge::new(&provider);
-        let subscriber = Registry::default().with(ot_layer);
+    let provider = setup_provider_with_callback();
+    let ot_layer = tracing_layer::OpenTelemetryTracingBridge::new(&provider);
+    let subscriber = Registry::default().with(ot_layer);
 
-        tracing::subscriber::with_default(subscriber, || {
-            c.bench_function("User_Event_4_Attributes_EventName_Callback", |b| {
-                b.iter(|| {
-                    error!(
-                        name : "CheckoutFailed",
-                        field1 = "field1",
-                        field2 = "field2",
-                        field3 = "field3",
-                        field4 = "field4",
-                        message = "Unable to process checkout."
-                    );
-                });
-            });
-        });
-    }
-    #[cfg(not(feature = "experimental_eventname_callback"))]
-    {
-        // Skip this benchmark if the feature is not enabled
+    tracing::subscriber::with_default(subscriber, || {
         c.bench_function("User_Event_4_Attributes_EventName_Callback", |b| {
             b.iter(|| {
-                // No-op when feature is disabled
+                error!(
+                    name : "CheckoutFailed",
+                    field1 = "field1",
+                    field2 = "field2",
+                    field3 = "field3",
+                    field4 = "field4",
+                    message = "Unable to process checkout."
+                );
             });
         });
-    }
+    });
 }
 
 fn benchmark_6_attributes(c: &mut Criterion) {
@@ -157,6 +146,7 @@ fn benchmark_6_attributes(c: &mut Criterion) {
 fn criterion_benchmark(c: &mut Criterion) {
     benchmark_4_attributes(c);
     benchmark_6_attributes(c);
+    #[cfg(feature = "experimental_eventname_callback")]
     benchmark_4_attributes_custom_event_name(c);
 }
 
