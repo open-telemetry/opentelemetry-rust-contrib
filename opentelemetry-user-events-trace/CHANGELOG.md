@@ -2,6 +2,10 @@
 
 ## vNext
 
+## v0.3.0
+
+Released 2025-July-24
+
 - Add support for RoleName,RoleInstance population from Resource.
 - Add mapping of well-known (OTel Semantic Conventions) attributes to PartB.
 - Only export parentId field when parent span ID is valid (not INVALID).
