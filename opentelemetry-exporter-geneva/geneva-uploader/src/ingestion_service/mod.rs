@@ -17,7 +17,6 @@ mod tests {
             pub data: Vec<u8>,
             pub uploader: GenevaUploader,
             pub event_name: String,
-            pub event_version: String,
         }
 
         pub async fn build_test_upload_context() -> TestUploadContext {
@@ -44,15 +43,14 @@ mod tests {
             let source_identity = env::var("GENEVA_SOURCE_IDENTITY").unwrap_or_else(|_| {
                 "Tenant=Default/Role=Uploader/RoleInstance=devhost".to_string()
             });
-            let schema_ids =
-                "c1ce0ecea020359624c493bbe97f9e80;0da22cabbee419e000541a5eda732eb3".to_string();
 
             // Define uploader config
+            let config_version = format!("Ver{config_major_version}v0");
             let uploader_config = GenevaUploaderConfig {
                 namespace: namespace.clone(),
                 source_identity,
                 environment: environment.clone(),
-                schema_ids,
+                config_version,
             };
 
             let config = GenevaConfigClientConfig {
@@ -78,13 +76,11 @@ mod tests {
 
             // Event name/version
             let event_name = "Log".to_string();
-            let event_version = "Ver2v0".to_string();
 
             TestUploadContext {
                 data,
                 uploader,
                 event_name,
-                event_version,
             }
         }
     }
@@ -108,6 +104,7 @@ mod tests {
     /// ```
     #[ignore]
     async fn test_upload_to_gig_real_server() {
+        use crate::payload_encoder::central_blob::BatchMetadata;
         let ctx = test_helpers::build_test_upload_context().await;
         let blob_size = ctx.data.len();
         println!("✅ Loaded blob ({blob_size} bytes)");
@@ -121,9 +118,17 @@ mod tests {
         println!("🚀 Uploading to: {}", auth_info.endpoint);
 
         let start = Instant::now();
+
+        // Create test metadata
+        let metadata = BatchMetadata {
+            start_time: 1_700_000_000_000_000_000,
+            end_time: 1_700_000_300_000_000_000,
+            schema_ids: "075bcd15e5b2ed60f26e66085ac2b2e8".to_string(), // Example MD5 hash
+        };
+
         let response = ctx
             .uploader
-            .upload(ctx.data, &ctx.event_name, &ctx.event_version)
+            .upload(ctx.data, &ctx.event_name, &metadata)
             .await
             .expect("Upload failed");
 
@@ -165,6 +170,7 @@ mod tests {
     #[tokio::test(flavor = "multi_thread")]
     #[ignore]
     async fn test_parallel_uploads() {
+        use crate::payload_encoder::central_blob::BatchMetadata;
         use std::env;
         use std::time::Instant;
 
@@ -179,9 +185,17 @@ mod tests {
         // --- Warm-up: do the first upload to populate the token cache ---
         println!("🔥 Performing warm-up upload...");
         let start_warmup = Instant::now();
+
+        // Create test metadata for warm-up
+        let warmup_metadata = BatchMetadata {
+            start_time: 1_700_000_000_000_000_000,
+            end_time: 1_700_000_300_000_000_000,
+            schema_ids: "075bcd15e5b2ed60f26e66085ac2b2e8".to_string(), // Example MD5 hash
+        };
+
         let _ = ctx
             .uploader
-            .upload(ctx.data.clone(), &ctx.event_name, &ctx.event_version)
+            .upload(ctx.data.clone(), &ctx.event_name, &warmup_metadata)
             .await
             .expect("Warm-up upload failed");
         let warmup_elapsed = start_warmup.elapsed();
@@ -196,12 +210,18 @@ mod tests {
             let uploader = ctx.uploader.clone();
             let data = ctx.data.clone();
             let event_name = ctx.event_name.to_string();
-            let event_version = ctx.event_version.to_string();
-
             let handle = tokio::spawn(async move {
                 let start = Instant::now();
+
+                // Create test metadata for this upload
+                let metadata = BatchMetadata {
+                    start_time: 1_700_000_000_000_000_000,
+                    end_time: 1_700_000_300_000_000_000,
+                    schema_ids: "075bcd15e5b2ed60f26e66085ac2b2e8".to_string(), // Example MD5 hash
+                };
+
                 let resp = uploader
-                    .upload(data, &event_name, &event_version)
+                    .upload(data, &event_name, &metadata)
                     .await
                     .unwrap_or_else(|_| panic!("Upload {i} failed"));
                 let elapsed = start.elapsed();
