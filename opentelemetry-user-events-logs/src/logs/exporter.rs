@@ -474,8 +474,10 @@ where
             } else if self.resource_attribute_keys.contains(key.as_str()) {
                 self.attributes_from_resource
                     .push((key.clone(), val_to_any_value(value)));
+            } else {
+                // Other attributes are ignored
+                otel_debug!(name: "UserEvents.ResourceAttributeIgnored", key = key.as_str(), message = "To include this attribute, add it via with_resource_attributes() method in the processor builder.");
             }
-            // Other attributes are ignored
         }
     }
 }
