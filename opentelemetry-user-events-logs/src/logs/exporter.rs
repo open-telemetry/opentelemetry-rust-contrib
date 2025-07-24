@@ -13,11 +13,29 @@ use std::{cell::RefCell, str, time::SystemTime};
 
 thread_local! { static EBW: RefCell<EventBuilder> = RefCell::new(EventBuilder::new());}
 
-/// Type alias for the event name callback function
-pub(crate) type EventNameCallback = fn(&opentelemetry_sdk::logs::SdkLogRecord) -> &'static str;
+/// Trait for event name callback
+pub trait EventNameCallback: Send + Sync + 'static {
+    /// Returns the event name for the given log record
+    fn get_name(&self, record: &opentelemetry_sdk::logs::SdkLogRecord) -> &'static str;
+}
 
-/// UserEventsExporter is a log exporter that exports logs in EventHeader format to user_events tracepoint.
-pub(crate) struct UserEventsExporter {
+/// Default implementation that always returns "Log"
+#[derive(Debug, Clone)]
+pub struct DefaultEventNameCallback;
+
+impl EventNameCallback for DefaultEventNameCallback {
+    fn get_name(&self, _record: &opentelemetry_sdk::logs::SdkLogRecord) -> &'static str {
+        DEFAULT_LOG_TYPE_NAME
+    }
+}
+
+/// UserEventsExporter is a log exporter that exports logs in EventHeader format
+/// to user_events tracepoint. Generic over the event name callback to avoid
+/// dynamic dispatch.
+pub(crate) struct UserEventsExporter<C = DefaultEventNameCallback>
+where
+    C: EventNameCallback,
+{
     provider: Mutex<Provider>,
     name: String,
     event_sets: Vec<Arc<EventSet>>,
@@ -25,7 +43,7 @@ pub(crate) struct UserEventsExporter {
     cloud_role_instance: Option<String>,
     attributes_from_resource: Vec<(Key, AnyValue)>,
     resource_attribute_keys: HashSet<Cow<'static, str>>,
-    event_name_callback: Option<EventNameCallback>,
+    event_name_callback: C,
 }
 
 // Constants for the UserEventsExporter
@@ -120,12 +138,15 @@ const fn get_severity_level(severity: Severity) -> Level {
     }
 }
 
-impl UserEventsExporter {
+impl<C> UserEventsExporter<C>
+where
+    C: EventNameCallback,
+{
     /// Create instance of the exporter
     pub(crate) fn new(
         provider_name: &str,
         resource_attributes: HashSet<Cow<'static, str>>,
-        event_name_callback: Option<EventNameCallback>,
+        event_name_callback: C,
     ) -> Self {
         let mut eventheader_provider: Provider =
             Provider::new(provider_name, &Provider::new_options());
@@ -167,13 +188,10 @@ impl UserEventsExporter {
         }
     }
 
-    /// Gets the event name from the log record using the provided callback or returns "Log" if no callback is set
+    /// Gets the event name from the log record using the provided callback
     #[inline]
     fn get_event_name(&self, record: &opentelemetry_sdk::logs::SdkLogRecord) -> &'static str {
-        match self.event_name_callback {
-            Some(callback_fn) => callback_fn(record),
-            None => "Log",
-        }
+        self.event_name_callback.get_name(record)
     }
 
     /// Builds Part A of the Common Schema format
@@ -395,13 +413,19 @@ impl UserEventsExporter {
     }
 }
 
-impl Debug for UserEventsExporter {
+impl<C> Debug for UserEventsExporter<C>
+where
+    C: EventNameCallback,
+{
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(f, "user_events log exporter (provider name: {})", self.name)
     }
 }
 
-impl opentelemetry_sdk::logs::LogExporter for UserEventsExporter {
+impl<C> opentelemetry_sdk::logs::LogExporter for UserEventsExporter<C>
+where
+    C: EventNameCallback,
+{
     async fn export(&self, batch: opentelemetry_sdk::logs::LogBatch<'_>) -> OTelSdkResult {
         if let Some((record, instrumentation)) = batch.iter().next() {
             self.export_log_data(record, instrumentation)
@@ -468,9 +492,11 @@ fn val_to_any_value(val: &Value) -> AnyValue {
 #[cfg(test)]
 mod tests {
     use super::*;
+
     #[test]
     fn exporter_debug() {
-        let exporter = UserEventsExporter::new("test_provider", HashSet::new(), None);
+        let exporter =
+            UserEventsExporter::new("test_provider", HashSet::new(), DefaultEventNameCallback);
         assert_eq!(
             format!("{exporter:?}"),
             "user_events log exporter (provider name: test_provider)"

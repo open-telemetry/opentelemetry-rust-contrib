@@ -135,9 +135,14 @@ mod logs;
 pub use logs::Processor;
 pub use logs::ProcessorBuilder;
 
+#[cfg(feature = "experimental_eventname_callback")]
+pub use logs::{DefaultEventNameCallback, EventNameCallback};
+
 #[cfg(test)]
 mod tests {
 
+    #[cfg(feature = "experimental_eventname_callback")]
+    use crate::EventNameCallback;
     use crate::Processor;
     use opentelemetry::trace::Tracer;
     use opentelemetry::trace::{TraceContextExt, TracerProvider};
@@ -303,9 +308,20 @@ mod tests {
     fn integration_test_callback_event_name() {
         // Run using the below command
         // sudo -E ~/.cargo/bin/cargo test integration_test_callback_event_name -- --nocapture --ignored
-        let callback: fn(&opentelemetry_sdk::logs::SdkLogRecord) -> &'static str =
-            |_| "MyEventName";
-        integration_test_callback_event_name_helper(callback, "myprovider:MyEventName");
+
+        #[derive(Debug, Clone)]
+        struct FixedEventNameCallback;
+
+        impl EventNameCallback for FixedEventNameCallback {
+            fn get_name(&self, _: &opentelemetry_sdk::logs::SdkLogRecord) -> &'static str {
+                "MyEventName"
+            }
+        }
+
+        integration_test_callback_event_name_helper(
+            FixedEventNameCallback,
+            "myprovider:MyEventName",
+        );
     }
 
     #[ignore]
@@ -314,16 +330,29 @@ mod tests {
     fn integration_test_callback_event_name_from_logrecord() {
         // Run using the below command
         // sudo -E ~/.cargo/bin/cargo test integration_test_callback_event_name_from_logrecord -- --nocapture --ignored
-        let callback: fn(&opentelemetry_sdk::logs::SdkLogRecord) -> &'static str =
-            |log_record| log_record.event_name().unwrap_or("MyEventName");
-        integration_test_callback_event_name_helper(callback, "myprovider:my-event-name");
+
+        #[derive(Debug, Clone)]
+        struct TestEventNameCallback;
+
+        impl EventNameCallback for TestEventNameCallback {
+            fn get_name(&self, log_record: &opentelemetry_sdk::logs::SdkLogRecord) -> &'static str {
+                log_record.event_name().unwrap_or("MyEventName")
+            }
+        }
+
+        integration_test_callback_event_name_helper(
+            TestEventNameCallback,
+            "myprovider:my-event-name",
+        );
     }
 
     #[cfg(feature = "experimental_eventname_callback")]
-    fn integration_test_callback_event_name_helper(
-        event_name_callback: fn(&opentelemetry_sdk::logs::SdkLogRecord) -> &'static str,
+    fn integration_test_callback_event_name_helper<C>(
+        event_name_callback: C,
         expected_event_name: &'static str,
-    ) {
+    ) where
+        C: EventNameCallback,
+    {
         // Basic check if user_events are available
         check_user_events_available().expect("Kernel does not support user_events. Verify your distribution/kernel supports user_events: https://docs.kernel.org/trace/user_events.html.");
         let user_event_processor = Processor::builder("myprovider")

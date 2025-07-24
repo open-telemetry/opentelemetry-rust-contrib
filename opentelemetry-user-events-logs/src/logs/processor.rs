@@ -8,28 +8,43 @@ use opentelemetry_sdk::{
 use std::borrow::Cow;
 use std::collections::HashSet;
 use std::error::Error;
-use std::fmt::Debug;
 
-use crate::logs::exporter::UserEventsExporter;
+use crate::logs::exporter::{DefaultEventNameCallback, EventNameCallback, UserEventsExporter};
 
 /// Processes and exports logs to user_events.
 ///
 /// This processor exports logs without synchronization.
 /// It is specifically designed for the user_events exporter, where
 /// the underlying exporter is safe under concurrent calls.
-#[derive(Debug)]
-pub struct Processor {
-    exporter: UserEventsExporter,
+pub struct Processor<C = DefaultEventNameCallback>
+where
+    C: EventNameCallback,
+{
+    exporter: UserEventsExporter<C>,
 }
 
-impl Processor {
+impl<C> std::fmt::Debug for Processor<C>
+where
+    C: EventNameCallback,
+{
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("Processor")
+            .field("exporter", &self.exporter)
+            .finish()
+    }
+}
+
+impl Processor<DefaultEventNameCallback> {
     /// Creates a builder for configuring a user_events Processor
     pub fn builder(provider_name: &str) -> ProcessorBuilder {
         ProcessorBuilder::new(provider_name)
     }
 }
 
-impl opentelemetry_sdk::logs::LogProcessor for Processor {
+impl<C> opentelemetry_sdk::logs::LogProcessor for Processor<C>
+where
+    C: EventNameCallback,
+{
     fn emit(&self, record: &mut SdkLogRecord, scope: &InstrumentationScope) {
         let log_tuple = &[(record as &SdkLogRecord, scope)];
         // TODO: Using futures_executor::block_on can make the code non reentrant safe
@@ -65,30 +80,29 @@ impl opentelemetry_sdk::logs::LogProcessor for Processor {
 }
 
 /// Builder for configuring and constructing a user_events Processor
-pub struct ProcessorBuilder<'a> {
+pub struct ProcessorBuilder<'a, C = DefaultEventNameCallback>
+where
+    C: EventNameCallback,
+{
     provider_name: &'a str,
     resource_attribute_keys: HashSet<Cow<'static, str>>,
-    event_name_callback: Option<crate::logs::exporter::EventNameCallback>,
+    event_name_callback: C,
 }
 
-impl<'a> std::fmt::Debug for ProcessorBuilder<'a> {
+impl<'a, C> std::fmt::Debug for ProcessorBuilder<'a, C>
+where
+    C: EventNameCallback,
+{
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("ProcessorBuilder")
             .field("provider_name", &self.provider_name)
             .field("resource_attribute_keys", &self.resource_attribute_keys)
-            .field(
-                "event_name_callback",
-                &if self.event_name_callback.is_some() {
-                    "Some(...)"
-                } else {
-                    "None"
-                },
-            )
+            .field("event_name_callback", &std::any::type_name::<C>())
             .finish()
     }
 }
 
-impl<'a> ProcessorBuilder<'a> {
+impl<'a> ProcessorBuilder<'a, DefaultEventNameCallback> {
     /// Creates a new builder with the given provider name
     ///
     /// The provider name must:
@@ -116,10 +130,15 @@ impl<'a> ProcessorBuilder<'a> {
         Self {
             provider_name,
             resource_attribute_keys: HashSet::new(),
-            event_name_callback: None,
+            event_name_callback: DefaultEventNameCallback,
         }
     }
+}
 
+impl<'a, C> ProcessorBuilder<'a, C>
+where
+    C: EventNameCallback,
+{
     /// Sets the resource attributes for the processor.
     ///
     /// This specifies which resource attributes should be exported with each log record.
@@ -158,40 +177,21 @@ impl<'a> ProcessorBuilder<'a> {
         self
     }
 
-    /// Sets a callback function to determine the event name for each log record
-    ///
-    /// The callback receives a reference to the log record and returns a string
-    /// that will be used as the event name in the user_events tracepoint.
-    ///
-    /// # Example
-    ///
-    /// ```
-    /// use opentelemetry_user_events_logs::Processor;
-    /// use opentelemetry_sdk::logs::SdkLogRecord;
-    ///
-    /// let processor = Processor::builder("myprovider")
-    ///     .with_event_name_callback(|record| {
-    ///         // Use the event name from the record if available, otherwise use "DefaultEvent"
-    ///         record.event_name().unwrap_or("DefaultEvent")
-    ///     })
-    ///     .build()
-    ///     .unwrap();
-    /// ```
+    /// Sets a callback for determining event names
     #[cfg(feature = "experimental_eventname_callback")]
-    pub fn with_event_name_callback(
-        mut self,
-        callback: fn(&opentelemetry_sdk::logs::SdkLogRecord) -> &'static str,
-    ) -> Self {
-        self.event_name_callback = Some(callback);
-        self
+    pub fn with_event_name_callback<NewC>(self, callback: NewC) -> ProcessorBuilder<'a, NewC>
+    where
+        NewC: EventNameCallback,
+    {
+        ProcessorBuilder {
+            provider_name: self.provider_name,
+            resource_attribute_keys: self.resource_attribute_keys,
+            event_name_callback: callback,
+        }
     }
 
-    /// Builds the processor with the configured options
-    ///
-    /// # Returns
-    ///
-    /// A result containing the configured `Processor` or a boxed error if validation fails.
-    pub fn build(self) -> Result<Processor, Box<dyn Error>> {
+    /// Builds the processor with the configured callback
+    pub fn build(self) -> Result<Processor<C>, Box<dyn Error>> {
         // Validate provider name
         if self.provider_name.is_empty() {
             return Err("Provider name cannot be empty.".into());
