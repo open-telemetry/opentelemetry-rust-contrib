@@ -24,10 +24,5 @@ pub use types::ManagedIdentity;
 pub mod resources {
     /// Azure Monitor endpoint for public Azure cloud (used for Geneva authentication)
     pub const AZURE_MONITOR_PUBLIC: &str = "https://monitor.core.windows.net/";
-    
-    /// Azure Monitor endpoint for US Government cloud
-    pub const AZURE_MONITOR_USGOV: &str = "https://monitor.core.usgovcloudapi.net/";
-    
-    /// Azure Monitor endpoint for China cloud
-    pub const AZURE_MONITOR_CHINA: &str = "https://monitor.core.chinacloudapi.cn/";
+    // Add more endpoints as needed
 }

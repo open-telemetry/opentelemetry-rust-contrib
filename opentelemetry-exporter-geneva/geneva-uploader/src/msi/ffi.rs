@@ -4,7 +4,7 @@ use std::os::raw::{c_char, c_int, c_long, c_void};
 
 // Include the C++ wrapper header for MSI authentication
 #[cfg(feature = "msi_auth")]
-extern "C" {
+unsafe extern "C" {
     #[link_name = "src/msi/native/wrapper.h"]
     fn __include_wrapper_header();
 }
@@ -31,7 +31,7 @@ pub enum ImdsEndpointType {
 }
 
 #[cfg(feature = "msi_auth")]
-extern "C" {
+unsafe extern "C" {
     /// Error constants (these will be linked from the C++ library)
     pub static XPLAT_NO_ERROR: XPLATRESULT;
     pub static XPLAT_FAIL: XPLATRESULT;

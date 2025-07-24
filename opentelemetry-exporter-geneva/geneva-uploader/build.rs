@@ -1,6 +1,7 @@
 //! Build script for Geneva Uploader with optional MSI authentication support
 
 fn main() {
+    println!("cargo:warning=---> Running build script for Geneva Uploader");
     // Always output cargo rerun instructions for environment changes
     println!("cargo:rerun-if-env-changed=MSINATIVE_LIB_PATH");
     println!("cargo:rerun-if-changed=build.rs");
@@ -11,6 +12,7 @@ fn main() {
     // Only run MSI build logic if the msi_auth feature is enabled
     #[cfg(feature = "msi_auth")]
     {
+        println!("cargo:warning=---> Checking for MSI native library support");
         let msi_available = check_msi_library();
         if msi_available {
             println!("cargo:rustc-cfg=msi_native_available");
@@ -29,6 +31,7 @@ fn check_msi_library() -> bool {
     // Check if MSINATIVE_LIB_PATH is provided
     match env::var("MSINATIVE_LIB_PATH") {
         Ok(msinative_lib_path) => {
+            println!("cargo:warning=---> MSINATIVE_LIB_PATH is set to: {}", msinative_lib_path);
             println!("cargo:rerun-if-changed={}", msinative_lib_path);
             
             // Check if the path points to a valid static library file
@@ -59,9 +62,12 @@ fn check_msi_library() -> bool {
                 eprintln!("MSI authentication will be disabled.");
                 return false;
             }
+
+            println!("cargo:warning=---> Valid static library found: {}", msinative_lib_path);
             
             // Extract library directory and name for linking
             if let (Some(lib_dir), Some(lib_name)) = (lib_path.parent(), lib_path.file_stem().and_then(|n| n.to_str())) {
+                println!("cargo:warning=---> Library directory: {}", lib_dir.display());
                 // Add library search path
                 println!("cargo:rustc-link-search=native={}", lib_dir.display());
                 
@@ -71,6 +77,7 @@ fn check_msi_library() -> bool {
                 } else {
                     lib_name
                 };
+                println!("cargo:warning=---> Linking against library: {}", link_name);
                 println!("cargo:rustc-link-lib=static={}", link_name);
                 
                 // Add platform-specific system libraries that MSI typically depends on

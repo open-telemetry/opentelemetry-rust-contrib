@@ -117,7 +117,7 @@ pub(crate) mod string_utils {
             return Err(MsiError::NullPointer);
         }
 
-        let c_str = CStr::from_ptr(ptr);
+        let c_str = unsafe { CStr::from_ptr(ptr) };
         c_str
             .to_str()
             .map(|s| s.to_string())
