@@ -2,7 +2,11 @@
 
 use opentelemetry_appender_tracing::layer;
 use opentelemetry_sdk::logs::LoggerProviderBuilder;
+#[cfg(feature = "experimental_eventname_callback")]
+use opentelemetry_sdk::logs::SdkLogRecord;
 use opentelemetry_sdk::logs::SdkLoggerProvider;
+#[cfg(feature = "experimental_eventname_callback")]
+use opentelemetry_user_events_logs::EventNameCallback;
 use opentelemetry_user_events_logs::Processor;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
@@ -10,12 +14,23 @@ use std::{thread, time::Duration};
 use tracing::error;
 use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt, EnvFilter, Layer};
 
+#[cfg(feature = "experimental_eventname_callback")]
+struct EventNameFromLogRecord;
+
+#[cfg(feature = "experimental_eventname_callback")]
+impl EventNameCallback for EventNameFromLogRecord {
+    fn get_name(&self, record: &SdkLogRecord) -> &'static str {
+        record.event_name().unwrap_or("Log".into())
+    }
+}
+
 fn init_logger() -> SdkLoggerProvider {
     let filter_fmt = EnvFilter::new("info").add_directive("opentelemetry=debug".parse().unwrap());
     let fmt_layer = tracing_subscriber::fmt::layer().with_filter(filter_fmt);
     let _guard = tracing_subscriber::registry().with(fmt_layer).set_default(); // Temporary subscriber active for this function
 
     let user_event_processor = Processor::builder("myprovider")
+        .with_event_name_callback(EventNameFromLogRecord)
         .build()
         .unwrap_or_else(|err| {
             eprintln!("Failed to create processor: {err}");
