@@ -41,6 +41,7 @@ struct CustomEventNameCallback;
 
 #[cfg(feature = "experimental_eventname_callback")]
 impl EventNameCallback for CustomEventNameCallback {
+    #[inline(always)]
     fn get_name(&self, record: &opentelemetry_sdk::logs::SdkLogRecord) -> &'static str {
         record.event_name().unwrap_or("Log")
     }

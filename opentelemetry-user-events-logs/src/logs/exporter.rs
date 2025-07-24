@@ -24,6 +24,7 @@ pub trait EventNameCallback: Send + Sync + 'static {
 pub struct DefaultEventNameCallback;
 
 impl EventNameCallback for DefaultEventNameCallback {
+    #[inline(always)]
     fn get_name(&self, _record: &opentelemetry_sdk::logs::SdkLogRecord) -> &'static str {
         DEFAULT_LOG_TYPE_NAME
     }
