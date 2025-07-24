@@ -351,7 +351,7 @@ mod tests {
         event_name_callback: C,
         expected_event_name: &'static str,
     ) where
-        C: EventNameCallback,
+        C: EventNameCallback + 'static,
     {
         // Basic check if user_events are available
         check_user_events_available().expect("Kernel does not support user_events. Verify your distribution/kernel supports user_events: https://docs.kernel.org/trace/user_events.html.");
