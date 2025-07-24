@@ -11,6 +11,35 @@
   - This feature enables exporting additional resource attributes beyond the
     defaults.
 
+- **EXPERIMENTAL**: New `experimental_eventname_callback` feature flag that
+  enables custom event naming functionality.
+  - When enabled, the `with_event_name_callback` method becomes available on
+    `ProcessorBuilder`.
+  - Allows users to provide a callback function that dynamically determines the
+    event name for each log record.
+  - The callback receives a `&SdkLogRecord` and must return a `&'static str` for
+    the event name.
+  - When no callback is provided, the default behavior continues to use "Log" as
+    the event name.
+
+  Example usage
+  
+  ```rust
+  struct CustomEventNameCallback;
+  
+  impl EventNameCallback for CustomEventNameCallback {
+      fn call(&self, record: &SdkLogRecord) -> &'static str {
+        // event_name() returns a &'static str
+        record.event_name().unwrap_or("DefaultEvent")
+      }
+  }
+
+  let processor = Processor::builder("myprovider")
+      .with_event_name_callback(CustomEventNameCallback)
+      .build()
+      .unwrap();
+  ```
+
 ## v0.13.0
 
 Released 2025-May-27
