@@ -14,7 +14,7 @@ use std::{cell::RefCell, str, time::SystemTime};
 thread_local! { static EBW: RefCell<EventBuilder> = RefCell::new(EventBuilder::new());}
 
 /// Trait for event name callback
-pub trait EventNameCallback: Send + Sync + 'static {
+pub trait EventNameCallback: Send + Sync {
     /// Returns the event name for the given log record
     fn get_name(&self, record: &opentelemetry_sdk::logs::SdkLogRecord) -> &'static str;
 }
