@@ -37,13 +37,29 @@ use tracing_subscriber::prelude::*;
 use tracing_subscriber::Registry;
 
 #[cfg(feature = "experimental_eventname_callback")]
-struct CustomEventNameCallback;
+struct EventNameFromLogRecordEventName;
 
 #[cfg(feature = "experimental_eventname_callback")]
-impl EventNameCallback for CustomEventNameCallback {
+impl EventNameCallback for EventNameFromLogRecordEventName {
     #[inline(always)]
     fn get_name(&self, record: &opentelemetry_sdk::logs::SdkLogRecord) -> &'static str {
         record.event_name().unwrap_or("Log")
+    }
+}
+
+#[cfg(feature = "experimental_eventname_callback")]
+struct EventNameFromLogRecordCustom;
+
+#[cfg(feature = "experimental_eventname_callback")]
+impl EventNameCallback for EventNameFromLogRecordCustom {
+    #[inline(always)]
+    fn get_name(&self, record: &opentelemetry_sdk::logs::SdkLogRecord) -> &'static str {
+        match record.event_name() {
+            Some(name) if name.starts_with("Checkout") => "CheckoutEvent",
+            Some(name) if name.starts_with("Payment") => "PaymentEvent",
+            Some(_) => "OtherEvent",
+            None => "DefaultEvent",
+        }
     }
 }
 
@@ -61,9 +77,12 @@ fn setup_provider_default() -> SdkLoggerProvider {
 }
 
 #[cfg(feature = "experimental_eventname_callback")]
-fn setup_provider_with_callback() -> SdkLoggerProvider {
+fn setup_provider_with_callback<C>(event_name_callback: C) -> SdkLoggerProvider
+where
+    C: EventNameCallback + 'static,
+{
     let user_event_processor = Processor::builder("myprovider")
-        .with_event_name_callback(CustomEventNameCallback)
+        .with_event_name_callback(event_name_callback)
         .build()
         .unwrap();
 
@@ -99,13 +118,35 @@ fn benchmark_4_attributes(c: &mut Criterion) {
 }
 
 #[cfg(feature = "experimental_eventname_callback")]
-fn benchmark_4_attributes_custom_event_name(c: &mut Criterion) {
-    let provider = setup_provider_with_callback();
+fn benchmark_4_attributes_event_name_custom(c: &mut Criterion) {
+    let provider = setup_provider_with_callback(EventNameFromLogRecordCustom);
     let ot_layer = tracing_layer::OpenTelemetryTracingBridge::new(&provider);
     let subscriber = Registry::default().with(ot_layer);
 
     tracing::subscriber::with_default(subscriber, || {
-        c.bench_function("User_Event_4_Attributes_EventName_Callback", |b| {
+        c.bench_function("User_Event_4_Attributes_EventName_Custom", |b| {
+            b.iter(|| {
+                error!(
+                    name : "CheckoutFailed",
+                    field1 = "field1",
+                    field2 = "field2",
+                    field3 = "field3",
+                    field4 = "field4",
+                    message = "Unable to process checkout."
+                );
+            });
+        });
+    });
+}
+
+#[cfg(feature = "experimental_eventname_callback")]
+fn benchmark_4_attributes_event_name_from_log_record(c: &mut Criterion) {
+    let provider = setup_provider_with_callback(EventNameFromLogRecordEventName);
+    let ot_layer = tracing_layer::OpenTelemetryTracingBridge::new(&provider);
+    let subscriber = Registry::default().with(ot_layer);
+
+    tracing::subscriber::with_default(subscriber, || {
+        c.bench_function("User_Event_4_Attributes_EventName_FromLogRecord", |b| {
             b.iter(|| {
                 error!(
                     name : "CheckoutFailed",
@@ -147,7 +188,9 @@ fn criterion_benchmark(c: &mut Criterion) {
     benchmark_4_attributes(c);
     benchmark_6_attributes(c);
     #[cfg(feature = "experimental_eventname_callback")]
-    benchmark_4_attributes_custom_event_name(c);
+    benchmark_4_attributes_event_name_custom(c);
+    #[cfg(feature = "experimental_eventname_callback")]
+    benchmark_4_attributes_event_name_from_log_record(c);
 }
 
 criterion_group! {
