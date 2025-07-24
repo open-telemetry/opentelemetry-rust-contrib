@@ -29,9 +29,9 @@ use criterion::{criterion_group, criterion_main, Criterion};
 use opentelemetry_appender_tracing::layer as tracing_layer;
 use opentelemetry_sdk::logs::SdkLoggerProvider;
 use opentelemetry_sdk::Resource;
-use opentelemetry_user_events_logs::Processor;
 #[cfg(feature = "experimental_eventname_callback")]
 use opentelemetry_user_events_logs::EventNameCallback;
+use opentelemetry_user_events_logs::Processor;
 use tracing::error;
 use tracing_subscriber::prelude::*;
 use tracing_subscriber::Registry;
