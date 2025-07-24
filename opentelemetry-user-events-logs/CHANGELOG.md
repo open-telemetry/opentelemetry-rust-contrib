@@ -25,11 +25,17 @@
   Example usage
   
   ```rust
+  struct CustomEventNameCallback;
+  
+  impl EventNameCallback for CustomEventNameCallback {
+      fn call(&self, record: &SdkLogRecord) -> &'static str {
+        // event_name() returns a &'static str
+        record.event_name().unwrap_or("DefaultEvent")
+      }
+  }
+
   let processor = Processor::builder("myprovider")
-      .with_event_name_callback(|record| {
-          // event_name() returns a &'static str
-          record.event_name().unwrap_or("DefaultEvent")
-      })
+      .with_event_name_callback(CustomEventNameCallback)
       .build()
       .unwrap();
   ```
