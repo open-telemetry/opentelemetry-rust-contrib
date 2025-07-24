@@ -24,7 +24,7 @@ path = "src/geneva_exporter.rs"
 ctrlc = "3.2.5"
 num_cpus = "1.15.0"
 num-format = "0.4.4"
-sysinfo = { version = "0.35", optional = true }
+sysinfo = { version = "0.36", optional = true }
 tokio = { version = "1", features = ["full", "test-util"] }
 wiremock = "0.6"
 futures = "0.3"
