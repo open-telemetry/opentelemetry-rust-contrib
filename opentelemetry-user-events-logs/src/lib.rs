@@ -136,7 +136,7 @@ pub use logs::Processor;
 pub use logs::ProcessorBuilder;
 
 #[cfg(feature = "experimental_eventname_callback")]
-pub use logs::{DefaultEventNameCallback, EventNameCallback};
+pub use logs::{EventNameCallback};
 
 #[cfg(test)]
 mod tests {
