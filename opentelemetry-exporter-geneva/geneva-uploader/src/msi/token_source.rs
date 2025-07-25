@@ -17,7 +17,7 @@ use crate::msi::types::{string_utils, ManagedIdentity};
 pub fn get_msi_access_token(
     resource: &str,
     managed_identity: Option<&ManagedIdentity>,
-    is_ant_mds: bool,
+    _is_ant_mds: bool,
 ) -> MsiResult<String> {
     let id_type = managed_identity.map(|id| id.identifier_type()).unwrap_or("");
     let id_value = managed_identity.map(|id| id.identifier_value()).unwrap_or("");
@@ -33,11 +33,10 @@ pub fn get_msi_access_token(
     let mut token_ptr: *mut c_char = ptr::null_mut();
 
     let result = unsafe {
-        ffi::rust_get_msi_access_token(
+        ffi::GetMSIAccessToken(
             _resource_ptr,
             _id_type_ptr,
             _id_value_ptr,
-            is_ant_mds,
             &mut token_ptr,
         )
     };
@@ -50,7 +49,7 @@ pub fn get_msi_access_token(
 
     let token = unsafe {
         let result = string_utils::c_string_to_rust_string(token_ptr);
-        ffi::rust_free_string(token_ptr);
+        ffi::xplat_free_string(token_ptr);
         result
     }?;
 

@@ -68,6 +68,24 @@ fn check_msi_library() -> bool {
             // Extract library directory and name for linking
             if let (Some(lib_dir), Some(lib_name)) = (lib_path.parent(), lib_path.file_stem().and_then(|n| n.to_str())) {
                 println!("cargo:warning=---> Library directory: {}", lib_dir.display());
+                
+                // Determine XPlatLib include directory
+                let xplatlib_inc = env::var("XPLATLIB_INC_PATH")
+                    .unwrap_or_else(|_| "/home/labhas/strato/Compute-Runtime-Tux/external/GenevaMonAgent-Shared-CrossPlat/src/XPlatLib/inc".to_string());
+                
+                // Compile the C++ bridge file
+                let bridge_path = "src/msi/native/bridge.cpp";
+                println!("cargo:warning=---> Compiling C++ bridge: {}", bridge_path);
+                println!("cargo:rerun-if-changed={}", bridge_path);
+                
+                cc::Build::new()
+                    .cpp(true)
+                    .file(bridge_path)
+                    .include(&xplatlib_inc)
+                    .flag("-std=c++17")
+                    .flag("-fPIC")
+                    .compile("msi_bridge");
+                
                 // Add library search path
                 println!("cargo:rustc-link-search=native={}", lib_dir.display());
                 
@@ -136,6 +154,13 @@ fn add_platform_libraries() {
             println!("cargo:rustc-link-lib=dl");
             println!("cargo:rustc-link-lib=ssl");
             println!("cargo:rustc-link-lib=crypto");
+            // Additional libraries required by XPlatLib (cpprestsdk dependencies)
+            println!("cargo:rustc-link-lib=cpprest");
+            println!("cargo:rustc-link-lib=boost_system");
+            println!("cargo:rustc-link-lib=boost_thread");
+            println!("cargo:rustc-link-lib=boost_atomic");
+            println!("cargo:rustc-link-lib=boost_chrono");
+            println!("cargo:rustc-link-lib=boost_regex");
         }
         "macos" => {
             println!("cargo:rustc-link-lib=c++");

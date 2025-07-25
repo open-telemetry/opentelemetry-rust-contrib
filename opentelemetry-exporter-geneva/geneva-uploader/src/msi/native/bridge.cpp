@@ -1,36 +1,23 @@
 // Copyright (c) Microsoft Corporation. All rights reserved.
 // Licensed under the MIT license.
 
+#include <cstring>
 #include "IMSIToken.h"
 #include "StringUtils.h"
 #include "XPlatErrors.h"
+#include "ImdsEndpointFetcher.h"
 
 extern "C" {
 
-// Simple wrapper for the existing C function
-XPLATRESULT rust_get_msi_access_token(
-    const char* resource,
-    const char* managed_id_identifier,
-    const char* managed_id_value,
-    bool is_ant_mds,
-    char** token
-) {
-    return GetMSIAccessToken(resource, managed_id_identifier, managed_id_value, is_ant_mds, token);
-}
+// C++ wrapper functions for Rust FFI to XPlatLib integration
 
-// Create MSI Token Source
-void* rust_create_imsi_token_source() {
-    return CreateIMSITokenSource();
-}
-
-// Initialize MSI Token Source
-XPLATRESULT rust_imsi_token_source_initialize(
+// Initialize MSI Token Source (wrapper for IMSITokenSource::Initialize)
+XPLATRESULT imsi_token_source_initialize(
     void* token_source,
     const char* resource,
     const char* managed_id_identifier,
     const char* managed_id_value,
-    bool fallback_to_default,
-    bool is_ant_mds
+    bool fallback_to_default
 ) {
     if (!token_source) return XPLAT_INITIALIZATION_FAILED;
     
@@ -39,14 +26,14 @@ XPLATRESULT rust_imsi_token_source_initialize(
     xplat_string_t x_managed_id_identifier = XPlatUtils::string_to_string_t(std::string(managed_id_identifier ? managed_id_identifier : ""));
     xplat_string_t x_managed_id_value = XPlatUtils::string_to_string_t(std::string(managed_id_value ? managed_id_value : ""));
     
-    return source->Initialize(x_resource, x_managed_id_identifier, x_managed_id_value, fallback_to_default, is_ant_mds);
+    return source->Initialize(x_resource, x_managed_id_identifier, x_managed_id_value, fallback_to_default);
 }
 
-// Get Access Token
-XPLATRESULT rust_imsi_token_source_get_access_token(
+// Get Access Token (wrapper for IMSITokenSource::GetAccessToken)
+XPLATRESULT imsi_token_source_get_access_token(
     void* token_source,
-    bool force_refresh,
-    char** access_token
+    char** access_token,
+    bool force_refresh
 ) {
     if (!token_source || !access_token) return XPLAT_FAIL;
     
@@ -65,8 +52,8 @@ XPLATRESULT rust_imsi_token_source_get_access_token(
     return result;
 }
 
-// Get Expires On Seconds
-XPLATRESULT rust_imsi_token_source_get_expires_on_seconds(
+// Get Expires On Seconds (wrapper for IMSITokenSource::GetExpiresOnSeconds)
+XPLATRESULT imsi_token_source_get_expires_on_seconds(
     void* token_source,
     long int* expires_on_seconds
 ) {
@@ -76,8 +63,8 @@ XPLATRESULT rust_imsi_token_source_get_expires_on_seconds(
     return source->GetExpiresOnSeconds(*expires_on_seconds);
 }
 
-// Set IMDS Host Address
-XPLATRESULT rust_imsi_token_source_set_imds_host_address(
+// Set IMDS Host Address (wrapper for IMSITokenSource::SetImdsHostAddress)
+XPLATRESULT imsi_token_source_set_imds_host_address(
     void* token_source,
     const char* host_address,
     int endpoint_type
@@ -86,13 +73,21 @@ XPLATRESULT rust_imsi_token_source_set_imds_host_address(
     
     auto* source = static_cast<IMSITokenSource*>(token_source);
     xplat_string_t x_host_address = XPlatUtils::string_to_string_t(std::string(host_address));
-    ImdsEndpointType x_endpoint_type = static_cast<ImdsEndpointType>(endpoint_type);
+    
+    // Map from our enum values to XPlatLib enum values
+    ImdsEndpointType x_endpoint_type;
+    switch (endpoint_type) {
+        case 0: x_endpoint_type = ImdsEndpointType::Custom_Endpoint; break;
+        case 1: x_endpoint_type = ImdsEndpointType::ARC_Endpoint; break;
+        case 2: x_endpoint_type = ImdsEndpointType::Azure_Endpoint; break;
+        default: return XPLAT_FAIL;
+    }
     
     return source->SetImdsHostAddress(x_host_address, x_endpoint_type);
 }
 
-// Get IMDS Host Address
-XPLATRESULT rust_imsi_token_source_get_imds_host_address(
+// Get IMDS Host Address (wrapper for IMSITokenSource::GetImdsHostAddress)
+XPLATRESULT imsi_token_source_get_imds_host_address(
     void* token_source,
     char** host_address
 ) {
@@ -108,23 +103,23 @@ XPLATRESULT rust_imsi_token_source_get_imds_host_address(
     return XPLAT_NO_ERROR;
 }
 
-// Stop Token Source
-void rust_imsi_token_source_stop(void* token_source) {
+// Stop Token Source (wrapper for IMSITokenSource::Stop)
+void imsi_token_source_stop(void* token_source) {
     if (token_source) {
         auto* source = static_cast<IMSITokenSource*>(token_source);
         source->Stop();
     }
 }
 
-// Destroy Token Source
-void rust_destroy_imsi_token_source(void* token_source) {
+// Destroy Token Source (wrapper for delete operator)
+void imsi_token_source_destroy(void* token_source) {
     if (token_source) {
         delete static_cast<IMSITokenSource*>(token_source);
     }
 }
 
-// Free string allocated by the library
-void rust_free_string(char* str) {
+// Free string allocated by XPlatLib (using delete[])
+void xplat_free_string(char* str) {
     if (str) {
         delete[] str;
     }
