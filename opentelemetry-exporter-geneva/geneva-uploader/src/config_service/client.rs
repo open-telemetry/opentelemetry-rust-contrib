@@ -1,4 +1,4 @@
-// Geneva Config Client with TLS (PKCS#12) and TODO: Managed Identity support
+// Geneva Config Client with TLS (PKCS#12) and MSI support
 
 use base64::{engine::general_purpose, Engine as _};
 use reqwest::{
@@ -18,11 +18,15 @@ use std::fs;
 use std::path::PathBuf;
 use std::sync::RwLock;
 
+#[cfg(feature = "msi_auth")]
+use crate::msi;
+
 /// Authentication methods for the Geneva Config Client.
 ///
-/// The client supports two authentication methods:
+/// The client supports three authentication methods:
 /// - Certificate-based authentication using PKCS#12 (.p12) files
-/// - Managed Identity (Azure) - planned for future implementation
+/// - Azure Managed Identity (MSI) authentication with support for both system-assigned and user-assigned identities
+/// - Mock authentication for testing purposes
 ///
 /// # Certificate Format
 /// Certificates should be in PKCS#12 (.p12) format for client TLS authentication.
@@ -55,10 +59,43 @@ pub enum AuthMethod {
     Certificate { path: PathBuf, password: String },
     /// Azure Managed Identity authentication
     ///
-    /// Note(TODO): This is not yet implemented.
-    ManagedIdentity,
+    /// Supports both system-assigned and user-assigned managed identities.
+    /// When `identity` is `None`, uses system-assigned managed identity.
+    /// When `identity` is `Some(...)`, uses the specified user-assigned managed identity.
+    ///
+    /// # Arguments
+    /// * `identity` - Optional user-assigned identity specification. If None, uses system-assigned identity.
+    /// * `fallback_to_default` - If true and user-assigned identity fails, fallback to system-assigned identity.
+    ManagedIdentity {
+        identity: Option<MsiIdentityType>,
+        fallback_to_default: bool,
+    },
     #[cfg(feature = "mock_auth")]
     MockAuth, // No authentication, used for testing purposes
+}
+
+/// Types of managed identity that can be used for authentication
+#[allow(dead_code)]
+#[derive(Clone, Debug)]
+pub enum MsiIdentityType {
+    /// User-assigned managed identity specified by Object ID
+    ObjectId(String),
+    /// User-assigned managed identity specified by Client ID
+    ClientId(String),
+    /// User-assigned managed identity specified by full ARM Resource ID
+    ResourceId(String),
+}
+
+impl MsiIdentityType {
+    /// Convert to the MSI library's ManagedIdentity type
+    #[cfg(feature = "msi_auth")]
+    pub fn to_managed_identity(&self) -> msi::ManagedIdentity {
+        match self {
+            MsiIdentityType::ObjectId(id) => msi::ManagedIdentity::ObjectId(id.clone()),
+            MsiIdentityType::ClientId(id) => msi::ManagedIdentity::ClientId(id.clone()),
+            MsiIdentityType::ResourceId(id) => msi::ManagedIdentity::ResourceId(id.clone()),
+        }
+    }
 }
 
 #[derive(Debug, Error)]
@@ -72,6 +109,12 @@ pub(crate) enum GenevaConfigClientError {
     JwtTokenError(String),
     #[error("Certificate error: {0}")]
     Certificate(String),
+    #[error("MSI authentication failed: {0}")]
+    #[cfg_attr(not(feature = "msi_auth"), allow(dead_code))]
+    MsiAuthenticationFailed(String),
+    #[error("MSI token refresh failed: {0}")]
+    #[cfg_attr(not(feature = "msi_auth"), allow(dead_code))]
+    MsiTokenRefreshFailed(String),
 
     // Networking / HTTP / TLS
     #[error("HTTP error: {0}")]
@@ -246,10 +289,10 @@ impl GenevaConfigClient {
                         .map_err(|e| GenevaConfigClientError::Certificate(e.to_string()))?;
                 client_builder = client_builder.use_preconfigured_tls(tls_connector);
             }
-            AuthMethod::ManagedIdentity => {
-                return Err(GenevaConfigClientError::AuthMethodNotImplemented(
-                    "Managed Identity authentication is not implemented yet".into(),
-                ));
+            AuthMethod::ManagedIdentity { .. } => {
+                // For MSI auth, we don't need special TLS configuration
+                // Authentication is done via Bearer tokens in HTTP headers
+                // Use default HTTPS client configuration
             }
             #[cfg(feature = "mock_auth")]
             AuthMethod::MockAuth => {
@@ -418,6 +461,22 @@ impl GenevaConfigClient {
 
     /// Internal method that actually fetches data from Geneva Config Service
     async fn fetch_ingestion_info(&self) -> Result<(IngestionGatewayInfo, MonikerInfo)> {
+        match &self.config.auth_method {
+            AuthMethod::Certificate { .. } => {
+                self.fetch_with_certificate().await
+            }
+            AuthMethod::ManagedIdentity { identity, fallback_to_default } => {
+                self.fetch_with_msi(identity, *fallback_to_default).await
+            }
+            #[cfg(feature = "mock_auth")]
+            AuthMethod::MockAuth => {
+                self.fetch_with_certificate().await // Use same logic for mock auth
+            }
+        }
+    }
+
+    /// Fetch ingestion info using certificate-based authentication
+    async fn fetch_with_certificate(&self) -> Result<(IngestionGatewayInfo, MonikerInfo)> {
         let tag_id = Uuid::new_v4().to_string(); //TODO - uuid is costly, check if counter is enough?
         let mut url = String::with_capacity(self.precomputed_url_prefix.len() + 50); // Pre-allocate with reasonable capacity
         write!(&mut url, "{}&TagId={tag_id}", self.precomputed_url_prefix).map_err(|e| {
@@ -439,6 +498,123 @@ impl GenevaConfigClient {
         // Check if the response is successful
         let status = response.status();
         let body = response.text().await?;
+        if status.is_success() {
+            let parsed = match serde_json::from_str::<GenevaResponse>(&body) {
+                Ok(response) => response,
+                Err(e) => {
+                    return Err(GenevaConfigClientError::AuthInfoNotFound(format!(
+                        "Failed to parse response: {e}"
+                    )));
+                }
+            };
+
+            for account in parsed.storage_account_keys {
+                if account.is_primary_moniker && account.account_moniker_name.contains("diag") {
+                    let moniker_info = MonikerInfo {
+                        name: account.account_moniker_name,
+                        account_group: account.account_group_name,
+                    };
+
+                    return Ok((parsed.ingestion_gateway_info, moniker_info));
+                }
+            }
+
+            Err(GenevaConfigClientError::MonikerNotFound(
+                "No primary diag moniker found in storage accounts".to_string(),
+            ))
+        } else {
+            Err(GenevaConfigClientError::RequestFailed {
+                status: status.as_u16(),
+                message: body,
+            })
+        }
+    }
+
+    /// Fetch ingestion info using MSI authentication
+    #[cfg(feature = "msi_auth")]
+    async fn fetch_with_msi(
+        &self,
+        identity: &Option<MsiIdentityType>,
+        fallback_to_default: bool,
+    ) -> Result<(IngestionGatewayInfo, MonikerInfo)> {
+        // First attempt: try with specified identity (or system-assigned if None)
+        let result = self.try_msi_request(identity).await;
+        
+        match result {
+            Ok(info) => Ok(info),
+            Err(e) => {
+                // If fallback is enabled and we were using a user-assigned identity, try system-assigned
+                if fallback_to_default && identity.is_some() {
+                    self.try_msi_request(&None).await.map_err(|fallback_err| {
+                        GenevaConfigClientError::MsiAuthenticationFailed(format!(
+                            "Primary identity failed: {}, Fallback also failed: {}", 
+                            e, fallback_err
+                        ))
+                    })
+                } else {
+                    Err(e)
+                }
+            }
+        }
+    }
+
+    /// Fetch ingestion info using MSI authentication (stub when feature is disabled)
+    #[cfg(not(feature = "msi_auth"))]
+    async fn fetch_with_msi(
+        &self,
+        _identity: &Option<MsiIdentityType>,
+        _fallback_to_default: bool,
+    ) -> Result<(IngestionGatewayInfo, MonikerInfo)> {
+        Err(GenevaConfigClientError::AuthMethodNotImplemented(
+            "MSI authentication support is not enabled. Enable the 'msi_auth' feature to use MSI authentication.".into(),
+        ))
+    }
+
+    /// Try MSI request with a specific identity configuration
+    #[cfg(feature = "msi_auth")]
+    async fn try_msi_request(
+        &self,
+        identity: &Option<MsiIdentityType>,
+    ) -> Result<(IngestionGatewayInfo, MonikerInfo)> {
+        // Get MSI token for Azure Monitor
+        let msi_identity = identity.as_ref().map(|id| id.to_managed_identity());
+        let msi_token = msi::get_msi_access_token(
+            msi::resources::AZURE_MONITOR_PUBLIC,
+            msi_identity.as_ref(),
+            false, // not AntMds
+        )
+        .map_err(|e| {
+            GenevaConfigClientError::MsiAuthenticationFailed(format!(
+                "Failed to get MSI token: {}", e
+            ))
+        })?;
+
+        // Build the request URL
+        let tag_id = Uuid::new_v4().to_string();
+        let mut url = String::with_capacity(self.precomputed_url_prefix.len() + 50);
+        write!(&mut url, "{}&TagId={tag_id}", self.precomputed_url_prefix).map_err(|e| {
+            GenevaConfigClientError::InternalError(format!("Failed to write URL: {e}"))
+        })?;
+
+        let req_id = Uuid::new_v4().to_string();
+
+        // Make authenticated request using MSI token
+        let mut request = self
+            .http_client
+            .get(&url)
+            .headers(self.static_headers.clone())
+            .header("Authorization", format!("Bearer {}", msi_token))
+            .header("x-ms-client-request-id", req_id);
+
+        let response = request
+            .send()
+            .await
+            .map_err(GenevaConfigClientError::Http)?;
+
+        // Process response
+        let status = response.status();
+        let body = response.text().await?;
+        
         if status.is_success() {
             let parsed = match serde_json::from_str::<GenevaResponse>(&body) {
                 Ok(response) => response,
