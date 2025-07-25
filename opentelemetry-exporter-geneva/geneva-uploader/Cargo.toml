@@ -29,7 +29,7 @@ default = ["self_signed_certs"] # TODO - remove this feature before release
 
 [dev-dependencies]
 tokio = { version = "1", features = ["full"] }
-rcgen = "0.13"
+rcgen = "0.14"
 openssl = { version = "0.10", features = ["vendored"] }
 tempfile = "3.5"
 wiremock = "0.6"
