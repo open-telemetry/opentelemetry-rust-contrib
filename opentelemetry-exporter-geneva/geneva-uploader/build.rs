@@ -154,13 +154,7 @@ fn add_platform_libraries() {
             println!("cargo:rustc-link-lib=dl");
             println!("cargo:rustc-link-lib=ssl");
             println!("cargo:rustc-link-lib=crypto");
-            // Additional libraries required by XPlatLib (cpprestsdk dependencies)
-            println!("cargo:rustc-link-lib=cpprest");
-            println!("cargo:rustc-link-lib=boost_system");
-            println!("cargo:rustc-link-lib=boost_thread");
-            println!("cargo:rustc-link-lib=boost_atomic");
-            println!("cargo:rustc-link-lib=boost_chrono");
-            println!("cargo:rustc-link-lib=boost_regex");
+            // Only link system libraries - XPlatLib is static and contains its dependencies
         }
         "macos" => {
             println!("cargo:rustc-link-lib=c++");
