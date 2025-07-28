@@ -115,7 +115,7 @@ impl OtlpEncoder {
                 entry.metadata.end_time = entry.metadata.end_time.max(timestamp);
             }
 
-            // 4. Add schema entry if not already present (deduplication within batch)
+            // 4. Add schema entry if not already present (multiple schemas per event_name batch)
             if !entry.schemas.iter().any(|s| s.id == schema_id) {
                 entry.schemas.push(schema_entry);
             }
