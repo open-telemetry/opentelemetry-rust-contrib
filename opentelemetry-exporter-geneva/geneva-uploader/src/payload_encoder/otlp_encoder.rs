@@ -238,7 +238,7 @@ impl OtlpEncoder {
     }
 
     /// Create schema - always creates a new CentralSchemaEntry
-    fn get_or_create_schema(&self, schema_id: u64, field_info: &[FieldDef]) -> CentralSchemaEntry {
+    fn create_schema(&self, schema_id: u64, field_info: &[FieldDef]) -> CentralSchemaEntry {
         let schema =
             BondEncodedSchema::from_fields("OtlpLogRecord", "telemetry", field_info.to_vec()); //TODO - use actual struct name and namespace
 
