@@ -466,8 +466,7 @@ mod tests {
         assert_eq!(
             unique_schemas.len(),
             3,
-            "Expected 3 unique schema IDs but found duplicates in: {}",
-            schema_ids
+            "Expected 3 unique schema IDs but found duplicates in: {schema_ids}"
         );
 
         // Verify each schema ID is a valid MD5 hash (32 hex characters)
@@ -475,13 +474,11 @@ mod tests {
             assert_eq!(
                 schema_id.len(),
                 32,
-                "Schema ID should be 32 hex characters: {}",
-                schema_id
+                "Schema ID should be 32 hex characters: {schema_id}"
             );
             assert!(
                 schema_id.chars().all(|c| c.is_ascii_hexdigit()),
-                "Schema ID should contain only hex characters: {}",
-                schema_id
+                "Schema ID should contain only hex characters: {schema_id}"
             );
         }
     }
