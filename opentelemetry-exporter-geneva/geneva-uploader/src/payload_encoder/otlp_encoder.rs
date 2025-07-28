@@ -91,7 +91,7 @@ impl OtlpEncoder {
             let (field_info, schema_id) =
                 Self::determine_fields_and_schema_id(log_record, event_name_str);
 
-            let schema_entry = self.get_or_create_schema(schema_id, field_info.as_slice());
+            let schema_entry = self.create_schema(schema_id, field_info.as_slice());
             // 2. Encode row
             let row_buffer = self.write_row_data(log_record, &field_info);
             let level = log_record.severity_number as u8;
@@ -115,7 +115,7 @@ impl OtlpEncoder {
                 entry.metadata.end_time = entry.metadata.end_time.max(timestamp);
             }
 
-            // 4. Add schema entry if not already present (multiple schemas per event_name batch)
+            // 4. Add schema entry if not already present (deduplication within batch)
             if !entry.schemas.iter().any(|s| s.id == schema_id) {
                 entry.schemas.push(schema_entry);
             }
@@ -396,35 +396,77 @@ mod tests {
     }
 
     #[test]
-    fn test_schema_creation_without_caching() {
+    fn test_multiple_schemas_per_batch() {
         let encoder = OtlpEncoder::new();
 
+        // Create multiple log records with different schema structures
+        // to test that multiple schemas can exist within the same batch
         let log1 = LogRecord {
             observed_time_unix_nano: 1_700_000_000_000_000_000,
+            event_name: "user_action".to_string(),
             severity_number: 9,
+            severity_text: "INFO".to_string(),
             ..Default::default()
         };
 
+        // Schema 2: Same event_name but with trace_id (different schema)
         let mut log2 = LogRecord {
+            event_name: "user_action".to_string(),
             observed_time_unix_nano: 1_700_000_001_000_000_000,
             severity_number: 10,
+            severity_text: "WARN".to_string(),
             ..Default::default()
         };
+        log2.trace_id = vec![1; 16];
+
+        // Schema 3: Same event_name but with attributes (different schema)
+        let mut log3 = LogRecord {
+            event_name: "user_action".to_string(),
+            observed_time_unix_nano: 1_700_000_002_000_000_000,
+            severity_number: 11,
+            severity_text: "ERROR".to_string(),
+            ..Default::default()
+        };
+        log3.attributes.push(KeyValue {
+            key: "user_id".to_string(),
+            value: Some(AnyValue {
+                value: Some(Value::StringValue("user123".to_string())),
+            }),
+        });
 
         let metadata = "namespace=test";
 
-        // First encoding creates schema
-        let result1 = encoder.encode_log_batch([log1].iter(), metadata);
-        assert!(!result1.is_empty());
+        // Encode multiple log records with different schema structures but same event_name
+        let result = encoder.encode_log_batch([log1, log2, log3].iter(), metadata);
 
-        // Second encoding with same schema structure creates new schema (no caching)
-        let result2 = encoder.encode_log_batch([log2.clone()].iter(), metadata);
-        assert!(!result2.is_empty());
+        // Should create one batch (same event_name = "user_action")
+        assert_eq!(result.len(), 1);
+        let batch = &result[0];
+        assert_eq!(batch.event_name, "user_action");
 
-        // Add trace_id to create different schema
-        log2.trace_id = vec![1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16];
-        let result3 = encoder.encode_log_batch([log2].iter(), metadata);
-        assert!(!result3.is_empty());
+        // Verify that multiple schemas were created within the same batch
+        // schema_ids should contain multiple semicolon-separated MD5 hashes
+        let schema_ids = &batch.metadata.schema_ids;
+        assert!(!schema_ids.is_empty());
+        
+        // Split by semicolon to get individual schema IDs
+        let schema_id_list: Vec<&str> = schema_ids.split(';').collect();
+        
+        // Should have 3 different schema IDs (one per unique schema structure)
+        assert_eq!(schema_id_list.len(), 3, 
+            "Expected 3 schema IDs but found {}: {}", schema_id_list.len(), schema_ids);
+        
+        // Verify all schema IDs are different (each log record has different schema structure)
+        let unique_schemas: std::collections::HashSet<&str> = schema_id_list.into_iter().collect();
+        assert_eq!(unique_schemas.len(), 3, 
+            "Expected 3 unique schema IDs but found duplicates in: {}", schema_ids);
+        
+        // Verify each schema ID is a valid MD5 hash (32 hex characters)
+        for schema_id in unique_schemas {
+            assert_eq!(schema_id.len(), 32, "Schema ID should be 32 hex characters: {}", schema_id);
+            assert!(schema_id.chars().all(|c| c.is_ascii_hexdigit()), 
+                "Schema ID should contain only hex characters: {}", schema_id);
+        }
     }
 
     #[test]
