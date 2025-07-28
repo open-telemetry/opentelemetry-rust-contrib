@@ -91,7 +91,7 @@ impl OtlpEncoder {
             let (field_info, schema_id) =
                 Self::determine_fields_and_schema_id(log_record, event_name_str);
 
-            let schema_entry = self.create_schema(schema_id, field_info.as_slice());
+            let schema_entry = Self::create_schema(schema_id, field_info.as_slice());
             // 2. Encode row
             let row_buffer = self.write_row_data(log_record, &field_info);
             let level = log_record.severity_number as u8;
@@ -238,7 +238,7 @@ impl OtlpEncoder {
     }
 
     /// Create schema - always creates a new CentralSchemaEntry
-    fn create_schema(&self, schema_id: u64, field_info: &[FieldDef]) -> CentralSchemaEntry {
+    fn create_schema(schema_id: u64, field_info: &[FieldDef]) -> CentralSchemaEntry {
         let schema =
             BondEncodedSchema::from_fields("OtlpLogRecord", "telemetry", field_info.to_vec()); //TODO - use actual struct name and namespace
 
@@ -448,24 +448,41 @@ mod tests {
         // schema_ids should contain multiple semicolon-separated MD5 hashes
         let schema_ids = &batch.metadata.schema_ids;
         assert!(!schema_ids.is_empty());
-        
+
         // Split by semicolon to get individual schema IDs
         let schema_id_list: Vec<&str> = schema_ids.split(';').collect();
-        
+
         // Should have 3 different schema IDs (one per unique schema structure)
-        assert_eq!(schema_id_list.len(), 3, 
-            "Expected 3 schema IDs but found {}: {}", schema_id_list.len(), schema_ids);
-        
+        assert_eq!(
+            schema_id_list.len(),
+            3,
+            "Expected 3 schema IDs but found {}: {}",
+            schema_id_list.len(),
+            schema_ids
+        );
+
         // Verify all schema IDs are different (each log record has different schema structure)
         let unique_schemas: std::collections::HashSet<&str> = schema_id_list.into_iter().collect();
-        assert_eq!(unique_schemas.len(), 3, 
-            "Expected 3 unique schema IDs but found duplicates in: {}", schema_ids);
-        
+        assert_eq!(
+            unique_schemas.len(),
+            3,
+            "Expected 3 unique schema IDs but found duplicates in: {}",
+            schema_ids
+        );
+
         // Verify each schema ID is a valid MD5 hash (32 hex characters)
         for schema_id in unique_schemas {
-            assert_eq!(schema_id.len(), 32, "Schema ID should be 32 hex characters: {}", schema_id);
-            assert!(schema_id.chars().all(|c| c.is_ascii_hexdigit()), 
-                "Schema ID should contain only hex characters: {}", schema_id);
+            assert_eq!(
+                schema_id.len(),
+                32,
+                "Schema ID should be 32 hex characters: {}",
+                schema_id
+            );
+            assert!(
+                schema_id.chars().all(|c| c.is_ascii_hexdigit()),
+                "Schema ID should contain only hex characters: {}",
+                schema_id
+            );
         }
     }
 
