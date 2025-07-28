@@ -113,7 +113,7 @@ jobs:
       - uses: dtolnay/rust-toolchain@b3b07ba8b418998c39fb20f53e8b695cdcc8de1b
         with:
           toolchain: stable
-      - uses: taiki-e/install-action@d188da0a65bc6c80011567688127bddc8be0ca24 # v2.56.21
+      - uses: taiki-e/install-action@1623b01885f360a2c467e6531b483f9afa328bf1 # v2.56.23
         with:
           tool: cargo-msrv
       - name: Check MSRV for all crates
@@ -172,7 +172,7 @@ jobs:
         with:
             repo-token: ${{ secrets.GITHUB_TOKEN }}
       - name: cargo install cargo-llvm-cov
-        uses: taiki-e/install-action@d188da0a65bc6c80011567688127bddc8be0ca24 # v2.56.21
+        uses: taiki-e/install-action@1623b01885f360a2c467e6531b483f9afa328bf1 # v2.56.23
         with:
           tool: cargo-llvm-cov
       - name: cargo generate-lockfile
@@ -199,7 +199,7 @@ jobs:
       - uses: dtolnay/rust-toolchain@b3b07ba8b418998c39fb20f53e8b695cdcc8de1b
         with:
           toolchain: stable
-      - uses: taiki-e/install-action@d188da0a65bc6c80011567688127bddc8be0ca24 # v2.56.21
+      - uses: taiki-e/install-action@1623b01885f360a2c467e6531b483f9afa328bf1 # v2.56.23
         with:
           tool: cargo-machete
       - name: cargo machete
@@ -219,7 +219,7 @@ jobs:
       - uses: dtolnay/rust-toolchain@b3b07ba8b418998c39fb20f53e8b695cdcc8de1b
         with:
           toolchain: stable
-      - uses: taiki-e/install-action@d188da0a65bc6c80011567688127bddc8be0ca24 # v2.56.21
+      - uses: taiki-e/install-action@1623b01885f360a2c467e6531b483f9afa328bf1 # v2.56.23
         with:
           tool: cargo-workspace-lints
       - name: cargo workspace-lints
