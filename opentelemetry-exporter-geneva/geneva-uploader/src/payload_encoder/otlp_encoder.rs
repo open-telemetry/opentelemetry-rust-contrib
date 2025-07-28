@@ -6,10 +6,7 @@ use chrono::{TimeZone, Utc};
 use opentelemetry_proto::tonic::common::v1::any_value::Value;
 use opentelemetry_proto::tonic::logs::v1::LogRecord;
 use std::borrow::Cow;
-use std::collections::HashMap;
-use std::sync::{Arc, RwLock};
-
-type SchemaCache = Arc<RwLock<HashMap<u64, (Arc<BondEncodedSchema>, [u8; 16])>>>;
+use std::sync::Arc;
 
 const FIELD_ENV_NAME: &str = "env_name";
 const FIELD_ENV_VER: &str = "env_ver";
@@ -25,22 +22,11 @@ const FIELD_BODY: &str = "body";
 
 /// Encoder to write OTLP payload in bond form.
 #[derive(Clone)]
-pub(crate) struct OtlpEncoder {
-    // TODO - limit cache size or use LRU eviction, and/or add feature flag for caching
-    schema_cache: SchemaCache,
-}
+pub(crate) struct OtlpEncoder;
 
 impl OtlpEncoder {
     pub(crate) fn new() -> Self {
-        OtlpEncoder {
-            schema_cache: Arc::new(RwLock::new(HashMap::new())),
-        }
-    }
-
-    /// Get the number of cached schemas (for testing/debugging purposes)
-    #[allow(dead_code)]
-    pub(crate) fn schema_cache_size(&self) -> usize {
-        self.schema_cache.read().unwrap().len()
+        OtlpEncoder {}
     }
 
     /// Encode a batch of logs into a vector of (event_name, bytes, schema_ids, start_time_nanos, end_time_nanos)
@@ -105,7 +91,7 @@ impl OtlpEncoder {
             let (field_info, schema_id) =
                 Self::determine_fields_and_schema_id(log_record, event_name_str);
 
-            let schema_entry = self.get_or_create_schema(schema_id, field_info.as_slice());
+            let schema_entry = Self::create_schema(schema_id, field_info.as_slice());
             // 2. Encode row
             let row_buffer = self.write_row_data(log_record, &field_info);
             let level = log_record.severity_number as u8;
@@ -251,34 +237,13 @@ impl OtlpEncoder {
         (field_defs, schema_id)
     }
 
-    /// Get or create schema - fields are accessible via returned schema entry
-    fn get_or_create_schema(&self, schema_id: u64, field_info: &[FieldDef]) -> CentralSchemaEntry {
-        {
-            if let Some((schema_arc, schema_md5)) =
-                self.schema_cache.read().unwrap().get(&schema_id)
-            {
-                return CentralSchemaEntry {
-                    id: schema_id,
-                    md5: *schema_md5,
-                    schema: (**schema_arc).clone(), // Dereference Arc and clone BondEncodedSchema
-                };
-            }
-        }
-
-        // Only clone field_info when we actually need to create a new schema
-        // Investigate if we can avoid cloning by using Cow using Arc to fields_info
+    /// Create schema - always creates a new CentralSchemaEntry
+    fn create_schema(schema_id: u64, field_info: &[FieldDef]) -> CentralSchemaEntry {
         let schema =
             BondEncodedSchema::from_fields("OtlpLogRecord", "telemetry", field_info.to_vec()); //TODO - use actual struct name and namespace
 
         let schema_bytes = schema.as_bytes();
         let schema_md5 = md5::compute(schema_bytes).0;
-
-        // Cache Arc<BondEncodedSchema> to avoid cloning large structures
-        let schema_arc = Arc::new(schema.clone());
-        {
-            let mut cache = self.schema_cache.write().unwrap();
-            cache.insert(schema_id, (schema_arc, schema_md5));
-        }
 
         CentralSchemaEntry {
             id: schema_id,
@@ -431,35 +396,91 @@ mod tests {
     }
 
     #[test]
-    fn test_schema_caching() {
+    fn test_multiple_schemas_per_batch() {
         let encoder = OtlpEncoder::new();
 
+        // Create multiple log records with different schema structures
+        // to test that multiple schemas can exist within the same batch
         let log1 = LogRecord {
             observed_time_unix_nano: 1_700_000_000_000_000_000,
+            event_name: "user_action".to_string(),
             severity_number: 9,
+            severity_text: "INFO".to_string(),
             ..Default::default()
         };
 
+        // Schema 2: Same event_name but with trace_id (different schema)
         let mut log2 = LogRecord {
+            event_name: "user_action".to_string(),
             observed_time_unix_nano: 1_700_000_001_000_000_000,
             severity_number: 10,
+            severity_text: "WARN".to_string(),
             ..Default::default()
         };
+        log2.trace_id = vec![1; 16];
+
+        // Schema 3: Same event_name but with attributes (different schema)
+        let mut log3 = LogRecord {
+            event_name: "user_action".to_string(),
+            observed_time_unix_nano: 1_700_000_002_000_000_000,
+            severity_number: 11,
+            severity_text: "ERROR".to_string(),
+            ..Default::default()
+        };
+        log3.attributes.push(KeyValue {
+            key: "user_id".to_string(),
+            value: Some(AnyValue {
+                value: Some(Value::StringValue("user123".to_string())),
+            }),
+        });
 
         let metadata = "namespace=test";
 
-        // First encoding creates schema
-        let _result1 = encoder.encode_log_batch([log1].iter(), metadata);
-        assert_eq!(encoder.schema_cache.read().unwrap().len(), 1);
+        // Encode multiple log records with different schema structures but same event_name
+        let result = encoder.encode_log_batch([log1, log2, log3].iter(), metadata);
 
-        // Second encoding with same schema structure reuses schema
-        let _result2 = encoder.encode_log_batch([log2.clone()].iter(), metadata);
-        assert_eq!(encoder.schema_cache.read().unwrap().len(), 1);
+        // Should create one batch (same event_name = "user_action")
+        assert_eq!(result.len(), 1);
+        let batch = &result[0];
+        assert_eq!(batch.event_name, "user_action");
 
-        // Add trace_id to create different schema
-        log2.trace_id = vec![1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16];
-        let _result3 = encoder.encode_log_batch([log2].iter(), metadata);
-        assert_eq!(encoder.schema_cache.read().unwrap().len(), 2);
+        // Verify that multiple schemas were created within the same batch
+        // schema_ids should contain multiple semicolon-separated MD5 hashes
+        let schema_ids = &batch.metadata.schema_ids;
+        assert!(!schema_ids.is_empty());
+
+        // Split by semicolon to get individual schema IDs
+        let schema_id_list: Vec<&str> = schema_ids.split(';').collect();
+
+        // Should have 3 different schema IDs (one per unique schema structure)
+        assert_eq!(
+            schema_id_list.len(),
+            3,
+            "Expected 3 schema IDs but found {}: {}",
+            schema_id_list.len(),
+            schema_ids
+        );
+
+        // Verify all schema IDs are different (each log record has different schema structure)
+        let unique_schemas: std::collections::HashSet<&str> = schema_id_list.into_iter().collect();
+        assert_eq!(
+            unique_schemas.len(),
+            3,
+            "Expected 3 unique schema IDs but found duplicates in: {schema_ids}"
+        );
+
+        // Verify each schema ID is a valid MD5 hash (32 hex characters)
+        for schema_id in unique_schemas {
+            assert_eq!(
+                schema_id.len(),
+                32,
+                "Schema ID should be 32 hex characters: {schema_id}"
+            );
+            assert!(
+                schema_id.chars().all(|c| c.is_ascii_hexdigit()),
+                "Schema ID should contain only hex characters: {schema_id}"
+            );
+        }
     }
 
     #[test]
@@ -521,9 +542,6 @@ mod tests {
         assert!(!result[0].data.is_empty()); // Should have encoded data
                                              // Should have 3 different schema IDs (semicolon-separated)
         assert_eq!(result[0].metadata.schema_ids.matches(';').count(), 2); // 3 schemas = 2 semicolons
-
-        // Should have 3 different schemas cached
-        assert_eq!(encoder.schema_cache.read().unwrap().len(), 3);
     }
 
     #[test]
@@ -637,8 +655,5 @@ mod tests {
         assert_eq!(system_alert.metadata.schema_ids.matches(';').count(), 0); // 1 schema = 0 semicolons
         assert!(!log_batch.data.is_empty()); // Should have encoded data
         assert_eq!(log_batch.metadata.schema_ids.matches(';').count(), 0); // 1 schema = 0 semicolons
-
-        // Should have 4 different schemas cached
-        assert_eq!(encoder.schema_cache.read().unwrap().len(), 4);
     }
 }
