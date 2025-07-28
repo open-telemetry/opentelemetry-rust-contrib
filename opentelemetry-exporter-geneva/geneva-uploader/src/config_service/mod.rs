@@ -36,7 +36,7 @@ mod tests {
 
         // The correct methods for rcgen 0.13:
         let cert_der = cert.cert.der().as_ref().to_vec();
-        let key_der = cert.key_pair.serialize_der();
+        let key_der = cert.signing_key.serialize_der();
 
         // Convert to OpenSSL types
         let x509 = X509::from_der(&cert_der).unwrap();
