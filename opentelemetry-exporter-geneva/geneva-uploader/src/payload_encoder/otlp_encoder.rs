@@ -22,7 +22,7 @@ const FIELD_BODY: &str = "body";
 
 /// Encoder to write OTLP payload in bond form.
 #[derive(Clone)]
-pub(crate) struct OtlpEncoder {}
+pub(crate) struct OtlpEncoder;
 
 impl OtlpEncoder {
     pub(crate) fn new() -> Self {
