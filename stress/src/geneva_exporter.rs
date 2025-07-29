@@ -269,9 +269,14 @@ async fn async_main(
 
     // Warm up the ingestion token cache using new split API
     println!("Warming up token cache...");
-    let warm_batches = client.encode_and_compress_logs(&logs)?;
+    let warm_batches = client
+        .encode_and_compress_logs(&logs)
+        .map_err(|e| format!("Failed to encode logs: {e}"))?;
     for batch in &warm_batches {
-        client.upload_batch(batch).await?;
+        client
+            .upload_batch(batch)
+            .await
+            .map_err(|e| format!("Failed to upload batch: {e}"))?;
     }
 
     println!("\nStarting Geneva exporter stress test using stream-based approach");
@@ -291,10 +296,28 @@ async fn async_main(
                 let client = client.clone();
                 let logs = logs.clone();
                 async move {
-                    // Use new split API
-                    let batches = client.encode_and_compress_logs(&logs)?;
-                    for batch in &batches {
-                        client.upload_batch(batch).await?;
+                    // Use new split API with concurrent batch uploads
+                    let batches = client
+                        .encode_and_compress_logs(&logs)
+                        .map_err(|e| std::io::Error::other(e))?;
+
+                    // Upload batches concurrently using buffer_unordered (like Geneva exporter)
+                    use futures::stream::{self, StreamExt};
+                    let errors: Vec<String> = stream::iter(batches)
+                        .map(|batch| {
+                            let client = client.clone();
+                            async move { client.upload_batch(&batch).await }
+                        })
+                        .buffer_unordered(10) // Max 10 concurrent uploads per operation
+                        .filter_map(|result| async move { result.err() })
+                        .collect()
+                        .await;
+
+                    if !errors.is_empty() {
+                        return Err(std::io::Error::other(format!(
+                            "Upload failures: {}",
+                            errors.join("; ")
+                        )));
                     }
                     Ok(())
                 }
@@ -319,10 +342,28 @@ async fn async_main(
                 let client = client.clone();
                 let logs = logs.clone();
                 async move {
-                    // Use new split API
-                    let batches = client.encode_and_compress_logs(&logs)?;
-                    for batch in &batches {
-                        client.upload_batch(batch).await?;
+                    // Use new split API with concurrent batch uploads
+                    let batches = client
+                        .encode_and_compress_logs(&logs)
+                        .map_err(|e| std::io::Error::other(e))?;
+
+                    // Upload batches concurrently using buffer_unordered (like Geneva exporter)
+                    use futures::stream::{self, StreamExt};
+                    let errors: Vec<String> = stream::iter(batches)
+                        .map(|batch| {
+                            let client = client.clone();
+                            async move { client.upload_batch(&batch).await }
+                        })
+                        .buffer_unordered(10) // Max 10 concurrent uploads per operation
+                        .filter_map(|result| async move { result.err() })
+                        .collect()
+                        .await;
+
+                    if !errors.is_empty() {
+                        return Err(std::io::Error::other(format!(
+                            "Upload failures: {}",
+                            errors.join("; ")
+                        )));
                     }
                     Ok(())
                 }
