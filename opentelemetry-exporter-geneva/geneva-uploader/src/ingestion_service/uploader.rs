@@ -88,13 +88,12 @@ impl From<reqwest::Error> for GenevaUploaderError {
 
 pub(crate) type Result<T> = std::result::Result<T, GenevaUploaderError>;
 
-#[allow(dead_code)]
 /// Response from the ingestion API when submitting data
 #[derive(Debug, Clone, Deserialize)]
-pub(crate) struct IngestionResponse {
-    pub(crate) ticket: String,
+pub struct IngestionResponse {
+    pub ticket: String,
     #[serde(flatten)]
-    pub(crate) extra: HashMap<String, Value>,
+    pub extra: HashMap<String, Value>,
 }
 
 /// Configuration for the Geneva Uploader
@@ -210,6 +209,7 @@ impl GenevaUploader {
         // Always get fresh auth info
         let (auth_info, moniker_info, monitoring_endpoint) =
             self.config_client.get_ingestion_info().await?;
+        println!("ayuth_info: {:?}", auth_info.endpoint);
         let data_size = data.len();
         let upload_uri = self.create_upload_uri(
             &monitoring_endpoint,

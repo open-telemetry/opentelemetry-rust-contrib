@@ -123,7 +123,6 @@ async fn init_client() -> Result<(GenevaClient, Option<String>), Box<dyn std::er
             tenant: std::env::var("GENEVA_TENANT").unwrap_or_else(|_| "test".to_string()),
             role_name: std::env::var("GENEVA_ROLE").unwrap_or_else(|_| "test".to_string()),
             role_instance: std::env::var("GENEVA_INSTANCE").unwrap_or_else(|_| "test".to_string()),
-            max_concurrent_uploads: None, // Use default
         };
 
         let client = GenevaClient::new(config).await?;
@@ -142,7 +141,6 @@ async fn init_client() -> Result<(GenevaClient, Option<String>), Box<dyn std::er
             tenant: "test".to_string(),
             role_name: "test".to_string(),
             role_instance: "test".to_string(),
-            max_concurrent_uploads: None, // Use default
         };
 
         let client = GenevaClient::new(config).await?;
@@ -197,7 +195,6 @@ async fn init_client() -> Result<(GenevaClient, Option<String>), Box<dyn std::er
             tenant: "test".to_string(),
             role_name: "test".to_string(),
             role_instance: "test".to_string(),
-            max_concurrent_uploads: None, // Use default
         };
 
         let client = GenevaClient::new(config).await?;
@@ -270,9 +267,12 @@ async fn async_main(
     let client = Arc::new(client);
     let logs = Arc::new(create_test_logs());
 
-    // Warm up the ingestion token cache
+    // Warm up the ingestion token cache using new split API
     println!("Warming up token cache...");
-    client.upload_logs(&logs).await?;
+    let warm_batches = client.encode_and_compress_logs(&logs)?;
+    for batch in &warm_batches {
+        client.upload_batch(batch).await?;
+    }
 
     println!("\nStarting Geneva exporter stress test using stream-based approach");
     println!("Press Ctrl+C to stop continuous tests\n");
@@ -290,7 +290,14 @@ async fn async_main(
             ThroughputTest::run_continuous("Geneva Upload", config, move || {
                 let client = client.clone();
                 let logs = logs.clone();
-                async move { client.upload_logs(&logs).await }
+                async move {
+                    // Use new split API
+                    let batches = client.encode_and_compress_logs(&logs)?;
+                    for batch in &batches {
+                        client.upload_batch(batch).await?;
+                    }
+                    Ok(())
+                }
             })
             .await;
         }
@@ -311,7 +318,14 @@ async fn async_main(
             let stats = ThroughputTest::run_fixed("Geneva Upload", config, move || {
                 let client = client.clone();
                 let logs = logs.clone();
-                async move { client.upload_logs(&logs).await }
+                async move {
+                    // Use new split API
+                    let batches = client.encode_and_compress_logs(&logs)?;
+                    for batch in &batches {
+                        client.upload_batch(batch).await?;
+                    }
+                    Ok(())
+                }
             })
             .await;
 
@@ -330,10 +344,17 @@ async fn async_main(
                     let client = client.clone();
                     let logs = logs.clone();
                     async move {
-                        client
-                            .upload_logs(&logs)
-                            .await
-                            .map_err(std::io::Error::other)
+                        // Use new split API
+                        let batches = match client.encode_and_compress_logs(&logs) {
+                            Ok(batches) => batches,
+                            Err(e) => return Err(std::io::Error::other(e)),
+                        };
+                        for batch in &batches {
+                            if let Err(e) = client.upload_batch(batch).await {
+                                return Err(std::io::Error::other(e));
+                            }
+                        }
+                        Ok(())
                     }
                 },
             )

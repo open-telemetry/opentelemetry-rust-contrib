@@ -33,9 +33,20 @@ impl fmt::Debug for GenevaExporter {
 impl opentelemetry_sdk::logs::LogExporter for GenevaExporter {
     async fn export(&self, batch: LogBatch<'_>) -> OTelSdkResult {
         let otlp = group_logs_by_resource_and_scope(batch, &self.resource);
-        if let Err(e) = self.geneva_client.upload_logs(&otlp).await {
-            return Err(OTelSdkError::InternalFailure(e));
+
+        // Encode and compress logs into batches
+        let compressed_batches = match self.geneva_client.encode_and_compress_logs(&otlp) {
+            Ok(batches) => batches,
+            Err(e) => return Err(OTelSdkError::InternalFailure(e)),
+        };
+
+        // Upload each batch individually
+        for batch in &compressed_batches {
+            if let Err(e) = self.geneva_client.upload_batch(batch).await {
+                return Err(OTelSdkError::InternalFailure(e));
+            }
         }
+
         Ok(())
     }
 
