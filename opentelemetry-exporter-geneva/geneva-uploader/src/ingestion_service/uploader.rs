@@ -200,14 +200,14 @@ impl GenevaUploader {
     /// * `metadata` - Batch metadata containing timestamps and schema information
     ///
     /// # Returns
-    /// * `Result<()>` - Success or an error
+    /// * `Result<IngestionResponse>` - The response containing the ticket ID or an error
     #[allow(dead_code)]
     pub(crate) async fn upload(
         &self,
         data: Vec<u8>,
         event_name: &str,
         metadata: &BatchMetadata,
-    ) -> Result<()> {
+    ) -> Result<IngestionResponse> {
         // Always get fresh auth info
         let (auth_info, moniker_info, monitoring_endpoint) =
             self.config_client.get_ingestion_info().await?;
@@ -240,10 +240,10 @@ impl GenevaUploader {
         let body = response.text().await?;
 
         if status == reqwest::StatusCode::ACCEPTED {
-            let _ingest_response: IngestionResponse =
+            let ingest_response: IngestionResponse =
                 serde_json::from_str(&body).map_err(GenevaUploaderError::SerdeJson)?;
 
-            Ok(())
+            Ok(ingest_response)
         } else {
             Err(GenevaUploaderError::UploadFailed {
                 status: status.as_u16(),

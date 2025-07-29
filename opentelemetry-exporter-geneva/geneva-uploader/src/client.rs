@@ -138,6 +138,7 @@ impl GenevaClient {
                 &batch.metadata,
             )
             .await
+            .map(|_| ()) // Discard the IngestionResponse and return ()
             .map_err(|e| format!("Geneva upload failed: {e} Event: {}", batch.event_name))
     }
 }
