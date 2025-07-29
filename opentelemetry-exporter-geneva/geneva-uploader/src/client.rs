@@ -95,7 +95,7 @@ impl GenevaClient {
     pub fn encode_and_compress_logs(
         &self,
         logs: &[ResourceLogs],
-    ) -> Result<Vec<CompressedBatch>, String> {
+    ) -> Result<Vec<CompressedBatch>, String> { //TODO - Return error type instead of String
         let log_iter = logs
             .iter()
             .flat_map(|resource_log| resource_log.scope_logs.iter())
@@ -130,7 +130,7 @@ impl GenevaClient {
 
     /// Upload a single compressed batch.
     /// This allows for granular control over uploads, including custom retry logic for individual batches.
-    pub async fn upload_batch(&self, batch: &CompressedBatch) -> Result<(), String> {
+    pub async fn upload_batch(&self, batch: &CompressedBatch) -> Result<(), String> { //TODO - Return error type instead of String
         self.uploader
             .upload(
                 batch.compressed_data.clone(),
@@ -138,7 +138,7 @@ impl GenevaClient {
                 &batch.metadata,
             )
             .await
-            .map(|_| ()) // Discard the IngestionResponse and return ()
+            .map(|_| ()) 
             .map_err(|e| format!("Geneva upload failed: {e} Event: {}", batch.event_name))
     }
 }
