@@ -90,10 +90,12 @@ pub(crate) type Result<T> = std::result::Result<T, GenevaUploaderError>;
 
 /// Response from the ingestion API when submitting data
 #[derive(Debug, Clone, Deserialize)]
-pub struct IngestionResponse {
-    pub ticket: String,
+pub(crate) struct IngestionResponse {
+    #[allow(dead_code)]
+    pub(crate) ticket: String,
     #[serde(flatten)]
-    pub extra: HashMap<String, Value>,
+    #[allow(dead_code)]
+    pub(crate) extra: HashMap<String, Value>,
 }
 
 /// Configuration for the Geneva Uploader
@@ -198,14 +200,14 @@ impl GenevaUploader {
     /// * `metadata` - Batch metadata containing timestamps and schema information
     ///
     /// # Returns
-    /// * `Result<IngestionResponse>` - The response containing the ticket ID or an error
+    /// * `Result<()>` - Success or an error
     #[allow(dead_code)]
     pub(crate) async fn upload(
         &self,
         data: Vec<u8>,
         event_name: &str,
         metadata: &BatchMetadata,
-    ) -> Result<IngestionResponse> {
+    ) -> Result<()> {
         // Always get fresh auth info
         let (auth_info, moniker_info, monitoring_endpoint) =
             self.config_client.get_ingestion_info().await?;
@@ -238,10 +240,10 @@ impl GenevaUploader {
         let body = response.text().await?;
 
         if status == reqwest::StatusCode::ACCEPTED {
-            let ingest_response: IngestionResponse =
+            let _ingest_response: IngestionResponse =
                 serde_json::from_str(&body).map_err(GenevaUploaderError::SerdeJson)?;
 
-            Ok(ingest_response)
+            Ok(())
         } else {
             Err(GenevaUploaderError::UploadFailed {
                 status: status.as_u16(),

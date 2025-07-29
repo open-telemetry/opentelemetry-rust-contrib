@@ -19,4 +19,3 @@ pub(crate) use ingestion_service::uploader::{
 
 pub use client::{CompressedBatch, GenevaClient, GenevaClientConfig};
 pub use config_service::client::AuthMethod;
-pub use ingestion_service::uploader::IngestionResponse;

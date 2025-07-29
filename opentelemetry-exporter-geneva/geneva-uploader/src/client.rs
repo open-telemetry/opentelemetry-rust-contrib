@@ -1,7 +1,7 @@
 //! High-level GenevaClient for user code. Wraps config_service and ingestion_service.
 
 use crate::config_service::client::{AuthMethod, GenevaConfigClient, GenevaConfigClientConfig};
-use crate::ingestion_service::uploader::{GenevaUploader, GenevaUploaderConfig, IngestionResponse};
+use crate::ingestion_service::uploader::{GenevaUploader, GenevaUploaderConfig};
 use crate::payload_encoder::central_blob::BatchMetadata;
 use crate::payload_encoder::lz4_chunked_compression::lz4_chunked_compression;
 use crate::payload_encoder::otlp_encoder::OtlpEncoder;
@@ -130,7 +130,7 @@ impl GenevaClient {
 
     /// Upload a single compressed batch.
     /// This allows for granular control over uploads, including custom retry logic for individual batches.
-    pub async fn upload_batch(&self, batch: &CompressedBatch) -> Result<IngestionResponse, String> {
+    pub async fn upload_batch(&self, batch: &CompressedBatch) -> Result<(), String> {
         self.uploader
             .upload(
                 batch.compressed_data.clone(),
