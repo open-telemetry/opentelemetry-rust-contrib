@@ -23,6 +23,9 @@ pub struct GenevaClientConfig {
     pub role_instance: String,
     /// Maximum number of concurrent uploads. If None, defaults to number of CPU cores.
     pub max_concurrent_uploads: Option<usize>,
+    /// User agent suffix for the client. Will be formatted as "RustGenevaClient-<suffix>".
+    /// If None, defaults to "RustGenevaClient".
+    pub user_agent_suffix: Option<String>,
     // Add event name/version here if constant, or per-upload if you want them per call.
 }
 
@@ -47,6 +50,7 @@ impl GenevaClient {
             region: cfg.region,
             config_major_version: cfg.config_major_version,
             auth_method: cfg.auth_method,
+            user_agent_suffix: cfg.user_agent_suffix,
         };
         let config_client = Arc::new(
             GenevaConfigClient::new(config_client_config)

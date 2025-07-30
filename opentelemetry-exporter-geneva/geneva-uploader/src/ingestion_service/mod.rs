@@ -64,6 +64,7 @@ mod tests {
                     path: cert_path,
                     password: cert_password,
                 },
+                user_agent_suffix: Some("TestUploader".to_string()),
             };
 
             // Build client and uploader
