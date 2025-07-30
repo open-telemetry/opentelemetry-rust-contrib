@@ -103,6 +103,213 @@ where
     Err(last_error.unwrap())
 }
 
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::sync::atomic::{AtomicU32, Ordering};
+    use std::sync::Arc;
+
+    #[derive(Debug, Clone)]
+    struct TestError {
+        message: String,
+        retriable: bool,
+    }
+
+    impl std::fmt::Display for TestError {
+        fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+            write!(f, "{}", self.message)
+        }
+    }
+
+    impl TestError {
+        fn new(message: &str, retriable: bool) -> Self {
+            Self {
+                message: message.to_string(),
+                retriable,
+            }
+        }
+
+        fn is_retriable(&self) -> bool {
+            self.retriable
+        }
+    }
+
+    #[tokio::test]
+    async fn test_retry_config_defaults() {
+        let config = RetryConfig::default();
+        assert_eq!(config.max_retries, 3);
+        assert_eq!(config.delay, Duration::from_millis(1000));
+    }
+
+    #[tokio::test]
+    async fn test_retry_config_builder() {
+        let config = RetryConfig::new()
+            .with_max_retries(5)
+            .with_delay(Duration::from_millis(500));
+
+        assert_eq!(config.max_retries, 5);
+        assert_eq!(config.delay, Duration::from_millis(500));
+    }
+
+    #[tokio::test]
+    async fn test_successful_operation_no_retry() {
+        let config = RetryConfig::new().with_max_retries(3);
+        let call_count = Arc::new(AtomicU32::new(0));
+        let call_count_clone = call_count.clone();
+
+        let result = retry_with_config_and_check(
+            &config,
+            "test_operation",
+            || {
+                let count = call_count_clone.clone();
+                async move {
+                    count.fetch_add(1, Ordering::SeqCst);
+                    Ok::<i32, TestError>(42)
+                }
+            },
+            |_| true,
+        )
+        .await;
+
+        assert_eq!(result.unwrap(), 42);
+        assert_eq!(call_count.load(Ordering::SeqCst), 1);
+    }
+
+    #[tokio::test]
+    async fn test_retriable_error_with_eventual_success() {
+        let config = RetryConfig::new()
+            .with_max_retries(3)
+            .with_delay(Duration::from_millis(1)); // Very short delay for testing
+
+        let call_count = Arc::new(AtomicU32::new(0));
+        let call_count_clone = call_count.clone();
+
+        let result = retry_with_config_and_check(
+            &config,
+            "test_operation",
+            || {
+                let count = call_count_clone.clone();
+                async move {
+                    let current_count = count.fetch_add(1, Ordering::SeqCst);
+                    if current_count < 2 {
+                        Err(TestError::new("retriable error", true))
+                    } else {
+                        Ok(42)
+                    }
+                }
+            },
+            |error| error.is_retriable(),
+        )
+        .await;
+
+        assert_eq!(result.unwrap(), 42);
+        assert_eq!(call_count.load(Ordering::SeqCst), 3); // Failed twice, succeeded on third
+    }
+
+    #[tokio::test]
+    async fn test_non_retriable_error_no_retry() {
+        let config = RetryConfig::new().with_max_retries(3);
+        let call_count = Arc::new(AtomicU32::new(0));
+        let call_count_clone = call_count.clone();
+
+        let result = retry_with_config_and_check(
+            &config,
+            "test_operation",
+            || {
+                let count = call_count_clone.clone();
+                async move {
+                    count.fetch_add(1, Ordering::SeqCst);
+                    Err::<i32, TestError>(TestError::new("non-retriable error", false))
+                }
+            },
+            |error| error.is_retriable(),
+        )
+        .await;
+
+        assert!(result.is_err());
+        assert_eq!(result.unwrap_err().message, "non-retriable error");
+        assert_eq!(call_count.load(Ordering::SeqCst), 1); // Only called once
+    }
+
+    #[tokio::test]
+    async fn test_max_retries_exhausted() {
+        let config = RetryConfig::new()
+            .with_max_retries(2)
+            .with_delay(Duration::from_millis(1)); // Very short delay for testing
+
+        let call_count = Arc::new(AtomicU32::new(0));
+        let call_count_clone = call_count.clone();
+
+        let result = retry_with_config_and_check(
+            &config,
+            "test_operation",
+            || {
+                let count = call_count_clone.clone();
+                async move {
+                    count.fetch_add(1, Ordering::SeqCst);
+                    Err::<i32, TestError>(TestError::new("always fails", true))
+                }
+            },
+            |error| error.is_retriable(),
+        )
+        .await;
+
+        assert!(result.is_err());
+        assert_eq!(result.unwrap_err().message, "always fails");
+        assert_eq!(call_count.load(Ordering::SeqCst), 3); // Initial attempt + 2 retries
+    }
+
+    #[tokio::test]
+    async fn test_zero_retries() {
+        let config = RetryConfig::new().with_max_retries(0);
+        let call_count = Arc::new(AtomicU32::new(0));
+        let call_count_clone = call_count.clone();
+
+        let result = retry_with_config_and_check(
+            &config,
+            "test_operation",
+            || {
+                let count = call_count_clone.clone();
+                async move {
+                    count.fetch_add(1, Ordering::SeqCst);
+                    Err::<i32, TestError>(TestError::new("error", true))
+                }
+            },
+            |error| error.is_retriable(),
+        )
+        .await;
+
+        assert!(result.is_err());
+        assert_eq!(call_count.load(Ordering::SeqCst), 1); // Only initial attempt
+    }
+
+    #[tokio::test]
+    async fn test_legacy_retry_function() {
+        let config = RetryConfig::new()
+            .with_max_retries(2)
+            .with_delay(Duration::from_millis(1));
+
+        let call_count = Arc::new(AtomicU32::new(0));
+        let call_count_clone = call_count.clone();
+
+        let result = retry_with_config(&config, "test_operation", || {
+            let count = call_count_clone.clone();
+            async move {
+                let current_count = count.fetch_add(1, Ordering::SeqCst);
+                if current_count < 1 {
+                    Err(TestError::new("retriable error", true))
+                } else {
+                    Ok(42)
+                }
+            }
+        })
+        .await;
+
+        assert_eq!(result.unwrap(), 42);
+        assert_eq!(call_count.load(Ordering::SeqCst), 2); // Failed once, succeeded on second
+    }
+}
+
 /// Execute a function with retry logic that includes retriability checking
 pub async fn retry_with_config_and_check<F, Fut, T, E, R>(
     config: &RetryConfig,
