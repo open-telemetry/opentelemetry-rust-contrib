@@ -48,7 +48,11 @@ impl opentelemetry_sdk::logs::LogExporter for GenevaExporter {
             Err(e) => return Err(OTelSdkError::InternalFailure(e)),
         };
 
-        // Execute uploads concurrently with configurable concurrency using buffer_unordered
+        // Execute uploads concurrently within the same async task using buffer_unordered.
+        // This processes up to max_concurrent_uploads batches simultaneously without
+        // spawning new tasks or threads, using async I/O concurrency instead.
+        // All batch uploads are processed asynchronously in the same task context that
+        // called the export() method.
         let errors: Vec<String> = stream::iter(compressed_batches)
             .map(|batch| {
                 let client = self.geneva_client.clone();
