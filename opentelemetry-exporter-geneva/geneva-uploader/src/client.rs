@@ -23,8 +23,8 @@ pub struct GenevaClientConfig {
     pub role_instance: String,
     /// Maximum number of concurrent uploads. If None, defaults to number of CPU cores.
     pub max_concurrent_uploads: Option<usize>,
-    /// User agent suffix for the client. Will be formatted as "RustGenevaClient-<suffix>".
-    /// If None, defaults to "RustGenevaClient".
+    /// User agent suffix for the client. Will be formatted as "RustGenevaClient-<suffix>-0.1".
+    /// If None, defaults to "RustGenevaClient-0.1".
     pub user_agent_suffix: Option<String>,
     // Add event name/version here if constant, or per-upload if you want them per call.
 }

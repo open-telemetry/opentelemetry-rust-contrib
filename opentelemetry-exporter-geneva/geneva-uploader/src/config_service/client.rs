@@ -129,8 +129,8 @@ pub(crate) struct GenevaConfigClientConfig {
     pub(crate) region: String,
     pub(crate) config_major_version: u32,
     pub(crate) auth_method: AuthMethod,
-    /// User agent suffix for the client. Will be formatted as "RustGenevaClient-<suffix>".
-    /// If None, defaults to "RustGenevaClient".
+    /// User agent suffix for the client. Will be formatted as "RustGenevaClient-<suffix>-0.1".
+    /// If None, defaults to "RustGenevaClient-0.1".
     pub(crate) user_agent_suffix: Option<String>,
 }
 
@@ -262,7 +262,7 @@ impl GenevaConfigClient {
             }
         }
 
-        let agent_identity = "GenevaUploader";
+        let agent_identity = "RustGenevaClient";
         let agent_version = "0.1";
         let user_agent_suffix = config.user_agent_suffix.as_deref().unwrap_or("");
         let static_headers =
@@ -308,15 +308,15 @@ impl GenevaConfigClient {
     }
 
     fn build_static_headers(
-        _agent_identity: &str,
-        _agent_version: &str,
+        agent_identity: &str,
+        agent_version: &str,
         user_agent_suffix: &str,
     ) -> HeaderMap {
         let mut headers = HeaderMap::new();
         let user_agent = if user_agent_suffix.is_empty() {
-            "RustGenevaClient".to_string()
+            format!("{}-{}", agent_identity, agent_version)
         } else {
-            format!("RustGenevaClient-{}", user_agent_suffix)
+            format!("{}-{}-{}", agent_identity, user_agent_suffix, agent_version)
         };
         headers.insert(USER_AGENT, HeaderValue::from_str(&user_agent).unwrap());
         headers.insert(ACCEPT, HeaderValue::from_static("application/json"));
