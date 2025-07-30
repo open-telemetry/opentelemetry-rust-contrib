@@ -267,7 +267,7 @@ async fn async_main(
     let client = Arc::new(client);
     let logs = Arc::new(create_test_logs());
 
-    // Warm up the ingestion token cache using new split API
+    // Warm up the ingestion token cache
     println!("Warming up token cache...");
     let warm_batches = client
         .encode_and_compress_logs(&logs)
@@ -296,12 +296,13 @@ async fn async_main(
                 let client = client.clone();
                 let logs = logs.clone();
                 async move {
-                    // Use new split API with concurrent batch uploads
                     let batches = client
                         .encode_and_compress_logs(&logs)
-                        .map_err(|e| std::io::Error::other(e))?;
+                        .map_err(std::io::Error::other)?;
 
-                    // Upload batches concurrently using buffer_unordered (like Geneva exporter)
+                    // All batch uploads happen within the same async task that called `encode_and_compress_logs`
+                    // Note: The batches are uploaded concurrently 10 at a time, however the test setup currently doesn't have
+                    // multiple concurrent operations.
                     use futures::stream::{self, StreamExt};
                     let errors: Vec<String> = stream::iter(batches)
                         .map(|batch| {
@@ -342,10 +343,9 @@ async fn async_main(
                 let client = client.clone();
                 let logs = logs.clone();
                 async move {
-                    // Use new split API with concurrent batch uploads
                     let batches = client
                         .encode_and_compress_logs(&logs)
-                        .map_err(|e| std::io::Error::other(e))?;
+                        .map_err(std::io::Error::other)?;
 
                     // Upload batches concurrently using buffer_unordered (like Geneva exporter)
                     use futures::stream::{self, StreamExt};
@@ -385,7 +385,6 @@ async fn async_main(
                     let client = client.clone();
                     let logs = logs.clone();
                     async move {
-                        // Use new split API
                         let batches = match client.encode_and_compress_logs(&logs) {
                             Ok(batches) => batches,
                             Err(e) => return Err(std::io::Error::other(e)),
