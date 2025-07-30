@@ -51,6 +51,7 @@ mod tests {
                 source_identity,
                 environment: environment.clone(),
                 config_version,
+                retry_config: crate::RetryConfig::default(),
             };
 
             let config = GenevaConfigClientConfig {

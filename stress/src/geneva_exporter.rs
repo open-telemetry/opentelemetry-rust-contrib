@@ -124,6 +124,7 @@ async fn init_client() -> Result<(GenevaClient, Option<String>), Box<dyn std::er
             role_name: std::env::var("GENEVA_ROLE").unwrap_or_else(|_| "test".to_string()),
             role_instance: std::env::var("GENEVA_INSTANCE").unwrap_or_else(|_| "test".to_string()),
             max_concurrent_uploads: None, // Use default
+            retry_config: None,           // Use default retry configuration
         };
 
         let client = GenevaClient::new(config).await?;
@@ -143,6 +144,7 @@ async fn init_client() -> Result<(GenevaClient, Option<String>), Box<dyn std::er
             role_name: "test".to_string(),
             role_instance: "test".to_string(),
             max_concurrent_uploads: None, // Use default
+            retry_config: None,           // Use default retry configuration
         };
 
         let client = GenevaClient::new(config).await?;
@@ -198,6 +200,7 @@ async fn init_client() -> Result<(GenevaClient, Option<String>), Box<dyn std::er
             role_name: "test".to_string(),
             role_instance: "test".to_string(),
             max_concurrent_uploads: None, // Use default
+            retry_config: None,           // Use default retry configuration
         };
 
         let client = GenevaClient::new(config).await?;

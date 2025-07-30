@@ -63,6 +63,7 @@ async fn main() {
         role_name,
         role_instance,
         max_concurrent_uploads: None, // Use default
+        retry_config: None,           // Use default retry configuration
     };
 
     let geneva_client = GenevaClient::new(config)

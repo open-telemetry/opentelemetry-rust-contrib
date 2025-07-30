@@ -1,5 +1,6 @@
 use crate::config_service::client::{GenevaConfigClient, GenevaConfigClientError};
 use crate::payload_encoder::central_blob::BatchMetadata;
+use crate::retry::{retry_with_config_and_check, RetryConfig};
 use reqwest::{header, Client};
 use serde::Deserialize;
 use serde_json::Value;
@@ -13,12 +14,12 @@ use url::form_urlencoded::byte_serialize;
 use uuid::Uuid;
 
 /// Error types for the Geneva Uploader
-#[derive(Debug, Error)]
+#[derive(Debug, Clone, Error)]
 pub(crate) enum GenevaUploaderError {
     #[error("HTTP error: {0}")]
     Http(String),
     #[error("JSON error: {0}")]
-    SerdeJson(#[from] serde_json::Error),
+    SerdeJson(String),
     #[error("Config service error: {0}")]
     ConfigClient(String),
     #[allow(dead_code)]
@@ -27,6 +28,12 @@ pub(crate) enum GenevaUploaderError {
     #[allow(dead_code)]
     #[error("Internal error: {0}")]
     InternalError(String),
+}
+
+impl From<serde_json::Error> for GenevaUploaderError {
+    fn from(err: serde_json::Error) -> Self {
+        GenevaUploaderError::SerdeJson(err.to_string())
+    }
 }
 
 impl From<GenevaConfigClientError> for GenevaUploaderError {
@@ -86,6 +93,28 @@ impl From<reqwest::Error> for GenevaUploaderError {
     }
 }
 
+impl GenevaUploaderError {
+    /// Determines if this error represents a transient condition that should be retried
+    pub fn is_retriable(&self) -> bool {
+        match self {
+            // Network/connection issues - always retry
+            GenevaUploaderError::Http(msg) => {
+                msg.contains("timeout")
+                    || msg.contains("connect")
+                    || msg.contains("io::ErrorKind::ConnectionRefused")
+                    || msg.contains("io::ErrorKind::TimedOut")
+                    || msg.contains("io::ErrorKind::UnexpectedEof")
+            }
+            // HTTP status codes - retry server errors and rate limiting
+            GenevaUploaderError::UploadFailed { status, .. } => *status >= 500 || *status == 429,
+            // Config service errors - may be transient (auth token refresh, etc.)
+            GenevaUploaderError::ConfigClient(_) => true,
+            // Don't retry parsing or internal errors
+            GenevaUploaderError::SerdeJson(_) | GenevaUploaderError::InternalError(_) => false,
+        }
+    }
+}
+
 pub(crate) type Result<T> = std::result::Result<T, GenevaUploaderError>;
 
 #[allow(dead_code)]
@@ -105,6 +134,7 @@ pub(crate) struct GenevaUploaderConfig {
     #[allow(dead_code)]
     pub environment: String,
     pub config_version: String,
+    pub retry_config: RetryConfig,
 }
 
 /// Client for uploading data to Geneva Ingestion Gateway (GIG)
@@ -190,20 +220,10 @@ impl GenevaUploader {
         Ok(query)
     }
 
-    /// Uploads data to the ingestion gateway
-    ///
-    /// # Arguments
-    /// * `data` - The encoded data to upload (already in the required format)
-    /// * `event_name` - Name of the event
-    /// * `event_version` - Version of the event
-    /// * `metadata` - Batch metadata containing timestamps and schema information
-    ///
-    /// # Returns
-    /// * `Result<IngestionResponse>` - The response containing the ticket ID or an error
-    #[allow(dead_code)]
-    pub(crate) async fn upload(
+    /// Performs a single upload attempt
+    async fn upload_attempt(
         &self,
-        data: Vec<u8>,
+        data: &[u8],
         event_name: &str,
         metadata: &BatchMetadata,
     ) -> Result<IngestionResponse> {
@@ -223,6 +243,7 @@ impl GenevaUploader {
             auth_info.endpoint.trim_end_matches('/'),
             upload_uri
         );
+
         // Send the upload request
         let response = self
             .http_client
@@ -231,16 +252,15 @@ impl GenevaUploader {
                 header::AUTHORIZATION,
                 format!("Bearer {}", auth_info.auth_token),
             )
-            .body(data)
+            .body(data.to_vec())
             .send()
             .await?;
+
         let status = response.status();
         let body = response.text().await?;
 
         if status == reqwest::StatusCode::ACCEPTED {
-            let ingest_response: IngestionResponse =
-                serde_json::from_str(&body).map_err(GenevaUploaderError::SerdeJson)?;
-
+            let ingest_response: IngestionResponse = serde_json::from_str(&body)?;
             Ok(ingest_response)
         } else {
             Err(GenevaUploaderError::UploadFailed {
@@ -248,5 +268,35 @@ impl GenevaUploader {
                 message: body,
             })
         }
+    }
+
+    /// Uploads data to the ingestion gateway with retry support
+    ///
+    /// # Arguments
+    /// * `data` - The encoded data to upload (already in the required format)
+    /// * `event_name` - Name of the event
+    /// * `metadata` - Batch metadata containing timestamps and schema information
+    ///
+    /// # Returns
+    /// * `Result<IngestionResponse>` - The response containing the ticket ID or an error
+    #[allow(dead_code)]
+    pub(crate) async fn upload(
+        &self,
+        data: Vec<u8>,
+        event_name: &str,
+        metadata: &BatchMetadata,
+    ) -> Result<IngestionResponse> {
+        let operation_name = format!("Upload {}", event_name);
+
+        retry_with_config_and_check(
+            &self.config.retry_config,
+            &operation_name,
+            || {
+                let data_ref = &data;
+                async move { self.upload_attempt(data_ref, event_name, metadata).await }
+            },
+            |error| error.is_retriable(),
+        )
+        .await
     }
 }
