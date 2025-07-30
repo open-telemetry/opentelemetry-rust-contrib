@@ -25,7 +25,7 @@ pub struct GenevaClientConfig {
     pub max_concurrent_uploads: Option<usize>,
     /// User agent suffix for the client. Will be formatted as "RustGenevaClient-<suffix>-0.1".
     /// If None, defaults to "RustGenevaClient-0.1".
-    pub user_agent_suffix: Option<String>,
+    pub user_agent_suffix: Option<&'static str>,
     // Add event name/version here if constant, or per-upload if you want them per call.
 }
 

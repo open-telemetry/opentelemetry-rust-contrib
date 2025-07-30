@@ -21,7 +21,7 @@ mod tests {
             region: "region".to_string(),
             config_major_version: 1,
             auth_method: AuthMethod::ManagedIdentity,
-            user_agent_suffix: Some("TestConfig".to_string()),
+            user_agent_suffix: Some("TestConfig"),
         };
 
         assert_eq!(config.environment, "env");
@@ -108,7 +108,7 @@ mod tests {
                 path: PathBuf::from(temp_p12_file.path().to_string_lossy().to_string()),
                 password,
             },
-            user_agent_suffix: Some("MockedTest".to_string()),
+            user_agent_suffix: Some("MockedTest"),
         };
 
         let client = GenevaConfigClient::new(config).unwrap();
@@ -154,7 +154,7 @@ mod tests {
                 path: PathBuf::from(temp_p12_file.path().to_string_lossy().to_string()),
                 password,
             },
-            user_agent_suffix: Some("ErrorHandlingTest".to_string()),
+            user_agent_suffix: Some("ErrorHandlingTest"),
         };
 
         let client = GenevaConfigClient::new(config).unwrap();
@@ -203,7 +203,7 @@ mod tests {
                 path: PathBuf::from(temp_p12_file.path().to_string_lossy().to_string()),
                 password,
             },
-            user_agent_suffix: Some("MissingInfoTest".to_string()),
+            user_agent_suffix: Some("MissingInfoTest"),
         };
 
         let client = GenevaConfigClient::new(config).unwrap();
@@ -235,7 +235,7 @@ mod tests {
                 path: PathBuf::from("/nonexistent/path.p12".to_string()),
                 password: "test".to_string(),
             },
-            user_agent_suffix: Some("InvalidCertTest".to_string()),
+            user_agent_suffix: Some("InvalidCertTest"),
         };
 
         let result = GenevaConfigClient::new(config);
@@ -299,7 +299,7 @@ mod tests {
                 path: PathBuf::from(cert_path),
                 password: cert_password,
             },
-            user_agent_suffix: Some("RealServerTest".to_string()),
+            user_agent_suffix: Some("RealServerTest"),
         };
 
         println!("Connecting to real Geneva Config service...");

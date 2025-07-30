@@ -131,7 +131,7 @@ pub(crate) struct GenevaConfigClientConfig {
     pub(crate) auth_method: AuthMethod,
     /// User agent suffix for the client. Will be formatted as "RustGenevaClient-<suffix>-0.1".
     /// If None, defaults to "RustGenevaClient-0.1".
-    pub(crate) user_agent_suffix: Option<String>,
+    pub(crate) user_agent_suffix: Option<&'static str>,
 }
 
 #[allow(dead_code)]
