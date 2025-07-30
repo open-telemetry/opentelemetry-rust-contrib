@@ -10,6 +10,13 @@ pub struct RetryConfig {
     pub max_retries: u32,
     /// Fixed delay between retries
     pub delay: Duration,
+    // TODO: Add support for exponential backoff
+    // - Add fields for initial_delay, max_delay, and backoff_multiplier
+    // - Implement exponential backoff logic in retry functions
+
+    // TODO: Add support for jitter to prevent thundering herd
+    // - Add jitter_factor field (e.g., 0.1 for 10% jitter)
+    // - Apply random jitter to calculated delays
 }
 
 impl Default for RetryConfig {
@@ -51,15 +58,16 @@ where
     Fut: std::future::Future<Output = Result<T, E>>,
     E: std::fmt::Display + Clone,
 {
-    let max_attempts = config.max_retries + 1; // +1 for the initial attempt
-    let mut last_error = None;
+    let max_attempts = config.max_retries.saturating_add(1); // +1 for the initial attempt, with overflow protection
 
     for attempt in 0..max_attempts {
         // Wait before retry (but not before the first attempt)
-        if attempt > 0 {
-            if !config.delay.is_zero() {
-                sleep(config.delay).await;
-            }
+        if attempt > 0 && !config.delay.is_zero() {
+            // TODO: Implement exponential backoff with jitter
+            // - Calculate delay as: initial_delay * (backoff_multiplier ^ attempt)
+            // - Cap delay at max_delay
+            // - Apply jitter: delay = delay * (1 + jitter_factor * (random - 0.5))
+            sleep(config.delay).await;
         }
 
         match operation().await {
@@ -75,10 +83,16 @@ where
                 return Ok(result);
             }
             Err(error) => {
-                last_error = Some(error.clone());
+                let is_last_attempt = attempt >= max_attempts.saturating_sub(1);
 
-                // Only retry if we haven't reached max attempts
-                if attempt < max_attempts - 1 {
+                if is_last_attempt {
+                    // We've exhausted all retries
+                    eprintln!(
+                        "{} failed after {} attempts: {}",
+                        operation_name, max_attempts, error
+                    );
+                    return Err(error);
+                } else {
                     eprintln!(
                         "{} attempt {} failed: {}. Retrying in {:?}...",
                         operation_name,
@@ -86,21 +100,14 @@ where
                         error,
                         config.delay
                     );
-                    continue;
-                } else {
-                    // We've exhausted all retries
-                    eprintln!(
-                        "{} failed after {} attempts: {}",
-                        operation_name, max_attempts, error
-                    );
-                    return Err(error);
+                    // Continue to next iteration
                 }
             }
         }
     }
 
-    // This should never be reached, but just in case
-    Err(last_error.unwrap())
+    // This should be unreachable, but included for completeness
+    unreachable!("Retry loop should have returned by now")
 }
 
 #[cfg(test)]
@@ -323,15 +330,15 @@ where
     E: std::fmt::Display + Clone,
     R: Fn(&E) -> bool,
 {
-    let max_attempts = config.max_retries + 1; // +1 for the initial attempt
-    let mut last_error = None;
+    let max_attempts = config.max_retries.saturating_add(1); // +1 for the initial attempt, with overflow protection
 
     for attempt in 0..max_attempts {
         // Wait before retry (but not before the first attempt)
-        if attempt > 0 {
-            if !config.delay.is_zero() {
-                sleep(config.delay).await;
-            }
+        if attempt > 0 && !config.delay.is_zero() {
+            // TODO: Implement exponential backoff with jitter (same as above)
+            // - This should use the same logic as retry_with_config
+            // - Consider extracting to a shared helper function
+            sleep(config.delay).await;
         }
 
         match operation().await {
@@ -347,10 +354,10 @@ where
                 return Ok(result);
             }
             Err(error) => {
-                last_error = Some(error.clone());
+                let is_last_attempt = attempt >= max_attempts.saturating_sub(1);
+                let should_retry = !is_last_attempt && is_retriable(&error);
 
-                // Check if we should retry - only if we haven't reached max attempts AND error is retriable
-                if attempt < max_attempts - 1 && is_retriable(&error) {
+                if should_retry {
                     eprintln!(
                         "{} attempt {} failed: {}. Retrying in {:?}...",
                         operation_name,
@@ -358,10 +365,10 @@ where
                         error,
                         config.delay
                     );
-                    continue;
+                    // Continue to next iteration
                 } else {
                     // Either we've exhausted retries or the error is not retriable
-                    if attempt == max_attempts - 1 {
+                    if is_last_attempt {
                         eprintln!(
                             "{} failed after {} attempts: {}",
                             operation_name, max_attempts, error
@@ -378,6 +385,6 @@ where
         }
     }
 
-    // This should never be reached, but just in case
-    Err(last_error.unwrap())
+    // This should be unreachable, but included for completeness
+    unreachable!("Retry loop should have returned by now")
 }
