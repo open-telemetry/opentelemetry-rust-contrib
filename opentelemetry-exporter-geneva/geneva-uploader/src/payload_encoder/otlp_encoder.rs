@@ -91,7 +91,6 @@ impl OtlpEncoder {
             let (field_info, schema_id) =
                 Self::determine_fields_and_schema_id(log_record, event_name_str);
 
-            let schema_entry = Self::create_schema(schema_id, field_info.as_slice());
             // 2. Encode row
             let row_buffer = self.write_row_data(log_record, &field_info);
             let level = log_record.severity_number as u8;
@@ -115,8 +114,9 @@ impl OtlpEncoder {
                 entry.metadata.end_time = entry.metadata.end_time.max(timestamp);
             }
 
-            // 4. Add schema entry if not already present (multiple schemas per event_name batch)
+            // 4. Add schema entry only if not already present (optimized: create only when needed)
             if !entry.schemas.iter().any(|s| s.id == schema_id) {
+                let schema_entry = Self::create_schema(schema_id, field_info.as_slice());
                 entry.schemas.push(schema_entry);
             }
 
