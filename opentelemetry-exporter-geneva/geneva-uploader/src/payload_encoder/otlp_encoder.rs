@@ -114,7 +114,7 @@ impl OtlpEncoder {
                 entry.metadata.end_time = entry.metadata.end_time.max(timestamp);
             }
 
-            // 4. Add schema entry only if not already present (optimized: create only when needed)
+            // 4. Add schema entry only if not already present (there could be multiple schemas per event_name batch)
             if !entry.schemas.iter().any(|s| s.id == schema_id) {
                 let schema_entry = Self::create_schema(schema_id, field_info.as_slice());
                 entry.schemas.push(schema_entry);
