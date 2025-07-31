@@ -242,19 +242,20 @@ mod benchmarks {
         criterion.final_summary();
     }
 
-    /// Benchmark specifically to test schema creation optimization
     /// This test focuses on scenarios where many log records share the same schema structure,
-    /// which is where our "create schema only when needed" optimization should show the most benefit.
+    ///    - Same event name ("IdenticalSchemaEvent")
+    ///    - Same set of attributes (4 attributes with identical keys and types)
+    ///
     #[test]
     #[ignore = "benchmark on crate private, ignored by default during normal test runs"]
-    // To run: $cargo test --release schema_optimization_benchmark -- --nocapture --ignored
-    fn schema_optimization_benchmark() {
+    // To run: $cargo test --release encode_log_batch_identical_schemas -- --nocapture --ignored
+    fn encode_log_batch_identical_schemas() {
         let mut criterion = Criterion::default();
         let encoder = OtlpEncoder::new();
         let metadata = "namespace=benchmark/eventVersion=Ver1v0";
 
         // Benchmark: Many logs with identical schema structure (should benefit most from optimization)
-        let mut group = criterion.benchmark_group("schema_optimization");
+        let mut group = criterion.benchmark_group("encode_log_batch_identical_schemas");
         for batch_size in [10, 50, 100, 500, 1000].iter() {
             group.bench_with_input(
                 BenchmarkId::new("identical_schemas", batch_size),
