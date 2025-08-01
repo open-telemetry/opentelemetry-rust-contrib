@@ -1,9 +1,9 @@
 // Geneva Config Client with TLS (PKCS#12) and TODO: Managed Identity support
 
-use crate::common::validate_user_agent_prefix;
+use crate::common::{build_static_headers, validate_user_agent_prefix};
 use base64::{engine::general_purpose, Engine as _};
 use reqwest::{
-    header::{HeaderMap, HeaderValue, ACCEPT, USER_AGENT},
+    header::{HeaderMap, USER_AGENT},
     Client,
 };
 use serde::Deserialize;
@@ -274,8 +274,8 @@ impl GenevaConfigClient {
         let agent_identity = "GenevaUploader";
         let agent_version = "0.1";
         let user_agent_prefix = config.user_agent_prefix.unwrap_or("");
-        let static_headers =
-            Self::build_static_headers(agent_identity, agent_version, user_agent_prefix)?;
+        let static_headers = build_static_headers(agent_identity, agent_version, user_agent_prefix)
+            .map_err(|e| GenevaConfigClientError::InvalidUserAgentPrefix(e.to_string()))?;
 
         let identity = format!("Tenant=Default/Role=GcsClient/RoleInstance={agent_identity}");
 
@@ -314,30 +314,6 @@ impl GenevaConfigClient {
         DateTime::parse_from_rfc3339(expiry_str)
             .ok()
             .map(|dt| dt.with_timezone(&Utc))
-    }
-
-    fn build_static_headers(
-        agent_identity: &str,
-        agent_version: &str,
-        user_agent_prefix: &str,
-    ) -> Result<HeaderMap> {
-        let mut headers = HeaderMap::new();
-        let user_agent = if user_agent_prefix.is_empty() {
-            format!("{agent_identity}/{agent_version}")
-        } else {
-            format!("{user_agent_prefix} ({agent_identity}/{agent_version})")
-        };
-
-        // Safe header construction with proper error handling
-        let header_value = HeaderValue::from_str(&user_agent).map_err(|e| {
-            GenevaConfigClientError::InvalidUserAgentPrefix(format!(
-                "Failed to create User-Agent header: {e}"
-            ))
-        })?;
-
-        headers.insert(USER_AGENT, header_value);
-        headers.insert(ACCEPT, HeaderValue::from_static("application/json"));
-        Ok(headers)
     }
 
     /// Retrieves ingestion gateway information from the Geneva Config Service.
@@ -595,8 +571,7 @@ mod tests {
 
     #[test]
     fn test_build_static_headers_safe() {
-        let headers =
-            GenevaConfigClient::build_static_headers("GenevaUploader", "0.1", "ValidApp/2.0");
+        let headers = build_static_headers("GenevaUploader", "0.1", "ValidApp/2.0");
         assert!(headers.is_ok());
 
         let headers = headers.unwrap();
@@ -604,7 +579,7 @@ mod tests {
         assert_eq!(user_agent, "ValidApp/2.0 (GenevaUploader/0.1)");
 
         // Test empty prefix
-        let headers = GenevaConfigClient::build_static_headers("GenevaUploader", "0.1", "");
+        let headers = build_static_headers("GenevaUploader", "0.1", "");
         assert!(headers.is_ok());
 
         let headers = headers.unwrap();
@@ -615,8 +590,7 @@ mod tests {
     #[test]
     fn test_build_static_headers_invalid() {
         // This should not happen in practice due to validation, but test the safety mechanism
-        let result =
-            GenevaConfigClient::build_static_headers("TestAgent", "1.0", "Invalid\nPrefix");
+        let result = build_static_headers("TestAgent", "1.0", "Invalid\nPrefix");
         assert!(result.is_err());
 
         if let Err(e) = result {

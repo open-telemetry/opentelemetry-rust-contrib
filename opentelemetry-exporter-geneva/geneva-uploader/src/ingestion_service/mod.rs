@@ -51,6 +51,7 @@ mod tests {
                 source_identity,
                 environment: environment.clone(),
                 config_version,
+                user_agent_prefix: Some("TestUploader"),
             };
 
             let config = GenevaConfigClientConfig {

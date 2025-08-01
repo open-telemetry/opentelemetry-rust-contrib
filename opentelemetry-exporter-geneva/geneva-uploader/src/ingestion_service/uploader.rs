@@ -1,3 +1,4 @@
+use crate::common::{build_static_headers, validate_user_agent_prefix};
 use crate::config_service::client::{GenevaConfigClient, GenevaConfigClientError};
 use crate::payload_encoder::central_blob::BatchMetadata;
 use reqwest::{header, Client};
@@ -27,6 +28,8 @@ pub(crate) enum GenevaUploaderError {
     #[allow(dead_code)]
     #[error("Internal error: {0}")]
     InternalError(String),
+    #[error("Invalid user agent prefix: {0}")]
+    InvalidUserAgentPrefix(String),
 }
 
 impl From<GenevaConfigClientError> for GenevaUploaderError {
@@ -105,6 +108,7 @@ pub(crate) struct GenevaUploaderConfig {
     #[allow(dead_code)]
     pub environment: String,
     pub config_version: String,
+    pub user_agent_prefix: Option<&'static str>,
 }
 
 /// Client for uploading data to Geneva Ingestion Gateway (GIG)
@@ -129,14 +133,21 @@ impl GenevaUploader {
         config_client: Arc<GenevaConfigClient>,
         uploader_config: GenevaUploaderConfig,
     ) -> Result<Self> {
-        let mut headers = header::HeaderMap::new();
-        headers.insert(
-            header::ACCEPT,
-            header::HeaderValue::from_static("application/json"),
-        );
+        // Validate user_agent_prefix if provided
+        if let Some(prefix) = uploader_config.user_agent_prefix {
+            validate_user_agent_prefix(prefix)
+                .map_err(|e| GenevaUploaderError::InvalidUserAgentPrefix(e.to_string()))?;
+        }
+
+        let agent_identity = "GenevaUploader";
+        let agent_version = "0.1";
+        let user_agent_prefix = uploader_config.user_agent_prefix.unwrap_or("");
+        let static_headers = build_static_headers(agent_identity, agent_version, user_agent_prefix)
+            .map_err(|e| GenevaUploaderError::InvalidUserAgentPrefix(e.to_string()))?;
+
         let http_client = Client::builder()
             .timeout(Duration::from_secs(30))
-            .default_headers(headers)
+            .default_headers(static_headers)
             .build()?;
 
         Ok(Self {

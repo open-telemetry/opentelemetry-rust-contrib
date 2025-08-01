@@ -85,6 +85,7 @@ impl GenevaClient {
             source_identity,
             environment: cfg.environment,
             config_version: config_version.clone(),
+            user_agent_prefix: cfg.user_agent_prefix,
         };
 
         let uploader = GenevaUploader::from_config_client(config_client, uploader_config)

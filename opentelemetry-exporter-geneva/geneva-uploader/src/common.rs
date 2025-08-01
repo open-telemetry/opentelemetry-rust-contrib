@@ -1,5 +1,6 @@
 //! Common utilities and validation functions shared across the Geneva uploader crate.
 
+use reqwest::header::{HeaderMap, HeaderValue, ACCEPT, USER_AGENT};
 use thiserror::Error;
 
 /// Common validation errors
@@ -61,6 +62,41 @@ pub(crate) fn validate_user_agent_prefix(prefix: &str) -> Result<()> {
     Ok(())
 }
 
+/// Builds static HTTP headers including User-Agent for Geneva clients
+///
+/// # Arguments
+/// * `agent_identity` - The identity of the agent (e.g., "GenevaUploader")
+/// * `agent_version` - The version of the agent (e.g., "0.1")
+/// * `user_agent_prefix` - Optional user agent prefix (can be empty string)
+///
+/// # Returns
+/// * `Result<HeaderMap>` - Headers with User-Agent and Accept headers set
+///
+/// # User-Agent Format
+/// - If prefix is empty: "{agent_identity}/{agent_version}"
+/// - If prefix is provided: "{prefix} ({agent_identity}/{agent_version})"
+pub(crate) fn build_static_headers(
+    agent_identity: &str,
+    agent_version: &str,
+    user_agent_prefix: &str,
+) -> Result<HeaderMap> {
+    let mut headers = HeaderMap::new();
+    let user_agent = if user_agent_prefix.is_empty() {
+        format!("{agent_identity}/{agent_version}")
+    } else {
+        format!("{user_agent_prefix} ({agent_identity}/{agent_version})")
+    };
+
+    // Safe header construction with proper error handling
+    let header_value = HeaderValue::from_str(&user_agent).map_err(|e| {
+        ValidationError::InvalidUserAgentPrefix(format!("Failed to create User-Agent header: {e}"))
+    })?;
+
+    headers.insert(USER_AGENT, header_value);
+    headers.insert(ACCEPT, HeaderValue::from_static("application/json"));
+    Ok(headers)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -114,9 +150,11 @@ mod tests {
         assert!(validate_user_agent_prefix("Appé").is_err());
         assert!(validate_user_agent_prefix("App中文").is_err());
 
-        // Test non-printable ASCII
-        assert!(validate_user_agent_prefix("AppName").is_err()); // Unit separator
-        assert!(validate_user_agent_prefix("AppName").is_err()); // DEL character
+        // Test non-printable ASCII - construct strings with actual control characters
+        let unit_separator = format!("App{}Name", '\u{001F}');
+        let del_char = format!("App{}Name", '\u{007F}');
+        assert!(validate_user_agent_prefix(&unit_separator).is_err()); // Unit separator (0x1F)
+        assert!(validate_user_agent_prefix(&del_char).is_err()); // DEL character (0x7F)
 
         // Verify error messages contain position information
         if let Err(e) = validate_user_agent_prefix("App\nName") {
@@ -137,5 +175,34 @@ mod tests {
         assert!(validate_user_agent_prefix("  ValidApp  ").is_ok()); // Leading/trailing spaces are valid ASCII printable chars
                                                                      // But strings that trim to empty should fail
         assert!(validate_user_agent_prefix("  ").is_err()); // Only spaces should fail
+    }
+
+    #[test]
+    fn test_build_static_headers_safe() {
+        let headers = build_static_headers("GenevaUploader", "0.1", "ValidApp/2.0");
+        assert!(headers.is_ok());
+
+        let headers = headers.unwrap();
+        let user_agent = headers.get(USER_AGENT).unwrap().to_str().unwrap();
+        assert_eq!(user_agent, "ValidApp/2.0 (GenevaUploader/0.1)");
+
+        // Test empty prefix
+        let headers = build_static_headers("GenevaUploader", "0.1", "");
+        assert!(headers.is_ok());
+
+        let headers = headers.unwrap();
+        let user_agent = headers.get(USER_AGENT).unwrap().to_str().unwrap();
+        assert_eq!(user_agent, "GenevaUploader/0.1");
+    }
+
+    #[test]
+    fn test_build_static_headers_invalid() {
+        // This should not happen in practice due to validation, but test the safety mechanism
+        let result = build_static_headers("TestAgent", "1.0", "Invalid\nPrefix");
+        assert!(result.is_err());
+
+        if let Err(e) = result {
+            assert!(e.to_string().contains("Failed to create User-Agent header"));
+        }
     }
 }
