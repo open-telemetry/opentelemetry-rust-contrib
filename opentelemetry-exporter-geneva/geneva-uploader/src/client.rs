@@ -25,7 +25,10 @@ pub struct GenevaClientConfig {
     pub max_concurrent_uploads: Option<usize>,
     /// User agent for the application. Will be formatted as "<application> (RustGenevaClient/0.1)".
     /// If None, defaults to "RustGenevaClient/0.1".
-    /// 
+    ///
+    /// The suffix must contain only ASCII printable characters, be non-empty (after trimming),
+    /// and not exceed 200 characters in length.
+    ///
     /// Examples:
     /// - None: "RustGenevaClient/0.1"
     /// - Some("MyApp/2.1.0"): "MyApp/2.1.0 (RustGenevaClient/0.1)"
