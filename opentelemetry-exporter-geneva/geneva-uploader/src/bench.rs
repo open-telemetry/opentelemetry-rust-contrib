@@ -92,28 +92,28 @@ mod benchmarks {
                 0 => AnyValue {
                     value: Some(
                         opentelemetry_proto::tonic::common::v1::any_value::Value::StringValue(
-                            format!("string_value_{}", rng.random::<u32>()),
+                            format!("string_value_{}", rng.r#gen::<u32>()),
                         ),
                     ),
                 },
                 1 => AnyValue {
                     value: Some(
                         opentelemetry_proto::tonic::common::v1::any_value::Value::IntValue(
-                            rng.random_range(0..1000),
+                            rng.gen_range(0..1000),
                         ),
                     ),
                 },
                 2 => AnyValue {
                     value: Some(
                         opentelemetry_proto::tonic::common::v1::any_value::Value::DoubleValue(
-                            rng.random_range(0.0..100.0),
+                            rng.gen_range(0.0..100.0),
                         ),
                     ),
                 },
                 _ => AnyValue {
                     value: Some(
                         opentelemetry_proto::tonic::common::v1::any_value::Value::BoolValue(
-                            rng.random::<f64>() < 0.5,
+                            rng.r#gen::<f64>() < 0.5,
                         ),
                     ),
                 },

@@ -23,6 +23,8 @@ pub struct GenevaClientConfig {
     pub role_instance: String,
     /// Maximum number of concurrent uploads. If None, defaults to number of CPU cores.
     pub max_concurrent_uploads: Option<usize>,
+    /// Retry configuration for failed uploads. If None, uses default retry settings.
+    pub retry_config: Option<crate::RetryConfig>,
     // Add event name/version here if constant, or per-upload if you want them per call.
 }
 
@@ -73,6 +75,7 @@ impl GenevaClient {
             source_identity,
             environment: cfg.environment,
             config_version: config_version.clone(),
+            retry_config: cfg.retry_config.unwrap_or_default(),
         };
 
         let uploader = GenevaUploader::from_config_client(config_client, uploader_config)

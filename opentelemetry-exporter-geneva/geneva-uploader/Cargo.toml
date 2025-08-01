@@ -21,6 +21,8 @@ md5 = "0.8.0"
 hex = "0.4"
 lz4_flex = { version = "0.11", features = ["safe-encode"], default-features = false }
 futures = "0.3"
+tokio = { version = "1.0", features = ["time"] }
+rand = "0.8"
 
 [features]
 self_signed_certs = [] # Empty by default for security
@@ -37,7 +39,7 @@ futures = "0.3"
 num_cpus = "1.16"
 lz4_flex = { version = "0.11" }
 criterion = {version = "0.6"}
-rand = {version = "0.9"}
+rand = {version = "0.8"}
 
 [lints]
 workspace = true
