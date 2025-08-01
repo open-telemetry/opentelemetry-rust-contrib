@@ -133,16 +133,6 @@ pub(crate) struct GenevaConfigClientConfig {
     pub(crate) region: String,
     pub(crate) config_major_version: u32,
     pub(crate) auth_method: AuthMethod,
-    /// User agent for the application. Will be formatted as "<application> (GenevaUploader/0.1)".
-    /// If None, defaults to "GenevaUploader/0.1".
-    ///
-    /// The suffix must contain only ASCII printable characters, be non-empty (after trimming),
-    /// and not exceed 200 characters in length.
-    ///
-    /// Examples:
-    /// - None: "GenevaUploader/0.1"
-    /// - Some("MyApp/2.1.0"): "MyApp/2.1.0 (GenevaUploader/0.1)"
-    /// - Some("ProductionService-1.0"): "ProductionService-1.0 (GenevaUploader/0.1)"
     pub(crate) user_agent_suffix: Option<&'static str>,
 }
 
