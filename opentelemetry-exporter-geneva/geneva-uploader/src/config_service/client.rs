@@ -1,11 +1,9 @@
 // Geneva Config Client with TLS (PKCS#12) and TODO: Managed Identity support
 
-use crate::common::{build_static_headers, validate_user_agent_prefix};
+use crate::client::build_geneva_headers;
+use crate::common::validate_user_agent_prefix;
 use base64::{engine::general_purpose, Engine as _};
-use reqwest::{
-    header::HeaderMap,
-    Client,
-};
+use reqwest::{header::HeaderMap, Client};
 use serde::Deserialize;
 use std::time::Duration;
 use thiserror::Error;
@@ -271,12 +269,10 @@ impl GenevaConfigClient {
             }
         }
 
-        let agent_identity = "GenevaUploader";
-        let agent_version = "0.1";
-        let user_agent_prefix = config.user_agent_prefix.unwrap_or("");
-        let static_headers = build_static_headers(agent_identity, agent_version, user_agent_prefix)
-            .map_err(|e| GenevaConfigClientError::InvalidUserAgentPrefix(e.to_string()))?;
+        let static_headers = build_geneva_headers(config.user_agent_prefix)
+            .map_err(|e| GenevaConfigClientError::InvalidUserAgentPrefix(e))?;
 
+        let agent_identity = "GenevaUploader";
         let identity = format!("Tenant=Default/Role=GcsClient/RoleInstance={agent_identity}");
 
         let encoded_identity = general_purpose::STANDARD.encode(&identity);
@@ -567,12 +563,12 @@ fn configure_tls_connector(
 
 #[cfg(test)]
 mod tests {
-    use super::*;
+    use crate::client::build_geneva_headers;
     use reqwest::header::USER_AGENT;
 
     #[test]
-    fn test_build_static_headers_safe() {
-        let headers = build_static_headers("GenevaUploader", "0.1", "ValidApp/2.0");
+    fn test_build_geneva_headers_safe() {
+        let headers = build_geneva_headers(Some("ValidApp/2.0"));
         assert!(headers.is_ok());
 
         let headers = headers.unwrap();
@@ -580,7 +576,7 @@ mod tests {
         assert_eq!(user_agent, "ValidApp/2.0 (GenevaUploader/0.1)");
 
         // Test empty prefix
-        let headers = build_static_headers("GenevaUploader", "0.1", "");
+        let headers = build_geneva_headers(None);
         assert!(headers.is_ok());
 
         let headers = headers.unwrap();
@@ -589,13 +585,13 @@ mod tests {
     }
 
     #[test]
-    fn test_build_static_headers_invalid() {
+    fn test_build_geneva_headers_invalid() {
         // This should not happen in practice due to validation, but test the safety mechanism
-        let result = build_static_headers("TestAgent", "1.0", "Invalid\nPrefix");
+        let result = build_geneva_headers(Some("Invalid\nPrefix"));
         assert!(result.is_err());
 
         if let Err(e) = result {
-            assert!(e.to_string().contains("Failed to create User-Agent header"));
+            assert!(e.contains("Invalid user agent prefix"));
         }
     }
 }
