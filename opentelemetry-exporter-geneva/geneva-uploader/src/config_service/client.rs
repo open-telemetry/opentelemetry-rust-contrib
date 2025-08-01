@@ -3,7 +3,7 @@
 use crate::common::{build_static_headers, validate_user_agent_prefix};
 use base64::{engine::general_purpose, Engine as _};
 use reqwest::{
-    header::{HeaderMap, USER_AGENT},
+    header::HeaderMap,
     Client,
 };
 use serde::Deserialize;
@@ -568,6 +568,7 @@ fn configure_tls_connector(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use reqwest::header::USER_AGENT;
 
     #[test]
     fn test_build_static_headers_safe() {
