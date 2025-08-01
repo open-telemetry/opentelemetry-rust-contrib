@@ -1,6 +1,6 @@
 // Geneva Config Client with TLS (PKCS#12) and TODO: Managed Identity support
 
-use crate::client::build_geneva_headers;
+use crate::common::build_geneva_headers;
 use crate::common::validate_user_agent_prefix;
 use base64::{engine::general_purpose, Engine as _};
 use reqwest::{header::HeaderMap, Client};
@@ -270,7 +270,7 @@ impl GenevaConfigClient {
         }
 
         let static_headers = build_geneva_headers(config.user_agent_prefix)
-            .map_err(|e| GenevaConfigClientError::InvalidUserAgentPrefix(e))?;
+            .map_err(|e| GenevaConfigClientError::InvalidUserAgentPrefix(e.to_string()))?;
 
         let agent_identity = "GenevaUploader";
         let identity = format!("Tenant=Default/Role=GcsClient/RoleInstance={agent_identity}");
@@ -563,7 +563,7 @@ fn configure_tls_connector(
 
 #[cfg(test)]
 mod tests {
-    use crate::client::build_geneva_headers;
+    use crate::common::build_geneva_headers;
     use reqwest::header::USER_AGENT;
 
     #[test]
@@ -591,7 +591,7 @@ mod tests {
         assert!(result.is_err());
 
         if let Err(e) = result {
-            assert!(e.contains("Invalid user agent prefix"));
+            assert!(e.to_string().contains("Invalid user agent prefix"));
         }
     }
 }

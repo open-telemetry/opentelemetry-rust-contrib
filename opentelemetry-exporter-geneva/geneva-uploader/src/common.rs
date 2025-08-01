@@ -1,5 +1,6 @@
 //! Common utilities and validation functions shared across the Geneva uploader crate.
 
+use reqwest::header::{HeaderMap, HeaderValue, ACCEPT, USER_AGENT};
 use thiserror::Error;
 
 /// Common validation errors
@@ -61,8 +62,58 @@ pub(crate) fn validate_user_agent_prefix(prefix: &str) -> Result<()> {
     Ok(())
 }
 
-// Note: build_static_headers has been moved to client.rs as build_geneva_headers
-// for centralized user-agent building across all Geneva services
+/// Builds a standardized User-Agent header for Geneva services
+///
+/// # Arguments
+/// * `user_agent_prefix` - Optional user agent prefix from the client configuration
+///
+/// # Returns
+/// * `Result<HeaderValue>` - A properly formatted User-Agent header value
+///
+/// # Format
+/// - If prefix is None or empty: "GenevaUploader/0.1"
+/// - If prefix is provided: "{prefix} (GenevaUploader/0.1)"
+///
+/// # Example
+/// ```ignore
+/// let header = build_user_agent_header(Some("MyApp/2.1.0"))?;
+/// // Results in: "MyApp/2.1.0 (GenevaUploader/0.1)"
+/// ```
+pub(crate) fn build_user_agent_header(user_agent_prefix: Option<&str>) -> Result<HeaderValue> {
+    let prefix = user_agent_prefix.unwrap_or("");
+
+    // Validate the prefix if provided
+    if !prefix.is_empty() {
+        validate_user_agent_prefix(prefix)?;
+    }
+
+    let user_agent = if prefix.is_empty() {
+        "GenevaUploader/0.1".to_string()
+    } else {
+        format!("{prefix} (GenevaUploader/0.1)")
+    };
+
+    HeaderValue::from_str(&user_agent).map_err(|e| {
+        ValidationError::InvalidUserAgentPrefix(format!("Failed to create User-Agent header: {e}"))
+    })
+}
+
+/// Builds a complete set of HTTP headers for Geneva services
+///
+/// # Arguments
+/// * `user_agent_prefix` - Optional user agent prefix from the client configuration
+///
+/// # Returns
+/// * `Result<HeaderMap>` - HTTP headers including User-Agent and Accept
+pub(crate) fn build_geneva_headers(user_agent_prefix: Option<&str>) -> Result<HeaderMap> {
+    let mut headers = HeaderMap::new();
+
+    let user_agent = build_user_agent_header(user_agent_prefix)?;
+    headers.insert(USER_AGENT, user_agent);
+    headers.insert(ACCEPT, HeaderValue::from_static("application/json"));
+
+    Ok(headers)
+}
 
 #[cfg(test)]
 mod tests {
@@ -144,5 +195,66 @@ mod tests {
         assert!(validate_user_agent_prefix("  ").is_err()); // Only spaces should fail
     }
 
-    // Note: Header building tests have been moved to client.rs where the functionality now resides
+    #[test]
+    fn test_build_user_agent_header_without_prefix() {
+        let header = build_user_agent_header(None).unwrap();
+        assert_eq!(header.to_str().unwrap(), "GenevaUploader/0.1");
+    }
+
+    #[test]
+    fn test_build_user_agent_header_with_empty_prefix() {
+        let header = build_user_agent_header(Some("")).unwrap();
+        assert_eq!(header.to_str().unwrap(), "GenevaUploader/0.1");
+    }
+
+    #[test]
+    fn test_build_user_agent_header_with_valid_prefix() {
+        let header = build_user_agent_header(Some("MyApp/2.1.0")).unwrap();
+        assert_eq!(header.to_str().unwrap(), "MyApp/2.1.0 (GenevaUploader/0.1)");
+    }
+
+    #[test]
+    fn test_build_user_agent_header_with_invalid_prefix() {
+        let result = build_user_agent_header(Some("Invalid\nPrefix"));
+        assert!(result.is_err());
+        assert!(result
+            .unwrap_err()
+            .to_string()
+            .contains("Invalid user agent prefix"));
+    }
+
+    #[test]
+    fn test_build_geneva_headers_complete() {
+        let headers = build_geneva_headers(Some("TestApp/1.0")).unwrap();
+
+        let user_agent = headers.get(USER_AGENT).unwrap();
+        assert_eq!(
+            user_agent.to_str().unwrap(),
+            "TestApp/1.0 (GenevaUploader/0.1)"
+        );
+
+        let accept = headers.get(ACCEPT).unwrap();
+        assert_eq!(accept.to_str().unwrap(), "application/json");
+    }
+
+    #[test]
+    fn test_build_geneva_headers_without_prefix() {
+        let headers = build_geneva_headers(None).unwrap();
+
+        let user_agent = headers.get(USER_AGENT).unwrap();
+        assert_eq!(user_agent.to_str().unwrap(), "GenevaUploader/0.1");
+
+        let accept = headers.get(ACCEPT).unwrap();
+        assert_eq!(accept.to_str().unwrap(), "application/json");
+    }
+
+    #[test]
+    fn test_build_geneva_headers_with_invalid_prefix() {
+        let result = build_geneva_headers(Some("Invalid\rPrefix"));
+        assert!(result.is_err());
+        assert!(result
+            .unwrap_err()
+            .to_string()
+            .contains("Invalid user agent prefix"));
+    }
 }

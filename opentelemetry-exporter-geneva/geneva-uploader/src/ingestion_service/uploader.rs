@@ -1,4 +1,4 @@
-use crate::client::build_geneva_headers;
+use crate::common::build_geneva_headers;
 use crate::common::validate_user_agent_prefix;
 use crate::config_service::client::{GenevaConfigClient, GenevaConfigClientError};
 use crate::payload_encoder::central_blob::BatchMetadata;
@@ -141,7 +141,7 @@ impl GenevaUploader {
         }
 
         let static_headers = build_geneva_headers(uploader_config.user_agent_prefix)
-            .map_err(|e| GenevaUploaderError::InvalidUserAgentPrefix(e))?;
+            .map_err(|e| GenevaUploaderError::InvalidUserAgentPrefix(e.to_string()))?;
 
         let http_client = Client::builder()
             .timeout(Duration::from_secs(30))
