@@ -70,7 +70,6 @@ mod tests {
                     path: cert_path,
                     password: cert_password,
                 },
-                user_agent_prefix: Some("TestUploader"),
                 static_headers,
             };
 

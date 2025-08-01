@@ -24,7 +24,6 @@ mod tests {
             region: "region".to_string(),
             config_major_version: 1,
             auth_method: AuthMethod::ManagedIdentity,
-            user_agent_prefix: Some("TestApp/1.0"),
             static_headers,
         };
 
@@ -115,7 +114,6 @@ mod tests {
                 path: PathBuf::from(temp_p12_file.path().to_string_lossy().to_string()),
                 password,
             },
-            user_agent_prefix: Some("MockClient/1.0"),
             static_headers,
         };
 
@@ -165,7 +163,6 @@ mod tests {
                 path: PathBuf::from(temp_p12_file.path().to_string_lossy().to_string()),
                 password,
             },
-            user_agent_prefix: Some("ErrorTestApp/1.0"),
             static_headers,
         };
 
@@ -218,7 +215,6 @@ mod tests {
                 path: PathBuf::from(temp_p12_file.path().to_string_lossy().to_string()),
                 password,
             },
-            user_agent_prefix: Some("MissingInfoTestApp/1.0"),
             static_headers,
         };
 
@@ -254,7 +250,6 @@ mod tests {
                 path: PathBuf::from("/nonexistent/path.p12".to_string()),
                 password: "test".to_string(),
             },
-            user_agent_prefix: Some("InvalidCertTestApp/1.0"),
             static_headers,
         };
 
@@ -322,7 +317,6 @@ mod tests {
                 path: PathBuf::from(cert_path),
                 password: cert_password,
             },
-            user_agent_prefix: Some("RealServerTestApp/1.0"),
             static_headers,
         };
 

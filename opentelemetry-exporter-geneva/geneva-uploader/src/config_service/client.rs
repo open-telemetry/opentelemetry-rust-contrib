@@ -126,7 +126,6 @@ pub(crate) struct GenevaConfigClientConfig {
     pub(crate) region: String,
     pub(crate) config_major_version: u32,
     pub(crate) auth_method: AuthMethod,
-    pub(crate) user_agent_prefix: Option<&'static str>,
     pub(crate) static_headers: HeaderMap,
 }
 

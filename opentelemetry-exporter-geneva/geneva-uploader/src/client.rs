@@ -69,7 +69,6 @@ impl GenevaClient {
             region: cfg.region,
             config_major_version: cfg.config_major_version,
             auth_method: cfg.auth_method,
-            user_agent_prefix: cfg.user_agent_prefix,
             static_headers: static_headers.clone(),
         };
         let config_client = Arc::new(
