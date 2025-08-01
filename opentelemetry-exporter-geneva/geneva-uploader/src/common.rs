@@ -62,23 +62,11 @@ pub(crate) fn validate_user_agent_prefix(prefix: &str) -> Result<()> {
     Ok(())
 }
 
-/// Builds a standardized User-Agent header for Geneva services
-///
-/// # Arguments
-/// * `user_agent_prefix` - Optional user agent prefix from the client configuration
-///
-/// # Returns
-/// * `Result<HeaderValue>` - A properly formatted User-Agent header value
-///
-/// # Format
-/// - If prefix is None or empty: "GenevaUploader/0.1"
-/// - If prefix is provided: "{prefix} (GenevaUploader/0.1)"
-///
-/// # Example
-/// ```ignore
-/// let header = build_user_agent_header(Some("MyApp/2.1.0"))?;
-/// // Results in: "MyApp/2.1.0 (GenevaUploader/0.1)"
-/// ```
+// Builds a standardized User-Agent header for Geneva services
+// TODO: Update the user agent format based on whether custom config will come first or later
+// Current format:
+// - If prefix is None or empty: "GenevaUploader/0.1"
+// - If prefix is provided: "{prefix} (GenevaUploader/0.1)"
 pub(crate) fn build_user_agent_header(user_agent_prefix: Option<&str>) -> Result<HeaderValue> {
     let prefix = user_agent_prefix.unwrap_or("");
 
@@ -98,13 +86,8 @@ pub(crate) fn build_user_agent_header(user_agent_prefix: Option<&str>) -> Result
     })
 }
 
-/// Builds a complete set of HTTP headers for Geneva services
-///
-/// # Arguments
-/// * `user_agent_prefix` - Optional user agent prefix from the client configuration
-///
-/// # Returns
-/// * `Result<HeaderMap>` - HTTP headers including User-Agent and Accept
+// Builds a complete set of HTTP headers for Geneva services
+// Returns HTTP headers including User-Agent and Accept
 pub(crate) fn build_geneva_headers(user_agent_prefix: Option<&str>) -> Result<HeaderMap> {
     let mut headers = HeaderMap::new();
 
