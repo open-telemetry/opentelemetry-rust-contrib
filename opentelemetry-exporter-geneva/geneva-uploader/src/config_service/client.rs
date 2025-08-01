@@ -1,5 +1,6 @@
 // Geneva Config Client with TLS (PKCS#12) and TODO: Managed Identity support
 
+use crate::common::validate_user_agent_prefix;
 use base64::{engine::general_purpose, Engine as _};
 use reqwest::{
     header::{HeaderMap, HeaderValue, ACCEPT, USER_AGENT},
@@ -84,8 +85,8 @@ pub(crate) enum GenevaConfigClientError {
     SerdeJson(#[from] serde_json::Error),
 
     // Validation
-    #[error("Invalid user agent suffix: {0}")]
-    InvalidUserAgentSuffix(String),
+    #[error("Invalid user agent prefix: {0}")]
+    InvalidUserAgentPrefix(String),
 
     // Misc
     #[error("Moniker not found: {0}")]
@@ -133,7 +134,7 @@ pub(crate) struct GenevaConfigClientConfig {
     pub(crate) region: String,
     pub(crate) config_major_version: u32,
     pub(crate) auth_method: AuthMethod,
-    pub(crate) user_agent_suffix: Option<&'static str>,
+    pub(crate) user_agent_prefix: Option<&'static str>,
 }
 
 #[allow(dead_code)]
@@ -212,56 +213,6 @@ impl fmt::Debug for GenevaConfigClient {
     }
 }
 
-/// Validates a user agent suffix for HTTP header compliance
-///
-/// # Arguments
-/// * `suffix` - The user agent suffix to validate
-///
-/// # Returns
-/// * `Ok(())` if valid
-/// * `Err(GenevaConfigClientError::InvalidUserAgentSuffix)` if invalid
-///
-/// # Validation Rules
-/// - Must contain only ASCII printable characters (0x20-0x7E)
-/// - Must not contain control characters (especially \r, \n, \0)
-/// - Must not exceed 200 characters in length
-/// - Must not be empty or only whitespace
-fn validate_user_agent_suffix(suffix: &str) -> Result<()> {
-    if suffix.trim().is_empty() {
-        return Err(GenevaConfigClientError::InvalidUserAgentSuffix(
-            "User agent suffix cannot be empty or only whitespace".to_string(),
-        ));
-    }
-
-    if suffix.len() > 200 {
-        return Err(GenevaConfigClientError::InvalidUserAgentSuffix(format!(
-            "User agent suffix too long: {len} characters (max 200)",
-            len = suffix.len()
-        )));
-    }
-
-    // Check for invalid characters
-    for (i, ch) in suffix.char_indices() {
-        match ch {
-            // Control characters that would break HTTP headers
-            '\r' | '\n' | '\0' => {
-                return Err(GenevaConfigClientError::InvalidUserAgentSuffix(format!(
-                    "Invalid control character at position {i}: {ch:?}"
-                )));
-            }
-            // Non-ASCII or non-printable characters
-            ch if !ch.is_ascii() || (ch as u8) < 0x20 || (ch as u8) > 0x7E => {
-                return Err(GenevaConfigClientError::InvalidUserAgentSuffix(format!(
-                    "Invalid character at position {i}: {ch:?} (must be ASCII printable)"
-                )));
-            }
-            _ => {} // Valid character
-        }
-    }
-
-    Ok(())
-}
-
 /// Client for interacting with the Geneva Configuration Service.
 ///
 /// This client handles authentication and communication with the Geneva Config
@@ -280,9 +231,10 @@ impl GenevaConfigClient {
     /// * `GenevaConfigClientError::AuthMethodNotImplemented` - If the specified authentication method is not yet supported
     #[allow(dead_code)]
     pub(crate) fn new(config: GenevaConfigClientConfig) -> Result<Self> {
-        // Validate user_agent_suffix if provided
-        if let Some(suffix) = config.user_agent_suffix {
-            validate_user_agent_suffix(suffix)?;
+        // Validate user_agent_prefix if provided
+        if let Some(prefix) = config.user_agent_prefix {
+            validate_user_agent_prefix(prefix)
+                .map_err(|e| GenevaConfigClientError::InvalidUserAgentPrefix(e.to_string()))?;
         }
 
         let mut client_builder = Client::builder()
@@ -321,9 +273,9 @@ impl GenevaConfigClient {
 
         let agent_identity = "GenevaUploader";
         let agent_version = "0.1";
-        let user_agent_suffix = config.user_agent_suffix.unwrap_or("");
+        let user_agent_prefix = config.user_agent_prefix.unwrap_or("");
         let static_headers =
-            Self::build_static_headers(agent_identity, agent_version, user_agent_suffix)?;
+            Self::build_static_headers(agent_identity, agent_version, user_agent_prefix)?;
 
         let identity = format!("Tenant=Default/Role=GcsClient/RoleInstance={agent_identity}");
 
@@ -367,18 +319,18 @@ impl GenevaConfigClient {
     fn build_static_headers(
         agent_identity: &str,
         agent_version: &str,
-        user_agent_suffix: &str,
+        user_agent_prefix: &str,
     ) -> Result<HeaderMap> {
         let mut headers = HeaderMap::new();
-        let user_agent = if user_agent_suffix.is_empty() {
+        let user_agent = if user_agent_prefix.is_empty() {
             format!("{agent_identity}/{agent_version}")
         } else {
-            format!("{user_agent_suffix} ({agent_identity}/{agent_version})")
+            format!("{user_agent_prefix} ({agent_identity}/{agent_version})")
         };
 
         // Safe header construction with proper error handling
         let header_value = HeaderValue::from_str(&user_agent).map_err(|e| {
-            GenevaConfigClientError::InvalidUserAgentSuffix(format!(
+            GenevaConfigClientError::InvalidUserAgentPrefix(format!(
                 "Failed to create User-Agent header: {e}"
             ))
         })?;
@@ -642,66 +594,6 @@ mod tests {
     use super::*;
 
     #[test]
-    fn test_validate_user_agent_suffix_valid() {
-        assert!(validate_user_agent_suffix("MyApp/1.0").is_ok());
-        assert!(validate_user_agent_suffix("Production-Service-2.1.0").is_ok());
-        assert!(validate_user_agent_suffix("TestApp_v3").is_ok());
-        assert!(validate_user_agent_suffix("App-Name.1.2.3").is_ok());
-        assert!(validate_user_agent_suffix("Simple123").is_ok());
-    }
-
-    #[test]
-    fn test_validate_user_agent_suffix_empty() {
-        assert!(validate_user_agent_suffix("").is_err());
-        assert!(validate_user_agent_suffix("   ").is_err());
-        assert!(validate_user_agent_suffix("\t\n").is_err());
-
-        if let Err(e) = validate_user_agent_suffix("") {
-            assert!(e.to_string().contains("cannot be empty"));
-        }
-    }
-
-    #[test]
-    fn test_validate_user_agent_suffix_too_long() {
-        let long_suffix = "a".repeat(201);
-        let result = validate_user_agent_suffix(&long_suffix);
-        assert!(result.is_err());
-
-        if let Err(e) = result {
-            assert!(e.to_string().contains("too long"));
-            assert!(e.to_string().contains("201 characters"));
-        }
-
-        // Test exactly at the limit should be OK
-        let max_length_suffix = "a".repeat(200);
-        assert!(validate_user_agent_suffix(&max_length_suffix).is_ok());
-    }
-
-    #[test]
-    fn test_validate_user_agent_suffix_invalid_chars() {
-        // Test control characters
-        assert!(validate_user_agent_suffix("App\nName").is_err());
-        assert!(validate_user_agent_suffix("App\rName").is_err());
-        assert!(validate_user_agent_suffix("App\0Name").is_err());
-        assert!(validate_user_agent_suffix("App\tName").is_err());
-
-        // Test non-ASCII characters
-        assert!(validate_user_agent_suffix("App🚀Name").is_err());
-        assert!(validate_user_agent_suffix("Appé").is_err());
-        assert!(validate_user_agent_suffix("App中文").is_err());
-
-        // Test non-printable ASCII
-        assert!(validate_user_agent_suffix("App\x1FName").is_err()); // Unit separator
-        assert!(validate_user_agent_suffix("App\x7FName").is_err()); // DEL character
-
-        // Verify error messages contain position information
-        if let Err(e) = validate_user_agent_suffix("App\nName") {
-            assert!(e.to_string().contains("position 3"));
-            assert!(e.to_string().contains("control character"));
-        }
-    }
-
-    #[test]
     fn test_build_static_headers_safe() {
         let headers =
             GenevaConfigClient::build_static_headers("GenevaUploader", "0.1", "ValidApp/2.0");
@@ -711,7 +603,7 @@ mod tests {
         let user_agent = headers.get(USER_AGENT).unwrap().to_str().unwrap();
         assert_eq!(user_agent, "ValidApp/2.0 (GenevaUploader/0.1)");
 
-        // Test empty suffix
+        // Test empty prefix
         let headers = GenevaConfigClient::build_static_headers("GenevaUploader", "0.1", "");
         assert!(headers.is_ok());
 
@@ -724,25 +616,11 @@ mod tests {
     fn test_build_static_headers_invalid() {
         // This should not happen in practice due to validation, but test the safety mechanism
         let result =
-            GenevaConfigClient::build_static_headers("TestAgent", "1.0", "Invalid\nSuffix");
+            GenevaConfigClient::build_static_headers("TestAgent", "1.0", "Invalid\nPrefix");
         assert!(result.is_err());
 
         if let Err(e) = result {
             assert!(e.to_string().contains("Failed to create User-Agent header"));
         }
-    }
-
-    #[test]
-    fn test_character_validation_edge_cases() {
-        // Test ASCII printable range boundaries
-        assert!(validate_user_agent_suffix(" ").is_err()); // Space only should be trimmed to empty
-        assert!(validate_user_agent_suffix("App Space").is_ok()); // Space in middle is OK
-        assert!(validate_user_agent_suffix("~").is_ok()); // Last printable ASCII (0x7E)
-        assert!(validate_user_agent_suffix("!").is_ok()); // First printable ASCII after space (0x21)
-
-        // Test that spaces at the beginning and end are allowed (they're ASCII printable)
-        assert!(validate_user_agent_suffix("  ValidApp  ").is_ok()); // Leading/trailing spaces are valid ASCII printable chars
-                                                                     // But strings that trim to empty should fail
-        assert!(validate_user_agent_suffix("  ").is_err()); // Only spaces should fail
     }
 }

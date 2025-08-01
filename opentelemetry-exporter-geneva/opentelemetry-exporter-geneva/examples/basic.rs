@@ -63,7 +63,7 @@ async fn main() {
         role_name,
         role_instance,
         max_concurrent_uploads: None, // Use default
-        user_agent_suffix: Some("BasicExample"),
+        user_agent_prefix: Some("BasicExample"),
     };
 
     let geneva_client = GenevaClient::new(config)
