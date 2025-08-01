@@ -1,7 +1,5 @@
 // Geneva Config Client with TLS (PKCS#12) and TODO: Managed Identity support
 
-use crate::common::build_geneva_headers;
-use crate::common::validate_user_agent_prefix;
 use base64::{engine::general_purpose, Engine as _};
 use reqwest::{header::HeaderMap, Client};
 use serde::Deserialize;
@@ -82,10 +80,6 @@ pub(crate) enum GenevaConfigClientError {
     #[error("JSON error: {0}")]
     SerdeJson(#[from] serde_json::Error),
 
-    // Validation
-    #[error("Invalid user agent prefix: {0}")]
-    InvalidUserAgentPrefix(String),
-
     // Misc
     #[error("Moniker not found: {0}")]
     MonikerNotFound(String),
@@ -133,6 +127,7 @@ pub(crate) struct GenevaConfigClientConfig {
     pub(crate) config_major_version: u32,
     pub(crate) auth_method: AuthMethod,
     pub(crate) user_agent_prefix: Option<&'static str>,
+    pub(crate) static_headers: HeaderMap,
 }
 
 #[allow(dead_code)]
@@ -229,12 +224,6 @@ impl GenevaConfigClient {
     /// * `GenevaConfigClientError::AuthMethodNotImplemented` - If the specified authentication method is not yet supported
     #[allow(dead_code)]
     pub(crate) fn new(config: GenevaConfigClientConfig) -> Result<Self> {
-        // Validate user_agent_prefix if provided
-        if let Some(prefix) = config.user_agent_prefix {
-            validate_user_agent_prefix(prefix)
-                .map_err(|e| GenevaConfigClientError::InvalidUserAgentPrefix(e.to_string()))?;
-        }
-
         let mut client_builder = Client::builder()
             .http1_only()
             .timeout(Duration::from_secs(30)); //TODO - make this configurable
@@ -269,9 +258,6 @@ impl GenevaConfigClient {
             }
         }
 
-        let static_headers = build_geneva_headers(config.user_agent_prefix)
-            .map_err(|e| GenevaConfigClientError::InvalidUserAgentPrefix(e.to_string()))?;
-
         let agent_identity = "GenevaUploader";
         let identity = format!("Tenant=Default/Role=GcsClient/RoleInstance={agent_identity}");
 
@@ -293,15 +279,16 @@ impl GenevaConfigClient {
         ).map_err(|e| GenevaConfigClientError::InternalError(format!("Failed to write URL: {e}")))?;
 
         let http_client = client_builder.build()?;
+        let static_headers = config.static_headers.clone();
 
         Ok(Self {
+            static_headers,
             config,
             http_client,
             cached_data: RwLock::new(None),
             precomputed_url_prefix: pre_url,
             agent_identity: agent_identity.to_string(), // TODO make this configurable
             agent_version: "1.0".to_string(),           // TODO make this configurable
-            static_headers,
         })
     }
 

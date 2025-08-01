@@ -1,5 +1,6 @@
 //! High-level GenevaClient for user code. Wraps config_service and ingestion_service.
 
+use crate::common::{build_geneva_headers, validate_user_agent_prefix};
 use crate::config_service::client::{AuthMethod, GenevaConfigClient, GenevaConfigClientConfig};
 use crate::ingestion_service::uploader::{GenevaUploader, GenevaUploaderConfig};
 use crate::payload_encoder::lz4_chunked_compression::lz4_chunked_compression;
@@ -49,7 +50,17 @@ pub struct GenevaClient {
 impl GenevaClient {
     /// Construct a new client with minimal configuration. Fetches and caches ingestion info as needed.
     pub async fn new(cfg: GenevaClientConfig) -> Result<Self, String> {
-        // Build config client config
+        // Validate user agent prefix once and build headers once for both services
+        // This avoids duplicate validation and header building in config and ingestion services
+        if let Some(prefix) = cfg.user_agent_prefix {
+            validate_user_agent_prefix(prefix)
+                .map_err(|e| format!("Invalid user agent prefix: {e}"))?;
+        }
+
+        let static_headers = build_geneva_headers(cfg.user_agent_prefix)
+            .map_err(|e| format!("Failed to build Geneva headers: {e}"))?;
+
+        // Build config client config with pre-built headers
         let config_client_config = GenevaConfigClientConfig {
             endpoint: cfg.endpoint,
             environment: cfg.environment.clone(),
@@ -59,6 +70,7 @@ impl GenevaClient {
             config_major_version: cfg.config_major_version,
             auth_method: cfg.auth_method,
             user_agent_prefix: cfg.user_agent_prefix,
+            static_headers: static_headers.clone(),
         };
         let config_client = Arc::new(
             GenevaConfigClient::new(config_client_config)
@@ -79,13 +91,13 @@ impl GenevaClient {
             cfg.namespace, config_version, cfg.tenant, cfg.role_name, cfg.role_instance,
         );
 
-        // Uploader config
+        // Uploader config with pre-built headers
         let uploader_config = GenevaUploaderConfig {
             namespace: cfg.namespace.clone(),
             source_identity,
             environment: cfg.environment,
             config_version: config_version.clone(),
-            user_agent_prefix: cfg.user_agent_prefix,
+            static_headers: static_headers.clone(),
         };
 
         let uploader = GenevaUploader::from_config_client(config_client, uploader_config)
