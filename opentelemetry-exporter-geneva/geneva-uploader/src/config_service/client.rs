@@ -546,5 +546,3 @@ fn configure_tls_connector(
         .max_protocol_version(Some(Protocol::Tlsv12));
     builder
 }
-
-// Note: Tests for build_geneva_headers are in common.rs where the functionality is implemented
