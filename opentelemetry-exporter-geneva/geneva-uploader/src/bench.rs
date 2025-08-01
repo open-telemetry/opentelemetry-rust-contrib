@@ -241,4 +241,3 @@ mod benchmarks {
 
         criterion.final_summary();
     }
-
