@@ -245,8 +245,8 @@ fn validate_user_agent_suffix(suffix: &str) -> Result<()> {
 
     if suffix.len() > 200 {
         return Err(GenevaConfigClientError::InvalidUserAgentSuffix(format!(
-            "User agent suffix too long: {} characters (max 200)",
-            suffix.len()
+            "User agent suffix too long: {len} characters (max 200)",
+            len = suffix.len()
         )));
     }
 
@@ -256,15 +256,13 @@ fn validate_user_agent_suffix(suffix: &str) -> Result<()> {
             // Control characters that would break HTTP headers
             '\r' | '\n' | '\0' => {
                 return Err(GenevaConfigClientError::InvalidUserAgentSuffix(format!(
-                    "Invalid control character at position {}: {:?}",
-                    i, ch
+                    "Invalid control character at position {i}: {ch:?}"
                 )));
             }
             // Non-ASCII or non-printable characters
             ch if !ch.is_ascii() || (ch as u8) < 0x20 || (ch as u8) > 0x7E => {
                 return Err(GenevaConfigClientError::InvalidUserAgentSuffix(format!(
-                    "Invalid character at position {}: {:?} (must be ASCII printable)",
-                    i, ch
+                    "Invalid character at position {i}: {ch:?} (must be ASCII printable)"
                 )));
             }
             _ => {} // Valid character
@@ -333,7 +331,7 @@ impl GenevaConfigClient {
 
         let agent_identity = "RustGenevaClient";
         let agent_version = "0.1";
-        let user_agent_suffix = config.user_agent_suffix.as_deref().unwrap_or("");
+        let user_agent_suffix = config.user_agent_suffix.unwrap_or("");
         let static_headers =
             Self::build_static_headers(agent_identity, agent_version, user_agent_suffix)?;
 
@@ -383,19 +381,15 @@ impl GenevaConfigClient {
     ) -> Result<HeaderMap> {
         let mut headers = HeaderMap::new();
         let user_agent = if user_agent_suffix.is_empty() {
-            format!("{}/{}", agent_identity, agent_version)
+            format!("{agent_identity}/{agent_version}")
         } else {
-            format!(
-                "{} ({}/{})",
-                user_agent_suffix, agent_identity, agent_version
-            )
+            format!("{user_agent_suffix} ({agent_identity}/{agent_version})")
         };
 
         // Safe header construction with proper error handling
         let header_value = HeaderValue::from_str(&user_agent).map_err(|e| {
             GenevaConfigClientError::InvalidUserAgentSuffix(format!(
-                "Failed to create User-Agent header: {}",
-                e
+                "Failed to create User-Agent header: {e}"
             ))
         })?;
 
