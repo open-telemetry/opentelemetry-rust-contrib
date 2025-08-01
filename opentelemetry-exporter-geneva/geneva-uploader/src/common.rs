@@ -12,20 +12,12 @@ pub(crate) enum ValidationError {
 
 pub(crate) type Result<T> = std::result::Result<T, ValidationError>;
 
-/// Validates a user agent prefix for HTTP header compliance
-///
-/// # Arguments
-/// * `prefix` - The user agent prefix to validate
-///
-/// # Returns
-/// * `Ok(())` if valid
-/// * `Err(ValidationError::InvalidUserAgentPrefix)` if invalid
-///
-/// # Validation Rules
-/// - Must contain only ASCII printable characters (0x20-0x7E)
-/// - Must not contain control characters (especially \r, \n, \0)
-/// - Must not exceed 200 characters in length
-/// - Must not be empty or only whitespace
+// Validates a user agent prefix for HTTP header compliance
+// Validation Rules:
+// - Must contain only ASCII printable characters (0x20-0x7E)
+// - Must not contain control characters (especially \r, \n, \0)
+// - Must not exceed 200 characters in length
+// - Must not be empty or only whitespace
 pub(crate) fn validate_user_agent_prefix(prefix: &str) -> Result<()> {
     if prefix.trim().is_empty() {
         return Err(ValidationError::InvalidUserAgentPrefix(
