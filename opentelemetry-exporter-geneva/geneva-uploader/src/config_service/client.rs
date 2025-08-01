@@ -133,16 +133,16 @@ pub(crate) struct GenevaConfigClientConfig {
     pub(crate) region: String,
     pub(crate) config_major_version: u32,
     pub(crate) auth_method: AuthMethod,
-    /// User agent for the application. Will be formatted as "<application> (RustGenevaClient/0.1)".
-    /// If None, defaults to "RustGenevaClient/0.1".
+    /// User agent for the application. Will be formatted as "<application> (GenevaUploader/0.1)".
+    /// If None, defaults to "GenevaUploader/0.1".
     ///
     /// The suffix must contain only ASCII printable characters, be non-empty (after trimming),
     /// and not exceed 200 characters in length.
     ///
     /// Examples:
-    /// - None: "RustGenevaClient/0.1"
-    /// - Some("MyApp/2.1.0"): "MyApp/2.1.0 (RustGenevaClient/0.1)"
-    /// - Some("ProductionService-1.0"): "ProductionService-1.0 (RustGenevaClient/0.1)"
+    /// - None: "GenevaUploader/0.1"
+    /// - Some("MyApp/2.1.0"): "MyApp/2.1.0 (GenevaUploader/0.1)"
+    /// - Some("ProductionService-1.0"): "ProductionService-1.0 (GenevaUploader/0.1)"
     pub(crate) user_agent_suffix: Option<&'static str>,
 }
 
@@ -329,7 +329,7 @@ impl GenevaConfigClient {
             }
         }
 
-        let agent_identity = "RustGenevaClient";
+        let agent_identity = "GenevaUploader";
         let agent_version = "0.1";
         let user_agent_suffix = config.user_agent_suffix.unwrap_or("");
         let static_headers =
@@ -713,20 +713,21 @@ mod tests {
 
     #[test]
     fn test_build_static_headers_safe() {
-        let headers = GenevaConfigClient::build_static_headers("TestAgent", "1.0", "ValidApp/2.0");
+        let headers =
+            GenevaConfigClient::build_static_headers("GenevaUploader", "0.1", "ValidApp/2.0");
         assert!(headers.is_ok());
 
         let headers = headers.unwrap();
         let user_agent = headers.get(USER_AGENT).unwrap().to_str().unwrap();
-        assert_eq!(user_agent, "ValidApp/2.0 (TestAgent/1.0)");
+        assert_eq!(user_agent, "ValidApp/2.0 (GenevaUploader/0.1)");
 
         // Test empty suffix
-        let headers = GenevaConfigClient::build_static_headers("TestAgent", "1.0", "");
+        let headers = GenevaConfigClient::build_static_headers("GenevaUploader", "0.1", "");
         assert!(headers.is_ok());
 
         let headers = headers.unwrap();
         let user_agent = headers.get(USER_AGENT).unwrap().to_str().unwrap();
-        assert_eq!(user_agent, "TestAgent/1.0");
+        assert_eq!(user_agent, "GenevaUploader/0.1");
     }
 
     #[test]
