@@ -561,37 +561,4 @@ fn configure_tls_connector(
     builder
 }
 
-#[cfg(test)]
-mod tests {
-    use crate::common::build_geneva_headers;
-    use reqwest::header::USER_AGENT;
-
-    #[test]
-    fn test_build_geneva_headers_safe() {
-        let headers = build_geneva_headers(Some("ValidApp/2.0"));
-        assert!(headers.is_ok());
-
-        let headers = headers.unwrap();
-        let user_agent = headers.get(USER_AGENT).unwrap().to_str().unwrap();
-        assert_eq!(user_agent, "ValidApp/2.0 (GenevaUploader/0.1)");
-
-        // Test empty prefix
-        let headers = build_geneva_headers(None);
-        assert!(headers.is_ok());
-
-        let headers = headers.unwrap();
-        let user_agent = headers.get(USER_AGENT).unwrap().to_str().unwrap();
-        assert_eq!(user_agent, "GenevaUploader/0.1");
-    }
-
-    #[test]
-    fn test_build_geneva_headers_invalid() {
-        // This should not happen in practice due to validation, but test the safety mechanism
-        let result = build_geneva_headers(Some("Invalid\nPrefix"));
-        assert!(result.is_err());
-
-        if let Err(e) = result {
-            assert!(e.to_string().contains("Invalid user agent prefix"));
-        }
-    }
-}
+// Note: Tests for build_geneva_headers are in common.rs where the functionality is implemented
