@@ -88,12 +88,13 @@ impl From<reqwest::Error> for GenevaUploaderError {
 
 pub(crate) type Result<T> = std::result::Result<T, GenevaUploaderError>;
 
-#[allow(dead_code)]
 /// Response from the ingestion API when submitting data
 #[derive(Debug, Clone, Deserialize)]
 pub(crate) struct IngestionResponse {
+    #[allow(dead_code)]
     pub(crate) ticket: String,
     #[serde(flatten)]
+    #[allow(dead_code)]
     pub(crate) extra: HashMap<String, Value>,
 }
 

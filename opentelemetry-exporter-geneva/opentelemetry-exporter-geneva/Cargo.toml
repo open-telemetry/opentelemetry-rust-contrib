@@ -9,6 +9,7 @@ rust-version = "1.75.0"
 opentelemetry_sdk = {workspace = true, default-features = false, features = ["logs"]}
 opentelemetry-proto = {workspace = true, default-features = false, features = ["logs"]}
 geneva-uploader = {path = "../geneva-uploader/", version = "0.1.0"}
+futures = "0.3"
 
 [dev-dependencies]
 opentelemetry-appender-tracing = {workspace = true}
