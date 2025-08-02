@@ -15,7 +15,7 @@ use opentelemetry_sdk::{
 };
 use rand::seq::{IndexedRandom, SliceRandom};
 use rand::{rng, rngs::ThreadRng, RngCore};
-use std::hint::std::hint::black_box;
+use std::hint::black_box;
 
 #[derive(Debug)]
 struct DummyClient;
