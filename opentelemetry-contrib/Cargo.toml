@@ -35,7 +35,7 @@ serde_json = { version = "1", optional = true }
 tokio = { version = "1.0", features = ["fs", "io-util"], optional = true }
 
 [dev-dependencies]
-criterion = { version = "0.7", features = ["html_reports"] }
+criterion = { version = "0.5", features = ["html_reports"] } #TODO - bump to 0.7 or higher once pprof supports it
 futures-util = { version = "0.3", default-features = false, features = ["std"] }
 opentelemetry_sdk = { workspace = true, features = ["trace", "testing"] }
 
