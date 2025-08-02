@@ -1,6 +1,6 @@
 //! High-level GenevaClient for user code. Wraps config_service and ingestion_service.
 
-use crate::config_service::client::{AuthMethod, GenevaConfigClient, GenevaConfigClientConfig};
+use crate::config_service::client::{AuthMethod, GenevaConfigClient, GenevaConfigClientConfig, MsiIdentityType};
 use crate::ingestion_service::uploader::{GenevaUploader, GenevaUploaderConfig};
 use crate::payload_encoder::lz4_chunked_compression::lz4_chunked_compression;
 use crate::payload_encoder::otlp_encoder::OtlpEncoder;
@@ -24,6 +24,134 @@ pub struct GenevaClientConfig {
     /// Maximum number of concurrent uploads. If None, defaults to number of CPU cores.
     pub max_concurrent_uploads: Option<usize>,
     // Add event name/version here if constant, or per-upload if you want them per call.
+}
+
+impl GenevaClientConfig {
+    /// Configure the client to use system-assigned managed identity
+    ///
+    /// # Example
+    /// ```rust,no_run
+    /// # use geneva_uploader::GenevaClientConfig;
+    /// let config = GenevaClientConfig {
+    ///     endpoint: "https://geneva.example.com".to_string(),
+    ///     environment: "prod".to_string(),
+    ///     account: "myaccount".to_string(),
+    ///     namespace: "myservice".to_string(),
+    ///     region: "westus2".to_string(),
+    ///     config_major_version: 1,
+    ///     auth_method: Default::default(), // placeholder
+    ///     tenant: "mytenant".to_string(),
+    ///     role_name: "myrole".to_string(),
+    ///     role_instance: "instance1".to_string(),
+    ///     max_concurrent_uploads: None,
+    /// }.with_system_assigned_identity();
+    /// ```
+    pub fn with_system_assigned_identity(mut self) -> Self {
+        self.auth_method = AuthMethod::ManagedIdentity {
+            identity: None,
+            fallback_to_default: false,
+        };
+        self
+    }
+
+    /// Configure the client to use user-assigned managed identity by Client ID
+    ///
+    /// # Arguments
+    /// * `client_id` - The Client ID (Application ID) of the user-assigned managed identity
+    /// * `fallback` - Whether to fallback to system-assigned identity if user-assigned fails
+    ///
+    /// # Example
+    /// ```rust,no_run
+    /// # use geneva_uploader::GenevaClientConfig;
+    /// let config = GenevaClientConfig {
+    ///     // ... other fields
+    /// #   endpoint: "https://geneva.example.com".to_string(),
+    /// #   environment: "prod".to_string(),
+    /// #   account: "myaccount".to_string(),
+    /// #   namespace: "myservice".to_string(),
+    /// #   region: "westus2".to_string(),
+    /// #   config_major_version: 1,
+    /// #   auth_method: Default::default(),
+    /// #   tenant: "mytenant".to_string(),
+    /// #   role_name: "myrole".to_string(),
+    /// #   role_instance: "instance1".to_string(),
+    /// #   max_concurrent_uploads: None,
+    /// }.with_user_assigned_client_id("12345678-1234-1234-1234-123456789012".to_string(), true);
+    /// ```
+    pub fn with_user_assigned_client_id(mut self, client_id: String, fallback: bool) -> Self {
+        self.auth_method = AuthMethod::ManagedIdentity {
+            identity: Some(MsiIdentityType::ClientId(client_id)),
+            fallback_to_default: fallback,
+        };
+        self
+    }
+
+    /// Configure the client to use user-assigned managed identity by Object ID
+    ///
+    /// # Arguments
+    /// * `object_id` - The Object ID of the user-assigned managed identity in Azure AD
+    /// * `fallback` - Whether to fallback to system-assigned identity if user-assigned fails
+    ///
+    /// # Example
+    /// ```rust,no_run
+    /// # use geneva_uploader::GenevaClientConfig;
+    /// let config = GenevaClientConfig {
+    ///     // ... other fields
+    /// #   endpoint: "https://geneva.example.com".to_string(),
+    /// #   environment: "prod".to_string(),
+    /// #   account: "myaccount".to_string(),
+    /// #   namespace: "myservice".to_string(),
+    /// #   region: "westus2".to_string(),
+    /// #   config_major_version: 1,
+    /// #   auth_method: Default::default(),
+    /// #   tenant: "mytenant".to_string(),
+    /// #   role_name: "myrole".to_string(),
+    /// #   role_instance: "instance1".to_string(),
+    /// #   max_concurrent_uploads: None,
+    /// }.with_user_assigned_object_id("87654321-4321-4321-4321-210987654321".to_string(), false);
+    /// ```
+    pub fn with_user_assigned_object_id(mut self, object_id: String, fallback: bool) -> Self {
+        self.auth_method = AuthMethod::ManagedIdentity {
+            identity: Some(MsiIdentityType::ObjectId(object_id)),
+            fallback_to_default: fallback,
+        };
+        self
+    }
+
+    /// Configure the client to use user-assigned managed identity by Resource ID
+    ///
+    /// # Arguments
+    /// * `resource_id` - The full ARM Resource ID of the user-assigned managed identity
+    /// * `fallback` - Whether to fallback to system-assigned identity if user-assigned fails
+    ///
+    /// # Example
+    /// ```rust,no_run
+    /// # use geneva_uploader::GenevaClientConfig;
+    /// let config = GenevaClientConfig {
+    ///     // ... other fields
+    /// #   endpoint: "https://geneva.example.com".to_string(),
+    /// #   environment: "prod".to_string(),
+    /// #   account: "myaccount".to_string(),
+    /// #   namespace: "myservice".to_string(),
+    /// #   region: "westus2".to_string(),
+    /// #   config_major_version: 1,
+    /// #   auth_method: Default::default(),
+    /// #   tenant: "mytenant".to_string(),
+    /// #   role_name: "myrole".to_string(),
+    /// #   role_instance: "instance1".to_string(),
+    /// #   max_concurrent_uploads: None,
+    /// }.with_user_assigned_resource_id(
+    ///     "/subscriptions/sub-id/resourceGroups/rg/providers/Microsoft.ManagedIdentity/userAssignedIdentities/my-identity".to_string(),
+    ///     false
+    /// );
+    /// ```
+    pub fn with_user_assigned_resource_id(mut self, resource_id: String, fallback: bool) -> Self {
+        self.auth_method = AuthMethod::ManagedIdentity {
+            identity: Some(MsiIdentityType::ResourceId(resource_id)),
+            fallback_to_default: fallback,
+        };
+        self
+    }
 }
 
 /// Main user-facing client for Geneva ingestion.
