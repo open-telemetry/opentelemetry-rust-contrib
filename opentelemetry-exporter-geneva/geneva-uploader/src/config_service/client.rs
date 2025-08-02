@@ -1,10 +1,7 @@
 // Geneva Config Client with TLS (PKCS#12) and TODO: Managed Identity support
 
 use base64::{engine::general_purpose, Engine as _};
-use reqwest::{
-    header::{HeaderMap, HeaderValue, ACCEPT, USER_AGENT},
-    Client,
-};
+use reqwest::{header::HeaderMap, Client};
 use serde::Deserialize;
 use std::time::Duration;
 use thiserror::Error;
@@ -128,7 +125,8 @@ pub(crate) struct GenevaConfigClientConfig {
     pub(crate) namespace: String,
     pub(crate) region: String,
     pub(crate) config_major_version: u32,
-    pub(crate) auth_method: AuthMethod, // agent_identity and agent_version are hardcoded for now
+    pub(crate) auth_method: AuthMethod,
+    pub(crate) static_headers: HeaderMap,
 }
 
 #[allow(dead_code)]
@@ -260,9 +258,6 @@ impl GenevaConfigClient {
         }
 
         let agent_identity = "GenevaUploader";
-        let agent_version = "0.1";
-        let static_headers = Self::build_static_headers(agent_identity, agent_version);
-
         let identity = format!("Tenant=Default/Role=GcsClient/RoleInstance={agent_identity}");
 
         let encoded_identity = general_purpose::STANDARD.encode(&identity);
@@ -283,15 +278,16 @@ impl GenevaConfigClient {
         ).map_err(|e| GenevaConfigClientError::InternalError(format!("Failed to write URL: {e}")))?;
 
         let http_client = client_builder.build()?;
+        let static_headers = config.static_headers.clone();
 
         Ok(Self {
+            static_headers,
             config,
             http_client,
             cached_data: RwLock::new(None),
             precomputed_url_prefix: pre_url,
             agent_identity: agent_identity.to_string(), // TODO make this configurable
             agent_version: "1.0".to_string(),           // TODO make this configurable
-            static_headers,
         })
     }
 
@@ -300,14 +296,6 @@ impl GenevaConfigClient {
         DateTime::parse_from_rfc3339(expiry_str)
             .ok()
             .map(|dt| dt.with_timezone(&Utc))
-    }
-
-    fn build_static_headers(agent_identity: &str, agent_version: &str) -> HeaderMap {
-        let mut headers = HeaderMap::new();
-        let user_agent = format!("{agent_identity}-{agent_version}");
-        headers.insert(USER_AGENT, HeaderValue::from_str(&user_agent).unwrap());
-        headers.insert(ACCEPT, HeaderValue::from_static("application/json"));
-        headers
     }
 
     /// Retrieves ingestion gateway information from the Geneva Config Service.

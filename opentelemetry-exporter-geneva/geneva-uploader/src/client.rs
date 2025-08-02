@@ -1,5 +1,6 @@
 //! High-level GenevaClient for user code. Wraps config_service and ingestion_service.
 
+use crate::common::{build_geneva_headers, validate_user_agent_prefix};
 use crate::config_service::client::{AuthMethod, GenevaConfigClient, GenevaConfigClientConfig};
 use crate::ingestion_service::uploader::{GenevaUploader, GenevaUploaderConfig};
 use crate::payload_encoder::lz4_chunked_compression::lz4_chunked_compression;
@@ -23,6 +24,17 @@ pub struct GenevaClientConfig {
     pub role_instance: String,
     /// Maximum number of concurrent uploads. If None, defaults to number of CPU cores.
     pub max_concurrent_uploads: Option<usize>,
+    /// User agent prefix for the application. Will be formatted as "<prefix> (GenevaUploader/0.1)".
+    /// If None, defaults to "GenevaUploader/0.1".
+    ///
+    /// The prefix must contain only ASCII printable characters, be non-empty (after trimming),
+    /// and not exceed 200 characters in length.
+    ///
+    /// Examples:
+    /// - None: "GenevaUploader/0.1"
+    /// - Some("MyApp/2.1.0"): "MyApp/2.1.0 (GenevaUploader/0.1)"
+    /// - Some("ProductionService-1.0"): "ProductionService-1.0 (GenevaUploader/0.1)"
+    pub user_agent_prefix: Option<&'static str>,
     // Add event name/version here if constant, or per-upload if you want them per call.
 }
 
@@ -38,7 +50,17 @@ pub struct GenevaClient {
 impl GenevaClient {
     /// Construct a new client with minimal configuration. Fetches and caches ingestion info as needed.
     pub async fn new(cfg: GenevaClientConfig) -> Result<Self, String> {
-        // Build config client config
+        // Validate user agent prefix once and build headers once for both services
+        // This avoids duplicate validation and header building in config and ingestion services
+        if let Some(prefix) = cfg.user_agent_prefix {
+            validate_user_agent_prefix(prefix)
+                .map_err(|e| format!("Invalid user agent prefix: {e}"))?;
+        }
+
+        let static_headers = build_geneva_headers(cfg.user_agent_prefix)
+            .map_err(|e| format!("Failed to build Geneva headers: {e}"))?;
+
+        // Build config client config with pre-built headers
         let config_client_config = GenevaConfigClientConfig {
             endpoint: cfg.endpoint,
             environment: cfg.environment.clone(),
@@ -47,6 +69,7 @@ impl GenevaClient {
             region: cfg.region,
             config_major_version: cfg.config_major_version,
             auth_method: cfg.auth_method,
+            static_headers: static_headers.clone(),
         };
         let config_client = Arc::new(
             GenevaConfigClient::new(config_client_config)
@@ -67,12 +90,13 @@ impl GenevaClient {
             cfg.namespace, config_version, cfg.tenant, cfg.role_name, cfg.role_instance,
         );
 
-        // Uploader config
+        // Uploader config with pre-built headers
         let uploader_config = GenevaUploaderConfig {
             namespace: cfg.namespace.clone(),
             source_identity,
             environment: cfg.environment,
             config_version: config_version.clone(),
+            static_headers: static_headers.clone(),
         };
 
         let uploader = GenevaUploader::from_config_client(config_client, uploader_config)
