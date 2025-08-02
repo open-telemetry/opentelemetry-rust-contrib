@@ -2,6 +2,15 @@
 
 ## vNext
 
+- Added a `with_resource_attributes` method to the processor builder, allowing
+  users to specify which resource attribute keys are exported with each log
+  record.
+  - By default, the Resource attributes `"service.name"` and
+    `"service.instance.id"` continue to be exported as `cloud.roleName` and
+    `cloud.roleInstance`.
+  - This feature enables exporting additional resource attributes beyond the
+    defaults.
+
 ## v0.9.1
 
 - Added `Processor::builder_etw_compat_only()` method that builds a processor using a provider name that is fully compatible with ETW requirements (dropping UserEvents provider name compatibility) by allowing hyphens (`-`).
