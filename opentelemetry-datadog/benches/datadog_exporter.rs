@@ -1,7 +1,8 @@
 use std::time::{Duration, SystemTime};
 
 use bytes::Bytes;
-use criterion::{black_box, criterion_group, criterion_main, Criterion};
+use criterion::{criterion_group, criterion_main, Criterion};
+use std::hint::std::hint::black_box;
 use http::Request;
 use opentelemetry::{
     trace::{SpanContext, SpanId, SpanKind, Status, TraceFlags, TraceId, TraceState},
