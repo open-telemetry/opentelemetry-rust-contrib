@@ -2,8 +2,8 @@
 name = "opentelemetry-instrumentation-actix-web"
 version = "0.22.0"
 description = "OpenTelemetry instrumentation for Actix Web apps"
-homepage = "https://github.com/open-telemetry/opentelemetry-rust-contrib/tree/main/actix-web-opentelemetry"
-repository = "https://github.com/open-telemetry/opentelemetry-rust-contrib/tree/main/actix-web-opentelemetry"
+homepage = "https://github.com/open-telemetry/opentelemetry-rust-contrib/tree/main/opentelemetry-instrumentation-actix-web"
+repository = "https://github.com/open-telemetry/opentelemetry-rust-contrib/tree/main/opentelemetry-instrumentation-actix-web"
 readme = "README.md"
 categories = ["api-bindings"]
 keywords = ["actix", "actix-web", "opentelemetry"]
