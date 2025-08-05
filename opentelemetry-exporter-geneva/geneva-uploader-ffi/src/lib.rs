@@ -11,7 +11,6 @@ use tokio::runtime::Runtime;
 
 use geneva_uploader::client::{GenevaClient, GenevaClientConfig};
 use geneva_uploader::AuthMethod;
-use opentelemetry_proto::tonic::logs::v1::ResourceLogs;
 use prost::Message;
 use std::path::PathBuf;
 
