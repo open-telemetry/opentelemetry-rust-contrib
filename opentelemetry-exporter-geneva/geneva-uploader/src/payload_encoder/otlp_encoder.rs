@@ -655,7 +655,6 @@ mod tests {
         assert_eq!(log_batch.metadata.schema_ids.matches(';').count(), 0); // 1 schema = 0 semicolons
     }
 
-
     #[test]
     fn test_different_attribute_order_creates_different_schema_ids() {
         // Test that different field orders create different schema IDs
@@ -710,6 +709,4 @@ mod tests {
             "Schema IDs should be different when attributes are in different order (no sorting)"
         );
     }
-
-
 }
