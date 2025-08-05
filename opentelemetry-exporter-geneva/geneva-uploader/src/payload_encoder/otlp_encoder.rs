@@ -659,6 +659,4 @@ mod tests {
         assert!(!log_batch.data.is_empty()); // Should have encoded data
         assert_eq!(log_batch.metadata.schema_ids.matches(';').count(), 0); // 1 schema = 0 semicolons
     }
-
-
 }
