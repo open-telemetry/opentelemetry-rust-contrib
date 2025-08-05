@@ -45,14 +45,14 @@ int main() {
     if (client != NULL) {
         printf("✓ Client created successfully\n");
         
-        // Test 3: Upload logs with invalid data
-        printf("Test 3: Uploading logs with invalid data...\n");
+        // Test 3: Upload logs with invalid data (sync)
+        printf("Test 3: Uploading logs with invalid data (sync)...\n");
         uint8_t dummy_data[] = {0x01, 0x02, 0x03, 0x04};
-        GenevaError result = geneva_upload_logs(client, dummy_data, sizeof(dummy_data));
+        GenevaError result = geneva_upload_logs_sync(client, dummy_data, sizeof(dummy_data));
         if (result != GENEVA_SUCCESS) {
-            printf("✓ Upload failed as expected with invalid data (error: %d)\n", result);
+            printf("✓ Sync upload failed as expected with invalid data (error: %d)\n", result);
         } else {
-            printf("✗ Upload should have failed with invalid data\n");
+            printf("✗ Sync upload should have failed with invalid data\n");
         }
         
         geneva_client_free(client);
@@ -69,8 +69,8 @@ int main() {
     // Test 4: Test error handling
     printf("Test 4: Testing error handling...\n");
     
-    // Upload with null handle
-    GenevaError result = geneva_upload_logs(NULL, NULL, 0);
+    // Upload sync with null handle
+    GenevaError result = geneva_upload_logs_sync(NULL, NULL, 0);
     if (result == GENEVA_INVALID_DATA) {
         printf("✓ Correctly returned INVALID_DATA for NULL handle\n");
     } else {
