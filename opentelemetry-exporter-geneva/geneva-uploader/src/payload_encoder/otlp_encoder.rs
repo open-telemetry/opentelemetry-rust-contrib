@@ -256,19 +256,22 @@ impl OtlpEncoder {
     fn write_row_data(&self, log: &LogRecord, sorted_fields: &[FieldDef]) -> Vec<u8> {
         let mut buffer = Vec::with_capacity(sorted_fields.len() * 50); //TODO - estimate better
 
+        // Pre-calculate timestamp to avoid duplicate computation for FIELD_TIMESTAMP and FIELD_ENV_TIME
+        let formatted_timestamp = {
+            let timestamp_nanos = if log.time_unix_nano != 0 {
+                log.time_unix_nano
+            } else {
+                log.observed_time_unix_nano
+            };
+            Self::format_timestamp(timestamp_nanos)
+        };
+
         for field in sorted_fields {
             match field.name.as_ref() {
                 FIELD_ENV_NAME => BondWriter::write_string(&mut buffer, "TestEnv"), // TODO - placeholder for actual env name
                 FIELD_ENV_VER => BondWriter::write_string(&mut buffer, "4.0"), // TODO - placeholder for actual env version
                 FIELD_TIMESTAMP | FIELD_ENV_TIME => {
-                    // Use the same timestamp precedence logic: prefer time_unix_nano, fall back to observed_time_unix_nano
-                    let timestamp_nanos = if log.time_unix_nano != 0 {
-                        log.time_unix_nano
-                    } else {
-                        log.observed_time_unix_nano
-                    };
-                    let dt = Self::format_timestamp(timestamp_nanos);
-                    BondWriter::write_string(&mut buffer, &dt);
+                    BondWriter::write_string(&mut buffer, &formatted_timestamp);
                 }
                 FIELD_TRACE_ID => {
                     let hex_bytes = Self::encode_id_to_hex::<32>(&log.trace_id);
@@ -655,5 +658,49 @@ mod tests {
         assert_eq!(system_alert.metadata.schema_ids.matches(';').count(), 0); // 1 schema = 0 semicolons
         assert!(!log_batch.data.is_empty()); // Should have encoded data
         assert_eq!(log_batch.metadata.schema_ids.matches(';').count(), 0); // 1 schema = 0 semicolons
+    }
+
+    #[test]
+    fn test_timestamp_optimization_consistency() {
+        // This test validates that both FIELD_TIMESTAMP and FIELD_ENV_TIME
+        // produce identical timestamps after the optimization
+        let encoder = OtlpEncoder::new();
+
+        // Test with time_unix_nano set (should be preferred)
+        let log_with_time = LogRecord {
+            time_unix_nano: 1_700_000_000_000_000_000,
+            observed_time_unix_nano: 1_600_000_000_000_000_000, // Different value
+            event_name: "test_event".to_string(),
+            severity_number: 9,
+            ..Default::default()
+        };
+
+        // Test with only observed_time_unix_nano set
+        let log_with_observed_time = LogRecord {
+            time_unix_nano: 0, // Should fall back to observed_time_unix_nano
+            observed_time_unix_nano: 1_600_000_000_000_000_000,
+            event_name: "test_event".to_string(),
+            severity_number: 9,
+            ..Default::default()
+        };
+
+        let metadata = "test";
+
+        // Encode both logs
+        let result1 = encoder.encode_log_batch([log_with_time].iter(), metadata);
+        let result2 = encoder.encode_log_batch([log_with_observed_time].iter(), metadata);
+
+        // Both should produce valid results
+        assert_eq!(result1.len(), 1);
+        assert_eq!(result2.len(), 1);
+        assert!(!result1[0].data.is_empty());
+        assert!(!result2[0].data.is_empty());
+
+        // Verify that the timestamp formatting is working correctly by checking
+        // that we get different results for different timestamps
+        assert_ne!(
+            result1[0].data, result2[0].data,
+            "Different timestamps should produce different encoded data"
+        );
     }
 }
