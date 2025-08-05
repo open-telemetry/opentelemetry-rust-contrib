@@ -166,60 +166,40 @@ impl OtlpEncoder {
         let mut hasher = DefaultHasher::new();
         event_name.hash(&mut hasher);
 
-        // Part A - Always present required fields (not included in schema ID hash)
+        // Part A - Always present fields
         fields.push((Cow::Borrowed(FIELD_ENV_NAME), BondDataType::BT_STRING));
         fields.push((FIELD_ENV_VER.into(), BondDataType::BT_STRING));
         fields.push((FIELD_TIMESTAMP.into(), BondDataType::BT_STRING));
         fields.push((FIELD_ENV_TIME.into(), BondDataType::BT_STRING));
 
-        // Part B - Schema-defining fields (conditional and dynamic fields that affect schema uniqueness)
-        let mut schema_defining_fields = Vec::new();
-
-        // Part B1 - Conditional core fields
+        // Part A extension - Conditional fields
         if !log.trace_id.is_empty() {
-            let field = (FIELD_TRACE_ID.into(), BondDataType::BT_STRING);
-            fields.push(field.clone());
-            schema_defining_fields.push(field);
+            fields.push((FIELD_TRACE_ID.into(), BondDataType::BT_STRING));
         }
         if !log.span_id.is_empty() {
-            let field = (FIELD_SPAN_ID.into(), BondDataType::BT_STRING);
-            fields.push(field.clone());
-            schema_defining_fields.push(field);
+            fields.push((FIELD_SPAN_ID.into(), BondDataType::BT_STRING));
         }
         if log.flags != 0 {
-            let field = (FIELD_TRACE_FLAGS.into(), BondDataType::BT_INT32);
-            fields.push(field.clone());
-            schema_defining_fields.push(field);
+            fields.push((FIELD_TRACE_FLAGS.into(), BondDataType::BT_INT32));
         }
 
-        // Part B2 - Core log fields  
+        // Part B - Core log fields
         if !log.event_name.is_empty() {
-            let field = (FIELD_NAME.into(), BondDataType::BT_STRING);
-            fields.push(field.clone());
-            schema_defining_fields.push(field);
+            fields.push((FIELD_NAME.into(), BondDataType::BT_STRING));
         }
-        
-        // severity_number is always present, but we include it in schema since it's not a required field like env_*
-        let severity_field = (FIELD_SEVERITY_NUMBER.into(), BondDataType::BT_INT32);
-        fields.push(severity_field.clone());
-        schema_defining_fields.push(severity_field);
-        
+        fields.push((FIELD_SEVERITY_NUMBER.into(), BondDataType::BT_INT32));
         if !log.severity_text.is_empty() {
-            let field = (FIELD_SEVERITY_TEXT.into(), BondDataType::BT_STRING);
-            fields.push(field.clone());
-            schema_defining_fields.push(field);
+            fields.push((FIELD_SEVERITY_TEXT.into(), BondDataType::BT_STRING));
         }
         if let Some(body) = &log.body {
             if let Some(Value::StringValue(_)) = &body.value {
                 // Only included in schema when body is a string value
-                let field = (FIELD_BODY.into(), BondDataType::BT_STRING);
-                fields.push(field.clone());
-                schema_defining_fields.push(field);
+                fields.push((FIELD_BODY.into(), BondDataType::BT_STRING));
             }
             //TODO - handle other body types
         }
 
-        // Part B3 - Dynamic attributes
+        // Part C - Dynamic attributes
         for attr in &log.attributes {
             if let Some(val) = attr.value.as_ref().and_then(|v| v.value.as_ref()) {
                 let type_id = match val {
@@ -229,32 +209,25 @@ impl OtlpEncoder {
                     Value::BoolValue(_) => BondDataType::BT_BOOL,
                     _ => continue,
                 };
-                let field = (attr.key.clone().into(), type_id);
-                fields.push(field.clone());
-                schema_defining_fields.push(field);
+                fields.push((attr.key.clone().into(), type_id));
             }
         }
 
-        // Sort only the schema-defining fields for consistent hashing (optimization: required fields don't need sorting)
-        schema_defining_fields.sort_by(|a, b| a.0.cmp(&b.0));
-
-        // Hash only schema-defining field names and types (optimization: exclude required fields)
-        for (name, type_id) in &schema_defining_fields {
-            name.hash(&mut hasher);
-            type_id.hash(&mut hasher);
-        }
-
-        // Sort all fields by name for consistent field ID assignment
-        fields.sort_by(|a, b| a.0.cmp(&b.0));
-
-        // Convert to FieldDef with consistent field IDs
+        // No sorting - field order affects schema ID calculation
+        // Hash field names and types while converting to FieldDef
         let field_defs: Vec<FieldDef> = fields
             .into_iter()
             .enumerate()
-            .map(|(i, (name, type_id))| FieldDef {
-                name,
-                type_id,
-                field_id: (i + 1) as u16,
+            .map(|(i, (name, type_id))| {
+                // Hash field name and type for schema ID
+                name.hash(&mut hasher);
+                type_id.hash(&mut hasher);
+
+                FieldDef {
+                    name,
+                    type_id,
+                    field_id: (i + 1) as u16,
+                }
             })
             .collect();
 
@@ -775,5 +748,60 @@ mod tests {
         let (_, schema_id2) = OtlpEncoder::determine_fields_and_schema_id(&log2, "test_event");
 
         assert_ne!(schema_id1, schema_id2, "Schema IDs should be different when schema-defining fields differ");
+    }
+
+    #[test]
+    fn test_different_attribute_order_creates_different_schema_ids() {
+        // Test that different field orders create different schema IDs
+        // This validates that sorting is not performed and field order matters
+        let _encoder = OtlpEncoder::new();
+
+        // Create two identical log records with same attributes but in different order
+        let mut log1 = LogRecord {
+            event_name: "test_event".to_string(),
+            severity_number: 9,
+            ..Default::default()
+        };
+        // Add attributes in order: user_id, session_id
+        log1.attributes.push(KeyValue {
+            key: "user_id".to_string(),
+            value: Some(AnyValue {
+                value: Some(Value::StringValue("user123".to_string())),
+            }),
+        });
+        log1.attributes.push(KeyValue {
+            key: "session_id".to_string(),
+            value: Some(AnyValue {
+                value: Some(Value::StringValue("session456".to_string())),
+            }),
+        });
+
+        let mut log2 = LogRecord {
+            event_name: "test_event".to_string(),
+            severity_number: 9,
+            ..Default::default()
+        };
+        // Add same attributes but in reverse order: session_id, user_id
+        log2.attributes.push(KeyValue {
+            key: "session_id".to_string(),
+            value: Some(AnyValue {
+                value: Some(Value::StringValue("session456".to_string())),
+            }),
+        });
+        log2.attributes.push(KeyValue {
+            key: "user_id".to_string(),
+            value: Some(AnyValue {
+                value: Some(Value::StringValue("user123".to_string())),
+            }),
+        });
+
+        // Schema IDs should be different because field order affects hash calculation
+        let (_, schema_id1) = OtlpEncoder::determine_fields_and_schema_id(&log1, "test_event");
+        let (_, schema_id2) = OtlpEncoder::determine_fields_and_schema_id(&log2, "test_event");
+
+        assert_ne!(
+            schema_id1, schema_id2,
+            "Schema IDs should be different when attributes are in different order (no sorting)"
+        );
     }
 }
