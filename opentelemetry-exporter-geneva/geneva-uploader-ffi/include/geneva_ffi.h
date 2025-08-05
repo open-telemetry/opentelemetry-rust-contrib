@@ -55,21 +55,17 @@ GenevaClientHandle* geneva_client_new(const GenevaConfig* config);
 // Uploads logs to Geneva synchronously (blocks until complete)
 // data should be protobuf-encoded ResourceLogs data
 // Note: This function blocks the calling thread. For high-performance scenarios,
-// consider using geneva_upload_logs_async instead.
+// consider using geneva_upload_logs instead.
 GenevaError geneva_upload_logs_sync(GenevaClientHandle* handle, const uint8_t* data, size_t data_len);
 
-// Uploads logs to Geneva asynchronously with callback notification
+// Uploads logs to Geneva asynchronously with callback notification (main function)
 // data should be protobuf-encoded ResourceLogs data
-// callback will be called when the operation completes
+// callback will be called when the operation completes on a dedicated background thread
 // user_data will be passed to the callback
 // Returns GENEVA_ASYNC_OPERATION_PENDING if queued successfully, or error code for immediate failures
-GenevaError geneva_upload_logs_async(GenevaClientHandle* handle, const uint8_t* data, size_t data_len, 
-                                     UploadCallback callback, void* user_data);
-
-// Main upload function - non-blocking with callback
-// data should be protobuf-encoded ResourceLogs data
-// callback will be called when the operation completes
-// user_data will be passed to the callback
+// 
+// Thread Safety: Callback executes on a dedicated thread, separate from the async runtime.
+// Ensure your callback is thread-safe and non-blocking.
 GenevaError geneva_upload_logs(GenevaClientHandle* handle, const uint8_t* data, size_t data_len,
                                UploadCallback callback, void* user_data);
 

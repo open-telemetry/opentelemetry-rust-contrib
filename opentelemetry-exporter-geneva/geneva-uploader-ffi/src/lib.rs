@@ -336,7 +336,7 @@ pub unsafe extern "C" fn geneva_upload_logs_sync(
     }
 }
 
-/// Uploads logs to Geneva asynchronously with callback notification
+/// Uploads logs to Geneva asynchronously with callback notification (main function)
 /// 
 /// # Safety
 /// - handle must be a valid pointer returned by geneva_client_new
@@ -349,7 +349,7 @@ pub unsafe extern "C" fn geneva_upload_logs_sync(
 /// - GenevaError::AsyncOperationPending if the upload was queued successfully
 /// - Other error codes for immediate validation failures
 #[no_mangle]
-pub unsafe extern "C" fn geneva_upload_logs_async(
+pub unsafe extern "C" fn geneva_upload_logs(
     handle: *mut GenevaClientHandle,
     data: *const u8,
     data_len: usize,
@@ -399,31 +399,16 @@ pub unsafe extern "C" fn geneva_upload_logs_async(
             Err(_) => GenevaError::UploadFailed,
         };
         
-        // Convert back to pointer and call the callback
-        let user_data_ptr = user_data_addr as *mut std::ffi::c_void;
-        unsafe { callback(error_code, user_data_ptr) };
+        // Spawn callback on dedicated thread to avoid blocking the async runtime
+        // and ensure thread safety as recommended by Claude
+        std::thread::spawn(move || {
+            // Convert back to pointer inside the thread (this is Send-safe)
+            let user_data_ptr = user_data_addr as *mut std::ffi::c_void;
+            unsafe { callback(error_code, user_data_ptr) };
+        });
     });
 
     GenevaError::AsyncOperationPending
-}
-
-/// Main upload function - non-blocking with callback
-/// 
-/// # Safety
-/// - handle must be a valid pointer returned by geneva_client_new
-/// - data must be a valid pointer to protobuf-encoded ResourceLogs data
-/// - data_len must be the correct length of the data
-/// - callback will be called when the operation completes
-/// - user_data will be passed to the callback
-#[no_mangle]
-pub unsafe extern "C" fn geneva_upload_logs(
-    handle: *mut GenevaClientHandle,
-    data: *const u8,
-    data_len: usize,
-    callback: UploadCallback,
-    user_data: *mut std::ffi::c_void,
-) -> GenevaError {
-    geneva_upload_logs_async(handle, data, data_len, callback, user_data)
 }
 
 /// Frees a Geneva client handle
