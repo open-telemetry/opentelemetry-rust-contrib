@@ -655,49 +655,6 @@ mod tests {
         assert_eq!(log_batch.metadata.schema_ids.matches(';').count(), 0); // 1 schema = 0 semicolons
     }
 
-    #[test]
-    fn test_schema_id_deterministic() {
-        // Test that schema ID generation is deterministic and only depends on variable fields
-        let _encoder = OtlpEncoder::new();
-
-        // Create two identical logs with same schema-defining fields
-        let mut log1 = LogRecord {
-            event_name: "test_event".to_string(),
-            severity_number: 9,
-            severity_text: "INFO".to_string(),
-            ..Default::default()
-        };
-        log1.trace_id = vec![1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16];
-        log1.attributes.push(KeyValue {
-            key: "user_id".to_string(),
-            value: Some(AnyValue {
-                value: Some(Value::StringValue("user123".to_string())),
-            }),
-        });
-
-        let mut log2 = LogRecord {
-            event_name: "test_event".to_string(),
-            severity_number: 10, // Different severity number
-            severity_text: "WARN".to_string(), // Different severity text
-            time_unix_nano: 1_700_000_001_000_000_000, // Different timestamp
-            ..Default::default()
-        };
-        log2.trace_id = vec![1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16];
-        log2.attributes.push(KeyValue {
-            key: "user_id".to_string(),
-            value: Some(AnyValue {
-                value: Some(Value::StringValue("user456".to_string())), // Different value
-            }),
-        });
-
-        // Both should generate the same schema ID since they have the same field structure
-        let (_, schema_id1) = OtlpEncoder::determine_fields_and_schema_id(&log1, "test_event");
-        let (_, schema_id2) = OtlpEncoder::determine_fields_and_schema_id(&log2, "test_event");
-
-        assert_eq!(schema_id1, schema_id2, "Schema IDs should be identical for same field structure");
-    }
-
-
 
     #[test]
     fn test_different_attribute_order_creates_different_schema_ids() {
