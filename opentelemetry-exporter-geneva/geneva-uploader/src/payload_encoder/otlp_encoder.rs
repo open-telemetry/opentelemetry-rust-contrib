@@ -166,13 +166,13 @@ impl OtlpEncoder {
         let mut hasher = DefaultHasher::new();
         event_name.hash(&mut hasher);
 
-        // Part A - Always present fields
+        // Part A - Always present mandatory fields (NOT included in schema ID hash)
         fields.push((Cow::Borrowed(FIELD_ENV_NAME), BondDataType::BT_STRING));
         fields.push((FIELD_ENV_VER.into(), BondDataType::BT_STRING));
         fields.push((FIELD_TIMESTAMP.into(), BondDataType::BT_STRING));
         fields.push((FIELD_ENV_TIME.into(), BondDataType::BT_STRING));
 
-        // Part A extension - Conditional fields
+        // Part A extension - Conditional fields (included in schema ID hash)
         if !log.trace_id.is_empty() {
             fields.push((FIELD_TRACE_ID.into(), BondDataType::BT_STRING));
         }
@@ -183,7 +183,7 @@ impl OtlpEncoder {
             fields.push((FIELD_TRACE_FLAGS.into(), BondDataType::BT_INT32));
         }
 
-        // Part B - Core log fields
+        // Part B - Core log fields (included in schema ID hash)
         if !log.event_name.is_empty() {
             fields.push((FIELD_NAME.into(), BondDataType::BT_STRING));
         }
@@ -199,7 +199,7 @@ impl OtlpEncoder {
             //TODO - handle other body types
         }
 
-        // Part C - Dynamic attributes
+        // Part C - Dynamic attributes (included in schema ID hash)
         for attr in &log.attributes {
             if let Some(val) = attr.value.as_ref().and_then(|v| v.value.as_ref()) {
                 let type_id = match val {
@@ -214,14 +214,22 @@ impl OtlpEncoder {
         }
 
         // No sorting - field order affects schema ID calculation
-        // Hash field names and types while converting to FieldDef
+        // Convert to FieldDef and hash only schema-defining fields (exclude mandatory fields)
         let field_defs: Vec<FieldDef> = fields
             .into_iter()
             .enumerate()
             .map(|(i, (name, type_id))| {
-                // Hash field name and type for schema ID
-                name.hash(&mut hasher);
-                type_id.hash(&mut hasher);
+                // Only hash non-mandatory fields for schema ID calculation
+                let is_mandatory_field = matches!(
+                    name.as_ref(),
+                    FIELD_ENV_NAME | FIELD_ENV_VER | FIELD_TIMESTAMP | FIELD_ENV_TIME
+                );
+                
+                if !is_mandatory_field {
+                    // Hash field name and type for schema ID
+                    name.hash(&mut hasher);
+                    type_id.hash(&mut hasher);
+                }
 
                 FieldDef {
                     name,
@@ -717,11 +725,11 @@ mod tests {
             ..Default::default()
         };
 
-        // Schema IDs should be identical since required fields don't contribute to schema uniqueness
+        // Schema IDs should be identical since required fields are excluded from schema hash
         let (_, schema_id1) = OtlpEncoder::determine_fields_and_schema_id(&log1, "test_event");
         let (_, schema_id2) = OtlpEncoder::determine_fields_and_schema_id(&log2, "test_event");
 
-        assert_eq!(schema_id1, schema_id2, "Schema IDs should be identical even with different timestamp values");
+        assert_eq!(schema_id1, schema_id2, "Schema IDs should be identical because mandatory fields (timestamp, env_name, etc.) are excluded from hash calculation");
     }
 
     #[test]
@@ -803,5 +811,46 @@ mod tests {
             schema_id1, schema_id2,
             "Schema IDs should be different when attributes are in different order (no sorting)"
         );
+    }
+
+    #[test]
+    fn test_mandatory_fields_vs_schema_defining_fields() {
+        // Test that mandatory fields don't affect schema ID but schema-defining fields do
+        let _encoder = OtlpEncoder::new();
+
+        // Base log with minimal schema
+        let log1 = LogRecord {
+            event_name: "test_event".to_string(),
+            severity_number: 9,
+            time_unix_nano: 1_700_000_000_000_000_000,
+            ..Default::default()
+        };
+
+        // Same schema-defining fields, but different mandatory field values
+        let log2 = LogRecord {
+            event_name: "test_event".to_string(),
+            severity_number: 9,
+            time_unix_nano: 1_800_000_000_000_000_000, // Different timestamp (mandatory field)
+            ..Default::default()
+        };
+
+        // Different schema-defining field (add trace_id)
+        let mut log3 = LogRecord {
+            event_name: "test_event".to_string(),
+            severity_number: 9,
+            time_unix_nano: 1_700_000_000_000_000_000,
+            ..Default::default()
+        };
+        log3.trace_id = vec![1; 16]; // Schema-defining field
+
+        let (_, schema_id1) = OtlpEncoder::determine_fields_and_schema_id(&log1, "test_event");
+        let (_, schema_id2) = OtlpEncoder::determine_fields_and_schema_id(&log2, "test_event");
+        let (_, schema_id3) = OtlpEncoder::determine_fields_and_schema_id(&log3, "test_event");
+
+        // log1 and log2 should have the same schema ID (only timestamp differs, which is mandatory)
+        assert_eq!(schema_id1, schema_id2, "Schema IDs should be same when only mandatory fields differ");
+        
+        // log1 and log3 should have different schema IDs (trace_id is schema-defining)
+        assert_ne!(schema_id1, schema_id3, "Schema IDs should be different when schema-defining fields differ");
     }
 }
