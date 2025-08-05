@@ -517,8 +517,6 @@ mod tests {
                 exact_size, actual_size,
                 "Exact size calculation {exact_size} does not match actual size {actual_size} for {description}"
             );
-
-            println!("Test {description}: calculated={exact_size}, actual={actual_size} ✓");
         }
     }
 }
