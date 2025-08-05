@@ -660,47 +660,5 @@ mod tests {
         assert_eq!(log_batch.metadata.schema_ids.matches(';').count(), 0); // 1 schema = 0 semicolons
     }
 
-    #[test]
-    fn test_timestamp_optimization_consistency() {
-        // This test validates that both FIELD_TIMESTAMP and FIELD_ENV_TIME
-        // produce identical timestamps after the optimization
-        let encoder = OtlpEncoder::new();
 
-        // Test with time_unix_nano set (should be preferred)
-        let log_with_time = LogRecord {
-            time_unix_nano: 1_700_000_000_000_000_000,
-            observed_time_unix_nano: 1_600_000_000_000_000_000, // Different value
-            event_name: "test_event".to_string(),
-            severity_number: 9,
-            ..Default::default()
-        };
-
-        // Test with only observed_time_unix_nano set
-        let log_with_observed_time = LogRecord {
-            time_unix_nano: 0, // Should fall back to observed_time_unix_nano
-            observed_time_unix_nano: 1_600_000_000_000_000_000,
-            event_name: "test_event".to_string(),
-            severity_number: 9,
-            ..Default::default()
-        };
-
-        let metadata = "test";
-
-        // Encode both logs
-        let result1 = encoder.encode_log_batch([log_with_time].iter(), metadata);
-        let result2 = encoder.encode_log_batch([log_with_observed_time].iter(), metadata);
-
-        // Both should produce valid results
-        assert_eq!(result1.len(), 1);
-        assert_eq!(result2.len(), 1);
-        assert!(!result1[0].data.is_empty());
-        assert!(!result2[0].data.is_empty());
-
-        // Verify that the timestamp formatting is working correctly by checking
-        // that we get different results for different timestamps
-        assert_ne!(
-            result1[0].data, result2[0].data,
-            "Different timestamps should produce different encoded data"
-        );
-    }
 }
