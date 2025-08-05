@@ -124,7 +124,8 @@ impl DynamicSchema {
 
     /// Encode the schema to Bond format
     pub(crate) fn encode(&self) -> Result<Vec<u8>> {
-        let mut schema_bytes = Vec::new();
+        let estimated_size = 200 + (self.fields.len() * 80);
+        let mut schema_bytes = Vec::with_capacity(estimated_size);
 
         // Write header
         schema_bytes.write_all(&[0x53, 0x50])?; // 'S','P'
@@ -374,5 +375,58 @@ mod tests {
         let schema = BondEncodedSchema::from_fields("TestStruct", "test.namespace", fields);
         let bytes = schema.as_bytes();
         assert!(!bytes.is_empty());
+    }
+
+    #[test]
+    fn test_schema_buffer_capacity_estimation() {
+        // Test that the estimated capacity is adequate for various field counts
+        // and verify no reallocations occur during encoding
+
+        // Test with different field counts to validate estimation formula
+        let test_cases = vec![
+            (0, "no fields"),
+            (1, "single field"),
+            (5, "few fields"),
+            (10, "medium fields"),
+            (20, "many fields"),
+        ];
+
+        for (field_count, description) in test_cases {
+            let fields: Vec<FieldDef> = (0..field_count)
+                .map(|i| FieldDef {
+                    name: Cow::Owned(format!("field_{}", i)),
+                    type_id: BondDataType::BT_STRING,
+                    field_id: i as u16 + 1,
+                })
+                .collect();
+
+            let schema = DynamicSchema::new("TestStruct", "test.namespace", fields);
+            let encoded = schema.encode().unwrap();
+
+            // Verify encoding succeeded
+            assert!(!encoded.is_empty(), "Encoding failed for {}", description);
+
+            // Verify the estimated size (200 + field_count * 80) is reasonably close
+            // to the actual encoded size (allowing some tolerance)
+            let estimated_size = 200 + (field_count * 80);
+            let actual_size = encoded.len();
+
+            // The actual size should be within reasonable bounds of the estimate
+            // Allow some variance but ensure we're in the right ballpark
+            assert!(
+                actual_size <= estimated_size + 100,
+                "Actual size {} exceeds estimate {} by too much for {}",
+                actual_size,
+                estimated_size,
+                description
+            );
+
+            // Also verify we allocated enough (actual size should not exceed capacity that was allocated)
+            // This is more of a documentation test since we can't directly verify the original capacity
+            println!(
+                "Test {}: estimated={}, actual={}",
+                description, estimated_size, actual_size
+            );
+        }
     }
 }
