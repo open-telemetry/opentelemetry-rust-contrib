@@ -40,16 +40,38 @@ typedef enum {
     GENEVA_INITIALIZATION_FAILED = 2,
     GENEVA_UPLOAD_FAILED = 3,
     GENEVA_INVALID_DATA = 4,
-    GENEVA_INTERNAL_ERROR = 5
+    GENEVA_INTERNAL_ERROR = 5,
+    GENEVA_ASYNC_OPERATION_PENDING = 6
 } GenevaError;
+
+// Callback function type for async upload completion
+// Parameters: error_code, user_data
+typedef void (*UploadCallback)(GenevaError error_code, void* user_data);
 
 // Creates a new Geneva client
 // Returns opaque handle or NULL on error
 GenevaClientHandle* geneva_client_new(const GenevaConfig* config);
 
-// Uploads logs to Geneva
+// Uploads logs to Geneva synchronously (blocks until complete)
 // data should be protobuf-encoded ResourceLogs data
-GenevaError geneva_upload_logs(GenevaClientHandle* handle, const uint8_t* data, size_t data_len);
+// Note: This function blocks the calling thread. For high-performance scenarios,
+// consider using geneva_upload_logs_async instead.
+GenevaError geneva_upload_logs_sync(GenevaClientHandle* handle, const uint8_t* data, size_t data_len);
+
+// Uploads logs to Geneva asynchronously with callback notification
+// data should be protobuf-encoded ResourceLogs data
+// callback will be called when the operation completes
+// user_data will be passed to the callback
+// Returns GENEVA_ASYNC_OPERATION_PENDING if queued successfully, or error code for immediate failures
+GenevaError geneva_upload_logs_async(GenevaClientHandle* handle, const uint8_t* data, size_t data_len, 
+                                     UploadCallback callback, void* user_data);
+
+// Main upload function - non-blocking with callback
+// data should be protobuf-encoded ResourceLogs data
+// callback will be called when the operation completes
+// user_data will be passed to the callback
+GenevaError geneva_upload_logs(GenevaClientHandle* handle, const uint8_t* data, size_t data_len,
+                               UploadCallback callback, void* user_data);
 
 // Frees a Geneva client handle
 void geneva_client_free(GenevaClientHandle* handle);

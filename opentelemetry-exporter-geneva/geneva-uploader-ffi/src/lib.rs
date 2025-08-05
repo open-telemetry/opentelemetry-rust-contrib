@@ -59,7 +59,12 @@ pub enum GenevaError {
     UploadFailed = 3,
     InvalidData = 4,
     InternalError = 5,
+    AsyncOperationPending = 6,
 }
+
+/// Callback function type for async upload completion
+/// Parameters: error_code, user_data
+pub type UploadCallback = unsafe extern "C" fn(GenevaError, *mut std::ffi::c_void);
 
 /// Sets the last error message in a thread-safe way
 fn set_last_error(msg: &str) {
@@ -278,14 +283,18 @@ pub unsafe extern "C" fn geneva_client_new(config: *const GenevaConfig) -> *mut 
     Box::into_raw(Box::new(handle))
 }
 
-/// Uploads logs to Geneva
+/// Uploads logs to Geneva synchronously (blocks until complete)
 /// 
 /// # Safety
 /// - handle must be a valid pointer returned by geneva_client_new
 /// - data must be a valid pointer to protobuf-encoded ResourceLogs data
 /// - data_len must be the correct length of the data
+/// 
+/// # Note
+/// This function blocks the calling thread. For high-performance scenarios,
+/// consider using geneva_upload_logs_async instead.
 #[no_mangle]
-pub unsafe extern "C" fn geneva_upload_logs(
+pub unsafe extern "C" fn geneva_upload_logs_sync(
     handle: *mut GenevaClientHandle,
     data: *const u8,
     data_len: usize,
@@ -317,7 +326,7 @@ pub unsafe extern "C" fn geneva_upload_logs(
         }
     };
 
-    // Upload logs using the shared runtime
+    // Upload logs using the shared runtime (blocking)
     match RUNTIME.block_on(handle.client.upload_logs(&[resource_logs])) {
         Ok(_) => GenevaError::Success,
         Err(e) => {
@@ -325,6 +334,96 @@ pub unsafe extern "C" fn geneva_upload_logs(
             GenevaError::UploadFailed
         }
     }
+}
+
+/// Uploads logs to Geneva asynchronously with callback notification
+/// 
+/// # Safety
+/// - handle must be a valid pointer returned by geneva_client_new
+/// - data must be a valid pointer to protobuf-encoded ResourceLogs data
+/// - data_len must be the correct length of the data
+/// - callback will be called when the operation completes
+/// - user_data will be passed to the callback
+/// 
+/// # Returns
+/// - GenevaError::AsyncOperationPending if the upload was queued successfully
+/// - Other error codes for immediate validation failures
+#[no_mangle]
+pub unsafe extern "C" fn geneva_upload_logs_async(
+    handle: *mut GenevaClientHandle,
+    data: *const u8,
+    data_len: usize,
+    callback: UploadCallback,
+    user_data: *mut std::ffi::c_void,
+) -> GenevaError {
+    if handle.is_null() {
+        set_last_error("Geneva client handle is null");
+        return GenevaError::InvalidData;
+    }
+    
+    if data.is_null() {
+        set_last_error("Data pointer is null");
+        return GenevaError::InvalidData;
+    }
+    
+    if data_len == 0 {
+        set_last_error("Data length is zero");
+        return GenevaError::InvalidData;
+    }
+
+    let handle = unsafe { &*handle };
+    let data_slice = unsafe { std::slice::from_raw_parts(data, data_len) };
+
+    // Decode protobuf data
+    let resource_logs = match Message::decode(data_slice) {
+        Ok(logs) => logs,
+        Err(e) => {
+            set_last_error(&format!("Failed to decode protobuf data: {}", e));
+            return GenevaError::InvalidData;
+        }
+    };
+
+    // Clone the client for the async task
+    let client = handle.client.clone();
+    
+    // Convert raw pointer to Send-safe usize
+    let user_data_addr = user_data as usize;
+    
+    // Spawn async task on the runtime
+    RUNTIME.spawn(async move {
+        let result = client.upload_logs(&[resource_logs]).await;
+        
+        // Determine the error code
+        let error_code = match result {
+            Ok(_) => GenevaError::Success,
+            Err(_) => GenevaError::UploadFailed,
+        };
+        
+        // Convert back to pointer and call the callback
+        let user_data_ptr = user_data_addr as *mut std::ffi::c_void;
+        unsafe { callback(error_code, user_data_ptr) };
+    });
+
+    GenevaError::AsyncOperationPending
+}
+
+/// Main upload function - non-blocking with callback
+/// 
+/// # Safety
+/// - handle must be a valid pointer returned by geneva_client_new
+/// - data must be a valid pointer to protobuf-encoded ResourceLogs data
+/// - data_len must be the correct length of the data
+/// - callback will be called when the operation completes
+/// - user_data will be passed to the callback
+#[no_mangle]
+pub unsafe extern "C" fn geneva_upload_logs(
+    handle: *mut GenevaClientHandle,
+    data: *const u8,
+    data_len: usize,
+    callback: UploadCallback,
+    user_data: *mut std::ffi::c_void,
+) -> GenevaError {
+    geneva_upload_logs_async(handle, data, data_len, callback, user_data)
 }
 
 /// Frees a Geneva client handle
@@ -352,5 +451,135 @@ pub unsafe extern "C" fn geneva_get_last_error() -> *const c_char {
             None => ptr::null(),
         },
         Err(_) => ptr::null(), // Mutex poisoned, return null
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::ffi::CString;
+
+    #[test]
+    fn test_geneva_client_new_with_null_config() {
+        unsafe {
+            let client = geneva_client_new(ptr::null());
+            assert!(client.is_null(), "Client should be null for null config");
+            
+            // Check that error message was set
+            let error_ptr = geneva_get_last_error();
+            assert!(!error_ptr.is_null(), "Should have error message");
+        }
+    }
+
+    // Dummy callback for testing
+    unsafe extern "C" fn dummy_callback(_error_code: GenevaError, _user_data: *mut std::ffi::c_void) {
+        // Do nothing - just for testing
+    }
+
+    #[test]
+    fn test_geneva_upload_logs_with_null_handle() {
+        unsafe {
+            let data = vec![1, 2, 3, 4];
+            let result = geneva_upload_logs(ptr::null_mut(), data.as_ptr(), data.len(), dummy_callback, ptr::null_mut());
+            assert_eq!(result as u32, GenevaError::InvalidData as u32);
+        }
+    }
+
+    #[test]
+    fn test_geneva_upload_logs_with_null_data() {
+        unsafe {
+            // Create a dummy handle pointer (not actually valid, but non-null)
+            let dummy_handle = 0x1 as *mut GenevaClientHandle;
+            let result = geneva_upload_logs(dummy_handle, ptr::null(), 0, dummy_callback, ptr::null_mut());
+            assert_eq!(result as u32, GenevaError::InvalidData as u32);
+        }
+    }
+
+    #[test]
+    fn test_geneva_upload_logs_with_zero_length() {
+        unsafe {
+            let dummy_handle = 0x1 as *mut GenevaClientHandle;
+            let data = vec![1, 2, 3, 4];
+            let result = geneva_upload_logs(dummy_handle, data.as_ptr(), 0, dummy_callback, ptr::null_mut());
+            assert_eq!(result as u32, GenevaError::InvalidData as u32);
+        }
+    }
+
+    #[test]
+    fn test_geneva_client_free_with_null() {
+        unsafe {
+            // Should not crash
+            geneva_client_free(ptr::null_mut());
+        }
+    }
+
+    #[test]
+    fn test_null_field_validation() {
+        unsafe {
+            // Test with missing endpoint
+            let environment = CString::new("test").unwrap();
+            let account = CString::new("testaccount").unwrap();
+            let namespace = CString::new("testns").unwrap();
+            let region = CString::new("testregion").unwrap();
+            let tenant = CString::new("testtenant").unwrap();
+            let role_name = CString::new("testrole").unwrap();
+            let role_instance = CString::new("testinstance").unwrap();
+
+            let config = GenevaConfig {
+                endpoint: ptr::null(), // Missing endpoint should cause failure
+                environment: environment.as_ptr(),
+                account: account.as_ptr(),
+                namespace_name: namespace.as_ptr(),
+                region: region.as_ptr(),
+                config_major_version: 1,
+                auth_method: 0,
+                tenant: tenant.as_ptr(),
+                role_name: role_name.as_ptr(),
+                role_instance: role_instance.as_ptr(),
+                max_concurrent_uploads: -1,
+                cert_path: ptr::null(),
+                cert_password: ptr::null(),
+            };
+
+            let client = geneva_client_new(&config);
+            assert!(client.is_null(), "Client should be null for invalid config");
+            
+            // Check that we can get error message
+            let error_ptr = geneva_get_last_error();
+            assert!(!error_ptr.is_null(), "Should have error message for invalid config");
+        }
+    }
+
+    #[test]
+    fn test_invalid_auth_method() {
+        unsafe {
+            let endpoint = CString::new("https://test.geneva.com").unwrap();
+            let environment = CString::new("test").unwrap();
+            let account = CString::new("testaccount").unwrap();
+            let namespace = CString::new("testns").unwrap();
+            let region = CString::new("testregion").unwrap();
+            let tenant = CString::new("testtenant").unwrap();
+            let role_name = CString::new("testrole").unwrap();
+            let role_instance = CString::new("testinstance").unwrap();
+
+            let config = GenevaConfig {
+                endpoint: endpoint.as_ptr(),
+                environment: environment.as_ptr(),
+                account: account.as_ptr(),
+                namespace_name: namespace.as_ptr(),
+                region: region.as_ptr(),
+                config_major_version: 1,
+                auth_method: 99, // Invalid auth method
+                tenant: tenant.as_ptr(),
+                role_name: role_name.as_ptr(),
+                role_instance: role_instance.as_ptr(),
+                max_concurrent_uploads: -1,
+                cert_path: ptr::null(),
+                cert_password: ptr::null(),
+            };
+
+            let client = geneva_client_new(&config);
+            assert!(client.is_null(), "Client should be null for invalid auth method");
+        }
     }
 }

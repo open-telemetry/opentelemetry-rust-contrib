@@ -13,9 +13,6 @@ build:
 rust-tests:
 	cargo test
 
-# Run Rust integration tests
-rust-integration-tests: build
-	cargo test --test integration_tests
 
 # Build and run C example
 c-example: build
@@ -23,14 +20,14 @@ c-example: build
 	gcc -o examples/c_example_test \
 		examples/c_example.c \
 		-I./include \
-		-L./target/release \
+		-L../../target/release \
 		-lgeneva_uploader_ffi \
 		-lpthread -ldl -lm
 	@echo "Running C example..."
-	LD_LIBRARY_PATH=./target/release ./examples/c_example_test
+	LD_LIBRARY_PATH=../../target/release ./examples/c_example_test
 
 # Run all tests
-test: rust-tests rust-integration-tests c-example
+test: rust-tests c-example
 
 # Clean build artifacts
 clean:
@@ -60,7 +57,6 @@ help:
 	@echo "  all                  - Build and test everything"
 	@echo "  build               - Build Rust FFI library"
 	@echo "  rust-tests          - Run Rust unit tests"
-	@echo "  rust-integration-tests - Run Rust integration tests"
 	@echo "  c-example           - Build and run C example"
 	@echo "  test                - Run all tests"
 	@echo "  check               - Check that code compiles"
