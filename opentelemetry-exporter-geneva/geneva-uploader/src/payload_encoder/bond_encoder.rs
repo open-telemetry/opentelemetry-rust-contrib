@@ -420,9 +420,7 @@ mod tests {
 
             // Also verify we allocated enough (actual size should not exceed capacity that was allocated)
             // This is more of a documentation test since we can't directly verify the original capacity
-            println!(
-                "Test {description}: estimated={estimated_size}, actual={actual_size}"
-            );
+            println!("Test {description}: estimated={estimated_size}, actual={actual_size}");
         }
     }
 }
