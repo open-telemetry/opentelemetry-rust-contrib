@@ -122,13 +122,98 @@ impl DynamicSchema {
         }
     }
 
+    /// Calculate the exact size of the encoded schema in bytes
+    pub(crate) fn calculate_exact_encoded_size(&self) -> usize {
+        // Fixed header components
+        let mut size = 0;
+
+        // Bond header: "SP" + version
+        size += 4; // [0x53, 0x50, 0x01, 0x00]
+
+        // Number of structs
+        size += 4; // 1u32
+
+        // Struct definition header
+        size += 4 + self.struct_name.len(); // struct_name length + bytes
+        size += 4 + self.qualified_name.len(); // qualified_name length + bytes
+        size += 4; // attributes (0u32)
+        size += 1; // modifier (0u8)
+
+        // Default values block
+        size += 8; // default_uint (u64)
+        size += 8; // default_int (i64)
+        size += 8; // default_double (f64)
+        size += 4; // default_string (u32)
+        size += 4; // default_wstring (u32)
+        size += 1; // default_nothing (u8)
+
+        // Base def
+        size += 4; // 0u32
+
+        // Field count header
+        size += 3; // 3 zero bytes
+        size += 4; // field count (u32)
+
+        // Field definitions
+        for (i, field) in self.fields.iter().enumerate() {
+            let is_last = i == self.fields.len() - 1;
+
+            // Field name
+            size += 4 + field.name.len(); // name length + bytes
+
+            // Empty qualified name
+            size += 4; // 0u32 for empty string
+
+            // Field attributes and data
+            size += 4; // attributes (0u32)
+            size += 1; // modifier (0u8)
+
+            // Default values block for field
+            size += 8; // default_uint (u64)
+            size += 8; // default_int (i64)
+            size += 8; // default_double (f64)
+            size += 4; // default_string (u32)
+            size += 4; // default_wstring (u32)
+            size += 1; // default_nothing (u8)
+
+            // Field metadata
+            size += 3; // 3 padding bytes
+            size += 2; // field_id (u16)
+            size += 1; // type_id (u8)
+
+            // Additional type info
+            size += 2; // struct_def (u16)
+            size += 1; // element (u8)
+            size += 1; // key (u8)
+            size += 1; // bonded_type (u8)
+            size += 1; // default_value_present (u8)
+
+            // Padding after each field except the last
+            if !is_last {
+                size += 8;
+            }
+        }
+
+        // Post-fields padding
+        size += 8; // alignment padding
+
+        // Root typedef
+        size += 1; // BondDataType::BT_STRUCT
+        size += 2; // struct index (u16)
+        size += 1; // element (u8)
+        size += 1; // key (u8)
+        size += 1; // bonded (u8)
+
+        // Final padding
+        size += 9; // 9 zero bytes
+
+        size
+    }
+
     /// Encode the schema to Bond format
     pub(crate) fn encode(&self) -> Result<Vec<u8>> {
-        // Base overhead: 200 bytes (header + struct metadata + footer)
-        // Per field: 80 bytes (field name + metadata + padding)
-        // Example: 10 fields = 200 + (10 × 80) = 1000 bytes
-        let estimated_size = 200 + (self.fields.len() * 80);
-        let mut schema_bytes = Vec::with_capacity(estimated_size);
+        let exact_size = self.calculate_exact_encoded_size();
+        let mut schema_bytes = Vec::with_capacity(exact_size);
 
         // Write header
         schema_bytes.write_all(&[0x53, 0x50])?; // 'S','P'
@@ -381,11 +466,11 @@ mod tests {
     }
 
     #[test]
-    fn test_schema_buffer_capacity_estimation() {
-        // Test that the estimated capacity is adequate for various field counts
-        // and verify no reallocations occur during encoding
+    fn test_schema_exact_size_calculation() {
+        // Test that the exact size calculation matches the actual encoded size
+        // This validates that pre-allocation is precise and no reallocations occur
 
-        // Test with different field counts to validate estimation formula
+        // Test with different field counts and varying field name lengths
         let test_cases = vec![
             (0, "no fields"),
             (1, "single field"),
@@ -395,35 +480,30 @@ mod tests {
         ];
 
         for (field_count, description) in test_cases {
+            // Create fields with varying name lengths to test the calculation accuracy
             let fields: Vec<FieldDef> = (0..field_count)
                 .map(|i| FieldDef {
-                    name: Cow::Owned(format!("field_{i}")),
+                    name: Cow::Owned(format!("field_with_long_name_{i}")),
                     type_id: BondDataType::BT_STRING,
                     field_id: i as u16 + 1,
                 })
                 .collect();
 
             let schema = DynamicSchema::new("TestStruct", "test.namespace", fields);
+            let exact_size = schema.calculate_exact_encoded_size();
             let encoded = schema.encode().unwrap();
 
             // Verify encoding succeeded
             assert!(!encoded.is_empty(), "Encoding failed for {description}");
 
-            // Verify the estimated size (200 + field_count * 80) is reasonably close
-            // to the actual encoded size (allowing some tolerance)
-            let estimated_size = 200 + (field_count * 80);
+            // The exact calculation should match the actual encoded size precisely
             let actual_size = encoded.len();
-
-            // The actual size should be within reasonable bounds of the estimate
-            // Allow some variance but ensure we're in the right ballpark
-            assert!(
-                actual_size <= estimated_size + 100,
-                "Actual size {actual_size} exceeds estimate {estimated_size} by too much for {description}"
+            assert_eq!(
+                exact_size, actual_size,
+                "Exact size calculation {exact_size} does not match actual size {actual_size} for {description}"
             );
 
-            // Also verify we allocated enough (actual size should not exceed capacity that was allocated)
-            // This is more of a documentation test since we can't directly verify the original capacity
-            println!("Test {description}: estimated={estimated_size}, actual={actual_size}");
+            println!("Test {description}: calculated={exact_size}, actual={actual_size} ✓");
         }
     }
 }
