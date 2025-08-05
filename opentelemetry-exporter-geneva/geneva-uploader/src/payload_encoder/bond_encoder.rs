@@ -394,7 +394,7 @@ mod tests {
         for (field_count, description) in test_cases {
             let fields: Vec<FieldDef> = (0..field_count)
                 .map(|i| FieldDef {
-                    name: Cow::Owned(format!("field_{}", i)),
+                    name: Cow::Owned(format!("field_{i}")),
                     type_id: BondDataType::BT_STRING,
                     field_id: i as u16 + 1,
                 })
@@ -404,7 +404,7 @@ mod tests {
             let encoded = schema.encode().unwrap();
 
             // Verify encoding succeeded
-            assert!(!encoded.is_empty(), "Encoding failed for {}", description);
+            assert!(!encoded.is_empty(), "Encoding failed for {description}");
 
             // Verify the estimated size (200 + field_count * 80) is reasonably close
             // to the actual encoded size (allowing some tolerance)
@@ -415,17 +415,13 @@ mod tests {
             // Allow some variance but ensure we're in the right ballpark
             assert!(
                 actual_size <= estimated_size + 100,
-                "Actual size {} exceeds estimate {} by too much for {}",
-                actual_size,
-                estimated_size,
-                description
+                "Actual size {actual_size} exceeds estimate {estimated_size} by too much for {description}"
             );
 
             // Also verify we allocated enough (actual size should not exceed capacity that was allocated)
             // This is more of a documentation test since we can't directly verify the original capacity
             println!(
-                "Test {}: estimated={}, actual={}",
-                description, estimated_size, actual_size
+                "Test {description}: estimated={estimated_size}, actual={actual_size}"
             );
         }
     }
