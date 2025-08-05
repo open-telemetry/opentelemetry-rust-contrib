@@ -124,6 +124,9 @@ impl DynamicSchema {
 
     /// Encode the schema to Bond format
     pub(crate) fn encode(&self) -> Result<Vec<u8>> {
+        // Base overhead: 200 bytes (header + struct metadata + footer)
+        // Per field: 80 bytes (field name + metadata + padding)
+        // Example: 10 fields = 200 + (10 × 80) = 1000 bytes
         let estimated_size = 200 + (self.fields.len() * 80);
         let mut schema_bytes = Vec::with_capacity(estimated_size);
 
