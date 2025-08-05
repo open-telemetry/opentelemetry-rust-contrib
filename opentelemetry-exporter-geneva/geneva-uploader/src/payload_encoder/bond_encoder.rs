@@ -122,20 +122,15 @@ impl DynamicSchema {
         }
     }
 
-    /// Calculate the exact size of the encoded schema in bytes
-    pub(crate) fn calculate_exact_encoded_size(&self) -> usize {
-        // Fixed header components
-        let mut size = 0;
-
+    /// Calculate the fixed overhead size for Bond schema encoding
+    const fn calculate_fixed_overhead() -> usize {
         // Bond header: "SP" + version
-        size += 4; // [0x53, 0x50, 0x01, 0x00]
+        let mut size = 4; // [0x53, 0x50, 0x01, 0x00]
 
         // Number of structs
         size += 4; // 1u32
 
-        // Struct definition header
-        size += 4 + self.struct_name.len(); // struct_name length + bytes
-        size += 4 + self.qualified_name.len(); // qualified_name length + bytes
+        // Struct definition header (excluding variable name lengths)
         size += 4; // attributes (0u32)
         size += 1; // modifier (0u8)
 
@@ -154,46 +149,6 @@ impl DynamicSchema {
         size += 3; // 3 zero bytes
         size += 4; // field count (u32)
 
-        // Field definitions
-        for (i, field) in self.fields.iter().enumerate() {
-            let is_last = i == self.fields.len() - 1;
-
-            // Field name
-            size += 4 + field.name.len(); // name length + bytes
-
-            // Empty qualified name
-            size += 4; // 0u32 for empty string
-
-            // Field attributes and data
-            size += 4; // attributes (0u32)
-            size += 1; // modifier (0u8)
-
-            // Default values block for field
-            size += 8; // default_uint (u64)
-            size += 8; // default_int (i64)
-            size += 8; // default_double (f64)
-            size += 4; // default_string (u32)
-            size += 4; // default_wstring (u32)
-            size += 1; // default_nothing (u8)
-
-            // Field metadata
-            size += 3; // 3 padding bytes
-            size += 2; // field_id (u16)
-            size += 1; // type_id (u8)
-
-            // Additional type info
-            size += 2; // struct_def (u16)
-            size += 1; // element (u8)
-            size += 1; // key (u8)
-            size += 1; // bonded_type (u8)
-            size += 1; // default_value_present (u8)
-
-            // Padding after each field except the last
-            if !is_last {
-                size += 8;
-            }
-        }
-
         // Post-fields padding
         size += 8; // alignment padding
 
@@ -206,6 +161,66 @@ impl DynamicSchema {
 
         // Final padding
         size += 9; // 9 zero bytes
+
+        size
+    }
+
+    /// Calculate the fixed overhead per field (excluding variable field name length)
+    const fn calculate_per_field_fixed_overhead() -> usize {
+        // Empty qualified name
+        let mut size = 4; // 0u32 for empty string
+
+        // Field attributes and data
+        size += 4; // attributes (0u32)
+        size += 1; // modifier (0u8)
+
+        // Default values block for field
+        size += 8; // default_uint (u64)
+        size += 8; // default_int (i64)
+        size += 8; // default_double (f64)
+        size += 4; // default_string (u32)
+        size += 4; // default_wstring (u32)
+        size += 1; // default_nothing (u8)
+
+        // Field metadata
+        size += 3; // 3 padding bytes
+        size += 2; // field_id (u16)
+        size += 1; // type_id (u8)
+
+        // Additional type info
+        size += 2; // struct_def (u16)
+        size += 1; // element (u8)
+        size += 1; // key (u8)
+        size += 1; // bonded_type (u8)
+        size += 1; // default_value_present (u8)
+
+        size
+    }
+
+    /// Calculate the exact size of the encoded schema in bytes
+    pub(crate) fn calculate_exact_encoded_size(&self) -> usize {
+        // Start with fixed overhead
+        let mut size = Self::calculate_fixed_overhead();
+
+        // Add variable struct name lengths
+        size += 4 + self.struct_name.len(); // struct_name length + bytes
+        size += 4 + self.qualified_name.len(); // qualified_name length + bytes
+
+        // Add field-specific sizes
+        for (i, field) in self.fields.iter().enumerate() {
+            let is_last = i == self.fields.len() - 1;
+
+            // Fixed overhead per field
+            size += Self::calculate_per_field_fixed_overhead();
+
+            // Variable field name
+            size += 4 + field.name.len(); // name length + bytes
+
+            // Padding after each field except the last
+            if !is_last {
+                size += 8;
+            }
+        }
 
         size
     }
