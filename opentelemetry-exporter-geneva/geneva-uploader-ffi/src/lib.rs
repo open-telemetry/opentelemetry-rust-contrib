@@ -29,7 +29,7 @@ static RUNTIME: Lazy<Runtime> = Lazy::new(|| {
     tokio::runtime::Builder::new_multi_thread()
         .worker_threads(std::thread::available_parallelism().map(|n| n.get()).unwrap_or(4))
         .thread_name("geneva-ffi-worker")
-        .enable_all() // TODO: Consider enabling only time + net for Geneva's needs
+        .enable_time().enable_io() // Only enable time + I/O for Geneva's needs
         .build()
         .expect("Failed to create Tokio runtime for Geneva FFI")
 });
