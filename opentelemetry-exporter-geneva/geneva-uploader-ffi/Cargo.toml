@@ -11,6 +11,8 @@ crate-type = ["cdylib", "staticlib"]
 [dependencies]
 geneva-uploader = { path = "../geneva-uploader" }
 opentelemetry-proto = { workspace = true, default-features = false, features = ["logs", "gen-tonic-messages"] }
+opentelemetry = { workspace = true }
+opentelemetry_sdk = { workspace = true }
 tokio = { version = "1.0", features = ["rt", "rt-multi-thread"] }
 libc = "0.2"
 prost = "0.13"
