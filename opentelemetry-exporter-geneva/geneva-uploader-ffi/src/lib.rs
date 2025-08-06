@@ -34,7 +34,6 @@ static RUNTIME: Lazy<Runtime> = Lazy::new(|| {
         .expect("Failed to create Tokio runtime for Geneva FFI")
 });
 
-
 // Thread-local error storage - eliminates mutex contention and provides better errno semantics
 // Benefits:
 // - Zero synchronization overhead - each thread has isolated storage
@@ -180,13 +179,11 @@ unsafe fn c_str_to_string(ptr: *const c_char, field_name: &str) -> Result<String
 #[no_mangle]
 pub unsafe extern "C" fn geneva_client_new(config: *const GenevaConfig) -> *mut GenevaClientHandle {
     // Safely dereference the config pointer with null check
-    let config = unsafe {
-        if config.is_null() {
-            set_last_error("Configuration pointer is null");
-            return ptr::null_mut();
-        }
-        &*config
-    };
+    if config.is_null() {
+        set_last_error("Configuration pointer is null");
+        return ptr::null_mut();
+    }
+    let config = unsafe { &*config };
     
     // Validate all required fields are non-null
     if let Err(err_msg) = unsafe { validate_required_config_fields(config) } {
@@ -457,25 +454,6 @@ pub unsafe extern "C" fn geneva_upload_logs(
         
         // Spawn callback on dedicated thread to avoid blocking the async runtime
         // and ensure thread safety.
-        std::thread::spawn(move || {
-            callback_wrapper.call(error_code, user_data_wrapper.as_ptr());
-        // and ensure thread safety.
->>>>>>> d7cbb4a714437a10a8cf2fd154e37349b3df5086
-        std::thread::spawn(move || {
-            callback_wrapper.call(error_code, user_data_wrapper.as_ptr());
-        });
-    });
-
-    GenevaError::AsyncOperationPending
-}
-        });
-    });
-
-    GenevaError::AsyncOperationPending
-}
-=======
-        // and ensure thread safety.
->>>>>>> d7cbb4a714437a10a8cf2fd154e37349b3df5086
         std::thread::spawn(move || {
             callback_wrapper.call(error_code, user_data_wrapper.as_ptr());
         });
