@@ -214,7 +214,7 @@ uint8_t* create_valid_resource_logs(size_t* data_len) {
                     // user_email
                     0x0a, 0x20,
                         0x0a, 0x0a, 'u', 's', 'e', 'r', '_', 'e', 'm', 'a', 'i', 'l',
-                        0x12, 0x12, 0x0a, 0x18, 'u', 's', 'e', 'r', '1', '@', 'o', 'p', 'e', 'n', 't', 'e', 'l', 'e', 'm', 'e', 't', 'r', 'y', '.', 'i', 'o',
+                        0x12, 0x18, 0x0a, 0x18, 'u', 's', 'e', 'r', '1', '@', 'o', 'p', 'e', 'n', 't', 'e', 'l', 'e', 'm', 'e', 't', 'r', 'y', '.', 'i', 'o',
                     // name = "Log"
                     0x0a, 0x0b,
                         0x0a, 0x04, 'n', 'a', 'm', 'e',
