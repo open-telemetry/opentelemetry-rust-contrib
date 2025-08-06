@@ -186,7 +186,7 @@ pub unsafe extern "C" fn geneva_client_new(config: *const GenevaConfig) -> *mut 
     let config = unsafe { &*config };
     
     // Validate all required fields are non-null
-    if let Err(err_msg) = unsafe { validate_required_config_fields(config) } {
+    if let Err(err_msg) = validate_required_config_fields(config) {
         set_last_error(err_msg);
         return ptr::null_mut();
     }
