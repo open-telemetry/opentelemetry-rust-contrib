@@ -1,14 +1,14 @@
+use std::borrow::Cow;
 use std::cell::RefCell;
 use std::collections::HashSet;
 use std::fmt::Debug;
 use std::pin::Pin;
 use std::sync::Arc;
-use std::borrow::Cow;
 
 use tracelogging_dynamic as tld;
 
 use opentelemetry::logs::Severity;
-use opentelemetry::{Key, Value, logs::AnyValue};
+use opentelemetry::{logs::AnyValue, Key, Value};
 use opentelemetry_sdk::error::{OTelSdkError, OTelSdkResult};
 
 pub(crate) mod common;
@@ -159,7 +159,7 @@ impl opentelemetry_sdk::logs::LogExporter for ETWExporter {
     fn set_resource(&mut self, resource: &opentelemetry_sdk::Resource) {
         // Clear previous resource attributes
         self.resource.attributes_from_resource.clear();
-        
+
         // Process resource attributes
         for (key, value) in resource.iter() {
             // Special handling for cloud role and instance
@@ -169,7 +169,8 @@ impl opentelemetry_sdk::logs::LogExporter for ETWExporter {
             } else if key.as_str() == "service.instance.id" {
                 self.resource.cloud_role_instance = Some(value.to_string());
             } else if self.resource_attribute_keys.contains(key.as_str()) {
-                self.resource.attributes_from_resource
+                self.resource
+                    .attributes_from_resource
                     .push((key.clone(), val_to_any_value(value)));
             }
             // Other attributes are ignored
@@ -263,9 +264,9 @@ mod tests {
         // Create exporter with custom resource attributes
         let options = Options::new("test_provider")
             .with_resource_attributes(vec!["custom_attribute1", "custom_attribute2"]);
-        
+
         let mut exporter = ETWExporter::new(options);
-        
+
         exporter.set_resource(
             &opentelemetry_sdk::Resource::builder()
                 .with_attributes([
@@ -279,12 +280,20 @@ mod tests {
         );
 
         // Verify that only the configured attributes are stored
-        assert_eq!(exporter.resource.cloud_role, Some("test-service".to_string()));
-        assert_eq!(exporter.resource.cloud_role_instance, Some("test-instance".to_string()));
+        assert_eq!(
+            exporter.resource.cloud_role,
+            Some("test-service".to_string())
+        );
+        assert_eq!(
+            exporter.resource.cloud_role_instance,
+            Some("test-instance".to_string())
+        );
         assert_eq!(exporter.resource.attributes_from_resource.len(), 2);
 
         // Check that the correct attributes are stored
-        let attrs: std::collections::HashMap<String, String> = exporter.resource.attributes_from_resource
+        let attrs: std::collections::HashMap<String, String> = exporter
+            .resource
+            .attributes_from_resource
             .iter()
             .map(|(k, v)| (k.as_str().to_string(), format!("{:?}", v)))
             .collect();
