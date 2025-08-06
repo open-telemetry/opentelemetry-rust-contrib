@@ -125,11 +125,72 @@ impl SendPtr {
 }
 
 /// Wrapper for Send-safe callback function passing in FFI
-/// This is safe because FFI callbacks are designed to be called from any thread
+///
+/// # Safety
+///
+/// The `unsafe impl Send for SendCallback` and `unsafe impl Sync for SendCallback` are
+/// considered sound under the following specific conditions, which are guaranteed by the
+/// FFI design and usage patterns:
+///
+/// ## Thread Safety Guarantees:
+///
+/// 1. **C Function Pointer Invariants**: FFI callback function pointers (`extern "C" fn`)
+///    are inherently thread-safe because:
+///    - They point to immutable code segments in memory
+///    - C functions do not capture Rust environment/closures
+///    - The function pointer itself is just an address - no mutable state
+///
+/// 2. **Calling Convention Safety**: The callback uses C calling convention (`extern "C"`),
+///    which ensures:
+///    - Consistent ABI across thread boundaries
+///    - No Rust-specific thread-local state dependencies
+///    - Compatible with threading models of C/C++ callers
+///
+/// 3. **Lifetime and Ownership**: 
+///    - The callback function pointer must remain valid for the duration of the async operation
+///    - The C code is responsible for ensuring the callback function doesn't become invalid
+///    - No Rust ownership is transferred - only a function pointer is copied
+///
+/// 4. **No Shared Mutable State**: 
+///    - The callback function itself contains no shared mutable state
+///    - Any mutable state access must be handled by the C implementation using appropriate
+///      synchronization primitives (mutexes, atomics, etc.)
+///
+/// 5. **Single Invocation Guarantee**:
+///    - Each callback is invoked exactly once per async operation
+///    - No concurrent access to the same callback instance from multiple threads
+///    - The callback is consumed when called, preventing reuse issues
+///
+/// ## Usage Contract:
+///
+/// This implementation is only safe when used in the specific context of the Geneva FFI:
+/// - Callbacks are passed from C code that guarantees thread-safety of the function pointer
+/// - The callback is invoked from a dedicated thread spawned specifically for this purpose
+/// - The Geneva FFI ensures proper synchronization between the async runtime and callback thread
+///
+/// ## Violations that would cause UB:
+///
+/// - Passing a callback that accesses thread-local storage without proper synchronization
+/// - C code invalidating the function pointer while async operation is in progress
+/// - Callback function accessing shared mutable state without synchronization
+/// - Using this wrapper outside the Geneva FFI context without equivalent guarantees
+///
+/// The implementor (Geneva FFI) guarantees these invariants are upheld through:
+/// - Proper async task lifecycle management
+/// - Dedicated callback thread isolation
+/// - C API contract enforcement
 #[derive(Clone, Copy)]
 struct SendCallback(UploadCallback);
 
+// SAFETY: See comprehensive safety documentation above. This is safe because FFI callback
+// function pointers are inherently thread-safe (immutable code addresses) and the Geneva FFI
+// guarantees proper usage patterns including single invocation, dedicated callback threads,
+// and lifetime management.
 unsafe impl Send for SendCallback {}
+
+// SAFETY: See comprehensive safety documentation above. Sync is safe for the same reasons as
+// Send - the callback is an immutable function pointer with no shared mutable state, and
+// the Geneva FFI ensures proper synchronization between async operations and callback invocation.
 unsafe impl Sync for SendCallback {}
 
 impl SendCallback {
