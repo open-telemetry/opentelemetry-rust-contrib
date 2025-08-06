@@ -9,7 +9,8 @@
 use std::ffi::{CStr, CString};
 use std::os::raw::{c_char, c_int, c_uint};
 use std::ptr;
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
+use std::cell::RefCell;
 use tokio::runtime::Runtime;
 use once_cell::sync::Lazy;
 
@@ -18,13 +19,31 @@ use geneva_uploader::AuthMethod;
 use prost::Message;
 use std::path::PathBuf;
 
-/// Global shared Tokio runtime for efficiency
+/// Global shared Tokio runtime for efficiency and Geneva client compatibility
+/// Benefits:
+/// - Geneva client is designed for concurrent operations (buffer_unordered)
+/// - Thread-agnostic: FFI callers can use from any thread
+/// - Optimal resource usage: single runtime shared across all clients
+/// - High performance: multi-threaded runtime supports Geneva's concurrent uploads
 static RUNTIME: Lazy<Runtime> = Lazy::new(|| {
-    Runtime::new().expect("Failed to create Tokio runtime")
+    tokio::runtime::Builder::new_multi_thread()
+        .worker_threads(std::thread::available_parallelism().map(|n| n.get()).unwrap_or(4))
+        .thread_name("geneva-ffi-worker")
+        .enable_all() // TODO: Consider enabling only time + net for Geneva's needs
+        .build()
+        .expect("Failed to create Tokio runtime for Geneva FFI")
 });
 
-/// Thread-safe error storage
-static LAST_ERROR: Lazy<Mutex<Option<CString>>> = Lazy::new(|| Mutex::new(None));
+
+// Thread-local error storage - eliminates mutex contention and provides better errno semantics
+// Benefits:
+// - Zero synchronization overhead - each thread has isolated storage
+// - Better C library semantics - matches errno behavior (per-thread)
+// - Natural isolation - thread A errors don't overwrite thread B errors
+// - Automatic cleanup on thread destruction
+thread_local! {
+    static THREAD_LOCAL_ERROR: RefCell<Option<CString>> = RefCell::new(None);
+}
 
 /// Opaque handle for GenevaClient
 pub struct GenevaClientHandle {
@@ -66,12 +85,48 @@ pub enum GenevaError {
 /// Parameters: error_code, user_data
 pub type UploadCallback = unsafe extern "C" fn(GenevaError, *mut std::ffi::c_void);
 
-/// Sets the last error message in a thread-safe way
+/// Wrapper for Send-safe pointer passing in FFI callbacks
+/// This is safe because FFI callbacks are designed to handle pointers across thread boundaries
+#[derive(Clone, Copy)]
+struct SendPtr(*mut std::ffi::c_void);
+
+unsafe impl Send for SendPtr {}
+unsafe impl Sync for SendPtr {}
+
+impl SendPtr {
+    fn new(ptr: *mut std::ffi::c_void) -> Self {
+        Self(ptr)
+    }
+    
+    fn as_ptr(self) -> *mut std::ffi::c_void {
+        self.0
+    }
+}
+
+/// Wrapper for Send-safe callback function passing in FFI
+/// This is safe because FFI callbacks are designed to be called from any thread
+#[derive(Clone, Copy)]
+struct SendCallback(UploadCallback);
+
+unsafe impl Send for SendCallback {}
+unsafe impl Sync for SendCallback {}
+
+impl SendCallback {
+    fn new(callback: UploadCallback) -> Self {
+        Self(callback)
+    }
+    
+    fn call(self, error_code: GenevaError, user_data: *mut std::ffi::c_void) {
+        unsafe { (self.0)(error_code, user_data) }
+    }
+}
+
+/// Sets the last error message using thread-local storage (lock-free)
 fn set_last_error(msg: &str) {
     if let Ok(c_string) = CString::new(msg) {
-        if let Ok(mut last_error) = LAST_ERROR.lock() {
-            *last_error = Some(c_string);
-        }
+        THREAD_LOCAL_ERROR.with(|error| {
+            *error.borrow_mut() = Some(c_string);
+        });
     }
 }
 
@@ -110,11 +165,9 @@ unsafe fn c_str_to_string(ptr: *const c_char, field_name: &str) -> Result<String
         return Err(format!("Field '{}' is null", field_name));
     }
     
-    unsafe {
-        match CStr::from_ptr(ptr).to_str() {
-            Ok(s) => Ok(s.to_string()),
-            Err(_) => Err(format!("Invalid UTF-8 in field '{}'", field_name)),
-        }
+    match CStr::from_ptr(ptr).to_str() {
+        Ok(s) => Ok(s.to_string()),
+        Err(_) => Err(format!("Invalid UTF-8 in field '{}'", field_name)),
     }
 }
 
@@ -126,12 +179,14 @@ unsafe fn c_str_to_string(ptr: *const c_char, field_name: &str) -> Result<String
 /// - Returns opaque handle or null on error
 #[no_mangle]
 pub unsafe extern "C" fn geneva_client_new(config: *const GenevaConfig) -> *mut GenevaClientHandle {
-    if config.is_null() {
-        set_last_error("Configuration pointer is null");
-        return ptr::null_mut();
-    }
-
-    let config = unsafe { &*config };
+    // Safely dereference the config pointer with null check
+    let config = unsafe {
+        if config.is_null() {
+            set_last_error("Configuration pointer is null");
+            return ptr::null_mut();
+        }
+        &*config
+    };
     
     // Validate all required fields are non-null
     if let Err(err_msg) = unsafe { validate_required_config_fields(config) } {
@@ -386,8 +441,9 @@ pub unsafe extern "C" fn geneva_upload_logs(
     // Clone the client for the async task
     let client = handle.client.clone();
     
-    // Convert raw pointer to Send-safe usize
-    let user_data_addr = user_data as usize;
+    // Wrap the callback and user_data pointer for safe transfer across threads
+    let callback_wrapper = SendCallback::new(callback);
+    let user_data_wrapper = SendPtr::new(user_data);
     
     // Spawn async task on the runtime
     RUNTIME.spawn(async move {
@@ -400,11 +456,8 @@ pub unsafe extern "C" fn geneva_upload_logs(
         };
         
         // Spawn callback on dedicated thread to avoid blocking the async runtime
-        // and ensure thread safety as recommended by Claude
         std::thread::spawn(move || {
-            // Convert back to pointer inside the thread (this is Send-safe)
-            let user_data_ptr = user_data_addr as *mut std::ffi::c_void;
-            unsafe { callback(error_code, user_data_ptr) };
+            callback_wrapper.call(error_code, user_data_wrapper.as_ptr());
         });
     });
 
@@ -423,20 +476,20 @@ pub unsafe extern "C" fn geneva_client_free(handle: *mut GenevaClientHandle) {
     }
 }
 
-/// Gets the last error message (for debugging)
+/// Gets the last error message for the current thread (lock-free)
 /// 
 /// # Safety
 /// - Returns a C string that should not be freed by the caller
-/// - The returned string is valid until the next call to this function or set_last_error
+/// - The returned string is valid until the next call to set_last_error on this thread
+/// - Each thread has its own error storage (better errno semantics)
 #[no_mangle]
 pub unsafe extern "C" fn geneva_get_last_error() -> *const c_char {
-    match LAST_ERROR.lock() {
-        Ok(last_error) => match last_error.as_ref() {
+    THREAD_LOCAL_ERROR.with(|error| {
+        match error.borrow().as_ref() {
             Some(err) => err.as_ptr(),
             None => ptr::null(),
-        },
-        Err(_) => ptr::null(), // Mutex poisoned, return null
-    }
+        }
+    })
 }
 
 #[cfg(test)]

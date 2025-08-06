@@ -6,7 +6,11 @@
  * - Valid OpenTelemetry ResourceLogs protobuf generation
  * - Both synchronous and asynchronous upload patterns
  * 
+ * ENVIRONMENT SETUP:
+ * ==================
+ * 
  * Required Environment Variables:
+ * ------------------------------
  * export GENEVA_ENDPOINT="https://abc.azurewebsites.net"
  * export GENEVA_ENVIRONMENT="Test"
  * export GENEVA_ACCOUNT="myaccount"
@@ -15,13 +19,51 @@
  * export GENEVA_CONFIG_MAJOR_VERSION="2"
  * 
  * Optional for Certificate Authentication:
+ * ---------------------------------------
  * export GENEVA_CERT_PATH="/path/to/cert.p12"
  * export GENEVA_CERT_PASSWORD="cert-password"
  * 
  * Optional with defaults:
+ * ----------------------
  * export GENEVA_TENANT="default-tenant"
  * export GENEVA_ROLE_NAME="default-role"
  * export GENEVA_ROLE_INSTANCE="default-instance"
+ * 
+ * BUILDING AND RUNNING:
+ * ====================
+ * 
+ * 1. Build the Rust FFI library:
+ *    cd opentelemetry-rust-contrib/opentelemetry-exporter-geneva/geneva-uploader-ffi
+ *    cargo build --release
+ * 
+ * 2. Set environment variables (replace with your values):
+ *    export GENEVA_ENDPOINT="https://your-geneva-endpoint.com"
+ *    export GENEVA_ENVIRONMENT="YourEnvironment"
+ *    export GENEVA_ACCOUNT="youraccount"
+ *    export GENEVA_NAMESPACE="yournamespace"
+ *    export GENEVA_REGION="yourregion"
+ *    export GENEVA_CONFIG_MAJOR_VERSION="2"
+ * 
+ * 3. Compile this C example:
+ *    cd examples
+ *    gcc -o c_example c_example.c -L../../../target/debug -lgeneva_uploader_ffi -I../include
+ * 
+ * 4. Run the example:
+ *    ./c_example
+ * 
+ * AUTHENTICATION METHODS:
+ * =======================
+ * 
+ * 1. Managed Identity (default):
+ *    - No additional configuration needed
+ *    - Uses Azure Managed Identity for authentication
+ * 
+ * 2. Certificate Authentication:
+ *    - Set GENEVA_CERT_PATH to your .p12 certificate file
+ *    - Set GENEVA_CERT_PASSWORD to your certificate password
+ *    - Example:
+ *      export GENEVA_CERT_PATH="/path/to/your/cert.p12"
+ *      export GENEVA_CERT_PASSWORD="your-certificate-password"
  */
 
 #include <stdio.h>
