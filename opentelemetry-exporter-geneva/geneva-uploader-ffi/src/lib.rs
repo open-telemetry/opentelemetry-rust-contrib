@@ -29,7 +29,7 @@ static RUNTIME: Lazy<Runtime> = Lazy::new(|| {
     tokio::runtime::Builder::new_multi_thread()
         .worker_threads(std::thread::available_parallelism().map(|n| n.get()).unwrap_or(4))
         .thread_name("geneva-ffi-worker")
-        .enable_all() // TODO: Consider enabling only time + net for Geneva's needs
+        .enable_time().enable_io() // Only enable time + I/O for Geneva's needs
         .build()
         .expect("Failed to create Tokio runtime for Geneva FFI")
 });
@@ -84,12 +84,34 @@ pub enum GenevaError {
 /// Parameters: error_code, user_data
 pub type UploadCallback = unsafe extern "C" fn(GenevaError, *mut std::ffi::c_void);
 
-/// Wrapper for Send-safe pointer passing in FFI callbacks
-/// This is safe because FFI callbacks are designed to handle pointers across thread boundaries
+/// Wrapper for Send-safe pointer passing in FFI callbacks.
+///
+/// # Safety
+///
+/// `SendPtr` wraps a raw pointer intended to be passed as user data in FFI callbacks,
+/// typically to C code. The unsafe `Send` and `Sync` implementations are sound only if
+/// the following invariants are upheld:
+///
+/// - The pointer must refer to data that is safe to send across thread boundaries.
+///   This usually means the pointer is either to immutable data, or to data that is
+///   itself thread-safe (e.g., protected by a mutex, or only accessed by one thread).
+/// - The lifetime of the pointed-to data must outlive all uses of the pointer in any
+///   thread. The pointer must not be used after the data is freed.
+/// - The FFI boundary (C code) must guarantee that the pointer is not accessed
+///   concurrently in a way that would violate Rust's aliasing or mutability rules.
+/// - This type is only intended for use with FFI callbacks where the underlying C code
+///   guarantees these invariants, such as passing opaque handles or user data pointers
+///   that are managed externally.
+///
+/// Failure to uphold these invariants may result in undefined behavior.
 #[derive(Clone, Copy)]
 struct SendPtr(*mut std::ffi::c_void);
 
+// SAFETY: See the safety comment above. The implementor must ensure that the pointer
+// is only used in contexts where it is safe to send across threads, as described.
 unsafe impl Send for SendPtr {}
+// SAFETY: See the safety comment above. The implementor must ensure that the pointer
+// is only used in contexts where it is safe to share between threads, as described.
 unsafe impl Sync for SendPtr {}
 
 impl SendPtr {
@@ -186,7 +208,7 @@ pub unsafe extern "C" fn geneva_client_new(config: *const GenevaConfig) -> *mut 
     let config = unsafe { &*config };
     
     // Validate all required fields are non-null
-    if let Err(err_msg) = unsafe { validate_required_config_fields(config) } {
+    if let Err(err_msg) = validate_required_config_fields(config) {
         set_last_error(err_msg);
         return ptr::null_mut();
     }

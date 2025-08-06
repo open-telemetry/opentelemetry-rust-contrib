@@ -46,7 +46,7 @@
  * 
  * 3. Compile this C example:
  *    cd examples
- *    gcc -o c_example c_example.c -L../../../target/debug -lgeneva_uploader_ffi -I../include
+ *    gcc -o c_example c_example.c -L../../../target/release -lgeneva_uploader_ffi -I../include
  * 
  * 4. Run the example:
  *    ./c_example
