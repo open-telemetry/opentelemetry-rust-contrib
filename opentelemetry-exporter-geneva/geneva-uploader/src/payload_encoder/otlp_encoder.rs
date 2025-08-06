@@ -213,9 +213,7 @@ impl OtlpEncoder {
             }
         }
 
-        // Sort fields by name for consistent schema ID generation
-        fields.sort_by(|a, b| a.0.cmp(&b.0));
-
+        // No sorting - field order affects schema ID calculation
         // Hash field names and types while converting to FieldDef
         let field_defs: Vec<FieldDef> = fields
             .into_iter()
