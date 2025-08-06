@@ -182,47 +182,185 @@ uint8_t* create_valid_resource_logs(size_t* data_len) {
         }
     }
     
+    /*
+     * PROTOBUF STRUCTURE DOCUMENTATION
+     * ================================
+     * 
+     * WARNING: Hardcoded protobuf bytes are error-prone and difficult to maintain!
+     * 
+     * RECOMMENDED IMPROVEMENTS:
+     * 1. Use a proper protobuf library (e.g., protobuf-c, nanopb, or protobuf-c-rpc)
+     * 2. Generate this data from .proto definitions
+     * 3. Use a protobuf builder helper library
+     * 
+     * Current structure follows OpenTelemetry logs.proto:
+     * https://github.com/open-telemetry/opentelemetry-proto/blob/main/opentelemetry/proto/logs/v1/logs.proto
+     * 
+     * PROTOBUF WIRE FORMAT REFERENCE:
+     * - 0x0a = field tag 1, wire type 2 (length-delimited)
+     * - 0x12 = field tag 2, wire type 2 (length-delimited) 
+     * - 0x18 = field tag 3, wire type 0 (varint)
+     * - 0x2a = field tag 5, wire type 2 (length-delimited)
+     * - 0x32 = field tag 6, wire type 2 (length-delimited)
+     * 
+     * Length bytes immediately follow field tags for wire type 2
+     * String lengths MUST match actual string byte counts
+     */
+    
     // For demonstration, create a simplified but valid ResourceLogs
     // with one representative log record that shows the structure
     static uint8_t demo_resource_logs[] = {
-        // ResourceLogs with user registration event
-        0x0a, 0x2f,  // Field 1 (resource), length 47 bytes
-            0x0a, 0x2d,  // attributes
-                0x0a, 0x1c,  // service.name
-                    0x0a, 0x0c, 's', 'e', 'r', 'v', 'i', 'c', 'e', '.', 'n', 'a', 'm', 'e',
-                    0x12, 0x0c, 0x0a, 0x09, 'm', 'y', '-', 's', 'y', 's', 't', 'e', 'm',
-                0x0a, 0x0d,  // deployment.environment  
-                    0x0a, 0x05, 'e', 'n', 'v',
-                    0x12, 0x04, 0x0a, 0x04, 't', 'e', 's', 't',
+        /*
+         * ResourceLogs message (top-level)
+         * Field 1: resource (Resource message)
+         * Field 2: scope_logs (repeated ScopeLogs message)
+         */
         
-        0x12, 0x80, 0x01,  // Field 2 (scope_logs), length ~128 bytes
-            0x12, 0xfd, 0x00,  // Field 2 (log_records), length ~125 bytes
-                // Registration event log record
-                0x09, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,  // time_unix_nano (8 bytes)
-                0x18, 0x09,  // severity_number = INFO (9)
-                0x2a, 0x15,  // body, length 21
+        // Field 1: resource (Resource message), length 47 bytes
+        0x0a, 0x2f,
+        
+            /*
+             * Resource message
+             * Field 1: attributes (repeated KeyValue)
+             */
+            // Field 1: attributes, length 45 bytes  
+            0x0a, 0x2d,
+            
+                /*
+                 * KeyValue: service.name = "my-system"
+                 * Field 1: key (string) = "service.name" (12 chars)
+                 * Field 2: value (AnyValue with string_value) = "my-system" (9 chars)
+                 */
+                // KeyValue message, length 28 bytes
+                0x0a, 0x1c,
+                    // Field 1: key = "service.name" (12 bytes)
+                    0x0a, 0x0c, 's', 'e', 'r', 'v', 'i', 'c', 'e', '.', 'n', 'a', 'm', 'e',
+                    // Field 2: value (AnyValue), length 12 bytes  
+                    0x12, 0x0c,
+                        // Field 1: string_value = "my-system" (9 bytes)
+                        0x0a, 0x09, 'm', 'y', '-', 's', 'y', 's', 't', 'e', 'm',
+                
+                /*
+                 * KeyValue: env = "test" 
+                 * Field 1: key (string) = "env" (3 chars)
+                 * Field 2: value (AnyValue with string_value) = "test" (4 chars)
+                 */
+                // KeyValue message, length 13 bytes
+                0x0a, 0x0d,
+                    // Field 1: key = "env" (3 bytes) 
+                    0x0a, 0x03, 'e', 'n', 'v',
+                    // Field 2: value (AnyValue), length 6 bytes
+                    0x12, 0x06,
+                        // Field 1: string_value = "test" (4 bytes)
+                        0x0a, 0x04, 't', 'e', 's', 't',
+        
+        /*
+         * Field 2: scope_logs (ScopeLogs message), length ~128 bytes
+         * ScopeLogs contains instrumentation scope and log records
+         */
+        0x12, 0x80, 0x01,
+        
+            /*
+             * ScopeLogs message  
+             * Field 2: log_records (repeated LogRecord)
+             */
+            // Field 2: log_records, length ~125 bytes
+            0x12, 0xfd, 0x00,
+            
+                /*
+                 * LogRecord message - the actual log entry
+                 * Field 1: time_unix_nano (uint64) - timestamp in nanoseconds
+                 * Field 3: severity_number (SeverityNumber enum) 
+                 * Field 5: body (AnyValue) - log message content
+                 * Field 6: attributes (repeated KeyValue) - structured data
+                 */
+                
+                // Field 1: time_unix_nano (fixed64), 8 bytes + 1 byte field tag
+                0x09, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+                
+                // Field 3: severity_number = INFO (9) 
+                0x18, 0x09,
+                
+                // Field 5: body (AnyValue), length 21 bytes
+                0x2a, 0x15,
+                    // String value "Registration successful" (21 chars)
                     'R', 'e', 'g', 'i', 's', 't', 'r', 'a', 't', 'i', 'o', 'n', ' ', 's', 'u', 'c', 'c', 'e', 's', 's', 'f', 'u', 'l',
-                0x32, 0x70,  // attributes, length ~112 bytes
-                    // event_id
+                
+                // Field 6: attributes (repeated KeyValue), length ~112 bytes
+                0x32, 0x70,
+                
+                    /*
+                     * KeyValue: event_id = 20 (integer)
+                     * Field 1: key = "event_id" (8 chars)
+                     * Field 2: value (AnyValue with int_value = 20)
+                     */
+                    // KeyValue message, length 14 bytes
                     0x0a, 0x0e,
+                        // Field 1: key = "event_id" (8 bytes)
                         0x0a, 0x08, 'e', 'v', 'e', 'n', 't', '_', 'i', 'd',
-                        0x12, 0x02, 0x10, 0x14,  // int_value = 20
-                    // user_name
+                        // Field 2: value (AnyValue), length 2 bytes
+                        0x12, 0x02,
+                            // Field 2: int_value = 20 (varint)
+                            0x10, 0x14,
+                    
+                    /*
+                     * KeyValue: user_name = "user1"
+                     * Field 1: key = "user_name" (9 chars) 
+                     * Field 2: value (AnyValue with string_value = "user1" (5 chars))
+                     */
+                    // KeyValue message, length 17 bytes
                     0x0a, 0x11,
+                        // Field 1: key = "user_name" (9 bytes)
                         0x0a, 0x09, 'u', 's', 'e', 'r', '_', 'n', 'a', 'm', 'e',
-                        0x12, 0x08, 0x0a, 0x05, 'u', 's', 'e', 'r', '1',
-                    // user_email
+                        // Field 2: value (AnyValue), length 8 bytes
+                        0x12, 0x08,
+                            // Field 1: string_value = "user1" (5 bytes)
+                            0x0a, 0x05, 'u', 's', 'e', 'r', '1',
+                    
+                    /*
+                     * KeyValue: user_email = "user1@opentelemetry.io"
+                     * Field 1: key = "user_email" (10 chars)
+                     * Field 2: value (AnyValue with string_value = "user1@opentelemetry.io" (24 chars))
+                     * 
+                     * CRITICAL: String length must match actual character count!
+                     * "user1@opentelemetry.io" = 24 characters = 0x18 bytes
+                     */
+                    // KeyValue message, length 32 bytes  
                     0x0a, 0x20,
+                        // Field 1: key = "user_email" (10 bytes)
                         0x0a, 0x0a, 'u', 's', 'e', 'r', '_', 'e', 'm', 'a', 'i', 'l',
-                        0x12, 0x18, 0x0a, 0x18, 'u', 's', 'e', 'r', '1', '@', 'o', 'p', 'e', 'n', 't', 'e', 'l', 'e', 'm', 'e', 't', 'r', 'y', '.', 'i', 'o',
-                    // name = "Log"
+                        // Field 2: value (AnyValue), length 24 bytes
+                        0x12, 0x18,
+                            // Field 1: string_value = "user1@opentelemetry.io" (24 bytes)
+                            0x0a, 0x18, 'u', 's', 'e', 'r', '1', '@', 'o', 'p', 'e', 'n', 't', 'e', 'l', 'e', 'm', 'e', 't', 'r', 'y', '.', 'i', 'o',
+                    
+                    /*
+                     * KeyValue: name = "Log"
+                     * Field 1: key = "name" (4 chars)
+                     * Field 2: value (AnyValue with string_value = "Log" (3 chars))
+                     */
+                    // KeyValue message, length 11 bytes
                     0x0a, 0x0b,
+                        // Field 1: key = "name" (4 bytes) 
                         0x0a, 0x04, 'n', 'a', 'm', 'e',
-                        0x12, 0x05, 0x0a, 0x03, 'L', 'o', 'g',
-                    // target = "my-system"  
+                        // Field 2: value (AnyValue), length 5 bytes
+                        0x12, 0x05,
+                            // Field 1: string_value = "Log" (3 bytes)
+                            0x0a, 0x03, 'L', 'o', 'g',
+                    
+                    /*
+                     * KeyValue: target = "my-system"
+                     * Field 1: key = "target" (6 chars)
+                     * Field 2: value (AnyValue with string_value = "my-system" (9 chars))
+                     */
+                    // KeyValue message, length 18 bytes
                     0x0a, 0x12,
+                        // Field 1: key = "target" (6 bytes)
                         0x0a, 0x06, 't', 'a', 'r', 'g', 'e', 't',
-                        0x12, 0x0b, 0x0a, 0x09, 'm', 'y', '-', 's', 'y', 's', 't', 'e', 'm'
+                        // Field 2: value (AnyValue), length 11 bytes
+                        0x12, 0x0b,
+                            // Field 1: string_value = "my-system" (9 bytes)
+                            0x0a, 0x09, 'm', 'y', '-', 's', 'y', 's', 't', 'e', 'm'
     };
     
     // Update timestamp in the demo data
