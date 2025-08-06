@@ -400,7 +400,7 @@ pub unsafe extern "C" fn geneva_upload_logs(
         };
         
         // Spawn callback on dedicated thread to avoid blocking the async runtime
-        // and ensure thread safety as recommended by Claude
+        // and ensure thread safety.
         std::thread::spawn(move || {
             // Convert back to pointer inside the thread (this is Send-safe)
             let user_data_ptr = user_data_addr as *mut std::ffi::c_void;
