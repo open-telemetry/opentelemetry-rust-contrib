@@ -122,9 +122,113 @@ impl DynamicSchema {
         }
     }
 
+    /// Calculate the fixed overhead size for Bond schema encoding
+    const fn calculate_fixed_overhead() -> usize {
+        // Bond header: "SP" + version
+        let mut size = 4; // [0x53, 0x50, 0x01, 0x00]
+
+        // Number of structs
+        size += 4; // 1u32
+
+        // Struct definition header (excluding variable name lengths)
+        size += 4; // attributes (0u32)
+        size += 1; // modifier (0u8)
+
+        // Default values block
+        size += 8; // default_uint (u64)
+        size += 8; // default_int (i64)
+        size += 8; // default_double (f64)
+        size += 4; // default_string (u32)
+        size += 4; // default_wstring (u32)
+        size += 1; // default_nothing (u8)
+
+        // Base def
+        size += 4; // 0u32
+
+        // Field count header
+        size += 3; // 3 zero bytes
+        size += 4; // field count (u32)
+
+        // Post-fields padding
+        size += 8; // alignment padding
+
+        // Root typedef
+        size += 1; // BondDataType::BT_STRUCT
+        size += 2; // struct index (u16)
+        size += 1; // element (u8)
+        size += 1; // key (u8)
+        size += 1; // bonded (u8)
+
+        // Final padding
+        size += 9; // 9 zero bytes
+
+        size
+    }
+
+    /// Calculate the fixed overhead per field (excluding variable field name length)
+    const fn calculate_per_field_fixed_overhead() -> usize {
+        // Empty qualified name
+        let mut size = 4; // 0u32 for empty string
+
+        // Field attributes and data
+        size += 4; // attributes (0u32)
+        size += 1; // modifier (0u8)
+
+        // Default values block for field
+        size += 8; // default_uint (u64)
+        size += 8; // default_int (i64)
+        size += 8; // default_double (f64)
+        size += 4; // default_string (u32)
+        size += 4; // default_wstring (u32)
+        size += 1; // default_nothing (u8)
+
+        // Field metadata
+        size += 3; // 3 padding bytes
+        size += 2; // field_id (u16)
+        size += 1; // type_id (u8)
+
+        // Additional type info
+        size += 2; // struct_def (u16)
+        size += 1; // element (u8)
+        size += 1; // key (u8)
+        size += 1; // bonded_type (u8)
+        size += 1; // default_value_present (u8)
+
+        size
+    }
+
+    /// Calculate the exact size of the encoded schema in bytes
+    pub(crate) fn calculate_exact_encoded_size(&self) -> usize {
+        // Start with fixed overhead
+        let mut size = Self::calculate_fixed_overhead();
+
+        // Add variable struct name lengths
+        size += 4 + self.struct_name.len(); // struct_name length + bytes
+        size += 4 + self.qualified_name.len(); // qualified_name length + bytes
+
+        // Add field-specific sizes
+        for (i, field) in self.fields.iter().enumerate() {
+            let is_last = i == self.fields.len() - 1;
+
+            // Fixed overhead per field
+            size += Self::calculate_per_field_fixed_overhead();
+
+            // Variable field name
+            size += 4 + field.name.len(); // name length + bytes
+
+            // Padding after each field except the last
+            if !is_last {
+                size += 8;
+            }
+        }
+
+        size
+    }
+
     /// Encode the schema to Bond format
     pub(crate) fn encode(&self) -> Result<Vec<u8>> {
-        let mut schema_bytes = Vec::new();
+        let exact_size = self.calculate_exact_encoded_size();
+        let mut schema_bytes = Vec::with_capacity(exact_size);
 
         // Write header
         schema_bytes.write_all(&[0x53, 0x50])?; // 'S','P'
@@ -374,5 +478,45 @@ mod tests {
         let schema = BondEncodedSchema::from_fields("TestStruct", "test.namespace", fields);
         let bytes = schema.as_bytes();
         assert!(!bytes.is_empty());
+    }
+
+    #[test]
+    fn test_schema_exact_size_calculation() {
+        // Test that the exact size calculation matches the actual encoded size
+        // This validates that pre-allocation is precise and no reallocations occur
+
+        // Test with different field counts and varying field name lengths
+        let test_cases = vec![
+            (0, "no fields"),
+            (1, "single field"),
+            (5, "few fields"),
+            (10, "medium fields"),
+            (20, "many fields"),
+        ];
+
+        for (field_count, description) in test_cases {
+            // Create fields with varying name lengths to test the calculation accuracy
+            let fields: Vec<FieldDef> = (0..field_count)
+                .map(|i| FieldDef {
+                    name: Cow::Owned(format!("field_with_long_name_{i}")),
+                    type_id: BondDataType::BT_STRING,
+                    field_id: i as u16 + 1,
+                })
+                .collect();
+
+            let schema = DynamicSchema::new("TestStruct", "test.namespace", fields);
+            let exact_size = schema.calculate_exact_encoded_size();
+            let encoded = schema.encode().unwrap();
+
+            // Verify encoding succeeded
+            assert!(!encoded.is_empty(), "Encoding failed for {description}");
+
+            // The exact calculation should match the actual encoded size precisely
+            let actual_size = encoded.len();
+            assert_eq!(
+                exact_size, actual_size,
+                "Exact size calculation {exact_size} does not match actual size {actual_size} for {description}"
+            );
+        }
     }
 }
