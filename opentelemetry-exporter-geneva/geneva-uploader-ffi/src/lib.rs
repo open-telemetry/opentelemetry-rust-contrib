@@ -456,6 +456,26 @@ pub unsafe extern "C" fn geneva_upload_logs(
         };
         
         // Spawn callback on dedicated thread to avoid blocking the async runtime
+        // and ensure thread safety.
+        std::thread::spawn(move || {
+            callback_wrapper.call(error_code, user_data_wrapper.as_ptr());
+        // and ensure thread safety.
+>>>>>>> d7cbb4a714437a10a8cf2fd154e37349b3df5086
+        std::thread::spawn(move || {
+            callback_wrapper.call(error_code, user_data_wrapper.as_ptr());
+        });
+    });
+
+    GenevaError::AsyncOperationPending
+}
+        });
+    });
+
+    GenevaError::AsyncOperationPending
+}
+=======
+        // and ensure thread safety.
+>>>>>>> d7cbb4a714437a10a8cf2fd154e37349b3df5086
         std::thread::spawn(move || {
             callback_wrapper.call(error_code, user_data_wrapper.as_ptr());
         });

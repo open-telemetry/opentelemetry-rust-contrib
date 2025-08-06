@@ -6,9 +6,9 @@
 
 [OpenTelemetry](https://opentelemetry.io/) instrumentation for [Actix Web](https://actix.rs/).
 
-[![Crates.io: actix-web-opentelemetry](https://img.shields.io/crates/v/actix-web-opentelemetry.svg)](https://crates.io/crates/actix-web-opentelemetry)
-[![Documentation](https://docs.rs/actix-web-opentelemetry/badge.svg)](https://docs.rs/actix-web-opentelemetry)
-[![LICENSE](https://img.shields.io/crates/l/actix-web-opentelemetry)](./LICENSE)
+[![Crates.io: opentelemetry-instrumentation-actix-web](https://img.shields.io/crates/v/opentelemetry-instrumentation-actix-web.svg)](https://crates.io/crates/opentelemetry-instrumentation-actix-web)
+[![Documentation](https://docs.rs/opentelemetry-instrumentation-actix-web/badge.svg)](https://docs.rs/opentelemetry-instrumentation-actix-web)
+[![LICENSE](https://img.shields.io/crates/l/opentelemetry-instrumentation-actix-web)](./LICENSE)
 [![GitHub Actions CI](https://github.com/open-telemetry/opentelemetry-rust-contrib/workflows/CI/badge.svg)](https://github.com/open-telemetry/opentelemetry-rust-contrib/actions?query=workflow%3ACI+branch%3Amain)
 [![Slack](https://img.shields.io/badge/slack-@cncf/otel/rust-brightgreen.svg?logo=slack)](https://cloud-native.slack.com/archives/C03GDP0H023)
 
