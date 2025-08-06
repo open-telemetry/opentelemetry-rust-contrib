@@ -24,7 +24,7 @@ c-example: build
 		-lgeneva_uploader_ffi \
 		-lpthread -ldl -lm
 	@echo "Running C example..."
-	LD_LIBRARY_PATH=../../target/release ./examples/c_example_test
+	export LD_LIBRARY_PATH=../../target/release; ./examples/c_example_test
 
 # Run all tests
 test: rust-tests c-example
