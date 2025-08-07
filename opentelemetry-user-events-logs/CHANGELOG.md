@@ -2,6 +2,15 @@
 
 ## vNext
 
+### Changed
+
+- Improved benchmark reliability by adding automatic enable/disable management for user events listener
+  - Added RAII guard (`UserEventsListenerGuard`) for automatic listener management
+  - Benchmarks now automatically enable listener when tests start and disable when complete
+  - Added graceful fallback for systems without user events support
+  - Updated benchmark results with current performance data
+  - Enabled required features by default to fix code analysis warnings
+
 ## v0.14.0
 
 Released 2025-July-24
