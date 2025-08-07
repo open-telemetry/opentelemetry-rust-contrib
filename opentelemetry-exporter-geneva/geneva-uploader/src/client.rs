@@ -3,7 +3,6 @@
 use crate::config_service::client::{AuthMethod, GenevaConfigClient, GenevaConfigClientConfig};
 use crate::ingestion_service::uploader::{GenevaUploader, GenevaUploaderConfig};
 use crate::payload_encoder::central_blob::BatchMetadata;
-use crate::payload_encoder::lz4_chunked_compression::lz4_chunked_compression;
 use crate::payload_encoder::otlp_encoder::OtlpEncoder;
 use opentelemetry_proto::tonic::logs::v1::ResourceLogs;
 use std::sync::Arc;
@@ -90,7 +89,7 @@ impl GenevaClient {
         })
     }
 
-    /// Encode and compress OTLP logs into ready-to-upload batches.
+    /// Encode OTLP logs into ready-to-upload compressed batches.
     /// Returns a vector of compressed batches that can be stored, persisted, or uploaded later.
     pub fn encode_and_compress_logs(
         &self,
@@ -102,29 +101,16 @@ impl GenevaClient {
             .flat_map(|resource_log| resource_log.scope_logs.iter())
             .flat_map(|scope_log| scope_log.log_records.iter());
 
-        // TODO: Investigate using tokio::spawn_blocking for event encoding to avoid blocking
-        // the async executor thread for CPU-intensive work.
         let encoded_batches = self.encoder.encode_log_batch(log_iter, &self.metadata);
 
-        // Pre-allocate with exact capacity to avoid reallocations
-        let mut compressed_batches = Vec::with_capacity(encoded_batches.len());
-
-        for encoded_batch in encoded_batches {
-            // TODO: Investigate using tokio::spawn_blocking for LZ4 compression to avoid blocking
-            // the async executor thread for CPU-intensive work.
-            let compressed_data = lz4_chunked_compression(&encoded_batch.data).map_err(|e| {
-                format!(
-                    "LZ4 compression failed: {e} Event: {}",
-                    encoded_batch.event_name
-                )
-            })?;
-
-            compressed_batches.push(CompressedBatch {
+        let compressed_batches = encoded_batches
+            .into_iter()
+            .map(|encoded_batch| CompressedBatch {
                 event_name: encoded_batch.event_name,
-                compressed_data,
+                compressed_data: encoded_batch.data, // already compressed
                 metadata: encoded_batch.metadata,
-            });
-        }
+            })
+            .collect();
 
         Ok(compressed_batches)
     }

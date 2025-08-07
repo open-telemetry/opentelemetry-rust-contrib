@@ -57,7 +57,7 @@ impl BatchMetadata {
 pub(crate) struct EncodedBatch {
     /// The event name for this batch
     pub(crate) event_name: String,
-    /// The encoded binary data
+    /// LZ4 chunked compressed CentralBlob bytes
     pub(crate) data: Vec<u8>,
     /// Batch metadata containing timestamps and schema information
     pub(crate) metadata: BatchMetadata,

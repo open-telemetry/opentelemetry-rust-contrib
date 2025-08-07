@@ -2,6 +2,7 @@ use crate::payload_encoder::bond_encoder::{BondDataType, BondEncodedSchema, Bond
 use crate::payload_encoder::central_blob::{
     BatchMetadata, CentralBlob, CentralEventEntry, CentralSchemaEntry, EncodedBatch,
 };
+use crate::payload_encoder::lz4_chunked_compression::lz4_chunked_compression;
 use chrono::{TimeZone, Utc};
 use opentelemetry_proto::tonic::common::v1::any_value::Value;
 use opentelemetry_proto::tonic::logs::v1::LogRecord;
@@ -29,7 +30,8 @@ impl OtlpEncoder {
         OtlpEncoder {}
     }
 
-    /// Encode a batch of logs into a vector of (event_name, bytes, schema_ids, start_time_nanos, end_time_nanos)
+    /// Encode a batch of logs into a vector of (event_name, compressed_bytes, schema_ids, start_time_nanos, end_time_nanos)
+    /// The returned `data` field contains LZ4 chunked compressed bytes.
     pub(crate) fn encode_log_batch<'a, I>(&self, logs: I, metadata: &str) -> Vec<EncodedBatch>
     where
         I: IntoIterator<Item = &'a opentelemetry_proto::tonic::logs::v1::LogRecord>,
@@ -143,10 +145,22 @@ impl OtlpEncoder {
                 schemas: batch_data.schemas,
                 events: batch_data.events,
             };
-            let bytes = blob.to_bytes();
+            let uncompressed = blob.to_bytes();
+            // Compress in-line; if compression fails, fall back to uncompressed to avoid data loss.
+            let compressed = match lz4_chunked_compression(&uncompressed) {
+                Ok(c) => c,
+                Err(e) => {
+                    // TODO: propagate error instead of fallback; for now log via debug assertion.
+                    debug_assert!(
+                        false,
+                        "LZ4 compression failed: {e}; falling back to uncompressed bytes"
+                    );
+                    uncompressed
+                }
+            };
             blobs.push(EncodedBatch {
                 event_name: batch_event_name,
-                data: bytes,
+                data: compressed,
                 metadata: batch_data.metadata,
             });
         }

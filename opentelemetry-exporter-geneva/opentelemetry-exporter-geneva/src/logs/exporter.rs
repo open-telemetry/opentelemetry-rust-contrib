@@ -15,14 +15,18 @@ pub struct GenevaExporter {
     max_concurrent_uploads: usize,
 }
 
+// TODO - Add builder pattern for GenevaExporter to allow more flexible configuration
 impl GenevaExporter {
     /// Create a new GenavaExporter
     pub fn new(geneva_client: GenevaClient) -> Self {
-        Self::with_concurrency(geneva_client, 10) // Default to 10 concurrent uploads
+        Self::new_with_concurrency(geneva_client, 10) // Default to 10 concurrent uploads
     }
 
     /// Create a new GenavaExporter with custom concurrency level
-    pub fn with_concurrency(geneva_client: GenevaClient, max_concurrent_uploads: usize) -> Self {
+    pub fn new_with_concurrency(
+        geneva_client: GenevaClient,
+        max_concurrent_uploads: usize,
+    ) -> Self {
         Self {
             resource: ResourceAttributesWithSchema::default(),
             _is_shutdown: atomic::AtomicBool::new(false),
