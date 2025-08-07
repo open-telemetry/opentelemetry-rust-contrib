@@ -1,7 +1,4 @@
-//! FFI bindings for geneva-uploader to be used from Go via CGO
-//!
-//! This crate provides C-compatible functions that can be called from Go
-//! to use the Geneva uploader functionality.
+//! C-compatible FFI bindings for geneva-uploader
 
 #![allow(unsafe_op_in_unsafe_fn)]
 #![allow(unsafe_attr_outside_unsafe)]
@@ -16,16 +13,12 @@ use tokio::runtime::Runtime;
 
 use geneva_uploader::client::{GenevaClient, GenevaClientConfig};
 use geneva_uploader::AuthMethod;
+use opentelemetry_proto::tonic::collector::logs::v1::ExportLogsServiceRequest;
 use prost::Message;
 use std::path::PathBuf;
-use opentelemetry_proto::tonic::collector::logs::v1::ExportLogsServiceRequest;
 
-/// Global shared Tokio runtime for efficiency and Geneva client compatibility
-/// Benefits:
-/// - Geneva client is designed for concurrent operations (buffer_unordered)
-/// - Thread-agnostic: FFI callers can use from any thread
-/// - Optimal resource usage: single runtime shared across all clients
-/// - High performance: multi-threaded runtime supports Geneva's concurrent uploads
+/// Shared Tokio runtime for async operations
+/// TODO - Consider per client runtimes if needed, or thread-local runtimes
 static RUNTIME: Lazy<Runtime> = Lazy::new(|| {
     tokio::runtime::Builder::new_multi_thread()
         .worker_threads(
@@ -40,12 +33,8 @@ static RUNTIME: Lazy<Runtime> = Lazy::new(|| {
         .expect("Failed to create Tokio runtime for Geneva FFI")
 });
 
-// Thread-local error storage - eliminates mutex contention and provides better errno semantics
-// Benefits:
-// - Zero synchronization overhead - each thread has isolated storage
-// - Better C library semantics - matches errno behavior (per-thread)
-// - Natural isolation - thread A errors don't overwrite thread B errors
-// - Automatic cleanup on thread destruction
+// Thread-local error storage for better errno-like semantics
+// TODO - Consider using a more structured error handling approach
 thread_local! {
     static THREAD_LOCAL_ERROR: RefCell<Option<CString>> = RefCell::new(None);
 }
@@ -90,34 +79,17 @@ pub enum GenevaError {
 /// Parameters: error_code, user_data
 pub type UploadCallback = unsafe extern "C" fn(GenevaError, *mut std::ffi::c_void);
 
-/// Wrapper for Send-safe pointer passing in FFI callbacks.
+/// Wrapper for passing raw pointers across thread boundaries in FFI callbacks.
 ///
 /// # Safety
-///
-/// `SendPtr` wraps a raw pointer intended to be passed as user data in FFI callbacks,
-/// typically to C code. The unsafe `Send` and `Sync` implementations are sound only if
-/// the following invariants are upheld:
-///
-/// - The pointer must refer to data that is safe to send across thread boundaries.
-///   This usually means the pointer is either to immutable data, or to data that is
-///   itself thread-safe (e.g., protected by a mutex, or only accessed by one thread).
-/// - The lifetime of the pointed-to data must outlive all uses of the pointer in any
-///   thread. The pointer must not be used after the data is freed.
-/// - The FFI boundary (C code) must guarantee that the pointer is not accessed
-///   concurrently in a way that would violate Rust's aliasing or mutability rules.
-/// - This type is only intended for use with FFI callbacks where the underlying C code
-///   guarantees these invariants, such as passing opaque handles or user data pointers
-///   that are managed externally.
-///
-/// Failure to uphold these invariants may result in undefined behavior.
+/// The caller must ensure:
+/// - The pointer remains valid for the lifetime of the operation
+/// - The pointed-to data is safe to access from different threads
+/// - No concurrent mutation occurs without proper synchronization
 #[derive(Clone, Copy)]
 struct SendPtr(*mut std::ffi::c_void);
 
-// SAFETY: See the safety comment above. The implementor must ensure that the pointer
-// is only used in contexts where it is safe to send across threads, as described.
 unsafe impl Send for SendPtr {}
-// SAFETY: See the safety comment above. The implementor must ensure that the pointer
-// is only used in contexts where it is safe to share between threads, as described.
 unsafe impl Sync for SendPtr {}
 
 impl SendPtr {
@@ -130,73 +102,15 @@ impl SendPtr {
     }
 }
 
-/// Wrapper for Send-safe callback function passing in FFI
+/// Wrapper for passing C function pointers across threads.
 ///
-/// # Safety
-///
-/// The `unsafe impl Send for SendCallback` and `unsafe impl Sync for SendCallback` are
-/// considered sound under the following specific conditions, which are guaranteed by the
-/// FFI design and usage patterns:
-///
-/// ## Thread Safety Guarantees:
-///
-/// 1. **C Function Pointer Invariants**: FFI callback function pointers (`extern "C" fn`)
-///    are inherently thread-safe because:
-///    - They point to immutable code segments in memory
-///    - C functions do not capture Rust environment/closures
-///    - The function pointer itself is just an address - no mutable state
-///
-/// 2. **Calling Convention Safety**: The callback uses C calling convention (`extern "C"`),
-///    which ensures:
-///    - Consistent ABI across thread boundaries
-///    - No Rust-specific thread-local state dependencies
-///    - Compatible with threading models of C/C++ callers
-///
-/// 3. **Lifetime and Ownership**:
-///    - The callback function pointer must remain valid for the duration of the async operation
-///    - The C code is responsible for ensuring the callback function doesn't become invalid
-///    - No Rust ownership is transferred - only a function pointer is copied
-///
-/// 4. **No Shared Mutable State**:
-///    - The callback function itself contains no shared mutable state
-///    - Any mutable state access must be handled by the C implementation using appropriate
-///      synchronization primitives (mutexes, atomics, etc.)
-///
-/// 5. **Single Invocation Guarantee**:
-///    - Each callback is invoked exactly once per async operation
-///    - No concurrent access to the same callback instance from multiple threads
-///    - The callback is consumed when called, preventing reuse issues
-///
-/// ## Usage Contract:
-///
-/// This implementation is only safe when used in the specific context of the Geneva FFI:
-/// - Callbacks are passed from C code that guarantees thread-safety of the function pointer
-/// - The callback is invoked from a dedicated thread spawned specifically for this purpose
-/// - The Geneva FFI ensures proper synchronization between the async runtime and callback thread
-///
-/// ## Violations that would cause UB:
-///
-/// - Passing a callback that accesses thread-local storage without proper synchronization
-/// - C code invalidating the function pointer while async operation is in progress
-/// - Callback function accessing shared mutable state without synchronization
-/// - Using this wrapper outside the Geneva FFI context without equivalent guarantees
-///
-/// The implementor (Geneva FFI) guarantees these invariants are upheld through:
-/// - Proper async task lifecycle management
-/// - Dedicated callback thread isolation
-/// - C API contract enforcement
+/// # Safety  
+/// Safe because C function pointers are stateless and point to immutable code.
+/// The caller must ensure the function remains valid during async operations.
 #[derive(Clone, Copy)]
 struct SendCallback(UploadCallback);
 
-// SAFETY: See comprehensive safety documentation above. This is safe because FFI callback
-// function pointers are inherently thread-safe (immutable code addresses) and the Geneva FFI
-// guarantees proper usage patterns including single invocation, dedicated callback threads,
-// and lifetime management.
 unsafe impl Send for SendCallback {}
-
-// SAFETY: See comprehensive safety documentation above. Sync is safe for the same reasons as
-// Send - the callback is an immutable function pointer with no shared mutable state, and
-// the Geneva FFI ensures proper synchronization between async operations and callback invocation.
 unsafe impl Sync for SendCallback {}
 
 impl SendCallback {
@@ -247,7 +161,7 @@ unsafe fn validate_required_config_fields(config: &GenevaConfig) -> Result<(), &
     Ok(())
 }
 
-/// Safely converts a C string to Rust String with error context
+/// Safely converts a C string to Rust String
 unsafe fn c_str_to_string(ptr: *const c_char, field_name: &str) -> Result<String, String> {
     if ptr.is_null() {
         return Err(format!("Field '{}' is null", field_name));
@@ -417,14 +331,14 @@ pub unsafe extern "C" fn geneva_client_new(config: *const GenevaConfig) -> *mut 
 
     // Create Geneva client using the shared runtime
     println!("[DEBUG] Creating Geneva client with config: endpoint={}, environment={}, account={}, namespace={}, region={}, auth_method={:?}", 
-             geneva_config.endpoint, geneva_config.environment, geneva_config.account, 
+             geneva_config.endpoint, geneva_config.environment, geneva_config.account,
              geneva_config.namespace, geneva_config.region, geneva_config.auth_method);
-    
+
     let client = match RUNTIME.block_on(GenevaClient::new(geneva_config)) {
         Ok(client) => {
             println!("[DEBUG] Geneva client created successfully");
             Arc::new(client)
-        },
+        }
         Err(e) => {
             println!("[ERROR] Failed to create Geneva client: {}", e);
             set_last_error(&format!("Failed to create Geneva client: {}", e));
@@ -442,17 +356,16 @@ pub unsafe extern "C" fn geneva_client_new(config: *const GenevaConfig) -> *mut 
 /// - handle must be a valid pointer returned by geneva_client_new
 /// - data must be a valid pointer to protobuf-encoded ResourceLogs data
 /// - data_len must be the correct length of the data
-///
-/// # Note
-/// This function blocks the calling thread. For high-performance scenarios,
-/// consider using geneva_upload_logs_async instead.
 #[no_mangle]
 pub unsafe extern "C" fn geneva_upload_logs_sync(
     handle: *mut GenevaClientHandle,
     data: *const u8,
     data_len: usize,
 ) -> GenevaError {
-    println!("[DEBUG] geneva_upload_logs_sync called with handle: {:?}, data_len: {}", handle, data_len);
+    println!(
+        "[DEBUG] geneva_upload_logs_sync called with handle: {:?}, data_len: {}",
+        handle, data_len
+    );
     if handle.is_null() {
         set_last_error("Geneva client handle is null");
         return GenevaError::InvalidData;
@@ -471,14 +384,7 @@ pub unsafe extern "C" fn geneva_upload_logs_sync(
     let handle = unsafe { &*handle };
     let data_slice = unsafe { std::slice::from_raw_parts(data, data_len) };
 
-    // Decode protobuf data as LogsData (produced by plog.ProtoMarshaler)
-    // TODO: Memory pressure risk - protobuf data is decoded and held in memory during the entire
-    // synchronous upload operation. For high-throughput OTLP Collector scenarios, this could
-    // accumulate significant memory if multiple threads call this function simultaneously with
-    // large log batches or if Geneva uploads are slow. Consider implementing:
-    // 1. Reasonable limits on protobuf payload size
-    // 2. Preferring async version for high-throughput scenarios
-    // 3. Memory usage monitoring in production deployments
+    // Decode protobuf data - note: holds data in memory during upload
     let logs_data: ExportLogsServiceRequest = match Message::decode(data_slice) {
         Ok(data) => data,
         Err(e) => {
@@ -491,20 +397,33 @@ pub unsafe extern "C" fn geneva_upload_logs_sync(
     let resource_logs = logs_data.resource_logs;
 
     // Debug: Print information about the decoded data
-    println!("[DEBUG] Decoded {} ResourceLogs from protobuf", resource_logs.len());
+    println!(
+        "[DEBUG] Decoded {} ResourceLogs from protobuf",
+        resource_logs.len()
+    );
     for (i, rl) in resource_logs.iter().enumerate() {
-        println!("[DEBUG] ResourceLogs[{}]: {} scope_logs", i, rl.scope_logs.len());
+        println!(
+            "[DEBUG] ResourceLogs[{}]: {} scope_logs",
+            i,
+            rl.scope_logs.len()
+        );
         let total_records: usize = rl.scope_logs.iter().map(|sl| sl.log_records.len()).sum();
-        println!("[DEBUG] ResourceLogs[{}]: {} total log records", i, total_records);
+        println!(
+            "[DEBUG] ResourceLogs[{}]: {} total log records",
+            i, total_records
+        );
     }
 
     // Upload logs using the shared runtime (blocking)
-    println!("[DEBUG] Starting Geneva upload with {} ResourceLogs", resource_logs.len());
+    println!(
+        "[DEBUG] Starting Geneva upload with {} ResourceLogs",
+        resource_logs.len()
+    );
     match RUNTIME.block_on(handle.client.upload_logs(&resource_logs)) {
         Ok(_) => {
             println!("[DEBUG] Geneva upload successful!");
             GenevaError::Success
-        },
+        }
         Err(e) => {
             println!("[ERROR] Geneva upload failed: {}", e);
             set_last_error(&format!("Failed to upload logs to Geneva: {}", e));
@@ -513,7 +432,7 @@ pub unsafe extern "C" fn geneva_upload_logs_sync(
     }
 }
 
-/// Uploads logs to Geneva asynchronously with callback notification (main function)
+/// Uploads logs to Geneva asynchronously with callback notification
 ///
 /// # Safety
 /// - handle must be a valid pointer returned by geneva_client_new
@@ -576,13 +495,7 @@ pub unsafe extern "C" fn geneva_upload_logs(
     RUNTIME.spawn(async move {
         let result = client.upload_logs(&resource_logs).await;
 
-        // Determine the error code
-        // TODO: Error information loss - detailed error context from upload_logs() is discarded.
-        // The Result<(), String> contains valuable debugging information that should be preserved
-        // for better observability. Consider either:
-        // 1. Storing error details in thread-local storage before callback
-        // 2. Extending callback signature to include error details
-        // 3. Using more granular error codes for different failure types
+        // Note: (TODO) detailed error information is lost here
         let error_code = match result {
             //print error string for debugging
             Ok(_) => GenevaError::Success,
@@ -594,7 +507,6 @@ pub unsafe extern "C" fn geneva_upload_logs(
         };
 
         // Spawn callback on dedicated thread to avoid blocking the async runtime
-        // and ensure thread safety.
         std::thread::spawn(move || {
             callback_wrapper.call(error_code, user_data_wrapper.as_ptr());
         });
@@ -603,7 +515,7 @@ pub unsafe extern "C" fn geneva_upload_logs(
     GenevaError::AsyncOperationPending
 }
 
-/// Frees a Geneva client handle
+// Frees a Geneva client handle
 ///
 /// # Safety
 /// - handle must be a valid pointer returned by geneva_client_new
@@ -615,12 +527,11 @@ pub unsafe extern "C" fn geneva_client_free(handle: *mut GenevaClientHandle) {
     }
 }
 
-/// Gets the last error message for the current thread (lock-free)
+/// Gets the last error message for the current thread
 ///
 /// # Safety
 /// - Returns a C string that should not be freed by the caller
 /// - The returned string is valid until the next call to set_last_error on this thread
-/// - Each thread has its own error storage (better errno semantics)
 #[no_mangle]
 pub unsafe extern "C" fn geneva_get_last_error() -> *const c_char {
     THREAD_LOCAL_ERROR.with(|error| match error.borrow().as_ref() {
