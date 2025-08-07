@@ -227,9 +227,7 @@ impl OtlpEncoder {
             }
         }
 
-        // Sort fields by name for consistent schema ID generation
-        fields.sort_by(|a, b| a.0.cmp(&b.0));
-
+        // No sorting - field order affects schema ID calculation
         // Hash field names and types while converting to FieldDef
         let field_defs: Vec<FieldDef> = fields
             .into_iter()
@@ -270,19 +268,22 @@ impl OtlpEncoder {
     fn write_row_data(&self, log: &LogRecord, sorted_fields: &[FieldDef]) -> Vec<u8> {
         let mut buffer = Vec::with_capacity(sorted_fields.len() * 50); //TODO - estimate better
 
+        // Pre-calculate timestamp to avoid duplicate computation for FIELD_TIMESTAMP and FIELD_ENV_TIME
+        let formatted_timestamp = {
+            let timestamp_nanos = if log.time_unix_nano != 0 {
+                log.time_unix_nano
+            } else {
+                log.observed_time_unix_nano
+            };
+            Self::format_timestamp(timestamp_nanos)
+        };
+
         for field in sorted_fields {
             match field.name.as_ref() {
                 FIELD_ENV_NAME => BondWriter::write_string(&mut buffer, "TestEnv"), // TODO - placeholder for actual env name
                 FIELD_ENV_VER => BondWriter::write_string(&mut buffer, "4.0"), // TODO - placeholder for actual env version
                 FIELD_TIMESTAMP | FIELD_ENV_TIME => {
-                    // Use the same timestamp precedence logic: prefer time_unix_nano, fall back to observed_time_unix_nano
-                    let timestamp_nanos = if log.time_unix_nano != 0 {
-                        log.time_unix_nano
-                    } else {
-                        log.observed_time_unix_nano
-                    };
-                    let dt = Self::format_timestamp(timestamp_nanos);
-                    BondWriter::write_string(&mut buffer, &dt);
+                    BondWriter::write_string(&mut buffer, &formatted_timestamp);
                 }
                 FIELD_TRACE_ID => {
                     let hex_bytes = Self::encode_id_to_hex::<32>(&log.trace_id);
