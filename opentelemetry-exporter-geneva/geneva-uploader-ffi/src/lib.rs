@@ -18,6 +18,7 @@ use geneva_uploader::client::{GenevaClient, GenevaClientConfig};
 use geneva_uploader::AuthMethod;
 use prost::Message;
 use std::path::PathBuf;
+use opentelemetry_proto::tonic::collector::logs::v1::ExportLogsServiceRequest;
 
 /// Global shared Tokio runtime for efficiency and Geneva client compatibility
 /// Benefits:
@@ -415,9 +416,17 @@ pub unsafe extern "C" fn geneva_client_new(config: *const GenevaConfig) -> *mut 
     };
 
     // Create Geneva client using the shared runtime
+    println!("[DEBUG] Creating Geneva client with config: endpoint={}, environment={}, account={}, namespace={}, region={}, auth_method={:?}", 
+             geneva_config.endpoint, geneva_config.environment, geneva_config.account, 
+             geneva_config.namespace, geneva_config.region, geneva_config.auth_method);
+    
     let client = match RUNTIME.block_on(GenevaClient::new(geneva_config)) {
-        Ok(client) => Arc::new(client),
+        Ok(client) => {
+            println!("[DEBUG] Geneva client created successfully");
+            Arc::new(client)
+        },
         Err(e) => {
+            println!("[ERROR] Failed to create Geneva client: {}", e);
             set_last_error(&format!("Failed to create Geneva client: {}", e));
             return ptr::null_mut();
         }
@@ -443,6 +452,7 @@ pub unsafe extern "C" fn geneva_upload_logs_sync(
     data: *const u8,
     data_len: usize,
 ) -> GenevaError {
+    println!("[DEBUG] geneva_upload_logs_sync called with handle: {:?}, data_len: {}", handle, data_len);
     if handle.is_null() {
         set_last_error("Geneva client handle is null");
         return GenevaError::InvalidData;
@@ -461,7 +471,7 @@ pub unsafe extern "C" fn geneva_upload_logs_sync(
     let handle = unsafe { &*handle };
     let data_slice = unsafe { std::slice::from_raw_parts(data, data_len) };
 
-    // Decode protobuf data
+    // Decode protobuf data as LogsData (produced by plog.ProtoMarshaler)
     // TODO: Memory pressure risk - protobuf data is decoded and held in memory during the entire
     // synchronous upload operation. For high-throughput OTLP Collector scenarios, this could
     // accumulate significant memory if multiple threads call this function simultaneously with
@@ -469,18 +479,34 @@ pub unsafe extern "C" fn geneva_upload_logs_sync(
     // 1. Reasonable limits on protobuf payload size
     // 2. Preferring async version for high-throughput scenarios
     // 3. Memory usage monitoring in production deployments
-    let resource_logs = match Message::decode(data_slice) {
-        Ok(logs) => logs,
+    let logs_data: ExportLogsServiceRequest = match Message::decode(data_slice) {
+        Ok(data) => data,
         Err(e) => {
-            set_last_error(&format!("Failed to decode protobuf data: {}", e));
+            set_last_error(&format!("Failed to decode protobuf LogsData: {}", e));
             return GenevaError::InvalidData;
         }
     };
 
+    // Extract ResourceLogs from the LogsData
+    let resource_logs = logs_data.resource_logs;
+
+    // Debug: Print information about the decoded data
+    println!("[DEBUG] Decoded {} ResourceLogs from protobuf", resource_logs.len());
+    for (i, rl) in resource_logs.iter().enumerate() {
+        println!("[DEBUG] ResourceLogs[{}]: {} scope_logs", i, rl.scope_logs.len());
+        let total_records: usize = rl.scope_logs.iter().map(|sl| sl.log_records.len()).sum();
+        println!("[DEBUG] ResourceLogs[{}]: {} total log records", i, total_records);
+    }
+
     // Upload logs using the shared runtime (blocking)
-    match RUNTIME.block_on(handle.client.upload_logs(&[resource_logs])) {
-        Ok(_) => GenevaError::Success,
+    println!("[DEBUG] Starting Geneva upload with {} ResourceLogs", resource_logs.len());
+    match RUNTIME.block_on(handle.client.upload_logs(&resource_logs)) {
+        Ok(_) => {
+            println!("[DEBUG] Geneva upload successful!");
+            GenevaError::Success
+        },
         Err(e) => {
+            println!("[ERROR] Geneva upload failed: {}", e);
             set_last_error(&format!("Failed to upload logs to Geneva: {}", e));
             GenevaError::UploadFailed
         }
@@ -507,6 +533,8 @@ pub unsafe extern "C" fn geneva_upload_logs(
     callback: UploadCallback,
     user_data: *mut std::ffi::c_void,
 ) -> GenevaError {
+    println!("[DEBUG] geneva_upload_logs called with handle: {:?}, data_len: {}, callback: {:?}, user_data: {:?}", 
+             handle, data_len, callback, user_data);
     if handle.is_null() {
         set_last_error("Geneva client handle is null");
         return GenevaError::InvalidData;
@@ -525,14 +553,17 @@ pub unsafe extern "C" fn geneva_upload_logs(
     let handle = unsafe { &*handle };
     let data_slice = unsafe { std::slice::from_raw_parts(data, data_len) };
 
-    // Decode protobuf data
-    let resource_logs = match Message::decode(data_slice) {
-        Ok(logs) => logs,
+    // Decode protobuf data as ExportLogsServiceRequest (produced by plog.ProtoMarshaler)
+    let logs_data: ExportLogsServiceRequest = match Message::decode(data_slice) {
+        Ok(data) => data,
         Err(e) => {
-            set_last_error(&format!("Failed to decode protobuf data: {}", e));
+            set_last_error(&format!("Failed to decode protobuf LogsData: {}", e));
             return GenevaError::InvalidData;
         }
     };
+
+    // Extract ResourceLogs from the LogsData
+    let resource_logs = logs_data.resource_logs;
 
     // Clone the client for the async task
     let client = handle.client.clone();
@@ -543,7 +574,7 @@ pub unsafe extern "C" fn geneva_upload_logs(
 
     // Spawn async task on the runtime
     RUNTIME.spawn(async move {
-        let result = client.upload_logs(&[resource_logs]).await;
+        let result = client.upload_logs(&resource_logs).await;
 
         // Determine the error code
         // TODO: Error information loss - detailed error context from upload_logs() is discarded.
@@ -553,8 +584,13 @@ pub unsafe extern "C" fn geneva_upload_logs(
         // 2. Extending callback signature to include error details
         // 3. Using more granular error codes for different failure types
         let error_code = match result {
+            //print error string for debugging
             Ok(_) => GenevaError::Success,
-            Err(_) => GenevaError::UploadFailed, // Detailed error context lost here
+            Err(e) => {
+                println!("Error uploading logs to Geneva: {}", e);
+                set_last_error(&format!("Failed to upload logs to Geneva: {}", e));
+                GenevaError::UploadFailed
+            }
         };
 
         // Spawn callback on dedicated thread to avoid blocking the async runtime
