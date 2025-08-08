@@ -15,7 +15,6 @@ pub struct EncodedBatch {
     pub metadata: crate::payload_encoder::central_blob::BatchMetadata,
 }
 
-
 /// Configuration for GenevaClient (user-facing)
 #[derive(Clone, Debug)]
 pub struct GenevaClientConfig {

@@ -52,7 +52,6 @@ impl BatchMetadata {
     }
 }
 
-
 /// Helper to encode UTF-8 Rust str to UTF-16LE bytes
 /// TODO - consider avoiding temporary allocation, by passing a mutable buffer
 #[allow(dead_code)]

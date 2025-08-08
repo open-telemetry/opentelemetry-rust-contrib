@@ -1,8 +1,8 @@
+use crate::client::EncodedBatch;
 use crate::payload_encoder::bond_encoder::{BondDataType, BondEncodedSchema, BondWriter, FieldDef};
 use crate::payload_encoder::central_blob::{
     BatchMetadata, CentralBlob, CentralEventEntry, CentralSchemaEntry,
 };
-use crate::client::EncodedBatch;
 use crate::payload_encoder::lz4_chunked_compression::lz4_chunked_compression;
 use chrono::{TimeZone, Utc};
 use opentelemetry_proto::tonic::common::v1::any_value::Value;
