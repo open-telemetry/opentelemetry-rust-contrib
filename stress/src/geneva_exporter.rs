@@ -296,31 +296,16 @@ async fn async_main(
                 let client = client.clone();
                 let logs = logs.clone();
                 async move {
-                    let batches = client
-                        .encode_and_compress_logs(&logs)
-                        .map_err(std::io::Error::other)?;
+                    let batches = client.encode_and_compress_logs(&logs)?;
 
-                    // All batch uploads happen within the same async task that called `encode_and_compress_logs`
-                    // Note: The batches are uploaded concurrently 10 at a time, however the test setup currently doesn't have
-                    // multiple concurrent operations.
-                    use futures::stream::{self, StreamExt};
-                    let errors: Vec<String> = stream::iter(batches)
-                        .map(|batch| {
-                            let client = client.clone();
-                            async move { client.upload_batch(&batch).await }
-                        })
-                        .buffer_unordered(10) // Max 10 concurrent uploads per operation
-                        .filter_map(|result| async move { result.err() })
-                        .collect()
-                        .await;
-
-                    if !errors.is_empty() {
-                        return Err(std::io::Error::other(format!(
-                            "Upload failures: {}",
-                            errors.join("; ")
-                        )));
+                    // Upload batches sequentially TODO - use buffer_unordered for concurrency
+                    for batch in &batches {
+                        client
+                            .upload_batch(batch)
+                            .await
+                            .map_err(|e| format!("Failed to upload batch: {e}"))?;
                     }
-                    Ok(())
+                    Ok::<(), String>(())
                 }
             })
             .await;
@@ -345,27 +330,16 @@ async fn async_main(
                 async move {
                     let batches = client
                         .encode_and_compress_logs(&logs)
-                        .map_err(std::io::Error::other)?;
+                        .map_err(|e| format!("Failed to encode logs: {e}"))?;
 
-                    // Upload batches concurrently using buffer_unordered (like Geneva exporter)
-                    use futures::stream::{self, StreamExt};
-                    let errors: Vec<String> = stream::iter(batches)
-                        .map(|batch| {
-                            let client = client.clone();
-                            async move { client.upload_batch(&batch).await }
-                        })
-                        .buffer_unordered(10) // Max 10 concurrent uploads per operation
-                        .filter_map(|result| async move { result.err() })
-                        .collect()
-                        .await;
-
-                    if !errors.is_empty() {
-                        return Err(std::io::Error::other(format!(
-                            "Upload failures: {}",
-                            errors.join("; ")
-                        )));
+                    // Upload batches sequentially - TODO - use buffer_unordered for concurrency
+                    for batch in &batches {
+                        client
+                            .upload_batch(batch)
+                            .await
+                            .map_err(|e| format!("Failed to upload batch: {e}"))?;
                     }
-                    Ok(())
+                    Ok::<(), String>(())
                 }
             })
             .await;
@@ -387,11 +361,11 @@ async fn async_main(
                     async move {
                         let batches = match client.encode_and_compress_logs(&logs) {
                             Ok(batches) => batches,
-                            Err(e) => return Err(std::io::Error::other(e)),
+                            Err(e) => return Err(format!("Failed to encode logs: {e}")),
                         };
                         for batch in &batches {
                             if let Err(e) = client.upload_batch(batch).await {
-                                return Err(std::io::Error::other(e));
+                                return Err(format!("Failed to upload batch: {e}"));
                             }
                         }
                         Ok(())
