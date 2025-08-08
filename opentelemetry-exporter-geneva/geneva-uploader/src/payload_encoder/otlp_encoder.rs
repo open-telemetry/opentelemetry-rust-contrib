@@ -180,7 +180,7 @@ impl OtlpEncoder {
             fields.push((FIELD_SPAN_ID.into(), BondDataType::BT_STRING));
         }
         if log.flags != 0 {
-            fields.push((FIELD_TRACE_FLAGS.into(), BondDataType::BT_INT32));
+            fields.push((FIELD_TRACE_FLAGS.into(), BondDataType::BT_UINT32));
         }
 
         // Part B - Core log fields
@@ -282,7 +282,7 @@ impl OtlpEncoder {
                     BondWriter::write_string(&mut buffer, hex_str);
                 }
                 FIELD_TRACE_FLAGS => {
-                    BondWriter::write_numeric(&mut buffer, log.flags as i32);
+                    BondWriter::write_numeric(&mut buffer, log.flags as u32);
                 }
                 FIELD_NAME => {
                     BondWriter::write_string(&mut buffer, &log.event_name);
