@@ -2,18 +2,19 @@
 
 use crate::config_service::client::{AuthMethod, GenevaConfigClient, GenevaConfigClientConfig};
 use crate::ingestion_service::uploader::{GenevaUploader, GenevaUploaderConfig};
-use crate::payload_encoder::central_blob::BatchMetadata;
 use crate::payload_encoder::otlp_encoder::OtlpEncoder;
 use opentelemetry_proto::tonic::logs::v1::ResourceLogs;
 use std::sync::Arc;
 
-/// Represents a compressed batch ready for upload
+/// Public batch type (already LZ4 chunked compressed).
+/// Produced by `OtlpEncoder::encode_log_batch` and returned to callers.
 #[derive(Debug, Clone)]
-pub struct CompressedBatch {
+pub struct EncodedBatch {
     pub event_name: String,
-    pub compressed_data: Vec<u8>,
-    pub metadata: BatchMetadata,
+    pub data: Vec<u8>,
+    pub metadata: crate::payload_encoder::central_blob::BatchMetadata,
 }
+
 
 /// Configuration for GenevaClient (user-facing)
 #[derive(Clone, Debug)]
@@ -89,45 +90,26 @@ impl GenevaClient {
         })
     }
 
-    /// Encode OTLP logs into ready-to-upload compressed batches.
-    /// Returns a vector of compressed batches that can be stored, persisted, or uploaded later.
+    /// Encode OTLP logs into LZ4 chunked compressed batches.
     pub fn encode_and_compress_logs(
         &self,
         logs: &[ResourceLogs],
-    ) -> Result<Vec<CompressedBatch>, String> {
-        //TODO - Return error type instead of String
+    ) -> Result<Vec<EncodedBatch>, String> {
         let log_iter = logs
             .iter()
             .flat_map(|resource_log| resource_log.scope_logs.iter())
             .flat_map(|scope_log| scope_log.log_records.iter());
 
-        let encoded_batches = self
-            .encoder
+        self.encoder
             .encode_log_batch(log_iter, &self.metadata)
-            .map_err(|e| format!("Compression failed: {e}"))?;
-
-        let compressed_batches = encoded_batches
-            .into_iter()
-            .map(|encoded_batch| CompressedBatch {
-                event_name: encoded_batch.event_name,
-                compressed_data: encoded_batch.data, // already compressed
-                metadata: encoded_batch.metadata,
-            })
-            .collect();
-
-        Ok(compressed_batches)
+            .map_err(|e| format!("Compression failed: {e}"))
     }
 
     /// Upload a single compressed batch.
     /// This allows for granular control over uploads, including custom retry logic for individual batches.
-    pub async fn upload_batch(&self, batch: &CompressedBatch) -> Result<(), String> {
-        //TODO - Return error type instead of String
+    pub async fn upload_batch(&self, batch: &EncodedBatch) -> Result<(), String> {
         self.uploader
-            .upload(
-                batch.compressed_data.clone(),
-                &batch.event_name,
-                &batch.metadata,
-            )
+            .upload(batch.data.clone(), &batch.event_name, &batch.metadata)
             .await
             .map(|_| ())
             .map_err(|e| format!("Geneva upload failed: {e} Event: {}", batch.event_name))

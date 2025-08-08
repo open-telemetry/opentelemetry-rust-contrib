@@ -52,16 +52,6 @@ impl BatchMetadata {
     }
 }
 
-/// Represents an encoded batch with all necessary metadata
-#[derive(Debug, Clone)]
-pub(crate) struct EncodedBatch {
-    /// The event name for this batch
-    pub(crate) event_name: String,
-    /// LZ4 chunked compressed CentralBlob bytes
-    pub(crate) data: Vec<u8>,
-    /// Batch metadata containing timestamps and schema information
-    pub(crate) metadata: BatchMetadata,
-}
 
 /// Helper to encode UTF-8 Rust str to UTF-16LE bytes
 /// TODO - consider avoiding temporary allocation, by passing a mutable buffer
