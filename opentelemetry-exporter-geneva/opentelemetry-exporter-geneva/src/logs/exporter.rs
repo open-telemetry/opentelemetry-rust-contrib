@@ -19,7 +19,7 @@ pub struct GenevaExporter {
 impl GenevaExporter {
     /// Create a new GenavaExporter
     pub fn new(geneva_client: GenevaClient) -> Self {
-        Self::new_with_concurrency(geneva_client, 10) // Default to 10 concurrent uploads
+        Self::new_with_concurrency(geneva_client, 4) // Default to 4 concurrent uploads
     }
 
     /// Create a new GenavaExporter with custom concurrency level
