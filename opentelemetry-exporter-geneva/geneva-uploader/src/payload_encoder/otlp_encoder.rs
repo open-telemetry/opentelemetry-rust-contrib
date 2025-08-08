@@ -32,7 +32,12 @@ impl OtlpEncoder {
 
     /// Encode a batch of logs into a vector of (event_name, compressed_bytes, schema_ids, start_time_nanos, end_time_nanos)
     /// The returned `data` field contains LZ4 chunked compressed bytes.
-    pub(crate) fn encode_log_batch<'a, I>(&self, logs: I, metadata: &str) -> Vec<EncodedBatch>
+    /// On compression failure, the error is returned (no logging, no fallback).
+    pub(crate) fn encode_log_batch<'a, I>(
+        &self,
+        logs: I,
+        metadata: &str,
+    ) -> Result<Vec<EncodedBatch>, String>
     where
         I: IntoIterator<Item = &'a opentelemetry_proto::tonic::logs::v1::LogRecord>,
     {
@@ -146,25 +151,15 @@ impl OtlpEncoder {
                 events: batch_data.events,
             };
             let uncompressed = blob.to_bytes();
-            // Compress in-line; if compression fails, fall back to uncompressed to avoid data loss.
-            let compressed = match lz4_chunked_compression(&uncompressed) {
-                Ok(c) => c,
-                Err(e) => {
-                    // TODO: propagate error instead of fallback; for now log via debug assertion.
-                    debug_assert!(
-                        false,
-                        "LZ4 compression failed: {e}; falling back to uncompressed bytes"
-                    );
-                    uncompressed
-                }
-            };
+            let compressed = lz4_chunked_compression(&uncompressed)
+                .map_err(|e| format!("compression failed: {e}"))?;
             blobs.push(EncodedBatch {
                 event_name: batch_event_name,
                 data: compressed,
                 metadata: batch_data.metadata,
             });
         }
-        blobs
+        Ok(blobs)
     }
 
     /// Determine fields and calculate schema ID in a single pass for optimal performance
@@ -405,7 +400,7 @@ mod tests {
         });
 
         let metadata = "namespace=testNamespace/eventVersion=Ver1v0";
-        let result = encoder.encode_log_batch([log].iter(), metadata);
+        let result = encoder.encode_log_batch([log].iter(), metadata).unwrap();
 
         assert!(!result.is_empty());
     }
@@ -452,7 +447,9 @@ mod tests {
         let metadata = "namespace=test";
 
         // Encode multiple log records with different schema structures but same event_name
-        let result = encoder.encode_log_batch([log1, log2, log3].iter(), metadata);
+        let result = encoder
+            .encode_log_batch([log1, log2, log3].iter(), metadata)
+            .unwrap();
 
         // Should create one batch (same event_name = "user_action")
         assert_eq!(result.len(), 1);
@@ -509,7 +506,7 @@ mod tests {
             ..Default::default()
         };
 
-        let result = encoder.encode_log_batch([log].iter(), "test");
+        let result = encoder.encode_log_batch([log].iter(), "test").unwrap();
 
         assert_eq!(result.len(), 1);
         assert_eq!(result[0].event_name, "test_event");
@@ -549,7 +546,9 @@ mod tests {
             }),
         });
 
-        let result = encoder.encode_log_batch([log1, log2, log3].iter(), "test");
+        let result = encoder
+            .encode_log_batch([log1, log2, log3].iter(), "test")
+            .unwrap();
 
         // All should be in one batch with same event_name
         assert_eq!(result.len(), 1);
@@ -575,7 +574,9 @@ mod tests {
             ..Default::default()
         };
 
-        let result = encoder.encode_log_batch([log1, log2].iter(), "test");
+        let result = encoder
+            .encode_log_batch([log1, log2].iter(), "test")
+            .unwrap();
 
         // Should create 2 separate batches
         assert_eq!(result.len(), 2);
@@ -598,7 +599,7 @@ mod tests {
             ..Default::default()
         };
 
-        let result = encoder.encode_log_batch([log].iter(), "test");
+        let result = encoder.encode_log_batch([log].iter(), "test").unwrap();
 
         assert_eq!(result.len(), 1);
         assert_eq!(result[0].event_name, "Log"); // Should default to "Log"
@@ -644,7 +645,9 @@ mod tests {
             }),
         });
 
-        let result = encoder.encode_log_batch([log1, log2, log3, log4].iter(), "test");
+        let result = encoder
+            .encode_log_batch([log1, log2, log3, log4].iter(), "test")
+            .unwrap();
 
         // Should create 3 batches: "user_action", "system_alert", "Log"
         assert_eq!(result.len(), 3);

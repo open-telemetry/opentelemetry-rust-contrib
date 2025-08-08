@@ -101,7 +101,10 @@ impl GenevaClient {
             .flat_map(|resource_log| resource_log.scope_logs.iter())
             .flat_map(|scope_log| scope_log.log_records.iter());
 
-        let encoded_batches = self.encoder.encode_log_batch(log_iter, &self.metadata);
+        let encoded_batches = self
+            .encoder
+            .encode_log_batch(log_iter, &self.metadata)
+            .map_err(|e| format!("Compression failed: {e}"))?;
 
         let compressed_batches = encoded_batches
             .into_iter()
