@@ -2,11 +2,18 @@
 
 use crate::config_service::client::{AuthMethod, GenevaConfigClient, GenevaConfigClientConfig};
 use crate::ingestion_service::uploader::{GenevaUploader, GenevaUploaderConfig};
-use crate::payload_encoder::lz4_chunked_compression::lz4_chunked_compression;
 use crate::payload_encoder::otlp_encoder::OtlpEncoder;
-use futures::stream::{self, StreamExt};
 use opentelemetry_proto::tonic::logs::v1::ResourceLogs;
 use std::sync::Arc;
+
+/// Public batch type (already LZ4 chunked compressed).
+/// Produced by `OtlpEncoder::encode_log_batch` and returned to callers.
+#[derive(Debug, Clone)]
+pub struct EncodedBatch {
+    pub event_name: String,
+    pub data: Vec<u8>,
+    pub metadata: crate::payload_encoder::central_blob::BatchMetadata,
+}
 
 /// Configuration for GenevaClient (user-facing)
 #[derive(Clone, Debug)]
@@ -21,8 +28,6 @@ pub struct GenevaClientConfig {
     pub tenant: String,
     pub role_name: String,
     pub role_instance: String,
-    /// Maximum number of concurrent uploads. If None, defaults to number of CPU cores.
-    pub max_concurrent_uploads: Option<usize>,
     // Add event name/version here if constant, or per-upload if you want them per call.
 }
 
@@ -32,7 +37,6 @@ pub struct GenevaClient {
     uploader: Arc<GenevaUploader>,
     encoder: OtlpEncoder,
     metadata: String,
-    max_concurrent_uploads: usize,
 }
 
 impl GenevaClient {
@@ -78,57 +82,35 @@ impl GenevaClient {
         let uploader = GenevaUploader::from_config_client(config_client, uploader_config)
             .await
             .map_err(|e| format!("GenevaUploader init failed: {e}"))?;
-        let max_concurrent_uploads = cfg.max_concurrent_uploads.unwrap_or_else(|| {
-            // TODO - Use a more sophisticated method to determine concurrency if needed
-            // currently using number of CPU cores
-            std::thread::available_parallelism()
-                .map(|p| p.get())
-                .unwrap_or(4)
-        });
         Ok(Self {
             uploader: Arc::new(uploader),
             encoder: OtlpEncoder::new(),
             metadata,
-            max_concurrent_uploads,
         })
     }
 
-    /// Upload OTLP logs (as ResourceLogs).
-    pub async fn upload_logs(&self, logs: &[ResourceLogs]) -> Result<(), String> {
+    /// Encode OTLP logs into LZ4 chunked compressed batches.
+    pub fn encode_and_compress_logs(
+        &self,
+        logs: &[ResourceLogs],
+    ) -> Result<Vec<EncodedBatch>, String> {
         let log_iter = logs
             .iter()
             .flat_map(|resource_log| resource_log.scope_logs.iter())
             .flat_map(|scope_log| scope_log.log_records.iter());
-        // TODO: Investigate using tokio::spawn_blocking for event encoding to avoid blocking
-        // the async executor thread for CPU-intensive work.
-        let blobs = self.encoder.encode_log_batch(log_iter, &self.metadata);
 
-        // create an iterator that yields futures for each upload
-        let upload_futures = blobs.into_iter().map(|batch| {
-            async move {
-                // TODO: Investigate using tokio::spawn_blocking for LZ4 compression to avoid blocking
-                // the async executor thread for CPU-intensive work.
-                let compressed_blob = lz4_chunked_compression(&batch.data).map_err(|e| {
-                    format!("LZ4 compression failed: {e} Event: {}", batch.event_name)
-                })?;
-                self.uploader
-                    .upload(compressed_blob, &batch.event_name, &batch.metadata)
-                    .await
-                    .map(|_| ())
-                    .map_err(|e| format!("Geneva upload failed: {e} Event: {}", batch.event_name))
-            }
-        });
-        // Execute uploads concurrently with configurable concurrency
-        let errors: Vec<String> = stream::iter(upload_futures)
-            .buffer_unordered(self.max_concurrent_uploads)
-            .filter_map(|result| async move { result.err() })
-            .collect()
-            .await;
+        self.encoder
+            .encode_log_batch(log_iter, &self.metadata)
+            .map_err(|e| format!("Compression failed: {e}"))
+    }
 
-        // Return error if any uploads failed
-        if !errors.is_empty() {
-            return Err(format!("Upload failures: {}", errors.join("; ")));
-        }
-        Ok(())
+    /// Upload a single compressed batch.
+    /// This allows for granular control over uploads, including custom retry logic for individual batches.
+    pub async fn upload_batch(&self, batch: &EncodedBatch) -> Result<(), String> {
+        self.uploader
+            .upload(batch.data.clone(), &batch.event_name, &batch.metadata)
+            .await
+            .map(|_| ())
+            .map_err(|e| format!("Geneva upload failed: {e} Event: {}", batch.event_name))
     }
 }

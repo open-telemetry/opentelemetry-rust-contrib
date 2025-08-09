@@ -62,7 +62,6 @@ async fn main() {
         tenant,
         role_name,
         role_instance,
-        max_concurrent_uploads: None, // Use default
     };
 
     let geneva_client = GenevaClient::new(config)
