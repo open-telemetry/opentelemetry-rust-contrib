@@ -282,7 +282,7 @@ impl OtlpEncoder {
                     BondWriter::write_string(&mut buffer, hex_str);
                 }
                 FIELD_TRACE_FLAGS => {
-                    BondWriter::write_numeric(&mut buffer, log.flags as u32);
+                    BondWriter::write_numeric(&mut buffer, log.flags);
                 }
                 FIELD_NAME => {
                     BondWriter::write_string(&mut buffer, &log.event_name);
