@@ -6,7 +6,7 @@
 use std::ffi::CStr;
 use std::os::raw::{c_char, c_int, c_uint};
 use std::ptr;
-use std::sync::{Arc, LazyLock};
+use std::sync::{Arc, OnceLock};
 use tokio::runtime::Runtime;
 
 use geneva_uploader::client::{EncodedBatch, GenevaClient, GenevaClientConfig};
@@ -25,19 +25,23 @@ const GENEVA_HANDLE_MAGIC: u64 = 0xFEED_BEEF;
 /// - Per-client runtimes vs shared global runtime
 /// - External runtime integration (accept user-provided runtime handle)
 /// - Runtime lifecycle management for FFI (shutdown, cleanup)
-static RUNTIME: LazyLock<Runtime> = LazyLock::new(|| {
-    tokio::runtime::Builder::new_multi_thread()
-        .worker_threads(
-            std::thread::available_parallelism()
-                .map(|n| n.get())
-                .unwrap_or(4),
-        )
-        .thread_name("geneva-ffi-worker")
-        .enable_time()
-        .enable_io() // Only enable time + I/O for Geneva's needs
-        .build()
-        .expect("Failed to create Tokio runtime for Geneva FFI")
-});
+static RUNTIME: OnceLock<Runtime> = OnceLock::new();
+
+fn runtime() -> &'static Runtime {
+    RUNTIME.get_or_init(|| {
+        tokio::runtime::Builder::new_multi_thread()
+            .worker_threads(
+                std::thread::available_parallelism()
+                    .map(|n| n.get())
+                    .unwrap_or(4),
+            )
+            .thread_name("geneva-ffi-worker")
+            .enable_time()
+            .enable_io() // Only enable time + I/O for Geneva's needs
+            .build()
+            .expect("Failed to create Tokio runtime for Geneva FFI")
+    })
+}
 
 /// Trait for handles that support validation
 trait ValidatedHandle {
@@ -494,7 +498,7 @@ pub unsafe extern "C" fn geneva_upload_batch_sync(
 
     let batch = batches_ref.batches[index].clone();
     let client = handle_ref.client.clone();
-    let res = RUNTIME.block_on(async move { client.upload_batch(&batch).await });
+    let res = runtime().block_on(async move { client.upload_batch(&batch).await });
     match res {
         Ok(_) => GenevaError::Success,
         Err(_e) => GenevaError::UploadFailed,
@@ -730,5 +734,261 @@ mod tests {
         unsafe {
             geneva_batches_free(ptr::null_mut());
         }
+    }
+
+    // Integration-style test: encode via FFI then upload via FFI using MockAuth + Wiremock server.
+    // Uses otlp_builder to construct an ExportLogsServiceRequest payload.
+    #[test]
+    fn test_encode_and_upload_with_mock_server() {
+        use otlp_builder::builder::build_otlp_logs_minimal;
+        use wiremock::matchers::{method, path_regex};
+        use wiremock::{Mock, MockServer, ResponseTemplate};
+
+        // Start mock server on the shared runtime used by the FFI code
+        let mock_server = runtime().block_on(async { MockServer::start().await });
+        let ingestion_endpoint = format!("{}/ingestion", mock_server.uri());
+
+        // Static JWT payload with Endpoint claim is acceptable because upload uses
+        // the endpoint from the GET response (auth_info.endpoint) to build the POST URL.
+        let auth_token = "eyJhbGciOiJub25lIiwidHlwIjoiSldUIn0.eyJFbmRwb2ludCI6Imh0dHA6Ly9sb2NhbGhvc3Q6ODA4MC9pbmdlc3Rpb24iLCJleHAiOjE3ODI5MzYwMDB9.dummy";
+        let auth_token_expiry = "2026-06-30T12:00:00+00:00";
+
+        // Mock config service (GET)
+        runtime().block_on(async {
+            Mock::given(method("GET"))
+                .respond_with(ResponseTemplate::new(200).set_body_string(format!(
+                    r#"{{
+                        "IngestionGatewayInfo": {{
+                            "Endpoint": "{ingestion_endpoint}",
+                            "AuthToken": "{auth_token}",
+                            "AuthTokenExpiryTime": "{auth_token_expiry}"
+                        }},
+                        "StorageAccountKeys": [{{
+                            "AccountMonikerName": "testdiagaccount",
+                            "AccountGroupName": "testgroup",
+                            "IsPrimaryMoniker": true
+                        }}],
+                        "TagId": "test"
+                    }}"#
+                )))
+                .mount(&mock_server)
+                .await;
+
+            // Mock ingestion service (POST)
+            Mock::given(method("POST"))
+                .and(path_regex(r"^/ingestion.*"))
+                .respond_with(
+                    ResponseTemplate::new(202).set_body_string(r#"{"ticket":"accepted"}"#),
+                )
+                .mount(&mock_server)
+                .await;
+        });
+
+        // Build a real GenevaClient using MockAuth (no mTLS), then wrap it in the FFI handle.
+        let cfg = GenevaClientConfig {
+            endpoint: mock_server.uri(),
+            environment: "test".to_string(),
+            account: "test".to_string(),
+            namespace: "testns".to_string(),
+            region: "testregion".to_string(),
+            config_major_version: 1,
+            auth_method: AuthMethod::MockAuth,
+            tenant: "testtenant".to_string(),
+            role_name: "testrole".to_string(),
+            role_instance: "testinstance".to_string(),
+        };
+        let client = GenevaClient::new(cfg).expect("failed to create GenevaClient with MockAuth");
+
+        // Wrap into an FFI-compatible handle
+        let handle = GenevaClientHandle {
+            magic: GENEVA_HANDLE_MAGIC,
+            client: Arc::new(client),
+        };
+        // Keep the boxed handle alive until we explicitly free it via FFI
+        let mut handle_box = Box::new(handle);
+        let handle_ptr: *mut GenevaClientHandle = &mut *handle_box;
+
+        // Build minimal OTLP logs payload bytes using the test helper
+        let bytes = build_otlp_logs_minimal("TestEvent", "hello-world", Some(("rk", "rv")));
+
+        // Encode via FFI
+        let mut batches_ptr: *mut EncodedBatchesHandle = std::ptr::null_mut();
+        let rc = unsafe {
+            geneva_encode_and_compress_logs(
+                handle_ptr,
+                bytes.as_ptr(),
+                bytes.len(),
+                &mut batches_ptr,
+            )
+        };
+        assert_eq!(rc as u32, GenevaError::Success as u32, "encode failed");
+        assert!(
+            !batches_ptr.is_null(),
+            "out_batches should be non-null on success"
+        );
+
+        // Validate number of batches and upload first batch via FFI (sync)
+        let len = unsafe { geneva_batches_len(batches_ptr) };
+        assert!(len >= 1, "expected at least one encoded batch");
+
+        let upload_rc = unsafe { geneva_upload_batch_sync(handle_ptr, batches_ptr as *const _, 0) };
+        assert_eq!(
+            upload_rc as u32,
+            GenevaError::Success as u32,
+            "upload failed"
+        );
+
+        // Cleanup: free batches and client
+        unsafe {
+            geneva_batches_free(batches_ptr);
+        }
+        // Transfer ownership of handle_box to the FFI free function
+        let raw_handle = Box::into_raw(handle_box);
+        unsafe {
+            geneva_client_free(raw_handle);
+        }
+
+        // Keep mock_server in scope until end of test
+        drop(mock_server);
+    }
+
+    // Verifies batching groups by LogRecord.event_name:
+    // multiple different event_names in one request produce multiple batches,
+    // and each batch upload hits ingestion with the corresponding event query param.
+    #[test]
+    fn test_encode_batching_by_event_name_and_upload() {
+        use wiremock::matchers::{method, path_regex};
+        use wiremock::{Mock, MockServer, ResponseTemplate};
+
+        // Start mock server
+        let mock_server = runtime().block_on(async { MockServer::start().await });
+        let ingestion_endpoint = format!("{}/ingestion", mock_server.uri());
+        let auth_token = "eyJhbGciOiJub25lIiwidHlwIjoiSldUIn0.eyJFbmRwb2ludCI6Imh0dHA6Ly9sb2NhbGhvc3Q6ODA4MC9pbmdlc3Rpb24iLCJleHAiOjE3ODI5MzYwMDB9.dummy";
+        let auth_token_expiry = "2026-06-30T12:00:00+00:00";
+
+        // Mock Geneva Config (GET) and Ingestion (POST)
+        runtime().block_on(async {
+            Mock::given(method("GET"))
+                .respond_with(ResponseTemplate::new(200).set_body_string(format!(
+                    r#"{{
+                        "IngestionGatewayInfo": {{
+                            "Endpoint": "{ingestion_endpoint}",
+                            "AuthToken": "{auth_token}",
+                            "AuthTokenExpiryTime": "{auth_token_expiry}"
+                        }},
+                        "StorageAccountKeys": [{{
+                            "AccountMonikerName": "testdiagaccount",
+                            "AccountGroupName": "testgroup",
+                            "IsPrimaryMoniker": true
+                        }}],
+                        "TagId": "test"
+                    }}"#
+                )))
+                .mount(&mock_server)
+                .await;
+
+            Mock::given(method("POST"))
+                .and(path_regex(r"^/ingestion.*"))
+                .respond_with(
+                    ResponseTemplate::new(202).set_body_string(r#"{"ticket":"accepted"}"#),
+                )
+                .mount(&mock_server)
+                .await;
+        });
+
+        // Build client with MockAuth
+        let cfg = GenevaClientConfig {
+            endpoint: mock_server.uri(),
+            environment: "test".to_string(),
+            account: "test".to_string(),
+            namespace: "testns".to_string(),
+            region: "testregion".to_string(),
+            config_major_version: 1,
+            auth_method: AuthMethod::MockAuth,
+            tenant: "testtenant".to_string(),
+            role_name: "testrole".to_string(),
+            role_instance: "testinstance".to_string(),
+        };
+        let client = GenevaClient::new(cfg).expect("failed to create GenevaClient with MockAuth");
+
+        // Wrap client into FFI handle
+        let mut handle_box = Box::new(GenevaClientHandle {
+            magic: GENEVA_HANDLE_MAGIC,
+            client: Arc::new(client),
+        });
+        let handle_ptr: *mut GenevaClientHandle = &mut *handle_box;
+
+        // Build ExportLogsServiceRequest with two different event_names
+        let log1 = opentelemetry_proto::tonic::logs::v1::LogRecord {
+            observed_time_unix_nano: 1_700_000_000_000_000_001,
+            event_name: "EventA".to_string(),
+            severity_number: 9,
+            ..Default::default()
+        };
+        let log2 = opentelemetry_proto::tonic::logs::v1::LogRecord {
+            observed_time_unix_nano: 1_700_000_000_000_000_002,
+            event_name: "EventB".to_string(),
+            severity_number: 10,
+            ..Default::default()
+        };
+        let scope_logs = opentelemetry_proto::tonic::logs::v1::ScopeLogs {
+            log_records: vec![log1, log2],
+            ..Default::default()
+        };
+        let resource_logs = opentelemetry_proto::tonic::logs::v1::ResourceLogs {
+            scope_logs: vec![scope_logs],
+            ..Default::default()
+        };
+        let req = ExportLogsServiceRequest {
+            resource_logs: vec![resource_logs],
+        };
+        let bytes = req.encode_to_vec();
+
+        // Encode via FFI
+        let mut batches_ptr: *mut EncodedBatchesHandle = std::ptr::null_mut();
+        let rc = unsafe {
+            geneva_encode_and_compress_logs(
+                handle_ptr,
+                bytes.as_ptr(),
+                bytes.len(),
+                &mut batches_ptr,
+            )
+        };
+        assert_eq!(rc as u32, GenevaError::Success as u32, "encode failed");
+        assert!(!batches_ptr.is_null());
+
+        // Expect 2 batches (EventA, EventB)
+        let len = unsafe { geneva_batches_len(batches_ptr) };
+        assert_eq!(len, 2, "expected 2 batches grouped by event_name");
+
+        // Upload all batches
+        for i in 0..len {
+            let upload_rc =
+                unsafe { geneva_upload_batch_sync(handle_ptr, batches_ptr as *const _, i) };
+            assert_eq!(
+                upload_rc as u32,
+                GenevaError::Success as u32,
+                "upload failed"
+            );
+        }
+
+        // Verify POSTs contain event=EventA and event=EventB in their URLs
+        let urls: Vec<String> = runtime()
+            .block_on(async { mock_server.received_requests().await.unwrap() })
+            .into_iter()
+            .map(|r| r.url.to_string())
+            .collect();
+        let has_a = urls.iter().any(|u| u.contains("event=EventA"));
+        let has_b = urls.iter().any(|u| u.contains("event=EventB"));
+        assert!(
+            has_a && has_b,
+            "POST URLs should include event=EventA and event=EventB; got: {urls:?}"
+        );
+
+        // Cleanup
+        unsafe { geneva_batches_free(batches_ptr) };
+        let raw_handle = Box::into_raw(handle_box);
+        unsafe { geneva_client_free(raw_handle) };
+        drop(mock_server);
     }
 }
