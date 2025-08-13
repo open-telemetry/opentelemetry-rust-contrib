@@ -40,9 +40,8 @@ pub struct GenevaClient {
 }
 
 impl GenevaClient {
-    /// Construct a new client with minimal configuration. Fetches and caches ingestion info as needed.
-    pub async fn new(cfg: GenevaClientConfig) -> Result<Self, String> {
-        // Build config client config
+    /// Synchronous constructor for FFI or sync contexts (no network I/O here).
+    pub fn new(cfg: GenevaClientConfig) -> Result<Self, String> {
         let config_client_config = GenevaConfigClientConfig {
             endpoint: cfg.endpoint,
             environment: cfg.environment.clone(),
@@ -62,16 +61,13 @@ impl GenevaClient {
             cfg.tenant, cfg.role_name, cfg.role_instance
         );
 
-        // Define config_version before using it
         let config_version = format!("Ver{}v0", cfg.config_major_version);
 
-        // Metadata string for the blob
         let metadata = format!(
             "namespace={}/eventVersion={}/tenant={}/role={}/roleinstance={}",
             cfg.namespace, config_version, cfg.tenant, cfg.role_name, cfg.role_instance,
         );
 
-        // Uploader config
         let uploader_config = GenevaUploaderConfig {
             namespace: cfg.namespace.clone(),
             source_identity,
@@ -80,8 +76,8 @@ impl GenevaClient {
         };
 
         let uploader = GenevaUploader::from_config_client(config_client, uploader_config)
-            .await
             .map_err(|e| format!("GenevaUploader init failed: {e}"))?;
+
         Ok(Self {
             uploader: Arc::new(uploader),
             encoder: OtlpEncoder::new(),

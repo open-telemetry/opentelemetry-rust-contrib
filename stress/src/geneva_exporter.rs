@@ -125,7 +125,7 @@ async fn init_client() -> Result<(GenevaClient, Option<String>), Box<dyn std::er
             role_instance: std::env::var("GENEVA_INSTANCE").unwrap_or_else(|_| "test".to_string()),
         };
 
-        let client = GenevaClient::new(config).await?;
+        let client = GenevaClient::new(config).map_err(std::io::Error::other)?;
         Ok((client, None))
     } else if let Ok(mock_endpoint) = std::env::var("MOCK_SERVER_URL") {
         println!("Using standalone mock server at: {mock_endpoint}");
@@ -143,7 +143,7 @@ async fn init_client() -> Result<(GenevaClient, Option<String>), Box<dyn std::er
             role_instance: "test".to_string(),
         };
 
-        let client = GenevaClient::new(config).await?;
+        let client = GenevaClient::new(config).map_err(std::io::Error::other)?;
         Ok((client, None))
     } else {
         println!("Using wiremock Geneva endpoints");
@@ -197,7 +197,7 @@ async fn init_client() -> Result<(GenevaClient, Option<String>), Box<dyn std::er
             role_instance: "test".to_string(),
         };
 
-        let client = GenevaClient::new(config).await?;
+        let client = GenevaClient::new(config).map_err(std::io::Error::other)?;
         Ok((client, Some(mock_server.uri())))
     }
 }
