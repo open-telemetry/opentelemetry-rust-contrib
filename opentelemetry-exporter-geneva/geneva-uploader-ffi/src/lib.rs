@@ -3,11 +3,10 @@
 // Allow #[repr(C)] and other FFI attributes without wrapping in unsafe blocks (standard FFI practice)
 #![allow(unsafe_attr_outside_unsafe)]
 
-use once_cell::sync::Lazy;
 use std::ffi::CStr;
 use std::os::raw::{c_char, c_int, c_uint};
 use std::ptr;
-use std::sync::Arc;
+use std::sync::{Arc, LazyLock};
 use tokio::runtime::Runtime;
 
 use geneva_uploader::client::{EncodedBatch, GenevaClient, GenevaClientConfig};
@@ -26,7 +25,7 @@ const GENEVA_HANDLE_MAGIC: u64 = 0xFEED_BEEF;
 /// - Per-client runtimes vs shared global runtime
 /// - External runtime integration (accept user-provided runtime handle)
 /// - Runtime lifecycle management for FFI (shutdown, cleanup)
-static RUNTIME: Lazy<Runtime> = Lazy::new(|| {
+static RUNTIME: LazyLock<Runtime> = LazyLock::new(|| {
     tokio::runtime::Builder::new_multi_thread()
         .worker_threads(
             std::thread::available_parallelism()
