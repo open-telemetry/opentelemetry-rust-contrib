@@ -16,7 +16,6 @@ prost = "0.13"
 
 [features]
 mock_auth = ["geneva-uploader/mock_auth"]
-default = ["mock_auth"]
 
 [lints]
 workspace = true
