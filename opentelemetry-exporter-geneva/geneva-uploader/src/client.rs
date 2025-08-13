@@ -40,7 +40,6 @@ pub struct GenevaClient {
 }
 
 impl GenevaClient {
-    /// Synchronous constructor for FFI or sync contexts (no network I/O here).
     pub fn new(cfg: GenevaClientConfig) -> Result<Self, String> {
         let config_client_config = GenevaConfigClientConfig {
             endpoint: cfg.endpoint,
