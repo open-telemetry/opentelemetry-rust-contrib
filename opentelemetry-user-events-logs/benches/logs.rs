@@ -5,7 +5,7 @@
     Hardware: Apple M4 Pro
     Total Number of Cores:	10
     (Inside multipass vm running Ubuntu 22.04)
-     
+
     // When no listener (automatic disable via RAII guard)
     | Test                        | Average time|
     |-----------------------------|-------------|
@@ -37,10 +37,10 @@ use opentelemetry_sdk::Resource;
 #[cfg(feature = "experimental_eventname_callback")]
 use opentelemetry_user_events_logs::EventNameCallback;
 use opentelemetry_user_events_logs::Processor;
+use std::process::Command;
 use tracing::error;
 use tracing_subscriber::prelude::*;
 use tracing_subscriber::Registry;
-use std::process::Command;
 
 const PROVIDER_NAME: &str = "myprovider";
 /// Suffix used by the kernel user_events provider naming in these benchmarks.
@@ -48,11 +48,11 @@ const PROVIDER_NAME: &str = "myprovider";
 const USER_EVENTS_PROVIDER_SUFFIX: &str = "_L2K1";
 
 /// RAII guard for enabling/disabling user events listener
-/// 
+///
 /// This guard automatically enables the user events listener when created and
 /// disables it when dropped, ensuring proper cleanup even if the benchmark
 /// panics or exits early.
-/// 
+///
 /// The guard tracks whether the listener was already enabled before it was
 /// created, and only disables it on drop if it wasn't already enabled.
 /// This prevents interfering with other tests or processes that might have
@@ -64,15 +64,15 @@ struct UserEventsListenerGuard {
 
 impl UserEventsListenerGuard {
     /// Enable the user events listener for the given provider
-    /// 
+    ///
     /// This method:
     /// 1. Checks if the listener is already enabled
     /// 2. Enables it if it's not already enabled
     /// 3. Returns a guard that will disable the listener on drop (if it wasn't already enabled)
-    /// 
+    ///
     /// # Arguments
     /// * `provider_name` - The name of the provider to enable/disable
-    /// 
+    ///
     /// # Returns
     /// * `Ok(Self)` - A guard that will disable the listener on drop
     /// * `Err(String)` - Error message if enabling failed
@@ -80,18 +80,19 @@ impl UserEventsListenerGuard {
         let enable_path = format!(
             "/sys/kernel/debug/tracing/events/user_events/{}{}//enable",
             provider_name, USER_EVENTS_PROVIDER_SUFFIX
-        ).replacen("//enable", "/enable", 1);
-        
+        )
+        .replacen("//enable", "/enable", 1);
+
         // Check if already enabled
         let check_output = Command::new("sudo")
             .arg("cat")
             .arg(&enable_path)
             .output()
             .map_err(|e| format!("Failed to check listener status: {e}"))?;
-        
-        let was_enabled = check_output.status.success() && 
-            String::from_utf8_lossy(&check_output.stdout).trim() == "1";
-        
+
+        let was_enabled = check_output.status.success()
+            && String::from_utf8_lossy(&check_output.stdout).trim() == "1";
+
         // Enable the listener using a safe approach (no shell interpretation)
         let mut enable_cmd = Command::new("sudo");
         enable_cmd.arg("tee").arg(&enable_path);
@@ -106,27 +107,30 @@ impl UserEventsListenerGuard {
                 child.wait_with_output()
             })
             .map_err(|e| format!("Failed to enable listener: {e}"))?;
-        
+
         if !enable_output.status.success() {
             return Err(format!(
                 "Failed to enable listener. Error: {}",
                 String::from_utf8_lossy(&enable_output.stderr)
             ));
         }
-        
-        println!("User events listener enabled for provider: {}", provider_name);
-        
+
+        println!(
+            "User events listener enabled for provider: {}",
+            provider_name
+        );
+
         Ok(UserEventsListenerGuard {
             provider_name: provider_name.to_string(),
             was_enabled,
         })
     }
-    
+
     /// Check if user events are available on the system
-    /// 
+    ///
     /// This method checks if the user_events subsystem is available by
     /// reading from `/sys/kernel/tracing/user_events_status`.
-    /// 
+    ///
     /// # Returns
     /// * `Ok(String)` - The status content if user events are available
     /// * `Err(String)` - Error message if user events are not available
@@ -165,8 +169,9 @@ impl Drop for UserEventsListenerGuard {
         let disable_path = format!(
             "/sys/kernel/debug/tracing/events/user_events/{}{}//enable",
             self.provider_name, USER_EVENTS_PROVIDER_SUFFIX
-        ).replacen("//enable", "/enable", 1);
-        
+        )
+        .replacen("//enable", "/enable", 1);
+
         // Only disable if it wasn't already enabled
         if !self.was_enabled {
             let mut disable_cmd = Command::new("sudo");
@@ -180,18 +185,26 @@ impl Drop for UserEventsListenerGuard {
                 child.wait_with_output()
             }) {
                 Ok(output) if output.status.success() => {
-                    println!("User events listener disabled for provider: {}", self.provider_name);
+                    println!(
+                        "User events listener disabled for provider: {}",
+                        self.provider_name
+                    );
                 }
                 Ok(output) => {
-                    eprintln!("Failed to disable listener. Error: {}", 
-                        String::from_utf8_lossy(&output.stderr));
+                    eprintln!(
+                        "Failed to disable listener. Error: {}",
+                        String::from_utf8_lossy(&output.stderr)
+                    );
                 }
                 Err(e) => {
                     eprintln!("Failed to disable listener: {}", e);
                 }
             }
         } else {
-            println!("User events listener was already enabled, leaving enabled for provider: {}", self.provider_name);
+            println!(
+                "User events listener was already enabled, leaving enabled for provider: {}",
+                self.provider_name
+            );
         }
     }
 }
@@ -262,16 +275,15 @@ fn benchmark_4_attributes(c: &mut Criterion) {
         eprintln!("Warning: User events not available: {}", e);
         eprintln!("Benchmarks will run without listener enabled");
     }
-    
+
     let provider = setup_provider_default();
     // Enable listener with RAII guard (after provider is built so tracepoints exist)
-    let _guard = UserEventsListenerGuard::enable(PROVIDER_NAME)
-        .unwrap_or_else(|e| {
-            eprintln!("Warning: Failed to enable listener: {}", e);
-            eprintln!("Benchmarks will run without listener enabled");
-            // Return a dummy guard that does nothing on drop
-            UserEventsListenerGuard::dummy_guard()
-        });
+    let _guard = UserEventsListenerGuard::enable(PROVIDER_NAME).unwrap_or_else(|e| {
+        eprintln!("Warning: Failed to enable listener: {}", e);
+        eprintln!("Benchmarks will run without listener enabled");
+        // Return a dummy guard that does nothing on drop
+        UserEventsListenerGuard::dummy_guard()
+    });
     let ot_layer = tracing_layer::OpenTelemetryTracingBridge::new(&provider);
     let subscriber = Registry::default().with(ot_layer);
 
@@ -298,16 +310,15 @@ fn benchmark_4_attributes_event_name_custom(c: &mut Criterion) {
         eprintln!("Warning: User events not available: {}", e);
         eprintln!("Benchmarks will run without listener enabled");
     }
-    
+
     let provider = setup_provider_with_callback(EventNameFromLogRecordCustom);
     // Enable listener with RAII guard (after provider is built so tracepoints exist)
-    let _guard = UserEventsListenerGuard::enable(PROVIDER_NAME)
-        .unwrap_or_else(|e| {
-            eprintln!("Warning: Failed to enable listener: {}", e);
-            eprintln!("Benchmarks will run without listener enabled");
-            // Return a dummy guard that does nothing on drop
-            UserEventsListenerGuard::dummy_guard()
-        });
+    let _guard = UserEventsListenerGuard::enable(PROVIDER_NAME).unwrap_or_else(|e| {
+        eprintln!("Warning: Failed to enable listener: {}", e);
+        eprintln!("Benchmarks will run without listener enabled");
+        // Return a dummy guard that does nothing on drop
+        UserEventsListenerGuard::dummy_guard()
+    });
     let ot_layer = tracing_layer::OpenTelemetryTracingBridge::new(&provider);
     let subscriber = Registry::default().with(ot_layer);
 
@@ -334,16 +345,15 @@ fn benchmark_4_attributes_event_name_from_log_record(c: &mut Criterion) {
         eprintln!("Warning: User events not available: {}", e);
         eprintln!("Benchmarks will run without listener enabled");
     }
-    
+
     let provider = setup_provider_with_callback(EventNameFromLogRecordEventName);
     // Enable listener with RAII guard (after provider is built so tracepoints exist)
-    let _guard = UserEventsListenerGuard::enable(PROVIDER_NAME)
-        .unwrap_or_else(|e| {
-            eprintln!("Warning: Failed to enable listener: {}", e);
-            eprintln!("Benchmarks will run without listener enabled");
-            // Return a dummy guard that does nothing on drop
-            UserEventsListenerGuard::dummy_guard()
-        });
+    let _guard = UserEventsListenerGuard::enable(PROVIDER_NAME).unwrap_or_else(|e| {
+        eprintln!("Warning: Failed to enable listener: {}", e);
+        eprintln!("Benchmarks will run without listener enabled");
+        // Return a dummy guard that does nothing on drop
+        UserEventsListenerGuard::dummy_guard()
+    });
     let ot_layer = tracing_layer::OpenTelemetryTracingBridge::new(&provider);
     let subscriber = Registry::default().with(ot_layer);
 
@@ -369,16 +379,15 @@ fn benchmark_6_attributes(c: &mut Criterion) {
         eprintln!("Warning: User events not available: {}", e);
         eprintln!("Benchmarks will run without listener enabled");
     }
-    
+
     let provider = setup_provider_default();
     // Enable listener with RAII guard (after provider is built so tracepoints exist)
-    let _guard = UserEventsListenerGuard::enable(PROVIDER_NAME)
-        .unwrap_or_else(|e| {
-            eprintln!("Warning: Failed to enable listener: {}", e);
-            eprintln!("Benchmarks will run without listener enabled");
-            // Return a dummy guard that does nothing on drop
-            UserEventsListenerGuard::dummy_guard()
-        });
+    let _guard = UserEventsListenerGuard::enable(PROVIDER_NAME).unwrap_or_else(|e| {
+        eprintln!("Warning: Failed to enable listener: {}", e);
+        eprintln!("Benchmarks will run without listener enabled");
+        // Return a dummy guard that does nothing on drop
+        UserEventsListenerGuard::dummy_guard()
+    });
     let ot_layer = tracing_layer::OpenTelemetryTracingBridge::new(&provider);
     let subscriber = Registry::default().with(ot_layer);
 
