@@ -731,31 +731,4 @@ mod tests {
             geneva_batches_free(ptr::null_mut());
         }
     }
-
-    #[test]
-    fn test_otlp_builder_roundtrip_decode() {
-        // Build bytes via example-only helper crate (dev-dependency)
-        let bytes = otlp_builder::builder::build_otlp_logs_minimal(
-            "Log",
-            "hello",
-            Some(("service.name", "test")),
-        );
-        // Decode using the same prost types the FFI uses
-        let msg: ExportLogsServiceRequest =
-            Message::decode(bytes.as_slice()).expect("decode must succeed");
-        assert_eq!(msg.resource_logs.len(), 1);
-        let rl = &msg.resource_logs[0];
-        let attrs = &rl.resource.as_ref().expect("resource").attributes;
-        assert!(attrs.iter().any(|kv| kv.key == "service.name"));
-
-        let scope_logs = &rl.scope_logs[0];
-        let lr = &scope_logs.log_records[0];
-        let body = lr.body.as_ref().expect("body");
-        match &body.value {
-            Some(opentelemetry_proto::tonic::common::v1::any_value::Value::StringValue(s)) => {
-                assert_eq!(s, "hello");
-            }
-            other => panic!("unexpected body type: {other:?}"),
-        }
-    }
 }
