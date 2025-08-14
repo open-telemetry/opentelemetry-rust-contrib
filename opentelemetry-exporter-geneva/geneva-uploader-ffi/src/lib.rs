@@ -25,8 +25,7 @@ const GENEVA_HANDLE_MAGIC: u64 = 0xFEED_BEEF;
 /// - Per-client runtimes vs shared global runtime
 /// - External runtime integration (accept user-provided runtime handle)
 /// - Runtime lifecycle management for FFI (shutdown, cleanup)
-/// TODO -Use LazyStatic for runtime initialization with rustc 1.80
-static RUNTIME: OnceLock<Runtime> = OnceLock::new();
+static RUNTIME: OnceLock<Runtime> = OnceLock::new(); // TODO - Consider using LazyLock once msrv is 1.80.
 
 fn runtime() -> &'static Runtime {
     RUNTIME.get_or_init(|| {
