@@ -25,6 +25,7 @@ const GENEVA_HANDLE_MAGIC: u64 = 0xFEED_BEEF;
 /// - Per-client runtimes vs shared global runtime
 /// - External runtime integration (accept user-provided runtime handle)
 /// - Runtime lifecycle management for FFI (shutdown, cleanup)
+/// TODO -Use LazyStatic for runtime initialization with rustc 1.80
 static RUNTIME: OnceLock<Runtime> = OnceLock::new();
 
 fn runtime() -> &'static Runtime {
@@ -176,36 +177,6 @@ pub enum GenevaError {
     MissingTenant = 135,
     MissingRoleName = 136,
     MissingRoleInstance = 137,
-}
-
-/// Validates that all required configuration fields are non-null
-#[allow(dead_code)]
-unsafe fn validate_required_config_fields(config: &GenevaConfig) -> Result<(), &'static str> {
-    if config.endpoint.is_null() {
-        return Err("Required field 'endpoint' is null");
-    }
-    if config.environment.is_null() {
-        return Err("Required field 'environment' is null");
-    }
-    if config.account.is_null() {
-        return Err("Required field 'account' is null");
-    }
-    if config.namespace_name.is_null() {
-        return Err("Required field 'namespace_name' is null");
-    }
-    if config.region.is_null() {
-        return Err("Required field 'region' is null");
-    }
-    if config.tenant.is_null() {
-        return Err("Required field 'tenant' is null");
-    }
-    if config.role_name.is_null() {
-        return Err("Required field 'role_name' is null");
-    }
-    if config.role_instance.is_null() {
-        return Err("Required field 'role_instance' is null");
-    }
-    Ok(())
 }
 
 /// Safely converts a C string to Rust String
@@ -379,8 +350,8 @@ pub unsafe extern "C" fn geneva_client_new(
     };
 
     let handle = GenevaClientHandle {
-        client,
         magic: GENEVA_HANDLE_MAGIC,
+        client,
     };
     unsafe { *out_handle = Box::into_raw(Box::new(handle)) };
     GenevaError::Success
