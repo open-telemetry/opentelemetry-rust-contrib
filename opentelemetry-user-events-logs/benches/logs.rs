@@ -38,7 +38,7 @@ use opentelemetry_sdk::Resource;
 use opentelemetry_user_events_logs::EventNameCallback;
 use opentelemetry_user_events_logs::Processor;
 use std::fs;
-use std::io;
+use std::io::{self, Read};
 use tracing::error;
 use tracing_subscriber::prelude::*;
 use tracing_subscriber::Registry;
@@ -63,7 +63,10 @@ const DUMMY_PROVIDER_NAME: &str = "dummy";
 /// enabled the listener.
 ///
 /// # Fields
-/// * `provider_name` - The name of the provider being managed
+/// * `provider_name` - The name of the kernel user events provider being managed by this guard.
+///   This is used to construct sysfs paths and identify which provider's listener should be enabled or disabled.
+///   It is essential for ensuring that the guard operates on the correct provider, especially when multiple
+///   providers may exist or when running benchmarks that interact with different user events sources.
 /// * `was_enabled` - Tracks whether the listener was already enabled before this guard was created.
 ///   This field is crucial for preventing the guard from disabling listeners that were enabled
 ///   by external processes or other parts of the system. When the guard is dropped, it only
@@ -94,9 +97,18 @@ impl UserEventsListenerGuard {
             provider_name, USER_EVENTS_PROVIDER_SUFFIX
         );
 
-        // Check if already enabled by reading the file directly
-        let was_enabled = match fs::read_to_string(&enable_path) {
-            Ok(contents) => contents.trim() == "1",
+        // Check if already enabled by reading only the first byte of the file
+        let was_enabled = match fs::File::open(&enable_path) {
+            Ok(mut file) => {
+                let mut buf = [0u8; 1];
+                match file.read(&mut buf) {
+                    Ok(0) => false, // empty file, treat as disabled
+                    Ok(_) => buf[0] == b'1',
+                    Err(e) => {
+                        return Err(format!("Failed to read listener status: {}", e));
+                    }
+                }
+            }
             Err(e) => {
                 if e.kind() == io::ErrorKind::PermissionDenied {
                     return Err(format!(
@@ -110,7 +122,8 @@ impl UserEventsListenerGuard {
         };
 
         // Enable the listener by writing "1" to the enable file
-        if let Err(e) = fs::write(&enable_path, b"1\n") {
+        // Note: No newline needed since we only read the first byte when checking status
+        if let Err(e) = fs::write(&enable_path, b"1") {
             if e.kind() == io::ErrorKind::PermissionDenied {
                 return Err(format!(
                     "Insufficient permissions to write to '{}'. Please run the benchmark as root or with appropriate capabilities (CAP_SYS_ADMIN). Error: {}",
@@ -179,9 +192,9 @@ impl Drop for UserEventsListenerGuard {
 
         // Only disable if it wasn't already enabled
         if !self.was_enabled {
-            match fs::write(&disable_path, b"0\n") {
+            match fs::write(&disable_path, b"0") {
                 Ok(_) => {
-                    println!(
+                    eprintln!(
                         "User events listener disabled for provider: {}",
                         self.provider_name
                     );
@@ -198,7 +211,7 @@ impl Drop for UserEventsListenerGuard {
                 }
             }
         } else {
-            println!(
+            eprintln!(
                 "User events listener was already enabled, leaving enabled for provider: {}",
                 self.provider_name
             );
