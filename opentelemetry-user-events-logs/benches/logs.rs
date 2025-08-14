@@ -78,10 +78,9 @@ impl UserEventsListenerGuard {
     /// * `Err(String)` - Error message if enabling failed
     fn enable(provider_name: &str) -> Result<Self, String> {
         let enable_path = format!(
-            "/sys/kernel/debug/tracing/events/user_events/{}{}//enable",
+            "/sys/kernel/debug/tracing/events/user_events/{}{}/enable",
             provider_name, USER_EVENTS_PROVIDER_SUFFIX
-        )
-        .replacen("//enable", "/enable", 1);
+        );
 
         // Check if already enabled
         let check_output = Command::new("sudo")
@@ -167,10 +166,9 @@ impl UserEventsListenerGuard {
 impl Drop for UserEventsListenerGuard {
     fn drop(&mut self) {
         let disable_path = format!(
-            "/sys/kernel/debug/tracing/events/user_events/{}{}//enable",
+            "/sys/kernel/debug/tracing/events/user_events/{}{}/enable",
             self.provider_name, USER_EVENTS_PROVIDER_SUFFIX
-        )
-        .replacen("//enable", "/enable", 1);
+        );
 
         // Only disable if it wasn't already enabled
         if !self.was_enabled {
