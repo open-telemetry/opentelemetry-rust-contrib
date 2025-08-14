@@ -206,6 +206,27 @@ impl Drop for UserEventsListenerGuard {
     }
 }
 
+/// Helper function to enable user events listener with fallback to dummy guard
+///
+/// This function attempts to enable the user events listener for the given provider.
+/// If enabling fails, it prints a warning message and returns a dummy guard that
+/// performs no operations. This ensures benchmarks can proceed even when the
+/// listener cannot be enabled.
+///
+/// # Arguments
+/// * `provider_name` - The name of the provider to enable
+///
+/// # Returns
+/// * `UserEventsListenerGuard` - Either a real guard or a dummy guard
+fn enable_listener_with_fallback(provider_name: &str) -> UserEventsListenerGuard {
+    UserEventsListenerGuard::enable(provider_name).unwrap_or_else(|e| {
+        eprintln!("Warning: Failed to enable listener: {}", e);
+        eprintln!("Benchmarks will run without listener enabled");
+        // Return a dummy guard that does nothing on drop
+        UserEventsListenerGuard::dummy_guard()
+    })
+}
+
 #[cfg(feature = "experimental_eventname_callback")]
 struct EventNameFromLogRecordEventName;
 
@@ -301,12 +322,7 @@ fn benchmark_4_attributes(c: &mut Criterion) {
     {
         let provider = setup_provider_default();
         // Enable listener with RAII guard (after provider is built so tracepoints exist)
-        let _guard = UserEventsListenerGuard::enable(PROVIDER_NAME).unwrap_or_else(|e| {
-            eprintln!("Warning: Failed to enable listener: {}", e);
-            eprintln!("Benchmarks will run without listener enabled");
-            // Return a dummy guard that does nothing on drop
-            UserEventsListenerGuard::dummy_guard()
-        });
+        let _guard = enable_listener_with_fallback(PROVIDER_NAME);
         let ot_layer = tracing_layer::OpenTelemetryTracingBridge::new(&provider);
         let subscriber = Registry::default().with(ot_layer);
 
@@ -365,12 +381,7 @@ fn benchmark_4_attributes_event_name_custom(c: &mut Criterion) {
     {
         let provider = setup_provider_with_callback(EventNameFromLogRecordCustom);
         // Enable listener with RAII guard (after provider is built so tracepoints exist)
-        let _guard = UserEventsListenerGuard::enable(PROVIDER_NAME).unwrap_or_else(|e| {
-            eprintln!("Warning: Failed to enable listener: {}", e);
-            eprintln!("Benchmarks will run without listener enabled");
-            // Return a dummy guard that does nothing on drop
-            UserEventsListenerGuard::dummy_guard()
-        });
+        let _guard = enable_listener_with_fallback(PROVIDER_NAME);
         let ot_layer = tracing_layer::OpenTelemetryTracingBridge::new(&provider);
         let subscriber = Registry::default().with(ot_layer);
 
@@ -429,12 +440,7 @@ fn benchmark_4_attributes_event_name_from_log_record(c: &mut Criterion) {
     {
         let provider = setup_provider_with_callback(EventNameFromLogRecordEventName);
         // Enable listener with RAII guard (after provider is built so tracepoints exist)
-        let _guard = UserEventsListenerGuard::enable(PROVIDER_NAME).unwrap_or_else(|e| {
-            eprintln!("Warning: Failed to enable listener: {}", e);
-            eprintln!("Benchmarks will run without listener enabled");
-            // Return a dummy guard that does nothing on drop
-            UserEventsListenerGuard::dummy_guard()
-        });
+        let _guard = enable_listener_with_fallback(PROVIDER_NAME);
         let ot_layer = tracing_layer::OpenTelemetryTracingBridge::new(&provider);
         let subscriber = Registry::default().with(ot_layer);
 
@@ -494,12 +500,7 @@ fn benchmark_6_attributes(c: &mut Criterion) {
     {
         let provider = setup_provider_default();
         // Enable listener with RAII guard (after provider is built so tracepoints exist)
-        let _guard = UserEventsListenerGuard::enable(PROVIDER_NAME).unwrap_or_else(|e| {
-            eprintln!("Warning: Failed to enable listener: {}", e);
-            eprintln!("Benchmarks will run without listener enabled");
-            // Return a dummy guard that does nothing on drop
-            UserEventsListenerGuard::dummy_guard()
-        });
+        let _guard = enable_listener_with_fallback(PROVIDER_NAME);
         let ot_layer = tracing_layer::OpenTelemetryTracingBridge::new(&provider);
         let subscriber = Registry::default().with(ot_layer);
 
