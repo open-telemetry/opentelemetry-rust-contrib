@@ -37,7 +37,8 @@ use opentelemetry_sdk::Resource;
 #[cfg(feature = "experimental_eventname_callback")]
 use opentelemetry_user_events_logs::EventNameCallback;
 use opentelemetry_user_events_logs::Processor;
-use std::process::Command;
+use std::fs;
+use std::io;
 use tracing::error;
 use tracing_subscriber::prelude::*;
 use tracing_subscriber::Registry;
@@ -82,36 +83,31 @@ impl UserEventsListenerGuard {
             provider_name, USER_EVENTS_PROVIDER_SUFFIX
         );
 
-        // Check if already enabled
-        let check_output = Command::new("sudo")
-            .arg("cat")
-            .arg(&enable_path)
-            .output()
-            .map_err(|e| format!("Failed to check listener status: {e}"))?;
-
-        let was_enabled = check_output.status.success()
-            && String::from_utf8_lossy(&check_output.stdout).trim() == "1";
-
-        // Enable the listener using a safe approach (no shell interpretation)
-        let mut enable_cmd = Command::new("sudo");
-        enable_cmd.arg("tee").arg(&enable_path);
-        enable_cmd.stdin(std::process::Stdio::piped());
-        let enable_output = enable_cmd
-            .spawn()
-            .and_then(|mut child| {
-                if let Some(stdin) = child.stdin.as_mut() {
-                    use std::io::Write;
-                    stdin.write_all(b"1\n")?;
+        // Check if already enabled by reading the file directly
+        let was_enabled = match fs::read_to_string(&enable_path) {
+            Ok(contents) => contents.trim() == "1",
+            Err(e) => {
+                if e.kind() == io::ErrorKind::PermissionDenied {
+                    return Err(format!(
+                        "Insufficient permissions to read '{}'. Please run the benchmark as root or with appropriate capabilities (CAP_SYS_ADMIN). Error: {}",
+                        enable_path, e
+                    ));
+                } else {
+                    return Err(format!("Failed to check listener status: {}", e));
                 }
-                child.wait_with_output()
-            })
-            .map_err(|e| format!("Failed to enable listener: {e}"))?;
+            }
+        };
 
-        if !enable_output.status.success() {
-            return Err(format!(
-                "Failed to enable listener. Error: {}",
-                String::from_utf8_lossy(&enable_output.stderr)
-            ));
+        // Enable the listener by writing "1" to the enable file
+        if let Err(e) = fs::write(&enable_path, b"1\n") {
+            if e.kind() == io::ErrorKind::PermissionDenied {
+                return Err(format!(
+                    "Insufficient permissions to write to '{}'. Please run the benchmark as root or with appropriate capabilities (CAP_SYS_ADMIN). Error: {}",
+                    enable_path, e
+                ));
+            } else {
+                return Err(format!("Failed to enable listener: {}", e));
+            }
         }
 
         println!(
@@ -134,20 +130,20 @@ impl UserEventsListenerGuard {
     /// * `Ok(String)` - The status content if user events are available
     /// * `Err(String)` - Error message if user events are not available
     fn check_user_events_available() -> Result<String, String> {
-        let output = Command::new("sudo")
-            .arg("cat")
-            .arg("/sys/kernel/tracing/user_events_status")
-            .output()
-            .map_err(|e| format!("Failed to execute command: {e}"))?;
-
-        if output.status.success() {
-            let status = String::from_utf8_lossy(&output.stdout);
-            Ok(status.to_string())
-        } else {
-            Err(format!(
-                "Command executed with failing error code: {}",
-                String::from_utf8_lossy(&output.stderr)
-            ))
+        match fs::read_to_string("/sys/kernel/tracing/user_events_status") {
+            Ok(status) => Ok(status),
+            Err(e) => {
+                if e.kind() == io::ErrorKind::PermissionDenied {
+                    Err(format!(
+                        "Insufficient permissions to read '/sys/kernel/tracing/user_events_status'. Please run the benchmark as root or with appropriate capabilities (CAP_SYS_ADMIN). Error: {}",
+                        e
+                    ))
+                } else if e.kind() == io::ErrorKind::NotFound {
+                    Err("User events subsystem not available on this system".to_string())
+                } else {
+                    Err(format!("Failed to check user events availability: {}", e))
+                }
+            }
         }
     }
 
@@ -172,30 +168,22 @@ impl Drop for UserEventsListenerGuard {
 
         // Only disable if it wasn't already enabled
         if !self.was_enabled {
-            let mut disable_cmd = Command::new("sudo");
-            disable_cmd.arg("tee").arg(&disable_path);
-            disable_cmd.stdin(std::process::Stdio::piped());
-            match disable_cmd.spawn().and_then(|mut child| {
-                if let Some(stdin) = child.stdin.as_mut() {
-                    use std::io::Write;
-                    stdin.write_all(b"0\n")?;
-                }
-                child.wait_with_output()
-            }) {
-                Ok(output) if output.status.success() => {
+            match fs::write(&disable_path, b"0\n") {
+                Ok(_) => {
                     println!(
                         "User events listener disabled for provider: {}",
                         self.provider_name
                     );
                 }
-                Ok(output) => {
-                    eprintln!(
-                        "Failed to disable listener. Error: {}",
-                        String::from_utf8_lossy(&output.stderr)
-                    );
-                }
                 Err(e) => {
-                    eprintln!("Failed to disable listener: {}", e);
+                    if e.kind() == io::ErrorKind::PermissionDenied {
+                        eprintln!(
+                            "Failed to disable listener due to insufficient permissions. Please run the benchmark as root or with appropriate capabilities (CAP_SYS_ADMIN). Error: {}",
+                            e
+                        );
+                    } else {
+                        eprintln!("Failed to disable listener: {}", e);
+                    }
                 }
             }
         } else {
