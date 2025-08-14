@@ -276,31 +276,60 @@ fn benchmark_4_attributes(c: &mut Criterion) {
         eprintln!("Benchmarks will run without listener enabled");
     }
 
-    let provider = setup_provider_default();
-    // Enable listener with RAII guard (after provider is built so tracepoints exist)
-    let _guard = UserEventsListenerGuard::enable(PROVIDER_NAME).unwrap_or_else(|e| {
-        eprintln!("Warning: Failed to enable listener: {}", e);
-        eprintln!("Benchmarks will run without listener enabled");
-        // Return a dummy guard that does nothing on drop
-        UserEventsListenerGuard::dummy_guard()
-    });
-    let ot_layer = tracing_layer::OpenTelemetryTracingBridge::new(&provider);
-    let subscriber = Registry::default().with(ot_layer);
+    let mut group = c.benchmark_group("User_Event_4_Attributes");
 
-    tracing::subscriber::with_default(subscriber, || {
-        c.bench_function("User_Event_4_Attributes", |b| {
-            b.iter(|| {
-                error!(
-                    name : "CheckoutFailed",
-                    field1 = "field1",
-                    field2 = "field2",
-                    field3 = "field3",
-                    field4 = "field4",
-                    message = "Unable to process checkout."
-                );
+    // Benchmark with listener disabled
+    {
+        let provider = setup_provider_default();
+        let ot_layer = tracing_layer::OpenTelemetryTracingBridge::new(&provider);
+        let subscriber = Registry::default().with(ot_layer);
+
+        tracing::subscriber::with_default(subscriber, || {
+            group.bench_function("disabled", |b| {
+                b.iter(|| {
+                    error!(
+                        name : "CheckoutFailed",
+                        field1 = "field1",
+                        field2 = "field2",
+                        field3 = "field3",
+                        field4 = "field4",
+                        message = "Unable to process checkout."
+                    );
+                });
             });
         });
-    });
+    }
+
+    // Benchmark with listener enabled
+    {
+        let provider = setup_provider_default();
+        // Enable listener with RAII guard (after provider is built so tracepoints exist)
+        let _guard = UserEventsListenerGuard::enable(PROVIDER_NAME).unwrap_or_else(|e| {
+            eprintln!("Warning: Failed to enable listener: {}", e);
+            eprintln!("Benchmarks will run without listener enabled");
+            // Return a dummy guard that does nothing on drop
+            UserEventsListenerGuard::dummy_guard()
+        });
+        let ot_layer = tracing_layer::OpenTelemetryTracingBridge::new(&provider);
+        let subscriber = Registry::default().with(ot_layer);
+
+        tracing::subscriber::with_default(subscriber, || {
+            group.bench_function("enabled", |b| {
+                b.iter(|| {
+                    error!(
+                        name : "CheckoutFailed",
+                        field1 = "field1",
+                        field2 = "field2",
+                        field3 = "field3",
+                        field4 = "field4",
+                        message = "Unable to process checkout."
+                    );
+                });
+            });
+        });
+    }
+
+    group.finish();
 }
 
 #[cfg(feature = "experimental_eventname_callback")]
@@ -311,31 +340,60 @@ fn benchmark_4_attributes_event_name_custom(c: &mut Criterion) {
         eprintln!("Benchmarks will run without listener enabled");
     }
 
-    let provider = setup_provider_with_callback(EventNameFromLogRecordCustom);
-    // Enable listener with RAII guard (after provider is built so tracepoints exist)
-    let _guard = UserEventsListenerGuard::enable(PROVIDER_NAME).unwrap_or_else(|e| {
-        eprintln!("Warning: Failed to enable listener: {}", e);
-        eprintln!("Benchmarks will run without listener enabled");
-        // Return a dummy guard that does nothing on drop
-        UserEventsListenerGuard::dummy_guard()
-    });
-    let ot_layer = tracing_layer::OpenTelemetryTracingBridge::new(&provider);
-    let subscriber = Registry::default().with(ot_layer);
+    let mut group = c.benchmark_group("User_Event_4_Attributes_EventName_Custom");
 
-    tracing::subscriber::with_default(subscriber, || {
-        c.bench_function("User_Event_4_Attributes_EventName_Custom", |b| {
-            b.iter(|| {
-                error!(
-                    name : "CheckoutFailed",
-                    field1 = "field1",
-                    field2 = "field2",
-                    field3 = "field3",
-                    field4 = "field4",
-                    message = "Unable to process checkout."
-                );
+    // Benchmark with listener disabled
+    {
+        let provider = setup_provider_with_callback(EventNameFromLogRecordCustom);
+        let ot_layer = tracing_layer::OpenTelemetryTracingBridge::new(&provider);
+        let subscriber = Registry::default().with(ot_layer);
+
+        tracing::subscriber::with_default(subscriber, || {
+            group.bench_function("disabled", |b| {
+                b.iter(|| {
+                    error!(
+                        name : "CheckoutFailed",
+                        field1 = "field1",
+                        field2 = "field2",
+                        field3 = "field3",
+                        field4 = "field4",
+                        message = "Unable to process checkout."
+                    );
+                });
             });
         });
-    });
+    }
+
+    // Benchmark with listener enabled
+    {
+        let provider = setup_provider_with_callback(EventNameFromLogRecordCustom);
+        // Enable listener with RAII guard (after provider is built so tracepoints exist)
+        let _guard = UserEventsListenerGuard::enable(PROVIDER_NAME).unwrap_or_else(|e| {
+            eprintln!("Warning: Failed to enable listener: {}", e);
+            eprintln!("Benchmarks will run without listener enabled");
+            // Return a dummy guard that does nothing on drop
+            UserEventsListenerGuard::dummy_guard()
+        });
+        let ot_layer = tracing_layer::OpenTelemetryTracingBridge::new(&provider);
+        let subscriber = Registry::default().with(ot_layer);
+
+        tracing::subscriber::with_default(subscriber, || {
+            group.bench_function("enabled", |b| {
+                b.iter(|| {
+                    error!(
+                        name : "CheckoutFailed",
+                        field1 = "field1",
+                        field2 = "field2",
+                        field3 = "field3",
+                        field4 = "field4",
+                        message = "Unable to process checkout."
+                    );
+                });
+            });
+        });
+    }
+
+    group.finish();
 }
 
 #[cfg(feature = "experimental_eventname_callback")]
@@ -346,31 +404,60 @@ fn benchmark_4_attributes_event_name_from_log_record(c: &mut Criterion) {
         eprintln!("Benchmarks will run without listener enabled");
     }
 
-    let provider = setup_provider_with_callback(EventNameFromLogRecordEventName);
-    // Enable listener with RAII guard (after provider is built so tracepoints exist)
-    let _guard = UserEventsListenerGuard::enable(PROVIDER_NAME).unwrap_or_else(|e| {
-        eprintln!("Warning: Failed to enable listener: {}", e);
-        eprintln!("Benchmarks will run without listener enabled");
-        // Return a dummy guard that does nothing on drop
-        UserEventsListenerGuard::dummy_guard()
-    });
-    let ot_layer = tracing_layer::OpenTelemetryTracingBridge::new(&provider);
-    let subscriber = Registry::default().with(ot_layer);
+    let mut group = c.benchmark_group("User_Event_4_Attributes_EventName_FromLogRecord");
 
-    tracing::subscriber::with_default(subscriber, || {
-        c.bench_function("User_Event_4_Attributes_EventName_FromLogRecord", |b| {
-            b.iter(|| {
-                error!(
-                    name : "CheckoutFailed",
-                    field1 = "field1",
-                    field2 = "field2",
-                    field3 = "field3",
-                    field4 = "field4",
-                    message = "Unable to process checkout."
-                );
+    // Benchmark with listener disabled
+    {
+        let provider = setup_provider_with_callback(EventNameFromLogRecordEventName);
+        let ot_layer = tracing_layer::OpenTelemetryTracingBridge::new(&provider);
+        let subscriber = Registry::default().with(ot_layer);
+
+        tracing::subscriber::with_default(subscriber, || {
+            group.bench_function("disabled", |b| {
+                b.iter(|| {
+                    error!(
+                        name : "CheckoutFailed",
+                        field1 = "field1",
+                        field2 = "field2",
+                        field3 = "field3",
+                        field4 = "field4",
+                        message = "Unable to process checkout."
+                    );
+                });
             });
         });
-    });
+    }
+
+    // Benchmark with listener enabled
+    {
+        let provider = setup_provider_with_callback(EventNameFromLogRecordEventName);
+        // Enable listener with RAII guard (after provider is built so tracepoints exist)
+        let _guard = UserEventsListenerGuard::enable(PROVIDER_NAME).unwrap_or_else(|e| {
+            eprintln!("Warning: Failed to enable listener: {}", e);
+            eprintln!("Benchmarks will run without listener enabled");
+            // Return a dummy guard that does nothing on drop
+            UserEventsListenerGuard::dummy_guard()
+        });
+        let ot_layer = tracing_layer::OpenTelemetryTracingBridge::new(&provider);
+        let subscriber = Registry::default().with(ot_layer);
+
+        tracing::subscriber::with_default(subscriber, || {
+            group.bench_function("enabled", |b| {
+                b.iter(|| {
+                    error!(
+                        name : "CheckoutFailed",
+                        field1 = "field1",
+                        field2 = "field2",
+                        field3 = "field3",
+                        field4 = "field4",
+                        message = "Unable to process checkout."
+                    );
+                });
+            });
+        });
+    }
+
+    group.finish();
 }
 
 fn benchmark_6_attributes(c: &mut Criterion) {
@@ -380,33 +467,64 @@ fn benchmark_6_attributes(c: &mut Criterion) {
         eprintln!("Benchmarks will run without listener enabled");
     }
 
-    let provider = setup_provider_default();
-    // Enable listener with RAII guard (after provider is built so tracepoints exist)
-    let _guard = UserEventsListenerGuard::enable(PROVIDER_NAME).unwrap_or_else(|e| {
-        eprintln!("Warning: Failed to enable listener: {}", e);
-        eprintln!("Benchmarks will run without listener enabled");
-        // Return a dummy guard that does nothing on drop
-        UserEventsListenerGuard::dummy_guard()
-    });
-    let ot_layer = tracing_layer::OpenTelemetryTracingBridge::new(&provider);
-    let subscriber = Registry::default().with(ot_layer);
+    let mut group = c.benchmark_group("User_Event_6_Attributes");
 
-    tracing::subscriber::with_default(subscriber, || {
-        c.bench_function("User_Event_6_Attributes", |b| {
-            b.iter(|| {
-                error!(
-                    name : "CheckoutFailed",
-                    field1 = "field1",
-                    field2 = "field2",
-                    field3 = "field3",
-                    field4 = "field4",
-                    field5 = "field5",
-                    field6 = "field6",
-                    message = "Unable to process checkout."
-                );
+    // Benchmark with listener disabled
+    {
+        let provider = setup_provider_default();
+        let ot_layer = tracing_layer::OpenTelemetryTracingBridge::new(&provider);
+        let subscriber = Registry::default().with(ot_layer);
+
+        tracing::subscriber::with_default(subscriber, || {
+            group.bench_function("disabled", |b| {
+                b.iter(|| {
+                    error!(
+                        name : "CheckoutFailed",
+                        field1 = "field1",
+                        field2 = "field2",
+                        field3 = "field3",
+                        field4 = "field4",
+                        field5 = "field5",
+                        field6 = "field6",
+                        message = "Unable to process checkout."
+                    );
+                });
             });
         });
-    });
+    }
+
+    // Benchmark with listener enabled
+    {
+        let provider = setup_provider_default();
+        // Enable listener with RAII guard (after provider is built so tracepoints exist)
+        let _guard = UserEventsListenerGuard::enable(PROVIDER_NAME).unwrap_or_else(|e| {
+            eprintln!("Warning: Failed to enable listener: {}", e);
+            eprintln!("Benchmarks will run without listener enabled");
+            // Return a dummy guard that does nothing on drop
+            UserEventsListenerGuard::dummy_guard()
+        });
+        let ot_layer = tracing_layer::OpenTelemetryTracingBridge::new(&provider);
+        let subscriber = Registry::default().with(ot_layer);
+
+        tracing::subscriber::with_default(subscriber, || {
+            group.bench_function("enabled", |b| {
+                b.iter(|| {
+                    error!(
+                        name : "CheckoutFailed",
+                        field1 = "field1",
+                        field2 = "field2",
+                        field3 = "field3",
+                        field4 = "field4",
+                        field5 = "field5",
+                        field6 = "field6",
+                        message = "Unable to process checkout."
+                    );
+                });
+            });
+        });
+    }
+
+    group.finish();
 }
 
 fn criterion_benchmark(c: &mut Criterion) {
