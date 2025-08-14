@@ -38,7 +38,7 @@ use opentelemetry_sdk::Resource;
 use opentelemetry_user_events_logs::EventNameCallback;
 use opentelemetry_user_events_logs::Processor;
 use std::fs;
-use std::io::{self, Read};
+use std::io;
 use tracing::error;
 use tracing_subscriber::prelude::*;
 use tracing_subscriber::Registry;
@@ -72,9 +72,14 @@ const DUMMY_PROVIDER_NAME: &str = "dummy";
 ///   by external processes or other parts of the system. When the guard is dropped, it only
 ///   disables the listener if `was_enabled` is false, ensuring that external processes that
 ///   may have enabled the listener for their own purposes are not disrupted.
+/// * `is_dummy` - Indicates whether this is a dummy guard that performs no operations.
+///   Dummy guards are created when enabling the listener fails, ensuring benchmarks can proceed
+///   without attempting to disable anything later. When `is_dummy` is true, the drop implementation
+///   performs no cleanup operations.
 struct UserEventsListenerGuard {
     provider_name: String,
     was_enabled: bool,
+    is_dummy: bool,
 }
 
 impl UserEventsListenerGuard {
@@ -97,17 +102,11 @@ impl UserEventsListenerGuard {
             provider_name, USER_EVENTS_PROVIDER_SUFFIX
         );
 
-        // Check if already enabled by reading only the first byte of the file
-        let was_enabled = match fs::File::open(&enable_path) {
-            Ok(mut file) => {
-                let mut buf = [0u8; 1];
-                match file.read(&mut buf) {
-                    Ok(0) => false, // empty file, treat as disabled
-                    Ok(_) => buf[0] == b'1',
-                    Err(e) => {
-                        return Err(format!("Failed to read listener status: {}", e));
-                    }
-                }
+        // Check if already enabled by reading the entire file and checking if it starts with '1'
+        let was_enabled = match fs::read_to_string(&enable_path) {
+            Ok(contents) => {
+                let trimmed = contents.trim_start();
+                trimmed.starts_with('1')
             }
             Err(e) => {
                 if e.kind() == io::ErrorKind::PermissionDenied {
@@ -121,9 +120,9 @@ impl UserEventsListenerGuard {
             }
         };
 
-        // Enable the listener by writing "1" to the enable file
-        // Note: No newline needed since we only read the first byte when checking status
-        if let Err(e) = fs::write(&enable_path, b"1") {
+        // Enable the listener by writing "1\n" to the enable file
+        // Most sysfs/debugfs interfaces expect a newline character.
+        if let Err(e) = fs::write(&enable_path, b"1\n") {
             if e.kind() == io::ErrorKind::PermissionDenied {
                 return Err(format!(
                     "Insufficient permissions to write to '{}'. Please run the benchmark as root or with appropriate capabilities (CAP_SYS_ADMIN). Error: {}",
@@ -142,6 +141,7 @@ impl UserEventsListenerGuard {
         Ok(UserEventsListenerGuard {
             provider_name: provider_name.to_string(),
             was_enabled,
+            is_dummy: false,
         })
     }
 
@@ -178,7 +178,8 @@ impl UserEventsListenerGuard {
     fn dummy_guard() -> Self {
         UserEventsListenerGuard {
             provider_name: DUMMY_PROVIDER_NAME.to_string(),
-            was_enabled: true,
+            was_enabled: false, // Not relevant for dummy guards
+            is_dummy: true,
         }
     }
 }
@@ -190,9 +191,14 @@ impl Drop for UserEventsListenerGuard {
             self.provider_name, USER_EVENTS_PROVIDER_SUFFIX
         );
 
+        // Skip cleanup for dummy guards
+        if self.is_dummy {
+            return;
+        }
+
         // Only disable if it wasn't already enabled
         if !self.was_enabled {
-            match fs::write(&disable_path, b"0") {
+            match fs::write(&disable_path, b"0\n") {
                 Ok(_) => {
                     eprintln!(
                         "User events listener disabled for provider: {}",
