@@ -47,6 +47,9 @@ const PROVIDER_NAME: &str = "myprovider";
 /// Suffix used by the kernel user_events provider naming in these benchmarks.
 /// Documented to avoid magic strings in path construction.
 const USER_EVENTS_PROVIDER_SUFFIX: &str = "_L2K1";
+/// Provider name used for dummy guards that perform no operations.
+/// This value is not used for actual provider operations, only for internal tracking.
+const DUMMY_PROVIDER_NAME: &str = "dummy";
 
 /// RAII guard for enabling/disabling user events listener
 ///
@@ -58,6 +61,14 @@ const USER_EVENTS_PROVIDER_SUFFIX: &str = "_L2K1";
 /// created, and only disables it on drop if it wasn't already enabled.
 /// This prevents interfering with other tests or processes that might have
 /// enabled the listener.
+///
+/// # Fields
+/// * `provider_name` - The name of the provider being managed
+/// * `was_enabled` - Tracks whether the listener was already enabled before this guard was created.
+///   This field is crucial for preventing the guard from disabling listeners that were enabled
+///   by external processes or other parts of the system. When the guard is dropped, it only
+///   disables the listener if `was_enabled` is false, ensuring that external processes that
+///   may have enabled the listener for their own purposes are not disrupted.
 struct UserEventsListenerGuard {
     provider_name: String,
     was_enabled: bool,
@@ -153,7 +164,7 @@ impl UserEventsListenerGuard {
     /// benchmark can proceed without attempting to disable anything later.
     fn dummy_guard() -> Self {
         UserEventsListenerGuard {
-            provider_name: "dummy".to_string(),
+            provider_name: DUMMY_PROVIDER_NAME.to_string(),
             was_enabled: true,
         }
     }
