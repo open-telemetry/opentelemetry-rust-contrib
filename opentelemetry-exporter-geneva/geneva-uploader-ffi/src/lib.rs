@@ -55,10 +55,7 @@ unsafe fn validate_handle<T: ValidatedHandle>(handle: *const T) -> GenevaError {
         return GenevaError::NullPointer;
     }
 
-    let handle_ref = match unsafe { handle.as_ref() } {
-        Some(h) => h,
-        None => return GenevaError::NullPointer,
-    };
+    let handle_ref = unsafe { handle.as_ref().unwrap() };
 
     if handle_ref.magic() != GENEVA_HANDLE_MAGIC {
         return GenevaError::InvalidData;
@@ -210,10 +207,7 @@ pub unsafe extern "C" fn geneva_client_new(
     }
     unsafe { *out_handle = ptr::null_mut() };
 
-    let config = match unsafe { config.as_ref() } {
-        Some(c) => c,
-        None => return GenevaError::NullPointer,
-    };
+    let config = unsafe { config.as_ref().unwrap() };
 
     // Validate required fields with granular error codes
     if config.endpoint.is_null() {
@@ -391,10 +385,7 @@ pub unsafe extern "C" fn geneva_encode_and_compress_logs(
         return validation_result;
     }
 
-    let handle_ref = match unsafe { handle.as_ref() } {
-        Some(h) => h,
-        None => return GenevaError::NullPointer,
-    };
+    let handle_ref = unsafe { handle.as_ref().unwrap() };
     let data_slice = unsafe { std::slice::from_raw_parts(data, data_len) };
 
     let logs_data: ExportLogsServiceRequest = match Message::decode(data_slice) {
