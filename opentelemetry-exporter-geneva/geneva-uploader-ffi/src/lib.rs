@@ -6,7 +6,7 @@
 use std::ffi::CStr;
 use std::os::raw::{c_char, c_int, c_uint};
 use std::ptr;
-use std::sync::{Arc, OnceLock};
+use std::sync::OnceLock;
 use tokio::runtime::Runtime;
 
 use geneva_uploader::client::{EncodedBatch, GenevaClient, GenevaClientConfig};
@@ -76,7 +76,7 @@ unsafe fn clear_handle_magic<T: ValidatedHandle>(handle: *mut T) {
 /// Opaque handle for GenevaClient
 pub struct GenevaClientHandle {
     magic: u64, // Magic number for handle validation
-    client: Arc<GenevaClient>,
+    client: GenevaClient,
 }
 
 impl ValidatedHandle for GenevaClientHandle {
@@ -336,7 +336,7 @@ pub unsafe extern "C" fn geneva_client_new(
 
     // Create client
     let client = match GenevaClient::new(geneva_config) {
-        Ok(client) => Arc::new(client),
+        Ok(client) => client,
         Err(_e) => {
             return GenevaError::InitializationFailed;
         }
@@ -457,9 +457,9 @@ pub unsafe extern "C" fn geneva_upload_batch_sync(
         return GenevaError::IndexOutOfRange;
     }
 
-    let batch = batches_ref.batches[index].clone();
-    let client = handle_ref.client.clone();
-    let res = runtime().block_on(async move { client.upload_batch(&batch).await });
+    let batch = &batches_ref.batches[index];
+    let client = &handle_ref.client;
+    let res = runtime().block_on(async move { client.upload_batch(batch).await });
     match res {
         Ok(_) => GenevaError::Success,
         Err(_e) => GenevaError::UploadFailed,
@@ -777,7 +777,7 @@ mod tests {
         // Wrap into an FFI-compatible handle
         let handle = GenevaClientHandle {
             magic: GENEVA_HANDLE_MAGIC,
-            client: Arc::new(client),
+            client,
         };
         // Keep the boxed handle alive until we explicitly free it via FFI
         let mut handle_box = Box::new(handle);
@@ -884,7 +884,7 @@ mod tests {
         // Wrap client into FFI handle
         let mut handle_box = Box::new(GenevaClientHandle {
             magic: GENEVA_HANDLE_MAGIC,
-            client: Arc::new(client),
+            client,
         });
         let handle_ptr: *mut GenevaClientHandle = &mut *handle_box;
 
