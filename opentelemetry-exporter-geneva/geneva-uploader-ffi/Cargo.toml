@@ -5,7 +5,23 @@ edition = "2021"
 license = "Apache-2.0"
 rust-version = "1.75.0"
 
+[lib]
+crate-type = ["cdylib", "staticlib", "rlib"]
+
 [dependencies]
+geneva-uploader = { path = "../geneva-uploader" }
+opentelemetry-proto = { workspace = true, default-features = false, features = ["logs", "gen-tonic-messages"] }
+tokio = { version = "1.0", features = ["rt-multi-thread"] }
+prost = "0.13"
+
+[features]
+mock_auth = ["geneva-uploader/mock_auth"]
 
 [lints]
 workspace = true
+
+[dev-dependencies]
+otlp_builder = { path = "examples/otlp_builder" }
+wiremock = "0.6"
+base64 = "0.22"
+chrono = "0.4"

@@ -126,7 +126,7 @@ impl GenevaUploader {
     /// # Returns
     /// * `Result<GenevaUploader>` with authenticated client and resolved moniker/endpoint
     #[allow(dead_code)]
-    pub(crate) async fn from_config_client(
+    pub(crate) fn from_config_client(
         config_client: Arc<GenevaConfigClient>,
         uploader_config: GenevaUploaderConfig,
     ) -> Result<Self> {
