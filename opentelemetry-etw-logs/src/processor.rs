@@ -2,6 +2,8 @@ use opentelemetry::InstrumentationScope;
 use opentelemetry_sdk::error::OTelSdkResult;
 use opentelemetry_sdk::logs::{LogBatch, LogExporter, SdkLogRecord};
 use opentelemetry_sdk::Resource;
+use std::borrow::Cow;
+use std::collections::HashSet;
 use std::error::Error;
 use std::fmt::Debug;
 
@@ -59,8 +61,11 @@ impl Processor {
     }
 
     /// Creates a new instance of the [`Processor`] using the given options.
-    pub(crate) fn new(options: Options) -> Self {
-        let exporter: ETWExporter = ETWExporter::new(options);
+    pub(crate) fn new(
+        options: Options,
+        resource_attribute_keys: HashSet<Cow<'static, str>>,
+    ) -> Self {
+        let exporter: ETWExporter = ETWExporter::new(options, resource_attribute_keys);
         Processor {
             event_exporter: exporter,
         }
@@ -113,6 +118,7 @@ impl opentelemetry_sdk::logs::LogProcessor for Processor {
 pub struct ProcessorBuilder {
     options: Options,
     provider_name_compat_mode: ProviderNameCompatMode,
+    resource_attribute_keys: HashSet<Cow<'static, str>>,
 }
 
 impl ProcessorBuilder {
@@ -125,6 +131,7 @@ impl ProcessorBuilder {
         ProcessorBuilder {
             options: Options::new(provider_name.to_string()),
             provider_name_compat_mode: ProviderNameCompatMode::CrossCompat,
+            resource_attribute_keys: HashSet::new(),
         }
     }
 
@@ -137,6 +144,7 @@ impl ProcessorBuilder {
         ProcessorBuilder {
             options: Options::new(provider_name.to_string()),
             provider_name_compat_mode: ProviderNameCompatMode::EtwCompatOnly,
+            resource_attribute_keys: HashSet::new(),
         }
     }
 
@@ -153,11 +161,48 @@ impl ProcessorBuilder {
         self
     }
 
+    /// Sets the resource attributes for the processor.
+    ///
+    /// This specifies which resource attributes should be exported with each log record.
+    ///
+    /// # Performance Considerations
+    ///
+    /// **Warning**: Each specified resource attribute will be serialized and sent
+    /// with EVERY log record. This is different from OTLP exporters where resource
+    /// attributes are serialized once per batch. Consider the performance impact
+    /// when selecting which attributes to export.
+    ///
+    /// # Best Practices for ETW
+    ///
+    /// **Recommendation**: Be selective about which resource attributes to export.
+    /// Since ETW requires a local listener/agent, the agent can often deduce many
+    /// resource attributes without requiring them to be sent with each log:
+    ///
+    /// - **Infrastructure attributes** (datacenter, region, availability zone) can
+    ///   be determined by the local agent.
+    /// - **Host attributes** (hostname, IP address, OS version) are available locally.
+    /// - **Deployment attributes** (environment, cluster) may be known to the agent.
+    ///
+    /// Focus on attributes that are truly specific to your application instance
+    /// and cannot be easily determined by the local agent.
+    ///
+    /// Nevertheless, if there are attributes that are fixed and must be emitted
+    /// with every log, modeling them as Resource attributes and using this method
+    /// is much more efficient than emitting them explicitly with every log.
+    pub fn with_resource_attributes<I, S>(mut self, attributes: I) -> Self
+    where
+        I: IntoIterator<Item = S>,
+        S: Into<Cow<'static, str>>,
+    {
+        self.resource_attribute_keys = attributes.into_iter().map(|s| s.into()).collect();
+        self
+    }
+
     /// Builds the processor with given options, returning `Error` if it fails.
     pub fn build(self) -> Result<Processor, Box<dyn Error>> {
         self.validate()?;
 
-        Ok(Processor::new(self.options))
+        Ok(Processor::new(self.options, self.resource_attribute_keys))
     }
 
     fn validate(&self) -> Result<(), Box<dyn Error>> {
@@ -214,21 +259,21 @@ mod tests {
 
     #[test]
     fn test_shutdown() {
-        let processor = Processor::new(test_options());
+        let processor = Processor::new(test_options(), HashSet::new());
 
         assert!(processor.shutdown().is_ok());
     }
 
     #[test]
     fn test_force_flush() {
-        let processor = Processor::new(test_options());
+        let processor = Processor::new(test_options(), HashSet::new());
 
         assert!(processor.force_flush().is_ok());
     }
 
     #[test]
     fn test_emit() {
-        let processor: Processor = Processor::new(test_options());
+        let processor: Processor = Processor::new(test_options(), HashSet::new());
 
         let mut record = SdkLoggerProvider::builder()
             .build()
@@ -241,7 +286,7 @@ mod tests {
     #[test]
     #[cfg(feature = "spec_unstable_logs_enabled")]
     fn test_event_enabled() {
-        let processor = Processor::new(test_options());
+        let processor = Processor::new(test_options(), HashSet::new());
 
         // Unit test are forced to return true as there is no ETW session listening for the event
         assert!(processor.event_enabled(opentelemetry::logs::Severity::Info, "test", Some("test")));
@@ -426,5 +471,37 @@ mod tests {
             compat_mode,
         );
         assert!(result.is_ok());
+    }
+
+    #[test]
+    fn test_resource_attributes() {
+        use opentelemetry::logs::LogRecord;
+        use opentelemetry::logs::Logger;
+        use opentelemetry::logs::LoggerProvider;
+        use opentelemetry::KeyValue;
+        use opentelemetry_sdk::logs::SdkLoggerProvider;
+        use opentelemetry_sdk::Resource;
+
+        let processor = Processor::builder("test_provider")
+            .with_resource_attributes(vec!["resource_attribute1", "resource_attribute2"])
+            .build()
+            .unwrap();
+
+        let logger_provider = SdkLoggerProvider::builder()
+            .with_resource(
+                Resource::builder()
+                    .with_service_name("test_service")
+                    .with_attribute(KeyValue::new("resource_attribute1", "value1"))
+                    .with_attribute(KeyValue::new("resource_attribute2", "value2"))
+                    .with_attribute(KeyValue::new("resource_attribute3", "value3")) // This should not be exported
+                    .build(),
+            )
+            .with_log_processor(processor)
+            .build();
+
+        let logger = logger_provider.logger("test_logger");
+        let mut log_record = logger.create_log_record();
+        log_record.add_attribute("log_attribute", "log_value");
+        logger.emit(log_record);
     }
 }
