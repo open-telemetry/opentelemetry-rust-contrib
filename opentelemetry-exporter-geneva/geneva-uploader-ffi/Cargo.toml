@@ -9,7 +9,7 @@ rust-version = "1.75.0"
 crate-type = ["cdylib", "staticlib", "rlib"]
 
 [dependencies]
-geneva-uploader = { path = "../geneva-uploader" }
+geneva-uploader = { path = "../geneva-uploader", version = "0.1.0" }
 opentelemetry-proto = { workspace = true, default-features = false, features = ["logs", "gen-tonic-messages"] }
 tokio = { version = "1.0", features = ["rt-multi-thread"] }
 prost = "0.13"
