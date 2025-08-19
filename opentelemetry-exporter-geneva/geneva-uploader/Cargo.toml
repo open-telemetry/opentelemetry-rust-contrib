@@ -1,9 +1,13 @@
 [package]
 name = "geneva-uploader"
+description = "Upload telemetry data to Geneva logs service"
 version = "0.1.0"
 edition = "2021"
-license = "Apache-2.0"
+homepage = "https://github.com/open-telemetry/opentelemetry-rust-contrib/tree/main/opentelemetry-exporter-geneva/geneva-uploader"
+repository = "https://github.com/open-telemetry/opentelemetry-rust-contrib/tree/main/opentelemetry-exporter-geneva/geneva-uploader"
 rust-version = "1.75.0"
+keywords = ["opentelemetry", "geneva", "logs", "uploader"]
+license = "Apache-2.0"
 
 [dependencies]
 opentelemetry-proto = {workspace = true, default-features = false, features = ["logs", "gen-tonic-messages"]}

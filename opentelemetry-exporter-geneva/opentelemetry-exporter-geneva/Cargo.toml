@@ -1,9 +1,13 @@
 [package]
 name = "opentelemetry-exporter-geneva"
+description = "OpenTelemetry exporter for Geneva logs"
 version = "0.1.0"
 edition = "2021"
-license = "Apache-2.0"
+homepage = "https://github.com/open-telemetry/opentelemetry-rust-contrib/tree/main/opentelemetry-exporter-geneva/opentelemetry-exporter-geneva"
+repository = "https://github.com/open-telemetry/opentelemetry-rust-contrib/tree/main/opentelemetry-exporter-geneva/opentelemetry-exporter-geneva"
 rust-version = "1.75.0"
+keywords = ["opentelemetry", "geneva", "logs", "exporter"]
+license = "Apache-2.0"
 
 [dependencies]
 opentelemetry_sdk = {workspace = true, default-features = false, features = ["logs"]}
