@@ -64,9 +64,7 @@ async fn main() {
         role_instance,
     };
 
-    let geneva_client = GenevaClient::new(config)
-        .await
-        .expect("Failed to create GenevaClient");
+    let geneva_client = GenevaClient::new(config).expect("Failed to create GenevaClient");
 
     let exporter = GenevaExporter::new(geneva_client);
     let batch_processor = BatchLogProcessor::builder(exporter, Tokio)
