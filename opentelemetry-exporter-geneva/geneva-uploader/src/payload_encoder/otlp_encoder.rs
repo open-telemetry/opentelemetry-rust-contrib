@@ -99,7 +99,6 @@ impl OtlpEncoder {
             let (field_info, schema_id) =
                 Self::determine_fields_and_schema_id(log_record, event_name_str);
 
-            let schema_entry = Self::create_schema(schema_id, field_info.as_slice());
             // 2. Encode row
             let row_buffer = self.write_row_data(log_record, &field_info);
             let level = log_record.severity_number as u8;
@@ -125,6 +124,7 @@ impl OtlpEncoder {
 
             // 4. Add schema entry if not already present (multiple schemas per event_name batch)
             if !entry.schemas.iter().any(|s| s.id == schema_id) {
+                let schema_entry = Self::create_schema(schema_id, field_info);
                 entry.schemas.push(schema_entry);
             }
 
@@ -246,9 +246,9 @@ impl OtlpEncoder {
     }
 
     /// Create schema - always creates a new CentralSchemaEntry
-    fn create_schema(schema_id: u64, field_info: &[FieldDef]) -> CentralSchemaEntry {
+    fn create_schema(schema_id: u64, field_info: Vec<FieldDef>) -> CentralSchemaEntry {
         let schema =
-            BondEncodedSchema::from_fields("OtlpLogRecord", "telemetry", field_info.to_vec()); //TODO - use actual struct name and namespace
+            BondEncodedSchema::from_fields("OtlpLogRecord", "telemetry", field_info); //TODO - use actual struct name and namespace
 
         let schema_bytes = schema.as_bytes();
         let schema_md5 = md5::compute(schema_bytes).0;
