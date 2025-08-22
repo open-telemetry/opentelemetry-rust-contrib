@@ -154,39 +154,39 @@ mod benchmarks {
         let encoder = OtlpEncoder::new();
         let metadata = "namespace=benchmark/eventVersion=Ver1v0";
 
-        // // Benchmark 1: Different numbers of attributes
-        // let mut group = criterion.benchmark_group("encode_log_batch_attributes");
-        // for num_attrs in [0, 4, 8, 16].iter() {
-        //     group.throughput(Throughput::Elements(*num_attrs as u64));
-        //     group.bench_with_input(
-        //         BenchmarkId::new("attributes", num_attrs),
-        //         num_attrs,
-        //         |b, &num_attrs| {
-        //             let mut rng = StdRng::seed_from_u64(42);
-        //             let logs: Vec<LogRecord> = (0..10)
-        //                 .map(|i| {
-        //                     if num_attrs == 0 {
-        //                         create_basic_log_record(1_700_000_000_000_000_000 + i)
-        //                     } else {
-        //                         create_log_with_attributes(
-        //                             1_700_000_000_000_000_000 + i,
-        //                             num_attrs,
-        //                             &mut rng,
-        //                         )
-        //                     }
-        //                 })
-        //                 .collect();
+        // Benchmark 1: Different numbers of attributes
+        let mut group = criterion.benchmark_group("encode_log_batch_attributes");
+        for num_attrs in [0, 4, 8, 16].iter() {
+            group.throughput(Throughput::Elements(*num_attrs as u64));
+            group.bench_with_input(
+                BenchmarkId::new("attributes", num_attrs),
+                num_attrs,
+                |b, &num_attrs| {
+                    let mut rng = StdRng::seed_from_u64(42);
+                    let logs: Vec<LogRecord> = (0..10)
+                        .map(|i| {
+                            if num_attrs == 0 {
+                                create_basic_log_record(1_700_000_000_000_000_000 + i)
+                            } else {
+                                create_log_with_attributes(
+                                    1_700_000_000_000_000_000 + i,
+                                    num_attrs,
+                                    &mut rng,
+                                )
+                            }
+                        })
+                        .collect();
 
-        //             b.iter(|| {
-        //                 let res = encoder
-        //                     .encode_log_batch(black_box(logs.iter()), black_box(metadata))
-        //                     .unwrap();
-        //                 black_box(res); // double sure the return value is generated
-        //             });
-        //         },
-        //     );
-        // }
-        // group.finish();
+                    b.iter(|| {
+                        let res = encoder
+                            .encode_log_batch(black_box(logs.iter()), black_box(metadata))
+                            .unwrap();
+                        black_box(res); // double sure the return value is generated
+                    });
+                },
+            );
+        }
+        group.finish();
 
         // Benchmark 2: Different batch sizes
         let mut group = criterion.benchmark_group("encode_log_batch_sizes");
@@ -219,30 +219,30 @@ mod benchmarks {
         }
         group.finish();
 
-        // // Benchmark 3: Mixed event names
-        // let mut group = criterion.benchmark_group("encode_log_batch_mixed_event_names");
-        // group.bench_function("mixed_event_names", |b| {
-        //     let mut rng = StdRng::seed_from_u64(42);
-        //     let event_names = ["EventA", "EventB", "EventC"];
-        //     let logs: Vec<LogRecord> = (0..100)
-        //         .map(|i| {
-        //             let mut log =
-        //                 create_log_with_attributes(1_700_000_000_000_000_000 + i, 4, &mut rng);
-        //             log.event_name = event_names[i as usize % event_names.len()].to_string();
-        //             log
-        //         })
-        //         .collect();
+        // Benchmark 3: Mixed event names
+        let mut group = criterion.benchmark_group("encode_log_batch_mixed_event_names");
+        group.bench_function("mixed_event_names", |b| {
+            let mut rng = StdRng::seed_from_u64(42);
+            let event_names = ["EventA", "EventB", "EventC"];
+            let logs: Vec<LogRecord> = (0..100)
+                .map(|i| {
+                    let mut log =
+                        create_log_with_attributes(1_700_000_000_000_000_000 + i, 4, &mut rng);
+                    log.event_name = event_names[i as usize % event_names.len()].to_string();
+                    log
+                })
+                .collect();
 
-        //     b.iter(|| {
-        //         let res = black_box(
-        //             encoder
-        //                 .encode_log_batch(black_box(logs.iter()), black_box(metadata))
-        //                 .unwrap(),
-        //         );
-        //         black_box(res);
-        //     });
-        // });
-        // group.finish();
+            b.iter(|| {
+                let res = black_box(
+                    encoder
+                        .encode_log_batch(black_box(logs.iter()), black_box(metadata))
+                        .unwrap(),
+                );
+                black_box(res);
+            });
+        });
+        group.finish();
 
         criterion.final_summary();
     }
