@@ -11,8 +11,12 @@ use std::{fmt, result};
 #[cfg(feature = "axum")]
 use axum::extract::MatchedPath;
 use futures_util::ready;
+use opentelemetry::global::BoxedTracer;
 use opentelemetry::metrics::{Histogram, Meter, UpDownCounter};
-use opentelemetry::KeyValue;
+use opentelemetry::trace::noop::NoopTracer;
+use opentelemetry::trace::{SpanKind, Status, TraceContextExt, Tracer};
+use opentelemetry::{Context as OtelContext, KeyValue};
+use opentelemetry_semantic_conventions as semconv;
 use pin_project_lite::pin_project;
 use tower_layer::Layer;
 use tower_service::Service;
@@ -31,23 +35,23 @@ const _OTEL_DEFAULT_HTTP_SERVER_DURATION_BOUNDARIES: [f64; 14] = [
 const LIBRARY_DEFAULT_HTTP_SERVER_DURATION_BOUNDARIES: [f64; 14] = [
     0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1.0, 2.5, 5.0, 10.0, 30.0, 60.0, 120.0, 300.0,
 ];
-const HTTP_SERVER_ACTIVE_REQUESTS_METRIC: &str = "http.server.active_requests";
+const HTTP_SERVER_ACTIVE_REQUESTS_METRIC: &str = semconv::metric::HTTP_SERVER_ACTIVE_REQUESTS;
 const HTTP_SERVER_ACTIVE_REQUESTS_UNIT: &str = "{request}";
 
-const HTTP_SERVER_REQUEST_BODY_SIZE_METRIC: &str = "http.server.request.body.size";
+const HTTP_SERVER_REQUEST_BODY_SIZE_METRIC: &str = semconv::metric::HTTP_SERVER_REQUEST_BODY_SIZE;
 const HTTP_SERVER_REQUEST_BODY_SIZE_UNIT: &str = "By";
 
-const HTTP_SERVER_RESPONSE_BODY_SIZE_METRIC: &str = "http.server.response.body.size";
+const HTTP_SERVER_RESPONSE_BODY_SIZE_METRIC: &str = semconv::metric::HTTP_SERVER_RESPONSE_BODY_SIZE;
 const HTTP_SERVER_RESPONSE_BODY_SIZE_UNIT: &str = "By";
 
-const NETWORK_PROTOCOL_NAME_LABEL: &str = "network.protocol.name";
-const NETWORK_PROTOCOL_VERSION_LABEL: &str = "network.protocol.version";
-const URL_SCHEME_LABEL: &str = "url.scheme";
+const NETWORK_PROTOCOL_NAME_LABEL: &str = semconv::trace::NETWORK_PROTOCOL_NAME;
+const NETWORK_PROTOCOL_VERSION_LABEL: &str = semconv::trace::NETWORK_PROTOCOL_VERSION;
+const URL_SCHEME_LABEL: &str = semconv::trace::URL_SCHEME;
 
-const HTTP_REQUEST_METHOD_LABEL: &str = "http.request.method";
+const HTTP_REQUEST_METHOD_LABEL: &str = semconv::trace::HTTP_REQUEST_METHOD;
 #[allow(dead_code)] // cargo check is not smart
-const HTTP_ROUTE_LABEL: &str = "http.route";
-const HTTP_RESPONSE_STATUS_CODE_LABEL: &str = "http.response.status_code";
+const HTTP_ROUTE_LABEL: &str = semconv::trace::HTTP_ROUTE;
+const HTTP_RESPONSE_STATUS_CODE_LABEL: &str = semconv::trace::HTTP_RESPONSE_STATUS_CODE;
 
 /// Trait for extracting custom attributes from HTTP requests
 pub trait RequestAttributeExtractor<B>: Clone + Send + Sync + 'static {
@@ -119,35 +123,44 @@ where
 
 /// State scoped to the entire middleware Layer.
 ///
-/// For now the only global state we hold onto is the metrics instruments.
-/// The OTEL SDKs do support calling for the global meter provider instead of holding a reference
-/// but it seems ideal to avoid extra access to the global meter, which sits behind a RWLock.
-struct HTTPMetricsLayerState {
+/// Holds both metrics instruments and tracing configuration.
+struct HTTPLayerState {
     pub server_request_duration: Histogram<f64>,
     pub server_active_requests: UpDownCounter<i64>,
     pub server_request_body_size: Histogram<u64>,
     pub server_response_body_size: Histogram<u64>,
+    pub tracer: BoxedTracer,
 }
 
 #[derive(Clone)]
-/// [`Service`] used by [`HTTPMetricsLayer`]
-pub struct HTTPMetricsService<S, ReqExt = NoOpExtractor, ResExt = NoOpExtractor> {
-    pub(crate) state: Arc<HTTPMetricsLayerState>,
+/// [`Service`] used by [`HTTPLayer`]
+pub struct HTTPService<S, ReqExt = NoOpExtractor, ResExt = NoOpExtractor> {
+    pub(crate) state: Arc<HTTPLayerState>,
     request_extractor: ReqExt,
     response_extractor: ResExt,
     inner_service: S,
 }
 
 #[derive(Clone)]
-/// [`Layer`] which applies the OTEL HTTP server metrics middleware
-pub struct HTTPMetricsLayer<ReqExt = NoOpExtractor, ResExt = NoOpExtractor> {
-    state: Arc<HTTPMetricsLayerState>,
+/// [`Layer`] which applies the OTEL HTTP server metrics and tracing middleware
+pub struct HTTPLayer<ReqExt = NoOpExtractor, ResExt = NoOpExtractor> {
+    state: Arc<HTTPLayerState>,
     request_extractor: ReqExt,
     response_extractor: ResExt,
 }
 
-pub struct HTTPMetricsLayerBuilder<ReqExt = NoOpExtractor, ResExt = NoOpExtractor> {
+// Type aliases for backward compatibility
+pub type HTTPMetricsLayer<ReqExt = NoOpExtractor, ResExt = NoOpExtractor> =
+    HTTPLayer<ReqExt, ResExt>;
+pub type HTTPMetricsService<S, ReqExt = NoOpExtractor, ResExt = NoOpExtractor> =
+    HTTPService<S, ReqExt, ResExt>;
+pub type HTTPMetricsResponseFuture<F, ResExt> = HTTPResponseFuture<F, ResExt>;
+pub type HTTPMetricsLayerBuilder<ReqExt = NoOpExtractor, ResExt = NoOpExtractor> =
+    HTTPLayerBuilder<ReqExt, ResExt>;
+
+pub struct HTTPLayerBuilder<ReqExt = NoOpExtractor, ResExt = NoOpExtractor> {
     meter: Option<Meter>,
+    tracer: Option<BoxedTracer>,
     req_dur_bounds: Option<Vec<f64>>,
     request_extractor: ReqExt,
     response_extractor: ResExt,
@@ -189,10 +202,11 @@ impl fmt::Debug for Error {
     }
 }
 
-impl HTTPMetricsLayerBuilder {
+impl HTTPLayerBuilder {
     pub fn builder() -> Self {
-        HTTPMetricsLayerBuilder {
+        HTTPLayerBuilder {
             meter: None,
+            tracer: None,
             req_dur_bounds: Some(LIBRARY_DEFAULT_HTTP_SERVER_DURATION_BOUNDARIES.to_vec()),
             request_extractor: NoOpExtractor,
             response_extractor: NoOpExtractor,
@@ -200,17 +214,18 @@ impl HTTPMetricsLayerBuilder {
     }
 }
 
-impl<ReqExt, ResExt> HTTPMetricsLayerBuilder<ReqExt, ResExt> {
+impl<ReqExt, ResExt> HTTPLayerBuilder<ReqExt, ResExt> {
     /// Set a request attribute extractor
     pub fn with_request_extractor<NewReqExt, B>(
         self,
         extractor: NewReqExt,
-    ) -> HTTPMetricsLayerBuilder<NewReqExt, ResExt>
+    ) -> HTTPLayerBuilder<NewReqExt, ResExt>
     where
         NewReqExt: RequestAttributeExtractor<B>,
     {
-        HTTPMetricsLayerBuilder {
+        HTTPLayerBuilder {
             meter: self.meter,
+            tracer: self.tracer,
             req_dur_bounds: self.req_dur_bounds,
             request_extractor: extractor,
             response_extractor: self.response_extractor,
@@ -221,12 +236,13 @@ impl<ReqExt, ResExt> HTTPMetricsLayerBuilder<ReqExt, ResExt> {
     pub fn with_response_extractor<NewResExt, B>(
         self,
         extractor: NewResExt,
-    ) -> HTTPMetricsLayerBuilder<ReqExt, NewResExt>
+    ) -> HTTPLayerBuilder<ReqExt, NewResExt>
     where
         NewResExt: ResponseAttributeExtractor<B>,
     {
-        HTTPMetricsLayerBuilder {
+        HTTPLayerBuilder {
             meter: self.meter,
+            tracer: self.tracer,
             req_dur_bounds: self.req_dur_bounds,
             request_extractor: self.request_extractor,
             response_extractor: extractor,
@@ -237,7 +253,7 @@ impl<ReqExt, ResExt> HTTPMetricsLayerBuilder<ReqExt, ResExt> {
     pub fn with_request_extractor_fn<F, B>(
         self,
         f: F,
-    ) -> HTTPMetricsLayerBuilder<FnRequestExtractor<F>, ResExt>
+    ) -> HTTPLayerBuilder<FnRequestExtractor<F>, ResExt>
     where
         F: Fn(&http::Request<B>) -> Vec<KeyValue> + Clone + Send + Sync + 'static,
     {
@@ -248,20 +264,24 @@ impl<ReqExt, ResExt> HTTPMetricsLayerBuilder<ReqExt, ResExt> {
     pub fn with_response_extractor_fn<F, B>(
         self,
         f: F,
-    ) -> HTTPMetricsLayerBuilder<ReqExt, FnResponseExtractor<F>>
+    ) -> HTTPLayerBuilder<ReqExt, FnResponseExtractor<F>>
     where
         F: Fn(&http::Response<B>) -> Vec<KeyValue> + Clone + Send + Sync + 'static,
     {
         self.with_response_extractor(FnResponseExtractor::new(f))
     }
 
-    pub fn build(self) -> Result<HTTPMetricsLayer<ReqExt, ResExt>> {
+    pub fn build(self) -> Result<HTTPLayer<ReqExt, ResExt>> {
         let req_dur_bounds = self
             .req_dur_bounds
             .unwrap_or_else(|| LIBRARY_DEFAULT_HTTP_SERVER_DURATION_BOUNDARIES.to_vec());
+        let tracer = match self.tracer {
+            Some(t) => t,
+            None => BoxedTracer::new(Box::new(NoopTracer::new())),
+        };
         match self.meter {
             Some(meter) => Ok(HTTPMetricsLayer {
-                state: Arc::from(Self::make_state(meter, req_dur_bounds)),
+                state: Arc::from(Self::make_state(meter, req_dur_bounds, tracer)),
                 request_extractor: self.request_extractor,
                 response_extractor: self.response_extractor,
             }),
@@ -281,8 +301,13 @@ impl<ReqExt, ResExt> HTTPMetricsLayerBuilder<ReqExt, ResExt> {
         self
     }
 
-    fn make_state(meter: Meter, req_dur_bounds: Vec<f64>) -> HTTPMetricsLayerState {
-        HTTPMetricsLayerState {
+    pub fn with_tracer(mut self, tracer: BoxedTracer) -> Self {
+        self.tracer = Some(tracer);
+        self
+    }
+
+    fn make_state(meter: Meter, req_dur_bounds: Vec<f64>, tracer: BoxedTracer) -> HTTPLayerState {
+        HTTPLayerState {
             server_request_duration: meter
                 .f64_histogram(Cow::from(HTTP_SERVER_DURATION_METRIC))
                 .with_description("Duration of HTTP server requests.")
@@ -304,19 +329,20 @@ impl<ReqExt, ResExt> HTTPMetricsLayerBuilder<ReqExt, ResExt> {
                 .with_description("Size of HTTP server response bodies.")
                 .with_unit(HTTP_SERVER_RESPONSE_BODY_SIZE_UNIT)
                 .build(),
+            tracer,
         }
     }
 }
 
-impl<S, ReqExt, ResExt> Layer<S> for HTTPMetricsLayer<ReqExt, ResExt>
+impl<S, ReqExt, ResExt> Layer<S> for HTTPLayer<ReqExt, ResExt>
 where
     ReqExt: Clone,
     ResExt: Clone,
 {
-    type Service = HTTPMetricsService<S, ReqExt, ResExt>;
+    type Service = HTTPService<S, ReqExt, ResExt>;
 
     fn layer(&self, service: S) -> Self::Service {
-        HTTPMetricsService {
+        HTTPService {
             state: self.state.clone(),
             request_extractor: self.request_extractor.clone(),
             response_extractor: self.response_extractor.clone(),
@@ -325,14 +351,13 @@ where
     }
 }
 
-/// ResponseFutureMetricsState holds request-scoped data for metrics and their attributes.
+/// ResponseFutureState holds request-scoped data for metrics, tracing and their attributes.
 ///
-/// ResponseFutureMetricsState lives inside the response future, as it needs to hold data
+/// ResponseFutureState lives inside the response future, as it needs to hold data
 /// initialized or extracted from the request before it is forwarded to the inner Service.
 /// The rest of the data (e.g. status code, error) can be extracted from the response
 /// or calculated with respect to the data held here (e.g., duration = now - duration start).
-#[derive(Clone)]
-struct ResponseFutureMetricsState {
+struct ResponseFutureState {
     // fields for the metric values
     // https://opentelemetry.io/docs/specs/semconv/http/http-metrics/#metric-httpserverrequestduration
     duration_start: Instant,
@@ -348,21 +373,24 @@ struct ResponseFutureMetricsState {
 
     // Custom attributes from request
     custom_request_attributes: Vec<KeyValue>,
+
+    // Tracing fields
+    otel_context: OtelContext,
 }
 
 pin_project! {
-    /// Response [`Future`] for [`HTTPMetricsService`].
-    pub struct HTTPMetricsResponseFuture<F, ResExt> {
+    /// Response [`Future`] for [`HTTPService`].
+    pub struct HTTPResponseFuture<F, ResExt> {
         #[pin]
         inner_response_future: F,
-        layer_state: Arc<HTTPMetricsLayerState>,
-        metrics_state: ResponseFutureMetricsState,
+        layer_state: Arc<HTTPLayerState>,
+        future_state: ResponseFutureState,
         response_extractor: ResExt,
     }
 }
 
 impl<S, ReqBody, ResBody, ReqExt, ResExt> Service<http::Request<ReqBody>>
-    for HTTPMetricsService<S, ReqExt, ResExt>
+    for HTTPService<S, ReqExt, ResExt>
 where
     S: Service<http::Request<ReqBody>, Response = http::Response<ResBody>>,
     ResBody: http_body::Body,
@@ -371,7 +399,7 @@ where
 {
     type Response = S::Response;
     type Error = S::Error;
-    type Future = HTTPMetricsResponseFuture<S::Future, ResExt>;
+    type Future = HTTPResponseFuture<S::Future, ResExt>;
 
     fn poll_ready(&mut self, cx: &mut Context<'_>) -> Poll<result::Result<(), Self::Error>> {
         self.inner_service.poll_ready(cx)
@@ -393,29 +421,73 @@ where
         let url_scheme_kv = KeyValue::new(URL_SCHEME_LABEL, scheme);
 
         let method = req.method().as_str().to_owned();
-        let method_kv = KeyValue::new(HTTP_REQUEST_METHOD_LABEL, method);
+        let method_kv = KeyValue::new(HTTP_REQUEST_METHOD_LABEL, method.clone());
 
         #[allow(unused_mut)]
         let mut route_kv_opt = None;
+        let mut route_str = None;
         #[cfg(feature = "axum")]
         if let Some(matched_path) = req.extensions().get::<MatchedPath>() {
-            route_kv_opt = Some(KeyValue::new(
-                HTTP_ROUTE_LABEL,
-                matched_path.as_str().to_owned(),
-            ));
+            let route = matched_path.as_str().to_owned();
+            route_kv_opt = Some(KeyValue::new(HTTP_ROUTE_LABEL, route.clone()));
+            route_str = Some(route.clone());
         };
 
         // Extract custom request attributes
         let custom_request_attributes = self.request_extractor.extract_attributes(&req);
 
+        // Start tracing span
+        let span_name = route_str
+            .clone()
+            .unwrap_or_else(|| format!("{} {}", method, req.uri().path()));
+
+        let mut span_attributes = vec![
+            KeyValue::new(semconv::trace::HTTP_REQUEST_METHOD, method.clone()),
+            url_scheme_kv.clone(),
+            KeyValue::new(semconv::attribute::URL_PATH, req.uri().path().to_string()),
+            KeyValue::new(semconv::trace::URL_FULL, req.uri().to_string()),
+        ];
+
+        if let Some(user_agent) = req
+            .headers()
+            .get("user-agent")
+            .and_then(|v| v.to_str().ok())
+        {
+            span_attributes.push(KeyValue::new(
+                semconv::trace::USER_AGENT_ORIGINAL,
+                user_agent.to_string(),
+            ));
+        }
+
+        if let Some(host) = req.headers().get("host").and_then(|v| v.to_str().ok()) {
+            span_attributes.push(KeyValue::new(
+                semconv::trace::SERVER_ADDRESS,
+                host.to_string(),
+            ));
+        }
+
+        if let Some(route) = &route_str {
+            span_attributes.push(KeyValue::new(semconv::trace::HTTP_ROUTE, route.clone()));
+        }
+
+        span_attributes.extend(custom_request_attributes.clone());
+
+        let tracer = &self.state.tracer;
+        let span = tracer
+            .span_builder(span_name)
+            .with_kind(SpanKind::Server)
+            .with_attributes(span_attributes)
+            .start(tracer);
+        let ctx = OtelContext::current_with_span(span);
+
         self.state
             .server_active_requests
             .add(1, &[url_scheme_kv.clone(), method_kv.clone()]);
 
-        HTTPMetricsResponseFuture {
+        HTTPResponseFuture {
             inner_response_future: self.inner_service.call(req),
             layer_state: self.state.clone(),
-            metrics_state: ResponseFutureMetricsState {
+            future_state: ResponseFutureState {
                 duration_start,
                 req_body_size: content_length,
 
@@ -425,13 +497,15 @@ where
                 method_kv,
                 route_kv_opt,
                 custom_request_attributes,
+
+                otel_context: ctx,
             },
             response_extractor: self.response_extractor.clone(),
         }
     }
 }
 
-impl<F, ResBody, E, ResExt> Future for HTTPMetricsResponseFuture<F, ResExt>
+impl<F, ResBody, E, ResExt> Future for HTTPResponseFuture<F, ResExt>
 where
     F: Future<Output = result::Result<http::Response<ResBody>, E>>,
     ResBody: http_body::Body,
@@ -446,30 +520,56 @@ where
 
         // Build base label set
         let mut label_superset = vec![
-            this.metrics_state.protocol_name_kv.clone(),
-            this.metrics_state.protocol_version_kv.clone(),
-            this.metrics_state.url_scheme_kv.clone(),
-            this.metrics_state.method_kv.clone(),
+            this.future_state.protocol_name_kv.clone(),
+            this.future_state.protocol_version_kv.clone(),
+            this.future_state.url_scheme_kv.clone(),
+            this.future_state.method_kv.clone(),
             KeyValue::new(HTTP_RESPONSE_STATUS_CODE_LABEL, i64::from(status.as_u16())),
         ];
 
-        if let Some(route_kv) = this.metrics_state.route_kv_opt.clone() {
+        if let Some(route_kv) = this.future_state.route_kv_opt.clone() {
             label_superset.push(route_kv);
         }
 
         // Add custom request attributes
-        label_superset.extend(this.metrics_state.custom_request_attributes.clone());
+        label_superset.extend(this.future_state.custom_request_attributes.clone());
 
         // Extract and add custom response attributes
         let custom_response_attributes = this.response_extractor.extract_attributes(&response);
-        label_superset.extend(custom_response_attributes);
+        label_superset.extend(custom_response_attributes.clone());
+
+        // Update span
+        let span = this.future_state.otel_context.span();
+        span.set_attribute(KeyValue::new(
+            semconv::trace::HTTP_RESPONSE_STATUS_CODE,
+            status.as_u16() as i64,
+        ));
+
+        // Add custom response attributes to span
+        for attr in &custom_response_attributes {
+            span.set_attribute(attr.clone());
+        }
+
+        // Set span status based on HTTP status code
+        // Following server-side semantic conventions:
+        // - 5xx server errors indicate server failure and should be marked as span errors
+        // - 4xx client errors indicate client mistakes, not server failures
+        if status.is_server_error() {
+            span.set_status(Status::Error {
+                description: format!("HTTP {}", status.as_u16()).into(),
+            });
+        } else {
+            span.set_status(Status::Ok);
+        }
+
+        span.end();
 
         this.layer_state.server_request_duration.record(
-            this.metrics_state.duration_start.elapsed().as_secs_f64(),
+            this.future_state.duration_start.elapsed().as_secs_f64(),
             &label_superset,
         );
 
-        if let Some(req_content_length) = this.metrics_state.req_body_size {
+        if let Some(req_content_length) = this.future_state.req_body_size {
             this.layer_state
                 .server_request_body_size
                 .record(req_content_length, &label_superset);
@@ -485,8 +585,8 @@ where
         this.layer_state.server_active_requests.add(
             -1,
             &[
-                this.metrics_state.url_scheme_kv.clone(),
-                this.metrics_state.method_kv.clone(),
+                this.future_state.url_scheme_kv.clone(),
+                this.future_state.method_kv.clone(),
             ],
         );
 
@@ -504,4 +604,167 @@ fn split_and_format_protocol_version(http_version: http::Version) -> (String, St
         _ => "",
     };
     (String::from("http"), String::from(version_str))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use opentelemetry::metrics::MeterProvider;
+    use opentelemetry::trace::{FutureExt, TraceContextExt, Tracer, TracerProvider};
+    use opentelemetry::Key;
+    use opentelemetry_sdk::metrics::data::{Metric, ResourceMetrics};
+    use opentelemetry_sdk::metrics::InMemoryMetricExporterBuilder;
+    use opentelemetry_sdk::metrics::SdkMeterProvider;
+    use opentelemetry_sdk::trace::InMemorySpanExporterBuilder;
+    use opentelemetry_sdk::trace::SdkTracerProvider;
+    use opentelemetry_sdk::Resource;
+    use std::result::Result;
+    use tower::Service;
+    use tower::ServiceBuilder;
+    use tower::ServiceExt;
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn test_tracing_with_in_memory_tracer() {
+        let trace_exporter = InMemorySpanExporterBuilder::new().build();
+        let tracer_provider = SdkTracerProvider::builder()
+            .with_simple_exporter(trace_exporter.clone())
+            .build();
+        let tracer = tracer_provider.tracer("test_tracer");
+
+        let metric_exporter = InMemoryMetricExporterBuilder::new().build();
+        let meter_provider = SdkMeterProvider::builder()
+            .with_periodic_exporter(metric_exporter.clone())
+            .build();
+        let meter = meter_provider.meter("test_meter");
+
+        let layer = HTTPLayerBuilder::builder()
+            .with_tracer(BoxedTracer::new(Box::new(tracer.clone())))
+            .with_meter(meter)
+            .build()
+            .unwrap();
+
+        let mut service = ServiceBuilder::new()
+            .layer(layer)
+            .service(tower::service_fn(echo));
+
+        // Create a parent span and set it as the current context
+        let parent_span = tracer.start("parent_operation");
+        let cx = OtelContext::current_with_span(parent_span);
+
+        let request_body = "test".to_string();
+        let request = http::Request::builder()
+            .uri("http://example.com")
+            .header("Content-Length", request_body.len().to_string())
+            .body(request_body)
+            .unwrap();
+
+        // Execute the service call within the parent span context
+        let _response = async {
+            service
+                .ready_and()
+                .await
+                .unwrap()
+                .call(request)
+                .await
+                .unwrap()
+        }
+        .with_context(cx)
+        .await;
+
+        tracer_provider.force_flush().unwrap();
+        meter_provider.force_flush().unwrap();
+
+        let spans = trace_exporter.get_finished_spans().unwrap();
+        assert_eq!(
+            spans.len(),
+            2,
+            "Expected exactly two spans to be recorded (parent + HTTP)"
+        );
+
+        // Find the HTTP span (should be the child)
+        let http_span = spans
+            .iter()
+            .find(|span| span.name == "GET /")
+            .expect("Should find HTTP span");
+
+        // Find the parent span
+        let parent_span = spans
+            .iter()
+            .find(|span| span.name == "parent_operation")
+            .expect("Should find parent span");
+
+        // Verify the HTTP span has the correct parent
+        assert_eq!(
+            http_span.parent_span_id,
+            parent_span.span_context.span_id(),
+            "HTTP span should have parent span as parent"
+        );
+
+        // Verify they share the same trace ID
+        assert_eq!(
+            http_span.span_context.trace_id(),
+            parent_span.span_context.trace_id(),
+            "Parent and child spans should share the same trace ID"
+        );
+
+        assert_eq!(
+            http_span.name, "GET /",
+            "Span name should match the request"
+        );
+        assert_eq!(
+            http_span.attributes,
+            vec![
+                KeyValue::new(semconv::trace::HTTP_REQUEST_METHOD, "GET".to_string()),
+                KeyValue::new(semconv::trace::URL_SCHEME, "http".to_string()),
+                KeyValue::new(semconv::trace::URL_PATH, "/".to_string()),
+                KeyValue::new(semconv::trace::URL_FULL, "http://example.com/".to_string()),
+                KeyValue::new(semconv::trace::HTTP_RESPONSE_STATUS_CODE, 200),
+            ]
+        );
+
+        // Verify metrics are recorded
+        let resource_metrics = metric_exporter.get_finished_metrics().unwrap();
+        assert_eq!(
+            resource_metrics.len(),
+            1,
+            "Expected 1 ResourceMetrics entry"
+        );
+
+        let resource_metric = &resource_metrics[0];
+        let service_name = Key::new(semconv::resource::SERVICE_NAME);
+        assert_eq!(
+            "unknown_service",
+            resource_metric
+                .resource()
+                .get(&service_name)
+                .unwrap()
+                .to_string()
+        );
+
+        // Count total metrics across all scopes
+        let total_metrics: usize = resource_metric
+            .scope_metrics()
+            .map(|scope| scope.metrics().count())
+            .sum();
+        assert_eq!(total_metrics, 4);
+
+        assert_eq!(resource_metric.scope_metrics().count(), 1);
+        let scope_metric = resource_metric.scope_metrics().next().unwrap();
+        assert_eq!(scope_metric.scope().name(), "test_meter");
+
+        let metric_names = vec![
+            semconv::metric::HTTP_SERVER_REQUEST_DURATION,
+            semconv::metric::HTTP_SERVER_ACTIVE_REQUESTS,
+            semconv::metric::HTTP_SERVER_REQUEST_BODY_SIZE,
+            semconv::metric::HTTP_SERVER_RESPONSE_BODY_SIZE,
+        ];
+        assert_eq!(scope_metric.metrics().count(), metric_names.len());
+        for (idx, metric) in scope_metric.metrics().enumerate() {
+            assert_eq!(metric.name(), metric_names[idx]);
+        }
+    }
+
+    async fn echo(req: http::Request<String>) -> Result<http::Response<String>, Error> {
+        Ok(http::Response::new(req.into_body()))
+    }
 }

@@ -5,7 +5,7 @@ rust-version = "1.75.0"
 
 version = "0.16.0"
 license = "Apache-2.0"
-description = "OpenTelemetry Metrics Middleware for Tower-compatible Rust HTTP servers"
+description = "OpenTelemetry Metrics and Tracing Middleware for Tower-compatible Rust HTTP servers"
 homepage = "https://github.com/open-telemetry/opentelemetry-rust-contrib"
 repository = "https://github.com/open-telemetry/opentelemetry-rust-contrib"
 documentation = "https://docs.rs/tower-otel-http-metrics"
@@ -21,12 +21,17 @@ axum = { features = ["matched-path", "macros"], version = "0.8", default-feature
 futures-util = { version = "0.3", default-features = false }
 http = { version = "1", features = ["std"], default-features = false }
 http-body = { version = "1", default-features = false }
-opentelemetry = { workspace = true, features = ["futures", "metrics"]}
+opentelemetry = { workspace = true, features = ["futures", "metrics", "trace"] }
+opentelemetry-semantic-conventions = { workspace = true, features = ["semconv_experimental"] } # Corrected feature name
 pin-project-lite = { version = "0.2", default-features = false }
 tower-service = { version = "0.3", default-features = false }
 tower-layer = { version = "0.3", default-features = false }
 
 [dev-dependencies]
+tokio = { version = "1" }
+tower = { version = "0.3" }
+tower-test = { version = "0.3" }
+opentelemetry_sdk = { workspace = true, features = ["testing"] }
 
 [lints]
 workspace = true
