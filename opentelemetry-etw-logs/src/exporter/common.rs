@@ -83,9 +83,10 @@ pub(crate) mod test_utils {
 
     use crate::exporter::options::Options;
     use crate::exporter::ETWExporter;
+    use std::collections::HashSet;
 
     pub(crate) fn new_etw_exporter() -> ETWExporter {
-        ETWExporter::new(test_options())
+        ETWExporter::new(test_options(), HashSet::new())
     }
 
     pub(crate) fn new_instrumentation_scope() -> opentelemetry::InstrumentationScope {
