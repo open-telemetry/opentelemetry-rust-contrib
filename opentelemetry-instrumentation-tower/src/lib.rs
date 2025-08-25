@@ -594,8 +594,6 @@ fn split_and_format_protocol_version(http_version: http::Version) -> (String, St
 #[cfg(test)]
 mod tests {
     use super::*;
-    #[cfg(feature = "axum")]
-    use axum::extract::MatchedPath;
     use opentelemetry::metrics::MeterProvider;
     use opentelemetry::trace::{FutureExt, TraceContextExt, Tracer, TracerProvider};
     use opentelemetry::Key;
