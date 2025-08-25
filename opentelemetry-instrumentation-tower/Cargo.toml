@@ -22,7 +22,7 @@ futures-util = { version = "0.3", default-features = false }
 http = { version = "1", features = ["std"], default-features = false }
 http-body = { version = "1", default-features = false }
 opentelemetry = { workspace = true, features = ["futures", "metrics", "trace"] }
-opentelemetry-semantic-conventions = { workspace = true, features = ["semconv_experimental"] } # Corrected feature name
+opentelemetry-semantic-conventions = { workspace = true, features = ["semconv_experimental"] }
 pin-project-lite = { version = "0.2", default-features = false }
 tower-service = { version = "0.3", default-features = false }
 tower-layer = { version = "0.3", default-features = false }
