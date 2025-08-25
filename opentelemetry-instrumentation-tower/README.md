@@ -29,10 +29,8 @@ HTTP spans are created with the following attributes (following OpenTelemetry se
 
 - `http.request.method` - HTTP method
 - `url.scheme` - URL scheme (http/https)
-- `http.target` - Request target (path + query)
+- `url.path` - Request path
 - `url.full` - Full URL
-- `http.route` - Matched route pattern (when available)
-- `server.address` - Server host
 - `user_agent.original` - User agent string
 - `http.response.status_code` - HTTP response status code
 

@@ -454,13 +454,6 @@ where
             ));
         }
 
-        if let Some(host) = req.headers().get("host").and_then(|v| v.to_str().ok()) {
-            span_attributes.push(KeyValue::new(
-                semconv::trace::SERVER_ADDRESS,
-                host.to_string(),
-            ));
-        }
-
         span_attributes.extend(custom_request_attributes.clone());
 
         let span_name = format!("{} {}", method, req.uri().path());
