@@ -279,6 +279,7 @@ impl<ReqExt, ResExt> HTTPLayerBuilder<ReqExt, ResExt> {
             Some(t) => t,
             None => BoxedTracer::new(Box::new(NoopTracer::new())),
         };
+
         match self.meter {
             Some(meter) => Ok(HTTPMetricsLayer {
                 state: Arc::from(Self::make_state(meter, req_dur_bounds, tracer)),
@@ -425,22 +426,16 @@ where
 
         #[allow(unused_mut)]
         let mut route_kv_opt = None;
-        let mut route_str = None;
         #[cfg(feature = "axum")]
         if let Some(matched_path) = req.extensions().get::<MatchedPath>() {
             let route = matched_path.as_str().to_owned();
             route_kv_opt = Some(KeyValue::new(HTTP_ROUTE_LABEL, route.clone()));
-            route_str = Some(route.clone());
         };
 
         // Extract custom request attributes
         let custom_request_attributes = self.request_extractor.extract_attributes(&req);
 
         // Start tracing span
-        let span_name = route_str
-            .clone()
-            .unwrap_or_else(|| format!("{} {}", method, req.uri().path()));
-
         let mut span_attributes = vec![
             KeyValue::new(semconv::trace::HTTP_REQUEST_METHOD, method.clone()),
             url_scheme_kv.clone(),
@@ -466,12 +461,9 @@ where
             ));
         }
 
-        if let Some(route) = &route_str {
-            span_attributes.push(KeyValue::new(semconv::trace::HTTP_ROUTE, route.clone()));
-        }
-
         span_attributes.extend(custom_request_attributes.clone());
 
+        let span_name = format!("{} {}", method, req.uri().path());
         let tracer = &self.state.tracer;
         let span = tracer
             .span_builder(span_name)
@@ -609,15 +601,15 @@ fn split_and_format_protocol_version(http_version: http::Version) -> (String, St
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[cfg(feature = "axum")]
+    use axum::extract::MatchedPath;
     use opentelemetry::metrics::MeterProvider;
     use opentelemetry::trace::{FutureExt, TraceContextExt, Tracer, TracerProvider};
     use opentelemetry::Key;
-    use opentelemetry_sdk::metrics::data::{Metric, ResourceMetrics};
     use opentelemetry_sdk::metrics::InMemoryMetricExporterBuilder;
     use opentelemetry_sdk::metrics::SdkMeterProvider;
     use opentelemetry_sdk::trace::InMemorySpanExporterBuilder;
     use opentelemetry_sdk::trace::SdkTracerProvider;
-    use opentelemetry_sdk::Resource;
     use std::result::Result;
     use tower::Service;
     use tower::ServiceBuilder;
@@ -653,8 +645,9 @@ mod tests {
 
         let request_body = "test".to_string();
         let request = http::Request::builder()
-            .uri("http://example.com")
+            .uri("http://example.com/api/users/123")
             .header("Content-Length", request_body.len().to_string())
+            .header("User-Agent", "tower-test-client/1.0")
             .body(request_body)
             .unwrap();
 
@@ -684,7 +677,7 @@ mod tests {
         // Find the HTTP span (should be the child)
         let http_span = spans
             .iter()
-            .find(|span| span.name == "GET /")
+            .find(|span| span.name == "GET /api/users/123")
             .expect("Should find HTTP span");
 
         // Find the parent span
@@ -708,19 +701,26 @@ mod tests {
         );
 
         assert_eq!(
-            http_span.name, "GET /",
+            http_span.name, "GET /api/users/123",
             "Span name should match the request"
         );
-        assert_eq!(
-            http_span.attributes,
-            vec![
-                KeyValue::new(semconv::trace::HTTP_REQUEST_METHOD, "GET".to_string()),
-                KeyValue::new(semconv::trace::URL_SCHEME, "http".to_string()),
-                KeyValue::new(semconv::trace::URL_PATH, "/".to_string()),
-                KeyValue::new(semconv::trace::URL_FULL, "http://example.com/".to_string()),
-                KeyValue::new(semconv::trace::HTTP_RESPONSE_STATUS_CODE, 200),
-            ]
-        );
+        // Build expected attributes
+        let expected_attributes = vec![
+            KeyValue::new(semconv::trace::HTTP_REQUEST_METHOD, "GET".to_string()),
+            KeyValue::new(semconv::trace::URL_SCHEME, "http".to_string()),
+            KeyValue::new(semconv::trace::URL_PATH, "/api/users/123".to_string()),
+            KeyValue::new(
+                semconv::trace::URL_FULL,
+                "http://example.com/api/users/123".to_string(),
+            ),
+            KeyValue::new(
+                semconv::trace::USER_AGENT_ORIGINAL,
+                "tower-test-client/1.0".to_string(),
+            ),
+            KeyValue::new(semconv::trace::HTTP_RESPONSE_STATUS_CODE, 200),
+        ];
+
+        assert_eq!(http_span.attributes, expected_attributes);
 
         // Verify metrics are recorded
         let resource_metrics = metric_exporter.get_finished_metrics().unwrap();
@@ -752,7 +752,7 @@ mod tests {
         let scope_metric = resource_metric.scope_metrics().next().unwrap();
         assert_eq!(scope_metric.scope().name(), "test_meter");
 
-        let metric_names = vec![
+        let metric_names = [
             semconv::metric::HTTP_SERVER_REQUEST_DURATION,
             semconv::metric::HTTP_SERVER_ACTIVE_REQUESTS,
             semconv::metric::HTTP_SERVER_REQUEST_BODY_SIZE,
