@@ -156,7 +156,7 @@ impl OtlpEncoder {
                 .map_err(|e| format!("compression failed: {e}"))?;
             blobs.push(EncodedBatch {
                 event_name: batch_event_name,
-                data: compressed,
+                data: Arc::new(compressed),
                 metadata: batch_data.metadata,
             });
         }
@@ -673,5 +673,40 @@ mod tests {
         assert_eq!(system_alert.metadata.schema_ids.matches(';').count(), 0); // 1 schema = 0 semicolons
         assert!(!log_batch.data.is_empty()); // Should have encoded data
         assert_eq!(log_batch.metadata.schema_ids.matches(';').count(), 0); // 1 schema = 0 semicolons
+    }
+
+    #[test]
+    fn test_arc_data_sharing() {
+        let encoder = OtlpEncoder::new();
+
+        let log = LogRecord {
+            event_name: "test_event".to_string(),
+            severity_number: 9,
+            severity_text: "INFO".to_string(),
+            observed_time_unix_nano: 1_700_000_000_000_000_000,
+            ..Default::default()
+        };
+
+        let metadata = "namespace=testNamespace/eventVersion=Ver1v0";
+        let result = encoder.encode_log_batch([log].iter(), metadata).unwrap();
+
+        assert_eq!(result.len(), 1);
+        let batch = &result[0];
+        
+        // Clone the batch to simulate retry scenario
+        let batch_clone = batch.clone();
+        
+        // Verify that both batches point to the same underlying data
+        // Arc::ptr_eq checks if two Arcs point to the same allocation
+        assert!(Arc::ptr_eq(&batch.data, &batch_clone.data), 
+               "Arc should share the same memory allocation after clone");
+        
+        // Verify the strong count is 2 (original + cloned)
+        assert_eq!(Arc::strong_count(&batch.data), 2,
+               "Arc should have reference count of 2 after cloning");
+        
+        // Verify that data is accessible from both references
+        assert_eq!(batch.data.len(), batch_clone.data.len());
+        assert_eq!(&**batch.data, &**batch_clone.data);
     }
 }

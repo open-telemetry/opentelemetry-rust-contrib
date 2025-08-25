@@ -2,6 +2,7 @@ pub(crate) mod uploader;
 
 #[cfg(test)]
 mod tests {
+    use std::sync::Arc;
     use std::time::Instant;
 
     mod test_helpers {
@@ -127,7 +128,7 @@ mod tests {
 
         let response = ctx
             .uploader
-            .upload(ctx.data, &ctx.event_name, &metadata)
+            .upload(Arc::new(ctx.data), &ctx.event_name, &metadata)
             .await
             .expect("Upload failed");
 
@@ -194,7 +195,7 @@ mod tests {
 
         let _ = ctx
             .uploader
-            .upload(ctx.data.clone(), &ctx.event_name, &warmup_metadata)
+            .upload(Arc::new(ctx.data.clone()), &ctx.event_name, &warmup_metadata)
             .await
             .expect("Warm-up upload failed");
         let warmup_elapsed = start_warmup.elapsed();
@@ -220,7 +221,7 @@ mod tests {
                 };
 
                 let resp = uploader
-                    .upload(data, &event_name, &metadata)
+                    .upload(Arc::new(data), &event_name, &metadata)
                     .await
                     .unwrap_or_else(|_| panic!("Upload {i} failed"));
                 let elapsed = start.elapsed();

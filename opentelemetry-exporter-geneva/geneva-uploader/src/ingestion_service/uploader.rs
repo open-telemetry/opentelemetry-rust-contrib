@@ -204,7 +204,7 @@ impl GenevaUploader {
     #[allow(dead_code)]
     pub(crate) async fn upload(
         &self,
-        data: Vec<u8>,
+        data: Arc<Vec<u8>>,
         event_name: &str,
         metadata: &BatchMetadata,
     ) -> Result<IngestionResponse> {
@@ -225,6 +225,12 @@ impl GenevaUploader {
             upload_uri
         );
         // Send the upload request
+        // Use Arc::try_unwrap for efficiency if this is the only reference,
+        // otherwise clone the data
+        let body_data = match Arc::try_unwrap(data) {
+            Ok(vec) => vec,
+            Err(arc) => (*arc).clone(),
+        };
         let response = self
             .http_client
             .post(&full_url)
@@ -232,7 +238,7 @@ impl GenevaUploader {
                 header::AUTHORIZATION,
                 format!("Bearer {}", auth_info.auth_token),
             )
-            .body(data)
+            .body(body_data)
             .send()
             .await?;
         let status = response.status();
