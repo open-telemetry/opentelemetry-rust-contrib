@@ -692,19 +692,24 @@ mod tests {
 
         assert_eq!(result.len(), 1);
         let batch = &result[0];
-        
+
         // Clone the batch to simulate retry scenario
         let batch_clone = batch.clone();
-        
+
         // Verify that both batches point to the same underlying data
         // Arc::ptr_eq checks if two Arcs point to the same allocation
-        assert!(Arc::ptr_eq(&batch.data, &batch_clone.data), 
-               "Arc should share the same memory allocation after clone");
-        
+        assert!(
+            Arc::ptr_eq(&batch.data, &batch_clone.data),
+            "Arc should share the same memory allocation after clone"
+        );
+
         // Verify the strong count is 2 (original + cloned)
-        assert_eq!(Arc::strong_count(&batch.data), 2,
-               "Arc should have reference count of 2 after cloning");
-        
+        assert_eq!(
+            Arc::strong_count(&batch.data),
+            2,
+            "Arc should have reference count of 2 after cloning"
+        );
+
         // Verify that data is accessible from both references
         assert_eq!(batch.data.len(), batch_clone.data.len());
         assert_eq!(&**batch.data, &**batch_clone.data);

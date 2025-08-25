@@ -195,7 +195,11 @@ mod tests {
 
         let _ = ctx
             .uploader
-            .upload(Arc::new(ctx.data.clone()), &ctx.event_name, &warmup_metadata)
+            .upload(
+                Arc::new(ctx.data.clone()),
+                &ctx.event_name,
+                &warmup_metadata,
+            )
             .await
             .expect("Warm-up upload failed");
         let warmup_elapsed = start_warmup.elapsed();
