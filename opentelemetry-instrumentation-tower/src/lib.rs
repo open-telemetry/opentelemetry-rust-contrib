@@ -13,6 +13,7 @@ use axum::extract::MatchedPath;
 use futures_util::ready;
 use opentelemetry::metrics::{Histogram, Meter, UpDownCounter};
 use opentelemetry::KeyValue;
+use opentelemetry_semantic_conventions as semconv;
 use pin_project_lite::pin_project;
 use tower_layer::Layer;
 use tower_service::Service;
@@ -31,29 +32,23 @@ const _OTEL_DEFAULT_HTTP_SERVER_DURATION_BOUNDARIES: [f64; 14] = [
 const LIBRARY_DEFAULT_HTTP_SERVER_DURATION_BOUNDARIES: [f64; 14] = [
     0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1.0, 2.5, 5.0, 10.0, 30.0, 60.0, 120.0, 300.0,
 ];
-const HTTP_SERVER_ACTIVE_REQUESTS_METRIC: &str =
-    opentelemetry_semantic_conventions::metric::HTTP_SERVER_ACTIVE_REQUESTS;
+const HTTP_SERVER_ACTIVE_REQUESTS_METRIC: &str = semconv::metric::HTTP_SERVER_ACTIVE_REQUESTS;
 const HTTP_SERVER_ACTIVE_REQUESTS_UNIT: &str = "{request}";
 
-const HTTP_SERVER_REQUEST_BODY_SIZE_METRIC: &str =
-    opentelemetry_semantic_conventions::metric::HTTP_SERVER_REQUEST_BODY_SIZE;
+const HTTP_SERVER_REQUEST_BODY_SIZE_METRIC: &str = semconv::metric::HTTP_SERVER_REQUEST_BODY_SIZE;
 const HTTP_SERVER_REQUEST_BODY_SIZE_UNIT: &str = "By";
 
-const HTTP_SERVER_RESPONSE_BODY_SIZE_METRIC: &str =
-    opentelemetry_semantic_conventions::metric::HTTP_SERVER_RESPONSE_BODY_SIZE;
+const HTTP_SERVER_RESPONSE_BODY_SIZE_METRIC: &str = semconv::metric::HTTP_SERVER_RESPONSE_BODY_SIZE;
 const HTTP_SERVER_RESPONSE_BODY_SIZE_UNIT: &str = "By";
 
-const NETWORK_PROTOCOL_NAME_LABEL: &str =
-    opentelemetry_semantic_conventions::attribute::NETWORK_PROTOCOL_NAME;
+const NETWORK_PROTOCOL_NAME_LABEL: &str = semconv::attribute::NETWORK_PROTOCOL_NAME;
 const NETWORK_PROTOCOL_VERSION_LABEL: &str = "network.protocol.version";
 const URL_SCHEME_LABEL: &str = "url.scheme";
 
-const HTTP_REQUEST_METHOD_LABEL: &str =
-    opentelemetry_semantic_conventions::trace::HTTP_REQUEST_METHOD;
+const HTTP_REQUEST_METHOD_LABEL: &str = semconv::trace::HTTP_REQUEST_METHOD;
 #[allow(dead_code)] // cargo check is not smart
-const HTTP_ROUTE_LABEL: &str = opentelemetry_semantic_conventions::trace::HTTP_ROUTE;
-const HTTP_RESPONSE_STATUS_CODE_LABEL: &str =
-    opentelemetry_semantic_conventions::attribute::HTTP_RESPONSE_STATUS_CODE;
+const HTTP_ROUTE_LABEL: &str = semconv::trace::HTTP_ROUTE;
+const HTTP_RESPONSE_STATUS_CODE_LABEL: &str = semconv::attribute::HTTP_RESPONSE_STATUS_CODE;
 
 /// Trait for extracting custom attributes from HTTP requests
 pub trait RequestAttributeExtractor<B>: Clone + Send + Sync + 'static {
