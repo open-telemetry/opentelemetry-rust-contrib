@@ -495,11 +495,15 @@ pub unsafe extern "C" fn geneva_client_free(handle: *mut GenevaClientHandle) {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use opentelemetry_proto::tonic::collector::logs::v1::ExportLogsServiceRequest;
-    use prost::Message;
     use std::ffi::CString;
 
+    #[cfg(feature = "mock_auth")]
+    use opentelemetry_proto::tonic::collector::logs::v1::ExportLogsServiceRequest;
+    #[cfg(feature = "mock_auth")]
+    use prost::Message;
+
     // Build a minimal unsigned JWT with the Endpoint claim and an exp. Matches what extract_endpoint_from_token expects.
+    #[cfg(feature = "mock_auth")]
     fn generate_mock_jwt_and_expiry(endpoint: &str, ttl_secs: i64) -> (String, String) {
         use base64::{engine::general_purpose::URL_SAFE_NO_PAD, Engine as _};
         use chrono::{Duration, Utc};
@@ -716,6 +720,7 @@ mod tests {
     // Integration-style test: encode via FFI then upload via FFI using MockAuth + Wiremock server.
     // Uses otlp_builder to construct an ExportLogsServiceRequest payload.
     #[test]
+    #[cfg(feature = "mock_auth")]
     fn test_encode_and_upload_with_mock_server() {
         use otlp_builder::builder::build_otlp_logs_minimal;
         use wiremock::matchers::method;
@@ -827,6 +832,7 @@ mod tests {
     // multiple different event_names in one request produce multiple batches,
     // and each batch upload hits ingestion with the corresponding event query param.
     #[test]
+    #[cfg(feature = "mock_auth")]
     fn test_encode_batching_by_event_name_and_upload() {
         use wiremock::matchers::method;
         use wiremock::{Mock, MockServer, ResponseTemplate};
@@ -945,7 +951,7 @@ mod tests {
                 let reqs = mock_server.received_requests().await.unwrap();
                 let posts: Vec<String> = reqs
                     .iter()
-                    .filter(|r| r.method.as_str() == "POST")
+                    .filter(|r| r.method.as_ref() == "POST")
                     .map(|r| r.url.to_string())
                     .collect();
 
