@@ -28,6 +28,9 @@ tower-service = { version = "0.3", default-features = false }
 tower-layer = { version = "0.3", default-features = false }
 
 [dev-dependencies]
+opentelemetry_sdk = { workspace = true, features = ["metrics", "testing"] }
+tokio = { version = "1.0", features = ["macros", "rt"] }
+tower = { version = "0.5", features = ["util"] }
 
 [lints]
 workspace = true
