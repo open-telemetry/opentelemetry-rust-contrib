@@ -18,7 +18,7 @@ use pin_project_lite::pin_project;
 use tower_layer::Layer;
 use tower_service::Service;
 
-const HTTP_SERVER_DURATION_METRIC: &str = "http.server.request.duration";
+const HTTP_SERVER_DURATION_METRIC: &str = semconv::metric::HTTP_SERVER_REQUEST_DURATION;
 const HTTP_SERVER_DURATION_UNIT: &str = "s";
 
 const _OTEL_DEFAULT_HTTP_SERVER_DURATION_BOUNDARIES: [f64; 14] = [
