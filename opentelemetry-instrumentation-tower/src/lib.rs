@@ -630,6 +630,24 @@ mod tests {
                 // Request body size metric should have 5 attributes: protocol_name, protocol_version, url_scheme, method, status_code
                 assert_eq!(attributes.len(), 5, "Request body size metric should have exactly 5 attributes");
 
+                let protocol_name = attributes
+                    .iter()
+                    .find(|kv| kv.key.as_str() == NETWORK_PROTOCOL_NAME_LABEL)
+                    .expect("Protocol name should be present in request body size");
+                assert_eq!(protocol_name.value.as_str(), "http");
+
+                let protocol_version = attributes
+                    .iter()
+                    .find(|kv| kv.key.as_str() == NETWORK_PROTOCOL_VERSION_LABEL)
+                    .expect("Protocol version should be present in request body size");
+                assert_eq!(protocol_version.value.as_str(), "1.1");
+
+                let url_scheme = attributes
+                    .iter()
+                    .find(|kv| kv.key.as_str() == URL_SCHEME_LABEL)
+                    .expect("URL scheme should be present in request body size");
+                assert_eq!(url_scheme.value.as_str(), "https");
+
                 let method = attributes
                     .iter()
                     .find(|kv| kv.key.as_str() == HTTP_REQUEST_METHOD_LABEL)
@@ -663,6 +681,24 @@ mod tests {
 
                 // Response body size metric should have 5 attributes: protocol_name, protocol_version, url_scheme, method, status_code
                 assert_eq!(attributes.len(), 5, "Response body size metric should have exactly 5 attributes");
+
+                let protocol_name = attributes
+                    .iter()
+                    .find(|kv| kv.key.as_str() == NETWORK_PROTOCOL_NAME_LABEL)
+                    .expect("Protocol name should be present in response body size");
+                assert_eq!(protocol_name.value.as_str(), "http");
+
+                let protocol_version = attributes
+                    .iter()
+                    .find(|kv| kv.key.as_str() == NETWORK_PROTOCOL_VERSION_LABEL)
+                    .expect("Protocol version should be present in response body size");
+                assert_eq!(protocol_version.value.as_str(), "1.1");
+
+                let url_scheme = attributes
+                    .iter()
+                    .find(|kv| kv.key.as_str() == URL_SCHEME_LABEL)
+                    .expect("URL scheme should be present in response body size");
+                assert_eq!(url_scheme.value.as_str(), "https");
 
                 let method = attributes
                     .iter()
