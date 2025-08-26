@@ -575,6 +575,9 @@ mod tests {
                 .expect("Should have data point");
             let attributes: Vec<_> = data_point.attributes().collect();
 
+            // Duration metric should have 5 attributes: protocol_name, protocol_version, url_scheme, method, status_code
+            assert_eq!(attributes.len(), 5, "Duration metric should have exactly 5 attributes");
+
             let protocol_name = attributes
                 .iter()
                 .find(|kv| kv.key.as_str() == NETWORK_PROTOCOL_NAME_LABEL)
@@ -592,6 +595,12 @@ mod tests {
                 .find(|kv| kv.key.as_str() == URL_SCHEME_LABEL)
                 .expect("URL scheme should be present");
             assert_eq!(url_scheme.value.as_str(), "https");
+
+            let method = attributes
+                .iter()
+                .find(|kv| kv.key.as_str() == HTTP_REQUEST_METHOD_LABEL)
+                .expect("HTTP method should be present");
+            assert_eq!(method.value.as_str(), "GET");
 
             let status_code = attributes
                 .iter()
@@ -617,6 +626,9 @@ mod tests {
                     .next()
                     .expect("Should have data point");
                 let attributes: Vec<_> = data_point.attributes().collect();
+
+                // Request body size metric should have 5 attributes: protocol_name, protocol_version, url_scheme, method, status_code
+                assert_eq!(attributes.len(), 5, "Request body size metric should have exactly 5 attributes");
 
                 let method = attributes
                     .iter()
@@ -649,6 +661,9 @@ mod tests {
                     .expect("Should have data point");
                 let attributes: Vec<_> = data_point.attributes().collect();
 
+                // Response body size metric should have 5 attributes: protocol_name, protocol_version, url_scheme, method, status_code
+                assert_eq!(attributes.len(), 5, "Response body size metric should have exactly 5 attributes");
+
                 let method = attributes
                     .iter()
                     .find(|kv| kv.key.as_str() == HTTP_REQUEST_METHOD_LABEL)
@@ -676,6 +691,9 @@ mod tests {
             if let AggregatedMetrics::I64(MetricData::Sum(sum)) = metric.data() {
                 let data_point = sum.data_points().next().expect("Should have data point");
                 let attributes: Vec<_> = data_point.attributes().collect();
+
+                // Active requests metric should have 2 attributes: method, url_scheme
+                assert_eq!(attributes.len(), 2, "Active requests metric should have exactly 2 attributes");
 
                 let method = attributes
                     .iter()
