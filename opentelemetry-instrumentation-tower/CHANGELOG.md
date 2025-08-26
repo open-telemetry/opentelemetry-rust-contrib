@@ -12,8 +12,8 @@
   - `HTTP_SERVER_DURATION_METRIC` now uses `semconv::metric::HTTP_SERVER_REQUEST_DURATION`
 * Update attribute keys to use semantic conventions constants:
   - `NETWORK_PROTOCOL_NAME_LABEL` now uses `semconv::attribute::NETWORK_PROTOCOL_NAME`
-  - `HTTP_REQUEST_METHOD_LABEL` now uses `semconv::trace::HTTP_REQUEST_METHOD`
-  - `HTTP_ROUTE_LABEL` now uses `semconv::trace::HTTP_ROUTE`
+  - `HTTP_REQUEST_METHOD_LABEL` now uses `semconv::attribute::HTTP_REQUEST_METHOD`
+  - `HTTP_ROUTE_LABEL` now uses `semconv::attribute::HTTP_ROUTE`
   - `HTTP_RESPONSE_STATUS_CODE_LABEL` now uses `semconv::attribute::HTTP_RESPONSE_STATUS_CODE`
 
 ### Added

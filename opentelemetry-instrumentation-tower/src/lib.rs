@@ -45,9 +45,9 @@ const NETWORK_PROTOCOL_NAME_LABEL: &str = semconv::attribute::NETWORK_PROTOCOL_N
 const NETWORK_PROTOCOL_VERSION_LABEL: &str = "network.protocol.version";
 const URL_SCHEME_LABEL: &str = "url.scheme";
 
-const HTTP_REQUEST_METHOD_LABEL: &str = semconv::trace::HTTP_REQUEST_METHOD;
+const HTTP_REQUEST_METHOD_LABEL: &str = semconv::attribute::HTTP_REQUEST_METHOD;
 #[cfg(feature = "axum")]
-const HTTP_ROUTE_LABEL: &str = semconv::trace::HTTP_ROUTE;
+const HTTP_ROUTE_LABEL: &str = semconv::attribute::HTTP_ROUTE;
 const HTTP_RESPONSE_STATUS_CODE_LABEL: &str = semconv::attribute::HTTP_RESPONSE_STATUS_CODE;
 
 /// Trait for extracting custom attributes from HTTP requests
@@ -576,7 +576,11 @@ mod tests {
             let attributes: Vec<_> = data_point.attributes().collect();
 
             // Duration metric should have 5 attributes: protocol_name, protocol_version, url_scheme, method, status_code
-            assert_eq!(attributes.len(), 5, "Duration metric should have exactly 5 attributes");
+            assert_eq!(
+                attributes.len(),
+                5,
+                "Duration metric should have exactly 5 attributes"
+            );
 
             let protocol_name = attributes
                 .iter()
@@ -628,7 +632,11 @@ mod tests {
                 let attributes: Vec<_> = data_point.attributes().collect();
 
                 // Request body size metric should have 5 attributes: protocol_name, protocol_version, url_scheme, method, status_code
-                assert_eq!(attributes.len(), 5, "Request body size metric should have exactly 5 attributes");
+                assert_eq!(
+                    attributes.len(),
+                    5,
+                    "Request body size metric should have exactly 5 attributes"
+                );
 
                 let protocol_name = attributes
                     .iter()
@@ -680,7 +688,11 @@ mod tests {
                 let attributes: Vec<_> = data_point.attributes().collect();
 
                 // Response body size metric should have 5 attributes: protocol_name, protocol_version, url_scheme, method, status_code
-                assert_eq!(attributes.len(), 5, "Response body size metric should have exactly 5 attributes");
+                assert_eq!(
+                    attributes.len(),
+                    5,
+                    "Response body size metric should have exactly 5 attributes"
+                );
 
                 let protocol_name = attributes
                     .iter()
@@ -729,7 +741,11 @@ mod tests {
                 let attributes: Vec<_> = data_point.attributes().collect();
 
                 // Active requests metric should have 2 attributes: method, url_scheme
-                assert_eq!(attributes.len(), 2, "Active requests metric should have exactly 2 attributes");
+                assert_eq!(
+                    attributes.len(),
+                    2,
+                    "Active requests metric should have exactly 2 attributes"
+                );
 
                 let method = attributes
                     .iter()
