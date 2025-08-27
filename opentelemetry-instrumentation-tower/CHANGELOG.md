@@ -5,7 +5,7 @@
 ### Changed
 
 * Migrate to use `opentelemetry-semantic-conventions` package for metric names and attribute keys instead of hardcoded strings
-* Update metric names to use semantic conventions constants:
+* Add dependency on otel semantic conventions crate and use constants from it instead of hardcoded attribute names. The values are unchanged
   - `HTTP_SERVER_ACTIVE_REQUESTS_METRIC` now uses `semconv::metric::HTTP_SERVER_ACTIVE_REQUESTS`
   - `HTTP_SERVER_REQUEST_BODY_SIZE_METRIC` now uses `semconv::metric::HTTP_SERVER_REQUEST_BODY_SIZE`
   - `HTTP_SERVER_RESPONSE_BODY_SIZE_METRIC` now uses `semconv::metric::HTTP_SERVER_RESPONSE_BODY_SIZE`
