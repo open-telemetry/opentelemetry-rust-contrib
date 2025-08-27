@@ -34,23 +34,23 @@ const _OTEL_DEFAULT_HTTP_SERVER_DURATION_BOUNDARIES: [f64; 14] = [
 const LIBRARY_DEFAULT_HTTP_SERVER_DURATION_BOUNDARIES: [f64; 14] = [
     0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1.0, 2.5, 5.0, 10.0, 30.0, 60.0, 120.0, 300.0,
 ];
-const HTTP_SERVER_ACTIVE_REQUESTS_METRIC: &str = semconv::metric::HTTP_SERVER_ACTIVE_REQUESTS;
+const HTTP_SERVER_ACTIVE_REQUESTS_METRIC: &str = "http.server.active_requests";
 const HTTP_SERVER_ACTIVE_REQUESTS_UNIT: &str = "{request}";
 
-const HTTP_SERVER_REQUEST_BODY_SIZE_METRIC: &str = semconv::metric::HTTP_SERVER_REQUEST_BODY_SIZE;
+const HTTP_SERVER_REQUEST_BODY_SIZE_METRIC: &str = "http.server.request.body.size";
 const HTTP_SERVER_REQUEST_BODY_SIZE_UNIT: &str = "By";
 
-const HTTP_SERVER_RESPONSE_BODY_SIZE_METRIC: &str = semconv::metric::HTTP_SERVER_RESPONSE_BODY_SIZE;
+const HTTP_SERVER_RESPONSE_BODY_SIZE_METRIC: &str = "http.server.response.body.size";
 const HTTP_SERVER_RESPONSE_BODY_SIZE_UNIT: &str = "By";
 
-const NETWORK_PROTOCOL_NAME_LABEL: &str = semconv::trace::NETWORK_PROTOCOL_NAME;
-const NETWORK_PROTOCOL_VERSION_LABEL: &str = semconv::trace::NETWORK_PROTOCOL_VERSION;
-const URL_SCHEME_LABEL: &str = semconv::trace::URL_SCHEME;
+const NETWORK_PROTOCOL_NAME_LABEL: &str = "network.protocol.name";
+const NETWORK_PROTOCOL_VERSION_LABEL: &str = "network.protocol.version";
+const URL_SCHEME_LABEL: &str = "url.scheme";
 
-const HTTP_REQUEST_METHOD_LABEL: &str = semconv::trace::HTTP_REQUEST_METHOD;
+const HTTP_REQUEST_METHOD_LABEL: &str = "http.request.method";
 #[allow(dead_code)] // cargo check is not smart
-const HTTP_ROUTE_LABEL: &str = semconv::trace::HTTP_ROUTE;
-const HTTP_RESPONSE_STATUS_CODE_LABEL: &str = semconv::trace::HTTP_RESPONSE_STATUS_CODE;
+const HTTP_ROUTE_LABEL: &str = "http.route";
+const HTTP_RESPONSE_STATUS_CODE_LABEL: &str = "http.response.status_code";
 
 /// Trait for extracting custom attributes from HTTP requests
 pub trait RequestAttributeExtractor<B>: Clone + Send + Sync + 'static {
@@ -718,7 +718,7 @@ mod tests {
         for (idx, metric) in scope_metric.metrics().enumerate() {
             assert_eq!(metric.name(), metric_names[idx]);
         }
-        
+
         // Reset to noop providers to avoid test interference
         global::set_tracer_provider(opentelemetry_sdk::trace::SdkTracerProvider::default());
         global::set_meter_provider(opentelemetry_sdk::metrics::SdkMeterProvider::default());
