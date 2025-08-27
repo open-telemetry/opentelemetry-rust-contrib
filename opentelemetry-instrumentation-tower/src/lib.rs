@@ -147,15 +147,6 @@ pub struct HTTPLayer<ReqExt = NoOpExtractor, ResExt = NoOpExtractor> {
     response_extractor: ResExt,
 }
 
-// Type aliases for backward compatibility
-pub type HTTPMetricsLayer<ReqExt = NoOpExtractor, ResExt = NoOpExtractor> =
-    HTTPLayer<ReqExt, ResExt>;
-pub type HTTPMetricsService<S, ReqExt = NoOpExtractor, ResExt = NoOpExtractor> =
-    HTTPService<S, ReqExt, ResExt>;
-pub type HTTPMetricsResponseFuture<F, ResExt> = HTTPResponseFuture<F, ResExt>;
-pub type HTTPMetricsLayerBuilder<ReqExt = NoOpExtractor, ResExt = NoOpExtractor> =
-    HTTPLayerBuilder<ReqExt, ResExt>;
-
 pub struct HTTPLayerBuilder<ReqExt = NoOpExtractor, ResExt = NoOpExtractor> {
     req_dur_bounds: Option<Vec<f64>>,
     request_extractor: ReqExt,
@@ -266,7 +257,7 @@ impl<ReqExt, ResExt> HTTPLayerBuilder<ReqExt, ResExt> {
             .req_dur_bounds
             .unwrap_or_else(|| LIBRARY_DEFAULT_HTTP_SERVER_DURATION_BOUNDARIES.to_vec());
 
-        Ok(HTTPMetricsLayer {
+        Ok(HTTPLayer {
             state: Arc::from(Self::make_state(req_dur_bounds)),
             request_extractor: self.request_extractor,
             response_extractor: self.response_extractor,

@@ -4,14 +4,22 @@
 
 ### Changed
 
-* **BREAKING**: Removed `with_meter()` method from `HTTPLayerBuilder`. The middleware now uses global providers.
+* **BREAKING**: Removed `with_meter()` method. The middleware now uses global meter and tracer providers via `opentelemetry::global::meter()` and `opentelemetry::global::tracer()`.
+* **BREAKING**: Renamed types. Use the new names:
+  - `HTTPMetricsLayer` → `HTTPLayer`
+  - `HTTPMetricsService` → `HTTPService`
+  - `HTTPMetricsResponseFuture` → `HTTPResponseFuture`
+  - `HTTPMetricsLayerBuilder` → `HTTPLayerBuilder`
 * Added OpenTelemetry trace support
 
 ### Migration Guide
 
+#### API Changes
 Before:
 ```rust
-let layer = HTTPLayerBuilder::builder()
+use opentelemetry_instrumentation_tower::HTTPMetricsLayerBuilder;
+
+let layer = HTTPMetricsLayerBuilder::builder()
     .with_meter(meter)
     .build()
     .unwrap();
@@ -19,6 +27,8 @@ let layer = HTTPLayerBuilder::builder()
 
 After:
 ```rust
+use opentelemetry_instrumentation_tower::HTTPLayerBuilder;
+
 // Set global providers first
 global::set_meter_provider(meter_provider);
 global::set_tracer_provider(tracer_provider); // for tracing support
@@ -28,3 +38,9 @@ let layer = HTTPLayerBuilder::builder()
     .build()
     .unwrap();
 ```
+
+#### Type Name Changes
+- Replace `HTTPMetricsLayerBuilder` with `HTTPLayerBuilder`
+- Replace `HTTPMetricsLayer` with `HTTPLayer`
+- Replace `HTTPMetricsService` with `HTTPService`
+- Replace `HTTPMetricsResponseFuture` with `HTTPResponseFuture`
