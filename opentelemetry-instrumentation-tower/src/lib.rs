@@ -11,9 +11,8 @@ use std::{fmt, result};
 #[cfg(feature = "axum")]
 use axum::extract::MatchedPath;
 use futures_util::ready;
-use opentelemetry::global::BoxedTracer;
-use opentelemetry::metrics::{Histogram, Meter, UpDownCounter};
-use opentelemetry::trace::noop::NoopTracer;
+use opentelemetry::global;
+use opentelemetry::metrics::{Histogram, UpDownCounter};
 use opentelemetry::trace::{SpanKind, Status, TraceContextExt, Tracer};
 use opentelemetry::{Context as OtelContext, KeyValue};
 use opentelemetry_semantic_conventions as semconv;
@@ -123,13 +122,12 @@ where
 
 /// State scoped to the entire middleware Layer.
 ///
-/// Holds both metrics instruments and tracing configuration.
+/// Holds metrics instruments.
 struct HTTPLayerState {
     pub server_request_duration: Histogram<f64>,
     pub server_active_requests: UpDownCounter<i64>,
     pub server_request_body_size: Histogram<u64>,
     pub server_response_body_size: Histogram<u64>,
-    pub tracer: BoxedTracer,
 }
 
 #[derive(Clone)]
@@ -159,8 +157,6 @@ pub type HTTPMetricsLayerBuilder<ReqExt = NoOpExtractor, ResExt = NoOpExtractor>
     HTTPLayerBuilder<ReqExt, ResExt>;
 
 pub struct HTTPLayerBuilder<ReqExt = NoOpExtractor, ResExt = NoOpExtractor> {
-    meter: Option<Meter>,
-    tracer: Option<BoxedTracer>,
     req_dur_bounds: Option<Vec<f64>>,
     request_extractor: ReqExt,
     response_extractor: ResExt,
@@ -205,8 +201,6 @@ impl fmt::Debug for Error {
 impl HTTPLayerBuilder {
     pub fn builder() -> Self {
         HTTPLayerBuilder {
-            meter: None,
-            tracer: None,
             req_dur_bounds: Some(LIBRARY_DEFAULT_HTTP_SERVER_DURATION_BOUNDARIES.to_vec()),
             request_extractor: NoOpExtractor,
             response_extractor: NoOpExtractor,
@@ -224,8 +218,6 @@ impl<ReqExt, ResExt> HTTPLayerBuilder<ReqExt, ResExt> {
         NewReqExt: RequestAttributeExtractor<B>,
     {
         HTTPLayerBuilder {
-            meter: self.meter,
-            tracer: self.tracer,
             req_dur_bounds: self.req_dur_bounds,
             request_extractor: extractor,
             response_extractor: self.response_extractor,
@@ -241,8 +233,6 @@ impl<ReqExt, ResExt> HTTPLayerBuilder<ReqExt, ResExt> {
         NewResExt: ResponseAttributeExtractor<B>,
     {
         HTTPLayerBuilder {
-            meter: self.meter,
-            tracer: self.tracer,
             req_dur_bounds: self.req_dur_bounds,
             request_extractor: self.request_extractor,
             response_extractor: extractor,
@@ -275,26 +265,12 @@ impl<ReqExt, ResExt> HTTPLayerBuilder<ReqExt, ResExt> {
         let req_dur_bounds = self
             .req_dur_bounds
             .unwrap_or_else(|| LIBRARY_DEFAULT_HTTP_SERVER_DURATION_BOUNDARIES.to_vec());
-        let tracer = match self.tracer {
-            Some(t) => t,
-            None => BoxedTracer::new(Box::new(NoopTracer::new())),
-        };
 
-        match self.meter {
-            Some(meter) => Ok(HTTPMetricsLayer {
-                state: Arc::from(Self::make_state(meter, req_dur_bounds, tracer)),
-                request_extractor: self.request_extractor,
-                response_extractor: self.response_extractor,
-            }),
-            None => Err(Error {
-                inner: ErrorKind::Config(String::from("no meter provided")),
-            }),
-        }
-    }
-
-    pub fn with_meter(mut self, meter: Meter) -> Self {
-        self.meter = Some(meter);
-        self
+        Ok(HTTPMetricsLayer {
+            state: Arc::from(Self::make_state(req_dur_bounds)),
+            request_extractor: self.request_extractor,
+            response_extractor: self.response_extractor,
+        })
     }
 
     pub fn with_request_duration_bounds(mut self, bounds: Vec<f64>) -> Self {
@@ -302,12 +278,8 @@ impl<ReqExt, ResExt> HTTPLayerBuilder<ReqExt, ResExt> {
         self
     }
 
-    pub fn with_tracer(mut self, tracer: BoxedTracer) -> Self {
-        self.tracer = Some(tracer);
-        self
-    }
-
-    fn make_state(meter: Meter, req_dur_bounds: Vec<f64>, tracer: BoxedTracer) -> HTTPLayerState {
+    fn make_state(req_dur_bounds: Vec<f64>) -> HTTPLayerState {
+        let meter = global::meter("opentelemetry-instrumentation-tower");
         HTTPLayerState {
             server_request_duration: meter
                 .f64_histogram(Cow::from(HTTP_SERVER_DURATION_METRIC))
@@ -330,7 +302,6 @@ impl<ReqExt, ResExt> HTTPLayerBuilder<ReqExt, ResExt> {
                 .with_description("Size of HTTP server response bodies.")
                 .with_unit(HTTP_SERVER_RESPONSE_BODY_SIZE_UNIT)
                 .build(),
-            tracer,
         }
     }
 }
@@ -457,12 +428,12 @@ where
         span_attributes.extend(custom_request_attributes.clone());
 
         let span_name = format!("{} {}", method, req.uri().path());
-        let tracer = &self.state.tracer;
+        let tracer = global::tracer("opentelemetry-instrumentation-tower");
         let span = tracer
             .span_builder(span_name)
             .with_kind(SpanKind::Server)
             .with_attributes(span_attributes)
-            .start(tracer);
+            .start(&tracer);
         let ctx = OtelContext::current_with_span(span);
 
         self.state
@@ -594,8 +565,8 @@ fn split_and_format_protocol_version(http_version: http::Version) -> (String, St
 #[cfg(test)]
 mod tests {
     use super::*;
-    use opentelemetry::metrics::MeterProvider;
-    use opentelemetry::trace::{FutureExt, TraceContextExt, Tracer, TracerProvider};
+
+    use opentelemetry::trace::{FutureExt, TraceContextExt, Tracer};
     use opentelemetry::Key;
     use opentelemetry_sdk::metrics::InMemoryMetricExporterBuilder;
     use opentelemetry_sdk::metrics::SdkMeterProvider;
@@ -612,19 +583,19 @@ mod tests {
         let tracer_provider = SdkTracerProvider::builder()
             .with_simple_exporter(trace_exporter.clone())
             .build();
-        let tracer = tracer_provider.tracer("test_tracer");
 
         let metric_exporter = InMemoryMetricExporterBuilder::new().build();
         let meter_provider = SdkMeterProvider::builder()
             .with_periodic_exporter(metric_exporter.clone())
             .build();
-        let meter = meter_provider.meter("test_meter");
 
-        let layer = HTTPLayerBuilder::builder()
-            .with_tracer(BoxedTracer::new(Box::new(tracer.clone())))
-            .with_meter(meter)
-            .build()
-            .unwrap();
+        // Set global providers
+        global::set_tracer_provider(tracer_provider.clone());
+        global::set_meter_provider(meter_provider.clone());
+
+        let tracer = global::tracer("test_tracer");
+
+        let layer = HTTPLayerBuilder::builder().build().unwrap();
 
         let mut service = ServiceBuilder::new()
             .layer(layer)
@@ -741,7 +712,10 @@ mod tests {
 
         assert_eq!(resource_metric.scope_metrics().count(), 1);
         let scope_metric = resource_metric.scope_metrics().next().unwrap();
-        assert_eq!(scope_metric.scope().name(), "test_meter");
+        assert_eq!(
+            scope_metric.scope().name(),
+            "opentelemetry-instrumentation-tower"
+        );
 
         let metric_names = [
             semconv::metric::HTTP_SERVER_REQUEST_DURATION,
@@ -753,6 +727,10 @@ mod tests {
         for (idx, metric) in scope_metric.metrics().enumerate() {
             assert_eq!(metric.name(), metric_names[idx]);
         }
+        
+        // Reset to noop providers to avoid test interference
+        global::set_tracer_provider(opentelemetry_sdk::trace::SdkTracerProvider::default());
+        global::set_meter_provider(opentelemetry_sdk::metrics::SdkMeterProvider::default());
     }
 
     async fn echo(req: http::Request<String>) -> Result<http::Response<String>, Error> {
