@@ -46,8 +46,8 @@ const HTTP_SERVER_RESPONSE_BODY_SIZE_METRIC: &str = semconv::metric::HTTP_SERVER
 const HTTP_SERVER_RESPONSE_BODY_SIZE_UNIT: &str = "By";
 
 const NETWORK_PROTOCOL_NAME_LABEL: &str = semconv::attribute::NETWORK_PROTOCOL_NAME;
-const NETWORK_PROTOCOL_VERSION_LABEL: &str = "network.protocol.version";
-const URL_SCHEME_LABEL: &str = "url.scheme";
+const NETWORK_PROTOCOL_VERSION_LABEL: &str = semconv::attribute::NETWORK_PROTOCOL_VERSION;
+const URL_SCHEME_LABEL: &str = semconv::attribute::URL_SCHEME;
 
 const HTTP_REQUEST_METHOD_LABEL: &str = semconv::attribute::HTTP_REQUEST_METHOD;
 #[cfg(feature = "axum")]
