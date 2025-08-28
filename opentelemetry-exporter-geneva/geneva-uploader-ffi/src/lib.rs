@@ -830,6 +830,7 @@ mod tests {
     fn test_encode_batching_by_event_name_and_upload() {
         use wiremock::matchers::method;
         use wiremock::{Mock, MockServer, ResponseTemplate};
+        use wiremock::http::Method;
 
         // Start mock server
         let mock_server = runtime().block_on(async { MockServer::start().await });
@@ -945,7 +946,7 @@ mod tests {
                 let reqs = mock_server.received_requests().await.unwrap();
                 let posts: Vec<String> = reqs
                     .iter()
-                    .filter(|r| r.method.as_str() == "POST")
+                    .filter(|r| r.method == Method::Post)
                     .map(|r| r.url.to_string())
                     .collect();
 
