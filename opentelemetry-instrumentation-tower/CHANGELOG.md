@@ -4,7 +4,7 @@
 
 ### Changed
 
-* **BREAKING**: Removed `with_meter()` method. The middleware now uses global meter and tracer providers via `opentelemetry::global::meter()` and `opentelemetry::global::tracer()`.
+* **BREAKING**: Removed `with_meter()` method. The middleware now uses global meter and tracer providers by default via `opentelemetry::global::meter()` and `opentelemetry::global::tracer()`, with optional overrides via `with_tracer_provider()` and `with_meter_provider()` methods.
 * **BREAKING**: Renamed types. Use the new names:
   - `HTTPMetricsLayer` → `HTTPLayer`
   - `HTTPMetricsService` → `HTTPService`
