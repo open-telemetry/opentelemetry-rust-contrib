@@ -150,6 +150,19 @@ pub struct HTTPLayer<ReqExt = NoOpExtractor, ResExt = NoOpExtractor> {
     response_extractor: ResExt,
 }
 
+impl HTTPLayer {
+    /// Create a new HTTP layer with default configuration using global providers
+    pub fn new() -> Self {
+        HTTPLayerBuilder::builder().build().unwrap()
+    }
+}
+
+impl Default for HTTPLayer {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 pub struct HTTPLayerBuilder<ReqExt = NoOpExtractor, ResExt = NoOpExtractor> {
     tracer_provider: Option<SdkTracerProvider>,
     meter_provider: Option<Box<dyn MeterProvider + Send + Sync>>,

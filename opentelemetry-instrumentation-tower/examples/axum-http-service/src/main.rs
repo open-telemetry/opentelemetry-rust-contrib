@@ -1,7 +1,9 @@
 use axum::routing::{get, post, put, Router};
 use bytes::Bytes;
 use opentelemetry::global;
-use opentelemetry_instrumentation_tower as otel_tower_metrics;
+use opentelemetry_instrumentation_tower::HTTPLayer;
+use opentelemetry_otlp::MetricExporter;
+use opentelemetry_sdk::metrics::{PeriodicReader, SdkMeterProvider};
 use std::time::Duration;
 
 const SERVICE_NAME: &str = "example-axum-http-service";
@@ -40,26 +42,24 @@ async fn handle() -> Bytes {
 
 #[tokio::main]
 async fn main() {
-    let exporter = opentelemetry_otlp::MetricExporter::builder()
+    let exporter = MetricExporter::builder()
         .with_tonic()
         // .with_endpoint("http://localhost:4317")  // default; leave out in favor of env var OTEL_EXPORTER_OTLP_ENDPOINT
         .build()
         .unwrap();
 
-    let reader = opentelemetry_sdk::metrics::PeriodicReader::builder(exporter)
+    let reader = PeriodicReader::builder(exporter)
         .with_interval(_OTEL_METRIC_EXPORT_INTERVAL)
         .build();
 
-    let meter_provider = opentelemetry_sdk::metrics::SdkMeterProvider::builder()
+    let meter_provider = SdkMeterProvider::builder()
         .with_reader(reader)
         .with_resource(init_otel_resource())
         .build();
 
     global::set_meter_provider(meter_provider);
 
-    let otel_metrics_service_layer = otel_tower_metrics::HTTPLayerBuilder::builder()
-        .build()
-        .unwrap();
+    let otel_metrics_service_layer = HTTPLayer::new();
 
     let app = Router::new()
         .route("/", get(handle))

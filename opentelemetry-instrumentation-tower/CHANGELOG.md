@@ -42,16 +42,14 @@ let layer = HTTPMetricsLayerBuilder::builder()
 
 After:
 ```rust
-use opentelemetry_instrumentation_tower::HTTPLayerBuilder;
+use opentelemetry_instrumentation_tower::HTTPLayer;
 
 // Set global providers first
 global::set_meter_provider(meter_provider);
 global::set_tracer_provider(tracer_provider); // for tracing support
 
-// Then create the layer without explicit meter
-let layer = HTTPLayerBuilder::builder()
-    .build()
-    .unwrap();
+// Then create the layer - simple API using global providers
+let layer = HTTPLayer::new();
 ```
 
 #### Type Name Changes
