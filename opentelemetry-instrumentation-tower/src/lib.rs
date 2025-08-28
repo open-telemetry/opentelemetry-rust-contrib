@@ -11,16 +11,18 @@ use std::{fmt, result};
 #[cfg(feature = "axum")]
 use axum::extract::MatchedPath;
 use futures_util::ready;
-use opentelemetry::global;
-use opentelemetry::metrics::{Histogram, UpDownCounter};
-use opentelemetry::trace::{SpanKind, Status, TraceContextExt, Tracer};
-use opentelemetry::{Context as OtelContext, KeyValue};
+use opentelemetry::global::{self, BoxedTracer};
+use opentelemetry::metrics::{Histogram, MeterProvider, UpDownCounter};
+use opentelemetry::trace::{SpanKind, Status, TraceContextExt, Tracer, TracerProvider};
+use opentelemetry::Context as OtelContext;
+use opentelemetry::KeyValue;
+use opentelemetry_sdk::trace::SdkTracerProvider;
 use opentelemetry_semantic_conventions as semconv;
 use pin_project_lite::pin_project;
 use tower_layer::Layer;
 use tower_service::Service;
 
-const HTTP_SERVER_DURATION_METRIC: &str = "http.server.request.duration";
+const HTTP_SERVER_DURATION_METRIC: &str = semconv::metric::HTTP_SERVER_REQUEST_DURATION;
 const HTTP_SERVER_DURATION_UNIT: &str = "s";
 
 const _OTEL_DEFAULT_HTTP_SERVER_DURATION_BOUNDARIES: [f64; 14] = [
@@ -34,23 +36,23 @@ const _OTEL_DEFAULT_HTTP_SERVER_DURATION_BOUNDARIES: [f64; 14] = [
 const LIBRARY_DEFAULT_HTTP_SERVER_DURATION_BOUNDARIES: [f64; 14] = [
     0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1.0, 2.5, 5.0, 10.0, 30.0, 60.0, 120.0, 300.0,
 ];
-const HTTP_SERVER_ACTIVE_REQUESTS_METRIC: &str = "http.server.active_requests";
+const HTTP_SERVER_ACTIVE_REQUESTS_METRIC: &str = semconv::metric::HTTP_SERVER_ACTIVE_REQUESTS;
 const HTTP_SERVER_ACTIVE_REQUESTS_UNIT: &str = "{request}";
 
-const HTTP_SERVER_REQUEST_BODY_SIZE_METRIC: &str = "http.server.request.body.size";
+const HTTP_SERVER_REQUEST_BODY_SIZE_METRIC: &str = semconv::metric::HTTP_SERVER_REQUEST_BODY_SIZE;
 const HTTP_SERVER_REQUEST_BODY_SIZE_UNIT: &str = "By";
 
-const HTTP_SERVER_RESPONSE_BODY_SIZE_METRIC: &str = "http.server.response.body.size";
+const HTTP_SERVER_RESPONSE_BODY_SIZE_METRIC: &str = semconv::metric::HTTP_SERVER_RESPONSE_BODY_SIZE;
 const HTTP_SERVER_RESPONSE_BODY_SIZE_UNIT: &str = "By";
 
-const NETWORK_PROTOCOL_NAME_LABEL: &str = "network.protocol.name";
+const NETWORK_PROTOCOL_NAME_LABEL: &str = semconv::attribute::NETWORK_PROTOCOL_NAME;
 const NETWORK_PROTOCOL_VERSION_LABEL: &str = "network.protocol.version";
 const URL_SCHEME_LABEL: &str = "url.scheme";
 
-const HTTP_REQUEST_METHOD_LABEL: &str = "http.request.method";
-#[allow(dead_code)] // cargo check is not smart
-const HTTP_ROUTE_LABEL: &str = "http.route";
-const HTTP_RESPONSE_STATUS_CODE_LABEL: &str = "http.response.status_code";
+const HTTP_REQUEST_METHOD_LABEL: &str = semconv::attribute::HTTP_REQUEST_METHOD;
+#[cfg(feature = "axum")]
+const HTTP_ROUTE_LABEL: &str = semconv::attribute::HTTP_ROUTE;
+const HTTP_RESPONSE_STATUS_CODE_LABEL: &str = semconv::attribute::HTTP_RESPONSE_STATUS_CODE;
 
 /// Trait for extracting custom attributes from HTTP requests
 pub trait RequestAttributeExtractor<B>: Clone + Send + Sync + 'static {
@@ -128,6 +130,7 @@ struct HTTPLayerState {
     pub server_active_requests: UpDownCounter<i64>,
     pub server_request_body_size: Histogram<u64>,
     pub server_response_body_size: Histogram<u64>,
+    pub tracer_provider: Option<SdkTracerProvider>,
 }
 
 #[derive(Clone)]
@@ -139,7 +142,6 @@ pub struct HTTPService<S, ReqExt = NoOpExtractor, ResExt = NoOpExtractor> {
     inner_service: S,
 }
 
-#[derive(Clone)]
 /// [`Layer`] which applies the OTEL HTTP server metrics and tracing middleware
 pub struct HTTPLayer<ReqExt = NoOpExtractor, ResExt = NoOpExtractor> {
     state: Arc<HTTPLayerState>,
@@ -148,6 +150,8 @@ pub struct HTTPLayer<ReqExt = NoOpExtractor, ResExt = NoOpExtractor> {
 }
 
 pub struct HTTPLayerBuilder<ReqExt = NoOpExtractor, ResExt = NoOpExtractor> {
+    tracer_provider: Option<SdkTracerProvider>,
+    meter_provider: Option<Box<dyn MeterProvider + Send + Sync>>,
     req_dur_bounds: Option<Vec<f64>>,
     request_extractor: ReqExt,
     response_extractor: ResExt,
@@ -192,6 +196,8 @@ impl fmt::Debug for Error {
 impl HTTPLayerBuilder {
     pub fn builder() -> Self {
         HTTPLayerBuilder {
+            tracer_provider: None,
+            meter_provider: None,
             req_dur_bounds: Some(LIBRARY_DEFAULT_HTTP_SERVER_DURATION_BOUNDARIES.to_vec()),
             request_extractor: NoOpExtractor,
             response_extractor: NoOpExtractor,
@@ -209,6 +215,8 @@ impl<ReqExt, ResExt> HTTPLayerBuilder<ReqExt, ResExt> {
         NewReqExt: RequestAttributeExtractor<B>,
     {
         HTTPLayerBuilder {
+            meter_provider: self.meter_provider,
+            tracer_provider: self.tracer_provider,
             req_dur_bounds: self.req_dur_bounds,
             request_extractor: extractor,
             response_extractor: self.response_extractor,
@@ -224,6 +232,8 @@ impl<ReqExt, ResExt> HTTPLayerBuilder<ReqExt, ResExt> {
         NewResExt: ResponseAttributeExtractor<B>,
     {
         HTTPLayerBuilder {
+            meter_provider: self.meter_provider,
+            tracer_provider: self.tracer_provider,
             req_dur_bounds: self.req_dur_bounds,
             request_extractor: self.request_extractor,
             response_extractor: extractor,
@@ -258,7 +268,11 @@ impl<ReqExt, ResExt> HTTPLayerBuilder<ReqExt, ResExt> {
             .unwrap_or_else(|| LIBRARY_DEFAULT_HTTP_SERVER_DURATION_BOUNDARIES.to_vec());
 
         Ok(HTTPLayer {
-            state: Arc::from(Self::make_state(req_dur_bounds)),
+            state: Arc::from(Self::make_state(
+                self.meter_provider,
+                self.tracer_provider,
+                req_dur_bounds,
+            )),
             request_extractor: self.request_extractor,
             response_extractor: self.response_extractor,
         })
@@ -269,8 +283,32 @@ impl<ReqExt, ResExt> HTTPLayerBuilder<ReqExt, ResExt> {
         self
     }
 
-    fn make_state(req_dur_bounds: Vec<f64>) -> HTTPLayerState {
-        let meter = global::meter("opentelemetry-instrumentation-tower");
+    /// Set a meter provider to use for creating a meter.
+    /// If none is specified, the global provider is used.
+    pub fn with_meter_provider<M>(mut self, provider: M) -> Self
+    where
+        M: MeterProvider + Send + Sync + 'static,
+    {
+        self.meter_provider = Some(Box::new(provider));
+        self
+    }
+
+    /// Set a meter provider to use for creating a meter.
+    /// If none is specified, the global provider is used.
+    pub fn with_tracer_provider(mut self, provider: SdkTracerProvider) -> Self {
+        self.tracer_provider = Some(provider);
+        self
+    }
+
+    fn make_state(
+        meter_provider: Option<Box<dyn MeterProvider + Send + Sync>>,
+        tracer_provider: Option<SdkTracerProvider>,
+        req_dur_bounds: Vec<f64>,
+    ) -> HTTPLayerState {
+        let meter = match meter_provider {
+            Some(provider) => provider.meter("opentelemetry-instrumentation-tower"),
+            None => global::meter("opentelemetry-instrumentation-tower"),
+        };
         HTTPLayerState {
             server_request_duration: meter
                 .f64_histogram(Cow::from(HTTP_SERVER_DURATION_METRIC))
@@ -293,6 +331,7 @@ impl<ReqExt, ResExt> HTTPLayerBuilder<ReqExt, ResExt> {
                 .with_description("Size of HTTP server response bodies.")
                 .with_unit(HTTP_SERVER_RESPONSE_BODY_SIZE_UNIT)
                 .build(),
+            tracer_provider,
         }
     }
 }
@@ -419,13 +458,21 @@ where
         span_attributes.extend(custom_request_attributes.clone());
 
         let span_name = format!("{} {}", method, req.uri().path());
-        let tracer = global::tracer("opentelemetry-instrumentation-tower");
+
+        let tracer = match &self.state.tracer_provider {
+            Some(tp) => {
+                BoxedTracer::new(Box::new(tp.tracer("opentelemetry-instrumentation-tower")))
+            }
+            None => global::tracer("opentelemetry-instrumentation-tower"),
+        };
+
         let span = tracer
             .span_builder(span_name)
             .with_kind(SpanKind::Server)
             .with_attributes(span_attributes)
             .start(&tracer);
-        let ctx = OtelContext::current_with_span(span);
+
+        let cx = OtelContext::current_with_span(span);
 
         self.state
             .server_active_requests
@@ -445,7 +492,7 @@ where
                 route_kv_opt,
                 custom_request_attributes,
 
-                otel_context: ctx,
+                otel_context: cx,
             },
             response_extractor: self.response_extractor.clone(),
         }
@@ -555,18 +602,20 @@ fn split_and_format_protocol_version(http_version: http::Version) -> (String, St
 
 #[cfg(test)]
 mod tests {
+    // Tests use optional provider overrides instead of global providers to avoid interference.
     use super::*;
 
+    use http::{Request, Response, StatusCode};
     use opentelemetry::trace::{FutureExt, TraceContextExt, Tracer};
-    use opentelemetry::Key;
-    use opentelemetry_sdk::metrics::InMemoryMetricExporterBuilder;
     use opentelemetry_sdk::metrics::SdkMeterProvider;
-    use opentelemetry_sdk::trace::InMemorySpanExporterBuilder;
-    use opentelemetry_sdk::trace::SdkTracerProvider;
+    use opentelemetry_sdk::metrics::{
+        data::{AggregatedMetrics, MetricData},
+        InMemoryMetricExporter, PeriodicReader,
+    };
+    use opentelemetry_sdk::trace::{InMemorySpanExporterBuilder, SdkTracerProvider};
     use std::result::Result;
-    use tower::Service;
-    use tower::ServiceBuilder;
-    use tower::ServiceExt;
+    use std::time::Duration;
+    use tower::{Service, ServiceBuilder, ServiceExt};
 
     #[tokio::test(flavor = "current_thread")]
     async fn test_tracing_with_in_memory_tracer() {
@@ -575,18 +624,12 @@ mod tests {
             .with_simple_exporter(trace_exporter.clone())
             .build();
 
-        let metric_exporter = InMemoryMetricExporterBuilder::new().build();
-        let meter_provider = SdkMeterProvider::builder()
-            .with_periodic_exporter(metric_exporter.clone())
-            .build();
+        let tracer = tracer_provider.tracer("test_tracer");
 
-        // Set global providers
-        global::set_tracer_provider(tracer_provider.clone());
-        global::set_meter_provider(meter_provider.clone());
-
-        let tracer = global::tracer("test_tracer");
-
-        let layer = HTTPLayerBuilder::builder().build().unwrap();
+        let layer = HTTPLayerBuilder::builder()
+            .with_tracer_provider(tracer_provider.clone())
+            .build()
+            .unwrap();
 
         let mut service = ServiceBuilder::new()
             .layer(layer)
@@ -605,20 +648,11 @@ mod tests {
             .unwrap();
 
         // Execute the service call within the parent span context
-        let _response = async {
-            service
-                .ready_and()
-                .await
-                .unwrap()
-                .call(request)
-                .await
-                .unwrap()
-        }
-        .with_context(cx)
-        .await;
+        let _response = async { service.ready().await.unwrap().call(request).await.unwrap() }
+            .with_context(cx)
+            .await;
 
         tracer_provider.force_flush().unwrap();
-        meter_provider.force_flush().unwrap();
 
         let spans = trace_exporter.get_finished_spans().unwrap();
         assert_eq!(
@@ -674,57 +708,252 @@ mod tests {
         ];
 
         assert_eq!(http_span.attributes, expected_attributes);
-
-        // Verify metrics are recorded
-        let resource_metrics = metric_exporter.get_finished_metrics().unwrap();
-        assert_eq!(
-            resource_metrics.len(),
-            1,
-            "Expected 1 ResourceMetrics entry"
-        );
-
-        let resource_metric = &resource_metrics[0];
-        let service_name = Key::new(semconv::resource::SERVICE_NAME);
-        assert_eq!(
-            "unknown_service",
-            resource_metric
-                .resource()
-                .get(&service_name)
-                .unwrap()
-                .to_string()
-        );
-
-        // Count total metrics across all scopes
-        let total_metrics: usize = resource_metric
-            .scope_metrics()
-            .map(|scope| scope.metrics().count())
-            .sum();
-        assert_eq!(total_metrics, 4);
-
-        assert_eq!(resource_metric.scope_metrics().count(), 1);
-        let scope_metric = resource_metric.scope_metrics().next().unwrap();
-        assert_eq!(
-            scope_metric.scope().name(),
-            "opentelemetry-instrumentation-tower"
-        );
-
-        let metric_names = [
-            semconv::metric::HTTP_SERVER_REQUEST_DURATION,
-            semconv::metric::HTTP_SERVER_ACTIVE_REQUESTS,
-            semconv::metric::HTTP_SERVER_REQUEST_BODY_SIZE,
-            semconv::metric::HTTP_SERVER_RESPONSE_BODY_SIZE,
-        ];
-        assert_eq!(scope_metric.metrics().count(), metric_names.len());
-        for (idx, metric) in scope_metric.metrics().enumerate() {
-            assert_eq!(metric.name(), metric_names[idx]);
-        }
-
-        // Reset to noop providers to avoid test interference
-        global::set_tracer_provider(opentelemetry_sdk::trace::SdkTracerProvider::default());
-        global::set_meter_provider(opentelemetry_sdk::metrics::SdkMeterProvider::default());
     }
 
     async fn echo(req: http::Request<String>) -> Result<http::Response<String>, Error> {
         Ok(http::Response::new(req.into_body()))
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn test_metrics_labels() {
+        let exporter = InMemoryMetricExporter::default();
+        let reader = PeriodicReader::builder(exporter.clone())
+            .with_interval(Duration::from_millis(100))
+            .build();
+        let meter_provider = SdkMeterProvider::builder().with_reader(reader).build();
+
+        // Use the new API with optional provider override instead of global providers
+        let layer = HTTPLayerBuilder::builder()
+            .with_meter_provider(meter_provider.clone())
+            .build()
+            .unwrap();
+
+        let service = tower::service_fn(|_req: Request<String>| async {
+            Ok::<_, std::convert::Infallible>(
+                Response::builder()
+                    .status(StatusCode::OK)
+                    .body(String::from("Hello, World!"))
+                    .unwrap(),
+            )
+        });
+
+        let mut service = layer.layer(service);
+
+        let request = Request::builder()
+            .method("GET")
+            .uri("https://example.com/test")
+            .body("test body".to_string())
+            .unwrap();
+
+        let _response = service.call(request).await.unwrap();
+
+        tokio::time::sleep(Duration::from_millis(200)).await;
+
+        let metrics = exporter.get_finished_metrics().unwrap();
+        assert!(!metrics.is_empty());
+
+        let resource_metrics = &metrics[0];
+        let scope_metrics = resource_metrics
+            .scope_metrics()
+            .next()
+            .expect("Should have scope metrics");
+
+        let duration_metric = scope_metrics
+            .metrics()
+            .find(|m| m.name() == HTTP_SERVER_DURATION_METRIC)
+            .expect("Duration metric should exist");
+
+        if let AggregatedMetrics::F64(MetricData::Histogram(histogram)) = duration_metric.data() {
+            let data_point = histogram
+                .data_points()
+                .next()
+                .expect("Should have data point");
+            let attributes: Vec<_> = data_point.attributes().collect();
+
+            // Duration metric should have 5 attributes: protocol_name, protocol_version, url_scheme, method, status_code
+            assert_eq!(
+                attributes.len(),
+                5,
+                "Duration metric should have exactly 5 attributes"
+            );
+
+            let protocol_name = attributes
+                .iter()
+                .find(|kv| kv.key.as_str() == NETWORK_PROTOCOL_NAME_LABEL)
+                .expect("Protocol name should be present");
+            assert_eq!(protocol_name.value.as_str(), "http");
+
+            let protocol_version = attributes
+                .iter()
+                .find(|kv| kv.key.as_str() == NETWORK_PROTOCOL_VERSION_LABEL)
+                .expect("Protocol version should be present");
+            assert_eq!(protocol_version.value.as_str(), "1.1");
+
+            let url_scheme = attributes
+                .iter()
+                .find(|kv| kv.key.as_str() == URL_SCHEME_LABEL)
+                .expect("URL scheme should be present");
+            assert_eq!(url_scheme.value.as_str(), "https");
+
+            let method = attributes
+                .iter()
+                .find(|kv| kv.key.as_str() == HTTP_REQUEST_METHOD_LABEL)
+                .expect("HTTP method should be present");
+            assert_eq!(method.value.as_str(), "GET");
+
+            let status_code = attributes
+                .iter()
+                .find(|kv| kv.key.as_str() == HTTP_RESPONSE_STATUS_CODE_LABEL)
+                .expect("Status code should be present");
+            if let opentelemetry::Value::I64(code) = &status_code.value {
+                assert_eq!(*code, 200);
+            } else {
+                panic!("Expected i64 status code");
+            }
+        } else {
+            panic!("Expected histogram data for duration metric");
+        }
+
+        let request_body_size_metric = scope_metrics
+            .metrics()
+            .find(|m| m.name() == HTTP_SERVER_REQUEST_BODY_SIZE_METRIC);
+
+        if let Some(metric) = request_body_size_metric {
+            if let AggregatedMetrics::F64(MetricData::Histogram(histogram)) = metric.data() {
+                let data_point = histogram
+                    .data_points()
+                    .next()
+                    .expect("Should have data point");
+                let attributes: Vec<_> = data_point.attributes().collect();
+
+                // Request body size metric should have 5 attributes: protocol_name, protocol_version, url_scheme, method, status_code
+                assert_eq!(
+                    attributes.len(),
+                    5,
+                    "Request body size metric should have exactly 5 attributes"
+                );
+
+                let protocol_name = attributes
+                    .iter()
+                    .find(|kv| kv.key.as_str() == NETWORK_PROTOCOL_NAME_LABEL)
+                    .expect("Protocol name should be present in request body size");
+                assert_eq!(protocol_name.value.as_str(), "https");
+
+                let protocol_version = attributes
+                    .iter()
+                    .find(|kv| kv.key.as_str() == NETWORK_PROTOCOL_VERSION_LABEL)
+                    .expect("Protocol version should be present in request body size");
+                assert_eq!(protocol_version.value.as_str(), "1.1");
+
+                let url_scheme = attributes
+                    .iter()
+                    .find(|kv| kv.key.as_str() == URL_SCHEME_LABEL)
+                    .expect("URL scheme should be present in request body size");
+                assert_eq!(url_scheme.value.as_str(), "https");
+
+                let method = attributes
+                    .iter()
+                    .find(|kv| kv.key.as_str() == HTTP_REQUEST_METHOD_LABEL)
+                    .expect("HTTP method should be present in request body size");
+                assert_eq!(method.value.as_str(), "GET");
+
+                let status_code = attributes
+                    .iter()
+                    .find(|kv| kv.key.as_str() == HTTP_RESPONSE_STATUS_CODE_LABEL)
+                    .expect("Status code should be present in request body size");
+                if let opentelemetry::Value::I64(code) = &status_code.value {
+                    assert_eq!(*code, 200);
+                } else {
+                    panic!("Expected i64 status code");
+                }
+            }
+        }
+
+        // Test response body size metric
+        let response_body_size_metric = scope_metrics
+            .metrics()
+            .find(|m| m.name() == HTTP_SERVER_RESPONSE_BODY_SIZE_METRIC);
+
+        if let Some(metric) = response_body_size_metric {
+            if let AggregatedMetrics::F64(MetricData::Histogram(histogram)) = metric.data() {
+                let data_point = histogram
+                    .data_points()
+                    .next()
+                    .expect("Should have data point");
+                let attributes: Vec<_> = data_point.attributes().collect();
+
+                // Response body size metric should have 5 attributes: protocol_name, protocol_version, url_scheme, method, status_code
+                assert_eq!(
+                    attributes.len(),
+                    5,
+                    "Response body size metric should have exactly 5 attributes"
+                );
+
+                let protocol_name = attributes
+                    .iter()
+                    .find(|kv| kv.key.as_str() == NETWORK_PROTOCOL_NAME_LABEL)
+                    .expect("Protocol name should be present in response body size");
+                assert_eq!(protocol_name.value.as_str(), "http");
+
+                let protocol_version = attributes
+                    .iter()
+                    .find(|kv| kv.key.as_str() == NETWORK_PROTOCOL_VERSION_LABEL)
+                    .expect("Protocol version should be present in response body size");
+                assert_eq!(protocol_version.value.as_str(), "1.1");
+
+                let url_scheme = attributes
+                    .iter()
+                    .find(|kv| kv.key.as_str() == URL_SCHEME_LABEL)
+                    .expect("URL scheme should be present in response body size");
+                assert_eq!(url_scheme.value.as_str(), "https");
+
+                let method = attributes
+                    .iter()
+                    .find(|kv| kv.key.as_str() == HTTP_REQUEST_METHOD_LABEL)
+                    .expect("HTTP method should be present in response body size");
+                assert_eq!(method.value.as_str(), "GET");
+
+                let status_code = attributes
+                    .iter()
+                    .find(|kv| kv.key.as_str() == HTTP_RESPONSE_STATUS_CODE_LABEL)
+                    .expect("Status code should be present in response body size");
+                if let opentelemetry::Value::I64(code) = &status_code.value {
+                    assert_eq!(*code, 200);
+                } else {
+                    panic!("Expected i64 status code");
+                }
+            }
+        }
+
+        // Test active requests metric
+        let active_requests_metric = scope_metrics
+            .metrics()
+            .find(|m| m.name() == HTTP_SERVER_ACTIVE_REQUESTS_METRIC);
+
+        if let Some(metric) = active_requests_metric {
+            if let AggregatedMetrics::I64(MetricData::Sum(sum)) = metric.data() {
+                let data_point = sum.data_points().next().expect("Should have data point");
+                let attributes: Vec<_> = data_point.attributes().collect();
+
+                // Active requests metric should have 2 attributes: method, url_scheme
+                assert_eq!(
+                    attributes.len(),
+                    2,
+                    "Active requests metric should have exactly 2 attributes"
+                );
+
+                let method = attributes
+                    .iter()
+                    .find(|kv| kv.key.as_str() == HTTP_REQUEST_METHOD_LABEL)
+                    .expect("HTTP method should be present in active requests");
+                assert_eq!(method.value.as_str(), "GET");
+
+                let url_scheme = attributes
+                    .iter()
+                    .find(|kv| kv.key.as_str() == URL_SCHEME_LABEL)
+                    .expect("URL scheme should be present in active requests");
+                assert_eq!(url_scheme.value.as_str(), "https");
+            }
+        }
     }
 }

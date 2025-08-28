@@ -22,16 +22,17 @@ futures-util = { version = "0.3", default-features = false }
 http = { version = "1", features = ["std"], default-features = false }
 http-body = { version = "1", default-features = false }
 opentelemetry = { workspace = true, features = ["futures", "metrics", "trace"] }
+opentelemetry_sdk = { workspace = true, features = ["trace"] }
 opentelemetry-semantic-conventions = { workspace = true, features = ["semconv_experimental"] }
 pin-project-lite = { version = "0.2", default-features = false }
 tower-service = { version = "0.3", default-features = false }
 tower-layer = { version = "0.3", default-features = false }
 
 [dev-dependencies]
-tokio = { version = "1" }
-tower = { version = "0.3" }
+opentelemetry_sdk = { workspace = true, features = ["metrics", "testing"] }
+tokio = { version = "1.0", features = ["macros", "rt"] }
+tower = { version = "0.5", features = ["util"] }
 tower-test = { version = "0.3" }
-opentelemetry_sdk = { workspace = true, features = ["testing"] }
 
 [lints]
 workspace = true
