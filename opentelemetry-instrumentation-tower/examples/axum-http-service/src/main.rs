@@ -56,7 +56,7 @@ async fn main() {
         .build();
 
     global::set_meter_provider(meter_provider);
-    
+
     let otel_metrics_service_layer = otel_tower_metrics::HTTPLayerBuilder::builder()
         .build()
         .unwrap();
