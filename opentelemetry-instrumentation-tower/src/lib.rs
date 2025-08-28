@@ -142,6 +142,7 @@ pub struct HTTPService<S, ReqExt = NoOpExtractor, ResExt = NoOpExtractor> {
     inner_service: S,
 }
 
+#[derive(Clone)]
 /// [`Layer`] which applies the OTEL HTTP server metrics and tracing middleware
 pub struct HTTPLayer<ReqExt = NoOpExtractor, ResExt = NoOpExtractor> {
     state: Arc<HTTPLayerState>,
