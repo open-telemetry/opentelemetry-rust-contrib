@@ -11,7 +11,7 @@ use std::sync::Arc;
 #[derive(Debug, Clone)]
 pub struct EncodedBatch {
     pub event_name: String,
-    pub data: Vec<u8>,
+    pub data: Arc<Vec<u8>>,
     pub metadata: crate::payload_encoder::central_blob::BatchMetadata,
 }
 
@@ -103,7 +103,7 @@ impl GenevaClient {
     /// This allows for granular control over uploads, including custom retry logic for individual batches.
     pub async fn upload_batch(&self, batch: &EncodedBatch) -> Result<(), String> {
         self.uploader
-            .upload(batch.data.clone(), &batch.event_name, &batch.metadata)
+            .upload(Arc::clone(&batch.data), &batch.event_name, &batch.metadata)
             .await
             .map(|_| ())
             .map_err(|e| format!("Geneva upload failed: {e} Event: {}", batch.event_name))
