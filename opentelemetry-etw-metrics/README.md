@@ -6,7 +6,7 @@
 
 | Status        |           |
 | ------------- |-----------|
-| Stability     | beta      |
+| Stability     | stable    |
 | Owners        | [Cijo Thomas](https://github.com/cijothomas), [Lalit Kumar Bhasin](https://github.com/lalitb), [Matthew Boddewyn](https://github.com/mattbodd), [Pato Sandaña](https://github.com/psandana)|
 
 This crate contains OpenTelemetry Metrics exporter to
