@@ -828,9 +828,9 @@ mod tests {
     // and each batch upload hits ingestion with the corresponding event query param.
     #[test]
     fn test_encode_batching_by_event_name_and_upload() {
+        use wiremock::http::Method;
         use wiremock::matchers::method;
         use wiremock::{Mock, MockServer, ResponseTemplate};
-        use wiremock::http::Method;
 
         // Start mock server
         let mock_server = runtime().block_on(async { MockServer::start().await });
