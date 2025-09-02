@@ -10,7 +10,6 @@ use std::sync::Arc;
 use std::time::Duration;
 use thiserror::Error;
 use url::form_urlencoded::byte_serialize;
-use std::sync::atomic::{AtomicUsize, Ordering};
 use uuid::Uuid;
 
 /// Error types for the Geneva Uploader
@@ -114,8 +113,7 @@ pub(crate) struct GenevaUploaderConfig {
 pub struct GenevaUploader {
     pub config_client: Arc<GenevaConfigClient>,
     pub config: GenevaUploaderConfig,
-    pub http_clients: Vec<Client>,     // pool of HTTP/1 clients (each can hold several sockets)
-    rr: Arc<AtomicUsize>,              // round-robin index}
+    pub http_client: Client,
 }
 
 impl GenevaUploader {
@@ -137,17 +135,12 @@ impl GenevaUploader {
             header::ACCEPT,
             header::HeaderValue::from_static("application/json"),
         );
-        let pool_size = 1; // Number of HTTP/1 clients to create
-        let mut clients = Vec::with_capacity(pool_size);
-        for _ in 0..pool_size {
-            clients.push(Self::build_h1_client(&headers)?);
-        }
+        let client = Self::build_h1_client(&headers)?;
 
         Ok(Self {
             config_client,
             config: uploader_config,
-            http_clients: clients,
-            rr: Arc::new(AtomicUsize::new(0)),
+            http_client: client,
         })
     }
 
@@ -155,24 +148,11 @@ impl GenevaUploader {
         Ok(Client::builder()
             .timeout(Duration::from_secs(30))
             .default_headers(headers.clone())
-            .build()?)
-        /*Ok(Client::builder()
             .http1_only()
-            // keep multiple warm sockets so bursts don't re-handshake
-            .pool_max_idle_per_host(8)
-            .pool_idle_timeout(Some(Duration::from_secs(60)))
-            .tcp_keepalive(Some(Duration::from_secs(60)))
             .tcp_nodelay(true)
-            .connect_timeout(Duration::from_secs(5))
+            .tcp_keepalive(Some(Duration::from_secs(60)))
             .timeout(Duration::from_secs(30))
-            .default_headers(headers.clone())
-            .build()?)*/
-    }
-
-    #[inline]
-    fn pick_client(&self) -> &Client {
-        let i = self.rr.fetch_add(1, Ordering::Relaxed);
-        &self.http_clients[i % self.http_clients.len()]
+            .build()?)
     }
 
     /// Creates the GIG upload URI with required parameters
@@ -254,7 +234,7 @@ impl GenevaUploader {
         );
         // Send the upload request
         let response = self
-            .pick_client()
+            .http_client
             .post(&full_url)
             .header(
                 header::AUTHORIZATION,
