@@ -550,9 +550,7 @@ fn extract_endpoint_from_token(token: &str) -> Result<String> {
 
 fn is_retriable_error(err: &GenevaConfigClientError) -> bool {
     match err {
-        GenevaConfigClientError::Http(e) => {
-            e.is_timeout() || e.is_connect()
-        }
+        GenevaConfigClientError::Http(e) => e.is_timeout() || e.is_connect(),
         GenevaConfigClientError::RequestFailed { status, .. } => {
             (*status >= 500 && *status < 600) || *status == 429
         }
@@ -598,14 +596,20 @@ mod retry_tests {
                 status,
                 message: String::new(),
             };
-            assert!(super::is_retriable_error(&err), "status {status} should be retriable");
+            assert!(
+                super::is_retriable_error(&err),
+                "status {status} should be retriable"
+            );
         }
         // 429
         let err_429 = GenevaConfigClientError::RequestFailed {
             status: 429,
             message: String::new(),
         };
-        assert!(super::is_retriable_error(&err_429), "status 429 should be retriable");
+        assert!(
+            super::is_retriable_error(&err_429),
+            "status 429 should be retriable"
+        );
     }
 
     #[test]
@@ -615,7 +619,10 @@ mod retry_tests {
                 status,
                 message: String::new(),
             };
-            assert!(!super::is_retriable_error(&err), "status {status} should NOT be retriable");
+            assert!(
+                !super::is_retriable_error(&err),
+                "status {status} should NOT be retriable"
+            );
         }
     }
 }
