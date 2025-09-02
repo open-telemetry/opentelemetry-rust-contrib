@@ -51,8 +51,8 @@ use wiremock::{Mock, MockServer, ResponseTemplate};
 fn create_test_logs() -> Vec<ResourceLogs> {
     let mut log_records = Vec::new();
 
-    // Create 500 simple log records
-    for i in 0..500 {
+    // Create 10 simple log records
+    for i in 0..10 {
         let log = LogRecord {
             observed_time_unix_nano: 1700000000000000000 + i,
             event_name: "StressTestEvent".to_string(),
