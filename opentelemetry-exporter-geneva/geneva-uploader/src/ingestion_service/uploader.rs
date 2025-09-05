@@ -135,7 +135,7 @@ impl GenevaUploader {
             header::ACCEPT,
             header::HeaderValue::from_static("application/json"),
         );
-        let client = Self::build_h1_client(&headers)?;
+        let client = Self::build_h1_client(headers)?;
 
         Ok(Self {
             config_client,
