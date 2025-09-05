@@ -135,16 +135,22 @@ impl GenevaUploader {
             header::ACCEPT,
             header::HeaderValue::from_static("application/json"),
         );
-        let http_client = Client::builder()
-            .timeout(Duration::from_secs(30))
-            .default_headers(headers)
-            .build()?;
+        let client = Self::build_h1_client(headers)?;
 
         Ok(Self {
             config_client,
             config: uploader_config,
-            http_client,
+            http_client: client,
         })
+    }
+
+    fn build_h1_client(headers: header::HeaderMap) -> Result<Client> {
+        Ok(Client::builder()
+            .timeout(Duration::from_secs(30))
+            .default_headers(headers)
+            .http1_only()
+            .tcp_keepalive(Some(Duration::from_secs(60)))
+            .build()?)
     }
 
     /// Creates the GIG upload URI with required parameters
