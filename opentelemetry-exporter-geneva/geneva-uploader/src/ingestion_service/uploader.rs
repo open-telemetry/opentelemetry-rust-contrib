@@ -147,7 +147,7 @@ impl GenevaUploader {
     fn build_h1_client(headers: header::HeaderMap) -> Result<Client> {
         Ok(Client::builder()
             .timeout(Duration::from_secs(30))
-            .default_headers(headers.clone())
+            .default_headers(headers)
             .http1_only()
             .tcp_keepalive(Some(Duration::from_secs(60)))
             .build()?)
