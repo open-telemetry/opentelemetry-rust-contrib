@@ -151,7 +151,6 @@ impl GenevaUploader {
             .http1_only()
             .tcp_nodelay(true)
             .tcp_keepalive(Some(Duration::from_secs(60)))
-            .timeout(Duration::from_secs(30))
             .build()?)
     }
 
