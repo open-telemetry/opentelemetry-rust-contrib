@@ -57,6 +57,7 @@ impl opentelemetry_sdk::logs::LogExporter for GenevaExporter {
         // spawning new tasks or threads, using async I/O concurrency instead.
         // All batch uploads are processed asynchronously in the same task context that
         // called the export() method.
+        let _batch_len = compressed_batches.len();
         let errors: Vec<String> = stream::iter(compressed_batches)
             .map(|batch| {
                 let client = self.geneva_client.clone();
