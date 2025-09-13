@@ -78,6 +78,12 @@ pub(crate) enum GenevaConfigClientError {
     Http(#[from] reqwest::Error),
     #[error("Request failed with status {status}: {message}")]
     RequestFailed { status: u16, message: String },
+    #[error("Request failed with status {status}: {message} (Retry-After={retry_after_secs:?})")]
+    RequestFailedWithRetryAfter {
+        status: u16,
+        message: String,
+        retry_after_secs: Option<u64>,
+    },
 
     // Data / parsing
     #[error("JSON error: {0}")]
@@ -94,6 +100,11 @@ pub(crate) enum GenevaConfigClientError {
 pub(crate) type Result<T> = std::result::Result<T, GenevaConfigClientError>;
 
 const MAX_GCS_RETRIES: usize = 5;
+const FIXED_BACKOFF: [Duration; 3] = [
+    Duration::from_millis(200),
+    Duration::from_millis(400),
+    Duration::from_millis(800),
+];
 
 /// Configuration for the Geneva Config Client.
 ///
@@ -380,6 +391,18 @@ impl GenevaConfigClient {
                     Ok(v) => break v,
                     Err(e) => {
                         if attempt < MAX_GCS_RETRIES && is_retriable_error(&e) {
+                            // Determine delay
+                            let delay = match &e {
+                                GenevaConfigClientError::RequestFailedWithRetryAfter {
+                                    retry_after_secs: Some(s),
+                                    ..
+                                } => Duration::from_secs(*s),
+                                _ => {
+                                    let idx = std::cmp::min(attempt, FIXED_BACKOFF.len() - 1);
+                                    FIXED_BACKOFF[idx]
+                                }
+                            };
+                            tokio::time::sleep(delay).await;
                             attempt += 1;
                             continue;
                         } else {
@@ -453,6 +476,18 @@ impl GenevaConfigClient {
             .map_err(GenevaConfigClientError::Http)?;
         // Check if the response is successful
         let status = response.status();
+        // Capture Retry-After before consuming body
+        let retry_after_header = if status == reqwest::StatusCode::TOO_MANY_REQUESTS
+            || status == reqwest::StatusCode::SERVICE_UNAVAILABLE
+        {
+            response
+                .headers()
+                .get("Retry-After")
+                .and_then(|hv| hv.to_str().ok())
+                .map(|s| s.trim().to_string())
+        } else {
+            None
+        };
         let body = response.text().await?;
         if status.is_success() {
             let parsed = match serde_json::from_str::<GenevaResponse>(&body) {
@@ -479,10 +514,23 @@ impl GenevaConfigClient {
                 "No primary diag moniker found in storage accounts".to_string(),
             ))
         } else {
-            Err(GenevaConfigClientError::RequestFailed {
-                status: status.as_u16(),
-                message: body,
-            })
+            if status == reqwest::StatusCode::TOO_MANY_REQUESTS
+                || status == reqwest::StatusCode::SERVICE_UNAVAILABLE
+            {
+                let retry_after_secs = retry_after_header
+                    .and_then(|s| s.parse::<u64>().ok())
+                    .filter(|v| *v >= 1 && *v <= 3);
+                Err(GenevaConfigClientError::RequestFailedWithRetryAfter {
+                    status: status.as_u16(),
+                    message: body,
+                    retry_after_secs,
+                })
+            } else {
+                Err(GenevaConfigClientError::RequestFailed {
+                    status: status.as_u16(),
+                    message: body,
+                })
+            }
         }
     }
 }
@@ -551,7 +599,8 @@ fn extract_endpoint_from_token(token: &str) -> Result<String> {
 fn is_retriable_error(err: &GenevaConfigClientError) -> bool {
     match err {
         GenevaConfigClientError::Http(e) => e.is_timeout() || e.is_connect(),
-        GenevaConfigClientError::RequestFailed { status, .. } => {
+        GenevaConfigClientError::RequestFailed { status, .. }
+        | GenevaConfigClientError::RequestFailedWithRetryAfter { status, .. } => {
             (*status >= 500 && *status < 600) || *status == 429
         }
         _ => false,
