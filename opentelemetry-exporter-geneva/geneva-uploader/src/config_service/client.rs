@@ -513,24 +513,22 @@ impl GenevaConfigClient {
             Err(GenevaConfigClientError::MonikerNotFound(
                 "No primary diag moniker found in storage accounts".to_string(),
             ))
+        } else if status == reqwest::StatusCode::TOO_MANY_REQUESTS
+            || status == reqwest::StatusCode::SERVICE_UNAVAILABLE
+        {
+            let retry_after_secs = retry_after_header
+                .and_then(|s| s.parse::<u64>().ok())
+                .filter(|v| *v >= 1 && *v <= 3);
+            Err(GenevaConfigClientError::RequestFailedWithRetryAfter {
+                status: status.as_u16(),
+                message: body,
+                retry_after_secs,
+            })
         } else {
-            if status == reqwest::StatusCode::TOO_MANY_REQUESTS
-                || status == reqwest::StatusCode::SERVICE_UNAVAILABLE
-            {
-                let retry_after_secs = retry_after_header
-                    .and_then(|s| s.parse::<u64>().ok())
-                    .filter(|v| *v >= 1 && *v <= 3);
-                Err(GenevaConfigClientError::RequestFailedWithRetryAfter {
-                    status: status.as_u16(),
-                    message: body,
-                    retry_after_secs,
-                })
-            } else {
-                Err(GenevaConfigClientError::RequestFailed {
-                    status: status.as_u16(),
-                    message: body,
-                })
-            }
+            Err(GenevaConfigClientError::RequestFailed {
+                status: status.as_u16(),
+                message: body,
+            })
         }
     }
 }
