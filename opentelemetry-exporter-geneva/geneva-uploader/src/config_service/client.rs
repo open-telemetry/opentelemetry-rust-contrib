@@ -383,16 +383,22 @@ impl GenevaConfigClient {
                 }
             }
         }
-        // Cache miss or expired token, fetch fresh data with retry logic (up to 5 retries on retriable errors)
+        // Cache miss or expired token, fetch fresh data with retry
         let (fresh_ingestion_gateway_info, fresh_moniker_info) = {
-            let mut attempt = 0;
-            loop {
+            let mut last_error = None;
+            let mut result = None;
+            for attempt in 0..=MAX_GCS_RETRIES {
                 match self.fetch_ingestion_info().await {
-                    Ok(v) => break v,
+                    Ok(res) => {
+                        result = Some(res);
+                        break;
+                    }
                     Err(e) => {
-                        if attempt < MAX_GCS_RETRIES && is_retriable_error(&e) {
-                            // Determine delay
-                            let delay = match &e {
+                        last_error = Some(e);
+                        if attempt < MAX_GCS_RETRIES
+                            && is_retriable_error(last_error.as_ref().unwrap())
+                        {
+                            let delay = match last_error.as_ref().unwrap() {
                                 GenevaConfigClientError::RequestFailedWithRetryAfter {
                                     retry_after_secs: Some(s),
                                     ..
@@ -403,14 +409,11 @@ impl GenevaConfigClient {
                                 }
                             };
                             tokio::time::sleep(delay).await;
-                            attempt += 1;
-                            continue;
-                        } else {
-                            return Err(e);
                         }
                     }
                 }
             }
+            result.ok_or_else(|| last_error.unwrap())?
         };
 
         let token_expiry =
