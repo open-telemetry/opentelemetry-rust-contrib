@@ -106,6 +106,11 @@ const FIXED_BACKOFF: [Duration; 3] = [
     Duration::from_millis(800),
 ];
 
+/// Minimum acceptable retry-after value in seconds for rate limiting responses
+const MIN_RETRY_AFTER_SECS: u64 = 1;
+/// Maximum acceptable retry-after value in seconds for rate limiting responses
+const MAX_RETRY_AFTER_SECS: u64 = 3;
+
 /// Configuration for the Geneva Config Client.
 ///
 /// # Fields
@@ -519,7 +524,7 @@ impl GenevaConfigClient {
         {
             let retry_after_secs = retry_after_header
                 .and_then(|s| s.parse::<u64>().ok())
-                .filter(|v| *v >= 1 && *v <= 3);
+                .filter(|v| *v >= MIN_RETRY_AFTER_SECS && *v <= MAX_RETRY_AFTER_SECS);
             Err(GenevaConfigClientError::RequestFailedWithRetryAfter {
                 status: status.as_u16(),
                 message: body,
