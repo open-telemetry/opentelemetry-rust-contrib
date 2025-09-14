@@ -99,7 +99,7 @@ pub(crate) enum GenevaConfigClientError {
 #[allow(dead_code)]
 pub(crate) type Result<T> = std::result::Result<T, GenevaConfigClientError>;
 
-const MAX_GCS_RETRIES: usize = 5;
+const MAX_GCS_RETRIES: usize = 3;
 const FIXED_BACKOFF: [Duration; 3] = [
     Duration::from_millis(200),
     Duration::from_millis(400),
