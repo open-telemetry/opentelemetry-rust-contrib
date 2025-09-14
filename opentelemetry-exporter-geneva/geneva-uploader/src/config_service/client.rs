@@ -394,11 +394,8 @@ impl GenevaConfigClient {
                         break;
                     }
                     Err(e) => {
-                        last_error = Some(e);
-                        if attempt < MAX_GCS_RETRIES
-                            && is_retriable_error(last_error.as_ref().unwrap())
-                        {
-                            let delay = match last_error.as_ref().unwrap() {
+                        if attempt < MAX_GCS_RETRIES && is_retriable_error(&e) {
+                            let delay = match &e {
                                 GenevaConfigClientError::RequestFailedWithRetryAfter {
                                     retry_after_secs: Some(s),
                                     ..
@@ -410,6 +407,7 @@ impl GenevaConfigClient {
                             };
                             tokio::time::sleep(delay).await;
                         }
+                        last_error = Some(e);
                     }
                 }
             }
