@@ -7,6 +7,7 @@ use crate::payload_encoder::lz4_chunked_compression::lz4_chunked_compression;
 use chrono::{TimeZone, Utc};
 use opentelemetry_proto::tonic::common::v1::any_value::Value;
 use opentelemetry_proto::tonic::logs::v1::LogRecord;
+use opentelemetry_proto::tonic::trace::v1::Span;
 use std::borrow::Cow;
 use std::sync::Arc;
 
@@ -21,6 +22,15 @@ const FIELD_NAME: &str = "name";
 const FIELD_SEVERITY_NUMBER: &str = "SeverityNumber";
 const FIELD_SEVERITY_TEXT: &str = "SeverityText";
 const FIELD_BODY: &str = "body";
+
+// Span-specific field constants
+const FIELD_KIND: &str = "kind";
+const FIELD_START_TIME: &str = "startTime";
+const FIELD_SUCCESS: &str = "success";
+const FIELD_TRACE_STATE: &str = "traceState";
+const FIELD_PARENT_ID: &str = "parentId";
+const FIELD_LINKS: &str = "links";
+const FIELD_STATUS_MESSAGE: &str = "statusMessage";
 
 /// Encoder to write OTLP payload in bond form.
 #[derive(Clone)]
@@ -163,6 +173,134 @@ impl OtlpEncoder {
         Ok(blobs)
     }
 
+    /// Encode a batch of spans into a vector of (event_name, compressed_bytes, schema_ids, start_time_nanos, end_time_nanos)
+    /// The returned `data` field contains LZ4 chunked compressed bytes.
+    /// On compression failure, the error is returned (no logging, no fallback).
+    pub(crate) fn encode_span_batch<'a, I>(
+        &self,
+        spans: I,
+        metadata: &str,
+    ) -> Result<Vec<EncodedBatch>, String>
+    where
+        I: IntoIterator<Item = &'a Span>,
+    {
+        use std::collections::HashMap;
+
+        // Internal struct to accumulate batch data before encoding
+        struct BatchData {
+            schemas: Vec<CentralSchemaEntry>,
+            events: Vec<CentralEventEntry>,
+            metadata: BatchMetadata,
+        }
+
+        impl BatchData {
+            fn format_schema_ids(&self) -> String {
+                use std::fmt::Write;
+
+                if self.schemas.is_empty() {
+                    return String::new();
+                }
+
+                // Pre-allocate capacity: Each MD5 hash is 32 hex chars + 1 semicolon (except last)
+                // Total: (32 chars per hash * num_schemas) + (semicolons = num_schemas - 1)
+                let estimated_capacity =
+                    self.schemas.len() * 32 + self.schemas.len().saturating_sub(1);
+
+                self.schemas.iter().enumerate().fold(
+                    String::with_capacity(estimated_capacity),
+                    |mut acc, (i, s)| {
+                        if i > 0 {
+                            acc.push(';');
+                        }
+                        let md5_hash = md5::compute(s.id.to_le_bytes());
+                        write!(&mut acc, "{md5_hash:x}").unwrap();
+                        acc
+                    },
+                )
+            }
+        }
+
+        let mut batches: HashMap<String, BatchData> = HashMap::new();
+
+        for span in spans {
+            // Use span name directly, fallback to "Span" if empty
+            let event_name_str = if span.name.is_empty() {
+                "Span"
+            } else {
+                span.name.as_str()
+            };
+
+            // 1. Get schema with optimized single-pass field collection and schema ID calculation
+            let (field_info, schema_id) =
+                Self::determine_span_fields_and_schema_id(span, event_name_str);
+
+            // 2. Encode row
+            let row_buffer = self.write_span_row_data(span, &field_info);
+            let level = 5; // Default level for spans (INFO equivalent)
+
+            // 3. Create or get existing batch entry with metadata tracking
+            let entry = batches
+                .entry(event_name_str.to_string())
+                .or_insert_with(|| BatchData {
+                    schemas: Vec::new(),
+                    events: Vec::new(),
+                    metadata: BatchMetadata {
+                        start_time: span.start_time_unix_nano,
+                        end_time: span.end_time_unix_nano,
+                        schema_ids: String::new(),
+                    },
+                });
+
+            // Update timestamp range
+            if span.start_time_unix_nano != 0 {
+                entry.metadata.start_time =
+                    entry.metadata.start_time.min(span.start_time_unix_nano);
+            }
+            if span.end_time_unix_nano != 0 {
+                entry.metadata.end_time = entry.metadata.end_time.max(span.end_time_unix_nano);
+            }
+
+            // 4. Add schema entry if not already present (multiple schemas per event_name batch)
+            if !entry.schemas.iter().any(|s| s.id == schema_id) {
+                let schema_entry = Self::create_span_schema(schema_id, field_info);
+                entry.schemas.push(schema_entry);
+            }
+
+            // 5. Create CentralEventEntry directly (optimization: no intermediate EncodedRow)
+            let central_event = CentralEventEntry {
+                schema_id,
+                level,
+                event_name: Arc::new(event_name_str.to_string()),
+                row: row_buffer,
+            };
+            entry.events.push(central_event);
+        }
+
+        // 6. Encode blobs (one per event_name, potentially multiple schemas per blob)
+        let mut blobs = Vec::with_capacity(batches.len());
+        for (batch_event_name, mut batch_data) in batches {
+            let schema_ids_string = batch_data.format_schema_ids();
+            batch_data.metadata.schema_ids = schema_ids_string;
+
+            let blob = CentralBlob {
+                version: 1,
+                format: 2,
+                metadata: metadata.to_string(),
+                schemas: batch_data.schemas,
+                events: batch_data.events,
+            };
+            let uncompressed = blob.to_bytes();
+            let compressed = lz4_chunked_compression(&uncompressed)
+                .map_err(|e| format!("compression failed: {e}"))?;
+            blobs.push(EncodedBatch {
+                event_name: batch_event_name,
+                data: compressed,
+                metadata: batch_data.metadata,
+            });
+        }
+        Ok(blobs)
+    }
+
     /// Determine fields and calculate schema ID in a single pass for optimal performance
     fn determine_fields_and_schema_id(log: &LogRecord, event_name: &str) -> (Vec<FieldDef>, u64) {
         use std::collections::hash_map::DefaultHasher;
@@ -245,6 +383,95 @@ impl OtlpEncoder {
         (field_defs, schema_id)
     }
 
+    /// Determine span fields and calculate schema ID in a single pass for optimal performance
+    fn determine_span_fields_and_schema_id(span: &Span, event_name: &str) -> (Vec<FieldDef>, u64) {
+        use std::collections::hash_map::DefaultHasher;
+        use std::hash::{Hash, Hasher};
+
+        // Pre-allocate with estimated capacity to avoid reallocations
+        let estimated_capacity = 10 + span.attributes.len();
+        let mut fields = Vec::with_capacity(estimated_capacity);
+
+        // Initialize hasher for schema ID calculation
+        let mut hasher = DefaultHasher::new();
+        event_name.hash(&mut hasher);
+
+        // Part A - Always present fields for spans
+        fields.push((Cow::Borrowed(FIELD_ENV_NAME), BondDataType::BT_STRING));
+        fields.push((FIELD_ENV_VER.into(), BondDataType::BT_STRING));
+        fields.push((FIELD_TIMESTAMP.into(), BondDataType::BT_STRING));
+        fields.push((FIELD_ENV_TIME.into(), BondDataType::BT_STRING));
+
+        // Span-specific required fields
+        fields.push((FIELD_KIND.into(), BondDataType::BT_INT32));
+        fields.push((FIELD_START_TIME.into(), BondDataType::BT_STRING));
+        fields.push((FIELD_SUCCESS.into(), BondDataType::BT_BOOL));
+
+        // Part A extension - Conditional fields
+        if !span.trace_id.is_empty() {
+            fields.push((FIELD_TRACE_ID.into(), BondDataType::BT_STRING));
+        }
+        if !span.span_id.is_empty() {
+            fields.push((FIELD_SPAN_ID.into(), BondDataType::BT_STRING));
+        }
+        if span.flags != 0 {
+            fields.push((FIELD_TRACE_FLAGS.into(), BondDataType::BT_UINT32));
+        }
+
+        // Part B - Span-specific optional fields
+        if !span.name.is_empty() {
+            fields.push((FIELD_NAME.into(), BondDataType::BT_STRING));
+        }
+        if !span.trace_state.is_empty() {
+            fields.push((FIELD_TRACE_STATE.into(), BondDataType::BT_STRING));
+        }
+        if !span.parent_span_id.is_empty() {
+            fields.push((FIELD_PARENT_ID.into(), BondDataType::BT_STRING));
+        }
+        if !span.links.is_empty() {
+            fields.push((FIELD_LINKS.into(), BondDataType::BT_STRING));
+        }
+        if let Some(status) = &span.status {
+            if !status.message.is_empty() {
+                fields.push((FIELD_STATUS_MESSAGE.into(), BondDataType::BT_STRING));
+            }
+        }
+
+        // Part C - Dynamic attributes
+        for attr in &span.attributes {
+            if let Some(val) = attr.value.as_ref().and_then(|v| v.value.as_ref()) {
+                let type_id = match val {
+                    Value::StringValue(_) => BondDataType::BT_STRING,
+                    Value::IntValue(_) => BondDataType::BT_INT64,
+                    Value::DoubleValue(_) => BondDataType::BT_DOUBLE,
+                    Value::BoolValue(_) => BondDataType::BT_BOOL,
+                    _ => continue,
+                };
+                fields.push((attr.key.clone().into(), type_id));
+            }
+        }
+
+        // Hash field names and types while converting to FieldDef
+        let field_defs: Vec<FieldDef> = fields
+            .into_iter()
+            .enumerate()
+            .map(|(i, (name, type_id))| {
+                // Hash field name and type for schema ID
+                name.hash(&mut hasher);
+                type_id.hash(&mut hasher);
+
+                FieldDef {
+                    name,
+                    type_id,
+                    field_id: (i + 1) as u16,
+                }
+            })
+            .collect();
+
+        let schema_id = hasher.finish();
+        (field_defs, schema_id)
+    }
+
     /// Create schema - always creates a new CentralSchemaEntry
     fn create_schema(schema_id: u64, field_info: Vec<FieldDef>) -> CentralSchemaEntry {
         let schema = BondEncodedSchema::from_fields("OtlpLogRecord", "telemetry", field_info); //TODO - use actual struct name and namespace
@@ -257,6 +484,114 @@ impl OtlpEncoder {
             md5: schema_md5,
             schema,
         }
+    }
+
+    /// Create span schema - always creates a new CentralSchemaEntry
+    fn create_span_schema(schema_id: u64, field_info: Vec<FieldDef>) -> CentralSchemaEntry {
+        let schema = BondEncodedSchema::from_fields("OtlpSpanRecord", "telemetry", field_info);
+
+        let schema_bytes = schema.as_bytes();
+        let schema_md5 = md5::compute(schema_bytes).0;
+
+        CentralSchemaEntry {
+            id: schema_id,
+            md5: schema_md5,
+            schema,
+        }
+    }
+
+    /// Write span row data directly from Span
+    fn write_span_row_data(&self, span: &Span, sorted_fields: &[FieldDef]) -> Vec<u8> {
+        let mut buffer = Vec::with_capacity(sorted_fields.len() * 50);
+
+        // Pre-calculate timestamps
+        let start_timestamp = Self::format_timestamp(span.start_time_unix_nano);
+        let formatted_timestamp = start_timestamp.clone(); // Use start time as primary timestamp
+
+        for field in sorted_fields {
+            match field.name.as_ref() {
+                FIELD_ENV_NAME => BondWriter::write_string(&mut buffer, "TestEnv"), // TODO - placeholder
+                FIELD_ENV_VER => BondWriter::write_string(&mut buffer, "4.0"), // TODO - placeholder
+                FIELD_TIMESTAMP | FIELD_ENV_TIME => {
+                    BondWriter::write_string(&mut buffer, &formatted_timestamp);
+                }
+                FIELD_KIND => {
+                    BondWriter::write_numeric(&mut buffer, span.kind);
+                }
+                FIELD_START_TIME => {
+                    BondWriter::write_string(&mut buffer, &start_timestamp);
+                }
+                FIELD_SUCCESS => {
+                    // Determine success based on status
+                    let success = match &span.status {
+                        Some(status) => {
+                            use opentelemetry_proto::tonic::trace::v1::status::StatusCode;
+                            match StatusCode::try_from(status.code) {
+                                Ok(StatusCode::Ok) => true,
+                                Ok(StatusCode::Error) => false,
+                                _ => true, // Unset or unknown defaults to true
+                            }
+                        }
+                        None => true, // No status defaults to true
+                    };
+                    BondWriter::write_bool(&mut buffer, success);
+                }
+                FIELD_TRACE_ID => {
+                    let hex_bytes = Self::encode_id_to_hex::<32>(&span.trace_id);
+                    let hex_str = std::str::from_utf8(&hex_bytes).unwrap();
+                    BondWriter::write_string(&mut buffer, hex_str);
+                }
+                FIELD_SPAN_ID => {
+                    let hex_bytes = Self::encode_id_to_hex::<16>(&span.span_id);
+                    let hex_str = std::str::from_utf8(&hex_bytes).unwrap();
+                    BondWriter::write_string(&mut buffer, hex_str);
+                }
+                FIELD_TRACE_FLAGS => {
+                    BondWriter::write_numeric(&mut buffer, span.flags);
+                }
+                FIELD_NAME => {
+                    BondWriter::write_string(&mut buffer, &span.name);
+                }
+                FIELD_TRACE_STATE => {
+                    BondWriter::write_string(&mut buffer, &span.trace_state);
+                }
+                FIELD_PARENT_ID => {
+                    let hex_bytes = Self::encode_id_to_hex::<16>(&span.parent_span_id);
+                    let hex_str = std::str::from_utf8(&hex_bytes).unwrap();
+                    BondWriter::write_string(&mut buffer, hex_str);
+                }
+                FIELD_LINKS => {
+                    // Serialize links as JSON, similar to the C# implementation
+                    let links_json = serde_json::to_string(
+                        &span
+                            .links
+                            .iter()
+                            .map(|link| {
+                                serde_json::json!({
+                                    "toSpanId": hex::encode(&link.span_id),
+                                    "toTraceId": hex::encode(&link.trace_id)
+                                })
+                            })
+                            .collect::<Vec<_>>(),
+                    )
+                    .unwrap_or_default();
+                    BondWriter::write_string(&mut buffer, &links_json);
+                }
+                FIELD_STATUS_MESSAGE => {
+                    if let Some(status) = &span.status {
+                        BondWriter::write_string(&mut buffer, &status.message);
+                    }
+                }
+                _ => {
+                    // Handle dynamic attributes
+                    if let Some(attr) = span.attributes.iter().find(|a| a.key == field.name) {
+                        self.write_attribute_value(&mut buffer, attr, field.type_id);
+                    }
+                }
+            }
+        }
+
+        buffer
     }
 
     /// Write row data directly from LogRecord
@@ -673,5 +1008,174 @@ mod tests {
         assert_eq!(system_alert.metadata.schema_ids.matches(';').count(), 0); // 1 schema = 0 semicolons
         assert!(!log_batch.data.is_empty()); // Should have encoded data
         assert_eq!(log_batch.metadata.schema_ids.matches(';').count(), 0); // 1 schema = 0 semicolons
+    }
+
+    #[test]
+    fn test_span_encoding() {
+        let encoder = OtlpEncoder::new();
+
+        let mut span = Span {
+            trace_id: vec![1; 16],
+            span_id: vec![2; 8],
+            parent_span_id: vec![3; 8],
+            name: "test_span".to_string(),
+            kind: 1, // CLIENT
+            start_time_unix_nano: 1_700_000_000_000_000_000,
+            end_time_unix_nano: 1_700_000_001_000_000_000,
+            flags: 1,
+            trace_state: "key=value".to_string(),
+            ..Default::default()
+        };
+
+        // Add some attributes
+        span.attributes.push(KeyValue {
+            key: "http.method".to_string(),
+            value: Some(AnyValue {
+                value: Some(Value::StringValue("GET".to_string())),
+            }),
+        });
+
+        span.attributes.push(KeyValue {
+            key: "http.status_code".to_string(),
+            value: Some(AnyValue {
+                value: Some(Value::IntValue(200)),
+            }),
+        });
+
+        let metadata = "namespace=testNamespace/eventVersion=Ver1v0";
+        let result = encoder.encode_span_batch([span].iter(), metadata).unwrap();
+
+        assert!(!result.is_empty());
+        assert_eq!(result[0].event_name, "test_span");
+        assert!(!result[0].data.is_empty());
+    }
+
+    #[test]
+    fn test_span_with_links() {
+        use opentelemetry_proto::tonic::trace::v1::span::Link;
+
+        let encoder = OtlpEncoder::new();
+
+        let mut span = Span {
+            trace_id: vec![1; 16],
+            span_id: vec![2; 8],
+            name: "linked_span".to_string(),
+            kind: 2, // SERVER
+            start_time_unix_nano: 1_700_000_000_000_000_000,
+            end_time_unix_nano: 1_700_000_001_000_000_000,
+            ..Default::default()
+        };
+
+        // Add some links
+        span.links.push(Link {
+            trace_id: vec![4; 16],
+            span_id: vec![5; 8],
+            ..Default::default()
+        });
+
+        span.links.push(Link {
+            trace_id: vec![6; 16],
+            span_id: vec![7; 8],
+            ..Default::default()
+        });
+
+        let result = encoder.encode_span_batch([span].iter(), "test").unwrap();
+
+        assert_eq!(result.len(), 1);
+        assert_eq!(result[0].event_name, "linked_span");
+        assert!(!result[0].data.is_empty());
+    }
+
+    #[test]
+    fn test_span_with_status() {
+        use opentelemetry_proto::tonic::trace::v1::{status::StatusCode, Status};
+
+        let encoder = OtlpEncoder::new();
+
+        let mut span = Span {
+            trace_id: vec![1; 16],
+            span_id: vec![2; 8],
+            name: "error_span".to_string(),
+            kind: 1,
+            start_time_unix_nano: 1_700_000_000_000_000_000,
+            end_time_unix_nano: 1_700_000_001_000_000_000,
+            ..Default::default()
+        };
+
+        span.status = Some(Status {
+            message: "Something went wrong".to_string(),
+            code: StatusCode::Error as i32,
+        });
+
+        let result = encoder.encode_span_batch([span].iter(), "test").unwrap();
+
+        assert_eq!(result.len(), 1);
+        assert_eq!(result[0].event_name, "error_span");
+        assert!(!result[0].data.is_empty());
+    }
+
+    #[test]
+    fn test_empty_span_name_defaults_to_span() {
+        let encoder = OtlpEncoder::new();
+
+        let span = Span {
+            trace_id: vec![1; 16],
+            span_id: vec![2; 8],
+            name: "".to_string(),
+            kind: 1,
+            start_time_unix_nano: 1_700_000_000_000_000_000,
+            end_time_unix_nano: 1_700_000_001_000_000_000,
+            ..Default::default()
+        };
+
+        let result = encoder.encode_span_batch([span].iter(), "test").unwrap();
+
+        assert_eq!(result.len(), 1);
+        assert_eq!(result[0].event_name, "Span"); // Should default to "Span"
+        assert!(!result[0].data.is_empty());
+    }
+
+    #[test]
+    fn test_multiple_spans_same_name() {
+        let encoder = OtlpEncoder::new();
+
+        let span1 = Span {
+            trace_id: vec![1; 16],
+            span_id: vec![2; 8],
+            name: "database_query".to_string(),
+            kind: 3, // CLIENT
+            start_time_unix_nano: 1_700_000_000_000_000_000,
+            end_time_unix_nano: 1_700_000_001_000_000_000,
+            ..Default::default()
+        };
+
+        let mut span2 = Span {
+            trace_id: vec![3; 16],
+            span_id: vec![4; 8],
+            name: "database_query".to_string(),
+            kind: 3,
+            start_time_unix_nano: 1_700_000_002_000_000_000,
+            end_time_unix_nano: 1_700_000_003_000_000_000,
+            ..Default::default()
+        };
+
+        // Add attributes to span2 to create different schema
+        span2.attributes.push(KeyValue {
+            key: "db.table".to_string(),
+            value: Some(AnyValue {
+                value: Some(Value::StringValue("users".to_string())),
+            }),
+        });
+
+        let result = encoder
+            .encode_span_batch([span1, span2].iter(), "test")
+            .unwrap();
+
+        // Should create one batch with same event_name
+        assert_eq!(result.len(), 1);
+        assert_eq!(result[0].event_name, "database_query");
+        assert!(!result[0].data.is_empty());
+        // Should have 2 different schema IDs (semicolon-separated)
+        assert_eq!(result[0].metadata.schema_ids.matches(';').count(), 1); // 2 schemas = 1 semicolon
     }
 }
