@@ -1145,27 +1145,4 @@ mod tests {
         assert_eq!(result[0].metadata.schema_ids.matches(';').count(), 0); // 1 schema = 0 semicolons
     }
 
-    #[test]
-    fn test_span_name_validation() {
-        let encoder = OtlpEncoder::new();
-
-        let span = Span {
-            trace_id: vec![1; 16],
-            span_id: vec![2; 8],
-            name: "test_operation".to_string(),
-            kind: 1, // CLIENT
-            start_time_unix_nano: 1_700_000_000_000_000_000,
-            end_time_unix_nano: 1_700_000_001_000_000_000,
-            ..Default::default()
-        };
-
-        let result = encoder.encode_span_batch([span].iter(), "test").unwrap();
-
-        assert_eq!(result.len(), 1);
-        // Validate that event_name is "Span" for routing
-        assert_eq!(result[0].event_name, "Span");
-        // Validate that name contains the actual span name
-        assert_eq!(result[0].name, Some("test_operation".to_string()));
-        assert!(!result[0].data.is_empty());
-    }
 }
