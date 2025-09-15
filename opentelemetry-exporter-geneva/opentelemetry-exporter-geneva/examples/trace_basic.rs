@@ -4,7 +4,7 @@ use geneva_uploader::client::{GenevaClient, GenevaClientConfig};
 use geneva_uploader::AuthMethod;
 use opentelemetry::{global, trace::Tracer, KeyValue};
 use opentelemetry_exporter_geneva::GenevaTraceExporter;
-use opentelemetry_sdk::trace::{BatchSpanProcessor, SdkTracerProvider};
+use opentelemetry_sdk::trace::{SimpleSpanProcessor, SdkTracerProvider};
 use opentelemetry_sdk::Resource;
 use std::env;
 use std::path::PathBuf;
@@ -63,8 +63,8 @@ async fn main() {
     // Create Geneva trace exporter
     let exporter = GenevaTraceExporter::new(geneva_client);
     
-    // Create batch span processor
-    let span_processor = BatchSpanProcessor::builder(exporter).build();
+    // Create simple span processor (exports spans immediately)
+    let span_processor = SimpleSpanProcessor::new(exporter);
 
     // Create tracer provider
     let tracer_provider = SdkTracerProvider::builder()
@@ -194,11 +194,10 @@ async fn main() {
 
     drop(_api_span);
 
-    println!("Spans created successfully!");
+    println!("Spans created and exported successfully!");
 
-    // Wait for spans to be exported
-    println!("Waiting for spans to be exported...");
-    thread::sleep(Duration::from_secs(3));
+    // SimpleSpanProcessor exports spans immediately, so no need to wait
+    println!("All spans have been exported to Geneva!");
 
     // Shutdown the tracer provider
     tracer_provider.shutdown().expect("Failed to shutdown tracer provider");

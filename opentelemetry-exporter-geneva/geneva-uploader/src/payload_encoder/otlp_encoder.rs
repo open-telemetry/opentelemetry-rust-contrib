@@ -192,13 +192,8 @@ impl OtlpEncoder {
         let mut events = Vec::new();
         let mut start_time = u64::MAX;
         let mut end_time = 0u64;
-        let mut first_span_name: Option<String> = None;
 
         for span in spans {
-            // Capture the first non-empty span name for the batch
-            if first_span_name.is_none() && !span.name.is_empty() {
-                first_span_name = Some(span.name.clone());
-            }
             // 1. Get schema with optimized single-pass field collection and schema ID calculation
             let (field_info, schema_id) =
                 Self::determine_span_fields_and_schema_id(span, EVENT_NAME);
