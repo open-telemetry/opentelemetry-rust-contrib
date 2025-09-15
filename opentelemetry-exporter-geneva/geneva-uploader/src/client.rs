@@ -12,6 +12,7 @@ use std::sync::Arc;
 #[derive(Debug, Clone)]
 pub struct EncodedBatch {
     pub event_name: String,
+    pub name: Option<String>, // For spans: actual span name, for logs: event name
     pub data: Vec<u8>,
     pub metadata: crate::payload_encoder::central_blob::BatchMetadata,
 }

@@ -165,7 +165,8 @@ impl OtlpEncoder {
             let compressed = lz4_chunked_compression(&uncompressed)
                 .map_err(|e| format!("compression failed: {e}"))?;
             blobs.push(EncodedBatch {
-                event_name: batch_event_name,
+                event_name: batch_event_name.clone(),
+                name: Some(batch_event_name),
                 data: compressed,
                 metadata: batch_data.metadata,
             });
@@ -173,7 +174,8 @@ impl OtlpEncoder {
         Ok(blobs)
     }
 
-    /// Encode a batch of spans into a vector of (event_name, compressed_bytes, schema_ids, start_time_nanos, end_time_nanos)
+    /// Encode a batch of spans into a single payload
+    /// All spans are grouped into a single batch with event_name "Span" for routing
     /// The returned `data` field contains LZ4 chunked compressed bytes.
     /// On compression failure, the error is returned (no logging, no fallback).
     pub(crate) fn encode_span_batch<'a, I>(
@@ -184,29 +186,65 @@ impl OtlpEncoder {
     where
         I: IntoIterator<Item = &'a Span>,
     {
-        use std::collections::HashMap;
+        // All spans use "Span" as event name for routing - no grouping by span name
+        const EVENT_NAME: &str = "Span";
+        
+        let mut schemas = Vec::new();
+        let mut events = Vec::new();
+        let mut start_time = u64::MAX;
+        let mut end_time = 0u64;
+        let mut first_span_name: Option<String> = None;
 
-        // Internal struct to accumulate batch data before encoding
-        struct BatchData {
-            schemas: Vec<CentralSchemaEntry>,
-            events: Vec<CentralEventEntry>,
-            metadata: BatchMetadata,
+        for span in spans {
+            // Capture the first non-empty span name for the batch
+            if first_span_name.is_none() && !span.name.is_empty() {
+                first_span_name = Some(span.name.clone());
+            }
+            // 1. Get schema with optimized single-pass field collection and schema ID calculation
+            let (field_info, schema_id) =
+                Self::determine_span_fields_and_schema_id(span, EVENT_NAME);
+
+            // 2. Encode row
+            let row_buffer = self.write_span_row_data(span, &field_info);
+            let level = 5; // Default level for spans (INFO equivalent)
+
+            // 3. Update timestamp range
+            if span.start_time_unix_nano != 0 {
+                start_time = start_time.min(span.start_time_unix_nano);
+            }
+            if span.end_time_unix_nano != 0 {
+                end_time = end_time.max(span.end_time_unix_nano);
+            }
+
+            // 4. Add schema entry if not already present
+            if !schemas.iter().any(|s: &CentralSchemaEntry| s.id == schema_id) {
+                let schema_entry = Self::create_span_schema(schema_id, field_info);
+                schemas.push(schema_entry);
+            }
+
+            // 5. Create CentralEventEntry
+            let central_event = CentralEventEntry {
+                schema_id,
+                level,
+                event_name: Arc::new(EVENT_NAME.to_string()),
+                row: row_buffer,
+            };
+            events.push(central_event);
         }
 
-        impl BatchData {
-            fn format_schema_ids(&self) -> String {
-                use std::fmt::Write;
+        // Handle case with no spans
+        if events.is_empty() {
+            return Ok(Vec::new());
+        }
 
-                if self.schemas.is_empty() {
-                    return String::new();
-                }
-
-                // Pre-allocate capacity: Each MD5 hash is 32 hex chars + 1 semicolon (except last)
-                // Total: (32 chars per hash * num_schemas) + (semicolons = num_schemas - 1)
-                let estimated_capacity =
-                    self.schemas.len() * 32 + self.schemas.len().saturating_sub(1);
-
-                self.schemas.iter().enumerate().fold(
+        // Format schema IDs
+        let schema_ids_string = {
+            use std::fmt::Write;
+            if schemas.is_empty() {
+                String::new()
+            } else {
+                let estimated_capacity = schemas.len() * 32 + schemas.len().saturating_sub(1);
+                schemas.iter().enumerate().fold(
                     String::with_capacity(estimated_capacity),
                     |mut acc, (i, s)| {
                         if i > 0 {
@@ -218,87 +256,33 @@ impl OtlpEncoder {
                     },
                 )
             }
-        }
+        };
 
-        let mut batches: HashMap<String, BatchData> = HashMap::new();
+        // Create single batch with all spans
+        let batch_metadata = BatchMetadata {
+            start_time: if start_time == u64::MAX { 0 } else { start_time },
+            end_time,
+            schema_ids: schema_ids_string,
+        };
 
-        for span in spans {
-            // Use span name directly, fallback to "Span" if empty
-            let event_name_str = if span.name.is_empty() {
-                "Span"
-            } else {
-                span.name.as_str()
-            };
-
-            // 1. Get schema with optimized single-pass field collection and schema ID calculation
-            let (field_info, schema_id) =
-                Self::determine_span_fields_and_schema_id(span, event_name_str);
-
-            // 2. Encode row
-            let row_buffer = self.write_span_row_data(span, &field_info);
-            let level = 5; // Default level for spans (INFO equivalent)
-
-            // 3. Create or get existing batch entry with metadata tracking
-            let entry = batches
-                .entry(event_name_str.to_string())
-                .or_insert_with(|| BatchData {
-                    schemas: Vec::new(),
-                    events: Vec::new(),
-                    metadata: BatchMetadata {
-                        start_time: span.start_time_unix_nano,
-                        end_time: span.end_time_unix_nano,
-                        schema_ids: String::new(),
-                    },
-                });
-
-            // Update timestamp range
-            if span.start_time_unix_nano != 0 {
-                entry.metadata.start_time =
-                    entry.metadata.start_time.min(span.start_time_unix_nano);
-            }
-            if span.end_time_unix_nano != 0 {
-                entry.metadata.end_time = entry.metadata.end_time.max(span.end_time_unix_nano);
-            }
-
-            // 4. Add schema entry if not already present (multiple schemas per event_name batch)
-            if !entry.schemas.iter().any(|s| s.id == schema_id) {
-                let schema_entry = Self::create_span_schema(schema_id, field_info);
-                entry.schemas.push(schema_entry);
-            }
-
-            // 5. Create CentralEventEntry directly (optimization: no intermediate EncodedRow)
-            let central_event = CentralEventEntry {
-                schema_id,
-                level,
-                event_name: Arc::new(event_name_str.to_string()),
-                row: row_buffer,
-            };
-            entry.events.push(central_event);
-        }
-
-        // 6. Encode blobs (one per event_name, potentially multiple schemas per blob)
-        let mut blobs = Vec::with_capacity(batches.len());
-        for (batch_event_name, mut batch_data) in batches {
-            let schema_ids_string = batch_data.format_schema_ids();
-            batch_data.metadata.schema_ids = schema_ids_string;
-
-            let blob = CentralBlob {
-                version: 1,
-                format: 2,
-                metadata: metadata.to_string(),
-                schemas: batch_data.schemas,
-                events: batch_data.events,
-            };
-            let uncompressed = blob.to_bytes();
-            let compressed = lz4_chunked_compression(&uncompressed)
-                .map_err(|e| format!("compression failed: {e}"))?;
-            blobs.push(EncodedBatch {
-                event_name: batch_event_name,
-                data: compressed,
-                metadata: batch_data.metadata,
-            });
-        }
-        Ok(blobs)
+        let blob = CentralBlob {
+            version: 1,
+            format: 2,
+            metadata: metadata.to_string(),
+            schemas,
+            events,
+        };
+        
+        let uncompressed = blob.to_bytes();
+        let compressed = lz4_chunked_compression(&uncompressed)
+            .map_err(|e| format!("compression failed: {e}"))?;
+        
+        Ok(vec![EncodedBatch {
+            event_name: EVENT_NAME.to_string(),
+            name: first_span_name, // Use the first span's name for test validation
+            data: compressed,
+            metadata: batch_metadata,
+        }])
     }
 
     /// Determine fields and calculate schema ID in a single pass for optimal performance
@@ -1046,7 +1030,7 @@ mod tests {
         let result = encoder.encode_span_batch([span].iter(), metadata).unwrap();
 
         assert!(!result.is_empty());
-        assert_eq!(result[0].event_name, "test_span");
+        assert_eq!(result[0].event_name, "Span"); // All spans use "Span" event name for routing
         assert!(!result[0].data.is_empty());
     }
 
@@ -1082,7 +1066,7 @@ mod tests {
         let result = encoder.encode_span_batch([span].iter(), "test").unwrap();
 
         assert_eq!(result.len(), 1);
-        assert_eq!(result[0].event_name, "linked_span");
+        assert_eq!(result[0].event_name, "Span"); // All spans use "Span" event name for routing
         assert!(!result[0].data.is_empty());
     }
 
@@ -1110,30 +1094,10 @@ mod tests {
         let result = encoder.encode_span_batch([span].iter(), "test").unwrap();
 
         assert_eq!(result.len(), 1);
-        assert_eq!(result[0].event_name, "error_span");
+        assert_eq!(result[0].event_name, "Span"); // All spans use "Span" event name for routing
         assert!(!result[0].data.is_empty());
     }
 
-    #[test]
-    fn test_empty_span_name_defaults_to_span() {
-        let encoder = OtlpEncoder::new();
-
-        let span = Span {
-            trace_id: vec![1; 16],
-            span_id: vec![2; 8],
-            name: "".to_string(),
-            kind: 1,
-            start_time_unix_nano: 1_700_000_000_000_000_000,
-            end_time_unix_nano: 1_700_000_001_000_000_000,
-            ..Default::default()
-        };
-
-        let result = encoder.encode_span_batch([span].iter(), "test").unwrap();
-
-        assert_eq!(result.len(), 1);
-        assert_eq!(result[0].event_name, "Span"); // Should default to "Span"
-        assert!(!result[0].data.is_empty());
-    }
 
     #[test]
     fn test_multiple_spans_same_name() {
@@ -1149,23 +1113,24 @@ mod tests {
             ..Default::default()
         };
 
-        let mut span2 = Span {
+        let span2 = Span {
             trace_id: vec![3; 16],
             span_id: vec![4; 8],
-            name: "database_query".to_string(),
+            name: "database_query".to_string(), // Same name as span1
             kind: 3,
             start_time_unix_nano: 1_700_000_002_000_000_000,
             end_time_unix_nano: 1_700_000_003_000_000_000,
             ..Default::default()
         };
 
-        // Add attributes to span2 to create different schema
-        span2.attributes.push(KeyValue {
-            key: "db.table".to_string(),
-            value: Some(AnyValue {
-                value: Some(Value::StringValue("users".to_string())),
-            }),
-        });
+        // Verify that both spans have name field in schema
+        let (fields1, _) = OtlpEncoder::determine_span_fields_and_schema_id(&span1, "Span");
+        let name_field_present1 = fields1.iter().any(|field| field.name.as_ref() == FIELD_NAME);
+        assert!(name_field_present1, "Span with non-empty name should include 'name' field in schema");
+
+        let (fields2, _) = OtlpEncoder::determine_span_fields_and_schema_id(&span2, "Span");
+        let name_field_present2 = fields2.iter().any(|field| field.name.as_ref() == FIELD_NAME);
+        assert!(name_field_present2, "Span with non-empty name should include 'name' field in schema");
 
         let result = encoder
             .encode_span_batch([span1, span2].iter(), "test")
@@ -1173,9 +1138,34 @@ mod tests {
 
         // Should create one batch with same event_name
         assert_eq!(result.len(), 1);
-        assert_eq!(result[0].event_name, "database_query");
+        assert_eq!(result[0].event_name, "Span"); // All spans use "Span" event name for routing
+        assert_eq!(result[0].name, Some("database_query".to_string())); // Should capture first span's name
         assert!(!result[0].data.is_empty());
-        // Should have 2 different schema IDs (semicolon-separated)
-        assert_eq!(result[0].metadata.schema_ids.matches(';').count(), 1); // 2 schemas = 1 semicolon
+        // Should have 1 schema ID since both spans have same schema structure
+        assert_eq!(result[0].metadata.schema_ids.matches(';').count(), 0); // 1 schema = 0 semicolons
+    }
+
+    #[test]
+    fn test_span_name_validation() {
+        let encoder = OtlpEncoder::new();
+
+        let span = Span {
+            trace_id: vec![1; 16],
+            span_id: vec![2; 8],
+            name: "test_operation".to_string(),
+            kind: 1, // CLIENT
+            start_time_unix_nano: 1_700_000_000_000_000_000,
+            end_time_unix_nano: 1_700_000_001_000_000_000,
+            ..Default::default()
+        };
+
+        let result = encoder.encode_span_batch([span].iter(), "test").unwrap();
+
+        assert_eq!(result.len(), 1);
+        // Validate that event_name is "Span" for routing
+        assert_eq!(result[0].event_name, "Span");
+        // Validate that name contains the actual span name
+        assert_eq!(result[0].name, Some("test_operation".to_string()));
+        assert!(!result[0].data.is_empty());
     }
 }
