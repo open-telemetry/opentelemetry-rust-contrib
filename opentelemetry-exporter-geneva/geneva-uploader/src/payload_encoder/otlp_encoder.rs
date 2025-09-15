@@ -485,6 +485,7 @@ impl OtlpEncoder {
     }
 
     /// Write span row data directly from Span
+    // TODO - code duplication between write_span_row_data() and write_row_data() - consider extracting common field handling
     fn write_span_row_data(&self, span: &Span, sorted_fields: &[FieldDef]) -> Vec<u8> {
         let mut buffer = Vec::with_capacity(sorted_fields.len() * 50);
 
@@ -545,7 +546,8 @@ impl OtlpEncoder {
                     BondWriter::write_string(&mut buffer, hex_str);
                 }
                 FIELD_LINKS => {
-                    // Serialize links as JSON, similar to the C# implementation
+                    // Serialize links as JSON
+                    // TODO - consider more efficient serialization if needed
                     let links_json = serde_json::to_string(
                         &span
                             .links
