@@ -4,7 +4,7 @@ use geneva_uploader::client::{GenevaClient, GenevaClientConfig};
 use geneva_uploader::AuthMethod;
 use opentelemetry::{global, trace::Tracer, KeyValue};
 use opentelemetry_exporter_geneva::GenevaTraceExporter;
-use opentelemetry_sdk::trace::{SimpleSpanProcessor, SdkTracerProvider};
+use opentelemetry_sdk::trace::{SdkTracerProvider, SimpleSpanProcessor};
 use opentelemetry_sdk::Resource;
 use std::env;
 use std::path::PathBuf;
@@ -62,7 +62,7 @@ async fn main() {
 
     // Create Geneva trace exporter
     let exporter = GenevaTraceExporter::new(geneva_client);
-    
+
     // Create simple span processor (exports spans immediately)
     let span_processor = SimpleSpanProcessor::new(exporter);
 
@@ -102,7 +102,10 @@ async fn main() {
             KeyValue::new("db.system", "postgresql"),
             KeyValue::new("db.name", "users"),
             KeyValue::new("db.operation", "INSERT"),
-            KeyValue::new("db.statement", "INSERT INTO users (email, name) VALUES (?, ?)"),
+            KeyValue::new(
+                "db.statement",
+                "INSERT INTO users (email, name) VALUES (?, ?)",
+            ),
         ])
         .start(&tracer);
 
@@ -200,6 +203,8 @@ async fn main() {
     println!("All spans have been exported to Geneva!");
 
     // Shutdown the tracer provider
-    tracer_provider.shutdown().expect("Failed to shutdown tracer provider");
+    tracer_provider
+        .shutdown()
+        .expect("Failed to shutdown tracer provider");
     println!("Tracer provider shut down successfully!");
 }

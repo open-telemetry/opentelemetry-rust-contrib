@@ -187,7 +187,7 @@ impl OtlpEncoder {
     {
         // All spans use "Span" as event name for routing - no grouping by span name
         const EVENT_NAME: &str = "Span";
-        
+
         let mut schemas = Vec::new();
         let mut events = Vec::new();
         let mut start_time = u64::MAX;
@@ -211,7 +211,10 @@ impl OtlpEncoder {
             }
 
             // 4. Add schema entry if not already present
-            if !schemas.iter().any(|s: &CentralSchemaEntry| s.id == schema_id) {
+            if !schemas
+                .iter()
+                .any(|s: &CentralSchemaEntry| s.id == schema_id)
+            {
                 let schema_entry = Self::create_span_schema(schema_id, field_info);
                 schemas.push(schema_entry);
             }
@@ -254,7 +257,11 @@ impl OtlpEncoder {
 
         // Create single batch with all spans
         let batch_metadata = BatchMetadata {
-            start_time: if start_time == u64::MAX { 0 } else { start_time },
+            start_time: if start_time == u64::MAX {
+                0
+            } else {
+                start_time
+            },
             end_time,
             schema_ids: schema_ids_string,
         };
@@ -266,11 +273,11 @@ impl OtlpEncoder {
             schemas,
             events,
         };
-        
+
         let uncompressed = blob.to_bytes();
         let compressed = lz4_chunked_compression(&uncompressed)
             .map_err(|e| format!("compression failed: {e}"))?;
-        
+
         Ok(vec![EncodedBatch {
             event_name: EVENT_NAME.to_string(),
             data: compressed,
@@ -366,7 +373,7 @@ impl OtlpEncoder {
         use std::hash::{Hash, Hasher};
 
         // Pre-allocate with estimated capacity to avoid reallocations
-        let estimated_capacity = 10 + span.attributes.len();
+        let estimated_capacity = 12 + span.attributes.len(); // 7 always + 5 max conditional + attributes
         let mut fields = Vec::with_capacity(estimated_capacity);
 
         // Initialize hasher for schema ID calculation
@@ -1091,7 +1098,6 @@ mod tests {
         assert!(!result[0].data.is_empty());
     }
 
-
     #[test]
     fn test_multiple_spans_same_name() {
         let encoder = OtlpEncoder::new();
@@ -1118,12 +1124,22 @@ mod tests {
 
         // Verify that both spans have name field in schema
         let (fields1, _) = OtlpEncoder::determine_span_fields_and_schema_id(&span1, "Span");
-        let name_field_present1 = fields1.iter().any(|field| field.name.as_ref() == FIELD_NAME);
-        assert!(name_field_present1, "Span with non-empty name should include 'name' field in schema");
+        let name_field_present1 = fields1
+            .iter()
+            .any(|field| field.name.as_ref() == FIELD_NAME);
+        assert!(
+            name_field_present1,
+            "Span with non-empty name should include 'name' field in schema"
+        );
 
         let (fields2, _) = OtlpEncoder::determine_span_fields_and_schema_id(&span2, "Span");
-        let name_field_present2 = fields2.iter().any(|field| field.name.as_ref() == FIELD_NAME);
-        assert!(name_field_present2, "Span with non-empty name should include 'name' field in schema");
+        let name_field_present2 = fields2
+            .iter()
+            .any(|field| field.name.as_ref() == FIELD_NAME);
+        assert!(
+            name_field_present2,
+            "Span with non-empty name should include 'name' field in schema"
+        );
 
         let result = encoder
             .encode_span_batch([span1, span2].iter(), "test")
@@ -1136,5 +1152,4 @@ mod tests {
         // Should have 1 schema ID since both spans have same schema structure
         assert_eq!(result[0].metadata.schema_ids.matches(';').count(), 0); // 1 schema = 0 semicolons
     }
-
 }
