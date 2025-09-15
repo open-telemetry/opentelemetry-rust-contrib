@@ -165,8 +165,7 @@ impl OtlpEncoder {
             let compressed = lz4_chunked_compression(&uncompressed)
                 .map_err(|e| format!("compression failed: {e}"))?;
             blobs.push(EncodedBatch {
-                event_name: batch_event_name.clone(),
-                name: Some(batch_event_name),
+                event_name: batch_event_name,
                 data: compressed,
                 metadata: batch_data.metadata,
             });
@@ -279,7 +278,6 @@ impl OtlpEncoder {
         
         Ok(vec![EncodedBatch {
             event_name: EVENT_NAME.to_string(),
-            name: first_span_name, // Use the first span's name for test validation
             data: compressed,
             metadata: batch_metadata,
         }])
@@ -1139,7 +1137,6 @@ mod tests {
         // Should create one batch with same event_name
         assert_eq!(result.len(), 1);
         assert_eq!(result[0].event_name, "Span"); // All spans use "Span" event name for routing
-        assert_eq!(result[0].name, Some("database_query".to_string())); // Should capture first span's name
         assert!(!result[0].data.is_empty());
         // Should have 1 schema ID since both spans have same schema structure
         assert_eq!(result[0].metadata.schema_ids.matches(';').count(), 0); // 1 schema = 0 semicolons
