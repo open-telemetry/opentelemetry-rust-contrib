@@ -2,6 +2,13 @@
 
 ## vNext
 
+## v0.11.1
+
+Released 2025-Sep-17
+
+- Bump opentelemetry-proto version to 0.30.1
+- Bump prost version to 0.14
+
 ## v0.11.0
 
 Released 2025-May-27

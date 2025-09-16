@@ -1,6 +1,6 @@
 [package]
 name = "opentelemetry-user-events-metrics"
-version = "0.11.0"
+version = "0.11.1"
 description = "OpenTelemetry metrics exporter to user events"
 homepage = "https://github.com/open-telemetry/opentelemetry-rust-contrib/tree/main/opentelemetry-user-events-metrics"
 repository = "https://github.com/open-telemetry/opentelemetry-rust-contrib/tree/main/opentelemetry-user-events-metrics"
@@ -13,9 +13,9 @@ rust-version = "1.75.0"
 [dependencies]
 opentelemetry = { version= "0.30", features = ["metrics"] }
 opentelemetry_sdk = { version= "0.30", features = ["metrics"] }
-opentelemetry-proto = { version= "0.30", features = ["gen-tonic", "metrics"] }
+opentelemetry-proto = { version= "0.30.1", features = ["gen-tonic", "metrics"] }
 eventheader = { version = "= 0.4.1" }
-prost = "0.13"
+prost = "0.14"
 tracing = {version = "0.1", optional = true}
 
 [dev-dependencies]

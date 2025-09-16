@@ -32,7 +32,7 @@ debug = 1
 opentelemetry = "0.30"
 opentelemetry-appender-tracing = "0.30"
 opentelemetry-http = "0.30"
-opentelemetry-proto = { version = "0.30", default-features = false }
+opentelemetry-proto = { version = "0.30.1", default-features = false }
 opentelemetry_sdk = { version = "0.30", default-features = false }
 opentelemetry-stdout = "0.30"
 opentelemetry-semantic-conventions = { version = "0.30", features = [
