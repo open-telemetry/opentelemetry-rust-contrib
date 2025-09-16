@@ -13,7 +13,7 @@ rust-version = "1.75.0"
 [dependencies]
 opentelemetry = { version = "0.30", features = ["metrics"] }
 opentelemetry_sdk = { version = "0.30", features = ["metrics"] }
-opentelemetry-proto = { version = "0.30", features = ["gen-tonic", "metrics"] }
+opentelemetry-proto = { version = "0.30", features = ["gen-tonic", "metrics"], default-features = false }
 prost = "0.13"
 tracelogging = "1.2.4"
 tracing = { version = "0.1", optional = true }
@@ -21,7 +21,7 @@ tracing = { version = "0.1", optional = true }
 tokio = { version = "1.0", features = ["full"] }
 criterion = { workspace = true, features = ["html_reports"] }
 tracing-subscriber = { version = "0.3", features = ["env-filter","registry", "std", "fmt"] }
-opentelemetry-proto = { version = "0.30", features = ["gen-tonic", "metrics", "gen-tonic-messages"] }
+opentelemetry-proto = { version = "0.30", features = ["gen-tonic", "metrics", "gen-tonic-messages"], default-features = false }
 
 [features]
 internal-logs = ["tracing", "opentelemetry/internal-logs", "opentelemetry_sdk/internal-logs", "opentelemetry-proto/internal-logs"]
