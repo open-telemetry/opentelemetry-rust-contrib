@@ -1,4 +1,5 @@
 use opentelemetry::logs::AnyValue;
+use opentelemetry::Key;
 use tracelogging_dynamic as tld;
 
 pub(crate) const EVENT_ID: &str = "event_id";
@@ -6,6 +7,7 @@ pub(crate) const EVENT_ID: &str = "event_id";
 pub(crate) fn populate_part_c(
     event: &mut tld::EventBuilder,
     log_record: &opentelemetry_sdk::logs::SdkLogRecord,
+    resource_attributes: &[(Key, AnyValue)],
     field_tag: u32,
 ) -> Option<i64> {
     //populate CS PartC
@@ -25,10 +27,14 @@ pub(crate) fn populate_part_c(
         }
     }
 
+    // Add count of resource attributes
+    cs_c_count += resource_attributes.len() as u16;
+
     // If there are additional PartC attributes, add them to the event
     if cs_c_count > 0 {
-        event.add_struct("PartC", cs_c_count, field_tag);
+        event.add_struct("PartC", cs_c_count as u8, field_tag);
 
+        // Add log record attributes first
         // TODO: This 2nd iteration is not optimal, and can be optimized
         for (key, value) in log_record.attributes_iter() {
             match (key.as_str(), &value) {
@@ -39,6 +45,11 @@ pub(crate) fn populate_part_c(
                     super::common::add_attribute_to_event(event, key, value);
                 }
             }
+        }
+
+        // Add resource attributes
+        for (key, value) in resource_attributes {
+            super::common::add_attribute_to_event(event, key, value);
         }
     }
     event_id
