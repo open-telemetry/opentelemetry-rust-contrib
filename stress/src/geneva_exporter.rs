@@ -251,7 +251,7 @@ async fn async_main(
     args_start_idx: usize,
     runtime_type: &str,
 ) -> Result<(), Box<dyn std::error::Error>> {
-    // Get timestamp once at the start to avoid repeated syscalls during stress test
+    // Get timestamp for events
     let base_timestamp = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .unwrap()
