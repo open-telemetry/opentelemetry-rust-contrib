@@ -51,8 +51,8 @@ use wiremock::{Mock, MockServer, ResponseTemplate};
 fn create_test_logs(base_timestamp: u64) -> Vec<ResourceLogs> {
     let mut log_records = Vec::new();
 
-    // Create 1000 simple log records
-    for i in 0..1000 {
+    // Create 10 simple log records
+    for i in 0..10 {
         let timestamp = base_timestamp + i * 1_000_000; // 1 ms apart
         let log = LogRecord {
             observed_time_unix_nano: timestamp,
