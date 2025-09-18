@@ -48,13 +48,8 @@ use wiremock::matchers::{method, path_regex};
 use wiremock::{Mock, MockServer, ResponseTemplate};
 
 // Helper functions
-fn create_test_logs() -> Vec<ResourceLogs> {
+fn create_test_logs(base_timestamp: u64) -> Vec<ResourceLogs> {
     let mut log_records = Vec::new();
-    // Get current timestamp once to avoid repeated syscalls
-    let base_timestamp = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .unwrap()
-        .as_nanos() as u64;
 
     // Create 1000 simple log records
     for i in 0..1000 {
@@ -256,6 +251,12 @@ async fn async_main(
     args_start_idx: usize,
     runtime_type: &str,
 ) -> Result<(), Box<dyn std::error::Error>> {
+    // Get timestamp once at the start to avoid repeated syscalls during stress test
+    let base_timestamp = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap()
+        .as_nanos() as u64;
+
     // Get concurrency from the appropriate position
     let concurrency = args
         .get(args_start_idx)
@@ -271,7 +272,7 @@ async fn async_main(
     // Initialize client and test data
     let (client, _mock_uri) = init_client().await?;
     let client = Arc::new(client);
-    let logs = Arc::new(create_test_logs());
+    let logs = Arc::new(create_test_logs(base_timestamp));
 
     // Warm up the ingestion token cache
     println!("Warming up token cache...");
