@@ -50,12 +50,18 @@ use wiremock::{Mock, MockServer, ResponseTemplate};
 // Helper functions
 fn create_test_logs() -> Vec<ResourceLogs> {
     let mut log_records = Vec::new();
+    // Get current timestamp once to avoid repeated syscalls
+    let base_timestamp = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap()
+        .as_nanos() as u64;
 
     // Create 10 simple log records
     for i in 0..10 {
+        let timestamp = base_timestamp + i * 1_000_000; // 1 ms apart
         let log = LogRecord {
-            observed_time_unix_nano: 1700000000000000000 + i,
-            event_name: "StressTestEvent".to_string(),
+            observed_time_unix_nano: timestamp,
+            event_name: "Log".to_string(),
             severity_number: 9,
             severity_text: "INFO".to_string(),
             body: Some(AnyValue {
