@@ -31,7 +31,7 @@ futures = "0.3"
 
 opentelemetry-appender-tracing = { version = "0.30", features= ["spec_unstable_logs_enabled"] }
 opentelemetry_sdk = { version = "0.30", features = ["logs", "spec_unstable_logs_enabled"] }
-opentelemetry-proto = { version = "0.30"}
+opentelemetry-proto = { version = "0.30", default-features = false, features = ["logs", "gen-tonic-messages"] }
 opentelemetry-user-events-logs = { path = "../opentelemetry-user-events-logs", features = ["spec_unstable_logs_enabled"]}
 opentelemetry-etw-logs = { path = "../opentelemetry-etw-logs"}
 tracing = { version = "0.1", default-features = false, features = ["std"] }
