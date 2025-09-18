@@ -85,117 +85,121 @@ async fn main() {
     // Create some example spans
     println!("Creating example spans...");
 
-    // Root span for a user registration flow
-    let _registration_span = tracer
-        .span_builder("user_registration")
-        .with_attributes(vec![
-            KeyValue::new("user.id", "user123"),
-            KeyValue::new("user.email", "user123@example.com"),
-            KeyValue::new("operation.type", "registration"),
-        ])
-        .start(&tracer);
+    // Example 1: User registration flow with nested spans
+    {
+        let registration_span = tracer
+            .span_builder("user_registration")
+            .with_attributes(vec![
+                KeyValue::new("user.id", "user123"),
+                KeyValue::new("user.email", "user123@example.com"),
+                KeyValue::new("operation.type", "registration"),
+            ])
+            .start(&tracer);
+        let _guard = registration_span.enter();
 
-    // Database query span
-    let _db_span = tracer
-        .span_builder("database_query")
-        .with_attributes(vec![
-            KeyValue::new("db.system", "postgresql"),
-            KeyValue::new("db.name", "users"),
-            KeyValue::new("db.operation", "INSERT"),
-            KeyValue::new(
-                "db.statement",
-                "INSERT INTO users (email, name) VALUES (?, ?)",
-            ),
-        ])
-        .start(&tracer);
+        // Nested database operation
+        {
+            let db_span = tracer
+                .span_builder("database_query")
+                .with_attributes(vec![
+                    KeyValue::new("db.system", "postgresql"),
+                    KeyValue::new("db.name", "users"),
+                    KeyValue::new("db.operation", "INSERT"),
+                    KeyValue::new(
+                        "db.statement",
+                        "INSERT INTO users (email, name) VALUES (?, ?)",
+                    ),
+                ])
+                .start(&tracer);
+            let _db_guard = db_span.enter();
+            thread::sleep(Duration::from_millis(50)); // Simulate database work
+        }
 
-    thread::sleep(Duration::from_millis(50)); // Simulate database work
+        // Nested email operation
+        {
+            let email_span = tracer
+                .span_builder("send_welcome_email")
+                .with_attributes(vec![
+                    KeyValue::new("http.method", "POST"),
+                    KeyValue::new("http.url", "https://api.email-service.com/send"),
+                    KeyValue::new("http.status_code", 200),
+                    KeyValue::new("email.type", "welcome"),
+                ])
+                .start(&tracer);
+            let _email_guard = email_span.enter();
+            thread::sleep(Duration::from_millis(100)); // Simulate HTTP request
+        }
+    }
 
-    drop(_db_span);
+    // Example 2: E-commerce checkout flow with nested spans
+    {
+        let checkout_span = tracer
+            .span_builder("checkout_process")
+            .with_attributes(vec![
+                KeyValue::new("user.id", "user456"),
+                KeyValue::new("cart.total", 99.99),
+                KeyValue::new("currency", "USD"),
+            ])
+            .start(&tracer);
+        let _guard = checkout_span.enter();
 
-    // HTTP request span
-    let _http_span = tracer
-        .span_builder("send_welcome_email")
-        .with_attributes(vec![
-            KeyValue::new("http.method", "POST"),
-            KeyValue::new("http.url", "https://api.email-service.com/send"),
-            KeyValue::new("http.status_code", 200),
-            KeyValue::new("email.type", "welcome"),
-        ])
-        .start(&tracer);
+        // Nested payment processing
+        {
+            let payment_span = tracer
+                .span_builder("process_payment")
+                .with_attributes(vec![
+                    KeyValue::new("payment.method", "credit_card"),
+                    KeyValue::new("payment.amount", 99.99),
+                    KeyValue::new("payment.processor", "stripe"),
+                ])
+                .start(&tracer);
+            let _payment_guard = payment_span.enter();
+            thread::sleep(Duration::from_millis(200)); // Simulate payment processing
+        }
 
-    thread::sleep(Duration::from_millis(100)); // Simulate HTTP request
+        // Nested inventory update
+        {
+            let inventory_span = tracer
+                .span_builder("update_inventory")
+                .with_attributes(vec![
+                    KeyValue::new("product.id", "prod789"),
+                    KeyValue::new("quantity.reserved", 2),
+                    KeyValue::new("inventory.operation", "reserve"),
+                ])
+                .start(&tracer);
+            let _inventory_guard = inventory_span.enter();
+            thread::sleep(Duration::from_millis(30)); // Simulate inventory update
+        }
+    }
 
-    drop(_http_span);
-    drop(_registration_span);
+    // Example 3: Error scenario - failed login (simple span)
+    {
+        let failed_login_span = tracer
+            .span_builder("user_login")
+            .with_attributes(vec![
+                KeyValue::new("user.email", "invalid@example.com"),
+                KeyValue::new("login.result", "failed"),
+                KeyValue::new("error.type", "authentication_error"),
+            ])
+            .start(&tracer);
+        let _guard = failed_login_span.enter();
+        thread::sleep(Duration::from_millis(10)); // Simulate failed login
+    }
 
-    // E-commerce checkout flow
-    let _checkout_span = tracer
-        .span_builder("checkout_process")
-        .with_attributes(vec![
-            KeyValue::new("user.id", "user456"),
-            KeyValue::new("cart.total", 99.99),
-            KeyValue::new("currency", "USD"),
-        ])
-        .start(&tracer);
-
-    // Payment processing span
-    let _payment_span = tracer
-        .span_builder("process_payment")
-        .with_attributes(vec![
-            KeyValue::new("payment.method", "credit_card"),
-            KeyValue::new("payment.amount", 99.99),
-            KeyValue::new("payment.processor", "stripe"),
-        ])
-        .start(&tracer);
-
-    thread::sleep(Duration::from_millis(200)); // Simulate payment processing
-
-    drop(_payment_span);
-
-    // Inventory update span
-    let _inventory_span = tracer
-        .span_builder("update_inventory")
-        .with_attributes(vec![
-            KeyValue::new("product.id", "prod789"),
-            KeyValue::new("quantity.reserved", 2),
-            KeyValue::new("inventory.operation", "reserve"),
-        ])
-        .start(&tracer);
-
-    thread::sleep(Duration::from_millis(30)); // Simulate inventory update
-
-    drop(_inventory_span);
-    drop(_checkout_span);
-
-    // Error scenario - failed login
-    let _failed_login_span = tracer
-        .span_builder("user_login")
-        .with_attributes(vec![
-            KeyValue::new("user.email", "invalid@example.com"),
-            KeyValue::new("login.result", "failed"),
-            KeyValue::new("error.type", "authentication_error"),
-        ])
-        .start(&tracer);
-
-    thread::sleep(Duration::from_millis(10)); // Simulate failed login
-
-    drop(_failed_login_span);
-
-    // API request span
-    let _api_span = tracer
-        .span_builder("api_request")
-        .with_attributes(vec![
-            KeyValue::new("http.method", "GET"),
-            KeyValue::new("http.route", "/api/users/:id"),
-            KeyValue::new("http.status_code", 200),
-            KeyValue::new("user.id", "user789"),
-        ])
-        .start(&tracer);
-
-    thread::sleep(Duration::from_millis(75)); // Simulate API processing
-
-    drop(_api_span);
+    // Example 4: API request (simple span)
+    {
+        let api_span = tracer
+            .span_builder("api_request")
+            .with_attributes(vec![
+                KeyValue::new("http.method", "GET"),
+                KeyValue::new("http.route", "/api/users/:id"),
+                KeyValue::new("http.status_code", 200),
+                KeyValue::new("user.id", "user789"),
+            ])
+            .start(&tracer);
+        let _guard = api_span.enter();
+        thread::sleep(Duration::from_millis(75)); // Simulate API processing
+    }
 
     println!("Spans created and exported successfully!");
 

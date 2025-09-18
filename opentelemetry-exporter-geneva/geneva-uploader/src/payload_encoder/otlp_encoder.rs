@@ -211,6 +211,7 @@ impl OtlpEncoder {
             }
 
             // 4. Add schema entry if not already present
+            // TODO - This can have collision if different spans have same schema ID but different fields
             if !schemas
                 .iter()
                 .any(|s: &CentralSchemaEntry| s.id == schema_id)
@@ -235,6 +236,7 @@ impl OtlpEncoder {
         }
 
         // Format schema IDs
+        // TODO - this can be shared code with log batch
         let schema_ids_string = {
             use std::fmt::Write;
             if schemas.is_empty() {
@@ -373,7 +375,7 @@ impl OtlpEncoder {
         use std::hash::{Hash, Hasher};
 
         // Pre-allocate with estimated capacity to avoid reallocations
-        let estimated_capacity = 12 + span.attributes.len(); // 7 always + 5 max conditional + attributes
+        let estimated_capacity = 15 + span.attributes.len(); // 7 always + 8 max conditional + attributes
         let mut fields = Vec::with_capacity(estimated_capacity);
 
         // Initialize hasher for schema ID calculation
@@ -486,14 +488,13 @@ impl OtlpEncoder {
 
     /// Write span row data directly from Span
     // TODO - code duplication between write_span_row_data() and write_row_data() - consider extracting common field handling
-    fn write_span_row_data(&self, span: &Span, sorted_fields: &[FieldDef]) -> Vec<u8> {
-        let mut buffer = Vec::with_capacity(sorted_fields.len() * 50);
+    fn write_span_row_data(&self, span: &Span, fields: &[FieldDef]) -> Vec<u8> {
+        let mut buffer = Vec::with_capacity(fields.len() * 50);
 
-        // Pre-calculate timestamps
-        let start_timestamp = Self::format_timestamp(span.start_time_unix_nano);
-        let formatted_timestamp = start_timestamp.clone(); // Use start time as primary timestamp
+        // Pre-calculate timestamp (use start time as primary timestamp for both fields)
+        let formatted_timestamp = Self::format_timestamp(span.start_time_unix_nano);
 
-        for field in sorted_fields {
+        for field in fields {
             match field.name.as_ref() {
                 FIELD_ENV_NAME => BondWriter::write_string(&mut buffer, "TestEnv"), // TODO - placeholder
                 FIELD_ENV_VER => BondWriter::write_string(&mut buffer, "4.0"), // TODO - placeholder
@@ -504,7 +505,7 @@ impl OtlpEncoder {
                     BondWriter::write_numeric(&mut buffer, span.kind);
                 }
                 FIELD_START_TIME => {
-                    BondWriter::write_string(&mut buffer, &start_timestamp);
+                    BondWriter::write_string(&mut buffer, &formatted_timestamp);
                 }
                 FIELD_SUCCESS => {
                     // Determine success based on status
@@ -546,21 +547,8 @@ impl OtlpEncoder {
                     BondWriter::write_string(&mut buffer, hex_str);
                 }
                 FIELD_LINKS => {
-                    // Serialize links as JSON
-                    // TODO - consider more efficient serialization if needed
-                    let links_json = serde_json::to_string(
-                        &span
-                            .links
-                            .iter()
-                            .map(|link| {
-                                serde_json::json!({
-                                    "toSpanId": hex::encode(&link.span_id),
-                                    "toTraceId": hex::encode(&link.trace_id)
-                                })
-                            })
-                            .collect::<Vec<_>>(),
-                    )
-                    .unwrap_or_default();
+                    // Manual JSON building to avoid intermediate allocations
+                    let links_json = Self::serialize_links(&span.links);
                     BondWriter::write_string(&mut buffer, &links_json);
                 }
                 FIELD_STATUS_MESSAGE => {
@@ -570,9 +558,12 @@ impl OtlpEncoder {
                 }
                 _ => {
                     // Handle dynamic attributes
-                    if let Some(attr) = span.attributes.iter().find(|a| a.key == field.name) {
-                        self.write_attribute_value(&mut buffer, attr, field.type_id);
-                    }
+                    let attr = span
+                        .attributes
+                        .iter()
+                        .find(|a| a.key == field.name)
+                        .unwrap();
+                    self.write_attribute_value(&mut buffer, attr, field.type_id);
                 }
             }
         }
@@ -648,6 +639,45 @@ impl OtlpEncoder {
         let mut hex_bytes = [0u8; N];
         hex::encode_to_slice(id, &mut hex_bytes).unwrap();
         hex_bytes
+    }
+
+    /// Links serialization
+    fn serialize_links(links: &[opentelemetry_proto::tonic::trace::v1::span::Link]) -> String {
+        if links.is_empty() {
+            return "[]".to_string();
+        }
+
+        // Estimate capacity: Each link needs ~80 chars for JSON structure + 32 chars for trace_id + 16 chars for span_id
+        // JSON overhead: {"toSpanId":"","toTraceId":""} = ~30 chars + commas/brackets
+        let estimated_capacity = links.len() * 128 + 2; // Extra buffer for safety
+        let mut json = String::with_capacity(estimated_capacity);
+
+        json.push('[');
+
+        for (i, link) in links.iter().enumerate() {
+            if i > 0 {
+                json.push(',');
+            }
+
+            json.push_str(r#"{"toSpanId":""#);
+
+            // Write hex directly to avoid temporary string allocation
+            for &byte in &link.span_id {
+                json.push_str(&format!("{:02x}", byte));
+            }
+
+            json.push_str(r#"","toTraceId":""#);
+
+            // Write hex directly to avoid temporary string allocation
+            for &byte in &link.trace_id {
+                json.push_str(&format!("{:02x}", byte));
+            }
+
+            json.push_str(r#""}"#);
+        }
+
+        json.push(']');
+        json
     }
 
     /// Format timestamp from nanoseconds
@@ -1031,7 +1061,7 @@ mod tests {
         let metadata = "namespace=testNamespace/eventVersion=Ver1v0";
         let result = encoder.encode_span_batch([span].iter(), metadata).unwrap();
 
-        assert!(!result.is_empty());
+        assert_eq!(result.len(), 1);
         assert_eq!(result[0].event_name, "Span"); // All spans use "Span" event name for routing
         assert!(!result[0].data.is_empty());
     }
@@ -1153,5 +1183,62 @@ mod tests {
         assert!(!result[0].data.is_empty());
         // Should have 1 schema ID since both spans have same schema structure
         assert_eq!(result[0].metadata.schema_ids.matches(';').count(), 0); // 1 schema = 0 semicolons
+    }
+
+    #[test]
+    fn test_optimized_links_serialization() {
+        use opentelemetry_proto::tonic::trace::v1::span::Link;
+
+        // Test that optimized serialization produces correct JSON output
+        let links = vec![
+            Link {
+                trace_id: vec![
+                    0x01, 0x23, 0x45, 0x67, 0x89, 0xab, 0xcd, 0xef, 0x01, 0x23, 0x45, 0x67, 0x89,
+                    0xab, 0xcd, 0xef,
+                ],
+                span_id: vec![0xfe, 0xdc, 0xba, 0x98, 0x76, 0x54, 0x32, 0x10],
+                ..Default::default()
+            },
+            Link {
+                trace_id: vec![
+                    0x11, 0x22, 0x33, 0x44, 0x55, 0x66, 0x77, 0x88, 0x99, 0xaa, 0xbb, 0xcc, 0xdd,
+                    0xee, 0xff, 0x00,
+                ],
+                span_id: vec![0x00, 0x11, 0x22, 0x33, 0x44, 0x55, 0x66, 0x77],
+                ..Default::default()
+            },
+        ];
+
+        let result = OtlpEncoder::serialize_links(&links);
+
+        // Verify JSON structure is correct
+        assert!(result.starts_with('['));
+        assert!(result.ends_with(']'));
+        assert!(result.contains("toSpanId"));
+        assert!(result.contains("toTraceId"));
+
+        // Verify it contains the expected hex values
+        assert!(result.contains("fedcba9876543210")); // First span_id
+        assert!(result.contains("0123456789abcdef0123456789abcdef")); // First trace_id
+        assert!(result.contains("0011223344556677")); // Second span_id
+        assert!(result.contains("112233445566778899aabbccddeeff00")); // Second trace_id
+
+        // Test empty links
+        let empty_result = OtlpEncoder::serialize_links(&[]);
+        assert_eq!(empty_result, "[]");
+
+        // Test single link
+        let single_link = vec![Link {
+            trace_id: vec![0x12; 16],
+            span_id: vec![0x34; 8],
+            ..Default::default()
+        }];
+        let single_result = OtlpEncoder::serialize_links(&single_link);
+        assert!(single_result.contains("3434343434343434")); // span_id
+        assert!(single_result.contains("12121212121212121212121212121212")); // trace_id
+                                                                             // Single item should have one comma (between toSpanId and toTraceId) but no comma between items
+        assert_eq!(single_result.matches(',').count(), 1); // Only one comma for field separation
+        assert!(single_result.starts_with('['));
+        assert!(single_result.ends_with(']'));
     }
 }

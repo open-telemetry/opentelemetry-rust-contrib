@@ -85,6 +85,7 @@ impl SpanExporter for GenevaTraceExporter {
     fn shutdown(&mut self) -> OTelSdkResult {
         // Set shutdown flag to true
         self._is_shutdown.store(true, atomic::Ordering::Relaxed);
+        // TODO: Use the is_shutdown value in export() method to prevent exports after shutdown
         Ok(())
     }
 }
