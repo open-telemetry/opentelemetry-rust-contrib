@@ -85,9 +85,9 @@ async fn main() {
     // Create some example spans
     println!("Creating example spans...");
 
-    // Example 1: User registration flow with nested spans
+    // Example 1: User registration flow
     {
-        let registration_span = tracer
+        let _registration_span = tracer
             .span_builder("user_registration")
             .with_attributes(vec![
                 KeyValue::new("user.id", "user123"),
@@ -95,11 +95,10 @@ async fn main() {
                 KeyValue::new("operation.type", "registration"),
             ])
             .start(&tracer);
-        let _guard = registration_span.enter();
 
-        // Nested database operation
+        // Database operation span
         {
-            let db_span = tracer
+            let _db_span = tracer
                 .span_builder("database_query")
                 .with_attributes(vec![
                     KeyValue::new("db.system", "postgresql"),
@@ -111,13 +110,12 @@ async fn main() {
                     ),
                 ])
                 .start(&tracer);
-            let _db_guard = db_span.enter();
             thread::sleep(Duration::from_millis(50)); // Simulate database work
-        }
+        } // db_span ends here
 
-        // Nested email operation
+        // Email operation span
         {
-            let email_span = tracer
+            let _email_span = tracer
                 .span_builder("send_welcome_email")
                 .with_attributes(vec![
                     KeyValue::new("http.method", "POST"),
@@ -126,14 +124,13 @@ async fn main() {
                     KeyValue::new("email.type", "welcome"),
                 ])
                 .start(&tracer);
-            let _email_guard = email_span.enter();
             thread::sleep(Duration::from_millis(100)); // Simulate HTTP request
-        }
-    }
+        } // email_span ends here
+    } // registration_span ends here
 
-    // Example 2: E-commerce checkout flow with nested spans
+    // Example 2: E-commerce checkout flow
     {
-        let checkout_span = tracer
+        let _checkout_span = tracer
             .span_builder("checkout_process")
             .with_attributes(vec![
                 KeyValue::new("user.id", "user456"),
@@ -141,11 +138,10 @@ async fn main() {
                 KeyValue::new("currency", "USD"),
             ])
             .start(&tracer);
-        let _guard = checkout_span.enter();
 
-        // Nested payment processing
+        // Payment processing span
         {
-            let payment_span = tracer
+            let _payment_span = tracer
                 .span_builder("process_payment")
                 .with_attributes(vec![
                     KeyValue::new("payment.method", "credit_card"),
@@ -153,13 +149,12 @@ async fn main() {
                     KeyValue::new("payment.processor", "stripe"),
                 ])
                 .start(&tracer);
-            let _payment_guard = payment_span.enter();
             thread::sleep(Duration::from_millis(200)); // Simulate payment processing
-        }
+        } // payment_span ends here
 
-        // Nested inventory update
+        // Inventory update span
         {
-            let inventory_span = tracer
+            let _inventory_span = tracer
                 .span_builder("update_inventory")
                 .with_attributes(vec![
                     KeyValue::new("product.id", "prod789"),
@@ -167,14 +162,13 @@ async fn main() {
                     KeyValue::new("inventory.operation", "reserve"),
                 ])
                 .start(&tracer);
-            let _inventory_guard = inventory_span.enter();
             thread::sleep(Duration::from_millis(30)); // Simulate inventory update
-        }
-    }
+        } // inventory_span ends here
+    } // checkout_span ends here
 
-    // Example 3: Error scenario - failed login (simple span)
+    // Example 3: Error scenario - failed login
     {
-        let failed_login_span = tracer
+        let _failed_login_span = tracer
             .span_builder("user_login")
             .with_attributes(vec![
                 KeyValue::new("user.email", "invalid@example.com"),
@@ -182,13 +176,12 @@ async fn main() {
                 KeyValue::new("error.type", "authentication_error"),
             ])
             .start(&tracer);
-        let _guard = failed_login_span.enter();
         thread::sleep(Duration::from_millis(10)); // Simulate failed login
-    }
+    } // failed_login_span ends here
 
-    // Example 4: API request (simple span)
+    // Example 4: API request
     {
-        let api_span = tracer
+        let _api_span = tracer
             .span_builder("api_request")
             .with_attributes(vec![
                 KeyValue::new("http.method", "GET"),
@@ -197,9 +190,8 @@ async fn main() {
                 KeyValue::new("user.id", "user789"),
             ])
             .start(&tracer);
-        let _guard = api_span.enter();
         thread::sleep(Duration::from_millis(75)); // Simulate API processing
-    }
+    } // api_span ends here
 
     println!("Spans created and exported successfully!");
 
