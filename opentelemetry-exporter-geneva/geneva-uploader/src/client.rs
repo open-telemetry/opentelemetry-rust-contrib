@@ -4,6 +4,7 @@ use crate::config_service::client::{AuthMethod, GenevaConfigClient, GenevaConfig
 use crate::ingestion_service::uploader::{GenevaUploader, GenevaUploaderConfig};
 use crate::payload_encoder::otlp_encoder::OtlpEncoder;
 use opentelemetry_proto::tonic::logs::v1::ResourceLogs;
+use opentelemetry_proto::tonic::trace::v1::ResourceSpans;
 use std::sync::Arc;
 
 /// Public batch type (already LZ4 chunked compressed).
@@ -96,6 +97,21 @@ impl GenevaClient {
 
         self.encoder
             .encode_log_batch(log_iter, &self.metadata)
+            .map_err(|e| format!("Compression failed: {e}"))
+    }
+
+    /// Encode OTLP spans into LZ4 chunked compressed batches.
+    pub fn encode_and_compress_spans(
+        &self,
+        spans: &[ResourceSpans],
+    ) -> Result<Vec<EncodedBatch>, String> {
+        let span_iter = spans
+            .iter()
+            .flat_map(|resource_span| resource_span.scope_spans.iter())
+            .flat_map(|scope_span| scope_span.spans.iter());
+
+        self.encoder
+            .encode_span_batch(span_iter, &self.metadata)
             .map_err(|e| format!("Compression failed: {e}"))
     }
 
