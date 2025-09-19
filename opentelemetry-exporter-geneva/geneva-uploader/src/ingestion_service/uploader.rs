@@ -214,7 +214,7 @@ impl GenevaUploader {
         event_name: &str,
         metadata: &BatchMetadata,
     ) -> Result<IngestionResponse> {
-        // Always get fresh auth info (config service caching will mitigate cost)
+        // Always get fresh auth info
         let (auth_info, moniker_info, monitoring_endpoint) =
             self.config_client.get_ingestion_info().await?;
         let data_size = data.len();

@@ -105,9 +105,8 @@ async fn main() {
         auth_method,
     };
 
-    let geneva_client = GenevaClient::new(config)
-        .await
-        .expect("Failed to create GenevaClient");
+    // GenevaClient::new is synchronous (returns Result), so no await is needed here.
+    let geneva_client = GenevaClient::new(config).expect("Failed to create GenevaClient");
 
     let exporter = GenevaExporter::new(geneva_client);
     let batch_processor = BatchLogProcessor::builder(exporter, Tokio)
@@ -123,7 +122,19 @@ async fn main() {
         .with_log_processor(batch_processor)
         .build();
 
-    // Enable debug logging to see HTTP requests including GCS calls
+    // To prevent a telemetry-induced-telemetry loop, OpenTelemetry's own internal
+    // logging is properly suppressed. However, logs emitted by external components
+    // (such as reqwest, tonic, etc.) are not suppressed as they do not propagate
+    // OpenTelemetry context. Until this issue is addressed
+    // (https://github.com/open-telemetry/opentelemetry-rust/issues/2877),
+    // filtering like this is the best way to suppress such logs.
+    //
+    // The filter levels are set as follows:
+    // - Allow `info` level and above by default.
+    // - Completely restrict logs from `hyper`, `tonic`, `h2`, and `reqwest`.
+    //
+    // Note: This filtering will also drop logs from these components even when
+    // they are used outside of the OTLP Exporter.
     let filter_otel = EnvFilter::new("info")
         .add_directive("hyper=off".parse().unwrap())
         .add_directive("opentelemetry=off".parse().unwrap())
@@ -132,6 +143,9 @@ async fn main() {
         .add_directive("reqwest=off".parse().unwrap());
     let otel_layer = layer::OpenTelemetryTracingBridge::new(&provider).with_filter(filter_otel);
 
+    // Create a new tracing::Fmt layer to print the logs to stdout. It has a
+    // default filter of `info` level and above, and `debug` and above for logs
+    // from OpenTelemetry crates. The filter levels can be customized as needed.
     let filter_fmt = EnvFilter::new("info")
         .add_directive("hyper=debug".parse().unwrap())
         .add_directive("reqwest=debug".parse().unwrap())
@@ -145,23 +159,19 @@ async fn main() {
         .with(fmt_layer)
         .init();
 
-    println!("Starting MSI authentication test...");
-
     // Generate logs to trigger batch processing and GCS calls
-    info!(name: "Log", target: "my-system", event_id = 20, user_name = "user1", user_email = "user1@opentelemetry.io", message = "Registration successful msi");
-    info!(name: "Log", target: "my-system", event_id = 51, user_name = "user2", user_email = "user2@opentelemetry.io", message = "Checkout successful msi");
-    info!(name: "Log", target: "my-system", event_id = 30, user_name = "user3", user_email = "user3@opentelemetry.io", message = "User login successful msi");
-    info!(name: "Log", target: "my-system", event_id = 52, user_name = "user2", user_email = "user2@opentelemetry.io", message = "Payment processed successfully msi");
-    error!(name: "Log", target: "my-system", event_id = 31, user_name = "user4", user_email = "user4@opentelemetry.io", message = "Login failed - invalid credentials msi");
-    warn!(name: "Log", target: "my-system", event_id = 53, user_name = "user5", user_email = "user5@opentelemetry.io", message = "Shopping cart abandoned msi");
-    info!(name: "Log", target: "my-system", event_id = 32, user_name = "user1", user_email = "user1@opentelemetry.io", message = "Password reset requested msi");
-    info!(name: "Log", target: "my-system", event_id = 54, user_name = "user2", user_email = "user2@opentelemetry.io", message = "Order shipped successfully msi");
+    info!(name: "Log", target: "my-system", event_id = 20, user_name = "user1", user_email = "user1@opentelemetry.io", message = "Registration successful");
+    info!(name: "Log", target: "my-system", event_id = 51, user_name = "user2", user_email = "user2@opentelemetry.io", message = "Checkout successful");
+    info!(name: "Log", target: "my-system", event_id = 30, user_name = "user3", user_email = "user3@opentelemetry.io", message = "User login successful");
+    info!(name: "Log", target: "my-system", event_id = 52, user_name = "user2", user_email = "user2@opentelemetry.io", message = "Payment processed successfully");
+    error!(name: "Log", target: "my-system", event_id = 31, user_name = "user4", user_email = "user4@opentelemetry.io", message = "Login failed - invalid credentials");
+    warn!(name: "Log", target: "my-system", event_id = 53, user_name = "user5", user_email = "user5@opentelemetry.io", message = "Shopping cart abandoned");
+    info!(name: "Log", target: "my-system", event_id = 32, user_name = "user1", user_email = "user1@opentelemetry.io", message = "Password reset requested");
+    info!(name: "Log", target: "my-system", event_id = 54, user_name = "user2", user_email = "user2@opentelemetry.io", message = "Order shipped successfully");
 
     println!("Sleeping for 30 seconds...");
     thread::sleep(Duration::from_secs(30));
-    
-    // Shutdown provider to force final batch flush
+
     let _ = provider.shutdown();
-    
-    println!("MSI authentication test completed");
+    println!("Shutting down provider");
 }

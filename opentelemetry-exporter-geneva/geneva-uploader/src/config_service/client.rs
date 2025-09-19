@@ -2,7 +2,7 @@
 
 use base64::{engine::general_purpose, Engine as _};
 use reqwest::{
-    header::{HeaderMap, HeaderValue, ACCEPT, USER_AGENT, AUTHORIZATION},
+    header::{HeaderMap, HeaderValue, ACCEPT, AUTHORIZATION, USER_AGENT},
     Client,
 };
 use serde::Deserialize;
@@ -19,8 +19,8 @@ use std::path::PathBuf;
 use std::sync::RwLock;
 
 // Azure Identity imports for MSI authentication
-use azure_identity::{ManagedIdentityCredential, ManagedIdentityCredentialOptions, UserAssignedId};
 use azure_core::credentials::TokenCredential;
+use azure_identity::{ManagedIdentityCredential, ManagedIdentityCredentialOptions, UserAssignedId};
 // use std::sync::Arc; // (unused after refactor)
 // (serde derive imported later where needed)
 
@@ -296,7 +296,7 @@ impl GenevaConfigClient {
         let mut pre_url = String::with_capacity(config.endpoint.len() + 200);
         write!(
             &mut pre_url,
-            "{}/{}/agent/v3/{}/{}/MonitoringStorageKeys?Namespace={}&Region={}&Identity={}&OSType={}&ConfigMajorVersion={}",
+            "{}/{}/agent/v3/{}/{}/MonitoringStorageKeys/?Namespace={}&Region={}&Identity={}&OSType={}&ConfigMajorVersion={}",
             config.endpoint.trim_end_matches('/'),
             api_path,
             config.environment,
@@ -340,7 +340,8 @@ impl GenevaConfigClient {
     async fn get_msi_token(&self) -> Result<String> {
         let resource = std::env::var("GENEVA_MSI_RESOURCE").map_err(|_| {
             GenevaConfigClientError::MsiAuth(
-                "GENEVA_MSI_RESOURCE env var is required for Managed Identity auth (no default)".to_string(),
+                "GENEVA_MSI_RESOURCE env var is required for Managed Identity auth (no default)"
+                    .to_string(),
             )
         })?;
 
@@ -348,10 +349,7 @@ impl GenevaConfigClient {
         let base = resource.trim_end_matches("/.default").trim_end_matches('/');
 
         // Candidate scopes tried with Azure Identity
-        let mut scope_candidates: Vec<String> = vec![
-            format!("{base}/.default"),
-            base.to_string(),
-        ];
+        let mut scope_candidates: Vec<String> = vec![format!("{base}/.default"), base.to_string()];
         // Add variant with trailing slash if not already present
         if !base.ends_with('/') {
             scope_candidates.push(format!("{base}/"));
@@ -374,9 +372,13 @@ impl GenevaConfigClient {
             ManagedIdentitySelector::ResourceId(v) => Some(UserAssignedId::ResourceId(v.clone())),
         };
 
-        let options = ManagedIdentityCredentialOptions { user_assigned_id, ..Default::default() };
-        let credential = ManagedIdentityCredential::new(Some(options))
-            .map_err(|e| GenevaConfigClientError::MsiAuth(format!("Failed to create MSI credential: {e}")))?;
+        let options = ManagedIdentityCredentialOptions {
+            user_assigned_id,
+            ..Default::default()
+        };
+        let credential = ManagedIdentityCredential::new(Some(options)).map_err(|e| {
+            GenevaConfigClientError::MsiAuth(format!("Failed to create MSI credential: {e}"))
+        })?;
 
         let mut last_err: Option<String> = None;
         for scope in &scope_candidates {
@@ -391,8 +393,6 @@ impl GenevaConfigClient {
             scopes = scope_candidates.join(", ")
         )))
     }
-
-    // IMDS fallback intentionally removed for strict provenance: tokens must originate via azure_identity.
 
     /// Retrieves ingestion gateway information from the Geneva Config Service.
     ///
@@ -445,8 +445,6 @@ impl GenevaConfigClient {
         if let Ok(guard) = self.cached_data.read() {
             if let Some(cached_data) = guard.as_ref() {
                 let expiry = cached_data.token_expiry;
-                // Reduced safety window: only refresh if token expires within next 30 seconds.
-                // Previous 5 minute window caused perpetual cache misses for short-lived tokens.
                 if expiry > Utc::now() + chrono::Duration::minutes(5) {
                     return Ok((
                         cached_data.auth_info.0.clone(),
@@ -467,15 +465,11 @@ impl GenevaConfigClient {
                     GenevaConfigClientError::InternalError("Failed to parse token expiry".into())
                 })?;
 
-        let token_endpoint = match extract_endpoint_from_token(&fresh_ingestion_gateway_info.auth_token) {
-            Ok(ep) => ep,
-            Err(e) => {
-                if std::env::var("GENEVA_VERBOSE").is_ok() {
-                    eprintln!("⚠️ JWT endpoint parse failed ({e}); falling back to IngestionGatewayInfo.endpoint field");
-                }
-                fresh_ingestion_gateway_info.endpoint.clone()
-            }
-        };
+        let token_endpoint =
+            match extract_endpoint_from_token(&fresh_ingestion_gateway_info.auth_token) {
+                Ok(ep) => ep,
+                Err(_e) => fresh_ingestion_gateway_info.endpoint.clone(),
+            };
 
         // Now update the cache with exclusive write access
         let mut guard = self
@@ -539,20 +533,16 @@ impl GenevaConfigClient {
         }
 
         // Log the request details for debugging
-        
         let response = match request.send().await {
-            Ok(response) => {
-                response
-            }
+            Ok(response) => response,
             Err(e) => {
                 return Err(GenevaConfigClientError::Http(e));
             }
         };
-        
+
         // Check if the response is successful
         let status = response.status();
         let body = response.text().await?;
-        
         if status.is_success() {
             let parsed = match serde_json::from_str::<GenevaResponse>(&body) {
                 Ok(response) => response,

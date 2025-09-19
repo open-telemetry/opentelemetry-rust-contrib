@@ -2,7 +2,9 @@ pub(crate) mod client;
 
 #[cfg(test)]
 mod tests {
-    use crate::config_service::client::{AuthMethod, GenevaConfigClient, GenevaConfigClientConfig};
+    use crate::config_service::client::{
+        AuthMethod, GenevaConfigClient, GenevaConfigClientConfig, ManagedIdentitySelector,
+    };
     use openssl::{pkcs12::Pkcs12, pkey::PKey, x509::X509};
     use rcgen::generate_simple_self_signed;
     use std::io::Write;
@@ -20,12 +22,17 @@ mod tests {
             namespace: "ns".to_string(),
             region: "region".to_string(),
             config_major_version: 1,
-            auth_method: AuthMethod::ManagedIdentity,
+            auth_method: AuthMethod::ManagedIdentity {
+                selector: ManagedIdentitySelector::System,
+            },
         };
 
         assert_eq!(config.environment, "env");
         assert_eq!(config.account, "acct");
-        assert!(matches!(config.auth_method, AuthMethod::ManagedIdentity));
+        assert!(matches!(
+            config.auth_method,
+            AuthMethod::ManagedIdentity { .. }
+        ));
     }
 
     fn generate_self_signed_p12() -> (NamedTempFile, String) {
