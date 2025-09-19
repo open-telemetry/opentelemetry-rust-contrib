@@ -4,9 +4,8 @@
  * This example demonstrates:
  * - Reading configuration from environment
  * - Creating a Geneva client via geneva_client_new (out-param)
- * - Encoding/compressing ResourceLogs and ResourceSpans
+ * - Encoding/compressing ResourceLogs
  * - Uploading batches synchronously with geneva_upload_batch_sync
- * - Testing both logs and spans functionality
  *
  * Note: The non-blocking callback-based mechanism has been removed.
  */
@@ -24,11 +23,6 @@ extern int geneva_build_otlp_logs_minimal(const char* body_utf8,
                                           const char* resource_value,
                                           uint8_t** out_ptr,
                                           size_t* out_len);
-extern int geneva_build_otlp_spans_minimal(const char* span_name,
-                                           const char* resource_key,
-                                           const char* resource_value,
-                                           uint8_t** out_ptr,
-                                           size_t* out_len);
 extern void geneva_free_buffer(uint8_t* ptr, size_t len);
 
 /* Helper to read env or default */
@@ -122,102 +116,49 @@ int main(void) {
     }
     printf("Geneva client created.\n");
 
-    /* Test logs functionality */
-    printf("\n=== Testing Logs ===\n");
-    size_t logs_data_len = 0;
-    uint8_t* logs_data = NULL;
-    GenevaError logs_brc = geneva_build_otlp_logs_minimal("hello from c ffi", "service.name", "c-ffi-example", &logs_data, &logs_data_len);
-    if (logs_brc != GENEVA_SUCCESS || logs_data == NULL || logs_data_len == 0) {
-        printf("Failed to build OTLP logs payload (code=%d)\n", logs_brc);
+    /* Create ExportLogsServiceRequest bytes via FFI builder */
+    size_t data_len = 0;
+    uint8_t* data = NULL;
+    GenevaError brc = geneva_build_otlp_logs_minimal("hello from c ffi", "service.name", "c-ffi-example", &data, &data_len);
+    if (brc != GENEVA_SUCCESS || data == NULL || data_len == 0) {
+        printf("Failed to build OTLP payload (code=%d)\n", brc);
         geneva_client_free(client);
         return 1;
     }
 
-    /* Encode and compress logs to batches */
-    EncodedBatchesHandle* logs_batches = NULL;
-    GenevaError logs_enc_rc = geneva_encode_and_compress_logs(client, logs_data, logs_data_len, &logs_batches);
-    if (logs_enc_rc != GENEVA_SUCCESS || logs_batches == NULL) {
-        printf("Logs encode/compress failed (code=%d)\n", logs_enc_rc);
-        geneva_free_buffer(logs_data, logs_data_len);
+    /* Encode and compress to batches */
+    EncodedBatchesHandle* batches = NULL;
+    GenevaError enc_rc = geneva_encode_and_compress_logs(client, data, data_len, &batches);
+    if (enc_rc != GENEVA_SUCCESS || batches == NULL) {
+        printf("Encode/compress failed (code=%d)\n", enc_rc);
+        geneva_free_buffer(data, data_len);
         geneva_client_free(client);
         return 1;
     }
 
-    size_t logs_n = geneva_batches_len(logs_batches);
-    printf("Encoded %zu log batch(es)\n", logs_n);
+    size_t n = geneva_batches_len(batches);
+    printf("Encoded %zu batch(es)\n", n);
 
-    /* Upload logs synchronously */
-    GenevaError logs_first_err = GENEVA_SUCCESS;
-    for (size_t i = 0; i < logs_n; i++) {
-        GenevaError r = geneva_upload_batch_sync(client, logs_batches, i);
+    /* Upload synchronously, batch by batch */
+    GenevaError first_err = GENEVA_SUCCESS;
+    for (size_t i = 0; i < n; i++) {
+        GenevaError r = geneva_upload_batch_sync(client, batches, i);
         if (r != GENEVA_SUCCESS) {
-            logs_first_err = r;
-            printf("Log batch %zu upload failed with error %d\n", i, r);
+            first_err = r;
+            printf("Batch %zu upload failed with error %d\n", i, r);
             break;
         }
     }
 
-    /* Cleanup logs */
-    geneva_batches_free(logs_batches);
-    geneva_free_buffer(logs_data, logs_data_len);
-
-    if (logs_first_err == GENEVA_SUCCESS) {
-        printf("All log batches uploaded successfully.\n");
-    } else {
-        printf("Log upload finished with error code: %d\n", logs_first_err);
-    }
-
-    /* Test spans functionality */
-    printf("\n=== Testing Spans ===\n");
-    size_t spans_data_len = 0;
-    uint8_t* spans_data = NULL;
-    GenevaError spans_brc = geneva_build_otlp_spans_minimal("test-span", "service.name", "c-ffi-example", &spans_data, &spans_data_len);
-    if (spans_brc != GENEVA_SUCCESS || spans_data == NULL || spans_data_len == 0) {
-        printf("Failed to build OTLP spans payload (code=%d)\n", spans_brc);
-        geneva_client_free(client);
-        return 1;
-    }
-
-    /* Encode and compress spans to batches */
-    EncodedBatchesHandle* spans_batches = NULL;
-    GenevaError spans_enc_rc = geneva_encode_and_compress_spans(client, spans_data, spans_data_len, &spans_batches);
-    if (spans_enc_rc != GENEVA_SUCCESS || spans_batches == NULL) {
-        printf("Spans encode/compress failed (code=%d)\n", spans_enc_rc);
-        geneva_free_buffer(spans_data, spans_data_len);
-        geneva_client_free(client);
-        return 1;
-    }
-
-    size_t spans_n = geneva_batches_len(spans_batches);
-    printf("Encoded %zu span batch(es)\n", spans_n);
-
-    /* Upload spans synchronously */
-    GenevaError spans_first_err = GENEVA_SUCCESS;
-    for (size_t i = 0; i < spans_n; i++) {
-        GenevaError r = geneva_upload_batch_sync(client, spans_batches, i);
-        if (r != GENEVA_SUCCESS) {
-            spans_first_err = r;
-            printf("Span batch %zu upload failed with error %d\n", i, r);
-            break;
-        }
-    }
-
-    /* Cleanup spans */
-    geneva_batches_free(spans_batches);
-    geneva_free_buffer(spans_data, spans_data_len);
+    /* Cleanup */
+    geneva_batches_free(batches);
+    geneva_free_buffer(data, data_len);
     geneva_client_free(client);
 
-    if (spans_first_err == GENEVA_SUCCESS) {
-        printf("All span batches uploaded successfully.\n");
-    } else {
-        printf("Span upload finished with error code: %d\n", spans_first_err);
-    }
-
-    /* Final result */
-    if (logs_first_err == GENEVA_SUCCESS && spans_first_err == GENEVA_SUCCESS) {
-        printf("\n=== All uploads completed successfully! ===\n");
+    if (first_err == GENEVA_SUCCESS) {
+        printf("All batches uploaded successfully.\n");
         return 0;
     }
-    printf("\n=== Some uploads failed ===\n");
+    printf("Upload finished with error code: %d\n", first_err);
     return 1;
 }
