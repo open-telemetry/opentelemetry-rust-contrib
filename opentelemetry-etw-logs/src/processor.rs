@@ -154,13 +154,13 @@ impl ProcessorBuilder {
     }
 
     /// Builds the processor with given options, returning `Error` if it fails.
-    pub fn build(self) -> Result<Processor, Box<dyn Error>> {
+    pub fn build(self) -> Result<Processor, Box<dyn Error + Send + Sync + 'static>> {
         self.validate()?;
 
         Ok(Processor::new(self.options))
     }
 
-    fn validate(&self) -> Result<(), Box<dyn Error>> {
+    fn validate(&self) -> Result<(), Box<dyn Error + Send + Sync + 'static>> {
         validate_provider_name(self.options.provider_name(), self.provider_name_compat_mode)?;
         Ok(())
     }
@@ -169,7 +169,7 @@ impl ProcessorBuilder {
 fn validate_provider_name(
     provider_name: &str,
     compat_mode: ProviderNameCompatMode,
-) -> Result<(), Box<dyn Error>> {
+) -> Result<(), Box<dyn Error + Send + Sync + 'static>> {
     if provider_name.is_empty() {
         return Err("Provider name must not be empty.".into());
     }

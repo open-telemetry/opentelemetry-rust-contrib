@@ -191,7 +191,7 @@ where
     }
 
     /// Builds the processor with the configured callback
-    pub fn build(self) -> Result<Processor<C>, Box<dyn Error>> {
+    pub fn build(self) -> Result<Processor<C>, Box<dyn Error + Send + Sync + 'static>> {
         // Validate provider name
         if self.provider_name.is_empty() {
             return Err("Provider name cannot be empty.".into());
