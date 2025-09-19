@@ -16,7 +16,7 @@ crate-type = ["cdylib", "staticlib", "rlib"]
 geneva-uploader = { path = "../geneva-uploader", version = "0.1.0" }
 opentelemetry-proto = { workspace = true, default-features = false, features = ["logs", "trace", "gen-tonic-messages"] }
 tokio = { version = "1.0", features = ["rt-multi-thread"] }
-prost = "0.14"
+prost = "0.13"
 
 [features]
 mock_auth = ["geneva-uploader/mock_auth"]
