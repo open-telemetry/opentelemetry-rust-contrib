@@ -378,73 +378,21 @@ impl GenevaConfigClient {
         let credential = ManagedIdentityCredential::new(Some(options))
             .map_err(|e| GenevaConfigClientError::MsiAuth(format!("Failed to create MSI credential: {e}")))?;
 
-        for (_i, scope) in scope_candidates.iter().enumerate() {
+        let mut last_err: Option<String> = None;
+        for scope in &scope_candidates {
             match credential.get_token(&[scope.as_str()], None).await {
-                Ok(token) => {
-                    return Ok(token.token.secret().to_string());
-                }
-                Err(_ignored) => { /* try next scope */ }
+                Ok(token) => return Ok(token.token.secret().to_string()),
+                Err(e) => last_err = Some(e.to_string()),
             }
         }
-
-        // OPTION B (strict): We do NOT fallback to IMDS. Propagate the last failure.
-        // If you want to restore the previous IMDS fallback behavior:
-        // 1. Uncomment the commented-out `get_msi_token_via_imds` function below.
-        // 2. Replace this return with that call:
-        //    return self.get_msi_token_via_imds(base, Some(selector), Some(&format!("{}-{}", self.agent_identity, self.agent_version))).await;
-        Err(GenevaConfigClientError::MsiAuth(
-            "All Azure Identity scope attempts failed and IMDS fallback is disabled (strict mode).".to_string(),
-        ))
+        let detail = last_err.unwrap_or_else(|| "no error detail".into());
+        Err(GenevaConfigClientError::MsiAuth(format!(
+            "Managed Identity token acquisition failed. Scopes tried: {scopes}. Last error: {detail}. IMDS fallback intentionally disabled.",
+            scopes = scope_candidates.join(", ")
+        )))
     }
 
-    /*
-    -----------------------------------------------------------------------------------------
-    IMDS FALLBACK (COMMENTED OUT)
-    -----------------------------------------------------------------------------------------
-    This block previously provided a direct call to the Azure Instance Metadata Service (IMDS)
-    when Azure Identity (ManagedIdentityCredential) failed to obtain a token. We have disabled
-    it per Option B (strict mode) to ensure tokens ONLY come from the Azure Identity library.
-
-    To re-enable:
-      1. Uncomment this entire function.
-      2. In `get_msi_token`, replace the final Err(...) with a call to this function.
-
-    Security / Observability Considerations:
-      - Direct IMDS calls bypass Azure Identity retry/backoff logic.
-      - Useful for diagnosing SDK regressions or environment differences.
-      - Should generally remain disabled in production if strict provenance is required.
-
-    async fn get_msi_token_via_imds(&self, resource: &str, selector: Option<&ManagedIdentitySelector>, user_agent: Option<&str>) -> Result<String> {
-        let mut url = format!("http://169.254.169.254/metadata/identity/oauth2/token?api-version=2018-02-01&resource={}", resource);
-        if let Some(sel) = selector {
-            match sel {
-                ManagedIdentitySelector::System => { }
-                ManagedIdentitySelector::ObjectId(v) => url.push_str(&format!("&object_id={}", v)),
-                ManagedIdentitySelector::ClientId(v) => url.push_str(&format!("&client_id={}", v)),
-                ManagedIdentitySelector::ResourceId(v) => url.push_str(&format!("&mi_res_id={}", v)),
-            }
-        }
-        eprintln!("🔍 IMDS fallback URL: {}", url);
-        let client = reqwest::Client::builder().timeout(Duration::from_secs(5)).build()
-            .map_err(|e| GenevaConfigClientError::MsiAuth(format!("Failed to build IMDS client: {e}")))?;
-        let mut req = client.get(&url).header("Metadata", "true");
-        if let Some(ua) = user_agent { req = req.header(USER_AGENT, ua); }
-        let resp = req.send().await
-            .map_err(|e| GenevaConfigClientError::MsiAuth(format!("IMDS request failed: {e}")))?;
-        let status = resp.status();
-        let body = resp.text().await
-            .map_err(|e| GenevaConfigClientError::MsiAuth(format!("Failed reading IMDS response: {e}")))?;
-        if !status.is_success() {
-            return Err(GenevaConfigClientError::MsiAuth(format!("IMDS token request failed (status {}): {}", status.as_u16(), body)));
-        }
-        #[derive(Deserialize)] struct ImdsToken { access_token: String }
-        let parsed: ImdsToken = serde_json::from_str(&body)
-            .map_err(|e| GenevaConfigClientError::MsiAuth(format!("Failed to parse IMDS JSON: {e}; body: {}", body)))?;
-        eprintln!("🔍 IMDS token acquired (first 12 chars): {}...", &parsed.access_token[..parsed.access_token.len().min(12)]);
-        Ok(parsed.access_token)
-    }
-    -----------------------------------------------------------------------------------------
-    */
+    // IMDS fallback intentionally removed for strict provenance: tokens must originate via azure_identity.
 
     /// Retrieves ingestion gateway information from the Geneva Config Service.
     ///
