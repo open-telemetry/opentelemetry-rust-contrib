@@ -68,6 +68,16 @@ GenevaError geneva_encode_and_compress_logs(GenevaClientHandle* handle,
                                             size_t data_len,
                                             EncodedBatchesHandle** out_batches);
 
+/* 1.1) Encode and compress spans into batches (synchronous).
+      `data` is a protobuf-encoded ExportTraceServiceRequest.
+      - On success returns GENEVA_SUCCESS and writes *out_batches.
+      - On failure returns an error code.
+      Caller must free *out_batches with geneva_batches_free. */
+GenevaError geneva_encode_and_compress_spans(GenevaClientHandle* handle,
+                                            const uint8_t* data,
+                                            size_t data_len,
+                                            EncodedBatchesHandle** out_batches);
+
 // 2) Query number of batches.
 size_t geneva_batches_len(const EncodedBatchesHandle* batches);
 
