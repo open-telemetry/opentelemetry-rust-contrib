@@ -48,14 +48,15 @@ use wiremock::matchers::{method, path_regex};
 use wiremock::{Mock, MockServer, ResponseTemplate};
 
 // Helper functions
-fn create_test_logs() -> Vec<ResourceLogs> {
+fn create_test_logs(base_timestamp: u64) -> Vec<ResourceLogs> {
     let mut log_records = Vec::new();
 
     // Create 10 simple log records
     for i in 0..10 {
+        let timestamp = base_timestamp + i * 1_000_000; // 1 ms apart
         let log = LogRecord {
-            observed_time_unix_nano: 1700000000000000000 + i,
-            event_name: "StressTestEvent".to_string(),
+            observed_time_unix_nano: timestamp,
+            event_name: "Log".to_string(),
             severity_number: 9,
             severity_text: "INFO".to_string(),
             body: Some(AnyValue {
@@ -250,6 +251,12 @@ async fn async_main(
     args_start_idx: usize,
     runtime_type: &str,
 ) -> Result<(), Box<dyn std::error::Error>> {
+    // Get timestamp for events
+    let base_timestamp = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap()
+        .as_nanos() as u64;
+
     // Get concurrency from the appropriate position
     let concurrency = args
         .get(args_start_idx)
@@ -265,7 +272,7 @@ async fn async_main(
     // Initialize client and test data
     let (client, _mock_uri) = init_client().await?;
     let client = Arc::new(client);
-    let logs = Arc::new(create_test_logs());
+    let logs = Arc::new(create_test_logs(base_timestamp));
 
     // Warm up the ingestion token cache
     println!("Warming up token cache...");
