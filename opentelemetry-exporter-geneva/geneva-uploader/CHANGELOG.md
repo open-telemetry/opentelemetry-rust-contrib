@@ -1,6 +1,6 @@
 # Changelog
 
-## [0.2.0] - 2025-01-17
+## [0.2.0] - 2025-09-24
 
 ### Added
 - HTTP/1.1 upload support with keep-alive connections
