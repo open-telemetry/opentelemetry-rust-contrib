@@ -1,7 +1,7 @@
 [package]
 name = "geneva-uploader-ffi"
 description = "FFI bindings for Geneva uploader"
-version = "0.1.0"
+version = "0.2.0"
 edition = "2021"
 homepage = "https://github.com/open-telemetry/opentelemetry-rust-contrib/tree/main/opentelemetry-exporter-geneva/geneva-uploader-ffi"
 repository = "https://github.com/open-telemetry/opentelemetry-rust-contrib/tree/main/opentelemetry-exporter-geneva/geneva-uploader-ffi"
@@ -13,7 +13,7 @@ license = "Apache-2.0"
 crate-type = ["cdylib", "staticlib", "rlib"]
 
 [dependencies]
-geneva-uploader = { path = "../geneva-uploader", version = "0.1.0" }
+geneva-uploader = { path = "../geneva-uploader", version = "0.2.0" }
 opentelemetry-proto = { workspace = true, default-features = false, features = ["logs", "trace", "gen-tonic-messages"] }
 tokio = { version = "1.0", features = ["rt-multi-thread"] }
 prost = "0.13"
