@@ -1,6 +1,6 @@
 # Changelog
 
-## [0.2.0] - 2025-01-17
+## [0.2.0] - 2025-09-24
 
 ### Added
 - FFI bindings for spans upload functionality
