@@ -1,7 +1,7 @@
 [package]
 name = "geneva-uploader-ffi"
 description = "FFI bindings for Geneva uploader"
-version = "0.1.0"
+version = "0.2.0"
 edition = "2021"
 homepage = "https://github.com/open-telemetry/opentelemetry-rust-contrib/tree/main/opentelemetry-exporter-geneva/geneva-uploader-ffi"
 repository = "https://github.com/open-telemetry/opentelemetry-rust-contrib/tree/main/opentelemetry-exporter-geneva/geneva-uploader-ffi"
