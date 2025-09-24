@@ -12,7 +12,7 @@ license = "Apache-2.0"
 [dependencies]
 opentelemetry_sdk = {workspace = true, default-features = false, features = ["logs", "trace"]}
 opentelemetry-proto = {workspace = true, default-features = false, features = ["logs", "trace"]}
-geneva-uploader = { path = "../geneva-uploader", version = "0.1.0" }
+geneva-uploader = { path = "../geneva-uploader", version = "0.2.0" }
 futures = "0.3"
 
 [dev-dependencies]
