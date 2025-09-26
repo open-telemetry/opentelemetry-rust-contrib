@@ -13,7 +13,7 @@ http-body-util = { version = "0.1", default-features = false }
 hyper-util = { version = "0.1", features = ["http1", "service", "server", "tokio"], default-features = false }
 opentelemetry = { workspace = true}
 opentelemetry_sdk = { workspace = true, default-features = false }
-opentelemetry-otlp = { version = "0.30.0", features = ["grpc-tonic", "metrics"], default-features = false }
+opentelemetry-otlp = { version = "0.31.0", features = ["grpc-tonic", "metrics"], default-features = false }
 tokio = { version = "1", features = ["rt-multi-thread", "macros"], default-features = false }
 tower = { version = "0.5", default-features = false }
 rand_09 = { package = "rand", version = "0.9" }

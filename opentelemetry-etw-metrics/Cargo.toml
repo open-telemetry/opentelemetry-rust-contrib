@@ -1,6 +1,6 @@
 [package]
 name = "opentelemetry-etw-metrics"
-version = "0.9.0"
+version = "0.10.0"
 edition = "2021"
 description = "OpenTelemetry metrics exporter to ETW (Event Tracing for Windows)"
 homepage = "https://github.com/open-telemetry/opentelemetry-rust-contrib/tree/main/opentelemetry-etw-metrics"
@@ -11,17 +11,17 @@ license = "Apache-2.0"
 rust-version = "1.75.0"
 
 [dependencies]
-opentelemetry = { version = "0.30", features = ["metrics"] }
-opentelemetry_sdk = { version = "0.30", features = ["metrics"] }
-opentelemetry-proto = { version = "0.30", features = ["gen-tonic", "metrics"], default-features = false }
-prost = "0.13"
+opentelemetry = { version = "0.31", features = ["metrics"] }
+opentelemetry_sdk = { version = "0.31", features = ["metrics"] }
+opentelemetry-proto = { version = "0.31", features = ["gen-tonic", "metrics"], default-features = false }
+prost = "0.14"
 tracelogging = "1.2.4"
 tracing = { version = "0.1", optional = true }
 [dev-dependencies]
 tokio = { version = "1.0", features = ["full"] }
 criterion = { workspace = true, features = ["html_reports"] }
 tracing-subscriber = { version = "0.3", features = ["env-filter","registry", "std", "fmt"] }
-opentelemetry-proto = { version = "0.30", features = ["gen-tonic", "metrics", "gen-tonic-messages"], default-features = false }
+opentelemetry-proto = { version = "0.31", features = ["gen-tonic", "metrics", "gen-tonic-messages"], default-features = false }
 
 [features]
 internal-logs = ["tracing", "opentelemetry/internal-logs", "opentelemetry_sdk/internal-logs", "opentelemetry-proto/internal-logs"]

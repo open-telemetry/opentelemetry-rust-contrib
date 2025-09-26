@@ -17,5 +17,5 @@ workspace = true
 
 [dependencies]
 # Use the repo's opentelemetry-proto crate directly
-opentelemetry-proto = { version = "0.30", default-features = false, features = ["logs", "trace", "gen-tonic-messages"] }
-prost = "0.13"
+opentelemetry-proto = { version = "0.31", default-features = false, features = ["logs", "trace", "gen-tonic-messages"] }
+prost = "0.14"

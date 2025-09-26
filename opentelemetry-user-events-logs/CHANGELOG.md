@@ -2,6 +2,11 @@
 
 ## vNext
 
+## v0.15.0
+
+- Bump opentelemetry and opentelemetry_sdk versions to 0.31
+- Bump opentelemetry-appender-tracing version to 0.31
+
 ## v0.14.0
 
 Released 2025-July-24

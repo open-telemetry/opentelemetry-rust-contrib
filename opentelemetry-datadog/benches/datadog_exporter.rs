@@ -126,8 +126,8 @@ fn get_array_of_booleans(rng: &mut ThreadRng) -> Value {
 
 fn get_span(trace_id: u128, parent_span_id: u64, span_id: u64, rng: &mut ThreadRng) -> SpanData {
     let span_context = SpanContext::new(
-        TraceId::from_u128(trace_id),
-        SpanId::from_u64(span_id),
+        TraceId::from(trace_id),
+        SpanId::from(span_id),
         TraceFlags::default(),
         false,
         TraceState::default(),
@@ -165,7 +165,8 @@ fn get_span(trace_id: u128, parent_span_id: u64, span_id: u64, rng: &mut ThreadR
 
     SpanData {
         span_context,
-        parent_span_id: SpanId::from_u64(parent_span_id),
+        parent_span_id: SpanId::from(parent_span_id),
+        parent_span_is_remote: false,
         span_kind: SpanKind::Client,
         name: "resource".into(),
         start_time,
