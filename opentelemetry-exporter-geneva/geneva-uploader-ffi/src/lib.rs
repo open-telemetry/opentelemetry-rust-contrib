@@ -9,7 +9,9 @@ use std::ptr;
 use std::sync::OnceLock;
 use tokio::runtime::Runtime;
 
-use geneva_uploader::client::{EncodedBatch, GenevaClient, GenevaClientConfig};
+use geneva_uploader::client::{
+    EncodedBatch, GenevaClient, GenevaClientConfig, ManagedIdentitySelector,
+};
 use geneva_uploader::AuthMethod;
 use opentelemetry_proto::tonic::collector::logs::v1::ExportLogsServiceRequest;
 use opentelemetry_proto::tonic::collector::trace::v1::ExportTraceServiceRequest;
@@ -288,7 +290,10 @@ pub unsafe extern "C" fn geneva_client_new(
 
     // Auth method conversion
     let auth_method = match config.auth_method {
-        0 => AuthMethod::ManagedIdentity,
+        // 0 => Managed Identity (default to system-assigned when coming from FFI for now)
+        0 => AuthMethod::ManagedIdentity {
+            selector: ManagedIdentitySelector::System,
+        },
         1 => {
             // Certificate authentication: read fields from tagged union
             let cert = unsafe { config.auth.cert };

@@ -1,6 +1,9 @@
 //! High-level GenevaClient for user code. Wraps config_service and ingestion_service.
 
 use crate::config_service::client::{AuthMethod, GenevaConfigClient, GenevaConfigClientConfig};
+
+// Re-export ManagedIdentitySelector for downstream crates/examples
+pub use crate::config_service::client::ManagedIdentitySelector;
 use crate::ingestion_service::uploader::{GenevaUploader, GenevaUploaderConfig};
 use crate::payload_encoder::otlp_encoder::OtlpEncoder;
 use opentelemetry_proto::tonic::logs::v1::ResourceLogs;
