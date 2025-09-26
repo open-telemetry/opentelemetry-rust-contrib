@@ -166,6 +166,7 @@ fn get_span(trace_id: u128, parent_span_id: u64, span_id: u64, rng: &mut ThreadR
     SpanData {
         span_context,
         parent_span_id: SpanId::from(parent_span_id),
+        parent_span_is_remote: false,
         span_kind: SpanKind::Client,
         name: "resource".into(),
         start_time,
