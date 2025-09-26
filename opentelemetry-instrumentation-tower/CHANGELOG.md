@@ -4,6 +4,13 @@
 
 ### Changed
 
+* **BREAKING**: Removed `with_meter()` method. The middleware now uses global meter and tracer providers by default via `opentelemetry::global::meter()` and `opentelemetry::global::tracer()`, with optional overrides via `with_tracer_provider()` and `with_meter_provider()` methods.
+* **BREAKING**: Renamed types. Use the new names:
+  - `HTTPMetricsLayer` → `HTTPLayer`
+  - `HTTPMetricsService` → `HTTPService`
+  - `HTTPMetricsResponseFuture` → `HTTPResponseFuture`
+  - `HTTPMetricsLayerBuilder` → `HTTPLayerBuilder`
+* Added OpenTelemetry trace support
 * Migrate to use `opentelemetry-semantic-conventions` package for metric names and attribute keys instead of hardcoded strings
 * Add dependency on otel semantic conventions crate and use constants from it instead of hardcoded attribute names. The values are unchanged
   - `HTTP_SERVER_ACTIVE_REQUESTS_METRIC` now uses `semconv::metric::HTTP_SERVER_ACTIVE_REQUESTS`
@@ -19,6 +26,37 @@
 ### Added
 
 * Add comprehensive test coverage for all HTTP server metrics with attribute validation
+
+### Migration Guide
+
+#### API Changes
+Before:
+```rust
+use opentelemetry_instrumentation_tower::HTTPMetricsLayerBuilder;
+
+let layer = HTTPMetricsLayerBuilder::builder()
+    .with_meter(meter)
+    .build()
+    .unwrap();
+```
+
+After:
+```rust
+use opentelemetry_instrumentation_tower::HTTPLayer;
+
+// Set global providers first
+global::set_meter_provider(meter_provider);
+global::set_tracer_provider(tracer_provider); // for tracing support
+
+// Then create the layer - simple API using global providers
+let layer = HTTPLayer::new();
+```
+
+#### Type Name Changes
+- Replace `HTTPMetricsLayerBuilder` with `HTTPLayerBuilder`
+- Replace `HTTPMetricsLayer` with `HTTPLayer`
+- Replace `HTTPMetricsService` with `HTTPService`
+- Replace `HTTPMetricsResponseFuture` with `HTTPResponseFuture`
 
 ## v0.16.0
 
