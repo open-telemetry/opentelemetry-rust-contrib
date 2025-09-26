@@ -233,6 +233,7 @@ pub(crate) mod tests {
         trace::SpanData {
             span_context,
             parent_span_id: SpanId::from(parent_span_id),
+            parent_span_is_remote: false,
             span_kind: SpanKind::Client,
             name: "resource".into(),
             start_time,
