@@ -781,6 +781,7 @@ mod tests {
     // Integration-style test: encode via FFI then upload via FFI using MockAuth + Wiremock server.
     // Uses otlp_builder to construct an ExportLogsServiceRequest payload.
     #[test]
+    #[cfg(feature = "mock_auth")]
     fn test_encode_and_upload_with_mock_server() {
         use otlp_builder::builder::build_otlp_logs_minimal;
         use wiremock::matchers::method;
@@ -892,6 +893,7 @@ mod tests {
     // multiple different event_names in one request produce multiple batches,
     // and each batch upload hits ingestion with the corresponding event query param.
     #[test]
+    #[cfg(feature = "mock_auth")]
     fn test_encode_batching_by_event_name_and_upload() {
         use wiremock::http::Method;
         use wiremock::matchers::method;
