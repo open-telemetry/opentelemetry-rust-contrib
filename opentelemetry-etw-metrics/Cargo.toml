@@ -8,7 +8,7 @@ repository = "https://github.com/open-telemetry/opentelemetry-rust-contrib/tree/
 readme = "README.md"
 keywords = ["opentelemetry", "metrics", "etw"]
 license = "Apache-2.0"
-rust-version = "1.75.0"
+rust-version = "1.85.0"
 
 [dependencies]
 opentelemetry = { version = "0.30", features = ["metrics"] }

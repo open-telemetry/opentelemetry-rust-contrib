@@ -18,7 +18,7 @@ OpenTelemetry-based utilities that don't fit the primary scope of the
 [OpenTelemetry Rust](https://github.com/open-telemetry/opentelemetry-rust)
 project.
 
-*Compiler support: [requires `rustc` 1.70+][msrv]*
+*Compiler support: [requires `rustc` 1.85+][msrv]*
 
 [msrv]: #supported-rust-versions
 
@@ -29,7 +29,7 @@ Check individual folders for usage guidelines and examples.
 ## Supported Rust Versions
 
 OpenTelemetry is built against the latest stable release. The minimum supported
-version is 1.75. The current OpenTelemetry version is not guaranteed to build
+version is 1.85. The current OpenTelemetry version is not guaranteed to build
 on Rust versions earlier than the minimum supported version.
 
 The current stable Rust compiler and the three most recent minor versions
