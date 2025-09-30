@@ -57,6 +57,9 @@ jobs:
     - uses: arduino/setup-protoc@c65c819552d16ad3c9b72d9dfd5ba5237b9c906b # v3.0.0
       with:
         repo-token: ${{ secrets.GITHUB_TOKEN }}
+        version: 3.21.12
+    - name: Show protoc version (test job)
+      run: protoc --version
     - name: Test (Windows)
       if: ${{ matrix.os == 'windows-2025'}}
       run: ./scripts/test.ps1
@@ -86,6 +89,9 @@ jobs:
     - uses: arduino/setup-protoc@c65c819552d16ad3c9b72d9dfd5ba5237b9c906b # v3.0.0
       with:
           repo-token: ${{ secrets.GITHUB_TOKEN }}
+          version: 3.21.12
+    - name: Show protoc version (lint job)
+      run: protoc --version
     - name: Format
       run: cargo fmt --all -- --check
     - name: Lint (Windows)
@@ -147,6 +153,9 @@ jobs:
       - uses: arduino/setup-protoc@c65c819552d16ad3c9b72d9dfd5ba5237b9c906b # v3.0.0
         with:
             repo-token: ${{ secrets.GITHUB_TOKEN }}
+            version: 3.21.12
+      - name: Show protoc version (docs job)
+        run: protoc --version
       - name: doc
         run: cargo doc --no-deps --all-features
         env:
@@ -171,6 +180,9 @@ jobs:
       - uses: arduino/setup-protoc@c65c819552d16ad3c9b72d9dfd5ba5237b9c906b # v3.0.0
         with:
             repo-token: ${{ secrets.GITHUB_TOKEN }}
+            version: 3.21.12
+      - name: Show protoc version (coverage job)
+        run: protoc --version
       - name: cargo install cargo-llvm-cov
         uses: taiki-e/install-action@d31232495ad76f47aad66e3501e47780b49f0f3e # v2.57.5
         with:
