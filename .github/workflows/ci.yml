@@ -180,6 +180,13 @@ jobs:
         run: cargo generate-lockfile
       - name: cargo llvm-cov
         run: cargo llvm-cov --locked --all-features --workspace --lcov --output-path lcov.info
+      - name: Upload generated proto files
+        if: failure()
+        uses: actions/upload-artifact@b4b15b8c7c6ac21ea08fcf65892d2ee8f75cf882 # v4.4.3
+        with:
+          name: regenerated-protos
+          path: |
+            opentelemetry-stackdriver/src/proto/**/*.rs
       - name: Upload to codecov.io
         uses: codecov/codecov-action@18283e04ce6e62d37312384ff67231eb8fd56d24 # v5.4.3
         with:
