@@ -7,7 +7,7 @@ repository = "https://github.com/open-telemetry/opentelemetry-rust-contrib"
 license = "Apache-2.0"
 edition = "2021"
 exclude = ["/proto"]
-rust-version = "1.85.0"
+rust-version = "1.75.0"
 
 [dependencies]
 gcp_auth = { version = "0.12", optional = true }

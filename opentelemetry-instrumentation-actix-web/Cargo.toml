@@ -9,7 +9,7 @@ categories = ["api-bindings"]
 keywords = ["actix", "actix-web", "opentelemetry"]
 license = "Apache-2.0"
 edition = "2021"
-rust-version = "1.85.0"
+rust-version = "1.75.0"
 
 [features]
 metrics = ["opentelemetry/metrics"]
