@@ -2,6 +2,11 @@
 
 ## vNext
 
+## v0.19.0
+
+- Bump opentelemetry and opentelemetry_sdk versions to 0.31
+- Bump opentelemetry-http and opentelemetry-semantic-conventions versions to 0.31
+
 ## v0.18.0
 
 - Bump opentelemetry and opentelemetry_sdk versions to 0.30

@@ -2,10 +2,12 @@
 
 ## vNext
 
+## v0.23.0
+
 ### Changed
 
 * Remove `opentelemetry-prometheus`, `opentelemetry_sdk`, `prometheus` and `tracing` dependencies
-* Update `opentelemetry` and `opentelemetry-semantic-conventions` dependencies to 0.30
+* Update `opentelemetry` and `opentelemetry-semantic-conventions` dependencies to 0.31
 * **Breaking** Rename crate to `opentelemetry-instrumentation-actix-web`
 * **Breaking** Remove `metrics-prometheus` feature and use `metric` feature instead
 * **Breaking** Remove Prometheus middleware `PrometheusMetricsHandler` and use OTLP exporter instead

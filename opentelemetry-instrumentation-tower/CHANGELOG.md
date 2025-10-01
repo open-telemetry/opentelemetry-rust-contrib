@@ -2,8 +2,11 @@
 
 ## vNext
 
+## v0.17.0
+
 ### Changed
 
+* Update to OpenTelemetry v0.31
 * Migrate to use `opentelemetry-semantic-conventions` package for metric names and attribute keys instead of hardcoded strings
 * Add dependency on otel semantic conventions crate and use constants from it instead of hardcoded attribute names. The values are unchanged
   - `HTTP_SERVER_ACTIVE_REQUESTS_METRIC` now uses `semconv::metric::HTTP_SERVER_ACTIVE_REQUESTS`
