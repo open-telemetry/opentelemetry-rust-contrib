@@ -2,7 +2,7 @@
 
 ## vNext
 
-## [v0.23.0](https://github.com/OutThereLabs/actix-web-opentelemetry/compare/v0.23.0..v0.22.0)
+## v0.23.0
 
 ### Changed
 
