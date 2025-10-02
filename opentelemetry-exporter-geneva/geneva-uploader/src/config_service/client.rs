@@ -463,15 +463,16 @@ impl GenevaConfigClient {
                     GenevaConfigClientError::InternalError("Failed to parse token expiry".into())
                 })?;
 
-        let token_endpoint = match extract_endpoint_from_token(&fresh_ingestion_gateway_info.auth_token) {
-            Ok(ep) => ep,
-            Err(err) => {
-                // Fallback: some tokens legitimately omit the Endpoint claim; use server endpoint.
-                #[cfg(debug_assertions)]
-                eprintln!("[geneva][debug] token Endpoint claim missing or unparsable: {err}");
-                fresh_ingestion_gateway_info.endpoint.clone()
-            }
-        };
+        let token_endpoint =
+            match extract_endpoint_from_token(&fresh_ingestion_gateway_info.auth_token) {
+                Ok(ep) => ep,
+                Err(err) => {
+                    // Fallback: some tokens legitimately omit the Endpoint claim; use server endpoint.
+                    #[cfg(debug_assertions)]
+                    eprintln!("[geneva][debug] token Endpoint claim missing or unparsable: {err}");
+                    fresh_ingestion_gateway_info.endpoint.clone()
+                }
+            };
 
         // Now update the cache with exclusive write access
         let mut guard = self
