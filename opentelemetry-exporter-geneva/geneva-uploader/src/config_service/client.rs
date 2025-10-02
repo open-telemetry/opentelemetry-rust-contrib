@@ -1,8 +1,8 @@
-// Geneva Config Client with TLS (PKCS#12) and TODO: Managed Identity support
+// Geneva Config Client with TLS (PKCS#12) and Azure Workload Identity support
 
 use base64::{engine::general_purpose, Engine as _};
 use reqwest::{
-    header::{HeaderMap, HeaderValue, ACCEPT, USER_AGENT},
+    header::{HeaderMap, HeaderValue, ACCEPT, AUTHORIZATION, USER_AGENT},
     Client,
 };
 use serde::Deserialize;
@@ -18,11 +18,16 @@ use std::fs;
 use std::path::PathBuf;
 use std::sync::RwLock;
 
+// Azure Identity imports for Workload Identity authentication
+use azure_core::credentials::TokenCredential;
+use azure_identity::{WorkloadIdentityCredential, WorkloadIdentityCredentialOptions};
+
 /// Authentication methods for the Geneva Config Client.
 ///
-/// The client supports two authentication methods:
+/// The client supports three authentication methods:
 /// - Certificate-based authentication using PKCS#12 (.p12) files
-/// - Managed Identity (Azure) - planned for future implementation
+/// - Azure Workload Identity (Federated Identity) for Kubernetes workloads
+/// - Mock authentication for testing
 ///
 /// # Certificate Format
 /// Certificates should be in PKCS#12 (.p12) format for client TLS authentication.
@@ -53,10 +58,18 @@ pub enum AuthMethod {
     /// * `path` - Path to the PKCS#12 (.p12) certificate file
     /// * `password` - Password to decrypt the PKCS#12 file
     Certificate { path: PathBuf, password: String },
-    /// Azure Managed Identity authentication
+    /// Azure Workload Identity authentication (Federated Identity for Kubernetes)
     ///
-    /// Note(TODO): This is not yet implemented.
-    ManagedIdentity,
+    /// # Arguments
+    /// * `client_id` - Azure AD Application (client) ID
+    /// * `tenant_id` - Azure AD Tenant ID
+    /// * `token_file` - Optional path to the service account token file.
+    ///                  If None, defaults to AZURE_FEDERATED_TOKEN_FILE env var
+    WorkloadIdentity {
+        client_id: String,
+        tenant_id: String,
+        token_file: Option<PathBuf>,
+    },
     #[cfg(feature = "mock_auth")]
     MockAuth, // No authentication, used for testing purposes
 }
@@ -64,14 +77,14 @@ pub enum AuthMethod {
 #[derive(Debug, Error)]
 pub(crate) enum GenevaConfigClientError {
     // Authentication-related errors
-    #[error("Authentication method not implemented: {0}")]
-    AuthMethodNotImplemented(String),
     #[error("Missing Auth Info: {0}")]
     AuthInfoNotFound(String),
     #[error("Invalid or malformed JWT token: {0}")]
     JwtTokenError(String),
     #[error("Certificate error: {0}")]
     Certificate(String),
+    #[error("Workload Identity authentication error: {0}")]
+    WorkloadIdentityAuth(String),
 
     // Networking / HTTP / TLS
     #[error("HTTP error: {0}")]
@@ -246,10 +259,9 @@ impl GenevaConfigClient {
                         .map_err(|e| GenevaConfigClientError::Certificate(e.to_string()))?;
                 client_builder = client_builder.use_preconfigured_tls(tls_connector);
             }
-            AuthMethod::ManagedIdentity => {
-                return Err(GenevaConfigClientError::AuthMethodNotImplemented(
-                    "Managed Identity authentication is not implemented yet".into(),
-                ));
+            AuthMethod::WorkloadIdentity { .. } => {
+                // No special HTTP client configuration needed for Workload Identity
+                // Authentication is done via Bearer token in request headers
             }
             #[cfg(feature = "mock_auth")]
             AuthMethod::MockAuth => {
@@ -268,11 +280,21 @@ impl GenevaConfigClient {
         let encoded_identity = general_purpose::STANDARD.encode(&identity);
         let version_str = format!("Ver{0}v0", config.config_major_version);
 
+        // Use different API endpoints based on authentication method
+        // Certificate auth uses "api", Workload Identity uses "userapi"
+        let api_path = match &config.auth_method {
+            AuthMethod::Certificate { .. } => "api",
+            AuthMethod::WorkloadIdentity { .. } => "userapi",
+            #[cfg(feature = "mock_auth")]
+            AuthMethod::MockAuth => "api", // treat mock like certificate path for URL shape
+        };
+
         let mut pre_url = String::with_capacity(config.endpoint.len() + 200);
         write!(
             &mut pre_url,
-            "{}/api/agent/v3/{}/{}/MonitoringStorageKeys/?Namespace={}&Region={}&Identity={}&OSType={}&ConfigMajorVersion={}",
+            "{}/{}/agent/v3/{}/{}/MonitoringStorageKeys/?Namespace={}&Region={}&Identity={}&OSType={}&ConfigMajorVersion={}",
             config.endpoint.trim_end_matches('/'),
+            api_path,
             config.environment,
             config.account,
             config.namespace,
@@ -308,6 +330,70 @@ impl GenevaConfigClient {
         headers.insert(USER_AGENT, HeaderValue::from_str(&user_agent).unwrap());
         headers.insert(ACCEPT, HeaderValue::from_static("application/json"));
         headers
+    }
+
+    /// Get Azure AD token using Workload Identity (Federated Identity)
+    async fn get_workload_identity_token(&self) -> Result<String> {
+        let (client_id, tenant_id, token_file) = match &self.config.auth_method {
+            AuthMethod::WorkloadIdentity {
+                client_id,
+                tenant_id,
+                token_file,
+            } => (client_id, tenant_id, token_file),
+            _ => {
+                return Err(GenevaConfigClientError::WorkloadIdentityAuth(
+                    "get_workload_identity_token called but auth method is not WorkloadIdentity"
+                        .to_string(),
+                ))
+            }
+        };
+
+        // Get the resource/scope for the token request
+        let resource = std::env::var("GENEVA_WORKLOAD_IDENTITY_RESOURCE").map_err(|_| {
+            GenevaConfigClientError::WorkloadIdentityAuth(
+                "GENEVA_WORKLOAD_IDENTITY_RESOURCE env var is required for Workload Identity auth (no default)"
+                    .to_string(),
+            )
+        })?;
+
+        // Normalize resource (strip trailing "/.default" if provided by user)
+        let base = resource.trim_end_matches("/.default").trim_end_matches('/');
+
+        // Candidate scopes tried with Azure Identity
+        let mut scope_candidates: Vec<String> = vec![format!("{base}/.default"), base.to_string()];
+        // Add variant with trailing slash if not already present
+        if !base.ends_with('/') {
+            scope_candidates.push(format!("{base}/"));
+        }
+
+        // Create WorkloadIdentityCredential using the Azure Identity SDK
+        let options = WorkloadIdentityCredentialOptions {
+            client_id: Some(client_id.clone()),
+            tenant_id: Some(tenant_id.clone()),
+            token_file_path: token_file.clone(),
+            ..Default::default()
+        };
+
+        let credential = WorkloadIdentityCredential::new(Some(options)).map_err(|e| {
+            GenevaConfigClientError::WorkloadIdentityAuth(format!(
+                "Failed to create WorkloadIdentityCredential: {e}"
+            ))
+        })?;
+
+        // Try each scope candidate until one succeeds
+        let mut last_err: Option<String> = None;
+        for scope in &scope_candidates {
+            match credential.get_token(&[scope.as_str()], None).await {
+                Ok(token) => return Ok(token.token.secret().to_string()),
+                Err(e) => last_err = Some(e.to_string()),
+            }
+        }
+
+        let detail = last_err.unwrap_or_else(|| "no error detail".into());
+        Err(GenevaConfigClientError::WorkloadIdentityAuth(format!(
+            "Workload Identity token acquisition failed. Scopes tried: {scopes}. Last error: {detail}",
+            scopes = scope_candidates.join(", ")
+        )))
     }
 
     /// Retrieves ingestion gateway information from the Geneva Config Service.
@@ -432,6 +518,18 @@ impl GenevaConfigClient {
             .headers(self.static_headers.clone()); // Clone only cheap references
 
         request = request.header("x-ms-client-request-id", req_id);
+
+        // Add authentication header based on auth method
+        match &self.config.auth_method {
+            AuthMethod::WorkloadIdentity { .. } => {
+                let token = self.get_workload_identity_token().await?;
+                request = request.header(AUTHORIZATION, format!("Bearer {}", token));
+            }
+            AuthMethod::Certificate { .. } => { /* mTLS only */ }
+            #[cfg(feature = "mock_auth")]
+            AuthMethod::MockAuth => { /* no auth header */ }
+        }
+
         let response = request
             .send()
             .await

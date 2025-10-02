@@ -17,13 +17,16 @@ serde_json = { version = "1.0", features = ["raw_value"] }
 uuid = { version = "1.0", features = ["v4"] }
 # TODO - support both native-tls and rustls
 reqwest = { version = "0.12", features = ["native-tls", "native-tls-alpn"]}
-native-tls = "0.2" 
+native-tls = "0.2"
 thiserror = "2.0"
 chrono = "0.4"
 url = "2.2"
 md5 = "0.8.0"
 hex = "0.4"
 lz4_flex = { version = "0.11", features = ["safe-encode"], default-features = false }
+# Azure Identity dependencies - using public crates.io versions
+azure_identity = "0.27.0"
+azure_core = "0.27.0"
 
 [features]
 self_signed_certs = [] # Empty by default for security
