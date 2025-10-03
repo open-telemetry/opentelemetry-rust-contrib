@@ -67,6 +67,8 @@ impl opentelemetry_sdk::logs::LogExporter for GenevaExporter {
             .collect()
             .await;
 
+	println!("Error vector : {:?}", errors);
+
         // Return error if any uploads failed
         if !errors.is_empty() {
             return Err(OTelSdkError::InternalFailure(format!(

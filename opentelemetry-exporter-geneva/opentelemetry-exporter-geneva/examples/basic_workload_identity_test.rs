@@ -62,6 +62,8 @@ async fn main() {
                 .expect("AZURE_CLIENT_ID required for Workload Identity auth");
             let tenant_id = env::var("AZURE_TENANT_ID")
                 .expect("AZURE_TENANT_ID required for Workload Identity auth");
+            let resource = env::var("GENEVA_WORKLOAD_IDENTITY_RESOURCE")
+                .expect("GENEVA_WORKLOAD_IDENTITY_RESOURCE required for Workload Identity auth");
 
             // Optional: Allow custom token file path
             let token_file = env::var("WORKLOAD_IDENTITY_TOKEN_FILE")
@@ -72,6 +74,7 @@ async fn main() {
                 client_id,
                 tenant_id,
                 token_file,
+                resource,
             }
         }
         _ => panic!(

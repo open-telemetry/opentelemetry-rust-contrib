@@ -65,10 +65,13 @@ pub enum AuthMethod {
     /// * `tenant_id` - Azure AD Tenant ID
     /// * `token_file` - Optional path to the service account token file.
     ///                  If None, defaults to AZURE_FEDERATED_TOKEN_FILE env var
+    /// * `resource` - Azure AD resource URI for token acquisition
+    ///               (e.g., "https://monitor.azure.com" for Azure Public Cloud)
     WorkloadIdentity {
         client_id: String,
         tenant_id: String,
         token_file: Option<PathBuf>,
+        resource: String,
     },
     #[cfg(feature = "mock_auth")]
     MockAuth, // No authentication, used for testing purposes
@@ -334,12 +337,13 @@ impl GenevaConfigClient {
 
     /// Get Azure AD token using Workload Identity (Federated Identity)
     async fn get_workload_identity_token(&self) -> Result<String> {
-        let (client_id, tenant_id, token_file) = match &self.config.auth_method {
+        let (client_id, tenant_id, token_file, resource) = match &self.config.auth_method {
             AuthMethod::WorkloadIdentity {
                 client_id,
                 tenant_id,
                 token_file,
-            } => (client_id, tenant_id, token_file),
+                resource,
+            } => (client_id, tenant_id, token_file, resource),
             _ => {
                 return Err(GenevaConfigClientError::WorkloadIdentityAuth(
                     "get_workload_identity_token called but auth method is not WorkloadIdentity"
@@ -347,14 +351,6 @@ impl GenevaConfigClient {
                 ))
             }
         };
-
-        // Get the resource/scope for the token request
-        let resource = std::env::var("GENEVA_WORKLOAD_IDENTITY_RESOURCE").map_err(|_| {
-            GenevaConfigClientError::WorkloadIdentityAuth(
-                "GENEVA_WORKLOAD_IDENTITY_RESOURCE env var is required for Workload Identity auth (no default)"
-                    .to_string(),
-            )
-        })?;
 
         // Normalize resource (strip trailing "/.default" if provided by user)
         let base = resource.trim_end_matches("/.default").trim_end_matches('/');
@@ -605,8 +601,11 @@ fn extract_endpoint_from_token(token: &str) -> Result<String> {
     };
 
     // Decode the Base64-encoded payload into raw bytes
+    // Try URL_SAFE_NO_PAD first (for tokens without padding),
+    // then fall back to URL_SAFE (for tokens with padding)
     let decoded = general_purpose::URL_SAFE_NO_PAD
-        .decode(payload)
+        .decode(&payload)
+        .or_else(|_| general_purpose::URL_SAFE.decode(&payload))
         .map_err(|e| {
             GenevaConfigClientError::JwtTokenError(format!("Failed to decode JWT: {e}"))
         })?;
