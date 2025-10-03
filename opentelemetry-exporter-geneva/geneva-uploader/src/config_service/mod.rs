@@ -3,7 +3,7 @@ pub(crate) mod client;
 #[cfg(test)]
 mod tests {
     use crate::config_service::client::{
-        AuthMethod, GenevaConfigClient, GenevaConfigClientConfig,
+        AuthMethod, GenevaConfigClient, GenevaConfigClientConfig, ManagedIdentitySelector,
     };
     use openssl::{pkcs12::Pkcs12, pkey::PKey, x509::X509};
     use rcgen::generate_simple_self_signed;
@@ -22,72 +22,17 @@ mod tests {
             namespace: "ns".to_string(),
             region: "region".to_string(),
             config_major_version: 1,
-            auth_method: AuthMethod::SystemManagedIdentity,
-            msi_resource: Some("https://example.com".into()),
+            auth_method: AuthMethod::ManagedIdentity {
+                selector: ManagedIdentitySelector::System,
+            },
         };
 
         assert_eq!(config.environment, "env");
         assert_eq!(config.account, "acct");
-        assert!(matches!(config.auth_method, AuthMethod::SystemManagedIdentity));
-    }
-
-    #[test]
-    fn test_msi_uses_userapi_path_segment() {
-        // System Managed Identity
-        let cfg_sys = GenevaConfigClientConfig {
-            endpoint: "https://example.com".into(),
-            environment: "env".into(),
-            account: "acct".into(),
-            namespace: "ns".into(),
-            region: "region".into(),
-            config_major_version: 1,
-            auth_method: AuthMethod::SystemManagedIdentity,
-            msi_resource: Some("https://example.com".into()),
-        };
-        let client_sys = GenevaConfigClient::new(cfg_sys).expect("client sys");
-        let pre_url_sys = client_sys.pre_url_for_test();
-        assert!(pre_url_sys.contains("/userapi/"), "expected userapi in {pre_url_sys}");
-
-        // Certificate stays on /api/
-        let cfg_cert = GenevaConfigClientConfig {
-            endpoint: "https://example.com".into(),
-            environment: "env".into(),
-            account: "acct".into(),
-            namespace: "ns".into(),
-            region: "region".into(),
-            config_major_version: 1,
-            auth_method: AuthMethod::Certificate { path: std::path::PathBuf::from("/nope"), password: "p".into() },
-            msi_resource: None,
-        };
-        // This will fail building due to missing cert file; assert the error path is Certificate
-        let res = GenevaConfigClient::new(cfg_cert);
-        assert!(res.is_err());
-    }
-
-    #[test]
-    fn test_user_assigned_identity_constructors() {
-        // client id
-        let am = AuthMethod::user_client_id("cid123");
-        let id = am.validate_user_assigned_id().unwrap();
-        matches!(id, Some(azure_identity::UserAssignedId::ClientId(_)));
-
-        // object id
-        let am = AuthMethod::user_object_id("oid123");
-        let id = am.validate_user_assigned_id().unwrap();
-        matches!(id, Some(azure_identity::UserAssignedId::ObjectId(_)));
-
-        // resource id
-        let am = AuthMethod::user_resource_id("/subscriptions/abc/resourceGroups/rg/providers/Microsoft.ManagedIdentity/userAssignedIdentities/x");
-        let id = am.validate_user_assigned_id().unwrap();
-        matches!(id, Some(azure_identity::UserAssignedId::ResourceId(_)));
-    }
-
-    #[test]
-    fn test_extract_endpoint_from_token_error() {
-        // malformed token (not three segments)
-        let err = crate::config_service::client::extract_endpoint_from_token("abc.def").unwrap_err();
-        let msg = format!("{err}");
-        assert!(msg.contains("Invalid JWT token format"));
+        assert!(matches!(
+            config.auth_method,
+            AuthMethod::ManagedIdentity { .. }
+        ));
     }
 
     fn generate_self_signed_p12() -> (NamedTempFile, String) {
@@ -169,7 +114,6 @@ mod tests {
                 path: PathBuf::from(temp_p12_file.path().to_string_lossy().to_string()),
                 password,
             },
-            msi_resource: None,
         };
 
         let client = GenevaConfigClient::new(config).unwrap();
@@ -215,7 +159,6 @@ mod tests {
                 path: PathBuf::from(temp_p12_file.path().to_string_lossy().to_string()),
                 password,
             },
-            msi_resource: None,
         };
 
         let client = GenevaConfigClient::new(config).unwrap();
@@ -264,7 +207,6 @@ mod tests {
                 path: PathBuf::from(temp_p12_file.path().to_string_lossy().to_string()),
                 password,
             },
-            msi_resource: None,
         };
 
         let client = GenevaConfigClient::new(config).unwrap();
@@ -296,7 +238,6 @@ mod tests {
                 path: PathBuf::from("/nonexistent/path.p12".to_string()),
                 password: "test".to_string(),
             },
-            msi_resource: None,
         };
 
         let result = GenevaConfigClient::new(config);
@@ -360,7 +301,6 @@ mod tests {
                 path: PathBuf::from(cert_path),
                 password: cert_password,
             },
-            msi_resource: None,
         };
 
         println!("Connecting to real Geneva Config service...");

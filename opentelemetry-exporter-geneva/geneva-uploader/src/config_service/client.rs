@@ -48,7 +48,18 @@ use azure_identity::{ManagedIdentityCredential, ManagedIdentityCredentialOptions
 /// ```powershell
 /// openssl pkcs12 -export -in cert.pem -inkey key.pem -out client.p12 -name "alias"
 /// ```
-// NOTE: ManagedIdentitySelector removed in favor of flattened AuthMethod variants.
+#[allow(dead_code)]
+#[derive(Clone, Debug)]
+pub enum ManagedIdentitySelector {
+    /// System-assigned managed identity.
+    System,
+    /// User-assigned by Object (Principal) Id (GUID)
+    ObjectId(String),
+    /// User-assigned by Client (Application) Id (GUID)
+    ClientId(String),
+    /// User-assigned by full Azure Resource Id
+    ResourceId(String),
+}
 
 #[allow(dead_code)]
 #[derive(Clone, Debug)]
@@ -59,98 +70,13 @@ pub enum AuthMethod {
     /// * `path` - Path to the PKCS#12 (.p12) certificate file
     /// * `password` - Password to decrypt the PKCS#12 file
     Certificate { path: PathBuf, password: String },
-    /// System-assigned managed identity (auto-detected).
-    SystemManagedIdentity,
-    /// User-assigned managed identity (exactly one of the optional identifiers must be Some).
+    /// Unified Azure Managed Identity authentication.
     ///
-    /// At runtime we validate that exactly one of client_id|object_id|resource_id is provided.
-    UserManagedIdentity {
-        client_id: Option<String>,
-        object_id: Option<String>,
-        resource_id: Option<String>,
-    },
-
+    /// Uses either the system-assigned identity (selector = System) or a user-assigned identity
+    /// specified by object id, client id, or resource id.
+    ManagedIdentity { selector: ManagedIdentitySelector },
     #[cfg(feature = "mock_auth")]
     MockAuth, // No authentication, used for testing purposes
-}
-
-impl AuthMethod {
-    /// Convenience constructor for user-assigned managed identity by client_id.
-    pub fn user_client_id<S: Into<String>>(id: S) -> Self {
-        Self::UserManagedIdentity {
-            client_id: Some(id.into()),
-            object_id: None,
-            resource_id: None,
-        }
-    }
-
-    /// Convenience constructor for user-assigned managed identity by object_id.
-    pub fn user_object_id<S: Into<String>>(id: S) -> Self {
-        Self::UserManagedIdentity {
-            client_id: None,
-            object_id: Some(id.into()),
-            resource_id: None,
-        }
-    }
-
-    /// Convenience constructor for user-assigned managed identity by resource_id.
-    pub fn user_resource_id<S: Into<String>>(id: S) -> Self {
-        Self::UserManagedIdentity {
-            client_id: None,
-            object_id: None,
-            resource_id: Some(id.into()),
-        }
-    }
-
-    /// Internal validation helper: returns the selected UserAssignedId (if any) or an error
-    /// if the identity specification is invalid.
-    pub(crate) fn validate_user_assigned_id(
-        &self,
-    ) -> std::result::Result<Option<UserAssignedId>, GenevaConfigClientError> {
-        match self {
-            AuthMethod::SystemManagedIdentity => Ok(None),
-            AuthMethod::UserManagedIdentity {
-                client_id,
-                object_id,
-                resource_id,
-            } => {
-                let mut count = 0;
-                if client_id.is_some() {
-                    count += 1;
-                }
-                if object_id.is_some() {
-                    count += 1;
-                }
-                if resource_id.is_some() {
-                    count += 1;
-                }
-                if count == 0 {
-                    return Err(GenevaConfigClientError::MsiAuth(
-                        "UserManagedIdentity: one of client_id|object_id|resource_id must be set".into(),
-                    ));
-                }
-                if count > 1 {
-                    return Err(GenevaConfigClientError::MsiAuth(
-                        "UserManagedIdentity: only one of client_id|object_id|resource_id may be set".into(),
-                    ));
-                }
-                if let Some(v) = client_id {
-                    Ok(Some(UserAssignedId::ClientId(v.clone())))
-                } else if let Some(v) = object_id {
-                    Ok(Some(UserAssignedId::ObjectId(v.clone())))
-                } else {
-                    Ok(resource_id.as_ref().map(|v| UserAssignedId::ResourceId(v.clone())))
-                }
-            }
-            AuthMethod::Certificate { .. } => Err(GenevaConfigClientError::MsiAuth(
-                "validate_user_assigned_id called with Certificate auth".into(),
-            )),
-            #[cfg(feature = "mock_auth")]
-            AuthMethod::MockAuth => Err(GenevaConfigClientError::MsiAuth(
-                "validate_user_assigned_id called with MockAuth".into(),
-            )),
-        }
-    }
 }
 
 #[derive(Debug, Error)]
@@ -221,9 +147,6 @@ pub(crate) struct GenevaConfigClientConfig {
     pub(crate) region: String,
     pub(crate) config_major_version: u32,
     pub(crate) auth_method: AuthMethod, // agent_identity and agent_version are hardcoded for now
-    /// Resource (audience) base used for Managed Identity token acquisition (e.g. "https://example.azurewebsites.net").
-    /// Required when using Managed Identity auth variants.
-    pub(crate) msi_resource: Option<String>,
 }
 
 #[allow(dead_code)]
@@ -341,9 +264,7 @@ impl GenevaConfigClient {
                         .map_err(|e| GenevaConfigClientError::Certificate(e.to_string()))?;
                 client_builder = client_builder.use_preconfigured_tls(tls_connector);
             }
-            AuthMethod::SystemManagedIdentity | AuthMethod::UserManagedIdentity { .. } => {
-                /* no special HTTP client changes needed */
-            }
+            AuthMethod::ManagedIdentity { .. } => { /* no special HTTP client changes needed */ }
             #[cfg(feature = "mock_auth")]
             AuthMethod::MockAuth => {
                 // Mock authentication for testing purposes, no actual auth needed
@@ -365,7 +286,7 @@ impl GenevaConfigClient {
         // Certificate auth uses "api", MSI auth uses "userapi"
         let api_path = match &config.auth_method {
             AuthMethod::Certificate { .. } => "api",
-            AuthMethod::SystemManagedIdentity | AuthMethod::UserManagedIdentity { .. } => "userapi",
+            AuthMethod::ManagedIdentity { .. } => "userapi",
             #[cfg(feature = "mock_auth")]
             AuthMethod::MockAuth => "api", // treat mock like certificate path for URL shape
         };
@@ -415,15 +336,12 @@ impl GenevaConfigClient {
 
     /// Get MSI token for GCS authentication
     async fn get_msi_token(&self) -> Result<String> {
-        let resource = self
-            .config
-            .msi_resource
-            .as_ref()
-            .ok_or_else(|| {
-                GenevaConfigClientError::MsiAuth(
-                    "msi_resource missing in config (required for Managed Identity)".to_string(),
-                )
-            })?;
+        let resource = std::env::var("GENEVA_MSI_RESOURCE").map_err(|_| {
+            GenevaConfigClientError::MsiAuth(
+                "GENEVA_MSI_RESOURCE env var is required for Managed Identity auth (no default)"
+                    .to_string(),
+            )
+        })?;
 
         // Normalize resource (strip trailing "/.default" if provided by user)
         let base = resource.trim_end_matches("/.default").trim_end_matches('/');
@@ -435,8 +353,22 @@ impl GenevaConfigClient {
             scope_candidates.push(format!("{base}/"));
         }
 
-        // Determine user-assigned identity (if any) from flattened variants via helper
-        let user_assigned_id = self.config.auth_method.validate_user_assigned_id()?;
+        // Build credential based on selector
+        let selector = match &self.config.auth_method {
+            AuthMethod::ManagedIdentity { selector } => selector,
+            _ => {
+                return Err(GenevaConfigClientError::MsiAuth(
+                    "get_msi_token called but auth method is not ManagedIdentity".to_string(),
+                ))
+            }
+        };
+
+        let user_assigned_id = match selector {
+            ManagedIdentitySelector::System => None,
+            ManagedIdentitySelector::ObjectId(v) => Some(UserAssignedId::ObjectId(v.clone())),
+            ManagedIdentitySelector::ClientId(v) => Some(UserAssignedId::ClientId(v.clone())),
+            ManagedIdentitySelector::ResourceId(v) => Some(UserAssignedId::ResourceId(v.clone())),
+        };
 
         let options = ManagedIdentityCredentialOptions {
             user_assigned_id,
@@ -594,7 +526,7 @@ impl GenevaConfigClient {
 
         // Add MSI authentication for managed identity auth method
         match &self.config.auth_method {
-            AuthMethod::SystemManagedIdentity | AuthMethod::UserManagedIdentity { .. } => {
+            AuthMethod::ManagedIdentity { .. } => {
                 let msi_token = self.get_msi_token().await?;
                 request = request.header(AUTHORIZATION, format!("Bearer {}", msi_token));
             }
@@ -645,11 +577,6 @@ impl GenevaConfigClient {
             })
         }
     }
-
-    #[cfg(test)]
-    pub(crate) fn pre_url_for_test(&self) -> &str {
-        &self.precomputed_url_prefix
-    }
 }
 
 #[inline]
@@ -662,7 +589,7 @@ fn get_os_type() -> &'static str {
     }
 }
 
-pub(crate) fn extract_endpoint_from_token(token: &str) -> Result<String> {
+fn extract_endpoint_from_token(token: &str) -> Result<String> {
     let parts: Vec<&str> = token.split('.').collect();
     if parts.len() != 3 {
         return Err(GenevaConfigClientError::JwtTokenError(
@@ -728,45 +655,6 @@ fn configure_tls_connector(
         .max_protocol_version(Some(Protocol::Tlsv12))
         .danger_accept_invalid_certs(true);
     builder
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn user_managed_identity_client_id_ok() {
-        let am = AuthMethod::user_client_id("cid-123");
-        let id = am.validate_user_assigned_id().expect("should be ok");
-        match id {
-            Some(UserAssignedId::ClientId(v)) => assert_eq!(v, "cid-123"),
-            other => panic!("unexpected id: {:?}", other),
-        }
-    }
-
-    #[test]
-    fn user_managed_identity_multiple_fields_error() {
-        let am = AuthMethod::UserManagedIdentity {
-            client_id: Some("a".into()),
-            object_id: Some("b".into()),
-            resource_id: None,
-        };
-        let err = am.validate_user_assigned_id().unwrap_err();
-        let msg = format!("{err}");
-        assert!(msg.contains("only one"));
-    }
-
-    #[test]
-    fn user_managed_identity_none_set_error() {
-        let am = AuthMethod::UserManagedIdentity {
-            client_id: None,
-            object_id: None,
-            resource_id: None,
-        };
-        let err = am.validate_user_assigned_id().unwrap_err();
-        let msg = format!("{err}");
-        assert!(msg.contains("must be set"));
-    }
 }
 
 #[cfg(not(feature = "self_signed_certs"))]
