@@ -337,20 +337,19 @@ impl GenevaConfigClient {
 
     /// Get Azure AD token using Workload Identity (Federated Identity)
     async fn get_workload_identity_token(&self) -> Result<String> {
-        let (client_id, tenant_id, token_file, resource) = match &self.config.auth_method {
-            AuthMethod::WorkloadIdentity {
-                client_id,
-                tenant_id,
-                token_file,
-                resource,
-            } => (client_id, tenant_id, token_file, resource),
-            _ => {
-                return Err(GenevaConfigClientError::WorkloadIdentityAuth(
+        let (client_id, tenant_id, token_file, resource) =
+            match &self.config.auth_method {
+                AuthMethod::WorkloadIdentity {
+                    client_id,
+                    tenant_id,
+                    token_file,
+                    resource,
+                } => (client_id, tenant_id, token_file, resource),
+                _ => return Err(GenevaConfigClientError::WorkloadIdentityAuth(
                     "get_workload_identity_token called but auth method is not WorkloadIdentity"
                         .to_string(),
-                ))
-            }
-        };
+                )),
+            };
 
         // Normalize resource (strip trailing "/.default" if provided by user)
         let base = resource.trim_end_matches("/.default").trim_end_matches('/');
