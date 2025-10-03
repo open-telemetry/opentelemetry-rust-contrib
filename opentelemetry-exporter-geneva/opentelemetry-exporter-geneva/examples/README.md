@@ -94,15 +94,7 @@ az identity federated-credential create \
 echo "Federated credential created: $FEDERATED_CREDENTIAL_NAME"
 ```
 
-## Step 5: Register Managed Identity in Jarvis (Geneva Portal)
-
-1. Navigate to your Geneva environment in Jarvis portal
-2. Go to **Accounts** → **Your Account** → **Identity Management**
-3. Click **Add Identity**
-4. Select **Managed Identity**
-5. Enter the **Principal ID** (from Step 2)
-6. Configure permissions as needed for your monitoring account
-7. Save the configuration
+## Step 5: Register Managed Identity in Geneva portal
 
 Wait a few minutes for the identity registration to propagate through Geneva systems.
 
@@ -146,7 +138,7 @@ metadata:
   name: geneva-config
   namespace: $NAMESPACE
 data:
-  GENEVA_ENDPOINT: "https://gcs.ppe.monitoring.core.windows.net"  # Use your Geneva endpoint
+  GENEVA_ENDPOINT: "https://abc.com"  # Use your Geneva endpoint
   GENEVA_ENVIRONMENT: "Test"  # Your environment name
   GENEVA_ACCOUNT: "PipelineAgent2Demo"  # Your Geneva account
   GENEVA_NAMESPACE: "PAdemo2"  # Your Geneva namespace
@@ -280,21 +272,15 @@ Expected log output should show:
 - Azure Government: `https://monitor.azure.us`
 - Azure China: `https://monitor.azure.cn`
 
-### "Invalid padding" JWT decode error
-
-**Cause**: This should be fixed in the latest code. If you see this error, ensure you're using the latest version.
-
-**Fix**: The code now tries both `URL_SAFE_NO_PAD` and `URL_SAFE` decoders automatically.
-
 ### Logs show success but no data in Geneva
 
 **Possible causes**:
-1. Managed identity not registered in Jarvis (wait 5-10 minutes after registration)
+1. Managed identity not registered in Geneva (wait 5-10 minutes after registration)
 2. Identity doesn't have correct permissions in Geneva account
 3. Wrong Geneva endpoint or account configuration
 
 **Fix**:
-- Verify identity in Jarvis portal
+- Verify identity in Geneva portal
 - Check Geneva account permissions
 - Review ConfigMap values against Geneva documentation
 
@@ -354,26 +340,3 @@ az identity delete \
 - [Azure Workload Identity Documentation](https://azure.github.io/azure-workload-identity/)
 - [AKS Workload Identity Overview](https://learn.microsoft.com/azure/aks/workload-identity-overview)
 
-## Code Structure
-
-The workload identity implementation consists of:
-
-1. **`AuthMethod::WorkloadIdentity`** enum variant in `geneva-uploader/src/config_service/client.rs:58-63`
-   - Contains: `client_id`, `tenant_id`, `token_file`, `resource`
-
-2. **`get_workload_identity_token()`** method in `geneva-uploader/src/config_service/client.rs:352-423`
-   - Reads Kubernetes service account token
-   - Exchanges for Azure AD access token via OAuth 2.0 token exchange
-   - Handles JWT decoding with padding fallback
-
-3. **Example usage** in `examples/basic_workload_identity_test.rs:59-83`
-   - Reads environment variables
-   - Constructs `AuthMethod::WorkloadIdentity`
-   - Creates `GenevaClient` and `GenevaExporter`
-
-## Security Notes
-
-- The Kubernetes service account token is automatically rotated by Kubernetes
-- Azure AD access tokens are short-lived and automatically refreshed
-- No secrets or credentials need to be stored in your application
-- Managed identity permissions are controlled through Geneva/Jarvis portal
