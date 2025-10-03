@@ -30,6 +30,7 @@ pub struct GenevaClientConfig {
     pub tenant: String,
     pub role_name: String,
     pub role_instance: String,
+    pub msi_resource: Option<String>, // Required for Managed Identity variants
     // Add event name/version here if constant, or per-upload if you want them per call.
 }
 
@@ -43,6 +44,20 @@ pub struct GenevaClient {
 
 impl GenevaClient {
     pub fn new(cfg: GenevaClientConfig) -> Result<Self, String> {
+        // Validate MSI resource presence for managed identity variants
+        match cfg.auth_method {
+            AuthMethod::SystemManagedIdentity
+            | AuthMethod::UserManagedIdentity { .. }
+            | AuthMethod::UserManagedIdentityByObjectId { .. }
+            | AuthMethod::UserManagedIdentityByResourceId { .. } => {
+                if cfg.msi_resource.is_none() {
+                    return Err("msi_resource must be provided for managed identity auth".to_string());
+                }
+            }
+            AuthMethod::Certificate { .. } => {}
+            #[cfg(feature = "mock_auth")]
+            AuthMethod::MockAuth => {}
+        }
         let config_client_config = GenevaConfigClientConfig {
             endpoint: cfg.endpoint,
             environment: cfg.environment.clone(),
@@ -51,6 +66,7 @@ impl GenevaClient {
             region: cfg.region,
             config_major_version: cfg.config_major_version,
             auth_method: cfg.auth_method,
+            msi_resource: cfg.msi_resource,
         };
         let config_client = Arc::new(GenevaConfigClient::new(config_client_config)
             .map_err(|e| format!("GenevaConfigClient init failed: {e}"))?);

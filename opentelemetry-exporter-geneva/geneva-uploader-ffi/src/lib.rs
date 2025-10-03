@@ -334,6 +334,7 @@ pub unsafe extern "C" fn geneva_client_new(
         tenant,
         role_name,
         role_instance,
+        msi_resource: None, // FFI path currently does not accept MSI resource; extend API if needed
     };
 
     // Create client
@@ -834,6 +835,7 @@ mod tests {
             tenant: "testtenant".to_string(),
             role_name: "testrole".to_string(),
             role_instance: "testinstance".to_string(),
+            msi_resource: None,
         };
         let client = GenevaClient::new(cfg).expect("failed to create GenevaClient with MockAuth");
 
@@ -943,6 +945,7 @@ mod tests {
             tenant: "testtenant".to_string(),
             role_name: "testrole".to_string(),
             role_instance: "testinstance".to_string(),
+            msi_resource: None,
         };
         let client = GenevaClient::new(cfg).expect("failed to create GenevaClient with MockAuth");
 

@@ -137,6 +137,7 @@ pub(crate) struct GenevaConfigClientConfig {
     pub(crate) region: String,
     pub(crate) config_major_version: u32,
     pub(crate) auth_method: AuthMethod, // agent_identity and agent_version are hardcoded for now
+    pub(crate) msi_resource: Option<String>, // Required when using any Managed Identity variant
 }
 
 #[allow(dead_code)]
@@ -332,12 +333,16 @@ impl GenevaConfigClient {
 
     /// Get MSI token for GCS authentication
     async fn get_msi_token(&self) -> Result<String> {
-        let resource = std::env::var("GENEVA_MSI_RESOURCE").map_err(|_| {
-            GenevaConfigClientError::MsiAuth(
-                "GENEVA_MSI_RESOURCE env var is required for Managed Identity auth (no default)"
-                    .to_string(),
-            )
-        })?;
+        let resource = self
+            .config
+            .msi_resource
+            .as_ref()
+            .ok_or_else(|| {
+                GenevaConfigClientError::MsiAuth(
+                    "msi_resource not set in config (required for Managed Identity auth)"
+                        .to_string(),
+                )
+            })?;
 
         // Normalize resource (strip trailing "/.default" if provided by user)
         let base = resource.trim_end_matches("/.default").trim_end_matches('/');

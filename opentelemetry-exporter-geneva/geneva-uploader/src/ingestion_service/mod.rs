@@ -64,6 +64,7 @@ mod tests {
                     path: cert_path,
                     password: cert_password,
                 },
+                msi_resource: None,
             };
 
             // Build client and uploader
