@@ -1,9 +1,7 @@
 //! High-level GenevaClient for user code. Wraps config_service and ingestion_service.
 
 use crate::config_service::client::{AuthMethod, GenevaConfigClient, GenevaConfigClientConfig};
-
-// Re-export ManagedIdentitySelector for downstream crates/examples
-pub use crate::config_service::client::ManagedIdentitySelector;
+// ManagedIdentitySelector removed; no re-export needed.
 use crate::ingestion_service::uploader::{GenevaUploader, GenevaUploaderConfig};
 use crate::payload_encoder::otlp_encoder::OtlpEncoder;
 use opentelemetry_proto::tonic::logs::v1::ResourceLogs;
@@ -54,10 +52,8 @@ impl GenevaClient {
             config_major_version: cfg.config_major_version,
             auth_method: cfg.auth_method,
         };
-        let config_client = Arc::new(
-            GenevaConfigClient::new(config_client_config)
-                .map_err(|e| format!("GenevaConfigClient init failed: {e}"))?,
-        );
+        let config_client = Arc::new(GenevaConfigClient::new(config_client_config)
+            .map_err(|e| format!("GenevaConfigClient init failed: {e}"))?);
 
         let source_identity = format!(
             "Tenant={}/Role={}/RoleInstance={}",

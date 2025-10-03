@@ -1,6 +1,6 @@
 //! run with `$ cargo run --example basic_msi_test`
 
-use geneva_uploader::client::{GenevaClient, GenevaClientConfig, ManagedIdentitySelector};
+use geneva_uploader::client::{GenevaClient, GenevaClientConfig};
 use geneva_uploader::AuthMethod;
 use opentelemetry_appender_tracing::layer;
 use opentelemetry_exporter_geneva::GenevaExporter;
@@ -46,6 +46,7 @@ async fn main() {
         .expect("GENEVA_CONFIG_MAJOR_VERSION is required")
         .parse()
         .expect("GENEVA_CONFIG_MAJOR_VERSION must be a u32");
+    let msi_resource = Some(env::var("GENEVA_MSI_RESOURCE").expect("GENEVA_MSI_RESOURCE is required"));
 
     let tenant = env::var("GENEVA_TENANT").unwrap_or_else(|_| "default-tenant".to_string());
     let role_name = env::var("GENEVA_ROLE_NAME").unwrap_or_else(|_| "default-role".to_string());
@@ -55,29 +56,29 @@ async fn main() {
     // Determine authentication method based on environment variables (MSI only for this example)
     let auth_method = match env::var("MONITORING_GCS_AUTH_ID_TYPE").as_deref() {
         Ok("AuthMSIToken") => {
-            let selector = match env::var("MONITORING_MANAGED_ID_IDENTIFIER") {
-                Err(_) => ManagedIdentitySelector::System,
+            let auth_method = match env::var("MONITORING_MANAGED_ID_IDENTIFIER") {
+                Err(_) => AuthMethod::SystemManagedIdentity,
                 Ok(raw) => {
                     let key = raw.to_ascii_lowercase();
                     match key.as_str() {
-                        "system" => ManagedIdentitySelector::System,
-                        "object_id" => {
-                            let v = env::var("MONITORING_MANAGED_ID_VALUE").expect(
-                                "MONITORING_MANAGED_ID_VALUE required when MONITORING_MANAGED_ID_IDENTIFIER=object_id",
-                            );
-                            ManagedIdentitySelector::ObjectId(v)
-                        }
+                        "system" => AuthMethod::SystemManagedIdentity,
                         "client_id" => {
                             let v = env::var("MONITORING_MANAGED_ID_VALUE").expect(
                                 "MONITORING_MANAGED_ID_VALUE required when MONITORING_MANAGED_ID_IDENTIFIER=client_id",
                             );
-                            ManagedIdentitySelector::ClientId(v)
+                            AuthMethod::UserManagedIdentity { client_id: v }
+                        }
+                        "object_id" => {
+                            let v = env::var("MONITORING_MANAGED_ID_VALUE").expect(
+                                "MONITORING_MANAGED_ID_VALUE required when MONITORING_MANAGED_ID_IDENTIFIER=object_id",
+                            );
+                            AuthMethod::UserManagedIdentityByObjectId { object_id: v }
                         }
                         "mi_res_id" | "resource_id" => {
                             let v = env::var("MONITORING_MANAGED_ID_VALUE").expect(
                                 "MONITORING_MANAGED_ID_VALUE required when MONITORING_MANAGED_ID_IDENTIFIER=mi_res_id/resource_id",
                             );
-                            ManagedIdentitySelector::ResourceId(v)
+                            AuthMethod::UserManagedIdentityByResourceId { resource_id: v }
                         }
                         other => panic!(
                             "Unsupported MONITORING_MANAGED_ID_IDENTIFIER value: {other}. Expected one of: system | object_id | client_id | mi_res_id | resource_id"
@@ -85,7 +86,7 @@ async fn main() {
                     }
                 }
             };
-            AuthMethod::ManagedIdentity { selector }
+            auth_method
         }
         _ => panic!(
             "This example requires MSI authentication. Set MONITORING_GCS_AUTH_ID_TYPE=AuthMSIToken"

@@ -50,19 +50,6 @@ use azure_identity::{ManagedIdentityCredential, ManagedIdentityCredentialOptions
 /// ```
 #[allow(dead_code)]
 #[derive(Clone, Debug)]
-pub enum ManagedIdentitySelector {
-    /// System-assigned managed identity.
-    System,
-    /// User-assigned by Object (Principal) Id (GUID)
-    ObjectId(String),
-    /// User-assigned by Client (Application) Id (GUID)
-    ClientId(String),
-    /// User-assigned by full Azure Resource Id
-    ResourceId(String),
-}
-
-#[allow(dead_code)]
-#[derive(Clone, Debug)]
 pub enum AuthMethod {
     /// Certificate-based authentication
     ///
@@ -70,11 +57,14 @@ pub enum AuthMethod {
     /// * `path` - Path to the PKCS#12 (.p12) certificate file
     /// * `password` - Password to decrypt the PKCS#12 file
     Certificate { path: PathBuf, password: String },
-    /// Unified Azure Managed Identity authentication.
-    ///
-    /// Uses either the system-assigned identity (selector = System) or a user-assigned identity
-    /// specified by object id, client id, or resource id.
-    ManagedIdentity { selector: ManagedIdentitySelector },
+    /// System-assigned managed identity (auto-detected)
+    SystemManagedIdentity,
+    /// User-assigned managed identity by client ID
+    UserManagedIdentity { client_id: String },
+    /// User-assigned managed identity by object ID
+    UserManagedIdentityByObjectId { object_id: String },
+    /// User-assigned managed identity by resource ID
+    UserManagedIdentityByResourceId { resource_id: String },
     #[cfg(feature = "mock_auth")]
     MockAuth, // No authentication, used for testing purposes
 }
@@ -247,7 +237,7 @@ impl GenevaConfigClient {
             .http1_only()
             .timeout(Duration::from_secs(30)); //TODO - make this configurable
 
-        match &config.auth_method {
+    match &config.auth_method {
             // TODO: Certificate auth would be removed in favor of managed identity.,
             // This is for testing, so we can use self-signed certs, and password in plain text.
             AuthMethod::Certificate { path, password } => {
@@ -264,7 +254,10 @@ impl GenevaConfigClient {
                         .map_err(|e| GenevaConfigClientError::Certificate(e.to_string()))?;
                 client_builder = client_builder.use_preconfigured_tls(tls_connector);
             }
-            AuthMethod::ManagedIdentity { .. } => { /* no special HTTP client changes needed */ }
+            AuthMethod::SystemManagedIdentity
+            | AuthMethod::UserManagedIdentity { .. }
+            | AuthMethod::UserManagedIdentityByObjectId { .. }
+            | AuthMethod::UserManagedIdentityByResourceId { .. } => { /* no special HTTP client changes needed */ }
             #[cfg(feature = "mock_auth")]
             AuthMethod::MockAuth => {
                 // Mock authentication for testing purposes, no actual auth needed
@@ -286,7 +279,10 @@ impl GenevaConfigClient {
         // Certificate auth uses "api", MSI auth uses "userapi"
         let api_path = match &config.auth_method {
             AuthMethod::Certificate { .. } => "api",
-            AuthMethod::ManagedIdentity { .. } => "userapi",
+            AuthMethod::SystemManagedIdentity
+            | AuthMethod::UserManagedIdentity { .. }
+            | AuthMethod::UserManagedIdentityByObjectId { .. }
+            | AuthMethod::UserManagedIdentityByResourceId { .. } => "userapi",
             #[cfg(feature = "mock_auth")]
             AuthMethod::MockAuth => "api", // treat mock like certificate path for URL shape
         };
@@ -354,20 +350,23 @@ impl GenevaConfigClient {
         }
 
         // Build credential based on selector
-        let selector = match &self.config.auth_method {
-            AuthMethod::ManagedIdentity { selector } => selector,
+        let user_assigned_id = match &self.config.auth_method {
+            AuthMethod::SystemManagedIdentity => None,
+            AuthMethod::UserManagedIdentity { client_id } => {
+                Some(UserAssignedId::ClientId(client_id.clone()))
+            }
+            AuthMethod::UserManagedIdentityByObjectId { object_id } => {
+                Some(UserAssignedId::ObjectId(object_id.clone()))
+            }
+            AuthMethod::UserManagedIdentityByResourceId { resource_id } => {
+                Some(UserAssignedId::ResourceId(resource_id.clone()))
+            }
             _ => {
                 return Err(GenevaConfigClientError::MsiAuth(
-                    "get_msi_token called but auth method is not ManagedIdentity".to_string(),
+                    "get_msi_token called but auth method is not a managed identity variant"
+                        .to_string(),
                 ))
             }
-        };
-
-        let user_assigned_id = match selector {
-            ManagedIdentitySelector::System => None,
-            ManagedIdentitySelector::ObjectId(v) => Some(UserAssignedId::ObjectId(v.clone())),
-            ManagedIdentitySelector::ClientId(v) => Some(UserAssignedId::ClientId(v.clone())),
-            ManagedIdentitySelector::ResourceId(v) => Some(UserAssignedId::ResourceId(v.clone())),
         };
 
         let options = ManagedIdentityCredentialOptions {
@@ -526,7 +525,10 @@ impl GenevaConfigClient {
 
         // Add MSI authentication for managed identity auth method
         match &self.config.auth_method {
-            AuthMethod::ManagedIdentity { .. } => {
+            AuthMethod::SystemManagedIdentity
+            | AuthMethod::UserManagedIdentity { .. }
+            | AuthMethod::UserManagedIdentityByObjectId { .. }
+            | AuthMethod::UserManagedIdentityByResourceId { .. } => {
                 let msi_token = self.get_msi_token().await?;
                 request = request.header(AUTHORIZATION, format!("Bearer {}", msi_token));
             }

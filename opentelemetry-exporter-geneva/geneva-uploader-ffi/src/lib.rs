@@ -9,9 +9,7 @@ use std::ptr;
 use std::sync::OnceLock;
 use tokio::runtime::Runtime;
 
-use geneva_uploader::client::{
-    EncodedBatch, GenevaClient, GenevaClientConfig, ManagedIdentitySelector,
-};
+use geneva_uploader::client::{EncodedBatch, GenevaClient, GenevaClientConfig};
 use geneva_uploader::AuthMethod;
 use opentelemetry_proto::tonic::collector::logs::v1::ExportLogsServiceRequest;
 use opentelemetry_proto::tonic::collector::trace::v1::ExportTraceServiceRequest;
@@ -291,9 +289,7 @@ pub unsafe extern "C" fn geneva_client_new(
     // Auth method conversion
     let auth_method = match config.auth_method {
         // 0 => Managed Identity (default to system-assigned when coming from FFI for now)
-        0 => AuthMethod::ManagedIdentity {
-            selector: ManagedIdentitySelector::System,
-        },
+        0 => AuthMethod::SystemManagedIdentity,
         1 => {
             // Certificate authentication: read fields from tagged union
             let cert = unsafe { config.auth.cert };
@@ -565,6 +561,7 @@ mod tests {
     use std::ffi::CString;
 
     // Build a minimal unsigned JWT with the Endpoint claim and an exp. Matches what extract_endpoint_from_token expects.
+    #[allow(dead_code)]
     fn generate_mock_jwt_and_expiry(endpoint: &str, ttl_secs: i64) -> (String, String) {
         use base64::{engine::general_purpose::URL_SAFE_NO_PAD, Engine as _};
         use chrono::{Duration, Utc};
