@@ -238,7 +238,7 @@ impl GenevaConfigClient {
             .http1_only()
             .timeout(Duration::from_secs(30)); //TODO - make this configurable
 
-    match &config.auth_method {
+        match &config.auth_method {
             // TODO: Certificate auth would be removed in favor of managed identity.,
             // This is for testing, so we can use self-signed certs, and password in plain text.
             AuthMethod::Certificate { path, password } => {
@@ -258,7 +258,8 @@ impl GenevaConfigClient {
             AuthMethod::SystemManagedIdentity
             | AuthMethod::UserManagedIdentity { .. }
             | AuthMethod::UserManagedIdentityByObjectId { .. }
-            | AuthMethod::UserManagedIdentityByResourceId { .. } => { /* no special HTTP client changes needed */ }
+            | AuthMethod::UserManagedIdentityByResourceId { .. } => { /* no special HTTP client changes needed */
+            }
             #[cfg(feature = "mock_auth")]
             AuthMethod::MockAuth => {
                 // Mock authentication for testing purposes, no actual auth needed
@@ -333,16 +334,11 @@ impl GenevaConfigClient {
 
     /// Get MSI token for GCS authentication
     async fn get_msi_token(&self) -> Result<String> {
-        let resource = self
-            .config
-            .msi_resource
-            .as_ref()
-            .ok_or_else(|| {
-                GenevaConfigClientError::MsiAuth(
-                    "msi_resource not set in config (required for Managed Identity auth)"
-                        .to_string(),
-                )
-            })?;
+        let resource = self.config.msi_resource.as_ref().ok_or_else(|| {
+            GenevaConfigClientError::MsiAuth(
+                "msi_resource not set in config (required for Managed Identity auth)".to_string(),
+            )
+        })?;
 
         // Normalize resource (strip trailing "/.default" if provided by user)
         let base = resource.trim_end_matches("/.default").trim_end_matches('/');

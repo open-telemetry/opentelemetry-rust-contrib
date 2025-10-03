@@ -26,7 +26,10 @@ mod tests {
 
         assert_eq!(config.environment, "env");
         assert_eq!(config.account, "acct");
-        assert!(matches!(config.auth_method, AuthMethod::SystemManagedIdentity));
+        assert!(matches!(
+            config.auth_method,
+            AuthMethod::SystemManagedIdentity
+        ));
     }
 
     fn generate_self_signed_p12() -> (NamedTempFile, String) {

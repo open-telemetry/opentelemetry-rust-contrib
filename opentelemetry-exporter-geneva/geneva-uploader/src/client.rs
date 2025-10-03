@@ -31,7 +31,7 @@ pub struct GenevaClientConfig {
     pub role_name: String,
     pub role_instance: String,
     pub msi_resource: Option<String>, // Required for Managed Identity variants
-    // Add event name/version here if constant, or per-upload if you want them per call.
+                                      // Add event name/version here if constant, or per-upload if you want them per call.
 }
 
 /// Main user-facing client for Geneva ingestion.
@@ -51,7 +51,9 @@ impl GenevaClient {
             | AuthMethod::UserManagedIdentityByObjectId { .. }
             | AuthMethod::UserManagedIdentityByResourceId { .. } => {
                 if cfg.msi_resource.is_none() {
-                    return Err("msi_resource must be provided for managed identity auth".to_string());
+                    return Err(
+                        "msi_resource must be provided for managed identity auth".to_string()
+                    );
                 }
             }
             AuthMethod::Certificate { .. } => {}
@@ -68,8 +70,10 @@ impl GenevaClient {
             auth_method: cfg.auth_method,
             msi_resource: cfg.msi_resource,
         };
-        let config_client = Arc::new(GenevaConfigClient::new(config_client_config)
-            .map_err(|e| format!("GenevaConfigClient init failed: {e}"))?);
+        let config_client = Arc::new(
+            GenevaConfigClient::new(config_client_config)
+                .map_err(|e| format!("GenevaConfigClient init failed: {e}"))?,
+        );
 
         let source_identity = format!(
             "Tenant={}/Role={}/RoleInstance={}",

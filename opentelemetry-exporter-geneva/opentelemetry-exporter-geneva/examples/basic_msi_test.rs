@@ -46,7 +46,7 @@ async fn main() {
         .expect("GENEVA_CONFIG_MAJOR_VERSION is required")
         .parse()
         .expect("GENEVA_CONFIG_MAJOR_VERSION must be a u32");
-        let msi_resource = env::var("GENEVA_MSI_RESOURCE").ok();
+    let msi_resource = env::var("GENEVA_MSI_RESOURCE").ok();
 
     let tenant = env::var("GENEVA_TENANT").unwrap_or_else(|_| "default-tenant".to_string());
     let role_name = env::var("GENEVA_ROLE_NAME").unwrap_or_else(|_| "default-role".to_string());
