@@ -56,6 +56,7 @@ async fn main() {
         tenant,
         role_name,
         role_instance,
+        msi_resource: None,
     };
 
     let geneva_client = GenevaClient::new(config).expect("Failed to create GenevaClient");
