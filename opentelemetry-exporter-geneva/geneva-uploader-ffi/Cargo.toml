@@ -5,7 +5,7 @@ version = "0.2.0"
 edition = "2021"
 homepage = "https://github.com/open-telemetry/opentelemetry-rust-contrib/tree/main/opentelemetry-exporter-geneva/geneva-uploader-ffi"
 repository = "https://github.com/open-telemetry/opentelemetry-rust-contrib/tree/main/opentelemetry-exporter-geneva/geneva-uploader-ffi"
-rust-version = "1.75.0"
+rust-version = "1.85.0"
 keywords = ["opentelemetry", "geneva", "ffi", "uploader"]
 license = "Apache-2.0"
 

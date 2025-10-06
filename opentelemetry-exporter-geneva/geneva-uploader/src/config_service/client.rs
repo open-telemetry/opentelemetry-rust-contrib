@@ -18,9 +18,9 @@ use std::fs;
 use std::path::PathBuf;
 use std::sync::RwLock;
 
-// Azure Identity imports for Workload Identity authentication
+// Azure Identity imports for MSI and Workload Identity authentication
 use azure_core::credentials::TokenCredential;
-use azure_identity::{WorkloadIdentityCredential, WorkloadIdentityCredentialOptions};
+use azure_identity::{ManagedIdentityCredential, ManagedIdentityCredentialOptions, UserAssignedId, WorkloadIdentityCredential, WorkloadIdentityCredentialOptions};
 
 /// Authentication methods for the Geneva Config Client.
 ///
@@ -58,6 +58,14 @@ pub enum AuthMethod {
     /// * `path` - Path to the PKCS#12 (.p12) certificate file
     /// * `password` - Password to decrypt the PKCS#12 file
     Certificate { path: PathBuf, password: String },
+    /// System-assigned managed identity (auto-detected)
+    SystemManagedIdentity,
+    /// User-assigned managed identity by client ID
+    UserManagedIdentity { client_id: String },
+    /// User-assigned managed identity by object ID
+    UserManagedIdentityByObjectId { object_id: String },
+    /// User-assigned managed identity by resource ID
+    UserManagedIdentityByResourceId { resource_id: String },
     /// Azure Workload Identity authentication (Federated Identity for Kubernetes)
     ///
     /// # Arguments
@@ -88,6 +96,8 @@ pub(crate) enum GenevaConfigClientError {
     Certificate(String),
     #[error("Workload Identity authentication error: {0}")]
     WorkloadIdentityAuth(String),
+    #[error("MSI authentication error: {0}")]
+    MsiAuth(String),
 
     // Networking / HTTP / TLS
     #[error("HTTP error: {0}")]
@@ -145,6 +155,7 @@ pub(crate) struct GenevaConfigClientConfig {
     pub(crate) region: String,
     pub(crate) config_major_version: u32,
     pub(crate) auth_method: AuthMethod, // agent_identity and agent_version are hardcoded for now
+    pub(crate) msi_resource: Option<String>, // Required when using any Managed Identity variant
 }
 
 #[allow(dead_code)]
@@ -266,6 +277,11 @@ impl GenevaConfigClient {
                 // No special HTTP client configuration needed for Workload Identity
                 // Authentication is done via Bearer token in request headers
             }
+            AuthMethod::SystemManagedIdentity
+            | AuthMethod::UserManagedIdentity { .. }
+            | AuthMethod::UserManagedIdentityByObjectId { .. }
+            | AuthMethod::UserManagedIdentityByResourceId { .. } => { /* no special HTTP client changes needed */
+            }
             #[cfg(feature = "mock_auth")]
             AuthMethod::MockAuth => {
                 // Mock authentication for testing purposes, no actual auth needed
@@ -284,10 +300,14 @@ impl GenevaConfigClient {
         let version_str = format!("Ver{0}v0", config.config_major_version);
 
         // Use different API endpoints based on authentication method
-        // Certificate auth uses "api", Workload Identity uses "userapi"
+        // Certificate auth uses "api", MSI auth uses "userapi"
         let api_path = match &config.auth_method {
             AuthMethod::Certificate { .. } => "api",
-            AuthMethod::WorkloadIdentity { .. } => "userapi",
+            AuthMethod::SystemManagedIdentity
+            | AuthMethod::UserManagedIdentity { .. }
+            | AuthMethod::UserManagedIdentityByObjectId { .. }
+            | AuthMethod::UserManagedIdentityByResourceId { .. }
+            | AuthMethod::WorkloadIdentity => "userapi",
             #[cfg(feature = "mock_auth")]
             AuthMethod::MockAuth => "api", // treat mock like certificate path for URL shape
         };
@@ -335,33 +355,30 @@ impl GenevaConfigClient {
         headers
     }
 
-    /// Get Azure AD token using Workload Identity (Federated Identity)
+      /// Get Azure AD token using Workload Identity (Federated Identity)
     async fn get_workload_identity_token(&self) -> Result<String> {
-        let (client_id, tenant_id, token_file, resource) =
-            match &self.config.auth_method {
-                AuthMethod::WorkloadIdentity {
-                    client_id,
-                    tenant_id,
-                    token_file,
-                    resource,
-                } => (client_id, tenant_id, token_file, resource),
-                _ => return Err(GenevaConfigClientError::WorkloadIdentityAuth(
+        let (client_id, tenant_id, token_file, resource) = match &self.config.auth_method {
+            AuthMethod::WorkloadIdentity {
+                client_id,
+                tenant_id,
+                token_file,
+                resource,
+            } => (client_id, tenant_id, token_file, resource),
+            _ => {
+                return Err(GenevaConfigClientError::WorkloadIdentityAuth(
                     "get_workload_identity_token called but auth method is not WorkloadIdentity"
                         .to_string(),
-                )),
-            };
+                ))
+            }
+        };
 
-        // Normalize resource (strip trailing "/.default" if provided by user)
         let base = resource.trim_end_matches("/.default").trim_end_matches('/');
-
-        // Candidate scopes tried with Azure Identity
-        let mut scope_candidates: Vec<String> = vec![format!("{base}/.default"), base.to_string()];
-        // Add variant with trailing slash if not already present
+        let mut scope_candidates: Vec<String> =
+            vec![format!("{base}/.default"), base.to_string()];
         if !base.ends_with('/') {
             scope_candidates.push(format!("{base}/"));
         }
 
-        // Create WorkloadIdentityCredential using the Azure Identity SDK
         let options = WorkloadIdentityCredentialOptions {
             client_id: Some(client_id.clone()),
             tenant_id: Some(tenant_id.clone()),
@@ -375,7 +392,6 @@ impl GenevaConfigClient {
             ))
         })?;
 
-        // Try each scope candidate until one succeeds
         let mut last_err: Option<String> = None;
         for scope in &scope_candidates {
             match credential.get_token(&[scope.as_str()], None).await {
@@ -390,6 +406,64 @@ impl GenevaConfigClient {
             scopes = scope_candidates.join(", ")
         )))
     }
+
+    /// Get MSI token for GCS authentication
+    async fn get_msi_token(&self) -> Result<String> {
+        let resource = self.config.msi_resource.as_ref().ok_or_else(|| {
+            GenevaConfigClientError::MsiAuth(
+                "msi_resource not set in config (required for Managed Identity auth)".to_string(),
+            )
+        })?;
+
+        let base = resource.trim_end_matches("/.default").trim_end_matches('/');
+        let mut scope_candidates: Vec<String> =
+            vec![format!("{base}/.default"), base.to_string()];
+        if !base.ends_with('/') {
+            scope_candidates.push(format!("{base}/"));
+        }
+
+        let user_assigned_id = match &self.config.auth_method {
+            AuthMethod::SystemManagedIdentity => None,
+            AuthMethod::UserManagedIdentity { client_id } => {
+                Some(UserAssignedId::ClientId(client_id.clone()))
+            }
+            AuthMethod::UserManagedIdentityByObjectId { object_id } => {
+                Some(UserAssignedId::ObjectId(object_id.clone()))
+            }
+            AuthMethod::UserManagedIdentityByResourceId { resource_id } => {
+                Some(UserAssignedId::ResourceId(resource_id.clone()))
+            }
+            _ => {
+                return Err(GenevaConfigClientError::MsiAuth(
+                    "get_msi_token called but auth method is not a managed identity variant"
+                        .to_string(),
+                ))
+            }
+        };
+
+        let options = ManagedIdentityCredentialOptions {
+            user_assigned_id,
+            ..Default::default()
+        };
+        let credential = ManagedIdentityCredential::new(Some(options)).map_err(|e| {
+            GenevaConfigClientError::MsiAuth(format!("Failed to create MSI credential: {e}"))
+        })?;
+
+        let mut last_err: Option<String> = None;
+        for scope in &scope_candidates {
+            match credential.get_token(&[scope.as_str()], None).await {
+                Ok(token) => return Ok(token.token.secret().to_string()),
+                Err(e) => last_err = Some(e.to_string()),
+            }
+        }
+
+        let detail = last_err.unwrap_or_else(|| "no error detail".into());
+        Err(GenevaConfigClientError::MsiAuth(format!(
+            "Managed Identity token acquisition failed. Scopes tried: {scopes}. Last error: {detail}. IMDS fallback intentionally disabled.",
+            scopes = scope_candidates.join(", ")
+        )))
+    }
+
 
     /// Retrieves ingestion gateway information from the Geneva Config Service.
     ///
@@ -462,7 +536,16 @@ impl GenevaConfigClient {
                     GenevaConfigClientError::InternalError("Failed to parse token expiry".into())
                 })?;
 
-        let token_endpoint = extract_endpoint_from_token(&fresh_ingestion_gateway_info.auth_token)?;
+        let token_endpoint =
+            match extract_endpoint_from_token(&fresh_ingestion_gateway_info.auth_token) {
+                Ok(ep) => ep,
+                Err(err) => {
+                    // Fallback: some tokens legitimately omit the Endpoint claim; use server endpoint.
+                    #[cfg(debug_assertions)]
+                    eprintln!("[geneva][debug] token Endpoint claim missing or unparsable: {err}");
+                    fresh_ingestion_gateway_info.endpoint.clone()
+                }
+            };
 
         // Now update the cache with exclusive write access
         let mut guard = self
@@ -499,25 +582,30 @@ impl GenevaConfigClient {
 
     /// Internal method that actually fetches data from Geneva Config Service
     async fn fetch_ingestion_info(&self) -> Result<(IngestionGatewayInfo, MonikerInfo)> {
-        let tag_id = Uuid::new_v4().to_string(); //TODO - uuid is costly, check if counter is enough?
-        let mut url = String::with_capacity(self.precomputed_url_prefix.len() + 50); // Pre-allocate with reasonable capacity
-        write!(&mut url, "{}&TagId={tag_id}", self.precomputed_url_prefix).map_err(|e| {
-            GenevaConfigClientError::InternalError(format!("Failed to write URL: {e}"))
-        })?;
+        let tag_id = Uuid::new_v4().to_string(); // TODO: consider cheaper counter if perf-critical
+        let mut url = String::with_capacity(self.precomputed_url_prefix.len() + 50);
+        write!(&mut url, "{}&TagId={tag_id}", self.precomputed_url_prefix)
+            .map_err(|e| GenevaConfigClientError::InternalError(format!("Failed to write URL: {e}")))?;
 
         let req_id = Uuid::new_v4().to_string();
-
         let mut request = self
             .http_client
             .get(&url)
-            .headers(self.static_headers.clone()); // Clone only cheap references
+            .headers(self.static_headers.clone());
 
         request = request.header("x-ms-client-request-id", req_id);
 
-        // Add authentication header based on auth method
+        // Add appropriate authentication header
         match &self.config.auth_method {
             AuthMethod::WorkloadIdentity { .. } => {
                 let token = self.get_workload_identity_token().await?;
+                request = request.header(AUTHORIZATION, format!("Bearer {}", token));
+            }
+            AuthMethod::SystemManagedIdentity
+            | AuthMethod::UserManagedIdentity { .. }
+            | AuthMethod::UserManagedIdentityByObjectId { .. }
+            | AuthMethod::UserManagedIdentityByResourceId { .. } => {
+                let token = self.get_msi_token().await?;
                 request = request.header(AUTHORIZATION, format!("Bearer {}", token));
             }
             AuthMethod::Certificate { .. } => { /* mTLS only */ }
@@ -525,22 +613,19 @@ impl GenevaConfigClient {
             AuthMethod::MockAuth => { /* no auth header */ }
         }
 
-        let response = request
-            .send()
-            .await
-            .map_err(GenevaConfigClientError::Http)?;
-        // Check if the response is successful
+        // Send HTTP request
+        let response = match request.send().await {
+            Ok(resp) => resp,
+            Err(e) => return Err(GenevaConfigClientError::Http(e)),
+        };
+
         let status = response.status();
         let body = response.text().await?;
+
         if status.is_success() {
-            let parsed = match serde_json::from_str::<GenevaResponse>(&body) {
-                Ok(response) => response,
-                Err(e) => {
-                    return Err(GenevaConfigClientError::AuthInfoNotFound(format!(
-                        "Failed to parse response: {e}"
-                    )));
-                }
-            };
+            let parsed = serde_json::from_str::<GenevaResponse>(&body).map_err(|e| {
+                GenevaConfigClientError::AuthInfoNotFound(format!("Failed to parse response: {e}"))
+            })?;
 
             for account in parsed.storage_account_keys {
                 if account.is_primary_moniker && account.account_moniker_name.contains("diag") {
@@ -548,7 +633,6 @@ impl GenevaConfigClient {
                         name: account.account_moniker_name,
                         account_group: account.account_group_name,
                     };
-
                     return Ok((parsed.ingestion_gateway_info, moniker_info));
                 }
             }
@@ -563,6 +647,7 @@ impl GenevaConfigClient {
             })
         }
     }
+
 }
 
 #[inline]
@@ -599,15 +684,24 @@ fn extract_endpoint_from_token(token: &str) -> Result<String> {
         _ => payload.to_string(),
     };
 
-    // Decode the Base64-encoded payload into raw bytes
-    // Try URL_SAFE_NO_PAD first (for tokens without padding),
-    // then fall back to URL_SAFE (for tokens with padding)
-    let decoded = general_purpose::URL_SAFE_NO_PAD
-        .decode(&payload)
-        .or_else(|_| general_purpose::URL_SAFE.decode(&payload))
-        .map_err(|e| {
-            GenevaConfigClientError::JwtTokenError(format!("Failed to decode JWT: {e}"))
-        })?;
+    // Decode the Base64-encoded payload into raw bytes.
+    // Try URL-safe (with and without padding), then fall back to standard Base64.
+    let decoded = match general_purpose::URL_SAFE_NO_PAD.decode(&payload) {
+        Ok(b) => b,
+        Err(e_url_no_pad) => match general_purpose::URL_SAFE.decode(&payload) {
+            Ok(b) => b,
+            Err(e_url_pad) => match general_purpose::STANDARD.decode(&payload) {
+                Ok(b) => b,
+                Err(e_std) => {
+                    return Err(GenevaConfigClientError::JwtTokenError(format!(
+                        "Failed to decode JWT (URL_SAFE_NO_PAD, URL_SAFE, and STANDARD): \
+                         no_pad_err={e_url_no_pad}; pad_err={e_url_pad}; std_err={e_std}"
+                    )))
+                }
+            },
+        },
+    };
+
 
     // Convert the raw bytes into a UTF-8 string
     let decoded_str = String::from_utf8(decoded).map_err(|e| {
@@ -618,15 +712,12 @@ fn extract_endpoint_from_token(token: &str) -> Result<String> {
     let payload_json: serde_json::Value =
         serde_json::from_str(&decoded_str).map_err(GenevaConfigClientError::SerdeJson)?;
 
-    // Extract "Endpoint" from JWT payload as a string, or fail if missing or invalid.
-    let endpoint = payload_json["Endpoint"]
-        .as_str()
-        .ok_or_else(|| {
-            GenevaConfigClientError::JwtTokenError("No Endpoint claim in JWT token".to_string())
-        })?
-        .to_string();
-
-    Ok(endpoint)
+    if let Some(ep) = payload_json["Endpoint"].as_str() {
+        return Ok(ep.to_string());
+    }
+    Err(GenevaConfigClientError::JwtTokenError(
+        "No Endpoint claim in JWT token".to_string(),
+    ))
 }
 
 #[cfg(feature = "self_signed_certs")]

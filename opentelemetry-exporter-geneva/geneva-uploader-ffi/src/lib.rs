@@ -288,23 +288,31 @@ pub unsafe extern "C" fn geneva_client_new(
 
     // Auth method conversion
     let auth_method = match config.auth_method {
-        0 => {
-            // MSI/Managed Identity authentication via Workload Identity
-            // Read from environment variables (typical AKS setup)
-            let client_id = std::env::var("AZURE_CLIENT_ID")
-                .unwrap_or_else(|_| "00000000-0000-0000-0000-000000000000".to_string());
-            let tenant_id = std::env::var("AZURE_TENANT_ID")
-                .unwrap_or_else(|_| "00000000-0000-0000-0000-000000000000".to_string());
-            let resource = std::env::var("GENEVA_WORKLOAD_IDENTITY_RESOURCE")
-                .unwrap_or_else(|_| "https://monitor.azure.com".to_string());
+       0 => {
+            // Unified: Workload Identity (AKS) or System Managed Identity (VM)
+            // Auto-detect based on environment
+            if std::env::var("AZURE_FEDERATED_TOKEN_FILE").is_ok() {
+                let client_id = std::env::var("AZURE_CLIENT_ID")
+                    .unwrap_or_else(|_| "00000000-0000-0000-0000-000000000000".to_string());
+                let tenant_id = std::env::var("AZURE_TENANT_ID")
+                    .unwrap_or_else(|_| "00000000-0000-0000-0000-000000000000".to_string());
+                let resource = std::env::var("GENEVA_WORKLOAD_IDENTITY_RESOURCE")
+                    .unwrap_or_else(|_| "https://monitor.azure.com".to_string());
+                let token_file = std::env::var("AZURE_FEDERATED_TOKEN_FILE")
+                    .ok()
+                    .map(PathBuf::from);
 
-            AuthMethod::WorkloadIdentity {
-                client_id,
-                tenant_id,
-                token_file: None, // Will use default AZURE_FEDERATED_TOKEN_FILE
-                resource,
+                AuthMethod::WorkloadIdentity {
+                    client_id,
+                    tenant_id,
+                    token_file,
+                    resource,
+                }
+            } else {
+                AuthMethod::SystemManagedIdentity
             }
         }
+ 
         1 => {
             // Certificate authentication: read fields from tagged union
             let cert = unsafe { config.auth.cert };
@@ -349,6 +357,7 @@ pub unsafe extern "C" fn geneva_client_new(
         tenant,
         role_name,
         role_instance,
+        msi_resource: None, // FFI path currently does not accept MSI resource; extend API if needed
     };
 
     // Create client
@@ -576,6 +585,7 @@ mod tests {
     use std::ffi::CString;
 
     // Build a minimal unsigned JWT with the Endpoint claim and an exp. Matches what extract_endpoint_from_token expects.
+    #[allow(dead_code)]
     fn generate_mock_jwt_and_expiry(endpoint: &str, ttl_secs: i64) -> (String, String) {
         use base64::{engine::general_purpose::URL_SAFE_NO_PAD, Engine as _};
         use chrono::{Duration, Utc};
@@ -848,6 +858,7 @@ mod tests {
             tenant: "testtenant".to_string(),
             role_name: "testrole".to_string(),
             role_instance: "testinstance".to_string(),
+            msi_resource: None,
         };
         let client = GenevaClient::new(cfg).expect("failed to create GenevaClient with MockAuth");
 
@@ -957,6 +968,7 @@ mod tests {
             tenant: "testtenant".to_string(),
             role_name: "testrole".to_string(),
             role_instance: "testinstance".to_string(),
+            msi_resource: None,
         };
         let client = GenevaClient::new(cfg).expect("failed to create GenevaClient with MockAuth");
 
