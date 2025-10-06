@@ -288,7 +288,8 @@ pub unsafe extern "C" fn geneva_client_new(
 
     // Auth method conversion
     let auth_method = match config.auth_method {
-        0 => AuthMethod::ManagedIdentity,
+        // 0 => Managed Identity (default to system-assigned when coming from FFI for now)
+        0 => AuthMethod::SystemManagedIdentity,
         1 => {
             // Certificate authentication: read fields from tagged union
             let cert = unsafe { config.auth.cert };
@@ -333,6 +334,7 @@ pub unsafe extern "C" fn geneva_client_new(
         tenant,
         role_name,
         role_instance,
+        msi_resource: None, // FFI path currently does not accept MSI resource; extend API if needed
     };
 
     // Create client
@@ -560,6 +562,7 @@ mod tests {
     use std::ffi::CString;
 
     // Build a minimal unsigned JWT with the Endpoint claim and an exp. Matches what extract_endpoint_from_token expects.
+    #[allow(dead_code)]
     fn generate_mock_jwt_and_expiry(endpoint: &str, ttl_secs: i64) -> (String, String) {
         use base64::{engine::general_purpose::URL_SAFE_NO_PAD, Engine as _};
         use chrono::{Duration, Utc};
@@ -832,6 +835,7 @@ mod tests {
             tenant: "testtenant".to_string(),
             role_name: "testrole".to_string(),
             role_instance: "testinstance".to_string(),
+            msi_resource: None,
         };
         let client = GenevaClient::new(cfg).expect("failed to create GenevaClient with MockAuth");
 
@@ -941,6 +945,7 @@ mod tests {
             tenant: "testtenant".to_string(),
             role_name: "testrole".to_string(),
             role_instance: "testinstance".to_string(),
+            msi_resource: None,
         };
         let client = GenevaClient::new(cfg).expect("failed to create GenevaClient with MockAuth");
 
