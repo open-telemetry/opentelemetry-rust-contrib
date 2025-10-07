@@ -292,22 +292,12 @@ pub unsafe extern "C" fn geneva_client_new(
             // Unified: Workload Identity (AKS) or System Managed Identity (VM)
             // Auto-detect based on environment
             if std::env::var("AZURE_FEDERATED_TOKEN_FILE").is_ok() {
-                let client_id = std::env::var("AZURE_CLIENT_ID")
-                    .unwrap_or_else(|_| "00000000-0000-0000-0000-000000000000".to_string());
-                let tenant_id = std::env::var("AZURE_TENANT_ID")
-                    .unwrap_or_else(|_| "00000000-0000-0000-0000-000000000000".to_string());
+                // Workload Identity: azure_identity crate reads AZURE_CLIENT_ID, AZURE_TENANT_ID,
+                // and AZURE_FEDERATED_TOKEN_FILE automatically from environment
                 let resource = std::env::var("GENEVA_WORKLOAD_IDENTITY_RESOURCE")
                     .unwrap_or_else(|_| "https://monitor.azure.com".to_string());
-                let token_file = std::env::var("AZURE_FEDERATED_TOKEN_FILE")
-                    .ok()
-                    .map(PathBuf::from);
 
-                AuthMethod::WorkloadIdentity {
-                    client_id,
-                    tenant_id,
-                    token_file,
-                    resource,
-                }
+                AuthMethod::WorkloadIdentity { resource }
             } else {
                 AuthMethod::SystemManagedIdentity
             }
