@@ -77,7 +77,7 @@ pub enum AuthMethod {
     /// * `token_file` - Optional path to the service account token file.
     ///   If None, defaults to AZURE_FEDERATED_TOKEN_FILE env var
     /// * `resource` - Azure AD resource URI for token acquisition
-    ///   (e.g., "https://monitor.azure.com" for Azure Public Cloud)
+    ///   (e.g., <https://monitor.azure.com> for Azure Public Cloud)
     WorkloadIdentity {
         client_id: String,
         tenant_id: String,

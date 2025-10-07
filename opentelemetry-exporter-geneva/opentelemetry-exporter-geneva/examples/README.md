@@ -12,12 +12,15 @@ This example demonstrates how to use Azure Workload Identity to authenticate to 
 
 ## Architecture
 
-Azure Workload Identity enables Kubernetes pods to authenticate to Azure services using federated identity credentials. The flow is:
+Azure Workload Identity enables Kubernetes pods to authenticate to Azure services using **User-Assigned Managed Identities** with federated identity credentials. This approach uses Managed Identities, NOT App Registrations, simplifying credential management.
 
+**Authentication Flow**:
 1. Pod runs with a Kubernetes service account
 2. Kubernetes injects a service account JWT token into the pod
-3. Application exchanges the Kubernetes token for an Azure AD access token
+3. Application exchanges the Kubernetes token for an Azure AD access token using the Managed Identity
 4. Azure AD access token is used to authenticate to Geneva Config Service
+
+**Key Difference**: Traditional Workload Identity setups often use App Registrations with client secrets. This implementation uses **User-Assigned Managed Identities** instead, which eliminates the need to manage secrets or certificates.
 
 ## Step 1: Enable Workload Identity on AKS (if not already enabled)
 
@@ -35,13 +38,15 @@ az aks update \
 
 ## Step 2: Create User-Assigned Managed Identity
 
+**Important**: We create a **User-Assigned Managed Identity**, NOT an Azure AD App Registration. Workload Identity with Managed Identities is simpler and doesn't require managing client secrets or certificates.
+
 ```bash
 # Set variables
 RESOURCE_GROUP="<your-resource-group>"
 LOCATION="<azure-region>"  # e.g., eastus2
 IDENTITY_NAME="geneva-uploader-identity-$(openssl rand -hex 3)"
 
-# Create the managed identity
+# Create the managed identity (NOT an App Registration)
 az identity create \
   --resource-group $RESOURCE_GROUP \
   --name $IDENTITY_NAME \
@@ -53,6 +58,8 @@ export PRINCIPAL_ID=$(az identity show --resource-group $RESOURCE_GROUP --name $
 
 echo "Client ID: $AZURE_CLIENT_ID"
 echo "Principal ID: $PRINCIPAL_ID"
+
+# Note: The AZURE_CLIENT_ID here is the managed identity's client ID, not an App Registration
 ```
 
 ## Step 3: Create Kubernetes Service Account
@@ -94,9 +101,9 @@ az identity federated-credential create \
 echo "Federated credential created: $FEDERATED_CREDENTIAL_NAME"
 ```
 
-## Step 5: Register Managed Identity in Geneva portal
+## Step 5: Register Managed Identity in Geneva Portal
 
-Wait a few minutes for the identity registration to propagate through Geneva systems.
+Register the managed identity using the **Principal ID (Object ID)** from Step 2. Wait 5-10 minutes for propagation.
 
 ## Step 6: Get Your Azure Tenant ID
 
