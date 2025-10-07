@@ -22,7 +22,7 @@ use std::sync::RwLock;
 use azure_core::credentials::TokenCredential;
 use azure_identity::{
     ManagedIdentityCredential, ManagedIdentityCredentialOptions, UserAssignedId,
-    WorkloadIdentityCredential, WorkloadIdentityCredentialOptions,
+    WorkloadIdentityCredential,
 };
 
 /// Authentication methods for the Geneva Config Client.
@@ -71,19 +71,17 @@ pub enum AuthMethod {
     UserManagedIdentityByResourceId { resource_id: String },
     /// Azure Workload Identity authentication (Federated Identity for Kubernetes)
     ///
+    /// The following environment variables must be set in the pod spec:
+    /// * `AZURE_CLIENT_ID` - Azure AD Application (client) ID (set explicitly in pod env)
+    /// * `AZURE_TENANT_ID` - Azure AD Tenant ID (set explicitly in pod env)
+    /// * `AZURE_FEDERATED_TOKEN_FILE` - Path to service account token file (auto-injected by workload identity webhook)
+    ///
+    /// These variables are automatically read by the Azure Identity SDK at runtime.
+    ///
     /// # Arguments
-    /// * `client_id` - Azure AD Application (client) ID
-    /// * `tenant_id` - Azure AD Tenant ID
-    /// * `token_file` - Optional path to the service account token file.
-    ///   If None, defaults to AZURE_FEDERATED_TOKEN_FILE env var
     /// * `resource` - Azure AD resource URI for token acquisition
     ///   (e.g., <https://monitor.azure.com> for Azure Public Cloud)
-    WorkloadIdentity {
-        client_id: String,
-        tenant_id: String,
-        token_file: Option<PathBuf>,
-        resource: String,
-    },
+    WorkloadIdentity { resource: String },
     #[cfg(feature = "mock_auth")]
     MockAuth, // No authentication, used for testing purposes
 }
@@ -356,15 +354,15 @@ impl GenevaConfigClient {
     }
 
     /// Get Azure AD token using Workload Identity (Federated Identity)
+    ///
+    /// Reads AZURE_CLIENT_ID, AZURE_TENANT_ID, and AZURE_FEDERATED_TOKEN_FILE from environment variables.
+    /// In Kubernetes:
+    /// - AZURE_CLIENT_ID and AZURE_TENANT_ID must be set explicitly in the pod spec
+    /// - AZURE_FEDERATED_TOKEN_FILE is auto-injected by the workload identity webhook
     async fn get_workload_identity_token(&self) -> Result<String> {
-        let (client_id, tenant_id, token_file, resource) =
+        let resource =
             match &self.config.auth_method {
-                AuthMethod::WorkloadIdentity {
-                    client_id,
-                    tenant_id,
-                    token_file,
-                    resource,
-                } => (client_id, tenant_id, token_file, resource),
+                AuthMethod::WorkloadIdentity { resource } => resource,
                 _ => return Err(GenevaConfigClientError::WorkloadIdentityAuth(
                     "get_workload_identity_token called but auth method is not WorkloadIdentity"
                         .to_string(),
@@ -379,16 +377,11 @@ impl GenevaConfigClient {
         }
 
         // TODO: Consider caching WorkloadIdentityCredential if profiling shows credential creation overhead
-        let options = WorkloadIdentityCredentialOptions {
-            client_id: Some(client_id.clone()),
-            tenant_id: Some(tenant_id.clone()),
-            token_file_path: token_file.clone(),
-            ..Default::default()
-        };
-
-        let credential = WorkloadIdentityCredential::new(Some(options)).map_err(|e| {
+        // Pass None to let azure_identity crate read AZURE_CLIENT_ID, AZURE_TENANT_ID,
+        // and AZURE_FEDERATED_TOKEN_FILE from environment variables automatically
+        let credential = WorkloadIdentityCredential::new(None).map_err(|e| {
             GenevaConfigClientError::WorkloadIdentityAuth(format!(
-                "Failed to create WorkloadIdentityCredential: {e}"
+                "Failed to create WorkloadIdentityCredential. Ensure AZURE_CLIENT_ID, AZURE_TENANT_ID, and AZURE_FEDERATED_TOKEN_FILE environment variables are set: {e}"
             ))
         })?;
 

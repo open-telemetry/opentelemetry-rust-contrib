@@ -58,22 +58,13 @@ async fn main() {
     // Determine authentication method based on environment variables
     let auth_method = match env::var("MONITORING_GCS_AUTH_ID_TYPE").as_deref() {
         Ok("AuthWorkloadIdentity") => {
-            let client_id = env::var("AZURE_CLIENT_ID")
-                .expect("AZURE_CLIENT_ID required for Workload Identity auth");
-            let tenant_id = env::var("AZURE_TENANT_ID")
-                .expect("AZURE_TENANT_ID required for Workload Identity auth");
             let resource = env::var("GENEVA_WORKLOAD_IDENTITY_RESOURCE")
                 .expect("GENEVA_WORKLOAD_IDENTITY_RESOURCE required for Workload Identity auth");
 
-            // Optional: Allow custom token file path
-            let token_file = env::var("WORKLOAD_IDENTITY_TOKEN_FILE")
-                .ok()
-                .map(PathBuf::from);
-
+            // Note: AZURE_CLIENT_ID, AZURE_TENANT_ID, and AZURE_FEDERATED_TOKEN_FILE
+            // are read automatically by the azure_identity crate from environment variables.
+            // These are typically set by the Azure Workload Identity webhook in Kubernetes.
             AuthMethod::WorkloadIdentity {
-                client_id,
-                tenant_id,
-                token_file,
                 resource,
             }
         }

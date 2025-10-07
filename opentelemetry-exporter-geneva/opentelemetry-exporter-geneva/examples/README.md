@@ -195,9 +195,17 @@ spec:
 EOF
 ```
 
-The workload identity webhook will automatically inject the following:
-- `AZURE_FEDERATED_TOKEN_FILE` environment variable pointing to `/var/run/secrets/azure/tokens/azure-identity-token`
+**Important - Environment Variable Setup:**
+
+The pod spec above sets these environment variables:
+- `AZURE_CLIENT_ID` - **Must be set explicitly in pod spec** (as shown above)
+- `AZURE_TENANT_ID` - **Must be set explicitly in pod spec** (as shown above)
+
+The workload identity webhook automatically injects:
+- `AZURE_FEDERATED_TOKEN_FILE` - Auto-injected by webhook, points to `/var/run/secrets/azure/tokens/azure-identity-token`
 - Projected service account token volume mount
+
+These three environment variables are automatically read by the Azure Identity SDK (`azure_identity` crate) at runtime. The Geneva client does not need to be configured with these values - they are discovered from the environment.
 
 ## Step 10: Verify the Deployment
 
@@ -235,10 +243,12 @@ Expected log output should show:
 
 ### Required Variables (from Pod Spec / Auto-injected)
 
+These variables are set in the pod environment and automatically read by the Azure Identity SDK:
+
 | Variable | Description | Source |
 |----------|-------------|--------|
-| `AZURE_CLIENT_ID` | Managed identity client ID | Pod spec |
-| `AZURE_TENANT_ID` | Azure AD tenant ID | Pod spec |
+| `AZURE_CLIENT_ID` | Managed identity client ID | Set in pod spec (Step 9) |
+| `AZURE_TENANT_ID` | Azure AD tenant ID | Set in pod spec (Step 9) |
 | `AZURE_FEDERATED_TOKEN_FILE` | Path to Kubernetes token file | Auto-injected by workload identity webhook |
 
 ### Optional Variables
@@ -252,14 +262,15 @@ Expected log output should show:
 
 ## Troubleshooting
 
-### Pod fails with "AZURE_CLIENT_ID required"
+### Pod fails with "AZURE_CLIENT_ID required" or similar Azure Identity errors
 
-**Cause**: Workload identity webhook not injecting variables.
+**Cause**: Azure Identity SDK cannot find required environment variables.
 
 **Fix**: Ensure:
+- `AZURE_CLIENT_ID` and `AZURE_TENANT_ID` are set in pod spec (Step 9)
 - Pod has label `azure.workload.identity/use: "true"`
 - Service account has annotation `azure.workload.identity/client-id: <client-id>`
-- Workload identity webhook is running in the cluster
+- Workload identity webhook is running in the cluster (it injects `AZURE_FEDERATED_TOKEN_FILE`)
 
 ### Token exchange fails with "invalid_client"
 

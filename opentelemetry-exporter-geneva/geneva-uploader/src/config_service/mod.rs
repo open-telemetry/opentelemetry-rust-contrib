@@ -21,9 +21,6 @@ mod tests {
             region: "region".to_string(),
             config_major_version: 1,
             auth_method: AuthMethod::WorkloadIdentity {
-                client_id: "test-client-id".to_string(),
-                tenant_id: "test-tenant-id".to_string(),
-                token_file: None,
                 resource: "https://monitor.azure.com".to_string(),
             },
             msi_resource: None,
