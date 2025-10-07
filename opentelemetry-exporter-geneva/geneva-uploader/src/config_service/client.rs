@@ -27,10 +27,11 @@ use azure_identity::{
 
 /// Authentication methods for the Geneva Config Client.
 ///
-/// The client supports three authentication methods:
-/// - Certificate-based authentication using PKCS#12 (.p12) files
-/// - Azure Workload Identity (Federated Identity) for Kubernetes workloads
-/// - Mock authentication for testing
+/// The client supports the following authentication methods:
+/// - Certificate-based authentication (mTLS) using PKCS#12 (.p12) files
+/// - Azure Managed Identity (System-assigned or User-assigned)
+/// - Azure Workload Identity (Federated Identity for Kubernetes)
+/// - Mock authentication for testing (feature-gated)
 ///
 /// # Certificate Format
 /// Certificates should be in PKCS#12 (.p12) format for client TLS authentication.

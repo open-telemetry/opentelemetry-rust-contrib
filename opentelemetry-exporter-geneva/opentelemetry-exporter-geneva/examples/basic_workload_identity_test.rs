@@ -11,7 +11,6 @@ use opentelemetry_sdk::{
     Resource,
 };
 use std::env;
-use std::path::PathBuf;
 use std::thread;
 use std::time::Duration;
 use tracing::{error, info, warn};
