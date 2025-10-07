@@ -72,9 +72,9 @@ pub enum AuthMethod {
     /// * `client_id` - Azure AD Application (client) ID
     /// * `tenant_id` - Azure AD Tenant ID
     /// * `token_file` - Optional path to the service account token file.
-    ///                  If None, defaults to AZURE_FEDERATED_TOKEN_FILE env var
+    ///   If None, defaults to AZURE_FEDERATED_TOKEN_FILE env var
     /// * `resource` - Azure AD resource URI for token acquisition
-    ///               (e.g., "https://monitor.azure.com" for Azure Public Cloud)
+    ///   (e.g., "https://monitor.azure.com" for Azure Public Cloud)
     WorkloadIdentity {
         client_id: String,
         tenant_id: String,
@@ -298,14 +298,14 @@ impl GenevaConfigClient {
         let version_str = format!("Ver{0}v0", config.config_major_version);
 
         // Use different API endpoints based on authentication method
-        // Certificate auth uses "api", MSI auth uses "userapi"
+        // Certificate auth uses "api", MSI auth and Workload Identity use "userapi"
         let api_path = match &config.auth_method {
             AuthMethod::Certificate { .. } => "api",
             AuthMethod::SystemManagedIdentity
             | AuthMethod::UserManagedIdentity { .. }
             | AuthMethod::UserManagedIdentityByObjectId { .. }
             | AuthMethod::UserManagedIdentityByResourceId { .. }
-            | AuthMethod::WorkloadIdentity => "userapi",
+            | AuthMethod::WorkloadIdentity { .. } => "userapi",
             #[cfg(feature = "mock_auth")]
             AuthMethod::MockAuth => "api", // treat mock like certificate path for URL shape
         };
@@ -369,6 +369,7 @@ impl GenevaConfigClient {
             }
         };
 
+        // TODO: Extract scope generation logic into helper function shared with get_msi_token()
         let base = resource.trim_end_matches("/.default").trim_end_matches('/');
         let mut scope_candidates: Vec<String> =
             vec![format!("{base}/.default"), base.to_string()];
@@ -376,6 +377,7 @@ impl GenevaConfigClient {
             scope_candidates.push(format!("{base}/"));
         }
 
+        // TODO: Consider caching WorkloadIdentityCredential if profiling shows credential creation overhead
         let options = WorkloadIdentityCredentialOptions {
             client_id: Some(client_id.clone()),
             tenant_id: Some(tenant_id.clone()),
@@ -412,6 +414,7 @@ impl GenevaConfigClient {
             )
         })?;
 
+        // TODO: Extract scope generation logic into helper function shared with get_workload_identity_token()
         let base = resource.trim_end_matches("/.default").trim_end_matches('/');
         let mut scope_candidates: Vec<String> =
             vec![format!("{base}/.default"), base.to_string()];
@@ -438,6 +441,7 @@ impl GenevaConfigClient {
             }
         };
 
+        // TODO: Consider caching ManagedIdentityCredential if profiling shows credential creation overhead
         let options = ManagedIdentityCredentialOptions {
             user_assigned_id,
             ..Default::default()

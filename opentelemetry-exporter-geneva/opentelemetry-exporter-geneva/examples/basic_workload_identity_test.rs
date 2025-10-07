@@ -93,6 +93,7 @@ async fn main() {
         role_name,
         role_instance,
         auth_method,
+        msi_resource: None, // Not used for Workload Identity
     };
 
     // GenevaClient::new is synchronous (returns Result), so no await is needed here.
