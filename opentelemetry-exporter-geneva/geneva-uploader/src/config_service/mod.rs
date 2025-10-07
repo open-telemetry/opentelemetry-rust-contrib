@@ -38,7 +38,6 @@ mod tests {
         }
     }
 
-
     fn generate_self_signed_p12() -> (NamedTempFile, String) {
         let password = "test".to_string();
 

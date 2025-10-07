@@ -20,7 +20,10 @@ use std::sync::RwLock;
 
 // Azure Identity imports for MSI and Workload Identity authentication
 use azure_core::credentials::TokenCredential;
-use azure_identity::{ManagedIdentityCredential, ManagedIdentityCredentialOptions, UserAssignedId, WorkloadIdentityCredential, WorkloadIdentityCredentialOptions};
+use azure_identity::{
+    ManagedIdentityCredential, ManagedIdentityCredentialOptions, UserAssignedId,
+    WorkloadIdentityCredential, WorkloadIdentityCredentialOptions,
+};
 
 /// Authentication methods for the Geneva Config Client.
 ///
@@ -352,27 +355,25 @@ impl GenevaConfigClient {
         headers
     }
 
-      /// Get Azure AD token using Workload Identity (Federated Identity)
+    /// Get Azure AD token using Workload Identity (Federated Identity)
     async fn get_workload_identity_token(&self) -> Result<String> {
-        let (client_id, tenant_id, token_file, resource) = match &self.config.auth_method {
-            AuthMethod::WorkloadIdentity {
-                client_id,
-                tenant_id,
-                token_file,
-                resource,
-            } => (client_id, tenant_id, token_file, resource),
-            _ => {
-                return Err(GenevaConfigClientError::WorkloadIdentityAuth(
+        let (client_id, tenant_id, token_file, resource) =
+            match &self.config.auth_method {
+                AuthMethod::WorkloadIdentity {
+                    client_id,
+                    tenant_id,
+                    token_file,
+                    resource,
+                } => (client_id, tenant_id, token_file, resource),
+                _ => return Err(GenevaConfigClientError::WorkloadIdentityAuth(
                     "get_workload_identity_token called but auth method is not WorkloadIdentity"
                         .to_string(),
-                ))
-            }
-        };
+                )),
+            };
 
         // TODO: Extract scope generation logic into helper function shared with get_msi_token()
         let base = resource.trim_end_matches("/.default").trim_end_matches('/');
-        let mut scope_candidates: Vec<String> =
-            vec![format!("{base}/.default"), base.to_string()];
+        let mut scope_candidates: Vec<String> = vec![format!("{base}/.default"), base.to_string()];
         if !base.ends_with('/') {
             scope_candidates.push(format!("{base}/"));
         }
@@ -416,8 +417,7 @@ impl GenevaConfigClient {
 
         // TODO: Extract scope generation logic into helper function shared with get_workload_identity_token()
         let base = resource.trim_end_matches("/.default").trim_end_matches('/');
-        let mut scope_candidates: Vec<String> =
-            vec![format!("{base}/.default"), base.to_string()];
+        let mut scope_candidates: Vec<String> = vec![format!("{base}/.default"), base.to_string()];
         if !base.ends_with('/') {
             scope_candidates.push(format!("{base}/"));
         }
@@ -464,7 +464,6 @@ impl GenevaConfigClient {
             scopes = scope_candidates.join(", ")
         )))
     }
-
 
     /// Retrieves ingestion gateway information from the Geneva Config Service.
     ///
@@ -585,8 +584,9 @@ impl GenevaConfigClient {
     async fn fetch_ingestion_info(&self) -> Result<(IngestionGatewayInfo, MonikerInfo)> {
         let tag_id = Uuid::new_v4().to_string(); // TODO: consider cheaper counter if perf-critical
         let mut url = String::with_capacity(self.precomputed_url_prefix.len() + 50);
-        write!(&mut url, "{}&TagId={tag_id}", self.precomputed_url_prefix)
-            .map_err(|e| GenevaConfigClientError::InternalError(format!("Failed to write URL: {e}")))?;
+        write!(&mut url, "{}&TagId={tag_id}", self.precomputed_url_prefix).map_err(|e| {
+            GenevaConfigClientError::InternalError(format!("Failed to write URL: {e}"))
+        })?;
 
         let req_id = Uuid::new_v4().to_string();
 
@@ -646,7 +646,6 @@ impl GenevaConfigClient {
             })
         }
     }
-
 }
 
 #[inline]
@@ -700,7 +699,6 @@ fn extract_endpoint_from_token(token: &str) -> Result<String> {
             },
         },
     };
-
 
     // Convert the raw bytes into a UTF-8 string
     let decoded_str = String::from_utf8(decoded).map_err(|e| {
