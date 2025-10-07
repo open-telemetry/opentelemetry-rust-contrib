@@ -201,7 +201,6 @@ pub(crate) struct GenevaConfigClient {
     precomputed_url_prefix: String,
     agent_identity: String,
     agent_version: String,
-    static_headers: HeaderMap,
 }
 
 impl fmt::Debug for GenevaConfigClient {
@@ -211,7 +210,6 @@ impl fmt::Debug for GenevaConfigClient {
             .field("precomputed_url_prefix", &self.precomputed_url_prefix)
             .field("agent_identity", &self.agent_identity)
             .field("agent_version", &self.agent_version)
-            .field("static_headers", &self.static_headers)
             .finish()
     }
 }
@@ -234,9 +232,13 @@ impl GenevaConfigClient {
     /// * `GenevaConfigClientError::AuthMethodNotImplemented` - If the specified authentication method is not yet supported
     #[allow(dead_code)]
     pub(crate) fn new(config: GenevaConfigClientConfig) -> Result<Self> {
+        let agent_identity = "GenevaUploader";
+        let agent_version = "0.1";
+
         let mut client_builder = Client::builder()
             .http1_only()
-            .timeout(Duration::from_secs(30)); //TODO - make this configurable
+            .timeout(Duration::from_secs(30)) //TODO - make this configurable
+            .default_headers(Self::build_static_headers(agent_identity, agent_version));
 
         match &config.auth_method {
             // TODO: Certificate auth would be removed in favor of managed identity.,
@@ -267,10 +269,6 @@ impl GenevaConfigClient {
                 eprintln!("WARNING: Using MockAuth for GenevaConfigClient. This should only be used in tests!");
             }
         }
-
-        let agent_identity = "GenevaUploader";
-        let agent_version = "0.1";
-        let static_headers = Self::build_static_headers(agent_identity, agent_version);
 
         let identity = format!("Tenant=Default/Role=GcsClient/RoleInstance={agent_identity}");
 
@@ -313,7 +311,6 @@ impl GenevaConfigClient {
             precomputed_url_prefix: pre_url,
             agent_identity: agent_identity.to_string(), // TODO make this configurable
             agent_version: "1.0".to_string(),           // TODO make this configurable
-            static_headers,
         })
     }
 
@@ -517,10 +514,7 @@ impl GenevaConfigClient {
 
         let req_id = Uuid::new_v4().to_string();
 
-        let mut request = self
-            .http_client
-            .get(&url)
-            .headers(self.static_headers.clone()); // Clone only cheap references
+        let mut request = self.http_client.get(&url);
 
         request = request.header("x-ms-client-request-id", req_id);
 
