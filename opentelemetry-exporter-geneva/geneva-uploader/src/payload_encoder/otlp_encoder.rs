@@ -114,17 +114,15 @@ impl OtlpEncoder {
             let level = log_record.severity_number as u8;
 
             // 3. Create or get existing batch entry with metadata tracking
-            let entry = batches
-                .entry(event_name_str)
-                .or_insert_with(|| BatchData {
-                    schemas: Vec::new(),
-                    events: Vec::new(),
-                    metadata: BatchMetadata {
-                        start_time: timestamp,
-                        end_time: timestamp,
-                        schema_ids: String::new(),
-                    },
-                });
+            let entry = batches.entry(event_name_str).or_insert_with(|| BatchData {
+                schemas: Vec::new(),
+                events: Vec::new(),
+                metadata: BatchMetadata {
+                    start_time: timestamp,
+                    end_time: timestamp,
+                    schema_ids: String::new(),
+                },
+            });
 
             // Update timestamp range
             if timestamp != 0 {
@@ -633,7 +631,7 @@ impl OtlpEncoder {
         buffer
     }
 
-    const fn encode_id_to_hex<const N: usize>(id: &[u8]) -> [u8; N] {
+    fn encode_id_to_hex<const N: usize>(id: &[u8]) -> [u8; N] {
         let mut hex_bytes = [0u8; N];
         hex::encode_to_slice(id, &mut hex_bytes).unwrap();
         hex_bytes
