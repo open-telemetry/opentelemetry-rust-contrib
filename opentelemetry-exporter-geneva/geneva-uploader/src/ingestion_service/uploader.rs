@@ -1,5 +1,6 @@
 use crate::config_service::client::{GenevaConfigClient, GenevaConfigClientError};
 use crate::payload_encoder::central_blob::BatchMetadata;
+use bytes::Bytes;
 use reqwest::{header, Client};
 use serde::Deserialize;
 use serde_json::Value;
@@ -210,7 +211,7 @@ impl GenevaUploader {
     #[allow(dead_code)]
     pub(crate) async fn upload(
         &self,
-        data: Vec<u8>,
+        data: Bytes,
         event_name: &str,
         metadata: &BatchMetadata,
     ) -> Result<IngestionResponse> {
