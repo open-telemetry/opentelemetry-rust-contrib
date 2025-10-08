@@ -88,7 +88,7 @@ impl OtlpEncoder {
             }
         }
 
-        let mut batches: HashMap<String, BatchData> = HashMap::new();
+        let mut batches: HashMap<&str, BatchData> = HashMap::new();
 
         for log_record in logs {
             // Get the timestamp - prefer time_unix_nano, fall back to observed_time_unix_nano if time_unix_nano is 0
@@ -115,7 +115,7 @@ impl OtlpEncoder {
 
             // 3. Create or get existing batch entry with metadata tracking
             let entry = batches
-                .entry(event_name_str.to_string())
+                .entry(event_name_str)
                 .or_insert_with(|| BatchData {
                     schemas: Vec::new(),
                     events: Vec::new(),
@@ -165,7 +165,7 @@ impl OtlpEncoder {
             let compressed = lz4_chunked_compression(&uncompressed)
                 .map_err(|e| format!("compression failed: {e}"))?;
             blobs.push(EncodedBatch {
-                event_name: batch_event_name,
+                event_name: batch_event_name.to_string(),
                 data: compressed,
                 metadata: batch_data.metadata,
             });
@@ -558,12 +558,10 @@ impl OtlpEncoder {
                 }
                 _ => {
                     // Handle dynamic attributes
-                    let attr = span
-                        .attributes
-                        .iter()
-                        .find(|a| a.key == field.name)
-                        .unwrap();
-                    self.write_attribute_value(&mut buffer, attr, field.type_id);
+                    // TODO - optimize better - we could update determine_fields to also return a vec of bytes which has bond serialized attributes
+                    if let Some(attr) = span.attributes.iter().find(|a| a.key == field.name) {
+                        self.write_attribute_value(&mut buffer, attr, field.type_id);
+                    }
                 }
             }
         }
@@ -635,7 +633,7 @@ impl OtlpEncoder {
         buffer
     }
 
-    fn encode_id_to_hex<const N: usize>(id: &[u8]) -> [u8; N] {
+    const fn encode_id_to_hex<const N: usize>(id: &[u8]) -> [u8; N] {
         let mut hex_bytes = [0u8; N];
         hex::encode_to_slice(id, &mut hex_bytes).unwrap();
         hex_bytes
