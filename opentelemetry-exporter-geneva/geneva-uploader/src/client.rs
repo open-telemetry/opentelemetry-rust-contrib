@@ -4,6 +4,7 @@ use crate::config_service::client::{AuthMethod, GenevaConfigClient, GenevaConfig
 // ManagedIdentitySelector removed; no re-export needed.
 use crate::ingestion_service::uploader::{GenevaUploader, GenevaUploaderConfig};
 use crate::payload_encoder::otlp_encoder::OtlpEncoder;
+use bytes::Bytes;
 use opentelemetry_proto::tonic::logs::v1::ResourceLogs;
 use opentelemetry_proto::tonic::trace::v1::ResourceSpans;
 use std::sync::Arc;
@@ -13,7 +14,7 @@ use std::sync::Arc;
 #[derive(Debug, Clone)]
 pub struct EncodedBatch {
     pub event_name: String,
-    pub data: Vec<u8>,
+    pub data: Bytes,
     pub metadata: crate::payload_encoder::central_blob::BatchMetadata,
 }
 

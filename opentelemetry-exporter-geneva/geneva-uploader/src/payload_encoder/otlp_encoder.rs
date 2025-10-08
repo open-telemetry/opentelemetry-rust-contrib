@@ -4,6 +4,7 @@ use crate::payload_encoder::central_blob::{
     BatchMetadata, CentralBlob, CentralEventEntry, CentralSchemaEntry,
 };
 use crate::payload_encoder::lz4_chunked_compression::lz4_chunked_compression;
+use bytes::Bytes;
 use chrono::{TimeZone, Utc};
 use opentelemetry_proto::tonic::common::v1::any_value::Value;
 use opentelemetry_proto::tonic::logs::v1::LogRecord;
@@ -164,7 +165,7 @@ impl OtlpEncoder {
                 .map_err(|e| format!("compression failed: {e}"))?;
             blobs.push(EncodedBatch {
                 event_name: batch_event_name.to_string(),
-                data: compressed,
+                data: Bytes::from(compressed),
                 metadata: batch_data.metadata,
             });
         }
@@ -280,7 +281,7 @@ impl OtlpEncoder {
 
         Ok(vec![EncodedBatch {
             event_name: EVENT_NAME.to_string(),
-            data: compressed,
+            data: Bytes::from(compressed),
             metadata: batch_metadata,
         }])
     }

@@ -9,12 +9,13 @@ mod tests {
             AuthMethod, GenevaConfigClient, GenevaConfigClientConfig, GenevaUploader,
             GenevaUploaderConfig,
         };
+        use bytes::Bytes;
         use std::env;
         use std::fs;
         use std::sync::Arc;
 
         pub struct TestUploadContext {
-            pub data: Vec<u8>,
+            pub data: Bytes,
             pub uploader: GenevaUploader,
             pub event_name: String,
         }
@@ -78,7 +79,7 @@ mod tests {
             let event_name = "Log".to_string();
 
             TestUploadContext {
-                data,
+                data: Bytes::from(data),
                 uploader,
                 event_name,
             }

@@ -12,12 +12,13 @@ license = "Apache-2.0"
 [dependencies]
 opentelemetry-proto = {workspace = true, default-features = false, features = ["logs", "trace", "gen-tonic-messages"]}
 base64 = "0.22"
+bytes = "1.5"
 serde = { version = "1.0", features = ["derive"] }
 serde_json = { version = "1.0", features = ["raw_value"] }
 uuid = { version = "1.0", features = ["v4"] }
 # TODO - support both native-tls and rustls
 reqwest = { version = "0.12", features = ["native-tls", "native-tls-alpn"], default-features = false}
-native-tls = "0.2" 
+native-tls = "0.2"
 thiserror = "2.0"
 chrono = "0.4"
 url = "2.2"
