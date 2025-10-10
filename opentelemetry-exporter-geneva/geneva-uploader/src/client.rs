@@ -57,6 +57,7 @@ impl GenevaClient {
                 }
             }
             AuthMethod::Certificate { .. } => {}
+            AuthMethod::WorkloadIdentity { .. } => {}
             #[cfg(feature = "mock_auth")]
             AuthMethod::MockAuth => {}
         }

@@ -20,16 +20,19 @@ mod tests {
             namespace: "ns".to_string(),
             region: "region".to_string(),
             config_major_version: 1,
-            auth_method: AuthMethod::SystemManagedIdentity,
+            auth_method: AuthMethod::WorkloadIdentity {
+                resource: "https://monitor.azure.com".to_string(),
+            },
             msi_resource: None,
         };
 
         assert_eq!(config.environment, "env");
         assert_eq!(config.account, "acct");
-        assert!(matches!(
-            config.auth_method,
-            AuthMethod::SystemManagedIdentity
-        ));
+
+        match config.auth_method {
+            AuthMethod::WorkloadIdentity { .. } => {}
+            _ => panic!("expected WorkloadIdentity variant"),
+        }
     }
 
     fn generate_self_signed_p12() -> (NamedTempFile, String) {

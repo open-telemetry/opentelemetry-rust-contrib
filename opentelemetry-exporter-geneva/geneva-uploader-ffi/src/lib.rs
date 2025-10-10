@@ -288,8 +288,21 @@ pub unsafe extern "C" fn geneva_client_new(
 
     // Auth method conversion
     let auth_method = match config.auth_method {
-        // 0 => Managed Identity (default to system-assigned when coming from FFI for now)
-        0 => AuthMethod::SystemManagedIdentity,
+        0 => {
+            // Unified: Workload Identity (AKS) or System Managed Identity (VM)
+            // Auto-detect based on environment
+            if std::env::var("AZURE_FEDERATED_TOKEN_FILE").is_ok() {
+                // Workload Identity: azure_identity crate reads AZURE_CLIENT_ID, AZURE_TENANT_ID,
+                // and AZURE_FEDERATED_TOKEN_FILE automatically from environment
+                let resource = std::env::var("GENEVA_WORKLOAD_IDENTITY_RESOURCE")
+                    .unwrap_or_else(|_| "https://monitor.azure.com".to_string());
+
+                AuthMethod::WorkloadIdentity { resource }
+            } else {
+                AuthMethod::SystemManagedIdentity
+            }
+        }
+
         1 => {
             // Certificate authentication: read fields from tagged union
             let cert = unsafe { config.auth.cert };
