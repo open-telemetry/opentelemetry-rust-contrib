@@ -373,6 +373,7 @@ impl GenevaConfigClient {
         // TODO: Extract scope generation logic into helper function shared with get_msi_token()
         let base = resource.trim_end_matches("/.default").trim_end_matches('/');
         let mut scope_candidates: Vec<String> = vec![format!("{base}/.default"), base.to_string()];
+        // TODO - below check is not required, as we alread trim "/"
         if !base.ends_with('/') {
             scope_candidates.push(format!("{base}/"));
         }
@@ -413,6 +414,7 @@ impl GenevaConfigClient {
         // TODO: Extract scope generation logic into helper function shared with get_workload_identity_token()
         let base = resource.trim_end_matches("/.default").trim_end_matches('/');
         let mut scope_candidates: Vec<String> = vec![format!("{base}/.default"), base.to_string()];
+        // TODO - below check is not required, as we alread trim "/"
         if !base.ends_with('/') {
             scope_candidates.push(format!("{base}/"));
         }
