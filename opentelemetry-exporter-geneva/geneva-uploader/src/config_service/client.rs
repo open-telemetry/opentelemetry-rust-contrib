@@ -2,7 +2,7 @@
 
 use base64::{engine::general_purpose, Engine as _};
 use reqwest::{
-    header::{HeaderMap, HeaderValue, ACCEPT, USER_AGENT},
+    header::{HeaderMap, HeaderValue, ACCEPT, AUTHORIZATION, USER_AGENT},
     Client,
 };
 use serde::Deserialize;
@@ -17,6 +17,10 @@ use std::fmt::Write;
 use std::fs;
 use std::path::PathBuf;
 use std::sync::RwLock;
+
+// Azure Identity imports for MSI authentication
+use azure_core::credentials::TokenCredential;
+use azure_identity::{ManagedIdentityCredential, ManagedIdentityCredentialOptions, UserAssignedId};
 
 /// Authentication methods for the Geneva Config Client.
 ///
@@ -53,10 +57,14 @@ pub enum AuthMethod {
     /// * `path` - Path to the PKCS#12 (.p12) certificate file
     /// * `password` - Password to decrypt the PKCS#12 file
     Certificate { path: PathBuf, password: String },
-    /// Azure Managed Identity authentication
-    ///
-    /// Note(TODO): This is not yet implemented.
-    ManagedIdentity,
+    /// System-assigned managed identity (auto-detected)
+    SystemManagedIdentity,
+    /// User-assigned managed identity by client ID
+    UserManagedIdentity { client_id: String },
+    /// User-assigned managed identity by object ID
+    UserManagedIdentityByObjectId { object_id: String },
+    /// User-assigned managed identity by resource ID
+    UserManagedIdentityByResourceId { resource_id: String },
     #[cfg(feature = "mock_auth")]
     MockAuth, // No authentication, used for testing purposes
 }
@@ -64,14 +72,14 @@ pub enum AuthMethod {
 #[derive(Debug, Error)]
 pub(crate) enum GenevaConfigClientError {
     // Authentication-related errors
-    #[error("Authentication method not implemented: {0}")]
-    AuthMethodNotImplemented(String),
     #[error("Missing Auth Info: {0}")]
     AuthInfoNotFound(String),
     #[error("Invalid or malformed JWT token: {0}")]
     JwtTokenError(String),
     #[error("Certificate error: {0}")]
     Certificate(String),
+    #[error("MSI authentication error: {0}")]
+    MsiAuth(String),
 
     // Networking / HTTP / TLS
     #[error("HTTP error: {0}")]
@@ -129,6 +137,7 @@ pub(crate) struct GenevaConfigClientConfig {
     pub(crate) region: String,
     pub(crate) config_major_version: u32,
     pub(crate) auth_method: AuthMethod, // agent_identity and agent_version are hardcoded for now
+    pub(crate) msi_resource: Option<String>, // Required when using any Managed Identity variant
 }
 
 #[allow(dead_code)]
@@ -192,7 +201,6 @@ pub(crate) struct GenevaConfigClient {
     precomputed_url_prefix: String,
     agent_identity: String,
     agent_version: String,
-    static_headers: HeaderMap,
 }
 
 impl fmt::Debug for GenevaConfigClient {
@@ -202,7 +210,6 @@ impl fmt::Debug for GenevaConfigClient {
             .field("precomputed_url_prefix", &self.precomputed_url_prefix)
             .field("agent_identity", &self.agent_identity)
             .field("agent_version", &self.agent_version)
-            .field("static_headers", &self.static_headers)
             .finish()
     }
 }
@@ -225,9 +232,13 @@ impl GenevaConfigClient {
     /// * `GenevaConfigClientError::AuthMethodNotImplemented` - If the specified authentication method is not yet supported
     #[allow(dead_code)]
     pub(crate) fn new(config: GenevaConfigClientConfig) -> Result<Self> {
+        let agent_identity = "GenevaUploader";
+        let agent_version = "0.1";
+
         let mut client_builder = Client::builder()
             .http1_only()
-            .timeout(Duration::from_secs(30)); //TODO - make this configurable
+            .timeout(Duration::from_secs(30)) //TODO - make this configurable
+            .default_headers(Self::build_static_headers(agent_identity, agent_version));
 
         match &config.auth_method {
             // TODO: Certificate auth would be removed in favor of managed identity.,
@@ -246,10 +257,10 @@ impl GenevaConfigClient {
                         .map_err(|e| GenevaConfigClientError::Certificate(e.to_string()))?;
                 client_builder = client_builder.use_preconfigured_tls(tls_connector);
             }
-            AuthMethod::ManagedIdentity => {
-                return Err(GenevaConfigClientError::AuthMethodNotImplemented(
-                    "Managed Identity authentication is not implemented yet".into(),
-                ));
+            AuthMethod::SystemManagedIdentity
+            | AuthMethod::UserManagedIdentity { .. }
+            | AuthMethod::UserManagedIdentityByObjectId { .. }
+            | AuthMethod::UserManagedIdentityByResourceId { .. } => { /* no special HTTP client changes needed */
             }
             #[cfg(feature = "mock_auth")]
             AuthMethod::MockAuth => {
@@ -259,20 +270,29 @@ impl GenevaConfigClient {
             }
         }
 
-        let agent_identity = "GenevaUploader";
-        let agent_version = "0.1";
-        let static_headers = Self::build_static_headers(agent_identity, agent_version);
-
         let identity = format!("Tenant=Default/Role=GcsClient/RoleInstance={agent_identity}");
 
         let encoded_identity = general_purpose::STANDARD.encode(&identity);
         let version_str = format!("Ver{0}v0", config.config_major_version);
 
+        // Use different API endpoints based on authentication method
+        // Certificate auth uses "api", MSI auth uses "userapi"
+        let api_path = match &config.auth_method {
+            AuthMethod::Certificate { .. } => "api",
+            AuthMethod::SystemManagedIdentity
+            | AuthMethod::UserManagedIdentity { .. }
+            | AuthMethod::UserManagedIdentityByObjectId { .. }
+            | AuthMethod::UserManagedIdentityByResourceId { .. } => "userapi",
+            #[cfg(feature = "mock_auth")]
+            AuthMethod::MockAuth => "api", // treat mock like certificate path for URL shape
+        };
+
         let mut pre_url = String::with_capacity(config.endpoint.len() + 200);
         write!(
             &mut pre_url,
-            "{}/api/agent/v3/{}/{}/MonitoringStorageKeys/?Namespace={}&Region={}&Identity={}&OSType={}&ConfigMajorVersion={}",
+            "{}/{}/agent/v3/{}/{}/MonitoringStorageKeys/?Namespace={}&Region={}&Identity={}&OSType={}&ConfigMajorVersion={}",
             config.endpoint.trim_end_matches('/'),
+            api_path,
             config.environment,
             config.account,
             config.namespace,
@@ -291,7 +311,6 @@ impl GenevaConfigClient {
             precomputed_url_prefix: pre_url,
             agent_identity: agent_identity.to_string(), // TODO make this configurable
             agent_version: "1.0".to_string(),           // TODO make this configurable
-            static_headers,
         })
     }
 
@@ -308,6 +327,66 @@ impl GenevaConfigClient {
         headers.insert(USER_AGENT, HeaderValue::from_str(&user_agent).unwrap());
         headers.insert(ACCEPT, HeaderValue::from_static("application/json"));
         headers
+    }
+
+    /// Get MSI token for GCS authentication
+    async fn get_msi_token(&self) -> Result<String> {
+        let resource = self.config.msi_resource.as_ref().ok_or_else(|| {
+            GenevaConfigClientError::MsiAuth(
+                "msi_resource not set in config (required for Managed Identity auth)".to_string(),
+            )
+        })?;
+
+        // Normalize resource (strip trailing "/.default" if provided by user)
+        let base = resource.trim_end_matches("/.default").trim_end_matches('/');
+
+        // Candidate scopes tried with Azure Identity
+        let mut scope_candidates: Vec<String> = vec![format!("{base}/.default"), base.to_string()];
+        // Add variant with trailing slash if not already present
+        if !base.ends_with('/') {
+            scope_candidates.push(format!("{base}/"));
+        }
+
+        // Build credential based on selector
+        let user_assigned_id = match &self.config.auth_method {
+            AuthMethod::SystemManagedIdentity => None,
+            AuthMethod::UserManagedIdentity { client_id } => {
+                Some(UserAssignedId::ClientId(client_id.clone()))
+            }
+            AuthMethod::UserManagedIdentityByObjectId { object_id } => {
+                Some(UserAssignedId::ObjectId(object_id.clone()))
+            }
+            AuthMethod::UserManagedIdentityByResourceId { resource_id } => {
+                Some(UserAssignedId::ResourceId(resource_id.clone()))
+            }
+            _ => {
+                return Err(GenevaConfigClientError::MsiAuth(
+                    "get_msi_token called but auth method is not a managed identity variant"
+                        .to_string(),
+                ))
+            }
+        };
+
+        let options = ManagedIdentityCredentialOptions {
+            user_assigned_id,
+            ..Default::default()
+        };
+        let credential = ManagedIdentityCredential::new(Some(options)).map_err(|e| {
+            GenevaConfigClientError::MsiAuth(format!("Failed to create MSI credential: {e}"))
+        })?;
+
+        let mut last_err: Option<String> = None;
+        for scope in &scope_candidates {
+            match credential.get_token(&[scope.as_str()], None).await {
+                Ok(token) => return Ok(token.token.secret().to_string()),
+                Err(e) => last_err = Some(e.to_string()),
+            }
+        }
+        let detail = last_err.unwrap_or_else(|| "no error detail".into());
+        Err(GenevaConfigClientError::MsiAuth(format!(
+            "Managed Identity token acquisition failed. Scopes tried: {scopes}. Last error: {detail}. IMDS fallback intentionally disabled.",
+            scopes = scope_candidates.join(", ")
+        )))
     }
 
     /// Retrieves ingestion gateway information from the Geneva Config Service.
@@ -381,7 +460,16 @@ impl GenevaConfigClient {
                     GenevaConfigClientError::InternalError("Failed to parse token expiry".into())
                 })?;
 
-        let token_endpoint = extract_endpoint_from_token(&fresh_ingestion_gateway_info.auth_token)?;
+        let token_endpoint =
+            match extract_endpoint_from_token(&fresh_ingestion_gateway_info.auth_token) {
+                Ok(ep) => ep,
+                Err(err) => {
+                    // Fallback: some tokens legitimately omit the Endpoint claim; use server endpoint.
+                    #[cfg(debug_assertions)]
+                    eprintln!("[geneva][debug] token Endpoint claim missing or unparsable: {err}");
+                    fresh_ingestion_gateway_info.endpoint.clone()
+                }
+            };
 
         // Now update the cache with exclusive write access
         let mut guard = self
@@ -426,16 +514,32 @@ impl GenevaConfigClient {
 
         let req_id = Uuid::new_v4().to_string();
 
-        let mut request = self
-            .http_client
-            .get(&url)
-            .headers(self.static_headers.clone()); // Clone only cheap references
+        let mut request = self.http_client.get(&url);
 
         request = request.header("x-ms-client-request-id", req_id);
-        let response = request
-            .send()
-            .await
-            .map_err(GenevaConfigClientError::Http)?;
+
+        // Add MSI authentication for managed identity auth method
+        match &self.config.auth_method {
+            AuthMethod::SystemManagedIdentity
+            | AuthMethod::UserManagedIdentity { .. }
+            | AuthMethod::UserManagedIdentityByObjectId { .. }
+            | AuthMethod::UserManagedIdentityByResourceId { .. } => {
+                let msi_token = self.get_msi_token().await?;
+                request = request.header(AUTHORIZATION, format!("Bearer {}", msi_token));
+            }
+            AuthMethod::Certificate { .. } => { /* mTLS only */ }
+            #[cfg(feature = "mock_auth")]
+            AuthMethod::MockAuth => { /* no auth header */ }
+        }
+
+        // Log the request details for debugging
+        let response = match request.send().await {
+            Ok(response) => response,
+            Err(e) => {
+                return Err(GenevaConfigClientError::Http(e));
+            }
+        };
+
         // Check if the response is successful
         let status = response.status();
         let body = response.text().await?;
@@ -506,12 +610,18 @@ fn extract_endpoint_from_token(token: &str) -> Result<String> {
         _ => payload.to_string(),
     };
 
-    // Decode the Base64-encoded payload into raw bytes
-    let decoded = general_purpose::URL_SAFE_NO_PAD
-        .decode(payload)
-        .map_err(|e| {
-            GenevaConfigClientError::JwtTokenError(format!("Failed to decode JWT: {e}"))
-        })?;
+    // Decode the Base64-encoded payload into raw bytes with a more tolerant approach.
+    let decoded = match general_purpose::URL_SAFE_NO_PAD.decode(&payload) {
+        Ok(b) => b,
+        Err(e_url) => match general_purpose::STANDARD.decode(&payload) {
+            Ok(b) => b,
+            Err(e_std) => {
+                return Err(GenevaConfigClientError::JwtTokenError(format!(
+                    "Failed to decode JWT (url_safe and standard): url_err={e_url}; std_err={e_std}"
+                )))
+            }
+        },
+    };
 
     // Convert the raw bytes into a UTF-8 string
     let decoded_str = String::from_utf8(decoded).map_err(|e| {
@@ -522,15 +632,12 @@ fn extract_endpoint_from_token(token: &str) -> Result<String> {
     let payload_json: serde_json::Value =
         serde_json::from_str(&decoded_str).map_err(GenevaConfigClientError::SerdeJson)?;
 
-    // Extract "Endpoint" from JWT payload as a string, or fail if missing or invalid.
-    let endpoint = payload_json["Endpoint"]
-        .as_str()
-        .ok_or_else(|| {
-            GenevaConfigClientError::JwtTokenError("No Endpoint claim in JWT token".to_string())
-        })?
-        .to_string();
-
-    Ok(endpoint)
+    if let Some(ep) = payload_json["Endpoint"].as_str() {
+        return Ok(ep.to_string());
+    }
+    Err(GenevaConfigClientError::JwtTokenError(
+        "No Endpoint claim in JWT token".to_string(),
+    ))
 }
 
 #[cfg(feature = "self_signed_certs")]

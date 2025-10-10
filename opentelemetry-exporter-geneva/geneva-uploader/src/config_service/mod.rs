@@ -20,12 +20,16 @@ mod tests {
             namespace: "ns".to_string(),
             region: "region".to_string(),
             config_major_version: 1,
-            auth_method: AuthMethod::ManagedIdentity,
+            auth_method: AuthMethod::SystemManagedIdentity,
+            msi_resource: None,
         };
 
         assert_eq!(config.environment, "env");
         assert_eq!(config.account, "acct");
-        assert!(matches!(config.auth_method, AuthMethod::ManagedIdentity));
+        assert!(matches!(
+            config.auth_method,
+            AuthMethod::SystemManagedIdentity
+        ));
     }
 
     fn generate_self_signed_p12() -> (NamedTempFile, String) {
@@ -107,6 +111,7 @@ mod tests {
                 path: PathBuf::from(temp_p12_file.path().to_string_lossy().to_string()),
                 password,
             },
+            msi_resource: None,
         };
 
         let client = GenevaConfigClient::new(config).unwrap();
@@ -152,6 +157,7 @@ mod tests {
                 path: PathBuf::from(temp_p12_file.path().to_string_lossy().to_string()),
                 password,
             },
+            msi_resource: None,
         };
 
         let client = GenevaConfigClient::new(config).unwrap();
@@ -200,6 +206,7 @@ mod tests {
                 path: PathBuf::from(temp_p12_file.path().to_string_lossy().to_string()),
                 password,
             },
+            msi_resource: None,
         };
 
         let client = GenevaConfigClient::new(config).unwrap();
@@ -231,6 +238,7 @@ mod tests {
                 path: PathBuf::from("/nonexistent/path.p12".to_string()),
                 password: "test".to_string(),
             },
+            msi_resource: None,
         };
 
         let result = GenevaConfigClient::new(config);
@@ -294,6 +302,7 @@ mod tests {
                 path: PathBuf::from(cert_path),
                 password: cert_password,
             },
+            msi_resource: None,
         };
 
         println!("Connecting to real Geneva Config service...");

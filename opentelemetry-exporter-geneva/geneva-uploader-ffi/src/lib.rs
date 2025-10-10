@@ -12,6 +12,7 @@ use tokio::runtime::Runtime;
 use geneva_uploader::client::{EncodedBatch, GenevaClient, GenevaClientConfig};
 use geneva_uploader::AuthMethod;
 use opentelemetry_proto::tonic::collector::logs::v1::ExportLogsServiceRequest;
+use opentelemetry_proto::tonic::collector::trace::v1::ExportTraceServiceRequest;
 use prost::Message;
 use std::path::PathBuf;
 
@@ -287,7 +288,8 @@ pub unsafe extern "C" fn geneva_client_new(
 
     // Auth method conversion
     let auth_method = match config.auth_method {
-        0 => AuthMethod::ManagedIdentity,
+        // 0 => Managed Identity (default to system-assigned when coming from FFI for now)
+        0 => AuthMethod::SystemManagedIdentity,
         1 => {
             // Certificate authentication: read fields from tagged union
             let cert = unsafe { config.auth.cert };
@@ -332,6 +334,7 @@ pub unsafe extern "C" fn geneva_client_new(
         tenant,
         role_name,
         role_instance,
+        msi_resource: None, // FFI path currently does not accept MSI resource; extend API if needed
     };
 
     // Create client
@@ -397,6 +400,65 @@ pub unsafe extern "C" fn geneva_encode_and_compress_logs(
 
     let resource_logs = logs_data.resource_logs;
     match handle_ref.client.encode_and_compress_logs(&resource_logs) {
+        Ok(batches) => {
+            let h = EncodedBatchesHandle {
+                magic: GENEVA_HANDLE_MAGIC,
+                batches,
+            };
+            unsafe { *out_batches = Box::into_raw(Box::new(h)) };
+            GenevaError::Success
+        }
+        Err(_e) => GenevaError::InternalError,
+    }
+}
+
+/// Encode and compress spans into batches (synchronous)
+///
+/// # Safety
+/// - handle must be a valid pointer returned by geneva_client_new
+/// - data must be a valid pointer to protobuf-encoded ExportTraceServiceRequest
+/// - data_len must be the correct length of the data
+/// - out_batches must be non-null; on success it receives a non-null pointer the caller must free with geneva_batches_free
+#[no_mangle]
+pub unsafe extern "C" fn geneva_encode_and_compress_spans(
+    handle: *mut GenevaClientHandle,
+    data: *const u8,
+    data_len: usize,
+    out_batches: *mut *mut EncodedBatchesHandle,
+) -> GenevaError {
+    if out_batches.is_null() {
+        return GenevaError::NullPointer;
+    }
+    unsafe { *out_batches = ptr::null_mut() };
+
+    if handle.is_null() {
+        return GenevaError::NullPointer;
+    }
+    if data.is_null() {
+        return GenevaError::NullPointer;
+    }
+    if data_len == 0 {
+        return GenevaError::EmptyInput;
+    }
+
+    // Validate handle first
+    let validation_result = unsafe { validate_handle(handle) };
+    if validation_result != GenevaError::Success {
+        return validation_result;
+    }
+
+    let handle_ref = unsafe { handle.as_ref().unwrap() };
+    let data_slice = unsafe { std::slice::from_raw_parts(data, data_len) };
+
+    let spans_data: ExportTraceServiceRequest = match Message::decode(data_slice) {
+        Ok(data) => data,
+        Err(_e) => {
+            return GenevaError::DecodeFailed;
+        }
+    };
+
+    let resource_spans = spans_data.resource_spans;
+    match handle_ref.client.encode_and_compress_spans(&resource_spans) {
         Ok(batches) => {
             let h = EncodedBatchesHandle {
                 magic: GENEVA_HANDLE_MAGIC,
@@ -500,6 +562,7 @@ mod tests {
     use std::ffi::CString;
 
     // Build a minimal unsigned JWT with the Endpoint claim and an exp. Matches what extract_endpoint_from_token expects.
+    #[allow(dead_code)]
     fn generate_mock_jwt_and_expiry(endpoint: &str, ttl_secs: i64) -> (String, String) {
         use base64::{engine::general_purpose::URL_SAFE_NO_PAD, Engine as _};
         use chrono::{Duration, Utc};
@@ -716,6 +779,7 @@ mod tests {
     // Integration-style test: encode via FFI then upload via FFI using MockAuth + Wiremock server.
     // Uses otlp_builder to construct an ExportLogsServiceRequest payload.
     #[test]
+    #[cfg(feature = "mock_auth")]
     fn test_encode_and_upload_with_mock_server() {
         use otlp_builder::builder::build_otlp_logs_minimal;
         use wiremock::matchers::method;
@@ -771,6 +835,7 @@ mod tests {
             tenant: "testtenant".to_string(),
             role_name: "testrole".to_string(),
             role_instance: "testinstance".to_string(),
+            msi_resource: None,
         };
         let client = GenevaClient::new(cfg).expect("failed to create GenevaClient with MockAuth");
 
@@ -827,6 +892,7 @@ mod tests {
     // multiple different event_names in one request produce multiple batches,
     // and each batch upload hits ingestion with the corresponding event query param.
     #[test]
+    #[cfg(feature = "mock_auth")]
     fn test_encode_batching_by_event_name_and_upload() {
         use wiremock::http::Method;
         use wiremock::matchers::method;
@@ -879,6 +945,7 @@ mod tests {
             tenant: "testtenant".to_string(),
             role_name: "testrole".to_string(),
             role_instance: "testinstance".to_string(),
+            msi_resource: None,
         };
         let client = GenevaClient::new(cfg).expect("failed to create GenevaClient with MockAuth");
 
