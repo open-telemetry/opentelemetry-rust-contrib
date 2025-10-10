@@ -388,6 +388,7 @@ impl GenevaConfigClient {
 
         let mut last_err: Option<String> = None;
         for scope in &scope_candidates {
+            //TODO - It looks like the get_token API accepts a slice of &str
             match credential.get_token(&[scope.as_str()], None).await {
                 Ok(token) => return Ok(token.token.secret().to_string()),
                 Err(e) => last_err = Some(e.to_string()),
