@@ -14,8 +14,12 @@ typedef struct GenevaClientHandle GenevaClientHandle;
 typedef struct EncodedBatchesHandle EncodedBatchesHandle;
 
 // Authentication method constants
-#define GENEVA_AUTH_MANAGED_IDENTITY 0
+#define GENEVA_AUTH_SYSTEM_MANAGED_IDENTITY 0
 #define GENEVA_AUTH_CERTIFICATE 1
+#define GENEVA_AUTH_WORKLOAD_IDENTITY 2
+#define GENEVA_AUTH_USER_MANAGED_IDENTITY 3
+#define GENEVA_AUTH_USER_MANAGED_IDENTITY_BY_OBJECT_ID 4
+#define GENEVA_AUTH_USER_MANAGED_IDENTITY_BY_RESOURCE_ID 5
 
 /* Configuration for certificate auth (valid only when auth_method == GENEVA_AUTH_CERTIFICATE) */
 typedef struct {
@@ -23,17 +27,34 @@ typedef struct {
     const char* cert_password;  /* Certificate password */
 } GenevaCertAuthConfig;
 
-/* Configuration for managed identity auth (valid only when auth_method == GENEVA_AUTH_MANAGED_IDENTITY) */
+/* Configuration for Workload Identity auth (valid only when auth_method == GENEVA_AUTH_WORKLOAD_IDENTITY) */
 typedef struct {
-    const char* objid; /* Optional: Azure AD object ID as NUL-terminated GUID string
-                          e.g. "00000000-0000-0000-0000-000000000000" */
-} GenevaMSIAuthConfig;
+    const char* resource;       /* Azure AD resource URI (e.g., "https://monitor.azure.com") */
+} GenevaWorkloadIdentityAuthConfig;
+
+/* Configuration for User-assigned Managed Identity by client ID (valid only when auth_method == GENEVA_AUTH_USER_MANAGED_IDENTITY) */
+typedef struct {
+    const char* client_id;      /* Azure AD client ID */
+} GenevaUserManagedIdentityAuthConfig;
+
+/* Configuration for User-assigned Managed Identity by object ID (valid only when auth_method == GENEVA_AUTH_USER_MANAGED_IDENTITY_BY_OBJECT_ID) */
+typedef struct {
+    const char* object_id;      /* Azure AD object ID */
+} GenevaUserManagedIdentityByObjectIdAuthConfig;
+
+/* Configuration for User-assigned Managed Identity by resource ID (valid only when auth_method == GENEVA_AUTH_USER_MANAGED_IDENTITY_BY_RESOURCE_ID) */
+typedef struct {
+    const char* resource_id;    /* Azure resource ID */
+} GenevaUserManagedIdentityByResourceIdAuthConfig;
 
 /* Tagged union for auth-specific configuration.
    The active member is determined by 'auth_method' in GenevaConfig. */
 typedef union {
-    GenevaMSIAuthConfig msi;    /* Valid when auth_method == GENEVA_AUTH_MANAGED_IDENTITY */
-    GenevaCertAuthConfig cert;  /* Valid when auth_method == GENEVA_AUTH_CERTIFICATE */
+    GenevaCertAuthConfig cert;                                              /* Valid when auth_method == GENEVA_AUTH_CERTIFICATE */
+    GenevaWorkloadIdentityAuthConfig workload_identity;                     /* Valid when auth_method == GENEVA_AUTH_WORKLOAD_IDENTITY */
+    GenevaUserManagedIdentityAuthConfig user_msi;                           /* Valid when auth_method == GENEVA_AUTH_USER_MANAGED_IDENTITY */
+    GenevaUserManagedIdentityByObjectIdAuthConfig user_msi_objid;           /* Valid when auth_method == GENEVA_AUTH_USER_MANAGED_IDENTITY_BY_OBJECT_ID */
+    GenevaUserManagedIdentityByResourceIdAuthConfig user_msi_resid;         /* Valid when auth_method == GENEVA_AUTH_USER_MANAGED_IDENTITY_BY_RESOURCE_ID */
 } GenevaAuthConfig;
 
 /* Configuration structure for Geneva client (C-compatible, tagged union) */
@@ -44,11 +65,12 @@ typedef struct {
     const char* namespace_name;
     const char* region;
     uint32_t config_major_version;
-    int32_t auth_method; /* 0 = Managed Identity, 1 = Certificate */
+    int32_t auth_method; /* 0 = System MSI, 1 = Certificate, 2 = Workload Identity, 3 = User MSI by client ID, 4 = User MSI by object ID, 5 = User MSI by resource ID */
     const char* tenant;
     const char* role_name;
     const char* role_instance;
     GenevaAuthConfig auth; /* Active member selected by auth_method */
+    const char* msi_resource; /* Optional: MSI resource for auth methods 0, 3, 4, 5 (nullable) */
 } GenevaConfig;
 
 /* Create a new Geneva client.
