@@ -275,6 +275,7 @@ impl GenevaConfigClient {
             // This is for testing, so we can use self-signed certs, and password in plain text.
             AuthMethod::Certificate { path, password } => {
                 debug!(
+                    name: "config_client.new.certificate_auth",
                     target: "geneva-uploader",
                     "Using Certificate authentication"
                 );
@@ -282,6 +283,7 @@ impl GenevaConfigClient {
                 let p12_bytes = fs::read(path)
                     .map_err(|e| {
                         debug!(
+                            name: "config_client.new.certificate_read_error",
                             target: "geneva-uploader",
                             "Failed to read certificate file: {}", e
                         );
@@ -290,6 +292,7 @@ impl GenevaConfigClient {
                 let identity = Identity::from_pkcs12(&p12_bytes, password)
                     .map_err(|e| {
                         debug!(
+                            name: "config_client.new.certificate_parse_error",
                             target: "geneva-uploader",
                             "Failed to parse PKCS#12 certificate: {}", e
                         );
@@ -302,6 +305,7 @@ impl GenevaConfigClient {
                         .build()
                         .map_err(|e| {
                             debug!(
+                                name: "config_client.new.tls_connector_error",
                                 target: "geneva-uploader",
                                 "Failed to build TLS connector: {}", e
                             );
@@ -311,6 +315,7 @@ impl GenevaConfigClient {
             }
             AuthMethod::WorkloadIdentity { .. } => {
                 debug!(
+                    name: "config_client.new.workload_identity_auth",
                     target: "geneva-uploader",
                     "Using Workload Identity authentication"
                 );
@@ -322,6 +327,7 @@ impl GenevaConfigClient {
             | AuthMethod::UserManagedIdentityByObjectId { .. }
             | AuthMethod::UserManagedIdentityByResourceId { .. } => {
                 debug!(
+                    name: "config_client.new.managed_identity_auth",
                     target: "geneva-uploader",
                     "Using Managed Identity authentication"
                 );
@@ -330,6 +336,7 @@ impl GenevaConfigClient {
             #[cfg(feature = "mock_auth")]
             AuthMethod::MockAuth => {
                 debug!(
+                    name: "config_client.new.mock_auth_warning",
                     target: "geneva-uploader",
                     "WARNING: Using MockAuth for GenevaConfigClient. This should only be used in tests!"
                 );
@@ -417,6 +424,7 @@ impl GenevaConfigClient {
                 AuthMethod::WorkloadIdentity { resource } => resource,
                 _ => {
                     debug!(
+                        name: "config_client.get_workload_identity_token.invalid_auth_method",
                         target: "geneva-uploader",
                         "get_workload_identity_token called but auth method is not WorkloadIdentity"
                     );
@@ -440,6 +448,7 @@ impl GenevaConfigClient {
         // and AZURE_FEDERATED_TOKEN_FILE from environment variables automatically
         let credential = WorkloadIdentityCredential::new(None).map_err(|e| {
             debug!(
+                name: "config_client.get_workload_identity_token.create_credential_error",
                 target: "geneva-uploader",
                 "Failed to create WorkloadIdentityCredential: {}", e
             );
@@ -466,6 +475,7 @@ impl GenevaConfigClient {
 
         let detail = last_err.unwrap_or_else(|| "no error detail".into());
         debug!(
+            name: "config_client.get_workload_identity_token.failed",
             target: "geneva-uploader",
             "Workload Identity token acquisition failed. Scopes tried: {}. Last error: {}",
             scope_candidates.join(", "), detail
@@ -486,6 +496,7 @@ impl GenevaConfigClient {
 
         let resource = self.config.msi_resource.as_ref().ok_or_else(|| {
             debug!(
+                name: "config_client.get_msi_token.missing_msi_resource",
                 target: "geneva-uploader",
                 "msi_resource not set in config (required for Managed Identity auth)"
             );
@@ -528,6 +539,7 @@ impl GenevaConfigClient {
         };
         let credential = ManagedIdentityCredential::new(Some(options)).map_err(|e| {
             debug!(
+                name: "config_client.get_msi_token.create_credential_error",
                 target: "geneva-uploader",
                 "Failed to create MSI credential: {}", e
             );
@@ -551,6 +563,7 @@ impl GenevaConfigClient {
 
         let detail = last_err.unwrap_or_else(|| "no error detail".into());
         debug!(
+            name: "config_client.get_msi_token.failed",
             target: "geneva-uploader",
             "Managed Identity token acquisition failed. Scopes tried: {}. Last error: {}",
             scope_candidates.join(", "), detail
@@ -706,6 +719,7 @@ impl GenevaConfigClient {
         let mut url = String::with_capacity(self.precomputed_url_prefix.len() + 50);
         write!(&mut url, "{}&TagId={tag_id}", self.precomputed_url_prefix).map_err(|e| {
             debug!(
+                name: "config_client.fetch_ingestion_info.write_url_error",
                 target: "geneva-uploader",
                 "Failed to write URL: {}", e
             );
@@ -715,6 +729,7 @@ impl GenevaConfigClient {
         let req_id = Uuid::new_v4().to_string();
 
         debug!(
+            name: "config_client.fetch_ingestion_info.request",
             target: "geneva-uploader",
             "Sending config request with request_id={}", req_id
         );
@@ -746,6 +761,7 @@ impl GenevaConfigClient {
             Ok(resp) => resp,
             Err(e) => {
                 debug!(
+                    name: "config_client.fetch_ingestion_info.http_error",
                     target: "geneva-uploader",
                     "Config service HTTP request failed: {}", e
                 );
@@ -764,10 +780,11 @@ impl GenevaConfigClient {
             );
 
             let parsed = serde_json::from_str::<GenevaResponse>(&body).map_err(|e| {
-                debug!(
-                    target: "geneva-uploader",
-                    "Failed to parse config service response: {}", e
-                );
+            debug!(
+                name: "config_client.fetch_ingestion_info.success_status",
+                target: "geneva-uploader",
+                "Config service returned success status"
+            );
                 GenevaConfigClientError::AuthInfoNotFound(format!("Failed to parse response: {e}"))
             })?;
 
@@ -778,6 +795,7 @@ impl GenevaConfigClient {
                         account_group: account.account_group_name.clone(),
                     };
                     info!(
+                        name: "config_client.fetch_ingestion_info.success",
                         target: "geneva-uploader",
                         "Successfully retrieved ingestion info, moniker={}", account.account_moniker_name
                     );
@@ -785,15 +803,22 @@ impl GenevaConfigClient {
                 }
             }
 
-            debug!(
-                target: "geneva-uploader",
-                "No primary diag moniker found in storage accounts"
-            );
+                debug!(
+                    name: "config_client.fetch_ingestion_info.parse_error",
+                    target: "geneva-uploader",
+                    "Failed to parse config service response: {}", e
+                );
             Err(GenevaConfigClientError::MonikerNotFound(
                 "No primary diag moniker found in storage accounts".to_string(),
             ))
         } else {
             debug!(
+                name: "config_client.fetch_ingestion_info.no_diag_moniker",
+                target: "geneva-uploader",
+                "No primary diag moniker found in storage accounts"
+            );
+            debug!(
+                name: "config_client.fetch_ingestion_info.error_status",
                 target: "geneva-uploader",
                 "Config service returned error status={}, body={}", status, body
             );
