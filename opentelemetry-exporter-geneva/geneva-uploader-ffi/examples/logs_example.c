@@ -69,7 +69,7 @@ int main(void) {
     /* Certificate auth if both provided; otherwise system managed identity */
     const char* cert_path     = getenv("GENEVA_CERT_PATH");
     const char* cert_password = getenv("GENEVA_CERT_PASSWORD");
-    int32_t auth_method = (cert_path && cert_password) ? GENEVA_AUTH_CERTIFICATE : GENEVA_AUTH_SYSTEM_MANAGED_IDENTITY;
+    uint32_t auth_method = (cert_path && cert_password) ? GENEVA_AUTH_CERTIFICATE : GENEVA_AUTH_SYSTEM_MANAGED_IDENTITY;
 
     printf("Configuration:\n");
     printf("  Endpoint: %s\n", endpoint);

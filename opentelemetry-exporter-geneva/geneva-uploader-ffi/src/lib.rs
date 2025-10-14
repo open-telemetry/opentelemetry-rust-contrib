@@ -4,7 +4,7 @@
 #![allow(unsafe_attr_outside_unsafe)]
 
 use std::ffi::CStr;
-use std::os::raw::{c_char, c_int, c_uint};
+use std::os::raw::{c_char, c_uint};
 use std::ptr;
 use std::sync::OnceLock;
 use tokio::runtime::Runtime;
@@ -168,7 +168,7 @@ pub struct GenevaConfig {
     pub namespace_name: *const c_char,
     pub region: *const c_char,
     pub config_major_version: c_uint,
-    pub auth_method: c_int,
+    pub auth_method: c_uint,
     pub tenant: *const c_char,
     pub role_name: *const c_char,
     pub role_instance: *const c_char,

@@ -68,7 +68,7 @@ typedef struct {
     const char* namespace_name;
     const char* region;
     uint32_t config_major_version;
-    int32_t auth_method; /* 0 = System MSI, 1 = Certificate, 2 = Workload Identity, 3 = User MSI by client ID, 4 = User MSI by object ID, 5 = User MSI by resource ID */
+    uint32_t auth_method; /* 0 = System MSI, 1 = Certificate, 2 = Workload Identity, 3 = User MSI by client ID, 4 = User MSI by object ID, 5 = User MSI by resource ID */
     const char* tenant;
     const char* role_name;
     const char* role_instance;
@@ -78,7 +78,11 @@ typedef struct {
 
 /* Create a new Geneva client.
    - On success returns GENEVA_SUCCESS and writes *out_handle.
-   - On failure returns an error code. */
+   - On failure returns an error code.
+
+   IMPORTANT: Caller must call geneva_client_free() on the returned handle
+   to avoid memory leaks. All strings in config are copied; caller retains
+   ownership of config strings and may free them after this call returns. */
 GenevaError geneva_client_new(const GenevaConfig* config,
                               GenevaClientHandle** out_handle);
 
@@ -119,7 +123,12 @@ void geneva_batches_free(EncodedBatchesHandle* batches);
 
 
 
-/* Frees a Geneva client handle */
+/* Frees a Geneva client handle and all associated resources.
+
+   IMPORTANT: This must be called for every handle returned by geneva_client_new()
+   to avoid memory leaks. After calling this function, the handle must not be used.
+
+   Safe to call with NULL (no-op). */
 void geneva_client_free(GenevaClientHandle* handle);
 
 
