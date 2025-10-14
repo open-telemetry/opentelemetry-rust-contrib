@@ -168,7 +168,7 @@ pub union GenevaAuthConfig {
 /// - **Auth method 1 (Certificate)**: No resource needed
 ///
 /// The `msi_resource` field specifies the Azure AD resource URI for token acquisition
-/// (e.g., "https://monitor.azure.com"). For user-assigned identities (3, 4, 5), the
+/// (e.g., <https://monitor.azure.com>). For user-assigned identities (3, 4, 5), the
 /// auth union specifies WHICH identity to use, while `msi_resource` specifies WHAT
 /// Azure resource to request tokens FOR. These are orthogonal concerns.
 #[repr(C)]
@@ -765,7 +765,10 @@ mod tests {
                 tenant: tenant.as_ptr(),
                 role_name: role_name.as_ptr(),
                 role_instance: role_instance.as_ptr(),
-                auth: std::mem::zeroed(), // Union not accessed for SystemManagedIdentity
+                // SAFETY: GenevaAuthConfig only contains raw pointers (*const c_char).
+                // Zero-initializing raw pointers creates null pointers, which is valid.
+                // The union is never accessed for SystemManagedIdentity (auth_method 0).
+                auth: std::mem::zeroed(),
                 msi_resource: ptr::null(),
             };
 
