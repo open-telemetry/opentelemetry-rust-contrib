@@ -20,10 +20,12 @@
 //! RUST_LOG=info,geneva_uploader=debug,hyper=off,reqwest=off cargo run --example basic
 //! ```
 //!
-//! Alternatively, modify the `filter_fmt` in the code (line ~108) and add:
-//! ```rust
-//! .add_directive("geneva_uploader=debug".parse().unwrap())
-//! ```
+ //! Alternatively, to hard-code debug for the geneva_uploader crate (instead of relying
+ //! on RUST_LOG each run), add the directive when constructing the filter:
+ //! ```rust
+ //! // after building/obtaining `filter_fmt`
+ //! // .add_directive("geneva_uploader=debug".parse().unwrap())
+ //! ```
 
 use geneva_uploader::client::{GenevaClient, GenevaClientConfig};
 use geneva_uploader::AuthMethod;
@@ -130,10 +132,17 @@ async fn main() {
     // Create a new tracing::Fmt layer to print the logs to stdout. It has a
     // default filter of `info` level and above, and `debug` and above for logs
     // from OpenTelemetry crates. The filter levels can be customized as needed.
-    let filter_fmt = EnvFilter::new("info")
+    // Build fmt layer filter from RUST_LOG if provided; otherwise fall back to defaults
+    // that enable debug for opentelemetry, hyper, and reqwest. Examples:
+    //   RUST_LOG=info,geneva_uploader=debug cargo run --example basic
+    //   RUST_LOG=info,geneva_uploader=debug,hyper=off,reqwest=off cargo run --example basic
+    let default_fmt = EnvFilter::new("info")
+        .add_directive("opentelemetry=debug".parse().unwrap())
         .add_directive("hyper=debug".parse().unwrap())
-        .add_directive("reqwest=debug".parse().unwrap())
-        .add_directive("opentelemetry=debug".parse().unwrap());
+        .add_directive("reqwest=debug".parse().unwrap());
+
+    let filter_fmt = EnvFilter::try_from_default_env().unwrap_or(default_fmt);
+
     let fmt_layer = tracing_subscriber::fmt::layer()
         .with_thread_names(true)
         .with_filter(filter_fmt);
