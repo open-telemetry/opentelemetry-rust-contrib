@@ -66,10 +66,10 @@ int main(void) {
     const char* role_name    = get_env_or_default("GENEVA_ROLE_NAME", "default-role");
     const char* role_instance= get_env_or_default("GENEVA_ROLE_INSTANCE", "default-instance");
 
-    /* Certificate auth if both provided; otherwise managed identity */
+    /* Certificate auth if both provided; otherwise system managed identity */
     const char* cert_path     = getenv("GENEVA_CERT_PATH");
     const char* cert_password = getenv("GENEVA_CERT_PASSWORD");
-    int32_t auth_method = (cert_path && cert_password) ? GENEVA_AUTH_CERTIFICATE : GENEVA_AUTH_MANAGED_IDENTITY;
+    uint32_t auth_method = (cert_path && cert_password) ? GENEVA_AUTH_CERTIFICATE : GENEVA_AUTH_SYSTEM_MANAGED_IDENTITY;
 
     printf("Configuration:\n");
     printf("  Endpoint: %s\n", endpoint);
@@ -81,7 +81,7 @@ int main(void) {
     printf("  Tenant: %s\n", tenant);
     printf("  Role Name: %s\n", role_name);
     printf("  Role Instance: %s\n", role_instance);
-    printf("  Auth Method: %s\n", auth_method == GENEVA_AUTH_CERTIFICATE ? "Certificate" : "Managed Identity");
+    printf("  Auth Method: %s\n", auth_method == GENEVA_AUTH_CERTIFICATE ? "Certificate" : "System Managed Identity");
     if (auth_method == GENEVA_AUTH_CERTIFICATE) {
         printf("  Cert Path: %s\n", cert_path);
     }
@@ -99,12 +99,11 @@ int main(void) {
         .tenant = tenant,
         .role_name = role_name,
         .role_instance = role_instance,
+        .msi_resource = NULL, /* Optional MSI resource - can be set via environment if needed */
     };
     if (auth_method == GENEVA_AUTH_CERTIFICATE) {
         cfg.auth.cert.cert_path = cert_path;
         cfg.auth.cert.cert_password = cert_password;
-    } else {
-        cfg.auth.msi.objid = NULL;
     }
 
     /* Create client */

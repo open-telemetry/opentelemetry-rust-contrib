@@ -14,8 +14,12 @@ typedef struct GenevaClientHandle GenevaClientHandle;
 typedef struct EncodedBatchesHandle EncodedBatchesHandle;
 
 // Authentication method constants
-#define GENEVA_AUTH_MANAGED_IDENTITY 0
+#define GENEVA_AUTH_SYSTEM_MANAGED_IDENTITY 0
 #define GENEVA_AUTH_CERTIFICATE 1
+#define GENEVA_AUTH_WORKLOAD_IDENTITY 2
+#define GENEVA_AUTH_USER_MANAGED_IDENTITY 3
+#define GENEVA_AUTH_USER_MANAGED_IDENTITY_BY_OBJECT_ID 4
+#define GENEVA_AUTH_USER_MANAGED_IDENTITY_BY_RESOURCE_ID 5
 
 /* Configuration for certificate auth (valid only when auth_method == GENEVA_AUTH_CERTIFICATE) */
 typedef struct {
@@ -23,20 +27,58 @@ typedef struct {
     const char* cert_password;  /* Certificate password */
 } GenevaCertAuthConfig;
 
-/* Configuration for managed identity auth (valid only when auth_method == GENEVA_AUTH_MANAGED_IDENTITY) */
+/* Configuration for Workload Identity auth (valid only when auth_method == GENEVA_AUTH_WORKLOAD_IDENTITY) */
 typedef struct {
-    const char* objid; /* Optional: Azure AD object ID as NUL-terminated GUID string
-                          e.g. "00000000-0000-0000-0000-000000000000" */
-} GenevaMSIAuthConfig;
+    const char* resource;       /* Azure AD resource URI (e.g., "https://monitor.azure.com") */
+} GenevaWorkloadIdentityAuthConfig;
+
+/* Configuration for User-assigned Managed Identity by client ID (valid only when auth_method == GENEVA_AUTH_USER_MANAGED_IDENTITY) */
+typedef struct {
+    const char* client_id;      /* Azure AD client ID */
+} GenevaUserManagedIdentityAuthConfig;
+
+/* Configuration for User-assigned Managed Identity by object ID (valid only when auth_method == GENEVA_AUTH_USER_MANAGED_IDENTITY_BY_OBJECT_ID) */
+typedef struct {
+    const char* object_id;      /* Azure AD object ID */
+} GenevaUserManagedIdentityByObjectIdAuthConfig;
+
+/* Configuration for User-assigned Managed Identity by resource ID (valid only when auth_method == GENEVA_AUTH_USER_MANAGED_IDENTITY_BY_RESOURCE_ID) */
+typedef struct {
+    const char* resource_id;    /* Azure resource ID */
+} GenevaUserManagedIdentityByResourceIdAuthConfig;
 
 /* Tagged union for auth-specific configuration.
-   The active member is determined by 'auth_method' in GenevaConfig. */
+   The active member is determined by 'auth_method' in GenevaConfig.
+
+   NOTE: When auth_method is GENEVA_AUTH_SYSTEM_MANAGED_IDENTITY (0),
+   the union is not accessed and can be zero-initialized. */
 typedef union {
-    GenevaMSIAuthConfig msi;    /* Valid when auth_method == GENEVA_AUTH_MANAGED_IDENTITY */
-    GenevaCertAuthConfig cert;  /* Valid when auth_method == GENEVA_AUTH_CERTIFICATE */
+    GenevaCertAuthConfig cert;                                              /* Valid when auth_method == GENEVA_AUTH_CERTIFICATE */
+    GenevaWorkloadIdentityAuthConfig workload_identity;                     /* Valid when auth_method == GENEVA_AUTH_WORKLOAD_IDENTITY */
+    GenevaUserManagedIdentityAuthConfig user_msi;                           /* Valid when auth_method == GENEVA_AUTH_USER_MANAGED_IDENTITY */
+    GenevaUserManagedIdentityByObjectIdAuthConfig user_msi_objid;           /* Valid when auth_method == GENEVA_AUTH_USER_MANAGED_IDENTITY_BY_OBJECT_ID */
+    GenevaUserManagedIdentityByResourceIdAuthConfig user_msi_resid;         /* Valid when auth_method == GENEVA_AUTH_USER_MANAGED_IDENTITY_BY_RESOURCE_ID */
 } GenevaAuthConfig;
 
-/* Configuration structure for Geneva client (C-compatible, tagged union) */
+/* Configuration structure for Geneva client (C-compatible, tagged union)
+ *
+ * IMPORTANT - Resource/Scope Configuration:
+ * Different auth methods require different resource configuration:
+ *
+ * - SystemManagedIdentity (0): Requires msi_resource field
+ * - Certificate (1): No resource needed (uses mTLS)
+ * - WorkloadIdentity (2): Requires auth.workload_identity.resource field
+ * - UserManagedIdentity by client ID (3): Requires msi_resource field
+ * - UserManagedIdentity by object ID (4): Requires msi_resource field
+ * - UserManagedIdentity by resource ID (5): Requires msi_resource field
+ *
+ * The msi_resource field specifies the Azure AD resource URI for token acquisition
+ * (e.g., "https://monitor.azure.com" for Azure Monitor in Public Cloud).
+ *
+ * Note: For user-assigned identities (3, 4, 5), the auth struct specifies WHICH
+ * identity to use (client_id/object_id/resource_id), while msi_resource specifies
+ * WHAT Azure resource to request tokens FOR. These are separate concerns.
+ */
 typedef struct {
     const char* endpoint;
     const char* environment;
@@ -44,16 +86,21 @@ typedef struct {
     const char* namespace_name;
     const char* region;
     uint32_t config_major_version;
-    int32_t auth_method; /* 0 = Managed Identity, 1 = Certificate */
+    uint32_t auth_method; /* 0 = System MSI, 1 = Certificate, 2 = Workload Identity, 3 = User MSI by client ID, 4 = User MSI by object ID, 5 = User MSI by resource ID */
     const char* tenant;
     const char* role_name;
     const char* role_instance;
     GenevaAuthConfig auth; /* Active member selected by auth_method */
+    const char* msi_resource; /* Azure AD resource URI for MSI auth (auth methods 0, 3, 4, 5). Not used for auth methods 1, 2. Nullable. */
 } GenevaConfig;
 
 /* Create a new Geneva client.
    - On success returns GENEVA_SUCCESS and writes *out_handle.
-   - On failure returns an error code. */
+   - On failure returns an error code.
+
+   IMPORTANT: Caller must call geneva_client_free() on the returned handle
+   to avoid memory leaks. All strings in config are copied; caller retains
+   ownership of config strings and may free them after this call returns. */
 GenevaError geneva_client_new(const GenevaConfig* config,
                               GenevaClientHandle** out_handle);
 
@@ -94,7 +141,12 @@ void geneva_batches_free(EncodedBatchesHandle* batches);
 
 
 
-/* Frees a Geneva client handle */
+/* Frees a Geneva client handle and all associated resources.
+
+   IMPORTANT: This must be called for every handle returned by geneva_client_new()
+   to avoid memory leaks. After calling this function, the handle must not be used.
+
+   Safe to call with NULL (no-op). */
 void geneva_client_free(GenevaClientHandle* handle);
 
 

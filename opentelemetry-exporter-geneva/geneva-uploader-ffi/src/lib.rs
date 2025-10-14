@@ -4,7 +4,7 @@
 #![allow(unsafe_attr_outside_unsafe)]
 
 use std::ffi::CStr;
-use std::os::raw::{c_char, c_int, c_uint};
+use std::os::raw::{c_char, c_uint};
 use std::ptr;
 use std::sync::OnceLock;
 use tokio::runtime::Runtime;
@@ -114,19 +114,63 @@ pub struct GenevaCertAuthConfig {
     pub cert_password: *const c_char, // Certificate password
 }
 
+/// Configuration for Workload Identity auth (valid only when auth_method == 2)
 #[repr(C)]
 #[derive(Copy, Clone)]
-pub struct GenevaMSIAuthConfig {
-    pub objid: *const c_char, // Optional: Azure AD object id; reserved for future use
+pub struct GenevaWorkloadIdentityAuthConfig {
+    pub resource: *const c_char, // Azure AD resource URI (e.g., "https://monitor.azure.com")
+}
+
+/// Configuration for User-assigned Managed Identity by client ID (valid only when auth_method == 3)
+#[repr(C)]
+#[derive(Copy, Clone)]
+pub struct GenevaUserManagedIdentityAuthConfig {
+    pub client_id: *const c_char, // Azure AD client ID
+}
+
+/// Configuration for User-assigned Managed Identity by object ID (valid only when auth_method == 4)
+#[repr(C)]
+#[derive(Copy, Clone)]
+pub struct GenevaUserManagedIdentityByObjectIdAuthConfig {
+    pub object_id: *const c_char, // Azure AD object ID
+}
+
+/// Configuration for User-assigned Managed Identity by resource ID (valid only when auth_method == 5)
+#[repr(C)]
+#[derive(Copy, Clone)]
+pub struct GenevaUserManagedIdentityByResourceIdAuthConfig {
+    pub resource_id: *const c_char, // Azure resource ID
 }
 
 #[repr(C)]
 pub union GenevaAuthConfig {
-    pub msi: GenevaMSIAuthConfig,   // Valid when auth_method == 0
     pub cert: GenevaCertAuthConfig, // Valid when auth_method == 1
+    pub workload_identity: GenevaWorkloadIdentityAuthConfig, // Valid when auth_method == 2
+    pub user_msi: GenevaUserManagedIdentityAuthConfig, // Valid when auth_method == 3
+    pub user_msi_objid: GenevaUserManagedIdentityByObjectIdAuthConfig, // Valid when auth_method == 4
+    pub user_msi_resid: GenevaUserManagedIdentityByResourceIdAuthConfig, // Valid when auth_method == 5
 }
 
 /// Configuration structure for Geneva client (C-compatible, tagged union)
+///
+/// # Auth Methods
+/// - 0 = SystemManagedIdentity (auto-detected VM/AKS system-assigned identity)
+/// - 1 = Certificate (mTLS with PKCS#12 certificate)
+/// - 2 = WorkloadIdentity (explicit Azure Workload Identity for AKS)
+/// - 3 = UserManagedIdentity (by client ID)
+/// - 4 = UserManagedIdentityByObjectId (by object ID)
+/// - 5 = UserManagedIdentityByResourceId (by resource ID)
+///
+/// # Resource Configuration
+/// Different auth methods require different resource configuration:
+/// - **Auth methods 0, 3, 4, 5 (MSI variants)**: Use the `msi_resource` field to specify the Azure AD resource URI
+/// - **Auth method 2 (WorkloadIdentity)**: Use `auth.workload_identity.resource` field
+/// - **Auth method 1 (Certificate)**: No resource needed
+///
+/// The `msi_resource` field specifies the Azure AD resource URI for token acquisition
+/// (e.g., <https://monitor.azure.com>). For user-assigned identities (3, 4, 5), the
+/// auth union specifies WHICH identity to use, while `msi_resource` specifies WHAT
+/// Azure resource to request tokens FOR. These are orthogonal concerns.
 #[repr(C)]
 pub struct GenevaConfig {
     pub endpoint: *const c_char,
@@ -135,11 +179,12 @@ pub struct GenevaConfig {
     pub namespace_name: *const c_char,
     pub region: *const c_char,
     pub config_major_version: c_uint,
-    pub auth_method: c_int, // 0 = ManagedIdentity, 1 = Certificate
+    pub auth_method: c_uint,
     pub tenant: *const c_char,
     pub role_name: *const c_char,
     pub role_instance: *const c_char,
     pub auth: GenevaAuthConfig, // Active member selected by auth_method
+    pub msi_resource: *const c_char, // Azure AD resource URI for MSI auth (auth methods 0, 3, 4, 5). Not used for auth methods 1, 2. Nullable.
 }
 
 /// Error codes returned by FFI functions
@@ -164,6 +209,10 @@ pub enum GenevaError {
     // Granular config/auth errors (used)
     InvalidAuthMethod = 110,
     InvalidCertConfig = 111,
+    InvalidWorkloadIdentityConfig = 112,
+    InvalidUserMsiConfig = 113,
+    InvalidUserMsiByObjectIdConfig = 114,
+    InvalidUserMsiByResourceIdConfig = 115,
 
     // Missing required config (granular INVALID_CONFIG)
     MissingEndpoint = 130,
@@ -289,18 +338,8 @@ pub unsafe extern "C" fn geneva_client_new(
     // Auth method conversion
     let auth_method = match config.auth_method {
         0 => {
-            // Unified: Workload Identity (AKS) or System Managed Identity (VM)
-            // Auto-detect based on environment
-            if std::env::var("AZURE_FEDERATED_TOKEN_FILE").is_ok() {
-                // Workload Identity: azure_identity crate reads AZURE_CLIENT_ID, AZURE_TENANT_ID,
-                // and AZURE_FEDERATED_TOKEN_FILE automatically from environment
-                let resource = std::env::var("GENEVA_WORKLOAD_IDENTITY_RESOURCE")
-                    .unwrap_or_else(|_| "https://monitor.azure.com".to_string());
-
-                AuthMethod::WorkloadIdentity { resource }
-            } else {
-                AuthMethod::SystemManagedIdentity
-            }
+            // System-assigned Managed Identity
+            AuthMethod::SystemManagedIdentity
         }
 
         1 => {
@@ -330,9 +369,85 @@ pub unsafe extern "C" fn geneva_client_new(
                 password: cert_password,
             }
         }
+
+        2 => {
+            // Workload Identity authentication
+            let workload_identity = unsafe { config.auth.workload_identity };
+            if workload_identity.resource.is_null() {
+                return GenevaError::InvalidWorkloadIdentityConfig;
+            }
+            let resource = match unsafe { c_str_to_string(workload_identity.resource, "resource") }
+            {
+                Ok(s) => s,
+                Err(_e) => {
+                    return GenevaError::InvalidConfig;
+                }
+            };
+            AuthMethod::WorkloadIdentity { resource }
+        }
+
+        3 => {
+            // User-assigned Managed Identity by client ID
+            let user_msi = unsafe { config.auth.user_msi };
+            if user_msi.client_id.is_null() {
+                return GenevaError::InvalidUserMsiConfig;
+            }
+            let client_id = match unsafe { c_str_to_string(user_msi.client_id, "client_id") } {
+                Ok(s) => s,
+                Err(_e) => {
+                    return GenevaError::InvalidConfig;
+                }
+            };
+            AuthMethod::UserManagedIdentity { client_id }
+        }
+
+        4 => {
+            // User-assigned Managed Identity by object ID
+            let user_msi_objid = unsafe { config.auth.user_msi_objid };
+            if user_msi_objid.object_id.is_null() {
+                return GenevaError::InvalidUserMsiByObjectIdConfig;
+            }
+            let object_id = match unsafe { c_str_to_string(user_msi_objid.object_id, "object_id") }
+            {
+                Ok(s) => s,
+                Err(_e) => {
+                    return GenevaError::InvalidConfig;
+                }
+            };
+            AuthMethod::UserManagedIdentityByObjectId { object_id }
+        }
+
+        5 => {
+            // User-assigned Managed Identity by resource ID
+            let user_msi_resid = unsafe { config.auth.user_msi_resid };
+            if user_msi_resid.resource_id.is_null() {
+                return GenevaError::InvalidUserMsiByResourceIdConfig;
+            }
+            let resource_id =
+                match unsafe { c_str_to_string(user_msi_resid.resource_id, "resource_id") } {
+                    Ok(s) => s,
+                    Err(_e) => {
+                        return GenevaError::InvalidConfig;
+                    }
+                };
+            AuthMethod::UserManagedIdentityByResourceId { resource_id }
+        }
+
         _ => {
             return GenevaError::InvalidAuthMethod;
         }
+    };
+
+    // Parse optional MSI resource
+    let msi_resource = if !config.msi_resource.is_null() {
+        match unsafe { c_str_to_string(config.msi_resource, "msi_resource") } {
+            Ok(s) => Some(s),
+            Err(_e) => {
+                return GenevaError::InvalidConfig;
+            }
+        }
+    } else {
+        None
     };
 
     // Build client config
@@ -347,7 +462,7 @@ pub unsafe extern "C" fn geneva_client_new(
         tenant,
         role_name,
         role_instance,
-        msi_resource: None, // FFI path currently does not accept MSI resource; extend API if needed
+        msi_resource,
     };
 
     // Create client
@@ -646,13 +761,15 @@ mod tests {
                 namespace_name: namespace.as_ptr(),
                 region: region.as_ptr(),
                 config_major_version: 1,
-                auth_method: 0,
+                auth_method: 0, // SystemManagedIdentity - union not used
                 tenant: tenant.as_ptr(),
                 role_name: role_name.as_ptr(),
                 role_instance: role_instance.as_ptr(),
-                auth: GenevaAuthConfig {
-                    msi: GenevaMSIAuthConfig { objid: ptr::null() },
-                },
+                // SAFETY: GenevaAuthConfig only contains raw pointers (*const c_char).
+                // Zero-initializing raw pointers creates null pointers, which is valid.
+                // The union is never accessed for SystemManagedIdentity (auth_method 0).
+                auth: std::mem::zeroed(),
+                msi_resource: ptr::null(),
             };
 
             let mut out: *mut GenevaClientHandle = std::ptr::null_mut();
@@ -681,13 +798,12 @@ mod tests {
                 namespace_name: namespace.as_ptr(),
                 region: region.as_ptr(),
                 config_major_version: 1,
-                auth_method: 99, // Invalid auth method
+                auth_method: 99, // Invalid auth method - union not used
                 tenant: tenant.as_ptr(),
                 role_name: role_name.as_ptr(),
                 role_instance: role_instance.as_ptr(),
-                auth: GenevaAuthConfig {
-                    msi: GenevaMSIAuthConfig { objid: ptr::null() },
-                },
+                auth: std::mem::zeroed(), // Union not accessed for invalid auth method
+                msi_resource: ptr::null(),
             };
 
             let mut out: *mut GenevaClientHandle = std::ptr::null_mut();
@@ -726,11 +842,170 @@ mod tests {
                         cert_password: ptr::null(),
                     },
                 },
+                msi_resource: ptr::null(),
             };
 
             let mut out: *mut GenevaClientHandle = std::ptr::null_mut();
             let rc = geneva_client_new(&config, &mut out);
             assert_eq!(rc as u32, GenevaError::InvalidCertConfig as u32);
+            assert!(out.is_null());
+        }
+    }
+
+    #[test]
+    fn test_workload_identity_auth_missing_resource() {
+        unsafe {
+            let endpoint = CString::new("https://test.geneva.com").unwrap();
+            let environment = CString::new("test").unwrap();
+            let account = CString::new("testaccount").unwrap();
+            let namespace = CString::new("testns").unwrap();
+            let region = CString::new("testregion").unwrap();
+            let tenant = CString::new("testtenant").unwrap();
+            let role_name = CString::new("testrole").unwrap();
+            let role_instance = CString::new("testinstance").unwrap();
+
+            let config = GenevaConfig {
+                endpoint: endpoint.as_ptr(),
+                environment: environment.as_ptr(),
+                account: account.as_ptr(),
+                namespace_name: namespace.as_ptr(),
+                region: region.as_ptr(),
+                config_major_version: 1,
+                auth_method: 2, // Workload Identity
+                tenant: tenant.as_ptr(),
+                role_name: role_name.as_ptr(),
+                role_instance: role_instance.as_ptr(),
+                auth: GenevaAuthConfig {
+                    workload_identity: GenevaWorkloadIdentityAuthConfig {
+                        resource: ptr::null(),
+                    },
+                },
+                msi_resource: ptr::null(),
+            };
+
+            let mut out: *mut GenevaClientHandle = std::ptr::null_mut();
+            let rc = geneva_client_new(&config, &mut out);
+            assert_eq!(rc as u32, GenevaError::InvalidWorkloadIdentityConfig as u32);
+            assert!(out.is_null());
+        }
+    }
+
+    #[test]
+    fn test_user_msi_auth_missing_client_id() {
+        unsafe {
+            let endpoint = CString::new("https://test.geneva.com").unwrap();
+            let environment = CString::new("test").unwrap();
+            let account = CString::new("testaccount").unwrap();
+            let namespace = CString::new("testns").unwrap();
+            let region = CString::new("testregion").unwrap();
+            let tenant = CString::new("testtenant").unwrap();
+            let role_name = CString::new("testrole").unwrap();
+            let role_instance = CString::new("testinstance").unwrap();
+
+            let config = GenevaConfig {
+                endpoint: endpoint.as_ptr(),
+                environment: environment.as_ptr(),
+                account: account.as_ptr(),
+                namespace_name: namespace.as_ptr(),
+                region: region.as_ptr(),
+                config_major_version: 1,
+                auth_method: 3, // User Managed Identity by client ID
+                tenant: tenant.as_ptr(),
+                role_name: role_name.as_ptr(),
+                role_instance: role_instance.as_ptr(),
+                auth: GenevaAuthConfig {
+                    user_msi: GenevaUserManagedIdentityAuthConfig {
+                        client_id: ptr::null(),
+                    },
+                },
+                msi_resource: ptr::null(),
+            };
+
+            let mut out: *mut GenevaClientHandle = std::ptr::null_mut();
+            let rc = geneva_client_new(&config, &mut out);
+            assert_eq!(rc as u32, GenevaError::InvalidUserMsiConfig as u32);
+            assert!(out.is_null());
+        }
+    }
+
+    #[test]
+    fn test_user_msi_auth_by_object_id_missing() {
+        unsafe {
+            let endpoint = CString::new("https://test.geneva.com").unwrap();
+            let environment = CString::new("test").unwrap();
+            let account = CString::new("testaccount").unwrap();
+            let namespace = CString::new("testns").unwrap();
+            let region = CString::new("testregion").unwrap();
+            let tenant = CString::new("testtenant").unwrap();
+            let role_name = CString::new("testrole").unwrap();
+            let role_instance = CString::new("testinstance").unwrap();
+
+            let config = GenevaConfig {
+                endpoint: endpoint.as_ptr(),
+                environment: environment.as_ptr(),
+                account: account.as_ptr(),
+                namespace_name: namespace.as_ptr(),
+                region: region.as_ptr(),
+                config_major_version: 1,
+                auth_method: 4, // User Managed Identity by object ID
+                tenant: tenant.as_ptr(),
+                role_name: role_name.as_ptr(),
+                role_instance: role_instance.as_ptr(),
+                auth: GenevaAuthConfig {
+                    user_msi_objid: GenevaUserManagedIdentityByObjectIdAuthConfig {
+                        object_id: ptr::null(),
+                    },
+                },
+                msi_resource: ptr::null(),
+            };
+
+            let mut out: *mut GenevaClientHandle = std::ptr::null_mut();
+            let rc = geneva_client_new(&config, &mut out);
+            assert_eq!(
+                rc as u32,
+                GenevaError::InvalidUserMsiByObjectIdConfig as u32
+            );
+            assert!(out.is_null());
+        }
+    }
+
+    #[test]
+    fn test_user_msi_auth_by_resource_id_missing() {
+        unsafe {
+            let endpoint = CString::new("https://test.geneva.com").unwrap();
+            let environment = CString::new("test").unwrap();
+            let account = CString::new("testaccount").unwrap();
+            let namespace = CString::new("testns").unwrap();
+            let region = CString::new("testregion").unwrap();
+            let tenant = CString::new("testtenant").unwrap();
+            let role_name = CString::new("testrole").unwrap();
+            let role_instance = CString::new("testinstance").unwrap();
+
+            let config = GenevaConfig {
+                endpoint: endpoint.as_ptr(),
+                environment: environment.as_ptr(),
+                account: account.as_ptr(),
+                namespace_name: namespace.as_ptr(),
+                region: region.as_ptr(),
+                config_major_version: 1,
+                auth_method: 5, // User Managed Identity by resource ID
+                tenant: tenant.as_ptr(),
+                role_name: role_name.as_ptr(),
+                role_instance: role_instance.as_ptr(),
+                auth: GenevaAuthConfig {
+                    user_msi_resid: GenevaUserManagedIdentityByResourceIdAuthConfig {
+                        resource_id: ptr::null(),
+                    },
+                },
+                msi_resource: ptr::null(),
+            };
+
+            let mut out: *mut GenevaClientHandle = std::ptr::null_mut();
+            let rc = geneva_client_new(&config, &mut out);
+            assert_eq!(
+                rc as u32,
+                GenevaError::InvalidUserMsiByResourceIdConfig as u32
+            );
             assert!(out.is_null());
         }
     }
@@ -765,6 +1040,7 @@ mod tests {
                         cert_password: ptr::null(),
                     },
                 },
+                msi_resource: ptr::null(),
             };
 
             let mut out: *mut GenevaClientHandle = std::ptr::null_mut();
