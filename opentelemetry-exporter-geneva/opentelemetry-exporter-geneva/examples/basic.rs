@@ -5,28 +5,28 @@
 //! To see internal logs from the geneva-uploader (initialization, auth, encoding, uploads),
 //! use the RUST_LOG environment variable:
 //!
- //! ## INFO level (initialization, auth token acquisition, GCS config requests)
- //! (include a root directive so example's own info! logs show)
- //! ```bash
- //! RUST_LOG=info,geneva-uploader=info cargo run --example basic
- //! ```
- //!
- //! ## DEBUG level (includes all hot-path operations: encoding, compression, uploads)
- //! ```bash
- //! RUST_LOG=info,geneva-uploader=debug cargo run --example basic
- //! ```
+//! ## INFO level (initialization, auth token acquisition, GCS config requests)
+//! (include a root directive so example's own info! logs show)
+//! ```bash
+//! RUST_LOG=info,geneva-uploader=info cargo run --example basic
+//! ```
+//!
+//! ## DEBUG level (includes all hot-path operations: encoding, compression, uploads)
+//! ```bash
+//! RUST_LOG=info,geneva-uploader=debug cargo run --example basic
+//! ```
 //!
 //! ## Filter out noisy dependencies
 //! ```bash
- //! RUST_LOG=info,geneva-uploader=debug,hyper=off,reqwest=off cargo run --example basic
+//! RUST_LOG=info,geneva-uploader=debug,hyper=off,reqwest=off cargo run --example basic
 //! ```
 //!
- //! Alternatively, to hard-code debug for the geneva_uploader crate (instead of relying
- //! on RUST_LOG each run), add the directive when constructing the filter:
- //! ```rust
- //! // after building/obtaining `filter_fmt`
- //! // .add_directive("geneva-uploader=debug".parse().unwrap())
- //! ```
+//! Alternatively, to hard-code debug for the geneva_uploader crate (instead of relying
+//! on RUST_LOG each run), add the directive when constructing the filter:
+//! ```rust
+//! // after building/obtaining `filter_fmt`
+//! // .add_directive("geneva-uploader=debug".parse().unwrap())
+//! ```
 
 use geneva_uploader::client::{GenevaClient, GenevaClientConfig};
 use geneva_uploader::AuthMethod;
