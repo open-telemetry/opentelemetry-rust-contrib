@@ -779,14 +779,20 @@ impl GenevaConfigClient {
                 "Config service returned success status"
             );
 
-            let parsed = serde_json::from_str::<GenevaResponse>(&body).map_err(|e| {
-            debug!(
-                name: "config_client.fetch_ingestion_info.success_status",
-                target: "geneva-uploader",
-                "Config service returned success status"
-            );
-                GenevaConfigClientError::AuthInfoNotFound(format!("Failed to parse response: {e}"))
-            })?;
+            let parsed: GenevaResponse = match serde_json::from_str::<GenevaResponse>(&body) {
+                Ok(p) => p,
+                Err(e) => {
+                    debug!(
+                        name: "config_client.fetch_ingestion_info.parse_error",
+                        target: "geneva-uploader",
+                        error = %e,
+                        "Failed to parse config service response"
+                    );
+                    return Err(GenevaConfigClientError::AuthInfoNotFound(
+                        format!("Failed to parse response: {e}")
+                    ));
+                }
+            };
 
             for account in parsed.storage_account_keys {
                 if account.is_primary_moniker && account.account_moniker_name.contains("diag") {
@@ -797,30 +803,28 @@ impl GenevaConfigClient {
                     info!(
                         name: "config_client.fetch_ingestion_info.success",
                         target: "geneva-uploader",
-                        "Successfully retrieved ingestion info, moniker={}", account.account_moniker_name
+                        "Successfully retrieved ingestion info, moniker={}",
+                        account.account_moniker_name
                     );
                     return Ok((parsed.ingestion_gateway_info, moniker_info));
                 }
             }
 
-                debug!(
-                    name: "config_client.fetch_ingestion_info.parse_error",
-                    target: "geneva-uploader",
-                    "Failed to parse config service response: {}", e
-                );
-            Err(GenevaConfigClientError::MonikerNotFound(
-                "No primary diag moniker found in storage accounts".to_string(),
-            ))
-        } else {
             debug!(
                 name: "config_client.fetch_ingestion_info.no_diag_moniker",
                 target: "geneva-uploader",
                 "No primary diag moniker found in storage accounts"
             );
+            Err(GenevaConfigClientError::MonikerNotFound(
+                "No primary diag moniker found in storage accounts".to_string(),
+            ))
+        } else {
             debug!(
                 name: "config_client.fetch_ingestion_info.error_status",
                 target: "geneva-uploader",
-                "Config service returned error status={}, body={}", status, body
+                status = status.as_u16(),
+                body = %body,
+                "Config service returned error"
             );
             Err(GenevaConfigClientError::RequestFailed {
                 status: status.as_u16(),
