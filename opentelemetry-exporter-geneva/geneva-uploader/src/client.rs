@@ -84,17 +84,15 @@ impl GenevaClient {
             auth_method: cfg.auth_method,
             msi_resource: cfg.msi_resource,
         };
-        let config_client = Arc::new(
-            GenevaConfigClient::new(config_client_config)
-                .map_err(|e| {
-                    debug!(
-                        name: "client.new.config_client_init",
-                        target: "geneva-uploader",
-                        "GenevaConfigClient init failed: {}", e
-                    );
-                    format!("GenevaConfigClient init failed: {e}")
-                })?,
-        );
+        let config_client =
+            Arc::new(GenevaConfigClient::new(config_client_config).map_err(|e| {
+                debug!(
+                    name: "client.new.config_client_init",
+                    target: "geneva-uploader",
+                    "GenevaConfigClient init failed: {}", e
+                );
+                format!("GenevaConfigClient init failed: {e}")
+            })?);
 
         let source_identity = format!(
             "Tenant={}/Role={}/RoleInstance={}",
@@ -115,8 +113,8 @@ impl GenevaClient {
             config_version: config_version.clone(),
         };
 
-        let uploader = GenevaUploader::from_config_client(config_client, uploader_config)
-            .map_err(|e| {
+        let uploader =
+            GenevaUploader::from_config_client(config_client, uploader_config).map_err(|e| {
                 debug!(
                     name: "client.new.uploader_init",
                     target: "geneva-uploader",

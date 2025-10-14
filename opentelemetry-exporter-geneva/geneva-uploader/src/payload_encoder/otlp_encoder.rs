@@ -164,17 +164,16 @@ impl OtlpEncoder {
                 events: batch_data.events,
             };
             let uncompressed = blob.to_bytes();
-            let compressed = lz4_chunked_compression(&uncompressed)
-                .map_err(|e| {
-                    debug!(
-                        name: "encoder.encode_log_batch.compress_error",
-                        target: "geneva-uploader",
-                        event_name = %batch_event_name,
-                        error = %e,
-                        "LZ4 compression failed"
-                    );
-                    format!("compression failed: {e}")
-                })?;
+            let compressed = lz4_chunked_compression(&uncompressed).map_err(|e| {
+                debug!(
+                    name: "encoder.encode_log_batch.compress_error",
+                    target: "geneva-uploader",
+                    event_name = %batch_event_name,
+                    error = %e,
+                    "LZ4 compression failed"
+                );
+                format!("compression failed: {e}")
+            })?;
 
             debug!(
                 name: "encoder.encode_log_batch",
@@ -303,16 +302,15 @@ impl OtlpEncoder {
         };
 
         let uncompressed = blob.to_bytes();
-        let compressed = lz4_chunked_compression(&uncompressed)
-            .map_err(|e| {
-                debug!(
-                    name: "encoder.encode_span_batch.compress_error",
-                    target: "geneva-uploader",
-                    error = %e,
-                    "LZ4 compression failed for spans"
-                );
-                format!("compression failed: {e}")
-            })?;
+        let compressed = lz4_chunked_compression(&uncompressed).map_err(|e| {
+            debug!(
+                name: "encoder.encode_span_batch.compress_error",
+                target: "geneva-uploader",
+                error = %e,
+                "LZ4 compression failed for spans"
+            );
+            format!("compression failed: {e}")
+        })?;
 
         debug!(
             name: "encoder.encode_span_batch",

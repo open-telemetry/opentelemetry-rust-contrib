@@ -263,16 +263,15 @@ impl GenevaUploader {
         let body = response.text().await?;
 
         if status == reqwest::StatusCode::ACCEPTED {
-            let ingest_response: IngestionResponse =
-                serde_json::from_str(&body).map_err(|e| {
-                    debug!(
-                        name: "uploader.upload.parse_error",
-                        target: "geneva-uploader",
-                        error = %e,
-                        "Failed to parse ingestion response"
-                    );
-                    GenevaUploaderError::SerdeJson(e)
-                })?;
+            let ingest_response: IngestionResponse = serde_json::from_str(&body).map_err(|e| {
+                debug!(
+                    name: "uploader.upload.parse_error",
+                    target: "geneva-uploader",
+                    error = %e,
+                    "Failed to parse ingestion response"
+                );
+                GenevaUploaderError::SerdeJson(e)
+            })?;
 
             debug!(
                 name: "uploader.upload.success",

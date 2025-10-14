@@ -280,24 +280,22 @@ impl GenevaConfigClient {
                     "Using Certificate authentication"
                 );
                 // Read the PKCS#12 file
-                let p12_bytes = fs::read(path)
-                    .map_err(|e| {
-                        debug!(
-                            name: "config_client.new.certificate_read_error",
-                            target: "geneva-uploader",
-                            "Failed to read certificate file: {}", e
-                        );
-                        GenevaConfigClientError::Certificate(e.to_string())
-                    })?;
-                let identity = Identity::from_pkcs12(&p12_bytes, password)
-                    .map_err(|e| {
-                        debug!(
-                            name: "config_client.new.certificate_parse_error",
-                            target: "geneva-uploader",
-                            "Failed to parse PKCS#12 certificate: {}", e
-                        );
-                        GenevaConfigClientError::Certificate(e.to_string())
-                    })?;
+                let p12_bytes = fs::read(path).map_err(|e| {
+                    debug!(
+                        name: "config_client.new.certificate_read_error",
+                        target: "geneva-uploader",
+                        "Failed to read certificate file: {}", e
+                    );
+                    GenevaConfigClientError::Certificate(e.to_string())
+                })?;
+                let identity = Identity::from_pkcs12(&p12_bytes, password).map_err(|e| {
+                    debug!(
+                        name: "config_client.new.certificate_parse_error",
+                        target: "geneva-uploader",
+                        "Failed to parse PKCS#12 certificate: {}", e
+                    );
+                    GenevaConfigClientError::Certificate(e.to_string())
+                })?;
                 //TODO - use use_native_tls instead of preconfigured_tls once we no longer need self-signed certs
                 // and TLS 1.2 as the exclusive protocol.
                 let tls_connector =
@@ -419,21 +417,20 @@ impl GenevaConfigClient {
             "Acquiring Workload Identity token"
         );
 
-        let resource =
-            match &self.config.auth_method {
-                AuthMethod::WorkloadIdentity { resource } => resource,
-                _ => {
-                    debug!(
-                        name: "config_client.get_workload_identity_token.invalid_auth_method",
-                        target: "geneva-uploader",
-                        "get_workload_identity_token called but auth method is not WorkloadIdentity"
-                    );
-                    return Err(GenevaConfigClientError::WorkloadIdentityAuth(
-                        "get_workload_identity_token called but auth method is not WorkloadIdentity"
-                            .to_string(),
-                    ));
-                }
-            };
+        let resource = match &self.config.auth_method {
+            AuthMethod::WorkloadIdentity { resource } => resource,
+            _ => {
+                debug!(
+                    name: "config_client.get_workload_identity_token.invalid_auth_method",
+                    target: "geneva-uploader",
+                    "get_workload_identity_token called but auth method is not WorkloadIdentity"
+                );
+                return Err(GenevaConfigClientError::WorkloadIdentityAuth(
+                    "get_workload_identity_token called but auth method is not WorkloadIdentity"
+                        .to_string(),
+                ));
+            }
+        };
 
         // TODO: Extract scope generation logic into helper function shared with get_msi_token()
         let base = resource.trim_end_matches("/.default").trim_end_matches('/');
@@ -788,23 +785,26 @@ impl GenevaConfigClient {
                         error = %e,
                         "Failed to parse config service response"
                     );
-                    return Err(GenevaConfigClientError::AuthInfoNotFound(
-                        format!("Failed to parse response: {e}")
-                    ));
+                    return Err(GenevaConfigClientError::AuthInfoNotFound(format!(
+                        "Failed to parse response: {e}"
+                    )));
                 }
             };
 
             for account in parsed.storage_account_keys {
                 if account.is_primary_moniker && account.account_moniker_name.contains("diag") {
+                    // Move (not clone) the strings out of the StorageAccountKey; no extra allocation
+                    let account_moniker_name = account.account_moniker_name;
+                    let account_group_name = account.account_group_name;
                     let moniker_info = MonikerInfo {
-                        name: account.account_moniker_name.clone(),
-                        account_group: account.account_group_name.clone(),
+                        name: account_moniker_name,
+                        account_group: account_group_name,
                     };
                     info!(
                         name: "config_client.fetch_ingestion_info.success",
                         target: "geneva-uploader",
-                        "Successfully retrieved ingestion info, moniker={}",
-                        account.account_moniker_name
+                        moniker = %moniker_info.name,
+                        "Successfully retrieved ingestion info"
                     );
                     return Ok((parsed.ingestion_gateway_info, moniker_info));
                 }
