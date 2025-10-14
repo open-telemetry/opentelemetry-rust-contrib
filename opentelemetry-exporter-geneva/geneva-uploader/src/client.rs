@@ -7,6 +7,7 @@ use crate::payload_encoder::otlp_encoder::OtlpEncoder;
 use opentelemetry_proto::tonic::logs::v1::ResourceLogs;
 use opentelemetry_proto::tonic::trace::v1::ResourceSpans;
 use std::sync::Arc;
+use tracing::{debug, info};
 
 /// Public batch type (already LZ4 chunked compressed).
 /// Produced by `OtlpEncoder::encode_log_batch` and returned to callers.
@@ -44,6 +45,13 @@ pub struct GenevaClient {
 
 impl GenevaClient {
     pub fn new(cfg: GenevaClientConfig) -> Result<Self, String> {
+        info!(
+            name: "client.new",
+            target: "geneva-uploader",
+            "Initializing GenevaClient with endpoint={}, namespace={}, account={}",
+            cfg.endpoint, cfg.namespace, cfg.account
+        );
+
         // Validate MSI resource presence for managed identity variants
         match cfg.auth_method {
             AuthMethod::SystemManagedIdentity
@@ -51,6 +59,11 @@ impl GenevaClient {
             | AuthMethod::UserManagedIdentityByObjectId { .. }
             | AuthMethod::UserManagedIdentityByResourceId { .. } => {
                 if cfg.msi_resource.is_none() {
+                    debug!(
+                        name: "client.new.validate_msi_resource",
+                        target: "geneva-uploader",
+                        "Validation failed: msi_resource must be provided for managed identity auth"
+                    );
                     return Err(
                         "msi_resource must be provided for managed identity auth".to_string()
                     );
@@ -73,7 +86,14 @@ impl GenevaClient {
         };
         let config_client = Arc::new(
             GenevaConfigClient::new(config_client_config)
-                .map_err(|e| format!("GenevaConfigClient init failed: {e}"))?,
+                .map_err(|e| {
+                    debug!(
+                        name: "client.new.config_client_init",
+                        target: "geneva-uploader",
+                        "GenevaConfigClient init failed: {}", e
+                    );
+                    format!("GenevaConfigClient init failed: {e}")
+                })?,
         );
 
         let source_identity = format!(
@@ -96,7 +116,20 @@ impl GenevaClient {
         };
 
         let uploader = GenevaUploader::from_config_client(config_client, uploader_config)
-            .map_err(|e| format!("GenevaUploader init failed: {e}"))?;
+            .map_err(|e| {
+                debug!(
+                    name: "client.new.uploader_init",
+                    target: "geneva-uploader",
+                    "GenevaUploader init failed: {}", e
+                );
+                format!("GenevaUploader init failed: {e}")
+            })?;
+
+        info!(
+            name: "client.new.complete",
+            target: "geneva-uploader",
+            "GenevaClient initialized successfully"
+        );
 
         Ok(Self {
             uploader: Arc::new(uploader),
@@ -110,6 +143,12 @@ impl GenevaClient {
         &self,
         logs: &[ResourceLogs],
     ) -> Result<Vec<EncodedBatch>, String> {
+        debug!(
+            name: "client.encode_and_compress_logs",
+            target: "geneva-uploader",
+            "Encoding and compressing {} resource logs", logs.len()
+        );
+
         let log_iter = logs
             .iter()
             .flat_map(|resource_log| resource_log.scope_logs.iter())
@@ -117,7 +156,14 @@ impl GenevaClient {
 
         self.encoder
             .encode_log_batch(log_iter, &self.metadata)
-            .map_err(|e| format!("Compression failed: {e}"))
+            .map_err(|e| {
+                debug!(
+                    name: "client.encode_and_compress_logs.error",
+                    target: "geneva-uploader",
+                    "Log compression failed: {}", e
+                );
+                format!("Compression failed: {e}")
+            })
     }
 
     /// Encode OTLP spans into LZ4 chunked compressed batches.
@@ -125,6 +171,12 @@ impl GenevaClient {
         &self,
         spans: &[ResourceSpans],
     ) -> Result<Vec<EncodedBatch>, String> {
+        debug!(
+            name: "client.encode_and_compress_spans",
+            target: "geneva-uploader",
+            "Encoding and compressing {} resource spans", spans.len()
+        );
+
         let span_iter = spans
             .iter()
             .flat_map(|resource_span| resource_span.scope_spans.iter())
@@ -132,16 +184,47 @@ impl GenevaClient {
 
         self.encoder
             .encode_span_batch(span_iter, &self.metadata)
-            .map_err(|e| format!("Compression failed: {e}"))
+            .map_err(|e| {
+                debug!(
+                    name: "client.encode_and_compress_spans.error",
+                    target: "geneva-uploader",
+                    "Span compression failed: {}", e
+                );
+                format!("Compression failed: {e}")
+            })
     }
 
     /// Upload a single compressed batch.
     /// This allows for granular control over uploads, including custom retry logic for individual batches.
     pub async fn upload_batch(&self, batch: &EncodedBatch) -> Result<(), String> {
+        debug!(
+            name: "client.upload_batch",
+            target: "geneva-uploader",
+            event_name = %batch.event_name,
+            size = batch.data.len(),
+            "Uploading batch"
+        );
+
         self.uploader
             .upload(batch.data.clone(), &batch.event_name, &batch.metadata)
             .await
-            .map(|_| ())
-            .map_err(|e| format!("Geneva upload failed: {e} Event: {}", batch.event_name))
+            .map(|_| {
+                debug!(
+                    name: "client.upload_batch.success",
+                    target: "geneva-uploader",
+                    event_name = %batch.event_name,
+                    "Successfully uploaded batch"
+                );
+            })
+            .map_err(|e| {
+                debug!(
+                    name: "client.upload_batch.error",
+                    target: "geneva-uploader",
+                    event_name = %batch.event_name,
+                    error = %e,
+                    "Geneva upload failed"
+                );
+                format!("Geneva upload failed: {e} Event: {}", batch.event_name)
+            })
     }
 }

@@ -1,4 +1,29 @@
 //! run with `$ cargo run --example basic
+//!
+//! # Enabling Geneva Uploader Internal Logs
+//!
+//! To see internal logs from the geneva-uploader (initialization, auth, encoding, uploads),
+//! use the RUST_LOG environment variable:
+//!
+//! ## INFO level (initialization, auth token acquisition, GCS config requests)
+//! ```bash
+//! RUST_LOG=geneva_uploader=info cargo run --example basic
+//! ```
+//!
+//! ## DEBUG level (includes all hot-path operations: encoding, compression, uploads)
+//! ```bash
+//! RUST_LOG=geneva_uploader=debug cargo run --example basic
+//! ```
+//!
+//! ## Filter out noisy dependencies
+//! ```bash
+//! RUST_LOG=info,geneva_uploader=debug,hyper=off,reqwest=off cargo run --example basic
+//! ```
+//!
+//! Alternatively, modify the `filter_fmt` in the code (line ~108) and add:
+//! ```rust
+//! .add_directive("geneva_uploader=debug".parse().unwrap())
+//! ```
 
 use geneva_uploader::client::{GenevaClient, GenevaClientConfig};
 use geneva_uploader::AuthMethod;
