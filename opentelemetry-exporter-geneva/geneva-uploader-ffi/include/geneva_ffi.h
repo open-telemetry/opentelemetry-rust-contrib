@@ -48,7 +48,10 @@ typedef struct {
 } GenevaUserManagedIdentityByResourceIdAuthConfig;
 
 /* Tagged union for auth-specific configuration.
-   The active member is determined by 'auth_method' in GenevaConfig. */
+   The active member is determined by 'auth_method' in GenevaConfig.
+
+   NOTE: When auth_method is GENEVA_AUTH_SYSTEM_MANAGED_IDENTITY (0),
+   the union is not accessed and can be zero-initialized. */
 typedef union {
     GenevaCertAuthConfig cert;                                              /* Valid when auth_method == GENEVA_AUTH_CERTIFICATE */
     GenevaWorkloadIdentityAuthConfig workload_identity;                     /* Valid when auth_method == GENEVA_AUTH_WORKLOAD_IDENTITY */

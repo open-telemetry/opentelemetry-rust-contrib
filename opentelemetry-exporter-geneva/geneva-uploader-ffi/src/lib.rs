@@ -750,16 +750,11 @@ mod tests {
                 namespace_name: namespace.as_ptr(),
                 region: region.as_ptr(),
                 config_major_version: 1,
-                auth_method: 0, // SystemManagedIdentity
+                auth_method: 0, // SystemManagedIdentity - union not used
                 tenant: tenant.as_ptr(),
                 role_name: role_name.as_ptr(),
                 role_instance: role_instance.as_ptr(),
-                auth: GenevaAuthConfig {
-                    cert: GenevaCertAuthConfig {
-                        cert_path: ptr::null(),
-                        cert_password: ptr::null(),
-                    },
-                },
+                auth: std::mem::zeroed(), // Union not accessed for SystemManagedIdentity
                 msi_resource: ptr::null(),
             };
 
@@ -789,16 +784,11 @@ mod tests {
                 namespace_name: namespace.as_ptr(),
                 region: region.as_ptr(),
                 config_major_version: 1,
-                auth_method: 99, // Invalid auth method
+                auth_method: 99, // Invalid auth method - union not used
                 tenant: tenant.as_ptr(),
                 role_name: role_name.as_ptr(),
                 role_instance: role_instance.as_ptr(),
-                auth: GenevaAuthConfig {
-                    cert: GenevaCertAuthConfig {
-                        cert_path: ptr::null(),
-                        cert_password: ptr::null(),
-                    },
-                },
+                auth: std::mem::zeroed(), // Union not accessed for invalid auth method
                 msi_resource: ptr::null(),
             };
 
