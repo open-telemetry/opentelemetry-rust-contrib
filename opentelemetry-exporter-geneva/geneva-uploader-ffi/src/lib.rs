@@ -160,6 +160,17 @@ pub union GenevaAuthConfig {
 /// - 3 = UserManagedIdentity (by client ID)
 /// - 4 = UserManagedIdentityByObjectId (by object ID)
 /// - 5 = UserManagedIdentityByResourceId (by resource ID)
+///
+/// # Resource Configuration
+/// Different auth methods require different resource configuration:
+/// - **Auth methods 0, 3, 4, 5 (MSI variants)**: Use the `msi_resource` field to specify the Azure AD resource URI
+/// - **Auth method 2 (WorkloadIdentity)**: Use `auth.workload_identity.resource` field
+/// - **Auth method 1 (Certificate)**: No resource needed
+///
+/// The `msi_resource` field specifies the Azure AD resource URI for token acquisition
+/// (e.g., "https://monitor.azure.com"). For user-assigned identities (3, 4, 5), the
+/// auth union specifies WHICH identity to use, while `msi_resource` specifies WHAT
+/// Azure resource to request tokens FOR. These are orthogonal concerns.
 #[repr(C)]
 pub struct GenevaConfig {
     pub endpoint: *const c_char,
@@ -173,7 +184,7 @@ pub struct GenevaConfig {
     pub role_name: *const c_char,
     pub role_instance: *const c_char,
     pub auth: GenevaAuthConfig, // Active member selected by auth_method
-    pub msi_resource: *const c_char, // Optional: MSI resource for auth methods 0, 3, 4, 5 (nullable)
+    pub msi_resource: *const c_char, // Azure AD resource URI for MSI auth (auth methods 0, 3, 4, 5). Not used for auth methods 1, 2. Nullable.
 }
 
 /// Error codes returned by FFI functions

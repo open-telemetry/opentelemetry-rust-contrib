@@ -60,7 +60,25 @@ typedef union {
     GenevaUserManagedIdentityByResourceIdAuthConfig user_msi_resid;         /* Valid when auth_method == GENEVA_AUTH_USER_MANAGED_IDENTITY_BY_RESOURCE_ID */
 } GenevaAuthConfig;
 
-/* Configuration structure for Geneva client (C-compatible, tagged union) */
+/* Configuration structure for Geneva client (C-compatible, tagged union)
+ *
+ * IMPORTANT - Resource/Scope Configuration:
+ * Different auth methods require different resource configuration:
+ *
+ * - SystemManagedIdentity (0): Requires msi_resource field
+ * - Certificate (1): No resource needed (uses mTLS)
+ * - WorkloadIdentity (2): Requires auth.workload_identity.resource field
+ * - UserManagedIdentity by client ID (3): Requires msi_resource field
+ * - UserManagedIdentity by object ID (4): Requires msi_resource field
+ * - UserManagedIdentity by resource ID (5): Requires msi_resource field
+ *
+ * The msi_resource field specifies the Azure AD resource URI for token acquisition
+ * (e.g., "https://monitor.azure.com" for Azure Monitor in Public Cloud).
+ *
+ * Note: For user-assigned identities (3, 4, 5), the auth struct specifies WHICH
+ * identity to use (client_id/object_id/resource_id), while msi_resource specifies
+ * WHAT Azure resource to request tokens FOR. These are separate concerns.
+ */
 typedef struct {
     const char* endpoint;
     const char* environment;
@@ -73,7 +91,7 @@ typedef struct {
     const char* role_name;
     const char* role_instance;
     GenevaAuthConfig auth; /* Active member selected by auth_method */
-    const char* msi_resource; /* Optional: MSI resource for auth methods 0, 3, 4, 5 (nullable) */
+    const char* msi_resource; /* Azure AD resource URI for MSI auth (auth methods 0, 3, 4, 5). Not used for auth methods 1, 2. Nullable. */
 } GenevaConfig;
 
 /* Create a new Geneva client.
