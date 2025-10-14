@@ -5,26 +5,27 @@
 //! To see internal logs from the geneva-uploader (initialization, auth, encoding, uploads),
 //! use the RUST_LOG environment variable:
 //!
-//! ## INFO level (initialization, auth token acquisition, GCS config requests)
-//! ```bash
-//! RUST_LOG=geneva_uploader=info cargo run --example basic
-//! ```
-//!
-//! ## DEBUG level (includes all hot-path operations: encoding, compression, uploads)
-//! ```bash
-//! RUST_LOG=geneva_uploader=debug cargo run --example basic
-//! ```
+ //! ## INFO level (initialization, auth token acquisition, GCS config requests)
+ //! (include a root directive so example's own info! logs show)
+ //! ```bash
+ //! RUST_LOG=info,geneva-uploader=info cargo run --example basic
+ //! ```
+ //!
+ //! ## DEBUG level (includes all hot-path operations: encoding, compression, uploads)
+ //! ```bash
+ //! RUST_LOG=info,geneva-uploader=debug cargo run --example basic
+ //! ```
 //!
 //! ## Filter out noisy dependencies
 //! ```bash
-//! RUST_LOG=info,geneva_uploader=debug,hyper=off,reqwest=off cargo run --example basic
+ //! RUST_LOG=info,geneva-uploader=debug,hyper=off,reqwest=off cargo run --example basic
 //! ```
 //!
  //! Alternatively, to hard-code debug for the geneva_uploader crate (instead of relying
  //! on RUST_LOG each run), add the directive when constructing the filter:
  //! ```rust
  //! // after building/obtaining `filter_fmt`
- //! // .add_directive("geneva_uploader=debug".parse().unwrap())
+ //! // .add_directive("geneva-uploader=debug".parse().unwrap())
  //! ```
 
 use geneva_uploader::client::{GenevaClient, GenevaClientConfig};
@@ -134,14 +135,28 @@ async fn main() {
     // from OpenTelemetry crates. The filter levels can be customized as needed.
     // Build fmt layer filter from RUST_LOG if provided; otherwise fall back to defaults
     // that enable debug for opentelemetry, hyper, and reqwest. Examples:
-    //   RUST_LOG=info,geneva_uploader=debug cargo run --example basic
-    //   RUST_LOG=info,geneva_uploader=debug,hyper=off,reqwest=off cargo run --example basic
-    let default_fmt = EnvFilter::new("info")
+    //   RUST_LOG=info,geneva-uploader=debug cargo run --example basic
+    //   RUST_LOG=info,geneva-uploader=debug,hyper=off,reqwest=off cargo run --example basic
+    // NOTE: geneva-uploader logs use an explicit `target = "geneva-uploader"` in tracing macros.
+    // Therefore the correct directive is `geneva-uploader=debug` (hyphen), not `geneva_uploader=debug`.
+    // Merge RUST_LOG directives (if any) on top of a default baseline so that
+    // users can specify just geneva_uploader=debug without losing root info logs.
+    let mut filter_fmt = EnvFilter::new("info")
         .add_directive("opentelemetry=debug".parse().unwrap())
         .add_directive("hyper=debug".parse().unwrap())
         .add_directive("reqwest=debug".parse().unwrap());
 
-    let filter_fmt = EnvFilter::try_from_default_env().unwrap_or(default_fmt);
+    if let Ok(spec) = std::env::var("RUST_LOG") {
+        for part in spec.split(',') {
+            let p = part.trim();
+            if p.is_empty() {
+                continue;
+            }
+            if let Ok(d) = p.parse() {
+                filter_fmt = filter_fmt.add_directive(d);
+            }
+        }
+    }
 
     let fmt_layer = tracing_subscriber::fmt::layer()
         .with_thread_names(true)
