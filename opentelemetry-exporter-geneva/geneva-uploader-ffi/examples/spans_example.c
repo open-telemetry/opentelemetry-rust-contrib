@@ -108,9 +108,10 @@ int main(void) {
 
     /* Create client */
     GenevaClientHandle* client = NULL;
-    GenevaError rc = geneva_client_new(&cfg, &client);
+    char err_buf[512];
+    GenevaError rc = geneva_client_new(&cfg, &client, err_buf, sizeof(err_buf));
     if (rc != GENEVA_SUCCESS || client == NULL) {
-        printf("Failed to create Geneva client (code=%d)\n", rc);
+        printf("Failed to create Geneva client (code=%d): %s\n", rc, err_buf);
         return 1;
     }
     printf("Geneva client created.\n");
@@ -127,9 +128,9 @@ int main(void) {
 
     /* Encode and compress spans to batches */
     EncodedBatchesHandle* batches = NULL;
-    GenevaError enc_rc = geneva_encode_and_compress_spans(client, data, data_len, &batches);
+    GenevaError enc_rc = geneva_encode_and_compress_spans(client, data, data_len, &batches, err_buf, sizeof(err_buf));
     if (enc_rc != GENEVA_SUCCESS || batches == NULL) {
-        printf("Spans encode/compress failed (code=%d)\n", enc_rc);
+        printf("Spans encode/compress failed (code=%d): %s\n", enc_rc, err_buf);
         geneva_free_buffer(data, data_len);
         geneva_client_free(client);
         return 1;
@@ -141,10 +142,10 @@ int main(void) {
     /* Upload spans synchronously, batch by batch */
     GenevaError first_err = GENEVA_SUCCESS;
     for (size_t i = 0; i < n; i++) {
-        GenevaError r = geneva_upload_batch_sync(client, batches, i);
+        GenevaError r = geneva_upload_batch_sync(client, batches, i, err_buf, sizeof(err_buf));
         if (r != GENEVA_SUCCESS) {
             first_err = r;
-            printf("Span batch %zu upload failed with error %d\n", i, r);
+            printf("Span batch %zu upload failed with error %d: %s\n", i, r, err_buf);
             break;
         }
     }

@@ -21,6 +21,7 @@ typedef enum {
     GENEVA_ERR_EMPTY_INPUT = 101,
     GENEVA_ERR_DECODE_FAILED = 102,
     GENEVA_ERR_INDEX_OUT_OF_RANGE = 103,
+    GENEVA_ERR_INVALID_HANDLE = 104,
 
     /* Granular config/auth errors (only those currently used) */
     GENEVA_ERR_INVALID_AUTH_METHOD = 110,
