@@ -622,11 +622,15 @@ pub unsafe extern "C" fn geneva_batches_len(batches: *const EncodedBatchesHandle
 /// - handle must be a valid pointer returned by geneva_client_new
 /// - batches must be a valid pointer returned by geneva_encode_and_compress_logs
 /// - index must be less than the value returned by geneva_batches_len
+/// - err_msg_out: optional buffer to receive error message (can be NULL)
+/// - err_msg_len: size of err_msg_out buffer
 #[no_mangle]
 pub unsafe extern "C" fn geneva_upload_batch_sync(
     handle: *mut GenevaClientHandle,
     batches: *const EncodedBatchesHandle,
     index: usize,
+    err_msg_out: *mut c_char,
+    err_msg_len: usize,
 ) -> GenevaError {
     // Validate client handle
     match unsafe { validate_handle(handle) } {
@@ -652,7 +656,25 @@ pub unsafe extern "C" fn geneva_upload_batch_sync(
     let res = runtime().block_on(async move { client.upload_batch(batch).await });
     match res {
         Ok(_) => GenevaError::Success,
-        Err(_e) => GenevaError::UploadFailed,
+        Err(e) => {
+            // Write error message to buffer if provided
+            if !err_msg_out.is_null() && err_msg_len > 0 {
+                let error_string = format!("{:?}", e);
+                let bytes_to_copy = std::cmp::min(error_string.len(), err_msg_len - 1);
+                if bytes_to_copy > 0 {
+                    unsafe {
+                        std::ptr::copy_nonoverlapping(
+                            error_string.as_ptr() as *const c_char,
+                            err_msg_out,
+                            bytes_to_copy,
+                        );
+                        // Null terminate
+                        *err_msg_out.add(bytes_to_copy) = 0;
+                    }
+                }
+            }
+            GenevaError::UploadFailed
+        }
     }
 }
 
@@ -719,7 +741,7 @@ mod tests {
     #[test]
     fn test_upload_batch_sync_with_nulls() {
         unsafe {
-            let result = geneva_upload_batch_sync(ptr::null_mut(), ptr::null(), 0);
+            let result = geneva_upload_batch_sync(ptr::null_mut(), ptr::null(), 0, ptr::null_mut(), 0);
             assert_eq!(result as u32, GenevaError::NullPointer as u32);
         }
     }
@@ -1161,7 +1183,7 @@ mod tests {
         assert!(len >= 1, "expected at least one encoded batch");
 
         // Attempt upload (ignore return code; we will assert via recorded requests)
-        let _ = unsafe { geneva_upload_batch_sync(handle_ptr, batches_ptr as *const _, 0) };
+        let _ = unsafe { geneva_upload_batch_sync(handle_ptr, batches_ptr as *const _, 0, ptr::null_mut(), 0) };
 
         // Cleanup: free batches and client
         unsafe {
@@ -1290,7 +1312,7 @@ mod tests {
 
         // Upload all batches
         for i in 0..len {
-            let _ = unsafe { geneva_upload_batch_sync(handle_ptr, batches_ptr as *const _, i) };
+            let _ = unsafe { geneva_upload_batch_sync(handle_ptr, batches_ptr as *const _, i, ptr::null_mut(), 0) };
         }
 
         // Verify requests contain event=EventA and event=EventB in their URLs
