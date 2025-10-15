@@ -101,8 +101,10 @@ typedef struct {
    Parameters:
    - config: Configuration structure (required)
    - out_handle: Receives the client handle on success (required)
-   - err_msg_out: Optional buffer to receive error message (can be NULL)
-   - err_msg_len: Size of err_msg_out buffer (ignored if err_msg_out is NULL)
+   - err_msg_out: Optional buffer to receive error message (can be NULL).
+                  Message will be NUL-terminated and truncated if buffer too small.
+                  Recommended size: >= 256 bytes for full diagnostics.
+   - err_msg_len: Size of err_msg_out buffer in bytes (ignored if err_msg_out is NULL)
 
    IMPORTANT: Caller must call geneva_client_free() on the returned handle
    to avoid memory leaks. All strings in config are copied; caller retains
@@ -123,8 +125,10 @@ GenevaError geneva_client_new(const GenevaConfig* config,
       - data: Protobuf-encoded ExportLogsServiceRequest (required)
       - data_len: Length of data buffer (required)
       - out_batches: Receives the batches handle on success (required)
-      - err_msg_out: Optional buffer to receive error message (can be NULL)
-      - err_msg_len: Size of err_msg_out buffer (ignored if err_msg_out is NULL)
+      - err_msg_out: Optional buffer to receive error message (can be NULL).
+                     Message will be NUL-terminated and truncated if buffer too small.
+                     Recommended size: >= 256 bytes.
+      - err_msg_len: Size of err_msg_out buffer in bytes (ignored if err_msg_out is NULL)
 
       Caller must free *out_batches with geneva_batches_free. */
 GenevaError geneva_encode_and_compress_logs(GenevaClientHandle* handle,
@@ -144,8 +148,10 @@ GenevaError geneva_encode_and_compress_logs(GenevaClientHandle* handle,
       - data: Protobuf-encoded ExportTraceServiceRequest (required)
       - data_len: Length of data buffer (required)
       - out_batches: Receives the batches handle on success (required)
-      - err_msg_out: Optional buffer to receive error message (can be NULL)
-      - err_msg_len: Size of err_msg_out buffer (ignored if err_msg_out is NULL)
+      - err_msg_out: Optional buffer to receive error message (can be NULL).
+                     Message will be NUL-terminated and truncated if buffer too small.
+                     Recommended size: >= 256 bytes.
+      - err_msg_len: Size of err_msg_out buffer in bytes (ignored if err_msg_out is NULL)
 
       Caller must free *out_batches with geneva_batches_free. */
 GenevaError geneva_encode_and_compress_spans(GenevaClientHandle* handle,
@@ -166,8 +172,10 @@ size_t geneva_batches_len(const EncodedBatchesHandle* batches);
       - handle: Client handle from geneva_client_new (required)
       - batches: Batches handle from encode/compress function (required)
       - index: Index of batch to upload (must be < geneva_batches_len(batches))
-      - err_msg_out: Optional buffer to receive error message (can be NULL)
-      - err_msg_len: Size of err_msg_out buffer (ignored if err_msg_out is NULL) */
+      - err_msg_out: Optional buffer to receive error message (can be NULL).
+                     Message will be NUL-terminated and truncated if buffer too small.
+                     Recommended size: >= 256 bytes.
+      - err_msg_len: Size of err_msg_out buffer in bytes (ignored if err_msg_out is NULL) */
 GenevaError geneva_upload_batch_sync(GenevaClientHandle* handle,
                                      const EncodedBatchesHandle* batches,
                                      size_t index,
