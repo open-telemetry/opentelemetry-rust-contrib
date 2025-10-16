@@ -1,7 +1,7 @@
 [package]
 name = "geneva-uploader"
 description = "Upload telemetry data to Geneva logs service"
-version = "0.2.0"
+version = "0.3.0"
 edition = "2021"
 homepage = "https://github.com/open-telemetry/opentelemetry-rust-contrib/tree/main/opentelemetry-exporter-geneva/geneva-uploader"
 repository = "https://github.com/open-telemetry/opentelemetry-rust-contrib/tree/main/opentelemetry-exporter-geneva/geneva-uploader"

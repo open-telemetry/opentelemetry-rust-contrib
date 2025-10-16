@@ -1,5 +1,10 @@
 # Changelog
 
+## [0.3.0] - 2025-10-16
+
+### Added
+- Error message parameters to FFI functions for better diagnostics
+
 ## [0.2.0] - 2025-09-24
 
 ### Added
