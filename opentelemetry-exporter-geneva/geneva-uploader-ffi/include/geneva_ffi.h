@@ -96,44 +96,91 @@ typedef struct {
 
 /* Create a new Geneva client.
    - On success returns GENEVA_SUCCESS and writes *out_handle.
-   - On failure returns an error code.
+   - On failure returns an error code and optionally writes diagnostic message to err_msg_out.
+
+   Parameters:
+   - config: Configuration structure (required)
+   - out_handle: Receives the client handle on success (required)
+   - err_msg_out: Optional buffer to receive error message (can be NULL).
+                  Message will be NUL-terminated and truncated if buffer too small.
+                  Recommended size: >= 256 bytes for full diagnostics.
+   - err_msg_len: Size of err_msg_out buffer in bytes (ignored if err_msg_out is NULL)
 
    IMPORTANT: Caller must call geneva_client_free() on the returned handle
    to avoid memory leaks. All strings in config are copied; caller retains
    ownership of config strings and may free them after this call returns. */
 GenevaError geneva_client_new(const GenevaConfig* config,
-                              GenevaClientHandle** out_handle);
+                              GenevaClientHandle** out_handle,
+                              char* err_msg_out,
+                              size_t err_msg_len);
 
 
 /* 1) Encode and compress logs into batches (synchronous).
       `data` is a protobuf-encoded ExportLogsServiceRequest.
       - On success returns GENEVA_SUCCESS and writes *out_batches.
-      - On failure returns an error code.
+      - On failure returns an error code and optionally writes diagnostic message to err_msg_out.
+
+      Parameters:
+      - handle: Client handle from geneva_client_new (required)
+      - data: Protobuf-encoded ExportLogsServiceRequest (required)
+      - data_len: Length of data buffer (required)
+      - out_batches: Receives the batches handle on success (required)
+      - err_msg_out: Optional buffer to receive error message (can be NULL).
+                     Message will be NUL-terminated and truncated if buffer too small.
+                     Recommended size: >= 256 bytes.
+      - err_msg_len: Size of err_msg_out buffer in bytes (ignored if err_msg_out is NULL)
+
       Caller must free *out_batches with geneva_batches_free. */
 GenevaError geneva_encode_and_compress_logs(GenevaClientHandle* handle,
                                             const uint8_t* data,
                                             size_t data_len,
-                                            EncodedBatchesHandle** out_batches);
+                                            EncodedBatchesHandle** out_batches,
+                                            char* err_msg_out,
+                                            size_t err_msg_len);
 
 /* 1.1) Encode and compress spans into batches (synchronous).
       `data` is a protobuf-encoded ExportTraceServiceRequest.
       - On success returns GENEVA_SUCCESS and writes *out_batches.
-      - On failure returns an error code.
+      - On failure returns an error code and optionally writes diagnostic message to err_msg_out.
+
+      Parameters:
+      - handle: Client handle from geneva_client_new (required)
+      - data: Protobuf-encoded ExportTraceServiceRequest (required)
+      - data_len: Length of data buffer (required)
+      - out_batches: Receives the batches handle on success (required)
+      - err_msg_out: Optional buffer to receive error message (can be NULL).
+                     Message will be NUL-terminated and truncated if buffer too small.
+                     Recommended size: >= 256 bytes.
+      - err_msg_len: Size of err_msg_out buffer in bytes (ignored if err_msg_out is NULL)
+
       Caller must free *out_batches with geneva_batches_free. */
 GenevaError geneva_encode_and_compress_spans(GenevaClientHandle* handle,
                                             const uint8_t* data,
                                             size_t data_len,
-                                            EncodedBatchesHandle** out_batches);
+                                            EncodedBatchesHandle** out_batches,
+                                            char* err_msg_out,
+                                            size_t err_msg_len);
 
 // 2) Query number of batches.
 size_t geneva_batches_len(const EncodedBatchesHandle* batches);
 
 /* 3) Upload a single batch by index (synchronous).
       - On success returns GENEVA_SUCCESS.
-      - On failure returns an error code. */
+      - On failure returns an error code and optionally writes diagnostic message to err_msg_out.
+
+      Parameters:
+      - handle: Client handle from geneva_client_new (required)
+      - batches: Batches handle from encode/compress function (required)
+      - index: Index of batch to upload (must be < geneva_batches_len(batches))
+      - err_msg_out: Optional buffer to receive error message (can be NULL).
+                     Message will be NUL-terminated and truncated if buffer too small.
+                     Recommended size: >= 256 bytes.
+      - err_msg_len: Size of err_msg_out buffer in bytes (ignored if err_msg_out is NULL) */
 GenevaError geneva_upload_batch_sync(GenevaClientHandle* handle,
                                      const EncodedBatchesHandle* batches,
-                                     size_t index);
+                                     size_t index,
+                                     char* err_msg_out,
+                                     size_t err_msg_len);
 
 
 /* 5) Free the batches handle. */

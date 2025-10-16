@@ -59,7 +59,7 @@ unsafe fn validate_handle<T: ValidatedHandle>(handle: *const T) -> GenevaError {
     let handle_ref = unsafe { handle.as_ref().unwrap() };
 
     if handle_ref.magic() != GENEVA_HANDLE_MAGIC {
-        return GenevaError::InvalidData;
+        return GenevaError::InvalidHandle;
     }
 
     GenevaError::Success
@@ -205,6 +205,7 @@ pub enum GenevaError {
     EmptyInput = 101,
     DecodeFailed = 102,
     IndexOutOfRange = 103,
+    InvalidHandle = 104,
 
     // Granular config/auth errors (used)
     InvalidAuthMethod = 110,
@@ -237,19 +238,51 @@ unsafe fn c_str_to_string(ptr: *const c_char, field_name: &str) -> Result<String
     }
 }
 
+/// Writes error message to caller-provided buffer if available
+///
+/// This function has zero allocation cost when err_msg_out is NULL or err_msg_len is 0.
+/// Only allocates (via Display::to_string) when caller requests error details.
+unsafe fn write_error_if_provided(
+    err_msg_out: *mut c_char,
+    err_msg_len: usize,
+    error: &impl std::fmt::Display,
+) {
+    if !err_msg_out.is_null() && err_msg_len > 0 {
+        let error_string = error.to_string();
+        let bytes_to_copy = error_string.len().min(err_msg_len - 1);
+        if bytes_to_copy > 0 {
+            unsafe {
+                std::ptr::copy_nonoverlapping(
+                    error_string.as_ptr() as *const c_char,
+                    err_msg_out,
+                    bytes_to_copy,
+                );
+            }
+        }
+        // Always null-terminate if we have space
+        unsafe {
+            *err_msg_out.add(bytes_to_copy) = 0;
+        }
+    }
+}
+
 /// Creates a new Geneva client with explicit result semantics (no TLS needed).
 ///
 /// On success: returns GenevaError::Success and writes a non-null handle into *out_handle.
-/// On failure: returns an error code and writes a short diagnostic message into err_msg if provided.
+/// On failure: returns an error code and writes a diagnostic message into err_msg_out if provided.
 ///
 /// # Safety
 /// - config must be a valid pointer to a GenevaConfig struct
 /// - out_handle must be a valid pointer to receive the client handle
+/// - err_msg_out: optional buffer to receive error message (can be NULL)
+/// - err_msg_len: size of err_msg_out buffer
 /// - caller must eventually call geneva_client_free on the returned handle
 #[no_mangle]
 pub unsafe extern "C" fn geneva_client_new(
     config: *const GenevaConfig,
     out_handle: *mut *mut GenevaClientHandle,
+    err_msg_out: *mut c_char,
+    err_msg_len: usize,
 ) -> GenevaError {
     // Validate pointers
     if config.is_null() || out_handle.is_null() {
@@ -288,49 +321,57 @@ pub unsafe extern "C" fn geneva_client_new(
     // Convert C strings to Rust strings
     let endpoint = match unsafe { c_str_to_string(config.endpoint, "endpoint") } {
         Ok(s) => s,
-        Err(_e) => {
+        Err(e) => {
+            unsafe { write_error_if_provided(err_msg_out, err_msg_len, &e) };
             return GenevaError::InvalidConfig;
         }
     };
     let environment = match unsafe { c_str_to_string(config.environment, "environment") } {
         Ok(s) => s,
-        Err(_e) => {
+        Err(e) => {
+            unsafe { write_error_if_provided(err_msg_out, err_msg_len, &e) };
             return GenevaError::InvalidConfig;
         }
     };
     let account = match unsafe { c_str_to_string(config.account, "account") } {
         Ok(s) => s,
-        Err(_e) => {
+        Err(e) => {
+            unsafe { write_error_if_provided(err_msg_out, err_msg_len, &e) };
             return GenevaError::InvalidConfig;
         }
     };
     let namespace = match unsafe { c_str_to_string(config.namespace_name, "namespace_name") } {
         Ok(s) => s,
-        Err(_e) => {
+        Err(e) => {
+            unsafe { write_error_if_provided(err_msg_out, err_msg_len, &e) };
             return GenevaError::InvalidConfig;
         }
     };
     let region = match unsafe { c_str_to_string(config.region, "region") } {
         Ok(s) => s,
-        Err(_e) => {
+        Err(e) => {
+            unsafe { write_error_if_provided(err_msg_out, err_msg_len, &e) };
             return GenevaError::InvalidConfig;
         }
     };
     let tenant = match unsafe { c_str_to_string(config.tenant, "tenant") } {
         Ok(s) => s,
-        Err(_e) => {
+        Err(e) => {
+            unsafe { write_error_if_provided(err_msg_out, err_msg_len, &e) };
             return GenevaError::InvalidConfig;
         }
     };
     let role_name = match unsafe { c_str_to_string(config.role_name, "role_name") } {
         Ok(s) => s,
-        Err(_e) => {
+        Err(e) => {
+            unsafe { write_error_if_provided(err_msg_out, err_msg_len, &e) };
             return GenevaError::InvalidConfig;
         }
     };
     let role_instance = match unsafe { c_str_to_string(config.role_instance, "role_instance") } {
         Ok(s) => s,
-        Err(_e) => {
+        Err(e) => {
+            unsafe { write_error_if_provided(err_msg_out, err_msg_len, &e) };
             return GenevaError::InvalidConfig;
         }
     };
@@ -353,14 +394,16 @@ pub unsafe extern "C" fn geneva_client_new(
             }
             let cert_path = match unsafe { c_str_to_string(cert.cert_path, "cert_path") } {
                 Ok(s) => PathBuf::from(s),
-                Err(_e) => {
+                Err(e) => {
+                    unsafe { write_error_if_provided(err_msg_out, err_msg_len, &e) };
                     return GenevaError::InvalidConfig;
                 }
             };
             let cert_password =
                 match unsafe { c_str_to_string(cert.cert_password, "cert_password") } {
                     Ok(s) => s,
-                    Err(_e) => {
+                    Err(e) => {
+                        unsafe { write_error_if_provided(err_msg_out, err_msg_len, &e) };
                         return GenevaError::InvalidConfig;
                     }
                 };
@@ -379,7 +422,8 @@ pub unsafe extern "C" fn geneva_client_new(
             let resource = match unsafe { c_str_to_string(workload_identity.resource, "resource") }
             {
                 Ok(s) => s,
-                Err(_e) => {
+                Err(e) => {
+                    unsafe { write_error_if_provided(err_msg_out, err_msg_len, &e) };
                     return GenevaError::InvalidConfig;
                 }
             };
@@ -394,7 +438,8 @@ pub unsafe extern "C" fn geneva_client_new(
             }
             let client_id = match unsafe { c_str_to_string(user_msi.client_id, "client_id") } {
                 Ok(s) => s,
-                Err(_e) => {
+                Err(e) => {
+                    unsafe { write_error_if_provided(err_msg_out, err_msg_len, &e) };
                     return GenevaError::InvalidConfig;
                 }
             };
@@ -410,7 +455,8 @@ pub unsafe extern "C" fn geneva_client_new(
             let object_id = match unsafe { c_str_to_string(user_msi_objid.object_id, "object_id") }
             {
                 Ok(s) => s,
-                Err(_e) => {
+                Err(e) => {
+                    unsafe { write_error_if_provided(err_msg_out, err_msg_len, &e) };
                     return GenevaError::InvalidConfig;
                 }
             };
@@ -426,7 +472,8 @@ pub unsafe extern "C" fn geneva_client_new(
             let resource_id =
                 match unsafe { c_str_to_string(user_msi_resid.resource_id, "resource_id") } {
                     Ok(s) => s,
-                    Err(_e) => {
+                    Err(e) => {
+                        unsafe { write_error_if_provided(err_msg_out, err_msg_len, &e) };
                         return GenevaError::InvalidConfig;
                     }
                 };
@@ -442,7 +489,8 @@ pub unsafe extern "C" fn geneva_client_new(
     let msi_resource = if !config.msi_resource.is_null() {
         match unsafe { c_str_to_string(config.msi_resource, "msi_resource") } {
             Ok(s) => Some(s),
-            Err(_e) => {
+            Err(e) => {
+                unsafe { write_error_if_provided(err_msg_out, err_msg_len, &e) };
                 return GenevaError::InvalidConfig;
             }
         }
@@ -468,7 +516,8 @@ pub unsafe extern "C" fn geneva_client_new(
     // Create client
     let client = match GenevaClient::new(geneva_config) {
         Ok(client) => client,
-        Err(_e) => {
+        Err(e) => {
+            unsafe { write_error_if_provided(err_msg_out, err_msg_len, &e) };
             return GenevaError::InitializationFailed;
         }
     };
@@ -488,12 +537,16 @@ pub unsafe extern "C" fn geneva_client_new(
 /// - data must be a valid pointer to protobuf-encoded ExportLogsServiceRequest
 /// - data_len must be the correct length of the data
 /// - out_batches must be non-null; on success it receives a non-null pointer the caller must free with geneva_batches_free
+/// - err_msg_out: optional buffer to receive error message (can be NULL)
+/// - err_msg_len: size of err_msg_out buffer
 #[no_mangle]
 pub unsafe extern "C" fn geneva_encode_and_compress_logs(
     handle: *mut GenevaClientHandle,
     data: *const u8,
     data_len: usize,
     out_batches: *mut *mut EncodedBatchesHandle,
+    err_msg_out: *mut c_char,
+    err_msg_len: usize,
 ) -> GenevaError {
     if out_batches.is_null() {
         return GenevaError::NullPointer;
@@ -521,7 +574,8 @@ pub unsafe extern "C" fn geneva_encode_and_compress_logs(
 
     let logs_data: ExportLogsServiceRequest = match Message::decode(data_slice) {
         Ok(data) => data,
-        Err(_e) => {
+        Err(e) => {
+            unsafe { write_error_if_provided(err_msg_out, err_msg_len, &e) };
             return GenevaError::DecodeFailed;
         }
     };
@@ -536,7 +590,10 @@ pub unsafe extern "C" fn geneva_encode_and_compress_logs(
             unsafe { *out_batches = Box::into_raw(Box::new(h)) };
             GenevaError::Success
         }
-        Err(_e) => GenevaError::InternalError,
+        Err(e) => {
+            unsafe { write_error_if_provided(err_msg_out, err_msg_len, &e) };
+            GenevaError::InternalError
+        }
     }
 }
 
@@ -547,12 +604,16 @@ pub unsafe extern "C" fn geneva_encode_and_compress_logs(
 /// - data must be a valid pointer to protobuf-encoded ExportTraceServiceRequest
 /// - data_len must be the correct length of the data
 /// - out_batches must be non-null; on success it receives a non-null pointer the caller must free with geneva_batches_free
+/// - err_msg_out: optional buffer to receive error message (can be NULL)
+/// - err_msg_len: size of err_msg_out buffer
 #[no_mangle]
 pub unsafe extern "C" fn geneva_encode_and_compress_spans(
     handle: *mut GenevaClientHandle,
     data: *const u8,
     data_len: usize,
     out_batches: *mut *mut EncodedBatchesHandle,
+    err_msg_out: *mut c_char,
+    err_msg_len: usize,
 ) -> GenevaError {
     if out_batches.is_null() {
         return GenevaError::NullPointer;
@@ -580,7 +641,8 @@ pub unsafe extern "C" fn geneva_encode_and_compress_spans(
 
     let spans_data: ExportTraceServiceRequest = match Message::decode(data_slice) {
         Ok(data) => data,
-        Err(_e) => {
+        Err(e) => {
+            unsafe { write_error_if_provided(err_msg_out, err_msg_len, &e) };
             return GenevaError::DecodeFailed;
         }
     };
@@ -595,7 +657,10 @@ pub unsafe extern "C" fn geneva_encode_and_compress_spans(
             unsafe { *out_batches = Box::into_raw(Box::new(h)) };
             GenevaError::Success
         }
-        Err(_e) => GenevaError::InternalError,
+        Err(e) => {
+            unsafe { write_error_if_provided(err_msg_out, err_msg_len, &e) };
+            GenevaError::InternalError
+        }
     }
 }
 
@@ -622,11 +687,15 @@ pub unsafe extern "C" fn geneva_batches_len(batches: *const EncodedBatchesHandle
 /// - handle must be a valid pointer returned by geneva_client_new
 /// - batches must be a valid pointer returned by geneva_encode_and_compress_logs
 /// - index must be less than the value returned by geneva_batches_len
+/// - err_msg_out: optional buffer to receive error message (can be NULL)
+/// - err_msg_len: size of err_msg_out buffer
 #[no_mangle]
 pub unsafe extern "C" fn geneva_upload_batch_sync(
     handle: *mut GenevaClientHandle,
     batches: *const EncodedBatchesHandle,
     index: usize,
+    err_msg_out: *mut c_char,
+    err_msg_len: usize,
 ) -> GenevaError {
     // Validate client handle
     match unsafe { validate_handle(handle) } {
@@ -652,7 +721,10 @@ pub unsafe extern "C" fn geneva_upload_batch_sync(
     let res = runtime().block_on(async move { client.upload_batch(batch).await });
     match res {
         Ok(_) => GenevaError::Success,
-        Err(_e) => GenevaError::UploadFailed,
+        Err(e) => {
+            unsafe { write_error_if_provided(err_msg_out, err_msg_len, &e) };
+            GenevaError::UploadFailed
+        }
     }
 }
 
@@ -685,8 +757,6 @@ pub unsafe extern "C" fn geneva_client_free(handle: *mut GenevaClientHandle) {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use opentelemetry_proto::tonic::collector::logs::v1::ExportLogsServiceRequest;
-    use prost::Message;
     use std::ffi::CString;
 
     // Build a minimal unsigned JWT with the Endpoint claim and an exp. Matches what extract_endpoint_from_token expects.
@@ -710,7 +780,7 @@ mod tests {
     fn test_geneva_client_new_with_null_config() {
         unsafe {
             let mut out: *mut GenevaClientHandle = std::ptr::null_mut();
-            let rc = geneva_client_new(std::ptr::null(), &mut out);
+            let rc = geneva_client_new(std::ptr::null(), &mut out, ptr::null_mut(), 0);
             assert_eq!(rc as u32, GenevaError::NullPointer as u32);
             assert!(out.is_null());
         }
@@ -719,7 +789,8 @@ mod tests {
     #[test]
     fn test_upload_batch_sync_with_nulls() {
         unsafe {
-            let result = geneva_upload_batch_sync(ptr::null_mut(), ptr::null(), 0);
+            let result =
+                geneva_upload_batch_sync(ptr::null_mut(), ptr::null(), 0, ptr::null_mut(), 0);
             assert_eq!(result as u32, GenevaError::NullPointer as u32);
         }
     }
@@ -728,7 +799,14 @@ mod tests {
     fn test_encode_with_nulls() {
         unsafe {
             let mut out: *mut EncodedBatchesHandle = std::ptr::null_mut();
-            let rc = geneva_encode_and_compress_logs(ptr::null_mut(), ptr::null(), 0, &mut out);
+            let rc = geneva_encode_and_compress_logs(
+                ptr::null_mut(),
+                ptr::null(),
+                0,
+                &mut out,
+                ptr::null_mut(),
+                0,
+            );
             assert_eq!(rc as u32, GenevaError::NullPointer as u32);
             assert!(out.is_null());
         }
@@ -773,7 +851,7 @@ mod tests {
             };
 
             let mut out: *mut GenevaClientHandle = std::ptr::null_mut();
-            let rc = geneva_client_new(&config, &mut out);
+            let rc = geneva_client_new(&config, &mut out, ptr::null_mut(), 0);
             assert_eq!(rc as u32, GenevaError::MissingEndpoint as u32);
             assert!(out.is_null());
         }
@@ -807,7 +885,7 @@ mod tests {
             };
 
             let mut out: *mut GenevaClientHandle = std::ptr::null_mut();
-            let rc = geneva_client_new(&config, &mut out);
+            let rc = geneva_client_new(&config, &mut out, ptr::null_mut(), 0);
             assert_eq!(rc as u32, GenevaError::InvalidAuthMethod as u32);
             assert!(out.is_null());
         }
@@ -846,7 +924,7 @@ mod tests {
             };
 
             let mut out: *mut GenevaClientHandle = std::ptr::null_mut();
-            let rc = geneva_client_new(&config, &mut out);
+            let rc = geneva_client_new(&config, &mut out, ptr::null_mut(), 0);
             assert_eq!(rc as u32, GenevaError::InvalidCertConfig as u32);
             assert!(out.is_null());
         }
@@ -884,7 +962,7 @@ mod tests {
             };
 
             let mut out: *mut GenevaClientHandle = std::ptr::null_mut();
-            let rc = geneva_client_new(&config, &mut out);
+            let rc = geneva_client_new(&config, &mut out, ptr::null_mut(), 0);
             assert_eq!(rc as u32, GenevaError::InvalidWorkloadIdentityConfig as u32);
             assert!(out.is_null());
         }
@@ -922,7 +1000,7 @@ mod tests {
             };
 
             let mut out: *mut GenevaClientHandle = std::ptr::null_mut();
-            let rc = geneva_client_new(&config, &mut out);
+            let rc = geneva_client_new(&config, &mut out, ptr::null_mut(), 0);
             assert_eq!(rc as u32, GenevaError::InvalidUserMsiConfig as u32);
             assert!(out.is_null());
         }
@@ -960,7 +1038,7 @@ mod tests {
             };
 
             let mut out: *mut GenevaClientHandle = std::ptr::null_mut();
-            let rc = geneva_client_new(&config, &mut out);
+            let rc = geneva_client_new(&config, &mut out, ptr::null_mut(), 0);
             assert_eq!(
                 rc as u32,
                 GenevaError::InvalidUserMsiByObjectIdConfig as u32
@@ -1001,7 +1079,7 @@ mod tests {
             };
 
             let mut out: *mut GenevaClientHandle = std::ptr::null_mut();
-            let rc = geneva_client_new(&config, &mut out);
+            let rc = geneva_client_new(&config, &mut out, ptr::null_mut(), 0);
             assert_eq!(
                 rc as u32,
                 GenevaError::InvalidUserMsiByResourceIdConfig as u32
@@ -1044,7 +1122,7 @@ mod tests {
             };
 
             let mut out: *mut GenevaClientHandle = std::ptr::null_mut();
-            let rc = geneva_client_new(&config, &mut out);
+            let rc = geneva_client_new(&config, &mut out, ptr::null_mut(), 0);
             assert_eq!(rc as u32, GenevaError::InvalidCertConfig as u32);
             assert!(out.is_null());
         }
@@ -1148,6 +1226,8 @@ mod tests {
                 bytes.as_ptr(),
                 bytes.len(),
                 &mut batches_ptr,
+                ptr::null_mut(),
+                0,
             )
         };
         assert_eq!(rc as u32, GenevaError::Success as u32, "encode failed");
@@ -1161,7 +1241,9 @@ mod tests {
         assert!(len >= 1, "expected at least one encoded batch");
 
         // Attempt upload (ignore return code; we will assert via recorded requests)
-        let _ = unsafe { geneva_upload_batch_sync(handle_ptr, batches_ptr as *const _, 0) };
+        let _ = unsafe {
+            geneva_upload_batch_sync(handle_ptr, batches_ptr as *const _, 0, ptr::null_mut(), 0)
+        };
 
         // Cleanup: free batches and client
         unsafe {
@@ -1279,6 +1361,8 @@ mod tests {
                 bytes.as_ptr(),
                 bytes.len(),
                 &mut batches_ptr,
+                ptr::null_mut(),
+                0,
             )
         };
         assert_eq!(rc as u32, GenevaError::Success as u32, "encode failed");
@@ -1290,7 +1374,9 @@ mod tests {
 
         // Upload all batches
         for i in 0..len {
-            let _ = unsafe { geneva_upload_batch_sync(handle_ptr, batches_ptr as *const _, i) };
+            let _ = unsafe {
+                geneva_upload_batch_sync(handle_ptr, batches_ptr as *const _, i, ptr::null_mut(), 0)
+            };
         }
 
         // Verify requests contain event=EventA and event=EventB in their URLs
