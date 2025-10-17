@@ -1,6 +1,6 @@
 # Changelog
 
-## [0.3.0] - 2025-10-16
+## [0.3.0] - 2025-10-17
 
 ### Changed
 - Minor internal updates
