@@ -192,7 +192,8 @@ impl GenevaClient {
                 debug!(
                     name: "client.encode_and_compress_spans.error",
                     target: "geneva-uploader",
-                    "Span compression failed: {}", e
+                    error = %e,
+                    "Span compression failed"
                 );
                 format!("Compression failed: {e}")
             })
