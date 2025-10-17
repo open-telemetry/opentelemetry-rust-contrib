@@ -766,7 +766,8 @@ impl GenevaConfigClient {
                 debug!(
                     name: "config_client.fetch_ingestion_info.http_error",
                     target: "geneva-uploader",
-                    "Config service HTTP request failed: {}", e
+                    error = %e,
+                    "Config service HTTP request failed"
                 );
                 return Err(GenevaConfigClientError::Http(e));
             }
