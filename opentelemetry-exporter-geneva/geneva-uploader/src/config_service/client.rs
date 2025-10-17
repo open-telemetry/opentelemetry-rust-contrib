@@ -284,7 +284,8 @@ impl GenevaConfigClient {
                     debug!(
                         name: "config_client.new.certificate_read_error",
                         target: "geneva-uploader",
-                        "Failed to read certificate file: {}", e
+                        error = %e,
+                        "Failed to read certificate file"
                     );
                     GenevaConfigClientError::Certificate(e.to_string())
                 })?;
@@ -292,7 +293,8 @@ impl GenevaConfigClient {
                     debug!(
                         name: "config_client.new.certificate_parse_error",
                         target: "geneva-uploader",
-                        "Failed to parse PKCS#12 certificate: {}", e
+                        error = %e,
+                        "Failed to parse PKCS#12 certificate"
                     );
                     GenevaConfigClientError::Certificate(e.to_string())
                 })?;
@@ -305,7 +307,8 @@ impl GenevaConfigClient {
                             debug!(
                                 name: "config_client.new.tls_connector_error",
                                 target: "geneva-uploader",
-                                "Failed to build TLS connector: {}", e
+                                error = %e,
+                                "Failed to build TLS connector"
                             );
                             GenevaConfigClientError::Certificate(e.to_string())
                         })?;

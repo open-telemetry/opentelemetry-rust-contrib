@@ -91,7 +91,8 @@ impl GenevaClient {
                 debug!(
                     name: "client.new.config_client_init",
                     target: "geneva-uploader",
-                    "GenevaConfigClient init failed: {}", e
+                    error = %e,
+                    "GenevaConfigClient init failed"
                 );
                 format!("GenevaConfigClient init failed: {e}")
             })?);

@@ -1,31 +1,29 @@
 //! run with `$ cargo run --example basic
 //!
-//! # Enabling Geneva Uploader Internal Logs
+//! # Geneva Uploader Internal Logs
 //!
-//! To see internal logs from the geneva-uploader (initialization, auth, encoding, uploads),
-//! use the RUST_LOG environment variable:
+//! By default, this example enables DEBUG level logs for geneva-uploader, showing all internal
+//! operations including initialization, auth, encoding, compression, and uploads.
 //!
-//! ## INFO level (initialization, auth token acquisition, GCS config requests)
-//! (include a root directive so example's own info! logs show)
+//! ## Default behavior (no RUST_LOG needed)
 //! ```bash
-//! RUST_LOG=info,geneva-uploader=info cargo run --example basic
+//! cargo run --example basic
+//! ```
+//! This shows DEBUG level logs from geneva-uploader.
+//!
+//! ## Override to INFO level (initialization, auth token acquisition, GCS config only)
+//! ```bash
+//! RUST_LOG=geneva-uploader=info cargo run --example basic
 //! ```
 //!
-//! ## DEBUG level (includes all hot-path operations: encoding, compression, uploads)
+//! ## Disable geneva-uploader logs
 //! ```bash
-//! RUST_LOG=info,geneva-uploader=debug cargo run --example basic
+//! RUST_LOG=geneva-uploader=off cargo run --example basic
 //! ```
 //!
-//! ## Filter out noisy dependencies
+//! ## Filter out noisy dependencies while keeping geneva-uploader at DEBUG
 //! ```bash
-//! RUST_LOG=info,geneva-uploader=debug,hyper=off,reqwest=off cargo run --example basic
-//! ```
-//!
-//! Alternatively, to hard-code debug for the geneva_uploader crate (instead of relying
-//! on RUST_LOG each run), add the directive when constructing the filter:
-//! ```rust
-//! // after building/obtaining `filter_fmt`
-//! // .add_directive("geneva-uploader=debug".parse().unwrap())
+//! RUST_LOG=hyper=off,reqwest=off cargo run --example basic
 //! ```
 
 use geneva_uploader::client::{GenevaClient, GenevaClientConfig};
@@ -130,21 +128,19 @@ async fn main() {
         .add_directive("reqwest=off".parse().unwrap());
     let otel_layer = layer::OpenTelemetryTracingBridge::new(&provider).with_filter(filter_otel);
 
-    // Create a new tracing::Fmt layer to print the logs to stdout. It has a
-    // default filter of `info` level and above, and `debug` and above for logs
-    // from OpenTelemetry crates. The filter levels can be customized as needed.
-    // Build fmt layer filter from RUST_LOG if provided; otherwise fall back to defaults
-    // that enable debug for opentelemetry, hyper, and reqwest. Examples:
-    //   RUST_LOG=info,geneva-uploader=debug cargo run --example basic
-    //   RUST_LOG=info,geneva-uploader=debug,hyper=off,reqwest=off cargo run --example basic
-    // NOTE: geneva-uploader logs use an explicit `target = "geneva-uploader"` in tracing macros.
-    // Therefore the correct directive is `geneva-uploader=debug` (hyphen), not `geneva_uploader=debug`.
-    // Merge RUST_LOG directives (if any) on top of a default baseline so that
-    // users can specify just geneva_uploader=debug without losing root info logs.
+    // Create a new tracing::Fmt layer to print the logs to stdout.
+    // Default filter: info level for most logs, debug level for opentelemetry, hyper, reqwest, and geneva-uploader.
+    // Users can override these defaults with RUST_LOG (later directives override earlier ones).
+    // Examples:
+    //   cargo run --example basic                                    # Uses defaults (geneva-uploader=debug)
+    //   RUST_LOG=geneva-uploader=info cargo run --example basic      # Override to info level
+    //   RUST_LOG=geneva-uploader=off cargo run --example basic       # Disable geneva-uploader logs
+    //   RUST_LOG=hyper=off,reqwest=off cargo run --example basic     # Quiet noisy deps, keep geneva-uploader=debug
     let mut filter_fmt = EnvFilter::new("info")
         .add_directive("opentelemetry=debug".parse().unwrap())
         .add_directive("hyper=debug".parse().unwrap())
-        .add_directive("reqwest=debug".parse().unwrap());
+        .add_directive("reqwest=debug".parse().unwrap())
+        .add_directive("geneva-uploader=debug".parse().unwrap());
 
     if let Ok(spec) = std::env::var("RUST_LOG") {
         for part in spec.split(',') {

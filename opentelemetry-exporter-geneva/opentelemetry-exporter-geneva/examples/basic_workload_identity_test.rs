@@ -130,7 +130,8 @@ async fn main() {
     let filter_fmt = EnvFilter::new("info")
         .add_directive("hyper=debug".parse().unwrap())
         .add_directive("reqwest=debug".parse().unwrap())
-        .add_directive("opentelemetry=debug".parse().unwrap());
+        .add_directive("opentelemetry=debug".parse().unwrap())
+        .add_directive("geneva-uploader=debug".parse().unwrap());
     let fmt_layer = tracing_subscriber::fmt::layer()
         .with_thread_names(true)
         .with_filter(filter_fmt);
