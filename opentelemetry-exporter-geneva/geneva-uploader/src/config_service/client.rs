@@ -274,7 +274,7 @@ impl GenevaConfigClient {
             // TODO: Certificate auth would be removed in favor of managed identity.,
             // This is for testing, so we can use self-signed certs, and password in plain text.
             AuthMethod::Certificate { path, password } => {
-                debug!(
+                info!(
                     name: "config_client.new.certificate_auth",
                     target: "geneva-uploader",
                     "Using Certificate authentication"
@@ -315,7 +315,7 @@ impl GenevaConfigClient {
                 client_builder = client_builder.use_preconfigured_tls(tls_connector);
             }
             AuthMethod::WorkloadIdentity { .. } => {
-                debug!(
+                info!(
                     name: "config_client.new.workload_identity_auth",
                     target: "geneva-uploader",
                     "Using Workload Identity authentication"
@@ -327,7 +327,7 @@ impl GenevaConfigClient {
             | AuthMethod::UserManagedIdentity { .. }
             | AuthMethod::UserManagedIdentityByObjectId { .. }
             | AuthMethod::UserManagedIdentityByResourceId { .. } => {
-                debug!(
+                info!(
                     name: "config_client.new.managed_identity_auth",
                     target: "geneva-uploader",
                     "Using Managed Identity authentication"
@@ -648,7 +648,7 @@ impl GenevaConfigClient {
                         cached_data.token_endpoint.clone(),
                     ));
                 } else {
-                    info!(
+                    debug!(
                         name: "config_client.get_ingestion_info.cache_expired",
                         target: "geneva-uploader",
                         "Cached token expired or expiring soon, fetching fresh data"
