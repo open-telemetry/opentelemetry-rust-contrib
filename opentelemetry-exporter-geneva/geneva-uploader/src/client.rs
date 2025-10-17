@@ -147,7 +147,8 @@ impl GenevaClient {
         debug!(
             name: "client.encode_and_compress_logs",
             target: "geneva-uploader",
-            "Encoding and compressing {} resource logs", logs.len()
+            resource_logs_count = logs.len(),
+            "Encoding and compressing resource logs"
         );
 
         let log_iter = logs
