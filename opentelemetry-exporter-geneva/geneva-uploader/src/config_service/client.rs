@@ -722,7 +722,8 @@ impl GenevaConfigClient {
             debug!(
                 name: "config_client.fetch_ingestion_info.write_url_error",
                 target: "geneva-uploader",
-                "Failed to write URL: {}", e
+                error = %e,
+                "Failed to write URL"
             );
             GenevaConfigClientError::InternalError(format!("Failed to write URL: {e}"))
         })?;
