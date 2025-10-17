@@ -162,7 +162,8 @@ impl GenevaClient {
                 debug!(
                     name: "client.encode_and_compress_logs.error",
                     target: "geneva-uploader",
-                    "Log compression failed: {}", e
+                    error = %e,
+                    "Log compression failed"
                 );
                 format!("Compression failed: {e}")
             })
