@@ -540,7 +540,8 @@ impl GenevaConfigClient {
             debug!(
                 name: "config_client.get_msi_token.create_credential_error",
                 target: "geneva-uploader",
-                "Failed to create MSI credential: {}", e
+                error = %e,
+                "Failed to create MSI credential"
             );
             GenevaConfigClientError::MsiAuth(format!("Failed to create MSI credential: {e}"))
         })?;
