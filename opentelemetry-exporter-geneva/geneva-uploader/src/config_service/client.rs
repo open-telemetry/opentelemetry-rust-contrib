@@ -733,7 +733,8 @@ impl GenevaConfigClient {
         debug!(
             name: "config_client.fetch_ingestion_info.request",
             target: "geneva-uploader",
-            "Sending config request with request_id={}", req_id
+            request_id = %req_id,
+            "Sending config request with request_id"
         );
 
         let mut request = self.http_client.get(&url);
