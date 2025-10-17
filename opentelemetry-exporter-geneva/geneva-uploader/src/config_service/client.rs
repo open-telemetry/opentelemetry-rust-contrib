@@ -565,8 +565,9 @@ impl GenevaConfigClient {
         debug!(
             name: "config_client.get_msi_token.failed",
             target: "geneva-uploader",
-            "Managed Identity token acquisition failed. Scopes tried: {}. Last error: {}",
-            scope_candidates.join(", "), detail
+            scopes = %scope_candidates.join(", "),
+            error = %detail,
+            "Managed Identity token acquisition failed"
         );
         Err(GenevaConfigClientError::MsiAuth(format!(
             "Managed Identity token acquisition failed. Scopes tried: {scopes}. Last error: {detail}. IMDS fallback intentionally disabled.",
