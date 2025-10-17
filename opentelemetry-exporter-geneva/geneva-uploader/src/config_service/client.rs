@@ -447,7 +447,8 @@ impl GenevaConfigClient {
             debug!(
                 name: "config_client.get_workload_identity_token.create_credential_error",
                 target: "geneva-uploader",
-                "Failed to create WorkloadIdentityCredential: {}", e
+                "Failed to create WorkloadIdentityCredential",
+                error = %e
             );
             GenevaConfigClientError::WorkloadIdentityAuth(format!(
                 "Failed to create WorkloadIdentityCredential. Ensure AZURE_CLIENT_ID, AZURE_TENANT_ID, and AZURE_FEDERATED_TOKEN_FILE environment variables are set: {e}"
