@@ -48,10 +48,10 @@ impl GenevaClient {
         info!(
             name: "client.new",
             target: "geneva-uploader",
-            "Initializing GenevaClient",
             endpoint = %cfg.endpoint,
             namespace = %cfg.namespace,
-            account = %cfg.account
+            account = %cfg.account,
+            "Initializing GenevaClient"
         );
 
         // Validate MSI resource presence for managed identity variants
