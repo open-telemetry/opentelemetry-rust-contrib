@@ -10,6 +10,7 @@ use opentelemetry_proto::tonic::logs::v1::LogRecord;
 use opentelemetry_proto::tonic::trace::v1::Span;
 use std::borrow::Cow;
 use std::sync::Arc;
+use tracing::debug;
 
 const FIELD_ENV_NAME: &str = "env_name";
 const FIELD_ENV_VER: &str = "env_ver";
@@ -152,6 +153,9 @@ impl OtlpEncoder {
             let schema_ids_string = batch_data.format_schema_ids();
             batch_data.metadata.schema_ids = schema_ids_string;
 
+            let schemas_count = batch_data.schemas.len();
+            let events_count = batch_data.events.len();
+
             let blob = CentralBlob {
                 version: 1,
                 format: 2,
@@ -160,8 +164,28 @@ impl OtlpEncoder {
                 events: batch_data.events,
             };
             let uncompressed = blob.to_bytes();
-            let compressed = lz4_chunked_compression(&uncompressed)
-                .map_err(|e| format!("compression failed: {e}"))?;
+            let compressed = lz4_chunked_compression(&uncompressed).map_err(|e| {
+                debug!(
+                    name: "encoder.encode_log_batch.compress_error",
+                    target: "geneva-uploader",
+                    event_name = %batch_event_name,
+                    error = %e,
+                    "LZ4 compression failed"
+                );
+                format!("compression failed: {e}")
+            })?;
+
+            debug!(
+                name: "encoder.encode_log_batch",
+                target: "geneva-uploader",
+                event_name = %batch_event_name,
+                schemas = schemas_count,
+                events = events_count,
+                uncompressed_size = uncompressed.len(),
+                compressed_size = compressed.len(),
+                "Encoded log batch"
+            );
+
             blobs.push(EncodedBatch {
                 event_name: batch_event_name.to_string(),
                 data: compressed,
@@ -266,6 +290,9 @@ impl OtlpEncoder {
             schema_ids: schema_ids_string,
         };
 
+        let schemas_count = schemas.len();
+        let events_count = events.len();
+
         let blob = CentralBlob {
             version: 1,
             format: 2,
@@ -275,8 +302,26 @@ impl OtlpEncoder {
         };
 
         let uncompressed = blob.to_bytes();
-        let compressed = lz4_chunked_compression(&uncompressed)
-            .map_err(|e| format!("compression failed: {e}"))?;
+        let compressed = lz4_chunked_compression(&uncompressed).map_err(|e| {
+            debug!(
+                name: "encoder.encode_span_batch.compress_error",
+                target: "geneva-uploader",
+                error = %e,
+                "LZ4 compression failed for spans"
+            );
+            format!("compression failed: {e}")
+        })?;
+
+        debug!(
+            name: "encoder.encode_span_batch",
+            target: "geneva-uploader",
+            event_name = EVENT_NAME,
+            schemas = schemas_count,
+            spans = events_count,
+            uncompressed_size = uncompressed.len(),
+            compressed_size = compressed.len(),
+            "Encoded span batch"
+        );
 
         Ok(vec![EncodedBatch {
             event_name: EVENT_NAME.to_string(),
