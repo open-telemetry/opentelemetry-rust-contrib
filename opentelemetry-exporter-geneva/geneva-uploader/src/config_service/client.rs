@@ -475,8 +475,9 @@ impl GenevaConfigClient {
         debug!(
             name: "config_client.get_workload_identity_token.failed",
             target: "geneva-uploader",
-            "Workload Identity token acquisition failed. Scopes tried: {}. Last error: {}",
-            scope_candidates.join(", "), detail
+            scopes = %scope_candidates.join(", "),
+            error = %detail,
+            "Workload Identity token acquisition failed"
         );
         Err(GenevaConfigClientError::WorkloadIdentityAuth(format!(
             "Workload Identity token acquisition failed. Scopes tried: {scopes}. Last error: {detail}",
