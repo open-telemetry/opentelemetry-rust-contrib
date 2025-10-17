@@ -9,6 +9,7 @@ use std::fmt::Write;
 use std::sync::Arc;
 use std::time::Duration;
 use thiserror::Error;
+use tracing::debug;
 use url::form_urlencoded::byte_serialize;
 use uuid::Uuid;
 
@@ -214,6 +215,14 @@ impl GenevaUploader {
         event_name: &str,
         metadata: &BatchMetadata,
     ) -> Result<IngestionResponse> {
+        debug!(
+            name: "uploader.upload",
+            target: "geneva-uploader",
+            event_name = %event_name,
+            size = data.len(),
+            "Starting upload"
+        );
+
         // Always get fresh auth info
         let (auth_info, moniker_info, monitoring_endpoint) =
             self.config_client.get_ingestion_info().await?;
@@ -230,6 +239,15 @@ impl GenevaUploader {
             auth_info.endpoint.trim_end_matches('/'),
             upload_uri
         );
+
+        debug!(
+            name: "uploader.upload.post",
+            target: "geneva-uploader",
+            event_name = %event_name,
+            moniker = %moniker_info.name,
+            "Posting to ingestion gateway"
+        );
+
         // Send the upload request
         let response = self
             .http_client
@@ -245,11 +263,34 @@ impl GenevaUploader {
         let body = response.text().await?;
 
         if status == reqwest::StatusCode::ACCEPTED {
-            let ingest_response: IngestionResponse =
-                serde_json::from_str(&body).map_err(GenevaUploaderError::SerdeJson)?;
+            let ingest_response: IngestionResponse = serde_json::from_str(&body).map_err(|e| {
+                debug!(
+                    name: "uploader.upload.parse_error",
+                    target: "geneva-uploader",
+                    error = %e,
+                    "Failed to parse ingestion response"
+                );
+                GenevaUploaderError::SerdeJson(e)
+            })?;
+
+            debug!(
+                name: "uploader.upload.success",
+                target: "geneva-uploader",
+                event_name = %event_name,
+                ticket = %ingest_response.ticket,
+                "Upload successful"
+            );
 
             Ok(ingest_response)
         } else {
+            debug!(
+                name: "uploader.upload.failed",
+                target: "geneva-uploader",
+                event_name = %event_name,
+                status = status.as_u16(),
+                body = %body,
+                "Upload failed"
+            );
             Err(GenevaUploaderError::UploadFailed {
                 status: status.as_u16(),
                 message: body,
