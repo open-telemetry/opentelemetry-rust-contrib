@@ -176,7 +176,8 @@ impl GenevaClient {
         debug!(
             name: "client.encode_and_compress_spans",
             target: "geneva-uploader",
-            "Encoding and compressing {} resource spans", spans.len()
+            resource_spans_count = spans.len(),
+            "Encoding and compressing resource spans"
         );
 
         let span_iter = spans
