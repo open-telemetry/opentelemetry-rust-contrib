@@ -4,6 +4,7 @@ use crate::config_service::client::{AuthMethod, GenevaConfigClient, GenevaConfig
 // ManagedIdentitySelector removed; no re-export needed.
 use crate::ingestion_service::uploader::{GenevaUploader, GenevaUploaderConfig};
 use crate::payload_encoder::otlp_encoder::OtlpEncoder;
+use crate::payload_encoder::otap_encoder::OtapEncoder;
 use opentelemetry_proto::tonic::logs::v1::ResourceLogs;
 use opentelemetry_proto::tonic::trace::v1::ResourceSpans;
 use std::sync::Arc;
@@ -40,6 +41,7 @@ pub struct GenevaClientConfig {
 pub struct GenevaClient {
     uploader: Arc<GenevaUploader>,
     encoder: OtlpEncoder,
+    otap_encoder: OtapEncoder,
     metadata: String,
 }
 
@@ -136,6 +138,7 @@ impl GenevaClient {
         Ok(Self {
             uploader: Arc::new(uploader),
             encoder: OtlpEncoder::new(),
+            otap_encoder: OtapEncoder::new(metadata.clone()),
             metadata,
         })
     }
@@ -197,6 +200,41 @@ impl GenevaClient {
                     "Span compression failed"
                 );
                 format!("Compression failed: {e}")
+            })
+    }
+
+    /// Encode OTAP Arrow logs RecordBatch into LZ4 chunked compressed batches.
+    ///
+    /// This method directly encodes Arrow columnar data without OTLP conversion,
+    /// providing better performance for OTAP-based pipelines.
+    ///
+    /// # Arguments
+    /// * `logs_batch` - Arrow RecordBatch containing log records in OTAP format
+    ///
+    /// # Returns
+    /// * `Ok(Vec<EncodedBatch>)` - Encoded batches ready for upload
+    /// * `Err(String)` - Error message if encoding fails
+    pub fn encode_and_compress_otap_logs(
+        &self,
+        logs_batch: &arrow::array::RecordBatch,
+    ) -> Result<Vec<EncodedBatch>, String> {
+        debug!(
+            name: "client.encode_and_compress_otap_logs",
+            target: "geneva-uploader",
+            num_rows = logs_batch.num_rows(),
+            "Encoding and compressing OTAP logs"
+        );
+
+        self.otap_encoder
+            .encode_log_batch(logs_batch)
+            .map_err(|e| {
+                debug!(
+                    name: "client.encode_and_compress_otap_logs.error",
+                    target: "geneva-uploader",
+                    error = %e,
+                    "OTAP log compression failed"
+                );
+                format!("OTAP compression failed: {e}")
             })
     }
 

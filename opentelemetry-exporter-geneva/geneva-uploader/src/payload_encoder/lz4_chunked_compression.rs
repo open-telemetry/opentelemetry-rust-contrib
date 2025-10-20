@@ -89,6 +89,51 @@ pub(crate) fn lz4_chunked_compression_custom<const CHUNK_SIZE: usize>(
     Ok(output)
 }
 
+/// Decompresses chunked LZ4 data
+///
+/// # Arguments
+/// * `compressed` - The compressed data with 4-byte length headers
+///
+/// # Returns
+/// * `Ok(Vec<u8>)` - Decompressed data
+/// * `Err(String)` - Error message if decompression fails
+#[allow(dead_code)]
+pub(crate) fn lz4_decompress(compressed: &[u8]) -> Result<Vec<u8>, String> {
+    const CHUNK_SIZE: usize = 64 * 1024;
+    let mut offset = 0;
+    let mut out = Vec::new();
+
+    while offset < compressed.len() {
+        if offset + 4 > compressed.len() {
+            return Err("Invalid compressed data: incomplete length header".to_string());
+        }
+
+        // Read compressed chunk length
+        let compressed_len =
+            u32::from_le_bytes(compressed[offset..offset + 4].try_into().unwrap()) as usize;
+        offset += 4;
+
+        if offset + compressed_len > compressed.len() {
+            return Err(format!(
+                "Invalid compressed data: chunk length {} exceeds remaining data",
+                compressed_len
+            ));
+        }
+
+        // Read compressed chunk
+        let chunk = &compressed[offset..offset + compressed_len];
+
+        // Decompress with max chunk size as upper bound
+        let decompressed_chunk = lz4_flex::block::decompress(chunk, CHUNK_SIZE)
+            .map_err(|e| format!("LZ4 decompression failed: {}", e))?;
+
+        out.extend_from_slice(&decompressed_chunk);
+        offset += compressed_len;
+    }
+
+    Ok(out)
+}
+
 #[cfg(test)]
 mod tests {
     use crate::payload_encoder::lz4_chunked_compression::lz4_chunked_compression;
