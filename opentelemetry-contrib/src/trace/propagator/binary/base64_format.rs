@@ -49,13 +49,13 @@ mod tests {
     fn to_base64_data() -> Vec<(SpanContext, String)> {
         vec![
             (SpanContext::new(
-               TraceId::from_u128(0x4bf9_2f35_77b3_4da6_a3ce_929d_0e0e_4736),
-               SpanId::from_u64(0x00f0_67aa_0ba9_02b7), TraceFlags::SAMPLED, true, TraceState::default()),
+               TraceId::from(0x4bf9_2f35_77b3_4da6_a3ce_929d_0e0e_4736),
+               SpanId::from(0x00f0_67aa_0ba9_02b7), TraceFlags::SAMPLED, true, TraceState::default()),
                 "AABL+S81d7NNpqPOkp0ODkc2AQDwZ6oLqQK3AgE=".to_string()
             ),
             (SpanContext::new(
-               TraceId::from_u128(0x4bf9_2f35_77b3_4da6_a3ce_929d_0e0e_4736),
-               SpanId::from_u64(0x00f0_67aa_0ba9_02b7), TraceFlags::default(), true, TraceState::default()),
+               TraceId::from(0x4bf9_2f35_77b3_4da6_a3ce_929d_0e0e_4736),
+               SpanId::from(0x00f0_67aa_0ba9_02b7), TraceFlags::default(), true, TraceState::default()),
                 "AABL+S81d7NNpqPOkp0ODkc2AQDwZ6oLqQK3AgA=".to_string()
             ),
         ]

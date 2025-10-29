@@ -1,30 +1,4 @@
-//! run with `$ cargo run --example basic
-//!
-//! # Geneva Uploader Internal Logs
-//!
-//! By default, this example enables DEBUG level logs for geneva-uploader, showing all internal
-//! operations including initialization, auth, encoding, compression, and uploads.
-//!
-//! ## Default behavior (no RUST_LOG needed)
-//! ```bash
-//! cargo run --example basic
-//! ```
-//! This shows DEBUG level logs from geneva-uploader.
-//!
-//! ## Override to INFO level (initialization, auth token acquisition, GCS config only)
-//! ```bash
-//! RUST_LOG=geneva-uploader=info cargo run --example basic
-//! ```
-//!
-//! ## Disable geneva-uploader logs
-//! ```bash
-//! RUST_LOG=geneva-uploader=off cargo run --example basic
-//! ```
-//!
-//! ## Filter out noisy dependencies while keeping geneva-uploader at DEBUG
-//! ```bash
-//! RUST_LOG=hyper=off,reqwest=off cargo run --example basic
-//! ```
+//! run with `$ cargo run --example basic_msi_test`
 
 use geneva_uploader::client::{GenevaClient, GenevaClientConfig};
 use geneva_uploader::AuthMethod;
@@ -37,21 +11,28 @@ use opentelemetry_sdk::{
     Resource,
 };
 use std::env;
-use std::path::PathBuf;
 use std::thread;
 use std::time::Duration;
 use tracing::{error, info, warn};
 use tracing_subscriber::{prelude::*, EnvFilter};
 
 /*
+Environment variables required:
+
 export GENEVA_ENDPOINT="https://abc.azurewebsites.net"
 export GENEVA_ENVIRONMENT="Test"
-export GENEVA_ACCOUNT="myaccount"
-export GENEVA_NAMESPACE="myns"
+export GENEVA_ACCOUNT="PipelineAgent2Demo"
+export GENEVA_NAMESPACE="PAdemo2"
 export GENEVA_REGION="eastus"
-export GENEVA_CERT_PATH="/tmp/client.p12"
-export GENEVA_CERT_PASSWORD="password"
 export GENEVA_CONFIG_MAJOR_VERSION=2
+export MONITORING_GCS_AUTH_ID_TYPE="AuthMSIToken"
+export GENEVA_MSI_RESOURCE="https://abc.azurewebsites.net" # Resource (audience) base used for MSI token (supply for your cloud)
+
+# Identity selection:
+# System-assigned: leave MONITORING_MANAGED_ID_IDENTIFIER and MONITORING_MANAGED_ID_VALUE unset
+# User-assigned: set both vars below (choose exactly one identifier type)
+export MONITORING_MANAGED_ID_IDENTIFIER="object_id" # object_id|client_id|mi_res_id|resource_id|system (system => ignore value)
+export MONITORING_MANAGED_ID_VALUE="<identity-guid-or-resource-id>" # required if identifier != system; GUID for object_id/client_id, ARM path for mi_res_id
 */
 
 #[tokio::main]
@@ -61,18 +42,56 @@ async fn main() {
     let account = env::var("GENEVA_ACCOUNT").expect("GENEVA_ACCOUNT is required");
     let namespace = env::var("GENEVA_NAMESPACE").expect("GENEVA_NAMESPACE is required");
     let region = env::var("GENEVA_REGION").expect("GENEVA_REGION is required");
-    let cert_path =
-        PathBuf::from(env::var("GENEVA_CERT_PATH").expect("GENEVA_CERT_PATH is required"));
-    let cert_password = env::var("GENEVA_CERT_PASSWORD").expect("GENEVA_CERT_PASSWORD is required");
     let config_major_version: u32 = env::var("GENEVA_CONFIG_MAJOR_VERSION")
         .expect("GENEVA_CONFIG_MAJOR_VERSION is required")
         .parse()
         .expect("GENEVA_CONFIG_MAJOR_VERSION must be a u32");
+    let msi_resource = env::var("GENEVA_MSI_RESOURCE").ok();
 
     let tenant = env::var("GENEVA_TENANT").unwrap_or_else(|_| "default-tenant".to_string());
     let role_name = env::var("GENEVA_ROLE_NAME").unwrap_or_else(|_| "default-role".to_string());
     let role_instance =
         env::var("GENEVA_ROLE_INSTANCE").unwrap_or_else(|_| "default-instance".to_string());
+
+    // Determine authentication method based on environment variables (MSI only for this example)
+    let auth_method = match env::var("MONITORING_GCS_AUTH_ID_TYPE").as_deref() {
+        Ok("AuthMSIToken") => {
+            let auth_method = match env::var("MONITORING_MANAGED_ID_IDENTIFIER") {
+                Err(_) => AuthMethod::SystemManagedIdentity,
+                Ok(raw) => {
+                    let key = raw.to_ascii_lowercase();
+                    match key.as_str() {
+                        "system" => AuthMethod::SystemManagedIdentity,
+                        "client_id" => {
+                            let v = env::var("MONITORING_MANAGED_ID_VALUE").expect(
+                                "MONITORING_MANAGED_ID_VALUE required when MONITORING_MANAGED_ID_IDENTIFIER=client_id",
+                            );
+                            AuthMethod::UserManagedIdentity { client_id: v }
+                        }
+                        "object_id" => {
+                            let v = env::var("MONITORING_MANAGED_ID_VALUE").expect(
+                                "MONITORING_MANAGED_ID_VALUE required when MONITORING_MANAGED_ID_IDENTIFIER=object_id",
+                            );
+                            AuthMethod::UserManagedIdentityByObjectId { object_id: v }
+                        }
+                        "mi_res_id" | "resource_id" => {
+                            let v = env::var("MONITORING_MANAGED_ID_VALUE").expect(
+                                "MONITORING_MANAGED_ID_VALUE required when MONITORING_MANAGED_ID_IDENTIFIER=mi_res_id/resource_id",
+                            );
+                            AuthMethod::UserManagedIdentityByResourceId { resource_id: v }
+                        }
+                        other => panic!(
+                            "Unsupported MONITORING_MANAGED_ID_IDENTIFIER value: {other}. Expected one of: system | object_id | client_id | mi_res_id | resource_id"
+                        ),
+                    }
+                }
+            };
+            auth_method
+        }
+        _ => panic!(
+            "This example requires MSI authentication. Set MONITORING_GCS_AUTH_ID_TYPE=AuthMSIToken"
+        ),
+    };
 
     let config = GenevaClientConfig {
         endpoint,
@@ -81,16 +100,14 @@ async fn main() {
         namespace,
         region,
         config_major_version,
-        auth_method: AuthMethod::Certificate {
-            path: cert_path,
-            password: cert_password,
-        },
         tenant,
         role_name,
         role_instance,
-        msi_resource: None,
+        auth_method,
+        msi_resource,
     };
 
+    // GenevaClient::new is synchronous (returns Result), so no await is needed here.
     let geneva_client = GenevaClient::new(config).expect("Failed to create GenevaClient");
 
     let exporter = GenevaExporter::new(geneva_client);
@@ -101,7 +118,7 @@ async fn main() {
     let provider: SdkLoggerProvider = SdkLoggerProvider::builder()
         .with_resource(
             Resource::builder()
-                .with_service_name("geneva-exporter-example")
+                .with_service_name("geneva-exporter-msi-test")
                 .build(),
         )
         .with_log_processor(batch_processor)
@@ -128,32 +145,14 @@ async fn main() {
         .add_directive("reqwest=off".parse().unwrap());
     let otel_layer = layer::OpenTelemetryTracingBridge::new(&provider).with_filter(filter_otel);
 
-    // Create a new tracing::Fmt layer to print the logs to stdout.
-    // Default filter: info level for most logs, debug level for opentelemetry, hyper, reqwest, and geneva-uploader.
-    // Users can override these defaults with RUST_LOG (later directives override earlier ones).
-    // Examples:
-    //   cargo run --example basic                                    # Uses defaults (geneva-uploader=debug)
-    //   RUST_LOG=geneva-uploader=info cargo run --example basic      # Override to info level
-    //   RUST_LOG=geneva-uploader=off cargo run --example basic       # Disable geneva-uploader logs
-    //   RUST_LOG=hyper=off,reqwest=off cargo run --example basic     # Quiet noisy deps, keep geneva-uploader=debug
-    let mut filter_fmt = EnvFilter::new("info")
-        .add_directive("opentelemetry=debug".parse().unwrap())
+    // Create a new tracing::Fmt layer to print the logs to stdout. It has a
+    // default filter of `info` level and above, and `debug` and above for logs
+    // from OpenTelemetry crates. The filter levels can be customized as needed.
+    let filter_fmt = EnvFilter::new("info")
         .add_directive("hyper=debug".parse().unwrap())
         .add_directive("reqwest=debug".parse().unwrap())
+        .add_directive("opentelemetry=debug".parse().unwrap())
         .add_directive("geneva-uploader=debug".parse().unwrap());
-
-    if let Ok(spec) = std::env::var("RUST_LOG") {
-        for part in spec.split(',') {
-            let p = part.trim();
-            if p.is_empty() {
-                continue;
-            }
-            if let Ok(d) = p.parse() {
-                filter_fmt = filter_fmt.add_directive(d);
-            }
-        }
-    }
-
     let fmt_layer = tracing_subscriber::fmt::layer()
         .with_thread_names(true)
         .with_filter(filter_fmt);

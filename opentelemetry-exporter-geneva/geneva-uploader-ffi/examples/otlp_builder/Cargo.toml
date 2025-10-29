@@ -5,7 +5,7 @@ version = "0.1.0"
 edition = "2021"
 homepage = "https://github.com/open-telemetry/opentelemetry-rust-contrib/tree/main/opentelemetry-exporter-geneva/geneva-uploader-ffi/examples/otlp_builder"
 repository = "https://github.com/open-telemetry/opentelemetry-rust-contrib/tree/main/opentelemetry-exporter-geneva/geneva-uploader-ffi/examples/otlp_builder"
-rust-version = "1.75.0"
+rust-version = "1.85.0"
 keywords = ["opentelemetry", "geneva", "otlp", "builder"]
 license = "Apache-2.0"
 
@@ -17,5 +17,5 @@ workspace = true
 
 [dependencies]
 # Use the repo's opentelemetry-proto crate directly
-opentelemetry-proto = { version = "0.30", default-features = false, features = ["logs", "gen-tonic-messages"] }
-prost = "0.13"
+opentelemetry-proto = { version = "0.31", default-features = false, features = ["logs", "trace", "gen-tonic-messages"] }
+prost = "0.14"
