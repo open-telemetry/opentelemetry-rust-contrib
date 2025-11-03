@@ -12,7 +12,7 @@ axum = { features = ["http1", "tokio"], version = "0.8", default-features = fals
 bytes = { version = "1", default-features = false }
 opentelemetry = { workspace = true}
 opentelemetry_sdk = { workspace = true, default-features = false }
-opentelemetry-otlp = { version = "0.30.0", features = ["grpc-tonic", "metrics"], default-features = false }
+opentelemetry-otlp = { version = "0.31.0", features = ["grpc-tonic", "metrics"], default-features = false }
 tokio = { version = "1", features = ["rt-multi-thread"], default-features = false }
 rand_09 = { package = "rand", version = "0.9" }
 

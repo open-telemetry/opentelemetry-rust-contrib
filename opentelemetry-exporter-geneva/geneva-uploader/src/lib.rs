@@ -1,7 +1,7 @@
 mod common;
 mod config_service;
 mod ingestion_service;
-pub mod payload_encoder;
+mod payload_encoder;
 
 pub mod client;
 
@@ -15,8 +15,9 @@ pub(crate) use config_service::client::{
 
 #[allow(unused_imports)]
 pub(crate) use ingestion_service::uploader::{
-    GenevaUploader, GenevaUploaderConfig, GenevaUploaderError, IngestionResponse, Result,
+    GenevaUploader, GenevaUploaderConfig, GenevaUploaderError, Result,
 };
 
+pub use client::EncodedBatch;
 pub use client::{GenevaClient, GenevaClientConfig};
 pub use config_service::client::AuthMethod;

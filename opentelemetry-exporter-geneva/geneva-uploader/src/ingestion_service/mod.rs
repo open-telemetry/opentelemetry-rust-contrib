@@ -71,6 +71,7 @@ mod tests {
                     password: cert_password,
                 },
                 static_headers,
+                msi_resource: None,
             };
 
             // Build client and uploader
@@ -78,7 +79,6 @@ mod tests {
                 GenevaConfigClient::new(config).expect("Failed to create config client");
             let uploader =
                 GenevaUploader::from_config_client(Arc::new(config_client), uploader_config)
-                    .await
                     .expect("Failed to create uploader");
 
             // Event name/version

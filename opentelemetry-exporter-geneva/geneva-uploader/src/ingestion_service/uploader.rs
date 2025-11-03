@@ -10,6 +10,7 @@ use std::fmt::Write;
 use std::sync::Arc;
 use std::time::Duration;
 use thiserror::Error;
+use tracing::debug;
 use url::form_urlencoded::byte_serialize;
 use uuid::Uuid;
 
@@ -89,12 +90,13 @@ impl From<reqwest::Error> for GenevaUploaderError {
 
 pub(crate) type Result<T> = std::result::Result<T, GenevaUploaderError>;
 
-#[allow(dead_code)]
 /// Response from the ingestion API when submitting data
 #[derive(Debug, Clone, Deserialize)]
 pub(crate) struct IngestionResponse {
+    #[allow(dead_code)]
     pub(crate) ticket: String,
     #[serde(flatten)]
+    #[allow(dead_code)]
     pub(crate) extra: HashMap<String, Value>,
 }
 
@@ -127,20 +129,37 @@ impl GenevaUploader {
     /// # Returns
     /// * `Result<GenevaUploader>` with authenticated client and resolved moniker/endpoint
     #[allow(dead_code)]
-    pub(crate) async fn from_config_client(
+    pub(crate) fn from_config_client(
         config_client: Arc<GenevaConfigClient>,
         uploader_config: GenevaUploaderConfig,
     ) -> Result<Self> {
-        let http_client = Client::builder()
-            .timeout(Duration::from_secs(30))
-            .default_headers(uploader_config.static_headers.clone())
-            .build()?;
+let mut headers = header::HeaderMap::new();
+headers.insert(
+    header::ACCEPT,
+    header::HeaderValue::from_static("application/json"),
+);
+
+// Merge static headers from uploader_config
+for (key, value) in uploader_config.static_headers.iter() {
+    headers.insert(key.clone(), value.clone());
+}
+
+let http_client = Self::build_h1_client(headers)?;
 
         Ok(Self {
             config_client,
             config: uploader_config,
-            http_client,
+            http_client: client,
         })
+    }
+
+    fn build_h1_client(headers: header::HeaderMap) -> Result<Client> {
+        Ok(Client::builder()
+            .timeout(Duration::from_secs(30))
+            .default_headers(headers)
+            .http1_only()
+            .tcp_keepalive(Some(Duration::from_secs(60)))
+            .build()?)
     }
 
     /// Creates the GIG upload URI with required parameters
@@ -204,6 +223,14 @@ impl GenevaUploader {
         event_name: &str,
         metadata: &BatchMetadata,
     ) -> Result<IngestionResponse> {
+        debug!(
+            name: "uploader.upload",
+            target: "geneva-uploader",
+            event_name = %event_name,
+            size = data.len(),
+            "Starting upload"
+        );
+
         // Always get fresh auth info
         let (auth_info, moniker_info, monitoring_endpoint) =
             self.config_client.get_ingestion_info().await?;
@@ -220,6 +247,15 @@ impl GenevaUploader {
             auth_info.endpoint.trim_end_matches('/'),
             upload_uri
         );
+
+        debug!(
+            name: "uploader.upload.post",
+            target: "geneva-uploader",
+            event_name = %event_name,
+            moniker = %moniker_info.name,
+            "Posting to ingestion gateway"
+        );
+
         // Send the upload request
         let response = self
             .http_client
@@ -235,11 +271,34 @@ impl GenevaUploader {
         let body = response.text().await?;
 
         if status == reqwest::StatusCode::ACCEPTED {
-            let ingest_response: IngestionResponse =
-                serde_json::from_str(&body).map_err(GenevaUploaderError::SerdeJson)?;
+            let ingest_response: IngestionResponse = serde_json::from_str(&body).map_err(|e| {
+                debug!(
+                    name: "uploader.upload.parse_error",
+                    target: "geneva-uploader",
+                    error = %e,
+                    "Failed to parse ingestion response"
+                );
+                GenevaUploaderError::SerdeJson(e)
+            })?;
+
+            debug!(
+                name: "uploader.upload.success",
+                target: "geneva-uploader",
+                event_name = %event_name,
+                ticket = %ingest_response.ticket,
+                "Upload successful"
+            );
 
             Ok(ingest_response)
         } else {
+            debug!(
+                name: "uploader.upload.failed",
+                target: "geneva-uploader",
+                event_name = %event_name,
+                status = status.as_u16(),
+                body = %body,
+                "Upload failed"
+            );
             Err(GenevaUploaderError::UploadFailed {
                 status: status.as_u16(),
                 message: body,

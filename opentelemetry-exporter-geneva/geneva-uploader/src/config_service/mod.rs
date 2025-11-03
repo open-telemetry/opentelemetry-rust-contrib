@@ -23,13 +23,20 @@ mod tests {
             namespace: "ns".to_string(),
             region: "region".to_string(),
             config_major_version: 1,
-            auth_method: AuthMethod::ManagedIdentity,
             static_headers,
+            auth_method: AuthMethod::WorkloadIdentity {
+                resource: "https://monitor.azure.com".to_string(),
+            },
+            msi_resource: None,
         };
 
         assert_eq!(config.environment, "env");
         assert_eq!(config.account, "acct");
-        assert!(matches!(config.auth_method, AuthMethod::ManagedIdentity));
+
+        match config.auth_method {
+            AuthMethod::WorkloadIdentity { .. } => {}
+            _ => panic!("expected WorkloadIdentity variant"),
+        }
     }
 
     fn generate_self_signed_p12() -> (NamedTempFile, String) {
@@ -115,6 +122,7 @@ mod tests {
                 password,
             },
             static_headers,
+            msi_resource: None,
         };
 
         let client = GenevaConfigClient::new(config).unwrap();
@@ -164,6 +172,7 @@ mod tests {
                 password,
             },
             static_headers,
+            msi_resource: None,
         };
 
         let client = GenevaConfigClient::new(config).unwrap();
@@ -216,6 +225,7 @@ mod tests {
                 password,
             },
             static_headers,
+            msi_resource: None,
         };
 
         let client = GenevaConfigClient::new(config).unwrap();
@@ -251,6 +261,7 @@ mod tests {
                 password: "test".to_string(),
             },
             static_headers,
+            msi_resource: None,
         };
 
         let result = GenevaConfigClient::new(config);
@@ -318,6 +329,7 @@ mod tests {
                 password: cert_password,
             },
             static_headers,
+            msi_resource: None,
         };
 
         println!("Connecting to real Geneva Config service...");

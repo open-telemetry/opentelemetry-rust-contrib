@@ -178,8 +178,9 @@ mod benchmarks {
                         .collect();
 
                     b.iter(|| {
-                        let res =
-                            encoder.encode_log_batch(black_box(logs.iter()), black_box(metadata));
+                        let res = encoder
+                            .encode_log_batch(black_box(logs.iter()), black_box(metadata))
+                            .unwrap();
                         black_box(res); // double sure the return value is generated
                     });
                 },
@@ -207,7 +208,9 @@ mod benchmarks {
 
                     b.iter(|| {
                         let res = black_box(
-                            encoder.encode_log_batch(black_box(logs.iter()), black_box(metadata)),
+                            encoder
+                                .encode_log_batch(black_box(logs.iter()), black_box(metadata))
+                                .unwrap(),
                         );
                         black_box(res); // double sure the return value is generated
                     });
@@ -232,7 +235,9 @@ mod benchmarks {
 
             b.iter(|| {
                 let res = black_box(
-                    encoder.encode_log_batch(black_box(logs.iter()), black_box(metadata)),
+                    encoder
+                        .encode_log_batch(black_box(logs.iter()), black_box(metadata))
+                        .unwrap(),
                 );
                 black_box(res);
             });

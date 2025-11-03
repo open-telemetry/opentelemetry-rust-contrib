@@ -2,6 +2,10 @@
 
 ## vNext
 
+## v0.10.0
+
+- Bump opentelemetry and opentelemetry_sdk versions to 0.31
+
 ## v0.9.1
 
 - Added `Processor::builder_etw_compat_only()` method that builds a processor using a provider name that is fully compatible with ETW requirements (dropping UserEvents provider name compatibility) by allowing hyphens (`-`).
