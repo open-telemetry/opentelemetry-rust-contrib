@@ -2,7 +2,7 @@
 
 use base64::{engine::general_purpose, Engine as _};
 use reqwest::{
-    header::{HeaderMap, HeaderValue, AUTHORIZATION},
+    header::{HeaderMap, AUTHORIZATION},
     Client,
 };
 use serde::Deserialize;
@@ -593,7 +593,7 @@ impl GenevaConfigClient {
     ///   - `ConfigMajorVersion`: Version string (format: "Ver{major_version}v0")
     ///   - `TagId`: UUID for request tracking
     /// - **Headers**:
-    ///   - `User-Agent`: "{agent_identity}-{agent_version}"
+    ///   - `User-Agent`: "{prefix} (RustGenevaClient/0.1)" or "RustGenevaClient/0.1" if no prefix
     ///   - `x-ms-client-request-id`: UUID for request tracking
     ///   - `Accept`: "application/json"
     ///
