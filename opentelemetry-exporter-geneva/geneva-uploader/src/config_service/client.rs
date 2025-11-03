@@ -267,14 +267,9 @@ impl GenevaConfigClient {
         let agent_identity = "GenevaUploader";
         let agent_version = "0.1";
 
-        // Merge static headers from config
-        let mut headers = config.static_headers.clone();
-        headers.insert("Accept", HeaderValue::from_static("application/json"));
-        // Add User-Agent header with agent identity and version
-        let user_agent = format!("{}-{}", agent_identity, agent_version);
-        if let Ok(ua_value) = HeaderValue::from_str(&user_agent) {
-            headers.insert("User-Agent", ua_value);
-        }
+        // Use static headers from config
+        // Note: User-Agent and Accept are already set in static_headers from build_geneva_headers()
+        let headers = config.static_headers.clone();
 
         let mut client_builder = Client::builder()
             .http1_only()

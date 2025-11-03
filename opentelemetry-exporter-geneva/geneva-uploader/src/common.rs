@@ -38,22 +38,25 @@ pub(crate) fn build_user_agent_header(user_agent_prefix: Option<&str>) -> Result
         }
     }
 
-    let user_agent = if prefix.is_empty() {
-        "RustGenevaClient/0.1".to_string()
+    // Optimize for the no-prefix case - avoid allocation
+    let header_value = if prefix.is_empty() {
+        HeaderValue::from_static("RustGenevaClient/0.1")
     } else {
-        format!("{prefix} (RustGenevaClient/0.1)")
+        let user_agent = format!("{prefix} (RustGenevaClient/0.1)");
+        let header_value = HeaderValue::from_str(&user_agent).map_err(|e| {
+            ValidationError::InvalidUserAgent(format!("Invalid User-Agent header: {e}"))
+        })?;
+
+        // Verify the header can be represented as valid ASCII string
+        // This rejects non-ASCII characters like emojis, Chinese chars, etc.
+        header_value.to_str().map_err(|_| {
+            ValidationError::InvalidUserAgent(
+                "User-Agent contains non-ASCII characters".to_string(),
+            )
+        })?;
+
+        header_value
     };
-
-    // Create the HeaderValue - rejects control characters
-    let header_value = HeaderValue::from_str(&user_agent).map_err(|e| {
-        ValidationError::InvalidUserAgent(format!("Invalid User-Agent header: {e}"))
-    })?;
-
-    // Verify the header can be represented as valid ASCII string
-    // This rejects non-ASCII characters like emojis, Chinese chars, etc.
-    header_value.to_str().map_err(|_| {
-        ValidationError::InvalidUserAgent("User-Agent contains non-ASCII characters".to_string())
-    })?;
 
     Ok(header_value)
 }
