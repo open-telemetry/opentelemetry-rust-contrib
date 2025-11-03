@@ -2,7 +2,7 @@
 
 use base64::{engine::general_purpose, Engine as _};
 use reqwest::{
-    header::{HeaderMap, HeaderValue, ACCEPT, AUTHORIZATION, USER_AGENT},
+    header::{HeaderMap, HeaderValue, AUTHORIZATION},
     Client,
 };
 use serde::Deserialize;
@@ -223,6 +223,7 @@ pub(crate) struct GenevaConfigClient {
     precomputed_url_prefix: String,
     agent_identity: String,
     agent_version: String,
+    static_headers: HeaderMap,
 }
 
 impl fmt::Debug for GenevaConfigClient {
@@ -266,10 +267,19 @@ impl GenevaConfigClient {
         let agent_identity = "GenevaUploader";
         let agent_version = "0.1";
 
+        // Merge static headers from config
+        let mut headers = config.static_headers.clone();
+        headers.insert("Accept", HeaderValue::from_static("application/json"));
+        // Add User-Agent header with agent identity and version
+        let user_agent = format!("{}-{}", agent_identity, agent_version);
+        if let Ok(ua_value) = HeaderValue::from_str(&user_agent) {
+            headers.insert("User-Agent", ua_value);
+        }
+
         let mut client_builder = Client::builder()
             .http1_only()
             .timeout(Duration::from_secs(30)) //TODO - make this configurable
-            .default_headers(Self::build_static_headers(agent_identity, agent_version));
+            .default_headers(headers);
 
         match &config.auth_method {
             // TODO: Certificate auth would be removed in favor of managed identity.,
@@ -391,7 +401,7 @@ impl GenevaConfigClient {
             cached_data: RwLock::new(None),
             precomputed_url_prefix: pre_url,
             agent_identity: agent_identity.to_string(), // TODO make this configurable
-            agent_version: "1.0".to_string(),           // TODO make this configurable
+            agent_version: agent_version.to_string(),   // TODO make this configurable
         })
     }
 

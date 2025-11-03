@@ -1,6 +1,6 @@
 //! High-level GenevaClient for user code. Wraps config_service and ingestion_service.
 
-use crate::common::{build_geneva_headers, validate_user_agent_prefix};
+use crate::common::build_geneva_headers;
 use crate::config_service::client::{AuthMethod, GenevaConfigClient, GenevaConfigClientConfig};
 // ManagedIdentitySelector removed; no re-export needed.
 use crate::ingestion_service::uploader::{GenevaUploader, GenevaUploaderConfig};
@@ -65,16 +65,12 @@ impl GenevaClient {
             account = %cfg.account,
             "Initializing GenevaClient"
         );
-      
-        // Validate user agent prefix once and build headers once for both services
-        // This avoids duplicate validation and header building in config and ingestion services
-        if let Some(prefix) = cfg.user_agent_prefix {
-            validate_user_agent_prefix(prefix)
-                .map_err(|e| format!("Invalid user agent prefix: {e}"))?;
-        }
+
+        // Build headers once for both services
+        // HeaderValue::from_str() in build_geneva_headers will automatically reject control characters
         let static_headers = build_geneva_headers(cfg.user_agent_prefix)
             .map_err(|e| format!("Failed to build Geneva headers: {e}"))?;
-      
+
         // Validate MSI resource presence for managed identity variants
         match cfg.auth_method {
             AuthMethod::SystemManagedIdentity

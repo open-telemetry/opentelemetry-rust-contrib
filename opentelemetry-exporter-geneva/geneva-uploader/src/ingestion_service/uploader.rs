@@ -133,23 +133,23 @@ impl GenevaUploader {
         config_client: Arc<GenevaConfigClient>,
         uploader_config: GenevaUploaderConfig,
     ) -> Result<Self> {
-let mut headers = header::HeaderMap::new();
-headers.insert(
-    header::ACCEPT,
-    header::HeaderValue::from_static("application/json"),
-);
+        let mut headers = header::HeaderMap::new();
+        headers.insert(
+            header::ACCEPT,
+            header::HeaderValue::from_static("application/json"),
+        );
 
-// Merge static headers from uploader_config
-for (key, value) in uploader_config.static_headers.iter() {
-    headers.insert(key.clone(), value.clone());
-}
+        // Merge static headers from uploader_config
+        for (key, value) in uploader_config.static_headers.iter() {
+            headers.insert(key.clone(), value.clone());
+        }
 
-let http_client = Self::build_h1_client(headers)?;
+        let http_client = Self::build_h1_client(headers)?;
 
         Ok(Self {
             config_client,
             config: uploader_config,
-            http_client: client,
+            http_client,
         })
     }
 
