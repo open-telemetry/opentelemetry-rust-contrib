@@ -412,9 +412,9 @@ impl GenevaConfigClient {
                     error = %e,
                     agent_identity = agent_identity,
                     agent_version = agent_version,
-                    "User-Agent header creation failed, using fallback"
+                    "User-Agent header creation failed, using 'GenevaUploader-0.1'"
                 );
-                HeaderValue::from_static("(Unknown) RustGenevaClient/0.1")
+                HeaderValue::from_static("GenevaUploader-0.1")
             }),
         );
         headers.insert(ACCEPT, HeaderValue::from_static("application/json"));
