@@ -281,9 +281,6 @@ impl OtlpEncoder {
         };
 
         // Create single batch with all spans
-        let schemas_count = schemas.len();
-        let events_count = events.len();
-
         let batch_metadata = BatchMetadata {
             start_time: if start_time == u64::MAX {
                 0
@@ -294,6 +291,8 @@ impl OtlpEncoder {
             schema_ids: schema_ids_string,
         };
 
+        let schemas_count = schemas.len();
+        let events_count = events.len();
         let blob = CentralBlob {
             version: 1,
             format: 2,
