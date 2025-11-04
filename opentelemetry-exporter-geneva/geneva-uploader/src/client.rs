@@ -16,6 +16,7 @@ pub struct EncodedBatch {
     pub event_name: String,
     pub data: Vec<u8>,
     pub metadata: crate::payload_encoder::central_blob::BatchMetadata,
+    pub row_count: usize,
 }
 
 /// Configuration for GenevaClient (user-facing)
@@ -212,7 +213,7 @@ impl GenevaClient {
         );
 
         self.uploader
-            .upload(batch.data.clone(), &batch.event_name, &batch.metadata)
+            .upload(batch.data.clone(), &batch.event_name, &batch.metadata, batch.row_count)
             .await
             .map(|_| {
                 debug!(

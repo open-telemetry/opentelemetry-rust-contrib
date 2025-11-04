@@ -190,6 +190,7 @@ impl OtlpEncoder {
                 event_name: batch_event_name.to_string(),
                 data: compressed,
                 metadata: batch_data.metadata,
+                row_count: events_count,
             });
         }
         Ok(blobs)
@@ -280,6 +281,9 @@ impl OtlpEncoder {
         };
 
         // Create single batch with all spans
+        let schemas_count = schemas.len();
+        let events_count = events.len();
+
         let batch_metadata = BatchMetadata {
             start_time: if start_time == u64::MAX {
                 0
@@ -289,9 +293,6 @@ impl OtlpEncoder {
             end_time,
             schema_ids: schema_ids_string,
         };
-
-        let schemas_count = schemas.len();
-        let events_count = events.len();
 
         let blob = CentralBlob {
             version: 1,
@@ -327,6 +328,7 @@ impl OtlpEncoder {
             event_name: EVENT_NAME.to_string(),
             data: compressed,
             metadata: batch_metadata,
+            row_count: events_count,
         }])
     }
 
