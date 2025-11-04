@@ -82,7 +82,8 @@ impl OtlpEncoder {
                             acc.push(';');
                         }
                         let md5_hash = md5::compute(s.id.to_le_bytes());
-                        write!(&mut acc, "{md5_hash:x}").unwrap();
+                        // Writing to String never fails in practice, ignore error
+                        let _ = write!(&mut acc, "{md5_hash:x}");
                         acc
                     },
                 )
@@ -272,7 +273,8 @@ impl OtlpEncoder {
                             acc.push(';');
                         }
                         let md5_hash = md5::compute(s.id.to_le_bytes());
-                        write!(&mut acc, "{md5_hash:x}").unwrap();
+                        // Writing to String never fails in practice, ignore error
+                        let _ = write!(&mut acc, "{md5_hash:x}");
                         acc
                     },
                 )
@@ -567,12 +569,30 @@ impl OtlpEncoder {
                 }
                 FIELD_TRACE_ID => {
                     let hex_bytes = Self::encode_id_to_hex::<32>(&span.trace_id);
-                    let hex_str = std::str::from_utf8(&hex_bytes).unwrap();
+                    // Hex encoding produces valid ASCII, log if conversion fails and skip field
+                    let hex_str = std::str::from_utf8(&hex_bytes).unwrap_or_else(|e| {
+                        debug!(
+                            name: "encoder.span.trace_id_utf8_error",
+                            target: "geneva-uploader",
+                            error = %e,
+                            "Trace ID UTF-8 conversion failed"
+                        );
+                        ""
+                    });
                     BondWriter::write_string(&mut buffer, hex_str);
                 }
                 FIELD_SPAN_ID => {
                     let hex_bytes = Self::encode_id_to_hex::<16>(&span.span_id);
-                    let hex_str = std::str::from_utf8(&hex_bytes).unwrap();
+                    // Hex encoding produces valid ASCII, log if conversion fails and skip field
+                    let hex_str = std::str::from_utf8(&hex_bytes).unwrap_or_else(|e| {
+                        debug!(
+                            name: "encoder.span.span_id_utf8_error",
+                            target: "geneva-uploader",
+                            error = %e,
+                            "Span ID UTF-8 conversion failed"
+                        );
+                        ""
+                    });
                     BondWriter::write_string(&mut buffer, hex_str);
                 }
                 FIELD_TRACE_FLAGS => {
@@ -586,7 +606,16 @@ impl OtlpEncoder {
                 }
                 FIELD_PARENT_ID => {
                     let hex_bytes = Self::encode_id_to_hex::<16>(&span.parent_span_id);
-                    let hex_str = std::str::from_utf8(&hex_bytes).unwrap();
+                    // Hex encoding produces valid ASCII, log if conversion fails and skip field
+                    let hex_str = std::str::from_utf8(&hex_bytes).unwrap_or_else(|e| {
+                        debug!(
+                            name: "encoder.span.parent_id_utf8_error",
+                            target: "geneva-uploader",
+                            error = %e,
+                            "Parent ID UTF-8 conversion failed"
+                        );
+                        ""
+                    });
                     BondWriter::write_string(&mut buffer, hex_str);
                 }
                 FIELD_LINKS => {
@@ -635,12 +664,30 @@ impl OtlpEncoder {
                 }
                 FIELD_TRACE_ID => {
                     let hex_bytes = Self::encode_id_to_hex::<32>(&log.trace_id);
-                    let hex_str = std::str::from_utf8(&hex_bytes).unwrap();
+                    // Hex encoding produces valid ASCII, log if conversion fails and skip field
+                    let hex_str = std::str::from_utf8(&hex_bytes).unwrap_or_else(|e| {
+                        debug!(
+                            name: "encoder.log.trace_id_utf8_error",
+                            target: "geneva-uploader",
+                            error = %e,
+                            "Trace ID UTF-8 conversion failed"
+                        );
+                        ""
+                    });
                     BondWriter::write_string(&mut buffer, hex_str);
                 }
                 FIELD_SPAN_ID => {
                     let hex_bytes = Self::encode_id_to_hex::<16>(&log.span_id);
-                    let hex_str = std::str::from_utf8(&hex_bytes).unwrap();
+                    // Hex encoding produces valid ASCII, log if conversion fails and skip field
+                    let hex_str = std::str::from_utf8(&hex_bytes).unwrap_or_else(|e| {
+                        debug!(
+                            name: "encoder.log.span_id_utf8_error",
+                            target: "geneva-uploader",
+                            error = %e,
+                            "Span ID UTF-8 conversion failed"
+                        );
+                        ""
+                    });
                     BondWriter::write_string(&mut buffer, hex_str);
                 }
                 FIELD_TRACE_FLAGS => {
@@ -678,7 +725,17 @@ impl OtlpEncoder {
 
     fn encode_id_to_hex<const N: usize>(id: &[u8]) -> [u8; N] {
         let mut hex_bytes = [0u8; N];
-        hex::encode_to_slice(id, &mut hex_bytes).unwrap();
+        // If encoding fails (buffer size mismatch), log and return zeros
+        if let Err(e) = hex::encode_to_slice(id, &mut hex_bytes) {
+            debug!(
+                name: "encoder.encode_id_to_hex.error",
+                target: "geneva-uploader",
+                error = %e,
+                id_len = id.len(),
+                buffer_size = N,
+                "Hex encoding failed, using zeros"
+            );
+        }
         hex_bytes
     }
 
@@ -727,8 +784,26 @@ impl OtlpEncoder {
         let nsec = (nanos % 1_000_000_000) as u32;
         Utc.timestamp_opt(secs, nsec)
             .single()
-            .unwrap_or_else(|| Utc.timestamp_opt(0, 0).single().unwrap())
-            .to_rfc3339()
+            .or_else(|| {
+                debug!(
+                    name: "encoder.format_timestamp.invalid",
+                    target: "geneva-uploader",
+                    nanos = nanos,
+                    secs = secs,
+                    nsec = nsec,
+                    "Timestamp out of range, falling back to epoch"
+                );
+                Utc.timestamp_opt(0, 0).single()
+            })
+            .map(|dt| dt.to_rfc3339())
+            .unwrap_or_else(|| {
+                debug!(
+                    name: "encoder.format_timestamp.epoch_failed",
+                    target: "geneva-uploader",
+                    "Unix epoch conversion failed, using constant"
+                );
+                "1970-01-01T00:00:00+00:00".to_string()
+            })
     }
 
     /// Write attribute value based on its type
