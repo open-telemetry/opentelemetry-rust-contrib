@@ -32,16 +32,16 @@ pub struct GenevaClientConfig {
     pub tenant: String,
     pub role_name: String,
     pub role_instance: String,
-    /// User agent prefix for the application. Will be formatted as "`<prefix>` (GenevaUploader/0.1)".
-    /// If None, defaults to "GenevaUploader/0.1".
+    /// User agent prefix for the application. Will be formatted as "`<prefix>` (RustGenevaClient/0.1)".
+    /// If None, defaults to "RustGenevaClient/0.1".
     ///
     /// The prefix must contain only ASCII printable characters, be non-empty (after trimming),
     /// and not exceed 200 characters in length.
     ///
     /// Examples:
-    /// - None: "GenevaUploader/0.1"
-    /// - Some("MyApp/2.1.0"): "MyApp/2.1.0 (GenevaUploader/0.1)"
-    /// - Some("ProductionService-1.0"): "ProductionService-1.0 (GenevaUploader/0.1)"
+    /// - None: "RustGenevaClient/0.1"
+    /// - Some("MyApp/2.1.0"): "MyApp/2.1.0 (RustGenevaClient/0.1)"
+    /// - Some("ProductionService-1.0"): "ProductionService-1.0 (RustGenevaClient/0.1)"
     pub user_agent_prefix: Option<&'static str>,
     pub msi_resource: Option<String>, // Required for Managed Identity variants
                                       // Add event name/version here if constant, or per-upload if you want them per call.
