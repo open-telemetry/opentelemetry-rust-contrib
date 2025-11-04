@@ -8,7 +8,7 @@ use reqwest::{
 use serde::Deserialize;
 use std::time::Duration;
 use thiserror::Error;
-use tracing::{debug, info, error};
+use tracing::{debug, error, info};
 use uuid::Uuid;
 
 use chrono::{DateTime, Utc};
