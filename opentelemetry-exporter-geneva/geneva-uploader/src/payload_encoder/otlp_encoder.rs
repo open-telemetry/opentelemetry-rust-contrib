@@ -1290,7 +1290,7 @@ mod tests {
         let encoder = OtlpEncoder::new();
 
         // Test with logs
-        let logs = vec![
+        let logs = [
             LogRecord {
                 observed_time_unix_nano: 1_700_000_000_000_000_000,
                 event_name: "test_event".to_string(),
@@ -1319,7 +1319,7 @@ mod tests {
         assert_eq!(result[0].row_count, 3);
 
         // Test with spans
-        let spans = vec![
+        let spans = [
             Span {
                 start_time_unix_nano: 1_700_000_000_000_000_000,
                 end_time_unix_nano: 1_700_000_001_000_000_000,
