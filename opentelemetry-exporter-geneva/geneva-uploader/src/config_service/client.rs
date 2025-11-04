@@ -8,7 +8,7 @@ use reqwest::{
 use serde::Deserialize;
 use std::time::Duration;
 use thiserror::Error;
-use tracing::{debug, info};
+use tracing::{debug, info, error};
 use uuid::Uuid;
 
 use chrono::{DateTime, Utc};
@@ -405,8 +405,17 @@ impl GenevaConfigClient {
         // Gracefully fallback to static header if formatting fails (though hardcoded values should always be valid)
         headers.insert(
             USER_AGENT,
-            HeaderValue::from_str(&user_agent)
-                .unwrap_or_else(|_| HeaderValue::from_static("GenevaUploader")),
+            HeaderValue::from_str(&user_agent).unwrap_or_else(|e| {
+                error!(
+                    name: "config_client.build_static_headers.error",
+                    target: "geneva-uploader",
+                    error = %e,
+                    agent_identity = agent_identity,
+                    agent_version = agent_version,
+                    "User-Agent header creation failed, using fallback"
+                );
+                HeaderValue::from_static("(Unknown) RustGenevaClient/0.1")
+            }),
         );
         headers.insert(ACCEPT, HeaderValue::from_static("application/json"));
         headers

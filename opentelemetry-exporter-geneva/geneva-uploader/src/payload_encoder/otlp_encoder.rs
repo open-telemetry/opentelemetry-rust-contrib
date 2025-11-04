@@ -10,7 +10,7 @@ use opentelemetry_proto::tonic::logs::v1::LogRecord;
 use opentelemetry_proto::tonic::trace::v1::Span;
 use std::borrow::Cow;
 use std::sync::Arc;
-use tracing::debug;
+use tracing::{debug, error};
 
 const FIELD_ENV_NAME: &str = "env_name";
 const FIELD_ENV_VER: &str = "env_ver";
@@ -569,13 +569,13 @@ impl OtlpEncoder {
                 }
                 FIELD_TRACE_ID => {
                     let hex_bytes = Self::encode_id_to_hex::<32>(&span.trace_id);
-                    // Hex encoding produces valid ASCII, log if conversion fails and skip field
+                    // Hex encoding produces valid ASCII, log error if conversion fails (data loss)
                     let hex_str = std::str::from_utf8(&hex_bytes).unwrap_or_else(|e| {
-                        debug!(
+                        error!(
                             name: "encoder.span.trace_id_utf8_error",
                             target: "geneva-uploader",
                             error = %e,
-                            "Trace ID UTF-8 conversion failed"
+                            "Trace ID UTF-8 conversion failed - distributed tracing will be broken"
                         );
                         ""
                     });
@@ -583,13 +583,13 @@ impl OtlpEncoder {
                 }
                 FIELD_SPAN_ID => {
                     let hex_bytes = Self::encode_id_to_hex::<16>(&span.span_id);
-                    // Hex encoding produces valid ASCII, log if conversion fails and skip field
+                    // Hex encoding produces valid ASCII, log error if conversion fails (data loss)
                     let hex_str = std::str::from_utf8(&hex_bytes).unwrap_or_else(|e| {
-                        debug!(
+                        error!(
                             name: "encoder.span.span_id_utf8_error",
                             target: "geneva-uploader",
                             error = %e,
-                            "Span ID UTF-8 conversion failed"
+                            "Span ID UTF-8 conversion failed - distributed tracing will be broken"
                         );
                         ""
                     });
@@ -606,13 +606,13 @@ impl OtlpEncoder {
                 }
                 FIELD_PARENT_ID => {
                     let hex_bytes = Self::encode_id_to_hex::<16>(&span.parent_span_id);
-                    // Hex encoding produces valid ASCII, log if conversion fails and skip field
+                    // Hex encoding produces valid ASCII, log error if conversion fails (data loss)
                     let hex_str = std::str::from_utf8(&hex_bytes).unwrap_or_else(|e| {
-                        debug!(
+                        error!(
                             name: "encoder.span.parent_id_utf8_error",
                             target: "geneva-uploader",
                             error = %e,
-                            "Parent ID UTF-8 conversion failed"
+                            "Parent ID UTF-8 conversion failed - span parent relationship will be lost"
                         );
                         ""
                     });
@@ -664,13 +664,13 @@ impl OtlpEncoder {
                 }
                 FIELD_TRACE_ID => {
                     let hex_bytes = Self::encode_id_to_hex::<32>(&log.trace_id);
-                    // Hex encoding produces valid ASCII, log if conversion fails and skip field
+                    // Hex encoding produces valid ASCII, log error if conversion fails (data loss)
                     let hex_str = std::str::from_utf8(&hex_bytes).unwrap_or_else(|e| {
-                        debug!(
+                        error!(
                             name: "encoder.log.trace_id_utf8_error",
                             target: "geneva-uploader",
                             error = %e,
-                            "Trace ID UTF-8 conversion failed"
+                            "Trace ID UTF-8 conversion failed - log correlation will be broken"
                         );
                         ""
                     });
@@ -678,13 +678,13 @@ impl OtlpEncoder {
                 }
                 FIELD_SPAN_ID => {
                     let hex_bytes = Self::encode_id_to_hex::<16>(&log.span_id);
-                    // Hex encoding produces valid ASCII, log if conversion fails and skip field
+                    // Hex encoding produces valid ASCII, log error if conversion fails (data loss)
                     let hex_str = std::str::from_utf8(&hex_bytes).unwrap_or_else(|e| {
-                        debug!(
+                        error!(
                             name: "encoder.log.span_id_utf8_error",
                             target: "geneva-uploader",
                             error = %e,
-                            "Span ID UTF-8 conversion failed"
+                            "Span ID UTF-8 conversion failed - log correlation will be broken"
                         );
                         ""
                     });
@@ -725,15 +725,15 @@ impl OtlpEncoder {
 
     fn encode_id_to_hex<const N: usize>(id: &[u8]) -> [u8; N] {
         let mut hex_bytes = [0u8; N];
-        // If encoding fails (buffer size mismatch), log and return zeros
+        // If encoding fails (buffer size mismatch), log error and return zeros
         if let Err(e) = hex::encode_to_slice(id, &mut hex_bytes) {
-            debug!(
+            error!(
                 name: "encoder.encode_id_to_hex.error",
                 target: "geneva-uploader",
                 error = %e,
                 id_len = id.len(),
                 buffer_size = N,
-                "Hex encoding failed, using zeros"
+                "Hex encoding failed, using zeros - indicates a bug"
             );
         }
         hex_bytes
@@ -785,22 +785,22 @@ impl OtlpEncoder {
         Utc.timestamp_opt(secs, nsec)
             .single()
             .or_else(|| {
-                debug!(
+                error!(
                     name: "encoder.format_timestamp.invalid",
                     target: "geneva-uploader",
                     nanos = nanos,
                     secs = secs,
                     nsec = nsec,
-                    "Timestamp out of range, falling back to epoch"
+                    "Timestamp out of range - using epoch, time data corrupted"
                 );
                 Utc.timestamp_opt(0, 0).single()
             })
             .map(|dt| dt.to_rfc3339())
             .unwrap_or_else(|| {
-                debug!(
+                error!(
                     name: "encoder.format_timestamp.epoch_failed",
                     target: "geneva-uploader",
-                    "Unix epoch conversion failed, using constant"
+                    "Unix epoch conversion failed - using constant, indicates serious issue"
                 );
                 "1970-01-01T00:00:00+00:00".to_string()
             })
