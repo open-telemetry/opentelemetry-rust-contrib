@@ -56,6 +56,7 @@ async fn main() {
         tenant,
         role_name,
         role_instance,
+        user_agent_prefix: None,
         msi_resource: None,
     };
 

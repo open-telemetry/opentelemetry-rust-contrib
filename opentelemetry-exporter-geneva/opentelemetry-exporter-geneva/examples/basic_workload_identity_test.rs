@@ -83,6 +83,7 @@ async fn main() {
         role_name,
         role_instance,
         auth_method,
+        user_agent_prefix: None,
         msi_resource: None, // Not used for Workload Identity
     };
 
