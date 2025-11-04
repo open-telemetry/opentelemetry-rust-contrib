@@ -213,7 +213,12 @@ impl GenevaClient {
         );
 
         self.uploader
-            .upload(batch.data.clone(), &batch.event_name, &batch.metadata, batch.row_count)
+            .upload(
+                batch.data.clone(),
+                &batch.event_name,
+                &batch.metadata,
+                batch.row_count,
+            )
             .await
             .map(|_| {
                 debug!(
