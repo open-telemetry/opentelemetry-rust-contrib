@@ -32,7 +32,7 @@ pub struct GenevaClientConfig {
     pub tenant: String,
     pub role_name: String,
     pub role_instance: String,
-    /// User agent prefix for the application. Will be formatted as "<prefix> (GenevaUploader/0.1)".
+    /// User agent prefix for the application. Will be formatted as "`<prefix>` (GenevaUploader/0.1)".
     /// If None, defaults to "GenevaUploader/0.1".
     ///
     /// The prefix must contain only ASCII printable characters, be non-empty (after trimming),
