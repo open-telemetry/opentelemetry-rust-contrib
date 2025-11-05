@@ -124,6 +124,7 @@ async fn init_client() -> Result<(GenevaClient, Option<String>), Box<dyn std::er
             tenant: std::env::var("GENEVA_TENANT").unwrap_or_else(|_| "test".to_string()),
             role_name: std::env::var("GENEVA_ROLE").unwrap_or_else(|_| "test".to_string()),
             role_instance: std::env::var("GENEVA_INSTANCE").unwrap_or_else(|_| "test".to_string()),
+            user_agent_prefix: Some("GenevaStressTest/1.0"),
             msi_resource: None,
         };
 
@@ -143,6 +144,7 @@ async fn init_client() -> Result<(GenevaClient, Option<String>), Box<dyn std::er
             tenant: "test".to_string(),
             role_name: "test".to_string(),
             role_instance: "test".to_string(),
+            user_agent_prefix: Some("GenevaStressTest/1.0"),
             msi_resource: None,
         };
 
@@ -198,6 +200,7 @@ async fn init_client() -> Result<(GenevaClient, Option<String>), Box<dyn std::er
             tenant: "test".to_string(),
             role_name: "test".to_string(),
             role_instance: "test".to_string(),
+            user_agent_prefix: Some("GenevaStressTest/1.0"),
             msi_resource: None,
         };
 

@@ -1,5 +1,6 @@
 use crate::config_service::client::{GenevaConfigClient, GenevaConfigClientError};
 use crate::payload_encoder::central_blob::BatchMetadata;
+use reqwest::header::HeaderMap;
 use reqwest::{header, Client};
 use serde::Deserialize;
 use serde_json::Value;
@@ -107,6 +108,7 @@ pub(crate) struct GenevaUploaderConfig {
     #[allow(dead_code)]
     pub environment: String,
     pub config_version: String,
+    pub static_headers: HeaderMap,
 }
 
 /// Client for uploading data to Geneva Ingestion Gateway (GIG)
@@ -136,12 +138,18 @@ impl GenevaUploader {
             header::ACCEPT,
             header::HeaderValue::from_static("application/json"),
         );
-        let client = Self::build_h1_client(headers)?;
+
+        // Merge static headers from uploader_config
+        for (key, value) in uploader_config.static_headers.iter() {
+            headers.insert(key.clone(), value.clone());
+        }
+
+        let http_client = Self::build_h1_client(headers)?;
 
         Ok(Self {
             config_client,
             config: uploader_config,
-            http_client: client,
+            http_client,
         })
     }
 

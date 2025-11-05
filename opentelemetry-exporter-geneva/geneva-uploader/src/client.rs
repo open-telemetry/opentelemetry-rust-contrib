@@ -1,5 +1,6 @@
 //! High-level GenevaClient for user code. Wraps config_service and ingestion_service.
 
+use crate::common::build_geneva_headers;
 use crate::config_service::client::{AuthMethod, GenevaConfigClient, GenevaConfigClientConfig};
 // ManagedIdentitySelector removed; no re-export needed.
 use crate::ingestion_service::uploader::{GenevaUploader, GenevaUploaderConfig};
@@ -32,6 +33,17 @@ pub struct GenevaClientConfig {
     pub tenant: String,
     pub role_name: String,
     pub role_instance: String,
+    /// User agent prefix for the application. Will be formatted as "`<prefix>` (RustGenevaClient/0.1)".
+    /// If None, defaults to "RustGenevaClient/0.1".
+    ///
+    /// The prefix must contain only ASCII printable characters, be non-empty (after trimming),
+    /// and not exceed 200 characters in length.
+    ///
+    /// Examples:
+    /// - None: "RustGenevaClient/0.1"
+    /// - Some("MyApp/2.1.0"): "MyApp/2.1.0 (RustGenevaClient/0.1)"
+    /// - Some("ProductionService-1.0"): "ProductionService-1.0 (RustGenevaClient/0.1)"
+    pub user_agent_prefix: Option<&'static str>,
     pub msi_resource: Option<String>, // Required for Managed Identity variants
                                       // Add event name/version here if constant, or per-upload if you want them per call.
 }
@@ -54,6 +66,11 @@ impl GenevaClient {
             account = %cfg.account,
             "Initializing GenevaClient"
         );
+
+        // Build headers once for both services
+        // HeaderValue::from_str() in build_geneva_headers will automatically reject control characters
+        let static_headers = build_geneva_headers(cfg.user_agent_prefix)
+            .map_err(|e| format!("Failed to build Geneva headers: {e}"))?;
 
         // Validate MSI resource presence for managed identity variants
         match cfg.auth_method {
@@ -85,6 +102,7 @@ impl GenevaClient {
             region: cfg.region,
             config_major_version: cfg.config_major_version,
             auth_method: cfg.auth_method,
+            static_headers: static_headers.clone(),
             msi_resource: cfg.msi_resource,
         };
         let config_client =
@@ -115,6 +133,7 @@ impl GenevaClient {
             source_identity,
             environment: cfg.environment,
             config_version: config_version.clone(),
+            static_headers: static_headers.clone(),
         };
 
         let uploader =

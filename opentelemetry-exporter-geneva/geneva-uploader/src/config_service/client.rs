@@ -2,7 +2,7 @@
 
 use base64::{engine::general_purpose, Engine as _};
 use reqwest::{
-    header::{HeaderMap, HeaderValue, ACCEPT, AUTHORIZATION, USER_AGENT},
+    header::{HeaderMap, AUTHORIZATION},
     Client,
 };
 use serde::Deserialize;
@@ -157,7 +157,8 @@ pub(crate) struct GenevaConfigClientConfig {
     pub(crate) namespace: String,
     pub(crate) region: String,
     pub(crate) config_major_version: u32,
-    pub(crate) auth_method: AuthMethod, // agent_identity and agent_version are hardcoded for now
+    pub(crate) static_headers: HeaderMap,
+    pub(crate) auth_method: AuthMethod,
     pub(crate) msi_resource: Option<String>, // Required when using any Managed Identity variant
 }
 
@@ -222,6 +223,7 @@ pub(crate) struct GenevaConfigClient {
     precomputed_url_prefix: String,
     agent_identity: String,
     agent_version: String,
+    static_headers: HeaderMap,
 }
 
 impl fmt::Debug for GenevaConfigClient {
@@ -265,10 +267,14 @@ impl GenevaConfigClient {
         let agent_identity = "GenevaUploader";
         let agent_version = "0.1";
 
+        // Use static headers from config
+        // Note: User-Agent and Accept are already set in static_headers from build_geneva_headers()
+        let headers = config.static_headers.clone();
+
         let mut client_builder = Client::builder()
             .http1_only()
             .timeout(Duration::from_secs(30)) //TODO - make this configurable
-            .default_headers(Self::build_static_headers(agent_identity, agent_version));
+            .default_headers(headers);
 
         match &config.auth_method {
             // TODO: Certificate auth would be removed in favor of managed identity.,
@@ -381,14 +387,16 @@ impl GenevaConfigClient {
         ).map_err(|e| GenevaConfigClientError::InternalError(format!("Failed to write URL: {e}")))?;
 
         let http_client = client_builder.build()?;
+        let static_headers = config.static_headers.clone();
 
         Ok(Self {
+            static_headers,
             config,
             http_client,
             cached_data: RwLock::new(None),
             precomputed_url_prefix: pre_url,
             agent_identity: agent_identity.to_string(), // TODO make this configurable
-            agent_version: "1.0".to_string(),           // TODO make this configurable
+            agent_version: agent_version.to_string(),   // TODO make this configurable
         })
     }
 
@@ -397,14 +405,6 @@ impl GenevaConfigClient {
         DateTime::parse_from_rfc3339(expiry_str)
             .ok()
             .map(|dt| dt.with_timezone(&Utc))
-    }
-
-    fn build_static_headers(agent_identity: &str, agent_version: &str) -> HeaderMap {
-        let mut headers = HeaderMap::new();
-        let user_agent = format!("{agent_identity}-{agent_version}");
-        headers.insert(USER_AGENT, HeaderValue::from_str(&user_agent).unwrap());
-        headers.insert(ACCEPT, HeaderValue::from_static("application/json"));
-        headers
     }
 
     /// Get Azure AD token using Workload Identity (Federated Identity)
@@ -593,7 +593,7 @@ impl GenevaConfigClient {
     ///   - `ConfigMajorVersion`: Version string (format: "Ver{major_version}v0")
     ///   - `TagId`: UUID for request tracking
     /// - **Headers**:
-    ///   - `User-Agent`: "{agent_identity}-{agent_version}"
+    ///   - `User-Agent`: "{prefix} (RustGenevaClient/0.1)" or "RustGenevaClient/0.1" if no prefix
     ///   - `x-ms-client-request-id`: UUID for request tracking
     ///   - `Accept`: "application/json"
     ///

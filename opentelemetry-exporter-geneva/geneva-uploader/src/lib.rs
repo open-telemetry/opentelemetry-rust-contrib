@@ -1,3 +1,4 @@
+mod common;
 mod config_service;
 mod ingestion_service;
 mod payload_encoder;

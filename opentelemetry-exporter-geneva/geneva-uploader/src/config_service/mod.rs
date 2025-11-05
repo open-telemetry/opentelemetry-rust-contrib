@@ -13,6 +13,9 @@ mod tests {
 
     #[test]
     fn test_config_fields() {
+        let static_headers = crate::common::build_geneva_headers(Some("TestApp/1.0"))
+            .expect("Failed to build Geneva headers");
+
         let config = GenevaConfigClientConfig {
             endpoint: "https://example.com".to_string(),
             environment: "env".to_string(),
@@ -20,6 +23,7 @@ mod tests {
             namespace: "ns".to_string(),
             region: "region".to_string(),
             config_major_version: 1,
+            static_headers,
             auth_method: AuthMethod::WorkloadIdentity {
                 resource: "https://monitor.azure.com".to_string(),
             },
@@ -103,6 +107,9 @@ mod tests {
 
         let (temp_p12_file, password) = generate_self_signed_p12();
 
+        let static_headers = crate::common::build_geneva_headers(Some("MockClient/1.0"))
+            .expect("Failed to build Geneva headers");
+
         let config = GenevaConfigClientConfig {
             endpoint: mock_server.uri(),
             environment: "mockenv".into(),
@@ -114,6 +121,7 @@ mod tests {
                 path: PathBuf::from(temp_p12_file.path().to_string_lossy().to_string()),
                 password,
             },
+            static_headers,
             msi_resource: None,
         };
 
@@ -149,6 +157,9 @@ mod tests {
 
         let (temp_p12_file, password) = generate_self_signed_p12();
 
+        let static_headers = crate::common::build_geneva_headers(Some("ErrorTestApp/1.0"))
+            .expect("Failed to build Geneva headers");
+
         let config = GenevaConfigClientConfig {
             endpoint: mock_server.uri(),
             environment: "mockenv".into(),
@@ -160,6 +171,7 @@ mod tests {
                 path: PathBuf::from(temp_p12_file.path().to_string_lossy().to_string()),
                 password,
             },
+            static_headers,
             msi_resource: None,
         };
 
@@ -198,6 +210,9 @@ mod tests {
 
         let (temp_p12_file, password) = generate_self_signed_p12();
 
+        let static_headers = crate::common::build_geneva_headers(Some("MissingInfoTestApp/1.0"))
+            .expect("Failed to build Geneva headers");
+
         let config = GenevaConfigClientConfig {
             endpoint: mock_server.uri(),
             environment: "mockenv".into(),
@@ -209,6 +224,7 @@ mod tests {
                 path: PathBuf::from(temp_p12_file.path().to_string_lossy().to_string()),
                 password,
             },
+            static_headers,
             msi_resource: None,
         };
 
@@ -230,6 +246,9 @@ mod tests {
     #[cfg_attr(target_os = "macos", ignore)] // cert generated not compatible with macOS
     #[tokio::test]
     async fn test_invalid_certificate_path() {
+        let static_headers = crate::common::build_geneva_headers(Some("InvalidCertTestApp/1.0"))
+            .expect("Failed to build Geneva headers");
+
         let config = GenevaConfigClientConfig {
             endpoint: "https://example.com".to_string(),
             environment: "env".to_string(),
@@ -241,6 +260,7 @@ mod tests {
                 path: PathBuf::from("/nonexistent/path.p12".to_string()),
                 password: "test".to_string(),
             },
+            static_headers,
             msi_resource: None,
         };
 
@@ -294,6 +314,9 @@ mod tests {
             .parse::<u32>() // Convert string to u32
             .expect("GENEVA_CONFIG_MAJOR_VERSION must be a valid unsigned integer");
 
+        let static_headers = crate::common::build_geneva_headers(Some("RealServerTestApp/1.0"))
+            .expect("Failed to build Geneva headers");
+
         let config = GenevaConfigClientConfig {
             endpoint,
             environment,
@@ -305,6 +328,7 @@ mod tests {
                 path: PathBuf::from(cert_path),
                 password: cert_password,
             },
+            static_headers,
             msi_resource: None,
         };
 

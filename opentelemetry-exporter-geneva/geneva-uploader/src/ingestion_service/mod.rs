@@ -46,11 +46,17 @@ mod tests {
 
             // Define uploader config
             let config_version = format!("Ver{config_major_version}v0");
+
+            // Build the static headers once for both services
+            let static_headers = crate::common::build_geneva_headers(Some("TestUploader"))
+                .expect("Failed to build Geneva headers");
+
             let uploader_config = GenevaUploaderConfig {
                 namespace: namespace.clone(),
                 source_identity,
                 environment: environment.clone(),
                 config_version,
+                static_headers: static_headers.clone(),
             };
 
             let config = GenevaConfigClientConfig {
@@ -64,6 +70,7 @@ mod tests {
                     path: cert_path,
                     password: cert_password,
                 },
+                static_headers,
                 msi_resource: None,
             };
 
