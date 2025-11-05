@@ -190,6 +190,7 @@ impl OtlpEncoder {
                 event_name: batch_event_name.to_string(),
                 data: compressed,
                 metadata: batch_data.metadata,
+                row_count: events_count,
             });
         }
         Ok(blobs)
@@ -292,7 +293,6 @@ impl OtlpEncoder {
 
         let schemas_count = schemas.len();
         let events_count = events.len();
-
         let blob = CentralBlob {
             version: 1,
             format: 2,
@@ -327,6 +327,7 @@ impl OtlpEncoder {
             event_name: EVENT_NAME.to_string(),
             data: compressed,
             metadata: batch_metadata,
+            row_count: events_count,
         }])
     }
 
@@ -1281,5 +1282,60 @@ mod tests {
         assert_eq!(single_result.matches(',').count(), 1); // Only one comma for field separation
         assert!(single_result.starts_with('['));
         assert!(single_result.ends_with(']'));
+    }
+
+    #[test]
+    fn test_row_count_in_encoded_batch() {
+        let encoder = OtlpEncoder::new();
+
+        // Test with logs
+        let logs = [
+            LogRecord {
+                observed_time_unix_nano: 1_700_000_000_000_000_000,
+                event_name: "test_event".to_string(),
+                severity_number: 9,
+                ..Default::default()
+            },
+            LogRecord {
+                observed_time_unix_nano: 1_700_000_001_000_000_000,
+                event_name: "test_event".to_string(),
+                severity_number: 10,
+                ..Default::default()
+            },
+            LogRecord {
+                observed_time_unix_nano: 1_700_000_002_000_000_000,
+                event_name: "test_event".to_string(),
+                severity_number: 11,
+                ..Default::default()
+            },
+        ];
+
+        let result = encoder
+            .encode_log_batch(logs.iter(), "namespace=test")
+            .unwrap();
+
+        assert_eq!(result.len(), 1);
+        assert_eq!(result[0].row_count, 3);
+
+        // Test with spans
+        let spans = [
+            Span {
+                start_time_unix_nano: 1_700_000_000_000_000_000,
+                end_time_unix_nano: 1_700_000_001_000_000_000,
+                ..Default::default()
+            },
+            Span {
+                start_time_unix_nano: 1_700_000_002_000_000_000,
+                end_time_unix_nano: 1_700_000_003_000_000_000,
+                ..Default::default()
+            },
+        ];
+
+        let span_result = encoder
+            .encode_span_batch(spans.iter(), "namespace=test")
+            .unwrap();
+
+        assert_eq!(span_result.len(), 1);
+        assert_eq!(span_result[0].row_count, 2);
     }
 }
