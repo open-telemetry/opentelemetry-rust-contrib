@@ -48,14 +48,15 @@ use wiremock::matchers::{method, path_regex};
 use wiremock::{Mock, MockServer, ResponseTemplate};
 
 // Helper functions
-fn create_test_logs() -> Vec<ResourceLogs> {
+fn create_test_logs(base_timestamp: u64) -> Vec<ResourceLogs> {
     let mut log_records = Vec::new();
 
     // Create 10 simple log records
     for i in 0..10 {
+        let timestamp = base_timestamp + i * 1_000_000; // 1 ms apart
         let log = LogRecord {
-            observed_time_unix_nano: 1700000000000000000 + i,
-            event_name: "StressTestEvent".to_string(),
+            observed_time_unix_nano: timestamp,
+            event_name: "Log".to_string(),
             severity_number: 9,
             severity_text: "INFO".to_string(),
             body: Some(AnyValue {
@@ -123,10 +124,10 @@ async fn init_client() -> Result<(GenevaClient, Option<String>), Box<dyn std::er
             tenant: std::env::var("GENEVA_TENANT").unwrap_or_else(|_| "test".to_string()),
             role_name: std::env::var("GENEVA_ROLE").unwrap_or_else(|_| "test".to_string()),
             role_instance: std::env::var("GENEVA_INSTANCE").unwrap_or_else(|_| "test".to_string()),
-            max_concurrent_uploads: None, // Use default
+            msi_resource: None,
         };
 
-        let client = GenevaClient::new(config).await?;
+        let client = GenevaClient::new(config).map_err(std::io::Error::other)?;
         Ok((client, None))
     } else if let Ok(mock_endpoint) = std::env::var("MOCK_SERVER_URL") {
         println!("Using standalone mock server at: {mock_endpoint}");
@@ -142,10 +143,10 @@ async fn init_client() -> Result<(GenevaClient, Option<String>), Box<dyn std::er
             tenant: "test".to_string(),
             role_name: "test".to_string(),
             role_instance: "test".to_string(),
-            max_concurrent_uploads: None, // Use default
+            msi_resource: None,
         };
 
-        let client = GenevaClient::new(config).await?;
+        let client = GenevaClient::new(config).map_err(std::io::Error::other)?;
         Ok((client, None))
     } else {
         println!("Using wiremock Geneva endpoints");
@@ -197,10 +198,10 @@ async fn init_client() -> Result<(GenevaClient, Option<String>), Box<dyn std::er
             tenant: "test".to_string(),
             role_name: "test".to_string(),
             role_instance: "test".to_string(),
-            max_concurrent_uploads: None, // Use default
+            msi_resource: None,
         };
 
-        let client = GenevaClient::new(config).await?;
+        let client = GenevaClient::new(config).map_err(std::io::Error::other)?;
         Ok((client, Some(mock_server.uri())))
     }
 }
@@ -253,6 +254,12 @@ async fn async_main(
     args_start_idx: usize,
     runtime_type: &str,
 ) -> Result<(), Box<dyn std::error::Error>> {
+    // Get timestamp for events
+    let base_timestamp = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap()
+        .as_nanos() as u64;
+
     // Get concurrency from the appropriate position
     let concurrency = args
         .get(args_start_idx)
@@ -268,11 +275,19 @@ async fn async_main(
     // Initialize client and test data
     let (client, _mock_uri) = init_client().await?;
     let client = Arc::new(client);
-    let logs = Arc::new(create_test_logs());
+    let logs = Arc::new(create_test_logs(base_timestamp));
 
     // Warm up the ingestion token cache
     println!("Warming up token cache...");
-    client.upload_logs(&logs).await?;
+    let warm_batches = client
+        .encode_and_compress_logs(&logs)
+        .map_err(|e| format!("Failed to encode logs: {e}"))?;
+    for batch in &warm_batches {
+        client
+            .upload_batch(batch)
+            .await
+            .map_err(|e| format!("Failed to upload batch: {e}"))?;
+    }
 
     println!("\nStarting Geneva exporter stress test using stream-based approach");
     println!("Press Ctrl+C to stop continuous tests\n");
@@ -290,7 +305,18 @@ async fn async_main(
             ThroughputTest::run_continuous("Geneva Upload", config, move || {
                 let client = client.clone();
                 let logs = logs.clone();
-                async move { client.upload_logs(&logs).await }
+                async move {
+                    let batches = client.encode_and_compress_logs(&logs)?;
+
+                    // Upload batches sequentially TODO - use buffer_unordered for concurrency
+                    for batch in &batches {
+                        client
+                            .upload_batch(batch)
+                            .await
+                            .map_err(|e| format!("Failed to upload batch: {e}"))?;
+                    }
+                    Ok::<(), String>(())
+                }
             })
             .await;
         }
@@ -311,7 +337,20 @@ async fn async_main(
             let stats = ThroughputTest::run_fixed("Geneva Upload", config, move || {
                 let client = client.clone();
                 let logs = logs.clone();
-                async move { client.upload_logs(&logs).await }
+                async move {
+                    let batches = client
+                        .encode_and_compress_logs(&logs)
+                        .map_err(|e| format!("Failed to encode logs: {e}"))?;
+
+                    // Upload batches sequentially - TODO - use buffer_unordered for concurrency
+                    for batch in &batches {
+                        client
+                            .upload_batch(batch)
+                            .await
+                            .map_err(|e| format!("Failed to upload batch: {e}"))?;
+                    }
+                    Ok::<(), String>(())
+                }
             })
             .await;
 
@@ -330,10 +369,16 @@ async fn async_main(
                     let client = client.clone();
                     let logs = logs.clone();
                     async move {
-                        client
-                            .upload_logs(&logs)
-                            .await
-                            .map_err(std::io::Error::other)
+                        let batches = match client.encode_and_compress_logs(&logs) {
+                            Ok(batches) => batches,
+                            Err(e) => return Err(format!("Failed to encode logs: {e}")),
+                        };
+                        for batch in &batches {
+                            if let Err(e) = client.upload_batch(batch).await {
+                                return Err(format!("Failed to upload batch: {e}"));
+                            }
+                        }
+                        Ok(())
                     }
                 },
             )

@@ -64,6 +64,7 @@ mod tests {
                     path: cert_path,
                     password: cert_password,
                 },
+                msi_resource: None,
             };
 
             // Build client and uploader
@@ -71,7 +72,6 @@ mod tests {
                 GenevaConfigClient::new(config).expect("Failed to create config client");
             let uploader =
                 GenevaUploader::from_config_client(Arc::new(config_client), uploader_config)
-                    .await
                     .expect("Failed to create uploader");
 
             // Event name/version
@@ -128,7 +128,7 @@ mod tests {
 
         let response = ctx
             .uploader
-            .upload(ctx.data, &ctx.event_name, &metadata)
+            .upload(ctx.data, &ctx.event_name, &metadata, 1)
             .await
             .expect("Upload failed");
 
@@ -195,7 +195,7 @@ mod tests {
 
         let _ = ctx
             .uploader
-            .upload(ctx.data.clone(), &ctx.event_name, &warmup_metadata)
+            .upload(ctx.data.clone(), &ctx.event_name, &warmup_metadata, 1)
             .await
             .expect("Warm-up upload failed");
         let warmup_elapsed = start_warmup.elapsed();
@@ -221,7 +221,7 @@ mod tests {
                 };
 
                 let resp = uploader
-                    .upload(data, &event_name, &metadata)
+                    .upload(data, &event_name, &metadata, 1)
                     .await
                     .unwrap_or_else(|_| panic!("Upload {i} failed"));
                 let elapsed = start.elapsed();

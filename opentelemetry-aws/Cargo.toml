@@ -1,6 +1,6 @@
 [package]
 name = "opentelemetry-aws"
-version = "0.18.0"
+version = "0.19.0"
 description = "AWS exporters and propagators for OpenTelemetry"
 homepage = "https://github.com/open-telemetry/opentelemetry-rust-contrib/tree/main/opentelemetry-aws"
 repository = "https://github.com/open-telemetry/opentelemetry-rust-contrib/tree/main/opentelemetry-aws"

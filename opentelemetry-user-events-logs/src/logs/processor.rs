@@ -36,7 +36,7 @@ where
 
 impl Processor<DefaultEventNameCallback> {
     /// Creates a builder for configuring a user_events Processor
-    pub fn builder(provider_name: &str) -> ProcessorBuilder {
+    pub fn builder(provider_name: &str) -> ProcessorBuilder<'_> {
         ProcessorBuilder::new(provider_name)
     }
 }
