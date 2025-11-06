@@ -8,7 +8,7 @@ use std::sync::Arc;
 use tracelogging_dynamic as tld;
 
 use opentelemetry::logs::Severity;
-use opentelemetry::{logs::AnyValue, Key, Value};
+use opentelemetry::{logs::AnyValue, otel_debug, Key, Value};
 use opentelemetry_sdk::error::{OTelSdkError, OTelSdkResult};
 
 pub(crate) mod common;
@@ -172,8 +172,10 @@ impl opentelemetry_sdk::logs::LogExporter for ETWExporter {
                 self.resource
                     .attributes_from_resource
                     .push((key.clone(), val_to_any_value(value)));
+            } else {
+                // Other attributes are ignored
+                otel_debug!(name: "UserEvents.ResourceAttributeIgnored", key = key.as_str(), message = "To include this attribute, add it via with_resource_attributes() method in the processor builder.");
             }
-            // Other attributes are ignored
         }
     }
 
