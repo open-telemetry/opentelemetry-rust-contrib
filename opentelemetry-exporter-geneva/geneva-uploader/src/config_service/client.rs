@@ -402,7 +402,7 @@ impl GenevaConfigClient {
     fn build_static_headers(agent_identity: &str, agent_version: &str) -> HeaderMap {
         let mut headers = HeaderMap::new();
         let user_agent = format!("{agent_identity}-{agent_version}");
-        // Gracefully fallback to static header if formatting fails (though hardcoded values should always be valid)
+        // Gracefully fallback to default header if formatting fails (though hardcoded values should always be valid)
         headers.insert(
             USER_AGENT,
             HeaderValue::from_str(&user_agent).unwrap_or_else(|e| {
