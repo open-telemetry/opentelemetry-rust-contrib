@@ -10,7 +10,7 @@ use opentelemetry_proto::tonic::logs::v1::LogRecord;
 use opentelemetry_proto::tonic::trace::v1::Span;
 use std::borrow::Cow;
 use std::sync::Arc;
-use tracing::debug;
+use tracing::{debug, error};
 
 const FIELD_ENV_NAME: &str = "env_name";
 const FIELD_ENV_VER: &str = "env_ver";
@@ -82,7 +82,8 @@ impl OtlpEncoder {
                             acc.push(';');
                         }
                         let md5_hash = md5::compute(s.id.to_le_bytes());
-                        write!(&mut acc, "{md5_hash:x}").unwrap();
+                        // Writing to String never fails in practice, ignore error
+                        let _ = write!(&mut acc, "{md5_hash:x}");
                         acc
                     },
                 )
@@ -273,7 +274,8 @@ impl OtlpEncoder {
                             acc.push(';');
                         }
                         let md5_hash = md5::compute(s.id.to_le_bytes());
-                        write!(&mut acc, "{md5_hash:x}").unwrap();
+                        // Writing to String never fails in practice, ignore error
+                        let _ = write!(&mut acc, "{md5_hash:x}");
                         acc
                     },
                 )
@@ -568,12 +570,14 @@ impl OtlpEncoder {
                 }
                 FIELD_TRACE_ID => {
                     let hex_bytes = Self::encode_id_to_hex::<32>(&span.trace_id);
-                    let hex_str = std::str::from_utf8(&hex_bytes).unwrap();
+                    let hex_str = std::str::from_utf8(&hex_bytes)
+                        .expect("hex encoding always produces valid UTF-8");
                     BondWriter::write_string(&mut buffer, hex_str);
                 }
                 FIELD_SPAN_ID => {
                     let hex_bytes = Self::encode_id_to_hex::<16>(&span.span_id);
-                    let hex_str = std::str::from_utf8(&hex_bytes).unwrap();
+                    let hex_str = std::str::from_utf8(&hex_bytes)
+                        .expect("hex encoding always produces valid UTF-8");
                     BondWriter::write_string(&mut buffer, hex_str);
                 }
                 FIELD_TRACE_FLAGS => {
@@ -587,7 +591,8 @@ impl OtlpEncoder {
                 }
                 FIELD_PARENT_ID => {
                     let hex_bytes = Self::encode_id_to_hex::<16>(&span.parent_span_id);
-                    let hex_str = std::str::from_utf8(&hex_bytes).unwrap();
+                    let hex_str = std::str::from_utf8(&hex_bytes)
+                        .expect("hex encoding always produces valid UTF-8");
                     BondWriter::write_string(&mut buffer, hex_str);
                 }
                 FIELD_LINKS => {
@@ -636,12 +641,14 @@ impl OtlpEncoder {
                 }
                 FIELD_TRACE_ID => {
                     let hex_bytes = Self::encode_id_to_hex::<32>(&log.trace_id);
-                    let hex_str = std::str::from_utf8(&hex_bytes).unwrap();
+                    let hex_str = std::str::from_utf8(&hex_bytes)
+                        .expect("hex encoding always produces valid UTF-8");
                     BondWriter::write_string(&mut buffer, hex_str);
                 }
                 FIELD_SPAN_ID => {
                     let hex_bytes = Self::encode_id_to_hex::<16>(&log.span_id);
-                    let hex_str = std::str::from_utf8(&hex_bytes).unwrap();
+                    let hex_str = std::str::from_utf8(&hex_bytes)
+                        .expect("hex encoding always produces valid UTF-8");
                     BondWriter::write_string(&mut buffer, hex_str);
                 }
                 FIELD_TRACE_FLAGS => {
@@ -679,7 +686,23 @@ impl OtlpEncoder {
 
     fn encode_id_to_hex<const N: usize>(id: &[u8]) -> [u8; N] {
         let mut hex_bytes = [0u8; N];
-        hex::encode_to_slice(id, &mut hex_bytes).unwrap();
+        // If encoding fails (buffer size mismatch), log error and return zeros
+        if let Err(e) = hex::encode_to_slice(id, &mut hex_bytes) {
+            let id_type = match N {
+                32 => "trace ID",
+                16 => "span ID",
+                _ => "input",
+            };
+            error!(
+                name: "encoder.encode_id_to_hex.error",
+                target: "geneva-uploader",
+                error = %e,
+                id_len = id.len(),
+                buffer_size = N,
+                "Hex encoding failed, using zeros - indicates an invalid {}",
+                id_type
+            );
+        }
         hex_bytes
     }
 
@@ -722,14 +745,25 @@ impl OtlpEncoder {
         json
     }
 
-    /// Format timestamp from nanoseconds
+    /// Format timestamp from nanoseconds to RFC3339 string
     fn format_timestamp(nanos: u64) -> String {
         let secs = (nanos / 1_000_000_000) as i64;
         let nsec = (nanos % 1_000_000_000) as u32;
-        Utc.timestamp_opt(secs, nsec)
-            .single()
-            .unwrap_or_else(|| Utc.timestamp_opt(0, 0).single().unwrap())
-            .to_rfc3339()
+
+        match Utc.timestamp_opt(secs, nsec).single() {
+            Some(dt) => dt.to_rfc3339(),
+            None => {
+                error!(
+                    name: "encoder.format_timestamp.invalid",
+                    target: "geneva-uploader",
+                    nanos = nanos,
+                    secs = secs,
+                    nsec = nsec,
+                    "Timestamp out of range, using epoch"
+                );
+                "1970-01-01T00:00:00+00:00".to_string()
+            }
+        }
     }
 
     /// Write attribute value based on its type
