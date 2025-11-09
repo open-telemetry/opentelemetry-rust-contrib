@@ -11,7 +11,7 @@ pub struct BatchMetadata {
     pub start_time: u64,
     /// End time of the latest event in nanoseconds since Unix epoch
     pub end_time: u64,
-    /// Schema IDs present in this batch formatted as comma-separated local IDs (0,1,2,...)
+    /// Schema IDs present in this batch formatted as MD5 hashes separated by semicolons
     pub schema_ids: String,
 }
 
@@ -72,6 +72,7 @@ pub(crate) struct CentralSchemaEntry {
     pub id: u64,
     pub md5: [u8; 16],
     pub schema: BondEncodedSchema,
+    // Store fields for deduplication. Alternative: encode schema per event and compare with stored encoded schemas.
     pub fields: Vec<crate::payload_encoder::bond_encoder::FieldDef>,
 }
 

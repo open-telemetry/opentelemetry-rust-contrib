@@ -64,16 +64,27 @@ impl OtlpEncoder {
 
         impl BatchData {
             fn format_schema_ids(&self) -> String {
+                use std::fmt::Write;
+
                 if self.schemas.is_empty() {
                     return String::new();
                 }
 
-                // Format as comma-separated list of local IDs (0,1,2,...)
-                self.schemas
-                    .iter()
-                    .map(|s| s.id.to_string())
-                    .collect::<Vec<_>>()
-                    .join(",")
+                // Server expects MD5(schema_bytes) as hex, semicolon-separated
+                let estimated_capacity =
+                    self.schemas.len() * 32 + self.schemas.len().saturating_sub(1);
+
+                self.schemas.iter().enumerate().fold(
+                    String::with_capacity(estimated_capacity),
+                    |mut acc, (i, s)| {
+                        if i > 0 {
+                            acc.push(';');
+                        }
+                        // Use stored MD5 hash (already computed when schema was created)
+                        let _ = write!(&mut acc, "{:x}", md5::Digest(s.md5));
+                        acc
+                    },
+                )
             }
         }
 
@@ -115,8 +126,8 @@ impl OtlpEncoder {
             }
 
             // 3. Find or create schema with exact equality check
+            // Compare stored fields to avoid encoding schema per event
             let schema_id = match entry.schemas.iter().position(|s| {
-                // Compare schemas by exact field equality (name and type)
                 s.fields.len() == field_info.len()
                     && s.fields
                         .iter()
@@ -229,8 +240,8 @@ impl OtlpEncoder {
             }
 
             // 3. Find or create schema with exact equality check
+            // Compare stored fields to avoid encoding schema per event
             let schema_id = match schemas.iter().position(|s: &CentralSchemaEntry| {
-                // Compare schemas by exact field equality (name and type)
                 s.fields.len() == field_info.len()
                     && s.fields
                         .iter()
@@ -266,15 +277,25 @@ impl OtlpEncoder {
             return Ok(Vec::new());
         }
 
-        // Format schema IDs as comma-separated list of local IDs (0,1,2,...)
-        let schema_ids_string = if schemas.is_empty() {
-            String::new()
-        } else {
-            schemas
-                .iter()
-                .map(|s| s.id.to_string())
-                .collect::<Vec<_>>()
-                .join(",")
+        // Format schema IDs - server expects MD5(schema_bytes) as hex, semicolon-separated
+        let schema_ids_string = {
+            use std::fmt::Write;
+            if schemas.is_empty() {
+                String::new()
+            } else {
+                let estimated_capacity = schemas.len() * 32 + schemas.len().saturating_sub(1);
+                schemas.iter().enumerate().fold(
+                    String::with_capacity(estimated_capacity),
+                    |mut acc, (i, s)| {
+                        if i > 0 {
+                            acc.push(';');
+                        }
+                        // Use stored MD5 hash (already computed when schema was created)
+                        let _ = write!(&mut acc, "{:x}", md5::Digest(s.md5));
+                        acc
+                    },
+                )
+            }
         };
 
         // Create single batch with all spans
@@ -850,16 +871,34 @@ mod tests {
         assert_eq!(batch.event_name, "user_action");
 
         // Verify that multiple schemas were created within the same batch
-        // schema_ids should contain comma-separated local IDs (0,1,2)
+        // schema_ids should contain multiple semicolon-separated MD5 hashes
         let schema_ids = &batch.metadata.schema_ids;
         assert!(!schema_ids.is_empty());
 
-        // Should be "0,1,2" for 3 schemas
+        // Split by semicolon to get individual schema IDs
+        let schema_id_list: Vec<&str> = schema_ids.split(';').collect();
+
+        // Should have 3 different schema IDs (one per unique schema structure)
         assert_eq!(
-            schema_ids, "0,1,2",
-            "Expected schema_ids to be '0,1,2' but found: {}",
+            schema_id_list.len(),
+            3,
+            "Expected 3 schema IDs but found {}: {}",
+            schema_id_list.len(),
             schema_ids
         );
+
+        // Verify each schema ID is a valid MD5 hash (32 hex characters)
+        for schema_id in schema_id_list {
+            assert_eq!(
+                schema_id.len(),
+                32,
+                "Schema ID should be 32 hex characters: {schema_id}"
+            );
+            assert!(
+                schema_id.chars().all(|c| c.is_ascii_hexdigit()),
+                "Schema ID should contain only hex characters: {schema_id}"
+            );
+        }
     }
 
     #[test]
@@ -921,8 +960,8 @@ mod tests {
         assert_eq!(result.len(), 1);
         assert_eq!(result[0].event_name, "user_action");
         assert!(!result[0].data.is_empty()); // Should have encoded data
-                                             // Should have 3 different schema IDs (comma-separated: "0,1,2")
-        assert_eq!(result[0].metadata.schema_ids, "0,1,2"); // 3 schemas = "0,1,2"
+                                             // Should have 3 different schema IDs (semicolon-separated)
+        assert_eq!(result[0].metadata.schema_ids.matches(';').count(), 2); // 3 schemas = 2 semicolons
     }
 
     #[test]
@@ -1035,11 +1074,11 @@ mod tests {
 
         // Verify that each batch has data and schema IDs
         assert!(!user_action.data.is_empty()); // Should have encoded data
-        assert_eq!(user_action.metadata.schema_ids, "0,1"); // 2 schemas = "0,1"
+        assert_eq!(user_action.metadata.schema_ids.matches(';').count(), 1); // 2 schemas = 1 semicolon
         assert!(!system_alert.data.is_empty()); // Should have encoded data
-        assert_eq!(system_alert.metadata.schema_ids, "0"); // 1 schema = "0"
+        assert_eq!(system_alert.metadata.schema_ids.matches(';').count(), 0); // 1 schema = 0 semicolons
         assert!(!log_batch.data.is_empty()); // Should have encoded data
-        assert_eq!(log_batch.metadata.schema_ids, "0"); // 1 schema = "0"
+        assert_eq!(log_batch.metadata.schema_ids.matches(';').count(), 0); // 1 schema = 0 semicolons
     }
 
     #[test]
@@ -1198,7 +1237,7 @@ mod tests {
         assert_eq!(result[0].event_name, "Span"); // All spans use "Span" event name for routing
         assert!(!result[0].data.is_empty());
         // Should have 1 schema ID since both spans have same schema structure
-        assert_eq!(result[0].metadata.schema_ids, "0"); // 1 schema = "0"
+        assert_eq!(result[0].metadata.schema_ids.matches(';').count(), 0); // 1 schema = 0 semicolons
     }
 
     #[test]
