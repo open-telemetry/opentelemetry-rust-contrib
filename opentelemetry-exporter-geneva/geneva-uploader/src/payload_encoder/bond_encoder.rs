@@ -114,11 +114,11 @@ pub(crate) struct DynamicSchema {
 }
 
 impl DynamicSchema {
-    pub(crate) fn new(name: &str, namespace: &str, fields: Vec<FieldDef>) -> Self {
+    pub(crate) fn new(name: &str, namespace: &str, fields: &[FieldDef]) -> Self {
         Self {
             struct_name: name.to_string(),
             qualified_name: format!("{namespace}.{name}"),
-            fields,
+            fields: fields.to_vec(),
         }
     }
 
@@ -380,7 +380,7 @@ pub(crate) struct BondEncodedSchema {
 }
 
 impl BondEncodedSchema {
-    pub(crate) fn from_fields(name: &str, namespace: &str, fields: Vec<FieldDef>) -> Self {
+    pub(crate) fn from_fields(name: &str, namespace: &str, fields: &[FieldDef]) -> Self {
         let schema = DynamicSchema::new(name, namespace, fields);
         let encoded_bytes = schema.encode().expect("Schema encoding failed");
 
@@ -428,7 +428,7 @@ mod tests {
             },
         ];
 
-        let schema = DynamicSchema::new("TestStruct", "test.namespace", fields);
+        let schema = DynamicSchema::new("TestStruct", "test.namespace", &fields);
         let encoded = schema.encode().unwrap();
         assert!(!encoded.is_empty());
     }
@@ -453,7 +453,7 @@ mod tests {
             },
         ];
 
-        let schema = BondEncodedSchema::from_fields("OtlpLogRecord", "telemetry", fields);
+        let schema = BondEncodedSchema::from_fields("OtlpLogRecord", "telemetry", &fields);
         let bytes = schema.as_bytes();
         assert!(!bytes.is_empty());
     }
@@ -475,7 +475,7 @@ mod tests {
             },
         ];
 
-        let schema = BondEncodedSchema::from_fields("TestStruct", "test.namespace", fields);
+        let schema = BondEncodedSchema::from_fields("TestStruct", "test.namespace", &fields);
         let bytes = schema.as_bytes();
         assert!(!bytes.is_empty());
     }
@@ -504,7 +504,7 @@ mod tests {
                 })
                 .collect();
 
-            let schema = DynamicSchema::new("TestStruct", "test.namespace", fields);
+            let schema = DynamicSchema::new("TestStruct", "test.namespace", &fields);
             let exact_size = schema.calculate_exact_encoded_size();
             let encoded = schema.encode().unwrap();
 

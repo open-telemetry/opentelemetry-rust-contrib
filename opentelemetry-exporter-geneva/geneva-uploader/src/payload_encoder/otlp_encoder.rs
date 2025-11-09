@@ -127,7 +127,7 @@ impl OtlpEncoder {
                 None => {
                     // New schema - assign next auto-incrementing ID
                     let new_id = entry.schemas.len() as u64;
-                    let schema_entry = Self::create_schema(new_id, field_info.clone());
+                    let schema_entry = Self::create_schema(new_id, &field_info);
                     entry.schemas.push(schema_entry);
                     new_id
                 }
@@ -241,7 +241,7 @@ impl OtlpEncoder {
                 None => {
                     // New schema - assign next auto-incrementing ID
                     let new_id = schemas.len() as u64;
-                    let schema_entry = Self::create_span_schema(new_id, field_info.clone());
+                    let schema_entry = Self::create_span_schema(new_id, &field_info);
                     schemas.push(schema_entry);
                     new_id
                 }
@@ -467,8 +467,9 @@ impl OtlpEncoder {
     }
 
     /// Create schema - always creates a new CentralSchemaEntry
-    fn create_schema(schema_id: u64, field_info: Vec<FieldDef>) -> CentralSchemaEntry {
-        let schema = BondEncodedSchema::from_fields("OtlpLogRecord", "telemetry", field_info.clone()); //TODO - use actual struct name and namespace
+    fn create_schema(schema_id: u64, field_info: &[FieldDef]) -> CentralSchemaEntry {
+        // Only one clone: from_fields borrows, we clone for storage
+        let schema = BondEncodedSchema::from_fields("OtlpLogRecord", "telemetry", field_info); //TODO - use actual struct name and namespace
 
         let schema_bytes = schema.as_bytes();
         let schema_md5 = md5::compute(schema_bytes).0;
@@ -477,13 +478,14 @@ impl OtlpEncoder {
             id: schema_id,
             md5: schema_md5,
             schema,
-            fields: field_info,
+            fields: field_info.to_vec(),
         }
     }
 
     /// Create span schema - always creates a new CentralSchemaEntry
-    fn create_span_schema(schema_id: u64, field_info: Vec<FieldDef>) -> CentralSchemaEntry {
-        let schema = BondEncodedSchema::from_fields("OtlpSpanRecord", "telemetry", field_info.clone());
+    fn create_span_schema(schema_id: u64, field_info: &[FieldDef]) -> CentralSchemaEntry {
+        // Only one clone: from_fields borrows, we clone for storage
+        let schema = BondEncodedSchema::from_fields("OtlpSpanRecord", "telemetry", field_info);
 
         let schema_bytes = schema.as_bytes();
         let schema_md5 = md5::compute(schema_bytes).0;
@@ -492,7 +494,7 @@ impl OtlpEncoder {
             id: schema_id,
             md5: schema_md5,
             schema,
-            fields: field_info,
+            fields: field_info.to_vec(),
         }
     }
 
