@@ -64,29 +64,16 @@ impl OtlpEncoder {
 
         impl BatchData {
             fn format_schema_ids(&self) -> String {
-                use std::fmt::Write;
-
                 if self.schemas.is_empty() {
                     return String::new();
                 }
 
-                // Pre-allocate capacity: Each MD5 hash is 32 hex chars + 1 semicolon (except last)
-                // Total: (32 chars per hash * num_schemas) + (semicolons = num_schemas - 1)
-                let estimated_capacity =
-                    self.schemas.len() * 32 + self.schemas.len().saturating_sub(1);
-
-                self.schemas.iter().enumerate().fold(
-                    String::with_capacity(estimated_capacity),
-                    |mut acc, (i, s)| {
-                        if i > 0 {
-                            acc.push(';');
-                        }
-                        let md5_hash = md5::compute(s.id.to_le_bytes());
-                        // Writing to String never fails in practice, ignore error
-                        let _ = write!(&mut acc, "{md5_hash:x}");
-                        acc
-                    },
-                )
+                // Format as comma-separated list of local IDs (0,1,2,...)
+                self.schemas
+                    .iter()
+                    .map(|s| s.id.to_string())
+                    .collect::<Vec<_>>()
+                    .join(",")
             }
         }
 
@@ -107,15 +94,10 @@ impl OtlpEncoder {
                 log_record.event_name.as_str()
             };
 
-            // 1. Get schema with optimized single-pass field collection and schema ID calculation
-            let (field_info, schema_id) =
-                Self::determine_fields_and_schema_id(log_record, event_name_str);
+            // 1. Get schema fields
+            let field_info = Self::determine_fields(log_record, event_name_str);
 
-            // 2. Encode row
-            let row_buffer = self.write_row_data(log_record, &field_info);
-            let level = log_record.severity_number as u8;
-
-            // 3. Create or get existing batch entry with metadata tracking
+            // 2. Create or get existing batch entry with metadata tracking
             let entry = batches.entry(event_name_str).or_insert_with(|| BatchData {
                 schemas: Vec::new(),
                 events: Vec::new(),
@@ -132,11 +114,28 @@ impl OtlpEncoder {
                 entry.metadata.end_time = entry.metadata.end_time.max(timestamp);
             }
 
-            // 4. Add schema entry if not already present (multiple schemas per event_name batch)
-            if !entry.schemas.iter().any(|s| s.id == schema_id) {
-                let schema_entry = Self::create_schema(schema_id, field_info);
-                entry.schemas.push(schema_entry);
-            }
+            // 3. Find or create schema with exact equality check
+            let schema_id = match entry.schemas.iter().position(|s| {
+                // Compare schemas by exact field equality (name and type)
+                s.fields.len() == field_info.len()
+                    && s.fields
+                        .iter()
+                        .zip(&field_info)
+                        .all(|(a, b)| a.name == b.name && a.type_id == b.type_id)
+            }) {
+                Some(idx) => idx as u64,
+                None => {
+                    // New schema - assign next auto-incrementing ID
+                    let new_id = entry.schemas.len() as u64;
+                    let schema_entry = Self::create_schema(new_id, field_info.clone());
+                    entry.schemas.push(schema_entry);
+                    new_id
+                }
+            };
+
+            // 4. Encode row
+            let row_buffer = self.write_row_data(log_record, &field_info);
+            let level = log_record.severity_number as u8;
 
             // 5. Create CentralEventEntry directly (optimization: no intermediate EncodedRow)
             let central_event = CentralEventEntry {
@@ -218,15 +217,10 @@ impl OtlpEncoder {
         let mut end_time = 0u64;
 
         for span in spans {
-            // 1. Get schema with optimized single-pass field collection and schema ID calculation
-            let (field_info, schema_id) =
-                Self::determine_span_fields_and_schema_id(span, EVENT_NAME);
+            // 1. Get schema fields
+            let field_info = Self::determine_span_fields(span, EVENT_NAME);
 
-            // 2. Encode row
-            let row_buffer = self.write_span_row_data(span, &field_info);
-            let level = 5; // Default level for spans (INFO equivalent)
-
-            // 3. Update timestamp range
+            // 2. Update timestamp range
             if span.start_time_unix_nano != 0 {
                 start_time = start_time.min(span.start_time_unix_nano);
             }
@@ -234,15 +228,28 @@ impl OtlpEncoder {
                 end_time = end_time.max(span.end_time_unix_nano);
             }
 
-            // 4. Add schema entry if not already present
-            // TODO - This can have collision if different spans have same schema ID but different fields
-            if !schemas
-                .iter()
-                .any(|s: &CentralSchemaEntry| s.id == schema_id)
-            {
-                let schema_entry = Self::create_span_schema(schema_id, field_info);
-                schemas.push(schema_entry);
-            }
+            // 3. Find or create schema with exact equality check
+            let schema_id = match schemas.iter().position(|s: &CentralSchemaEntry| {
+                // Compare schemas by exact field equality (name and type)
+                s.fields.len() == field_info.len()
+                    && s.fields
+                        .iter()
+                        .zip(&field_info)
+                        .all(|(a, b)| a.name == b.name && a.type_id == b.type_id)
+            }) {
+                Some(idx) => idx as u64,
+                None => {
+                    // New schema - assign next auto-incrementing ID
+                    let new_id = schemas.len() as u64;
+                    let schema_entry = Self::create_span_schema(new_id, field_info.clone());
+                    schemas.push(schema_entry);
+                    new_id
+                }
+            };
+
+            // 4. Encode row
+            let row_buffer = self.write_span_row_data(span, &field_info);
+            let level = 5; // Default level for spans (INFO equivalent)
 
             // 5. Create CentralEventEntry
             let central_event = CentralEventEntry {
@@ -259,27 +266,15 @@ impl OtlpEncoder {
             return Ok(Vec::new());
         }
 
-        // Format schema IDs
-        // TODO - this can be shared code with log batch
-        let schema_ids_string = {
-            use std::fmt::Write;
-            if schemas.is_empty() {
-                String::new()
-            } else {
-                let estimated_capacity = schemas.len() * 32 + schemas.len().saturating_sub(1);
-                schemas.iter().enumerate().fold(
-                    String::with_capacity(estimated_capacity),
-                    |mut acc, (i, s)| {
-                        if i > 0 {
-                            acc.push(';');
-                        }
-                        let md5_hash = md5::compute(s.id.to_le_bytes());
-                        // Writing to String never fails in practice, ignore error
-                        let _ = write!(&mut acc, "{md5_hash:x}");
-                        acc
-                    },
-                )
-            }
+        // Format schema IDs as comma-separated list of local IDs (0,1,2,...)
+        let schema_ids_string = if schemas.is_empty() {
+            String::new()
+        } else {
+            schemas
+                .iter()
+                .map(|s| s.id.to_string())
+                .collect::<Vec<_>>()
+                .join(",")
         };
 
         // Create single batch with all spans
@@ -333,18 +328,11 @@ impl OtlpEncoder {
         }])
     }
 
-    /// Determine fields and calculate schema ID in a single pass for optimal performance
-    fn determine_fields_and_schema_id(log: &LogRecord, event_name: &str) -> (Vec<FieldDef>, u64) {
-        use std::collections::hash_map::DefaultHasher;
-        use std::hash::{Hash, Hasher};
-
+    /// Determine fields for a log record
+    fn determine_fields(log: &LogRecord, _event_name: &str) -> Vec<FieldDef> {
         // Pre-allocate with estimated capacity to avoid reallocations
         let estimated_capacity = 7 + 4 + log.attributes.len();
         let mut fields = Vec::with_capacity(estimated_capacity);
-
-        // Initialize hasher for schema ID calculation
-        let mut hasher = DefaultHasher::new();
-        event_name.hash(&mut hasher);
 
         // Part A - Always present fields
         fields.push((Cow::Borrowed(FIELD_ENV_NAME), BondDataType::BT_STRING));
@@ -393,40 +381,23 @@ impl OtlpEncoder {
             }
         }
 
-        // No sorting - field order affects schema ID calculation
-        // Hash field names and types while converting to FieldDef
-        let field_defs: Vec<FieldDef> = fields
+        // Convert to FieldDef with field IDs
+        fields
             .into_iter()
             .enumerate()
-            .map(|(i, (name, type_id))| {
-                // Hash field name and type for schema ID
-                name.hash(&mut hasher);
-                type_id.hash(&mut hasher);
-
-                FieldDef {
-                    name,
-                    type_id,
-                    field_id: (i + 1) as u16,
-                }
+            .map(|(i, (name, type_id))| FieldDef {
+                name,
+                type_id,
+                field_id: (i + 1) as u16,
             })
-            .collect();
-
-        let schema_id = hasher.finish();
-        (field_defs, schema_id)
+            .collect()
     }
 
-    /// Determine span fields and calculate schema ID in a single pass for optimal performance
-    fn determine_span_fields_and_schema_id(span: &Span, event_name: &str) -> (Vec<FieldDef>, u64) {
-        use std::collections::hash_map::DefaultHasher;
-        use std::hash::{Hash, Hasher};
-
+    /// Determine span fields
+    fn determine_span_fields(span: &Span, _event_name: &str) -> Vec<FieldDef> {
         // Pre-allocate with estimated capacity to avoid reallocations
         let estimated_capacity = 15 + span.attributes.len(); // 7 always + 8 max conditional + attributes
         let mut fields = Vec::with_capacity(estimated_capacity);
-
-        // Initialize hasher for schema ID calculation
-        let mut hasher = DefaultHasher::new();
-        event_name.hash(&mut hasher);
 
         // Part A - Always present fields for spans
         fields.push((Cow::Borrowed(FIELD_ENV_NAME), BondDataType::BT_STRING));
@@ -483,30 +454,21 @@ impl OtlpEncoder {
             }
         }
 
-        // Hash field names and types while converting to FieldDef
-        let field_defs: Vec<FieldDef> = fields
+        // Convert to FieldDef with field IDs
+        fields
             .into_iter()
             .enumerate()
-            .map(|(i, (name, type_id))| {
-                // Hash field name and type for schema ID
-                name.hash(&mut hasher);
-                type_id.hash(&mut hasher);
-
-                FieldDef {
-                    name,
-                    type_id,
-                    field_id: (i + 1) as u16,
-                }
+            .map(|(i, (name, type_id))| FieldDef {
+                name,
+                type_id,
+                field_id: (i + 1) as u16,
             })
-            .collect();
-
-        let schema_id = hasher.finish();
-        (field_defs, schema_id)
+            .collect()
     }
 
     /// Create schema - always creates a new CentralSchemaEntry
     fn create_schema(schema_id: u64, field_info: Vec<FieldDef>) -> CentralSchemaEntry {
-        let schema = BondEncodedSchema::from_fields("OtlpLogRecord", "telemetry", field_info); //TODO - use actual struct name and namespace
+        let schema = BondEncodedSchema::from_fields("OtlpLogRecord", "telemetry", field_info.clone()); //TODO - use actual struct name and namespace
 
         let schema_bytes = schema.as_bytes();
         let schema_md5 = md5::compute(schema_bytes).0;
@@ -515,12 +477,13 @@ impl OtlpEncoder {
             id: schema_id,
             md5: schema_md5,
             schema,
+            fields: field_info,
         }
     }
 
     /// Create span schema - always creates a new CentralSchemaEntry
     fn create_span_schema(schema_id: u64, field_info: Vec<FieldDef>) -> CentralSchemaEntry {
-        let schema = BondEncodedSchema::from_fields("OtlpSpanRecord", "telemetry", field_info);
+        let schema = BondEncodedSchema::from_fields("OtlpSpanRecord", "telemetry", field_info.clone());
 
         let schema_bytes = schema.as_bytes();
         let schema_md5 = md5::compute(schema_bytes).0;
@@ -529,6 +492,7 @@ impl OtlpEncoder {
             id: schema_id,
             md5: schema_md5,
             schema,
+            fields: field_info,
         }
     }
 
@@ -884,42 +848,16 @@ mod tests {
         assert_eq!(batch.event_name, "user_action");
 
         // Verify that multiple schemas were created within the same batch
-        // schema_ids should contain multiple semicolon-separated MD5 hashes
+        // schema_ids should contain comma-separated local IDs (0,1,2)
         let schema_ids = &batch.metadata.schema_ids;
         assert!(!schema_ids.is_empty());
 
-        // Split by semicolon to get individual schema IDs
-        let schema_id_list: Vec<&str> = schema_ids.split(';').collect();
-
-        // Should have 3 different schema IDs (one per unique schema structure)
+        // Should be "0,1,2" for 3 schemas
         assert_eq!(
-            schema_id_list.len(),
-            3,
-            "Expected 3 schema IDs but found {}: {}",
-            schema_id_list.len(),
+            schema_ids, "0,1,2",
+            "Expected schema_ids to be '0,1,2' but found: {}",
             schema_ids
         );
-
-        // Verify all schema IDs are different (each log record has different schema structure)
-        let unique_schemas: std::collections::HashSet<&str> = schema_id_list.into_iter().collect();
-        assert_eq!(
-            unique_schemas.len(),
-            3,
-            "Expected 3 unique schema IDs but found duplicates in: {schema_ids}"
-        );
-
-        // Verify each schema ID is a valid MD5 hash (32 hex characters)
-        for schema_id in unique_schemas {
-            assert_eq!(
-                schema_id.len(),
-                32,
-                "Schema ID should be 32 hex characters: {schema_id}"
-            );
-            assert!(
-                schema_id.chars().all(|c| c.is_ascii_hexdigit()),
-                "Schema ID should contain only hex characters: {schema_id}"
-            );
-        }
     }
 
     #[test]
@@ -981,8 +919,8 @@ mod tests {
         assert_eq!(result.len(), 1);
         assert_eq!(result[0].event_name, "user_action");
         assert!(!result[0].data.is_empty()); // Should have encoded data
-                                             // Should have 3 different schema IDs (semicolon-separated)
-        assert_eq!(result[0].metadata.schema_ids.matches(';').count(), 2); // 3 schemas = 2 semicolons
+                                             // Should have 3 different schema IDs (comma-separated: "0,1,2")
+        assert_eq!(result[0].metadata.schema_ids, "0,1,2"); // 3 schemas = "0,1,2"
     }
 
     #[test]
@@ -1095,11 +1033,11 @@ mod tests {
 
         // Verify that each batch has data and schema IDs
         assert!(!user_action.data.is_empty()); // Should have encoded data
-        assert_eq!(user_action.metadata.schema_ids.matches(';').count(), 1); // 2 schemas = 1 semicolon
+        assert_eq!(user_action.metadata.schema_ids, "0,1"); // 2 schemas = "0,1"
         assert!(!system_alert.data.is_empty()); // Should have encoded data
-        assert_eq!(system_alert.metadata.schema_ids.matches(';').count(), 0); // 1 schema = 0 semicolons
+        assert_eq!(system_alert.metadata.schema_ids, "0"); // 1 schema = "0"
         assert!(!log_batch.data.is_empty()); // Should have encoded data
-        assert_eq!(log_batch.metadata.schema_ids.matches(';').count(), 0); // 1 schema = 0 semicolons
+        assert_eq!(log_batch.metadata.schema_ids, "0"); // 1 schema = "0"
     }
 
     #[test]
@@ -1231,7 +1169,7 @@ mod tests {
         };
 
         // Verify that both spans have name field in schema
-        let (fields1, _) = OtlpEncoder::determine_span_fields_and_schema_id(&span1, "Span");
+        let fields1 = OtlpEncoder::determine_span_fields(&span1, "Span");
         let name_field_present1 = fields1
             .iter()
             .any(|field| field.name.as_ref() == FIELD_NAME);
@@ -1240,7 +1178,7 @@ mod tests {
             "Span with non-empty name should include 'name' field in schema"
         );
 
-        let (fields2, _) = OtlpEncoder::determine_span_fields_and_schema_id(&span2, "Span");
+        let fields2 = OtlpEncoder::determine_span_fields(&span2, "Span");
         let name_field_present2 = fields2
             .iter()
             .any(|field| field.name.as_ref() == FIELD_NAME);
@@ -1258,7 +1196,7 @@ mod tests {
         assert_eq!(result[0].event_name, "Span"); // All spans use "Span" event name for routing
         assert!(!result[0].data.is_empty());
         // Should have 1 schema ID since both spans have same schema structure
-        assert_eq!(result[0].metadata.schema_ids.matches(';').count(), 0); // 1 schema = 0 semicolons
+        assert_eq!(result[0].metadata.schema_ids, "0"); // 1 schema = "0"
     }
 
     #[test]

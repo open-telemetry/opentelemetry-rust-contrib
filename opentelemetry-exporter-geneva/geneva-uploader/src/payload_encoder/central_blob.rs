@@ -11,7 +11,7 @@ pub struct BatchMetadata {
     pub start_time: u64,
     /// End time of the latest event in nanoseconds since Unix epoch
     pub end_time: u64,
-    /// Schema IDs present in this batch formatted as MD5 hashes separated by semicolons
+    /// Schema IDs present in this batch formatted as comma-separated local IDs (0,1,2,...)
     pub schema_ids: String,
 }
 
@@ -72,6 +72,7 @@ pub(crate) struct CentralSchemaEntry {
     pub id: u64,
     pub md5: [u8; 16],
     pub schema: BondEncodedSchema,
+    pub fields: Vec<crate::payload_encoder::bond_encoder::FieldDef>,
 }
 
 /// Event/row entry for central blob
@@ -250,7 +251,7 @@ mod tests {
                 field_id: 2u16,
             },
         ];
-        let schema_obj = BondEncodedSchema::from_fields("TestStruct", "test.namespace", fields);
+        let schema_obj = BondEncodedSchema::from_fields("TestStruct", "test.namespace", fields.clone());
         let schema_bytes = schema_obj.as_bytes().to_vec();
         let schema_md5 = md5_bytes(&schema_bytes);
         let schema_id = 1234u64;
@@ -259,6 +260,7 @@ mod tests {
             id: schema_id,
             md5: schema_md5,
             schema: schema_obj,
+            fields,
         };
 
         // Prepare a row
