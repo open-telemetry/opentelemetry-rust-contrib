@@ -1,29 +1,34 @@
 [package]
 name = "geneva-uploader"
 description = "Upload telemetry data to Geneva logs service"
-version = "0.1.0"
+version = "0.3.0"
 edition = "2021"
 homepage = "https://github.com/open-telemetry/opentelemetry-rust-contrib/tree/main/opentelemetry-exporter-geneva/geneva-uploader"
 repository = "https://github.com/open-telemetry/opentelemetry-rust-contrib/tree/main/opentelemetry-exporter-geneva/geneva-uploader"
-rust-version = "1.75.0"
+rust-version = "1.85.0"
 keywords = ["opentelemetry", "geneva", "logs", "uploader"]
 license = "Apache-2.0"
 
 [dependencies]
-opentelemetry-proto = {workspace = true, default-features = false, features = ["logs", "gen-tonic-messages"]}
+opentelemetry-proto = {workspace = true, default-features = false, features = ["logs", "trace", "gen-tonic-messages"]}
 base64 = "0.22"
 serde = { version = "1.0", features = ["derive"] }
 serde_json = { version = "1.0", features = ["raw_value"] }
 uuid = { version = "1.0", features = ["v4"] }
 # TODO - support both native-tls and rustls
-reqwest = { version = "0.12", features = ["native-tls", "native-tls-alpn"]}
-native-tls = "0.2" 
+# http2 feature is required by hyper-util even when using http1_only()
+reqwest = { version = "0.12", features = ["native-tls", "native-tls-alpn", "http2"], default-features = false}
+native-tls = "0.2"
 thiserror = "2.0"
 chrono = "0.4"
 url = "2.2"
 md5 = "0.8.0"
 hex = "0.4"
 lz4_flex = { version = "0.11", features = ["safe-encode"], default-features = false }
+# Azure Identity dependencies - using public crates.io versions
+azure_identity = "0.29"
+azure_core = "0.29"
+tracing = "0.1"
 
 [features]
 self_signed_certs = [] # Empty by default for security

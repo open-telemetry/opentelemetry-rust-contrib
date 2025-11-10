@@ -3,7 +3,7 @@ name = "opentelemetry-instrumentation-tower"
 edition = "2021"
 rust-version = "1.75.0"
 
-version = "0.16.0"
+version = "0.17.0"
 license = "Apache-2.0"
 description = "OpenTelemetry Metrics Middleware for Tower-compatible Rust HTTP servers"
 homepage = "https://github.com/open-telemetry/opentelemetry-rust-contrib"

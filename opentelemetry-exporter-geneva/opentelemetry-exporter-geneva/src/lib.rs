@@ -4,5 +4,7 @@
 #![warn(missing_debug_implementations, missing_docs)]
 
 mod logs;
+mod trace;
 
 pub use logs::*;
+pub use trace::*;
