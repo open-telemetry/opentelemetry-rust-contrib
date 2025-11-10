@@ -1,0 +1,9 @@
+metrics:
+    readers:
+        - periodic:
+            exporter:
+                console:
+                    temporality: delta
+resource:
+    service.name: "test-service"
+    service.version: "1.0.0"

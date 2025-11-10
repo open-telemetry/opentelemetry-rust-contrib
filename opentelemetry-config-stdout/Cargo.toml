@@ -1,0 +1,12 @@
+[package]
+name = "opentelemetry-config-stdout"
+version = "0.1.0"
+description = "Declarative configuration for OpenTelemetry SDK using console (stdout) configuration"
+license = "Apache-2.0"
+edition = "2021"
+rust-version = "1.75.0"
+
+[dependencies]
+opentelemetry-config = { path = "../opentelemetry-config" }
+opentelemetry_sdk = { version = "0.31.0" }
+opentelemetry-stdout = { version = "0.31.0" }

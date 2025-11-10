@@ -1,0 +1,14 @@
+[package]
+name = "opentelemetry-config-mock-exporter-example"
+version = "0.1.0"
+description = "Declarative configuration for OpenTelemetry SDK example using a mock console exporter configuration"
+license = "Apache-2.0"
+edition = "2021"
+rust-version = "1.75.0"
+
+[workspace]
+
+[dependencies]
+opentelemetry-config = { path = "../../"}
+opentelemetry_sdk = { version = "0.31.0", features = ["experimental_metrics_custom_reader"] }
+opentelemetry-stdout = { version = "0.31.0" }
