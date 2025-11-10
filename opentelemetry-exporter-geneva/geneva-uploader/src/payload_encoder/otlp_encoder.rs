@@ -81,9 +81,8 @@ impl OtlpEncoder {
                         if i > 0 {
                             acc.push(';');
                         }
-                        let md5_hash = md5::compute(s.id.to_le_bytes());
-                        // Writing to String never fails in practice, ignore error
-                        let _ = write!(&mut acc, "{md5_hash:x}");
+                        // Use stored MD5 hash (already computed when schema was created)
+                        let _ = write!(&mut acc, "{:x}", md5::Digest(s.md5));
                         acc
                     },
                 )
@@ -107,15 +106,10 @@ impl OtlpEncoder {
                 log_record.event_name.as_str()
             };
 
-            // 1. Get schema with optimized single-pass field collection and schema ID calculation
-            let (field_info, schema_id) =
-                Self::determine_fields_and_schema_id(log_record, event_name_str);
+            // 1. Get schema fields
+            let field_info = Self::determine_fields(log_record, event_name_str);
 
-            // 2. Encode row
-            let row_buffer = self.write_row_data(log_record, &field_info);
-            let level = log_record.severity_number as u8;
-
-            // 3. Create or get existing batch entry with metadata tracking
+            // 2. Create or get existing batch entry with metadata tracking
             let entry = batches.entry(event_name_str).or_insert_with(|| BatchData {
                 schemas: Vec::new(),
                 events: Vec::new(),
@@ -132,11 +126,31 @@ impl OtlpEncoder {
                 entry.metadata.end_time = entry.metadata.end_time.max(timestamp);
             }
 
-            // 4. Add schema entry if not already present (multiple schemas per event_name batch)
-            if !entry.schemas.iter().any(|s| s.id == schema_id) {
-                let schema_entry = Self::create_schema(schema_id, field_info);
-                entry.schemas.push(schema_entry);
-            }
+            // 3. Find or create schema with exact equality check
+            // Compare stored fields to avoid encoding schema per event
+            // Check in reverse order: Part C (dynamic attributes) vary more than Part A/B (standard fields)
+            // Check type_id first (u8 comparison) before name (&str comparison) for faster short-circuit
+            let schema_id = match entry.schemas.iter().position(|s| {
+                s.fields.len() == field_info.len()
+                    && s.fields
+                        .iter()
+                        .zip(&field_info)
+                        .rev()
+                        .all(|(a, b)| a.type_id == b.type_id && a.name == b.name)
+            }) {
+                Some(idx) => (idx + 1) as u64,
+                None => {
+                    // New schema - assign next auto-incrementing ID (starting from 1)
+                    let new_id = (entry.schemas.len() + 1) as u64;
+                    let schema_entry = Self::create_schema(new_id, &field_info);
+                    entry.schemas.push(schema_entry);
+                    new_id
+                }
+            };
+
+            // 4. Encode row
+            let row_buffer = self.write_row_data(log_record, &field_info);
+            let level = log_record.severity_number as u8;
 
             // 5. Create CentralEventEntry directly (optimization: no intermediate EncodedRow)
             let central_event = CentralEventEntry {
@@ -218,15 +232,10 @@ impl OtlpEncoder {
         let mut end_time = 0u64;
 
         for span in spans {
-            // 1. Get schema with optimized single-pass field collection and schema ID calculation
-            let (field_info, schema_id) =
-                Self::determine_span_fields_and_schema_id(span, EVENT_NAME);
+            // 1. Get schema fields
+            let field_info = Self::determine_span_fields(span, EVENT_NAME);
 
-            // 2. Encode row
-            let row_buffer = self.write_span_row_data(span, &field_info);
-            let level = 5; // Default level for spans (INFO equivalent)
-
-            // 3. Update timestamp range
+            // 2. Update timestamp range
             if span.start_time_unix_nano != 0 {
                 start_time = start_time.min(span.start_time_unix_nano);
             }
@@ -234,15 +243,31 @@ impl OtlpEncoder {
                 end_time = end_time.max(span.end_time_unix_nano);
             }
 
-            // 4. Add schema entry if not already present
-            // TODO - This can have collision if different spans have same schema ID but different fields
-            if !schemas
-                .iter()
-                .any(|s: &CentralSchemaEntry| s.id == schema_id)
-            {
-                let schema_entry = Self::create_span_schema(schema_id, field_info);
-                schemas.push(schema_entry);
-            }
+            // 3. Find or create schema with exact equality check
+            // Compare stored fields to avoid encoding schema per event
+            // Check in reverse order: Part C (dynamic attributes) vary more than Part A/B (standard fields)
+            // Check type_id first (u8 comparison) before name (&str comparison) for faster short-circuit
+            let schema_id = match schemas.iter().position(|s: &CentralSchemaEntry| {
+                s.fields.len() == field_info.len()
+                    && s.fields
+                        .iter()
+                        .zip(&field_info)
+                        .rev()
+                        .all(|(a, b)| a.type_id == b.type_id && a.name == b.name)
+            }) {
+                Some(idx) => (idx + 1) as u64,
+                None => {
+                    // New schema - assign next auto-incrementing ID (starting from 1)
+                    let new_id = (schemas.len() + 1) as u64;
+                    let schema_entry = Self::create_span_schema(new_id, &field_info);
+                    schemas.push(schema_entry);
+                    new_id
+                }
+            };
+
+            // 4. Encode row
+            let row_buffer = self.write_span_row_data(span, &field_info);
+            let level = 5; // Default level for spans (INFO equivalent)
 
             // 5. Create CentralEventEntry
             let central_event = CentralEventEntry {
@@ -260,12 +285,14 @@ impl OtlpEncoder {
         }
 
         // Format schema IDs
-        // TODO - this can be shared code with log batch
+        // TODO: This can be shared code with log batch
         let schema_ids_string = {
             use std::fmt::Write;
             if schemas.is_empty() {
                 String::new()
             } else {
+                // Pre-allocate capacity: Each MD5 hash is 32 hex chars + 1 semicolon (except last)
+                // Total: (32 chars per hash * num_schemas) + (semicolons = num_schemas - 1)
                 let estimated_capacity = schemas.len() * 32 + schemas.len().saturating_sub(1);
                 schemas.iter().enumerate().fold(
                     String::with_capacity(estimated_capacity),
@@ -273,9 +300,8 @@ impl OtlpEncoder {
                         if i > 0 {
                             acc.push(';');
                         }
-                        let md5_hash = md5::compute(s.id.to_le_bytes());
-                        // Writing to String never fails in practice, ignore error
-                        let _ = write!(&mut acc, "{md5_hash:x}");
+                        // Use stored MD5 hash (already computed when schema was created)
+                        let _ = write!(&mut acc, "{:x}", md5::Digest(s.md5));
                         acc
                     },
                 )
@@ -333,18 +359,11 @@ impl OtlpEncoder {
         }])
     }
 
-    /// Determine fields and calculate schema ID in a single pass for optimal performance
-    fn determine_fields_and_schema_id(log: &LogRecord, event_name: &str) -> (Vec<FieldDef>, u64) {
-        use std::collections::hash_map::DefaultHasher;
-        use std::hash::{Hash, Hasher};
-
+    /// Determine fields for a log record
+    fn determine_fields(log: &LogRecord, _event_name: &str) -> Vec<FieldDef> {
         // Pre-allocate with estimated capacity to avoid reallocations
         let estimated_capacity = 7 + 4 + log.attributes.len();
         let mut fields = Vec::with_capacity(estimated_capacity);
-
-        // Initialize hasher for schema ID calculation
-        let mut hasher = DefaultHasher::new();
-        event_name.hash(&mut hasher);
 
         // Part A - Always present fields
         fields.push((Cow::Borrowed(FIELD_ENV_NAME), BondDataType::BT_STRING));
@@ -393,40 +412,23 @@ impl OtlpEncoder {
             }
         }
 
-        // No sorting - field order affects schema ID calculation
-        // Hash field names and types while converting to FieldDef
-        let field_defs: Vec<FieldDef> = fields
+        // Convert to FieldDef with field IDs
+        fields
             .into_iter()
             .enumerate()
-            .map(|(i, (name, type_id))| {
-                // Hash field name and type for schema ID
-                name.hash(&mut hasher);
-                type_id.hash(&mut hasher);
-
-                FieldDef {
-                    name,
-                    type_id,
-                    field_id: (i + 1) as u16,
-                }
+            .map(|(i, (name, type_id))| FieldDef {
+                name,
+                type_id,
+                field_id: (i + 1) as u16,
             })
-            .collect();
-
-        let schema_id = hasher.finish();
-        (field_defs, schema_id)
+            .collect()
     }
 
-    /// Determine span fields and calculate schema ID in a single pass for optimal performance
-    fn determine_span_fields_and_schema_id(span: &Span, event_name: &str) -> (Vec<FieldDef>, u64) {
-        use std::collections::hash_map::DefaultHasher;
-        use std::hash::{Hash, Hasher};
-
+    /// Determine span fields
+    fn determine_span_fields(span: &Span, _event_name: &str) -> Vec<FieldDef> {
         // Pre-allocate with estimated capacity to avoid reallocations
         let estimated_capacity = 15 + span.attributes.len(); // 7 always + 8 max conditional + attributes
         let mut fields = Vec::with_capacity(estimated_capacity);
-
-        // Initialize hasher for schema ID calculation
-        let mut hasher = DefaultHasher::new();
-        event_name.hash(&mut hasher);
 
         // Part A - Always present fields for spans
         fields.push((Cow::Borrowed(FIELD_ENV_NAME), BondDataType::BT_STRING));
@@ -483,29 +485,21 @@ impl OtlpEncoder {
             }
         }
 
-        // Hash field names and types while converting to FieldDef
-        let field_defs: Vec<FieldDef> = fields
+        // Convert to FieldDef with field IDs
+        fields
             .into_iter()
             .enumerate()
-            .map(|(i, (name, type_id))| {
-                // Hash field name and type for schema ID
-                name.hash(&mut hasher);
-                type_id.hash(&mut hasher);
-
-                FieldDef {
-                    name,
-                    type_id,
-                    field_id: (i + 1) as u16,
-                }
+            .map(|(i, (name, type_id))| FieldDef {
+                name,
+                type_id,
+                field_id: (i + 1) as u16,
             })
-            .collect();
-
-        let schema_id = hasher.finish();
-        (field_defs, schema_id)
+            .collect()
     }
 
     /// Create schema - always creates a new CentralSchemaEntry
-    fn create_schema(schema_id: u64, field_info: Vec<FieldDef>) -> CentralSchemaEntry {
+    fn create_schema(schema_id: u64, field_info: &[FieldDef]) -> CentralSchemaEntry {
+        // Only one clone: from_fields borrows, we clone for storage
         let schema = BondEncodedSchema::from_fields("OtlpLogRecord", "telemetry", field_info); //TODO - use actual struct name and namespace
 
         let schema_bytes = schema.as_bytes();
@@ -515,11 +509,13 @@ impl OtlpEncoder {
             id: schema_id,
             md5: schema_md5,
             schema,
+            fields: field_info.to_vec(),
         }
     }
 
     /// Create span schema - always creates a new CentralSchemaEntry
-    fn create_span_schema(schema_id: u64, field_info: Vec<FieldDef>) -> CentralSchemaEntry {
+    fn create_span_schema(schema_id: u64, field_info: &[FieldDef]) -> CentralSchemaEntry {
+        // Only one clone: from_fields borrows, we clone for storage
         let schema = BondEncodedSchema::from_fields("OtlpSpanRecord", "telemetry", field_info);
 
         let schema_bytes = schema.as_bytes();
@@ -529,6 +525,7 @@ impl OtlpEncoder {
             id: schema_id,
             md5: schema_md5,
             schema,
+            fields: field_info.to_vec(),
         }
     }
 
@@ -900,16 +897,8 @@ mod tests {
             schema_ids
         );
 
-        // Verify all schema IDs are different (each log record has different schema structure)
-        let unique_schemas: std::collections::HashSet<&str> = schema_id_list.into_iter().collect();
-        assert_eq!(
-            unique_schemas.len(),
-            3,
-            "Expected 3 unique schema IDs but found duplicates in: {schema_ids}"
-        );
-
         // Verify each schema ID is a valid MD5 hash (32 hex characters)
-        for schema_id in unique_schemas {
+        for schema_id in schema_id_list {
             assert_eq!(
                 schema_id.len(),
                 32,
@@ -1231,7 +1220,7 @@ mod tests {
         };
 
         // Verify that both spans have name field in schema
-        let (fields1, _) = OtlpEncoder::determine_span_fields_and_schema_id(&span1, "Span");
+        let fields1 = OtlpEncoder::determine_span_fields(&span1, "Span");
         let name_field_present1 = fields1
             .iter()
             .any(|field| field.name.as_ref() == FIELD_NAME);
@@ -1240,7 +1229,7 @@ mod tests {
             "Span with non-empty name should include 'name' field in schema"
         );
 
-        let (fields2, _) = OtlpEncoder::determine_span_fields_and_schema_id(&span2, "Span");
+        let fields2 = OtlpEncoder::determine_span_fields(&span2, "Span");
         let name_field_present2 = fields2
             .iter()
             .any(|field| field.name.as_ref() == FIELD_NAME);
