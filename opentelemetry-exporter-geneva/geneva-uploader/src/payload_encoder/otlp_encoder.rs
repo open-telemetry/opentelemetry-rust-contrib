@@ -134,10 +134,10 @@ impl OtlpEncoder {
                         .zip(&field_info)
                         .all(|(a, b)| a.name == b.name && a.type_id == b.type_id)
             }) {
-                Some(idx) => idx as u64,
+                Some(idx) => (idx + 1) as u64,
                 None => {
-                    // New schema - assign next auto-incrementing ID
-                    let new_id = entry.schemas.len() as u64;
+                    // New schema - assign next auto-incrementing ID (starting from 1)
+                    let new_id = (entry.schemas.len() + 1) as u64;
                     let schema_entry = Self::create_schema(new_id, &field_info);
                     entry.schemas.push(schema_entry);
                     new_id
@@ -248,10 +248,10 @@ impl OtlpEncoder {
                         .zip(&field_info)
                         .all(|(a, b)| a.name == b.name && a.type_id == b.type_id)
             }) {
-                Some(idx) => idx as u64,
+                Some(idx) => (idx + 1) as u64,
                 None => {
-                    // New schema - assign next auto-incrementing ID
-                    let new_id = schemas.len() as u64;
+                    // New schema - assign next auto-incrementing ID (starting from 1)
+                    let new_id = (schemas.len() + 1) as u64;
                     let schema_entry = Self::create_span_schema(new_id, &field_info);
                     schemas.push(schema_entry);
                     new_id
