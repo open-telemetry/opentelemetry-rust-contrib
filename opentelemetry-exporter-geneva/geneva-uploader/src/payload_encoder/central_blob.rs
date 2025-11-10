@@ -1,6 +1,6 @@
 //use md5;
 
-use crate::payload_encoder::bond_encoder::BondEncodedSchema;
+use crate::payload_encoder::bond_encoder::{BondEncodedSchema, FieldDef};
 use chrono::{DateTime, Datelike, Timelike, Utc};
 use std::sync::Arc;
 
@@ -72,8 +72,10 @@ pub(crate) struct CentralSchemaEntry {
     pub id: u64,
     pub md5: [u8; 16],
     pub schema: BondEncodedSchema,
-    // Store fields for deduplication. Alternative: encode schema per event and compare with stored encoded schemas.
-    pub fields: Vec<crate::payload_encoder::bond_encoder::FieldDef>,
+    // Store fields for deduplication
+    // TODO: It might be faster to encode schema per event and compare encoded bytes with stored schemas
+    // instead of checking each field. Needs benchmarking to determine which approach is faster.
+    pub fields: Vec<FieldDef>,
 }
 
 /// Event/row entry for central blob

@@ -70,7 +70,8 @@ impl OtlpEncoder {
                     return String::new();
                 }
 
-                // Server expects MD5(schema_bytes) as hex, semicolon-separated
+                // Pre-allocate capacity: Each MD5 hash is 32 hex chars + 1 semicolon (except last)
+                // Total: (32 chars per hash * num_schemas) + (semicolons = num_schemas - 1)
                 let estimated_capacity =
                     self.schemas.len() * 32 + self.schemas.len().saturating_sub(1);
 
@@ -127,12 +128,15 @@ impl OtlpEncoder {
 
             // 3. Find or create schema with exact equality check
             // Compare stored fields to avoid encoding schema per event
+            // Check in reverse order: Part C (dynamic attributes) vary more than Part A/B (standard fields)
+            // Check type_id first (u8 comparison) before name (&str comparison) for faster short-circuit
             let schema_id = match entry.schemas.iter().position(|s| {
                 s.fields.len() == field_info.len()
                     && s.fields
                         .iter()
                         .zip(&field_info)
-                        .all(|(a, b)| a.name == b.name && a.type_id == b.type_id)
+                        .rev()
+                        .all(|(a, b)| a.type_id == b.type_id && a.name == b.name)
             }) {
                 Some(idx) => (idx + 1) as u64,
                 None => {
@@ -241,12 +245,15 @@ impl OtlpEncoder {
 
             // 3. Find or create schema with exact equality check
             // Compare stored fields to avoid encoding schema per event
+            // Check in reverse order: Part C (dynamic attributes) vary more than Part A/B (standard fields)
+            // Check type_id first (u8 comparison) before name (&str comparison) for faster short-circuit
             let schema_id = match schemas.iter().position(|s: &CentralSchemaEntry| {
                 s.fields.len() == field_info.len()
                     && s.fields
                         .iter()
                         .zip(&field_info)
-                        .all(|(a, b)| a.name == b.name && a.type_id == b.type_id)
+                        .rev()
+                        .all(|(a, b)| a.type_id == b.type_id && a.name == b.name)
             }) {
                 Some(idx) => (idx + 1) as u64,
                 None => {
@@ -277,12 +284,15 @@ impl OtlpEncoder {
             return Ok(Vec::new());
         }
 
-        // Format schema IDs - server expects MD5(schema_bytes) as hex, semicolon-separated
+        // Format schema IDs
+        // TODO: This can be shared code with log batch
         let schema_ids_string = {
             use std::fmt::Write;
             if schemas.is_empty() {
                 String::new()
             } else {
+                // Pre-allocate capacity: Each MD5 hash is 32 hex chars + 1 semicolon (except last)
+                // Total: (32 chars per hash * num_schemas) + (semicolons = num_schemas - 1)
                 let estimated_capacity = schemas.len() * 32 + schemas.len().saturating_sub(1);
                 schemas.iter().enumerate().fold(
                     String::with_capacity(estimated_capacity),

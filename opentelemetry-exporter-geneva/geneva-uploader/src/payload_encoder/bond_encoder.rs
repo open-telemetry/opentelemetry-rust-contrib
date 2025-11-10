@@ -107,18 +107,18 @@ pub(crate) struct FieldDef {
 
 /// Schema definition that can be built dynamically
 #[derive(Clone)]
-pub(crate) struct DynamicSchema {
+pub(crate) struct DynamicSchema<'a> {
     pub struct_name: String,
     pub qualified_name: String,
-    pub fields: Vec<FieldDef>,
+    pub fields: &'a [FieldDef],
 }
 
-impl DynamicSchema {
-    pub(crate) fn new(name: &str, namespace: &str, fields: &[FieldDef]) -> Self {
+impl<'a> DynamicSchema<'a> {
+    pub(crate) fn new(name: &str, namespace: &str, fields: &'a [FieldDef]) -> Self {
         Self {
             struct_name: name.to_string(),
             qualified_name: format!("{namespace}.{name}"),
-            fields: fields.to_vec(),
+            fields,
         }
     }
 
