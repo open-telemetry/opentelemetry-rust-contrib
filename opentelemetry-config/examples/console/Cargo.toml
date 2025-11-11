@@ -10,3 +10,4 @@ rust-version = "1.75.0"
 
 [dependencies]
 opentelemetry-config = { path = "../../"}
+opentelemetry_sdk = { version = "0.31.0" }

@@ -12,10 +12,12 @@ Declarative configuration for applications instrumented with [`OpenTelemetry`].
 
 This crate provides a declarative, YAML-based configuration approach for the OpenTelemetry Rust SDK. Instead of programmatically building telemetry providers with code, you can define your OpenTelemetry configuration in YAML files and load them at runtime.
 
+The configuration model is aligned with the [OpenTelemetry Configuration Schema](https://github.com/open-telemetry/opentelemetry-configuration), following the standard defined in the [kitchen-sink.yaml](https://github.com/open-telemetry/opentelemetry-configuration/blob/main/examples/kitchen-sink.yaml) example. This ensures compatibility and consistency with OpenTelemetry implementations across different languages and platforms.
+
 ### Features
 
 - **Declarative Configuration**: Define metrics, traces, and logs configuration in YAML
-- **Extensible Architecture**: Register custom configurators for different exporters
+- **Extensible Architecture**: Register custom providers for different exporters
 - **Type-Safe**: Strongly typed configuration models with serde deserialization
 - **Multiple Exporters**: Support for Console, OTLP, and custom exporters
 - **Resource Attributes**: Configure resource attributes for all telemetry signals
@@ -52,26 +54,27 @@ resource:
 
 ```rust
 fn main() -> Result<(), Box<dyn std::error::Error>> {
-    // Create configurator manager and register exporters
-    let mut configurator_manager = ConfiguratorManager::new();
-    configurator_manager
+    // Create a configuration registry and register exporters
+    let mut registry = ConfigurationProvidersRegistry::new();
+    registry
         .metrics_mut()
-        .register_periodic_exporter_configurator::<PeriodicExporterConsole>(
-            Box::new(ConsoleExporterConfigurator)
+        .register_periodic_exporter_provider::<PeriodicExporterConsole>(
+            Box::new(ConsoleExporterProvider)
         );
 
     // Load configuration from YAML file
-    let telemetry_configurator = TelemetryConfigurator::new();
-    let providers = telemetry_configurator
-        .configure_from_yaml_file(&configurator_manager, "otel-config.yaml")?;
+    let telemetry_provider = TelemetryProvider::new();
+    let providers = telemetry_provider
+        .provide_from_yaml_file(&registry, "otel-config.yaml")?;
 
     // Use the configured providers
     if let Some(meter_provider) = providers.meter_provider() {
         // Your application code here
+
+        // Shutdown the meter provider
+        meter_provider.shutdown()?;
     }
 
-    // Shutdown all providers
-    providers.shutdown()?;
     Ok(())
 }
 ```
@@ -80,10 +83,24 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
 ### Core Components
 
-- **`ConfiguratorManager`**: Central registry for exporter configurators
-- **`TelemetryConfigurator`**: Orchestrates the configuration process from YAML to providers
+- **`ConfigurationProvidersRegistry`**: Central registry for configuration providers
+- **`TelemetryProvider`**: Orchestrates the configuration process from YAML to providers
 - **`TelemetryProviders`**: Holds configured meter, tracer, and logger providers
-- **`MetricsReaderPeriodicExporterConfigurator`**: Trait for implementing custom metric exporters
+- **`MetricsReaderPeriodicExporterProvider`**: Trait for implementing custom metric exporters
+
+### Design Pattern
+
+This crate follows a **decoupled implementation pattern**:
+
+- **Centralized Configuration Model**: The configuration schema (YAML structure and data models) is defined and maintained centrally in this crate, ensuring alignment with the OpenTelemetry Configuration Standard
+- **Decoupled Implementations**: Actual exporter implementations live in external crates, allowing the community to contribute custom exporters without modifying the core configuration model
+- **Community Control**: By keeping the configuration model centralized and standardized, the community maintains consistency across all implementations while enabling extensibility
+
+This design enables:
+- **Standard Compliance**: All configurations follow the official OpenTelemetry schema
+- **Easy Extension**: Contributors can add new exporters by implementing traits in their own crates
+- **Version Independence**: Exporter implementations can evolve independently from the configuration schema
+- **Flexibility**: Users can mix official and custom exporters using the same configuration format
 
 ### Configuration Model
 
@@ -100,7 +117,7 @@ The configuration is structured around the `Telemetry` model which includes:
 
 See the [examples/console](examples/console) directory for a complete working example that demonstrates:
 
-- Setting up a console exporter configurator
+- Setting up a console exporter provider
 - Loading configuration from a YAML file
 - Configuring a meter provider
 - Proper shutdown handling
@@ -153,16 +170,16 @@ pub struct MyCustomExporter {
 }
 ```
 
-2. Implement the configurator trait:
+2. Implement the provider trait:
 
 ```rust
-impl MetricsReaderPeriodicExporterConfigurator for MyCustomConfigurator {
-    fn configure(
+impl MetricsReaderPeriodicExporterProvider for MyCustomProvider {
+    fn provide(
         &self,
         meter_provider_builder: MeterProviderBuilder,
         config: &dyn std::any::Any,
     ) -> MeterProviderBuilder {
-        let config = config.downcast_ref::<MyCustomExporter>()
+        let config = config.downcast_ref::<PeriodicExporterConsole>()
             .expect("Invalid config type");
         
         // Build your exporter with the config
@@ -176,13 +193,13 @@ impl MetricsReaderPeriodicExporterConfigurator for MyCustomConfigurator {
 }
 ```
 
-3. Register it with the configurator manager:
+3. Register it with the ConfigurationProvidersRegistry:
 
 ```rust
-configurator_manager
+registry
     .metrics_mut()
-    .register_periodic_exporter_configurator::<MyCustomExporter>(
-        Box::new(MyCustomConfigurator)
+    .register_periodic_exporter_provider::<PeriodicExporterConsole>(
+        Box::new(MyCustomProvider)
     );
 ```
 

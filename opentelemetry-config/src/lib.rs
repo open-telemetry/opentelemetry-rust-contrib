@@ -12,69 +12,68 @@ use std::{
 };
 
 use opentelemetry_sdk::{
-    error::OTelSdkResult,
     logs::SdkLoggerProvider,
     metrics::{MeterProviderBuilder, SdkMeterProvider},
     trace::SdkTracerProvider,
 };
 
-use crate::model::metrics::reader::{PeriodicExporterConsole, PeriodicExporterOtlp};
-
-pub mod configurators;
 pub mod model;
+pub mod providers;
 
-pub struct ConfiguratorManager {
-    metrics: MetricsConfiguratorManager,
+/// Registry for different configuration providers.
+pub struct ConfigurationProvidersRegistry {
+    metrics: MetricsProvidersRegistry,
 }
 
-impl ConfiguratorManager {
+impl ConfigurationProvidersRegistry {
     pub fn new() -> Self {
         Self {
-            metrics: MetricsConfiguratorManager::new(),
+            metrics: MetricsProvidersRegistry::new(),
         }
     }
 
-    pub fn metrics_mut(&mut self) -> &mut MetricsConfiguratorManager {
+    pub fn metrics_mut(&mut self) -> &mut MetricsProvidersRegistry {
         &mut self.metrics
     }
 
-    pub fn metrics(&self) -> &MetricsConfiguratorManager {
+    pub fn metrics(&self) -> &MetricsProvidersRegistry {
         &self.metrics
     }
 }
 
-impl Default for ConfiguratorManager {
+impl Default for ConfigurationProvidersRegistry {
     fn default() -> Self {
         Self::new()
     }
 }
 
-pub struct MetricsConfiguratorManager {
-    readers_periodic_exporters: HashMap<String, Box<dyn MetricsReaderPeriodicExporterConfigurator>>,
+/// Registry for metrics configuration providers.
+pub struct MetricsProvidersRegistry {
+    readers_periodic_exporters: HashMap<String, Box<dyn MetricsReaderPeriodicExporterProvider>>,
 }
 
-impl MetricsConfiguratorManager {
+impl MetricsProvidersRegistry {
     pub fn new() -> Self {
         Self {
             readers_periodic_exporters: HashMap::new(),
         }
     }
 
-    pub fn register_periodic_exporter_configurator<T: 'static + std::any::Any + ?Sized>(
+    pub fn register_periodic_exporter_provider<T: 'static + std::any::Any + ?Sized>(
         &mut self,
-        configurator: Box<dyn MetricsReaderPeriodicExporterConfigurator>,
+        provider: Box<dyn MetricsReaderPeriodicExporterProvider>,
     ) {
         let name: String = type_name::<T>().to_string();
         self.readers_periodic_exporters.insert(
             name,
-            configurator as Box<dyn MetricsReaderPeriodicExporterConfigurator>,
+            provider as Box<dyn MetricsReaderPeriodicExporterProvider>,
         );
     }
 
     pub fn readers_periodic_exporter<T>(
         &self,
         //type_name: &str,
-    ) -> Option<&dyn MetricsReaderPeriodicExporterConfigurator> {
+    ) -> Option<&dyn MetricsReaderPeriodicExporterProvider> {
         let type_name = type_name::<T>().to_string();
         self.readers_periodic_exporters
             .get(&type_name)
@@ -82,34 +81,15 @@ impl MetricsConfiguratorManager {
     }
 }
 
-impl Default for MetricsConfiguratorManager {
+impl Default for MetricsProvidersRegistry {
     fn default() -> Self {
         Self::new()
     }
 }
 
-/// Trait for configuring Console Exporter for Periodic Metrics Reader
-pub trait MetricsReadersPeriodicExporterConsoleConfigurator {
-    fn configure(
-        &self,
-        meter_provider_builder: MeterProviderBuilder,
-        config: &PeriodicExporterConsole,
-    ) -> MeterProviderBuilder;
-
-    fn as_any(&self) -> &dyn std::any::Any;
-}
-
-/// Trait for configuring OTLP Exporter for Periodic Metrics Reader
-pub trait MetricsReadersPeriodicExporterOtlpConfigurator {
-    fn configure(
-        &self,
-        meter_provider_builder: MeterProviderBuilder,
-        config: &PeriodicExporterOtlp,
-    ) -> MeterProviderBuilder;
-}
-
-pub trait MetricsReaderPeriodicExporterConfigurator {
-    fn configure(
+/// Trait for providing metrics reader periodic exporter configurations.
+pub trait MetricsReaderPeriodicExporterProvider {
+    fn provide(
         &self,
         meter_provider_builder: MeterProviderBuilder,
         config: &dyn std::any::Any,
@@ -159,47 +139,36 @@ impl TelemetryProviders {
     pub fn logs_provider(&self) -> Option<&SdkLoggerProvider> {
         self.logs_provider.as_ref()
     }
-
-    pub fn shutdown(self) -> OTelSdkResult {
-        if let Some(meter_provider) = self.meter_provider {
-            meter_provider.shutdown()?;
-        }
-        if let Some(traces_provider) = self.traces_provider {
-            traces_provider.shutdown()?;
-        }
-        if let Some(logs_provider) = self.logs_provider {
-            logs_provider.shutdown()?;
-        }
-        Ok(())
-    }
 }
 
+/// Default implementation for TelemetryProviders
 impl Default for TelemetryProviders {
     fn default() -> Self {
         Self::new()
     }
 }
 
+/// Errors related to providers and configuration management.
 #[derive(Debug)]
-pub enum ConfiguratorError {
+pub enum ProviderError {
     InvalidConfiguration(String),
     UnsupportedExporter(String),
-    NotRegisteredConfigurator(String),
+    NotRegisteredProvider(String),
 }
 
-impl error::Error for ConfiguratorError {}
+impl error::Error for ProviderError {}
 
-impl Display for ConfiguratorError {
+impl Display for ProviderError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            ConfiguratorError::InvalidConfiguration(details) => {
+            ProviderError::InvalidConfiguration(details) => {
                 write!(f, "Invalid configuration: {}", details)
             }
-            ConfiguratorError::UnsupportedExporter(details) => {
+            ProviderError::UnsupportedExporter(details) => {
                 write!(f, "Unsupported exporter: {}", details)
             }
-            ConfiguratorError::NotRegisteredConfigurator(details) => {
-                write!(f, "Not registered configurator: {}", details)
+            ProviderError::NotRegisteredProvider(details) => {
+                write!(f, "Not registered provider: {}", details)
             }
         }
     }
@@ -207,37 +176,38 @@ impl Display for ConfiguratorError {
 
 #[cfg(test)]
 mod tests {
-    use std::sync::atomic::AtomicI16;
+    use std::cell::Cell;
+
+    use crate::model::metrics::reader::PeriodicExporterConsole;
 
     use super::*;
 
     #[test]
-    fn test_register_periodic_exporter_configurator() {
+    fn test_register_periodic_exporter_provider() {
         // Arrange
-        struct MockPeriodicExporterConfigurator {
-            call_count: AtomicI16,
+        struct MockPeriodicExporterProvider {
+            call_count: Cell<i16>,
         }
 
-        impl MockPeriodicExporterConfigurator {
+        impl MockPeriodicExporterProvider {
             fn new() -> Self {
                 Self {
-                    call_count: AtomicI16::new(0),
+                    call_count: Cell::new(0),
                 }
             }
 
             pub fn get_call_count(&self) -> i16 {
-                self.call_count.load(std::sync::atomic::Ordering::SeqCst)
+                self.call_count.get()
             }
         }
 
-        impl MetricsReaderPeriodicExporterConfigurator for MockPeriodicExporterConfigurator {
-            fn configure(
+        impl MetricsReaderPeriodicExporterProvider for MockPeriodicExporterProvider {
+            fn provide(
                 &self,
                 meter_provider_builder: MeterProviderBuilder,
                 _config: &dyn std::any::Any,
             ) -> MeterProviderBuilder {
-                self.call_count
-                    .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+                self.call_count.set(self.call_count.get() + 1);
                 meter_provider_builder
             }
 
@@ -246,52 +216,52 @@ mod tests {
             }
         }
 
-        let mock_configurator = Box::new(MockPeriodicExporterConfigurator::new());
-        let mut configurator_manager = ConfiguratorManager::new();
+        let mock_provider = Box::new(MockPeriodicExporterProvider::new());
+        let mut registry = ConfigurationProvidersRegistry::new();
 
         // Act
-        configurator_manager
+        registry
             .metrics_mut()
-            .register_periodic_exporter_configurator::<PeriodicExporterConsole>(mock_configurator);
+            .register_periodic_exporter_provider::<PeriodicExporterConsole>(mock_provider);
 
         // Assert
         let type_name = type_name::<PeriodicExporterConsole>().to_string();
-        assert!(configurator_manager
+        assert!(registry
             .metrics()
             .readers_periodic_exporters
             .contains_key(&type_name));
 
-        let configurator_option = configurator_manager
+        let provider_option = registry
             .metrics()
             .readers_periodic_exporter::<PeriodicExporterConsole>();
-        if let Some(configurator) = configurator_option {
-            configurator.configure(
+        if let Some(provider) = provider_option {
+            provider.provide(
                 MeterProviderBuilder::default(),
                 &PeriodicExporterConsole { temporality: None },
             );
-            let configurator_cast = configurator
+            let provider_cast = provider
                 .as_any()
-                .downcast_ref::<MockPeriodicExporterConfigurator>()
+                .downcast_ref::<MockPeriodicExporterProvider>()
                 .unwrap();
-            assert_eq!(configurator_cast.get_call_count(), 1);
+            assert_eq!(provider_cast.get_call_count(), 1);
         } else {
-            panic!("Configurator not found");
+            panic!("Provider not found");
         }
     }
 
     #[test]
-    fn test_configurator_manager_default() {
-        let configurator_manager = ConfiguratorManager::default();
-        assert!(configurator_manager
+    fn test_provider_manager_default() {
+        let provider_manager = ConfigurationProvidersRegistry::default();
+        assert!(provider_manager
             .metrics()
             .readers_periodic_exporters
             .is_empty());
     }
 
     #[test]
-    fn test_metrics_configurator_manager_default() {
-        let metrics_configurator_manager = MetricsConfiguratorManager::default();
-        assert!(metrics_configurator_manager
+    fn test_metrics_provider_manager_default() {
+        let metrics_provider_manager = MetricsProvidersRegistry::default();
+        assert!(metrics_provider_manager
             .readers_periodic_exporters
             .is_empty());
     }

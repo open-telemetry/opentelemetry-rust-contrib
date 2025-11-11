@@ -17,7 +17,7 @@ This crate provides a declarative configuration extension for OpenTelemetry that
 - Console/stdout metrics exporter configuration via YAML
 - Support for both Delta and Cumulative temporality
 - Integration with OpenTelemetry declarative configuration
-- Simple registration API for the configurator
+- Simple registration API for declarative configuration
 
 ## Installation
 
@@ -50,26 +50,27 @@ resource:
 ### 2. Load and Apply Configuration
 
 ```rust
-use opentelemetry_config::{ConfiguratorManager, TelemetryConfigurator};
-use opentelemetry_config_stdout::ConsolePeriodicExporterConfigurator;
+use opentelemetry_config::{ConfigurationProvidersRegistry, TelemetryProvider};
+use opentelemetry_config_stdout::ConsolePeriodicExporterProvider;
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
-    // Create configurator manager and register stdout exporter
-    let mut configurator_manager = ConfiguratorManager::new();
-    ConsolePeriodicExporterConfigurator::register_into(&mut configurator_manager);
+    // Create configuration registry and register stdout exporter
+    let mut registry = ConfigurationProvidersRegistry::new();
+    ConsolePeriodicExporterRegistry::register_into(&mut registry);
 
     // Load configuration from YAML file
-    let telemetry_configurator = TelemetryConfigurator::new();
-    let providers = telemetry_configurator
-        .configure_from_yaml_file(&configurator_manager, "otel-config.yaml")?;
+    let telemetry_provider = TelemetryProvider::new();
+    let providers = telemetry_provider
+        .configure_from_yaml_file(&registry, "otel-config.yaml")?;
 
     // Use the configured providers
     if let Some(meter_provider) = providers.meter_provider() {
         // Your application code here
+
+        // Shutdown the created meter provider.
+        meter_provider.shutdown()?;
     }
 
-    // Shutdown all providers
-    providers.shutdown()?;
     Ok(())
 }
 ```
@@ -80,7 +81,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
 See the [examples/console](examples/console) directory for a complete working example that demonstrates:
 
-- Setting up a console exporter configurator
+- Setting up a console exporter provider
 - Loading configuration from a YAML file
 - Configuring a meter provider
 - Proper shutdown handling

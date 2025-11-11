@@ -1,9 +1,9 @@
-//! # Configurator objects for OpenTelemetry SDKs
+//! # Provider objects for OpenTelemetry SDKs
 //!
-//! This module provides the different element configurators to configure
+//! This module provides the different element providers to configure
 //! OpenTelemetry SDKs using declarative YAML configurations.
 
-pub mod metrics_configurator;
+pub mod metrics_provider;
 
 use std::collections::HashMap;
 
@@ -11,35 +11,35 @@ use opentelemetry::KeyValue;
 use opentelemetry_sdk::{metrics::SdkMeterProvider, Resource};
 
 use crate::{
-    configurators::metrics_configurator::MetricsConfigurator, model::Telemetry, ConfiguratorError,
-    ConfiguratorManager, TelemetryProviders,
+    model::Telemetry, providers::metrics_provider::MetricsProvider, ConfigurationProvidersRegistry,
+    ProviderError, TelemetryProviders,
 };
 
-/// Configurator for Telemetry object
-pub struct TelemetryConfigurator {
-    metrics_configurator: MetricsConfigurator,
+/// Provider for Telemetry object
+pub struct TelemetryProvider {
+    metrics_provider: MetricsProvider,
 }
 
-impl TelemetryConfigurator {
-    /// Creates a new TelemetryConfigurator
+impl TelemetryProvider {
+    /// Creates a new TelemetryProvider
     pub fn new() -> Self {
         Self {
-            metrics_configurator: MetricsConfigurator::new(),
+            metrics_provider: MetricsProvider::new(),
         }
     }
 
-    pub fn configure(
+    pub fn provide(
         &self,
-        configurator_manager: &ConfiguratorManager,
+        configuration_registry: &ConfigurationProvidersRegistry,
         config: &Telemetry,
-    ) -> Result<TelemetryProviders, ConfiguratorError> {
+    ) -> Result<TelemetryProviders, ProviderError> {
         let mut providers = TelemetryProviders::new();
         let resource: Resource = self.as_resource(&config.resource);
         if let Some(metrics_config) = &config.metrics {
             let mut meter_provider_builder =
                 SdkMeterProvider::builder().with_resource(resource.clone());
-            meter_provider_builder = self.metrics_configurator.configure(
-                configurator_manager.metrics(),
+            meter_provider_builder = self.metrics_provider.provide(
+                configuration_registry.metrics(),
                 meter_provider_builder,
                 metrics_config,
             )?;
@@ -52,32 +52,32 @@ impl TelemetryConfigurator {
         Ok(providers)
     }
 
-    pub fn configure_from_yaml(
+    pub fn provide_from_yaml(
         &self,
-        configurator_manager: &ConfiguratorManager,
+        configuration_registry: &ConfigurationProvidersRegistry,
         yaml_str: &str,
-    ) -> Result<TelemetryProviders, ConfiguratorError> {
+    ) -> Result<TelemetryProviders, ProviderError> {
         let config: crate::model::Telemetry = serde_yaml::from_str(yaml_str).map_err(|e| {
-            ConfiguratorError::InvalidConfiguration(format!(
+            ProviderError::InvalidConfiguration(format!(
                 "Failed to parse YAML configuration: {}",
                 e
             ))
         })?;
-        self.configure(configurator_manager, &config)
+        self.provide(configuration_registry, &config)
     }
 
-    pub fn configure_from_yaml_file(
+    pub fn provide_from_yaml_file(
         &self,
-        configurator_manager: &ConfiguratorManager,
+        configuration_registry: &ConfigurationProvidersRegistry,
         file_path: &str,
-    ) -> Result<TelemetryProviders, ConfiguratorError> {
+    ) -> Result<TelemetryProviders, ProviderError> {
         let yaml_str = std::fs::read_to_string(file_path).map_err(|e| {
-            ConfiguratorError::InvalidConfiguration(format!(
+            ProviderError::InvalidConfiguration(format!(
                 "Failed to read YAML configuration file: {}",
                 e
             ))
         })?;
-        self.configure_from_yaml(configurator_manager, &yaml_str)
+        self.provide_from_yaml(configuration_registry, &yaml_str)
     }
 
     /// Converts resource attributes from HashMap to Resource
@@ -111,7 +111,7 @@ impl TelemetryConfigurator {
     }
 }
 
-impl Default for TelemetryConfigurator {
+impl Default for TelemetryProvider {
     fn default() -> Self {
         Self::new()
     }
@@ -119,43 +119,40 @@ impl Default for TelemetryConfigurator {
 
 #[cfg(test)]
 mod tests {
-    use std::{any::Any, sync::atomic::AtomicU16};
+    use std::{any::Any, cell::Cell};
 
     use opentelemetry_sdk::metrics::MeterProviderBuilder;
 
     use crate::{
-        model::metrics::reader::PeriodicExporterConsole, MetricsReaderPeriodicExporterConfigurator,
+        model::metrics::reader::PeriodicExporterConsole, MetricsReaderPeriodicExporterProvider,
     };
 
     use super::*;
 
-    struct MockMetricsReadersPeriodicExporterConsoleConfigurator {
-        call_count: AtomicU16,
+    struct MockMetricsReadersPeriodicExporterConsoleProvider {
+        call_count: Cell<u16>,
     }
 
-    impl MockMetricsReadersPeriodicExporterConsoleConfigurator {
+    impl MockMetricsReadersPeriodicExporterConsoleProvider {
         fn new() -> Self {
             Self {
-                call_count: AtomicU16::new(0),
+                call_count: Cell::new(0),
             }
         }
 
         pub fn get_call_count(&self) -> u16 {
-            self.call_count.load(std::sync::atomic::Ordering::SeqCst)
+            self.call_count.get()
         }
     }
 
-    impl MetricsReaderPeriodicExporterConfigurator
-        for MockMetricsReadersPeriodicExporterConsoleConfigurator
-    {
-        fn configure(
+    impl MetricsReaderPeriodicExporterProvider for MockMetricsReadersPeriodicExporterConsoleProvider {
+        fn provide(
             &self,
             meter_provider_builder: MeterProviderBuilder,
             config: &(dyn Any + 'static),
         ) -> MeterProviderBuilder {
             // Mock implementation: In a real scenario, configure the console exporter here
-            self.call_count
-                .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+            self.call_count.set(self.call_count.get() + 1);
             let config = config
                 .downcast_ref::<PeriodicExporterConsole>()
                 .expect("Invalid config type");
@@ -185,41 +182,41 @@ mod tests {
           development: true
         "#;
 
-        let configurator = Box::new(MockMetricsReadersPeriodicExporterConsoleConfigurator::new());
+        let provider = Box::new(MockMetricsReadersPeriodicExporterConsoleProvider::new());
 
-        let mut configurator_manager = ConfiguratorManager::new();
-        let metrics_configurator_manager = configurator_manager.metrics_mut();
-        //metrics_configurator_manager.register_periodic_exporter_console_configurator(configurator);
-        metrics_configurator_manager
-            .register_periodic_exporter_configurator::<PeriodicExporterConsole>(configurator);
+        let mut configuration_registry = ConfigurationProvidersRegistry::new();
+        let metrics_provider_manager = configuration_registry.metrics_mut();
+        //metrics_provider_manager.register_periodic_exporter_console_provider(provider);
+        metrics_provider_manager
+            .register_periodic_exporter_provider::<PeriodicExporterConsole>(provider);
 
-        let telemetry_configurator = TelemetryConfigurator::new();
-        let providers = telemetry_configurator
-            .configure_from_yaml(&configurator_manager, yaml_str)
+        let telemetry_provider = TelemetryProvider::new();
+        let providers = telemetry_provider
+            .provide_from_yaml(&configuration_registry, yaml_str)
             .unwrap();
         assert!(providers.meter_provider.is_some());
 
-        let configurator = configurator_manager
+        let provider = configuration_registry
             .metrics()
             .readers_periodic_exporter::<PeriodicExporterConsole>()
             .unwrap();
-        let configurator = configurator
+        let provider = provider
             .as_any()
-            .downcast_ref::<MockMetricsReadersPeriodicExporterConsoleConfigurator>()
+            .downcast_ref::<MockMetricsReadersPeriodicExporterConsoleProvider>()
             .unwrap();
-        assert_eq!(configurator.get_call_count(), 1);
+        assert_eq!(provider.get_call_count(), 1);
     }
 
     #[test]
-    fn test_telemetry_configurator_default() {
-        let telemetry_configurator = TelemetryConfigurator::default();
-        let configurator_manager = ConfiguratorManager::default();
+    fn test_telemetry_provider_default() {
+        let telemetry_provider = TelemetryProvider::default();
+        let configuration_registry = ConfigurationProvidersRegistry::default();
         let telemetry = Telemetry {
             resource: HashMap::new(),
             metrics: None,
         };
-        let providers = telemetry_configurator
-            .configure(&configurator_manager, &telemetry)
+        let providers = telemetry_provider
+            .provide(&configuration_registry, &telemetry)
             .unwrap();
         assert!(providers.meter_provider.is_none());
     }

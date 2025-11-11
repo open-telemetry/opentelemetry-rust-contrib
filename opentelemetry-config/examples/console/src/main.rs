@@ -5,8 +5,8 @@
 //! It is helpful to implement and test custom exporters.
 
 use opentelemetry_config::{
-    configurators::TelemetryConfigurator, model::metrics::reader::PeriodicExporterConsole,
-    ConfiguratorManager, MetricsReaderPeriodicExporterConfigurator,
+    model::metrics::reader::PeriodicExporterConsole, providers::TelemetryProvider,
+    ConfigurationProvidersRegistry, MetricsReaderPeriodicExporterProvider,
 };
 use opentelemetry_sdk::metrics::Temporality;
 use opentelemetry_sdk::{
@@ -32,43 +32,47 @@ pub fn main() -> Result<(), Box<dyn std::error::Error>> {
     }
     let config_file = &args[2];
 
-    // Setup configurator manager with console exporter configurator
-    let configurator = Box::new(MockPeriodicExporterConfigurator::new());
-    let mut configurator_manager = ConfiguratorManager::new();
+    // Setup configuration registry with console exporter provider.
+    let provider = Box::new(MockPeriodicExporterProvider::new());
+    let mut registry = ConfigurationProvidersRegistry::new();
 
-    // Register the console exporter configurator for the specific exporter type.
-    configurator_manager
+    // Register the console exporter provider for the specific exporter type.
+    registry
         .metrics_mut()
-        .register_periodic_exporter_configurator::<PeriodicExporterConsole>(configurator);
+        .register_periodic_exporter_provider::<PeriodicExporterConsole>(provider);
 
-    let telemetry_configurator = TelemetryConfigurator::new();
-    let providers = telemetry_configurator
-        .configure_from_yaml_file(&configurator_manager, config_file)
+    let telemetry_provider = TelemetryProvider::new();
+    let providers = telemetry_provider
+        .provide_from_yaml_file(&registry, config_file)
         .unwrap();
-    assert!(providers.meter_provider().is_some());
-    println!("Metrics configured with Console Exporter successfully.");
 
-    println!(
-        "Meter provider configured: {}",
-        providers.meter_provider().is_some()
-    );
-    println!(
-        "Logs provider configured: {}",
-        providers.logs_provider().is_some()
-    );
-    println!(
-        "Traces provider configured: {}",
-        providers.traces_provider().is_some()
-    );
+    if let Some(meter_provider) = providers.meter_provider() {
+        println!("Meter provider configured successfully. Shutting it down...");
+        meter_provider.shutdown()?;
+    } else {
+        println!("No Meter provider configured.");
+    }
 
-    println!("Shutting down telemetry providers...");
-    providers.shutdown()?;
+    if let Some(logs_provider) = providers.logs_provider() {
+        println!("Logs provider configured successfully. Shutting it down...");
+        logs_provider.shutdown()?;
+    } else {
+        println!("No Logs provider configured.");
+    }
+
+    if let Some(traces_provider) = providers.traces_provider() {
+        println!("Traces provider configured successfully. Shutting it down...");
+        traces_provider.shutdown()?;
+    } else {
+        println!("No Traces provider configured.");
+    }
+
     Ok(())
 }
 
-pub struct MockPeriodicExporterConfigurator {}
+pub struct MockPeriodicExporterProvider {}
 
-impl MockPeriodicExporterConfigurator {
+impl MockPeriodicExporterProvider {
     fn new() -> Self {
         Self {}
     }
@@ -127,8 +131,8 @@ impl PushMetricExporter for MockConsoleExporter {
     }
 }
 
-impl MetricsReaderPeriodicExporterConfigurator for MockPeriodicExporterConfigurator {
-    fn configure(
+impl MetricsReaderPeriodicExporterProvider for MockPeriodicExporterProvider {
+    fn provide(
         &self,
         mut meter_provider_builder: MeterProviderBuilder,
         config: &dyn std::any::Any,

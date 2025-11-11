@@ -3,8 +3,8 @@
 //! This example demonstrates how to configure OpenTelemetry Metrics
 //! using the OpenTelemetry Config crate with a Console Exporter.
 
-use opentelemetry_config::{configurators::TelemetryConfigurator, ConfiguratorManager};
-use opentelemetry_config_stdout::ConsolePeriodicExporterConfigurator;
+use opentelemetry_config::{providers::TelemetryProvider, ConfigurationProvidersRegistry};
+use opentelemetry_config_stdout::ConsolePeriodicExporterProvider;
 
 use std::env;
 
@@ -23,30 +23,34 @@ pub fn main() -> Result<(), Box<dyn std::error::Error>> {
     }
     let config_file = &args[2];
 
-    // Setup configurator manager with console exporter configurator
-    let mut configurator_manager = ConfiguratorManager::new();
-    ConsolePeriodicExporterConfigurator::register_into(&mut configurator_manager);
+    // Setup configuration registry with console exporter provider.
+    let mut configuration_providers_registry = ConfigurationProvidersRegistry::new();
+    ConsolePeriodicExporterProvider::register_into(&mut configuration_providers_registry);
 
-    let telemetry_configurator = TelemetryConfigurator::new();
-    let providers = telemetry_configurator
-        .configure_from_yaml_file(&configurator_manager, config_file)?;
+    let telemetry_provider = TelemetryProvider::new();
+    let providers = telemetry_provider
+        .provide_from_yaml_file(&configuration_providers_registry, config_file)?;
 
-    println!("Metrics configured with Console Exporter successfully.");
+    if let Some(meter_provider) = providers.meter_provider() {
+        println!("Meter provider is configured. Shutting it down...");
+        meter_provider.shutdown()?;
+    } else {
+        println!("No Meter Provider configured.");
+    }
 
-    println!(
-        "Meter provider configured: {}",
-        providers.meter_provider().is_some()
-    );
-    println!(
-        "Logs provider configured: {}",
-        providers.logs_provider().is_some()
-    );
-    println!(
-        "Traces provider configured: {}",
-        providers.traces_provider().is_some()
-    );
+    if let Some(logs_provider) = providers.logs_provider() {
+        println!("Logs provider is configured. Shutting it down...");
+        logs_provider.shutdown()?;
+    } else {
+        println!("No Logs Provider configured.");
+    }
 
-    println!("Shutting down telemetry providers...");
-    providers.shutdown()?;
+    if let Some(traces_provider) = providers.traces_provider() {
+        println!("Traces provider is configured. Shutting it down...");
+        traces_provider.shutdown()?;
+    } else {
+        println!("No Traces Provider configured.");
+    }
+
     Ok(())
 }

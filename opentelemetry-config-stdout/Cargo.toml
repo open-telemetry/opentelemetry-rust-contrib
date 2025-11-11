@@ -10,3 +10,6 @@ rust-version = "1.75.0"
 opentelemetry-config = { path = "../opentelemetry-config" }
 opentelemetry_sdk = { version = "0.31.0" }
 opentelemetry-stdout = { version = "0.31.0" }
+
+[lints]
+workspace = true

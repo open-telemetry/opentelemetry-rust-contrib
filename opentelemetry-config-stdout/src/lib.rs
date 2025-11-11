@@ -1,35 +1,37 @@
-//! # OpenTelemetry Dynamic Configurator module for Stdout (Console) exporter
+//! # OpenTelemetry declarative configuration module for Stdout (Console) exporter
 //!
-//! This module provides a configurator for OpenTelemetry Metrics
+//! This module implements a provider for OpenTelemetry Metrics
 //! that enables exporting metrics to the console (stdout) using
 //! the OpenTelemetry Config crate.
 
 use opentelemetry_config::{
-    model::metrics::reader::PeriodicExporterConsole, MetricsReaderPeriodicExporterConfigurator,
+    model::metrics::reader::PeriodicExporterConsole, MetricsReaderPeriodicExporterProvider,
 };
 use opentelemetry_sdk::metrics::MeterProviderBuilder;
 
 #[derive(Clone)]
-pub struct ConsolePeriodicExporterConfigurator {}
+pub struct ConsolePeriodicExporterProvider {}
 
-impl ConsolePeriodicExporterConfigurator {
+impl ConsolePeriodicExporterProvider {
     pub fn new() -> Self {
         Self {}
     }
 
-    pub fn register_into(configurators_manager: &mut opentelemetry_config::ConfiguratorManager) {
-        let configurator = ConsolePeriodicExporterConfigurator::new();
-        configurators_manager
+    pub fn register_into(
+        configuration_registry: &mut opentelemetry_config::ConfigurationProvidersRegistry,
+    ) {
+        let provider = ConsolePeriodicExporterProvider::new();
+        configuration_registry
             .metrics_mut()
-            .register_periodic_exporter_configurator::<PeriodicExporterConsole>(Box::new(
-                configurator.clone(),
+            .register_periodic_exporter_provider::<PeriodicExporterConsole>(Box::new(
+                provider.clone(),
             ));
-        // TODO: Add logs and traces configurator registration.
+        // TODO: Add logs and traces providers registration.
     }
 }
 
-impl MetricsReaderPeriodicExporterConfigurator for ConsolePeriodicExporterConfigurator {
-    fn configure(
+impl MetricsReaderPeriodicExporterProvider for ConsolePeriodicExporterProvider {
+    fn provide(
         &self,
         mut meter_provider_builder: MeterProviderBuilder,
         config: &dyn std::any::Any,
@@ -63,7 +65,7 @@ impl MetricsReaderPeriodicExporterConfigurator for ConsolePeriodicExporterConfig
     }
 }
 
-impl Default for ConsolePeriodicExporterConfigurator {
+impl Default for ConsolePeriodicExporterProvider {
     fn default() -> Self {
         Self::new()
     }
@@ -74,31 +76,32 @@ mod tests {
     use super::*;
 
     #[test]
-    fn test_console_configurator_registration() {
+    fn test_console_provider_registration() {
         // Arrange
-        let mut configurator_manager = opentelemetry_config::ConfiguratorManager::new();
+        let mut configuration_registry =
+            opentelemetry_config::ConfigurationProvidersRegistry::new();
 
         // Act
-        ConsolePeriodicExporterConfigurator::register_into(&mut configurator_manager);
+        ConsolePeriodicExporterProvider::register_into(&mut configuration_registry);
 
-        let configurators_option = configurator_manager
+        let provider_option = configuration_registry
             .metrics()
             .readers_periodic_exporter::<PeriodicExporterConsole>();
 
         // Assert
-        assert!(configurators_option.is_some());
+        assert!(provider_option.is_some());
     }
 
     #[test]
-    fn test_console_configurator_configure_temporality_minimal() {
+    fn test_console_provider_configure_temporality_minimal() {
         // Arrange
-        let configurator = ConsolePeriodicExporterConfigurator::new();
+        let provider = ConsolePeriodicExporterProvider::new();
         let meter_provider_builder = opentelemetry_sdk::metrics::SdkMeterProvider::builder();
 
         let config = PeriodicExporterConsole { temporality: None };
 
         // Act
-        let configured_builder = configurator.configure(meter_provider_builder, &config);
+        let configured_builder = provider.provide(meter_provider_builder, &config);
 
         // Assert
         // Since the MeterProviderBuilder does not expose its internal state,
@@ -110,9 +113,9 @@ mod tests {
     }
 
     #[test]
-    fn test_console_configurator_configure_temporality_delta() {
+    fn test_console_provider_configure_temporality_delta() {
         // Arrange
-        let configurator = ConsolePeriodicExporterConfigurator::new();
+        let provider = ConsolePeriodicExporterProvider::new();
         let meter_provider_builder = opentelemetry_sdk::metrics::SdkMeterProvider::builder();
 
         let config = PeriodicExporterConsole {
@@ -120,7 +123,7 @@ mod tests {
         };
 
         // Act
-        let configured_builder = configurator.configure(meter_provider_builder, &config);
+        let configured_builder = provider.provide(meter_provider_builder, &config);
 
         // Assert
         // Since the MeterProviderBuilder does not expose its internal state,
@@ -132,9 +135,9 @@ mod tests {
     }
 
     #[test]
-    fn test_console_configurator_configure_temporality_cumulative() {
+    fn test_console_provider_configure_temporality_cumulative() {
         // Arrange
-        let configurator = ConsolePeriodicExporterConfigurator::new();
+        let provider = ConsolePeriodicExporterProvider::new();
         let meter_provider_builder = opentelemetry_sdk::metrics::SdkMeterProvider::builder();
 
         let config = PeriodicExporterConsole {
@@ -144,7 +147,7 @@ mod tests {
         };
 
         // Act
-        let configured_builder = configurator.configure(meter_provider_builder, &config);
+        let configured_builder = provider.provide(meter_provider_builder, &config);
 
         // Assert
         // Since the MeterProviderBuilder does not expose its internal state,

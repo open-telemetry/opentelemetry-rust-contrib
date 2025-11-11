@@ -23,3 +23,6 @@ opentelemetry = { version = "0.31.0" }
 opentelemetry_sdk = { version = "0.31.0", features = ["experimental_metrics_custom_reader"] }
 serde = { version = "1.0", features = ["derive"] }
 serde_yaml = { version = "0.9.34" }
+
+[lints]
+workspace = true
