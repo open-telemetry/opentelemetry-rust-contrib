@@ -10,7 +10,6 @@ use std::env;
 use std::path::PathBuf;
 use std::thread;
 use std::time::Duration;
-use tracing_subscriber;
 
 /*
 export GENEVA_ENDPOINT="https://abc.azurewebsites.net"
