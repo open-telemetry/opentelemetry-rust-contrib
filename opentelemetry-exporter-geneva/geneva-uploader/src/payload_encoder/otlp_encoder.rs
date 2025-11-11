@@ -874,6 +874,18 @@ mod tests {
     use super::*;
     use opentelemetry_proto::tonic::common::v1::{AnyValue, KeyValue};
 
+    fn make_metadata(namespace: &str) -> MetadataFields {
+        MetadataFields::new(
+            "TestEnv".to_string(),
+            "Ver1v0".to_string(),
+            "TestTenant".to_string(),
+            "TestRole".to_string(),
+            "TestRoleInstance".to_string(),
+            namespace.to_string(),
+            "Ver1v0".to_string(),
+        )
+    }
+
     #[test]
     fn test_encoding() {
         let encoder = OtlpEncoder::new();
@@ -901,8 +913,8 @@ mod tests {
             }),
         });
 
-        let metadata = "namespace=testNamespace/eventVersion=Ver1v0";
-        let result = encoder.encode_log_batch([log].iter(), metadata).unwrap();
+        let metadata = make_metadata("testNamespace");
+        let result = encoder.encode_log_batch([log].iter(), &metadata).unwrap();
 
         assert!(!result.is_empty());
     }
@@ -946,11 +958,11 @@ mod tests {
             }),
         });
 
-        let metadata = "namespace=test";
+        let metadata = make_metadata("test");
 
         // Encode multiple log records with different schema structures but same event_name
         let result = encoder
-            .encode_log_batch([log1, log2, log3].iter(), metadata)
+            .encode_log_batch([log1, log2, log3].iter(), &metadata)
             .unwrap();
 
         // Should create one batch (same event_name = "user_action")
@@ -1000,7 +1012,8 @@ mod tests {
             ..Default::default()
         };
 
-        let result = encoder.encode_log_batch([log].iter(), "test").unwrap();
+        let metadata = make_metadata("test");
+        let result = encoder.encode_log_batch([log].iter(), &metadata).unwrap();
 
         assert_eq!(result.len(), 1);
         assert_eq!(result[0].event_name, "test_event");
@@ -1041,7 +1054,7 @@ mod tests {
         });
 
         let result = encoder
-            .encode_log_batch([log1, log2, log3].iter(), "test")
+            .encode_log_batch([log1, log2, log3].iter(), &make_metadata("test"))
             .unwrap();
 
         // All should be in one batch with same event_name
@@ -1068,8 +1081,9 @@ mod tests {
             ..Default::default()
         };
 
+        let metadata = make_metadata("test");
         let result = encoder
-            .encode_log_batch([log1, log2].iter(), "test")
+            .encode_log_batch([log1, log2].iter(), &metadata)
             .unwrap();
 
         // Should create 2 separate batches
@@ -1093,7 +1107,8 @@ mod tests {
             ..Default::default()
         };
 
-        let result = encoder.encode_log_batch([log].iter(), "test").unwrap();
+        let metadata = make_metadata("test");
+        let result = encoder.encode_log_batch([log].iter(), &metadata).unwrap();
 
         assert_eq!(result.len(), 1);
         assert_eq!(result[0].event_name, "Log"); // Should default to "Log"
@@ -1139,8 +1154,9 @@ mod tests {
             }),
         });
 
+        let metadata = make_metadata("test");
         let result = encoder
-            .encode_log_batch([log1, log2, log3, log4].iter(), "test")
+            .encode_log_batch([log1, log2, log3, log4].iter(), &metadata)
             .unwrap();
 
         // Should create 3 batches: "user_action", "system_alert", "Log"
@@ -1201,8 +1217,8 @@ mod tests {
             }),
         });
 
-        let metadata = "namespace=testNamespace/eventVersion=Ver1v0";
-        let result = encoder.encode_span_batch([span].iter(), metadata).unwrap();
+        let metadata = make_metadata("testNamespace");
+        let result = encoder.encode_span_batch([span].iter(), &metadata).unwrap();
 
         assert_eq!(result.len(), 1);
         assert_eq!(result[0].event_name, "Span"); // All spans use "Span" event name for routing
@@ -1238,7 +1254,8 @@ mod tests {
             ..Default::default()
         });
 
-        let result = encoder.encode_span_batch([span].iter(), "test").unwrap();
+        let metadata = make_metadata("test");
+        let result = encoder.encode_span_batch([span].iter(), &metadata).unwrap();
 
         assert_eq!(result.len(), 1);
         assert_eq!(result[0].event_name, "Span"); // All spans use "Span" event name for routing
@@ -1266,7 +1283,8 @@ mod tests {
             code: StatusCode::Error as i32,
         });
 
-        let result = encoder.encode_span_batch([span].iter(), "test").unwrap();
+        let metadata = make_metadata("test");
+        let result = encoder.encode_span_batch([span].iter(), &metadata).unwrap();
 
         assert_eq!(result.len(), 1);
         assert_eq!(result[0].event_name, "Span"); // All spans use "Span" event name for routing
@@ -1316,8 +1334,9 @@ mod tests {
             "Span with non-empty name should include 'name' field in schema"
         );
 
+        let metadata = make_metadata("test");
         let result = encoder
-            .encode_span_batch([span1, span2].iter(), "test")
+            .encode_span_batch([span1, span2].iter(), &metadata)
             .unwrap();
 
         // Should create one batch with same event_name
@@ -1411,9 +1430,8 @@ mod tests {
             },
         ];
 
-        let result = encoder
-            .encode_log_batch(logs.iter(), "namespace=test")
-            .unwrap();
+        let metadata = make_metadata("test");
+        let result = encoder.encode_log_batch(logs.iter(), &metadata).unwrap();
 
         assert_eq!(result.len(), 1);
         assert_eq!(result[0].row_count, 3);
@@ -1432,9 +1450,8 @@ mod tests {
             },
         ];
 
-        let span_result = encoder
-            .encode_span_batch(spans.iter(), "namespace=test")
-            .unwrap();
+        let metadata = make_metadata("test");
+        let span_result = encoder.encode_span_batch(spans.iter(), &metadata).unwrap();
 
         assert_eq!(span_result.len(), 1);
         assert_eq!(span_result[0].row_count, 2);
