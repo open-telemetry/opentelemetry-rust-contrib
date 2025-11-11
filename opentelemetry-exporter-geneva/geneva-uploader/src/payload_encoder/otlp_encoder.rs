@@ -24,7 +24,7 @@ const FIELD_SEVERITY_NUMBER: &str = "SeverityNumber";
 const FIELD_SEVERITY_TEXT: &str = "SeverityText";
 const FIELD_BODY: &str = "body";
 
-// Tenant/Role/RoleInstance fields - match C# Bond schema convention
+// Tenant/Role/RoleInstance fields
 const FIELD_TENANT: &str = "Tenant";
 const FIELD_ROLE: &str = "Role";
 const FIELD_ROLE_INSTANCE: &str = "RoleInstance";
@@ -48,15 +48,42 @@ pub struct MetadataFields {
     pub role_instance: String,
     pub namespace: String,
     pub event_version: String,
+    /// Pre-formatted metadata string for CentralBlob (computed once at initialization)
+    metadata_string: String,
 }
 
 impl MetadataFields {
-    /// Format metadata string for CentralBlob (backward compatible format)
-    pub(crate) fn format_metadata_string(&self) -> String {
-        format!(
+    /// Create MetadataFields with pre-formatted metadata string (avoids hot-path allocation)
+    pub fn new(
+        env_name: String,
+        env_ver: String,
+        tenant: String,
+        role: String,
+        role_instance: String,
+        namespace: String,
+        event_version: String,
+    ) -> Self {
+        let metadata_string = format!(
             "namespace={}/eventVersion={}/tenant={}/role={}/roleinstance={}",
-            self.namespace, self.event_version, self.tenant, self.role, self.role_instance
-        )
+            namespace, event_version, tenant, role, role_instance
+        );
+
+        Self {
+            env_name,
+            env_ver,
+            tenant,
+            role,
+            role_instance,
+            namespace,
+            event_version,
+            metadata_string,
+        }
+    }
+
+    /// Get pre-formatted metadata string (zero allocation in hot path)
+    #[inline]
+    pub(crate) fn metadata_string(&self) -> &str {
+        &self.metadata_string
     }
 }
 
@@ -201,7 +228,7 @@ impl OtlpEncoder {
             let blob = CentralBlob {
                 version: 1,
                 format: 2,
-                metadata: metadata_fields.format_metadata_string(),
+                metadata: metadata_fields.metadata_string().to_owned(),
                 schemas: batch_data.schemas,
                 events: batch_data.events,
             };
@@ -351,7 +378,7 @@ impl OtlpEncoder {
         let blob = CentralBlob {
             version: 1,
             format: 2,
-            metadata: metadata_fields.format_metadata_string(),
+            metadata: metadata_fields.metadata_string().to_owned(),
             schemas,
             events,
         };

@@ -10,6 +10,7 @@ use std::env;
 use std::path::PathBuf;
 use std::thread;
 use std::time::Duration;
+use tracing_subscriber;
 
 /*
 export GENEVA_ENDPOINT="https://abc.azurewebsites.net"
@@ -24,6 +25,12 @@ export GENEVA_CONFIG_MAJOR_VERSION=2
 
 #[tokio::main]
 async fn main() {
+    // Initialize tracing subscriber to see debug logs
+    // This respects the RUST_LOG environment variable
+    tracing_subscriber::fmt()
+        .with_env_filter(tracing_subscriber::EnvFilter::from_default_env())
+        .init();
+
     let endpoint = env::var("GENEVA_ENDPOINT").expect("GENEVA_ENDPOINT is required");
     let environment = env::var("GENEVA_ENVIRONMENT").expect("GENEVA_ENVIRONMENT is required");
     let account = env::var("GENEVA_ACCOUNT").expect("GENEVA_ACCOUNT is required");

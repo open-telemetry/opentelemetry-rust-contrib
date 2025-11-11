@@ -3,6 +3,7 @@
 use crate::config_service::client::{AuthMethod, GenevaConfigClient, GenevaConfigClientConfig};
 // ManagedIdentitySelector removed; no re-export needed.
 use crate::ingestion_service::uploader::{GenevaUploader, GenevaUploaderConfig};
+use crate::payload_encoder::otlp_encoder::MetadataFields;
 use crate::payload_encoder::otlp_encoder::OtlpEncoder;
 use opentelemetry_proto::tonic::logs::v1::ResourceLogs;
 use opentelemetry_proto::tonic::trace::v1::ResourceSpans;
@@ -41,7 +42,7 @@ pub struct GenevaClientConfig {
 pub struct GenevaClient {
     uploader: Arc<GenevaUploader>,
     encoder: OtlpEncoder,
-    metadata_fields: crate::payload_encoder::otlp_encoder::MetadataFields,
+    metadata_fields: MetadataFields,
 }
 
 impl GenevaClient {
@@ -106,22 +107,21 @@ impl GenevaClient {
         let config_version = format!("Ver{}v0", cfg.config_major_version);
 
         // Create metadata fields that will appear as Bond schema fields in Geneva
-        // Move values into metadata_fields to avoid unnecessary clones
-        let metadata_fields = crate::payload_encoder::otlp_encoder::MetadataFields {
-            env_name: cfg.environment,
-            env_ver: config_version.clone(), // Clone once for both env_ver and event_version
-            tenant: cfg.tenant,
-            role: cfg.role_name,
-            role_instance: cfg.role_instance,
-            namespace: cfg.namespace,
-            event_version: config_version, // Move config_version (last use)
-        };
+        let metadata_fields = MetadataFields::new(
+            cfg.environment,
+            config_version.clone(),
+            cfg.tenant,
+            cfg.role_name,
+            cfg.role_instance,
+            cfg.namespace,
+            config_version,
+        );
 
         let uploader_config = GenevaUploaderConfig {
-            namespace: metadata_fields.namespace.clone(), // Clone from metadata_fields
+            namespace: metadata_fields.namespace.clone(),
             source_identity,
-            environment: metadata_fields.env_name.clone(), // Clone from metadata_fields
-            config_version: metadata_fields.event_version.clone(), // Clone from metadata_fields
+            environment: metadata_fields.env_name.clone(),
+            config_version: metadata_fields.event_version.clone(),
         };
 
         let uploader =
