@@ -24,6 +24,11 @@ const FIELD_SEVERITY_NUMBER: &str = "SeverityNumber";
 const FIELD_SEVERITY_TEXT: &str = "SeverityText";
 const FIELD_BODY: &str = "body";
 
+// Tenant/Role/RoleInstance fields - match C# Bond schema convention
+const FIELD_TENANT: &str = "Tenant";
+const FIELD_ROLE: &str = "Role";
+const FIELD_ROLE_INSTANCE: &str = "RoleInstance";
+
 // Span-specific field constants
 const FIELD_KIND: &str = "kind";
 const FIELD_START_TIME: &str = "startTime";
@@ -32,6 +37,28 @@ const FIELD_TRACE_STATE: &str = "traceState";
 const FIELD_PARENT_ID: &str = "parentId";
 const FIELD_LINKS: &str = "links";
 const FIELD_STATUS_MESSAGE: &str = "statusMessage";
+
+/// Metadata fields that should appear as Bond schema fields (queryable in Geneva)
+#[derive(Clone, Debug)]
+pub struct MetadataFields {
+    pub env_name: String,
+    pub env_ver: String,
+    pub tenant: String,
+    pub role: String,
+    pub role_instance: String,
+    pub namespace: String,
+    pub event_version: String,
+}
+
+impl MetadataFields {
+    /// Format metadata string for CentralBlob (backward compatible format)
+    pub(crate) fn format_metadata_string(&self) -> String {
+        format!(
+            "namespace={}/eventVersion={}/tenant={}/role={}/roleinstance={}",
+            self.namespace, self.event_version, self.tenant, self.role, self.role_instance
+        )
+    }
+}
 
 /// Encoder to write OTLP payload in bond form.
 #[derive(Clone)]
@@ -48,7 +75,7 @@ impl OtlpEncoder {
     pub(crate) fn encode_log_batch<'a, I>(
         &self,
         logs: I,
-        metadata: &str,
+        metadata_fields: &MetadataFields,
     ) -> Result<Vec<EncodedBatch>, String>
     where
         I: IntoIterator<Item = &'a opentelemetry_proto::tonic::logs::v1::LogRecord>,
@@ -149,7 +176,7 @@ impl OtlpEncoder {
             };
 
             // 4. Encode row
-            let row_buffer = self.write_row_data(log_record, &field_info);
+            let row_buffer = self.write_row_data(log_record, &field_info, metadata_fields);
             let level = log_record.severity_number as u8;
 
             // 5. Create CentralEventEntry directly (optimization: no intermediate EncodedRow)
@@ -174,7 +201,7 @@ impl OtlpEncoder {
             let blob = CentralBlob {
                 version: 1,
                 format: 2,
-                metadata: metadata.to_string(),
+                metadata: metadata_fields.format_metadata_string(),
                 schemas: batch_data.schemas,
                 events: batch_data.events,
             };
@@ -218,7 +245,7 @@ impl OtlpEncoder {
     pub(crate) fn encode_span_batch<'a, I>(
         &self,
         spans: I,
-        metadata: &str,
+        metadata_fields: &MetadataFields,
     ) -> Result<Vec<EncodedBatch>, String>
     where
         I: IntoIterator<Item = &'a Span>,
@@ -266,7 +293,7 @@ impl OtlpEncoder {
             };
 
             // 4. Encode row
-            let row_buffer = self.write_span_row_data(span, &field_info);
+            let row_buffer = self.write_span_row_data(span, &field_info, metadata_fields);
             let level = 5; // Default level for spans (INFO equivalent)
 
             // 5. Create CentralEventEntry
@@ -324,7 +351,7 @@ impl OtlpEncoder {
         let blob = CentralBlob {
             version: 1,
             format: 2,
-            metadata: metadata.to_string(),
+            metadata: metadata_fields.format_metadata_string(),
             schemas,
             events,
         };
@@ -362,7 +389,7 @@ impl OtlpEncoder {
     /// Determine fields for a log record
     fn determine_fields(log: &LogRecord, _event_name: &str) -> Vec<FieldDef> {
         // Pre-allocate with estimated capacity to avoid reallocations
-        let estimated_capacity = 7 + 4 + log.attributes.len();
+        let estimated_capacity = 10 + 4 + log.attributes.len(); // 7 base fields + 3 tenant/role fields + 4 conditional + attributes
         let mut fields = Vec::with_capacity(estimated_capacity);
 
         // Part A - Always present fields
@@ -370,6 +397,9 @@ impl OtlpEncoder {
         fields.push((FIELD_ENV_VER.into(), BondDataType::BT_STRING));
         fields.push((FIELD_TIMESTAMP.into(), BondDataType::BT_STRING));
         fields.push((FIELD_ENV_TIME.into(), BondDataType::BT_STRING));
+        fields.push((FIELD_TENANT.into(), BondDataType::BT_STRING));
+        fields.push((FIELD_ROLE.into(), BondDataType::BT_STRING));
+        fields.push((FIELD_ROLE_INSTANCE.into(), BondDataType::BT_STRING));
 
         // Part A extension - Conditional fields
         if !log.trace_id.is_empty() {
@@ -427,7 +457,7 @@ impl OtlpEncoder {
     /// Determine span fields
     fn determine_span_fields(span: &Span, _event_name: &str) -> Vec<FieldDef> {
         // Pre-allocate with estimated capacity to avoid reallocations
-        let estimated_capacity = 15 + span.attributes.len(); // 7 always + 8 max conditional + attributes
+        let estimated_capacity = 18 + span.attributes.len(); // 7 base + 3 tenant/role + 3 span-specific + 5 max conditional + attributes
         let mut fields = Vec::with_capacity(estimated_capacity);
 
         // Part A - Always present fields for spans
@@ -435,6 +465,9 @@ impl OtlpEncoder {
         fields.push((FIELD_ENV_VER.into(), BondDataType::BT_STRING));
         fields.push((FIELD_TIMESTAMP.into(), BondDataType::BT_STRING));
         fields.push((FIELD_ENV_TIME.into(), BondDataType::BT_STRING));
+        fields.push((FIELD_TENANT.into(), BondDataType::BT_STRING));
+        fields.push((FIELD_ROLE.into(), BondDataType::BT_STRING));
+        fields.push((FIELD_ROLE_INSTANCE.into(), BondDataType::BT_STRING));
 
         // Span-specific required fields
         fields.push((FIELD_KIND.into(), BondDataType::BT_INT32));
@@ -531,7 +564,12 @@ impl OtlpEncoder {
 
     /// Write span row data directly from Span
     // TODO - code duplication between write_span_row_data() and write_row_data() - consider extracting common field handling
-    fn write_span_row_data(&self, span: &Span, fields: &[FieldDef]) -> Vec<u8> {
+    fn write_span_row_data(
+        &self,
+        span: &Span,
+        fields: &[FieldDef],
+        metadata_fields: &MetadataFields,
+    ) -> Vec<u8> {
         let mut buffer = Vec::with_capacity(fields.len() * 50);
 
         // Pre-calculate timestamp (use start time as primary timestamp for both fields)
@@ -539,8 +577,13 @@ impl OtlpEncoder {
 
         for field in fields {
             match field.name.as_ref() {
-                FIELD_ENV_NAME => BondWriter::write_string(&mut buffer, "TestEnv"), // TODO - placeholder
-                FIELD_ENV_VER => BondWriter::write_string(&mut buffer, "4.0"), // TODO - placeholder
+                FIELD_ENV_NAME => BondWriter::write_string(&mut buffer, &metadata_fields.env_name),
+                FIELD_ENV_VER => BondWriter::write_string(&mut buffer, &metadata_fields.env_ver),
+                FIELD_TENANT => BondWriter::write_string(&mut buffer, &metadata_fields.tenant),
+                FIELD_ROLE => BondWriter::write_string(&mut buffer, &metadata_fields.role),
+                FIELD_ROLE_INSTANCE => {
+                    BondWriter::write_string(&mut buffer, &metadata_fields.role_instance)
+                }
                 FIELD_TIMESTAMP | FIELD_ENV_TIME => {
                     BondWriter::write_string(&mut buffer, &formatted_timestamp);
                 }
@@ -616,7 +659,12 @@ impl OtlpEncoder {
     }
 
     /// Write row data directly from LogRecord
-    fn write_row_data(&self, log: &LogRecord, sorted_fields: &[FieldDef]) -> Vec<u8> {
+    fn write_row_data(
+        &self,
+        log: &LogRecord,
+        sorted_fields: &[FieldDef],
+        metadata_fields: &MetadataFields,
+    ) -> Vec<u8> {
         let mut buffer = Vec::with_capacity(sorted_fields.len() * 50); //TODO - estimate better
 
         // Pre-calculate timestamp to avoid duplicate computation for FIELD_TIMESTAMP and FIELD_ENV_TIME
@@ -631,8 +679,13 @@ impl OtlpEncoder {
 
         for field in sorted_fields {
             match field.name.as_ref() {
-                FIELD_ENV_NAME => BondWriter::write_string(&mut buffer, "TestEnv"), // TODO - placeholder for actual env name
-                FIELD_ENV_VER => BondWriter::write_string(&mut buffer, "4.0"), // TODO - placeholder for actual env version
+                FIELD_ENV_NAME => BondWriter::write_string(&mut buffer, &metadata_fields.env_name),
+                FIELD_ENV_VER => BondWriter::write_string(&mut buffer, &metadata_fields.env_ver),
+                FIELD_TENANT => BondWriter::write_string(&mut buffer, &metadata_fields.tenant),
+                FIELD_ROLE => BondWriter::write_string(&mut buffer, &metadata_fields.role),
+                FIELD_ROLE_INSTANCE => {
+                    BondWriter::write_string(&mut buffer, &metadata_fields.role_instance)
+                }
                 FIELD_TIMESTAMP | FIELD_ENV_TIME => {
                     BondWriter::write_string(&mut buffer, &formatted_timestamp);
                 }
