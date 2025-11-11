@@ -207,12 +207,28 @@ impl Display for ConfiguratorError {
 
 #[cfg(test)]
 mod tests {
+    use std::sync::atomic::AtomicI16;
+
     use super::*;
 
     #[test]
     fn test_register_periodic_exporter_configurator() {
         // Arrange
-        struct MockPeriodicExporterConfigurator {}
+        struct MockPeriodicExporterConfigurator {
+            call_count: AtomicI16,
+        }
+
+        impl MockPeriodicExporterConfigurator {
+            fn new() -> Self {
+                Self {
+                    call_count: AtomicI16::new(0),
+                }
+            }
+
+            pub fn get_call_count(&self) -> i16 {
+                self.call_count.load(std::sync::atomic::Ordering::SeqCst)
+            }
+        }
 
         impl MetricsReaderPeriodicExporterConfigurator for MockPeriodicExporterConfigurator {
             fn configure(
@@ -220,6 +236,8 @@ mod tests {
                 meter_provider_builder: MeterProviderBuilder,
                 _config: &dyn std::any::Any,
             ) -> MeterProviderBuilder {
+                self.call_count
+                    .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
                 meter_provider_builder
             }
 
@@ -228,7 +246,7 @@ mod tests {
             }
         }
 
-        let mock_configurator = Box::new(MockPeriodicExporterConfigurator {});
+        let mock_configurator = Box::new(MockPeriodicExporterConfigurator::new());
         let mut configurator_manager = ConfiguratorManager::new();
 
         // Act
@@ -242,5 +260,64 @@ mod tests {
             .metrics()
             .readers_periodic_exporters
             .contains_key(&type_name));
+
+        let configurator_option = configurator_manager
+            .metrics()
+            .readers_periodic_exporter::<PeriodicExporterConsole>();
+        if let Some(configurator) = configurator_option {
+            configurator.configure(
+                MeterProviderBuilder::default(),
+                &PeriodicExporterConsole { temporality: None },
+            );
+            let configurator_cast = configurator
+                .as_any()
+                .downcast_ref::<MockPeriodicExporterConfigurator>()
+                .unwrap();
+            assert_eq!(configurator_cast.get_call_count(), 1);
+        } else {
+            panic!("Configurator not found");
+        }
+    }
+
+    #[test]
+    fn test_configurator_manager_default() {
+        let configurator_manager = ConfiguratorManager::default();
+        assert!(configurator_manager
+            .metrics()
+            .readers_periodic_exporters
+            .is_empty());
+    }
+
+    #[test]
+    fn test_metrics_configurator_manager_default() {
+        let metrics_configurator_manager = MetricsConfiguratorManager::default();
+        assert!(metrics_configurator_manager
+            .readers_periodic_exporters
+            .is_empty());
+    }
+
+    #[test]
+    fn test_telemetry_providers_default() {
+        let telemetry_providers = TelemetryProviders::default();
+        assert!(telemetry_providers.meter_provider.is_none());
+        assert!(telemetry_providers.traces_provider.is_none());
+        assert!(telemetry_providers.logs_provider.is_none());
+    }
+
+    #[test]
+    fn test_telemetry_providers_with_methods() {
+        let meter_provider = SdkMeterProvider::builder().build();
+        let traces_provider = SdkTracerProvider::builder().build();
+        let logs_provider = SdkLoggerProvider::builder().build();
+
+        let telemetry_providers = TelemetryProviders {
+            meter_provider: Some(meter_provider),
+            traces_provider: Some(traces_provider),
+            logs_provider: Some(logs_provider),
+        };
+
+        assert!(telemetry_providers.meter_provider().is_some());
+        assert!(telemetry_providers.traces_provider().is_some());
+        assert!(telemetry_providers.logs_provider().is_some());
     }
 }

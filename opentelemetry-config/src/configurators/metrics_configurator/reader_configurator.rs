@@ -268,7 +268,7 @@ mod tests {
 
         _ = configurator
             .configure(
-                &metrics_configurator_manager,
+                metrics_configurator_manager,
                 meter_provider_builder,
                 &config,
             )

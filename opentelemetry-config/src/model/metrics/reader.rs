@@ -107,3 +107,65 @@ pub enum Protocol {
     #[serde(rename = "http/json")]
     HttpJson,
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_deserialize_periodic_reader() {
+        let yaml_data = r#"
+        periodic:
+          exporter:
+            console:
+              temporality: cumulative
+        "#;
+        let reader: Reader = serde_yaml::from_str(yaml_data).unwrap();
+        match reader {
+            Reader::Periodic(periodic) => {
+                assert!(periodic.exporter.is_some());
+                let exporter = periodic.exporter.unwrap();
+                assert!(exporter.console.is_some());
+                let console = exporter.console.unwrap();
+                match console.temporality {
+                    Some(Temporality::Cumulative) => {}
+                    _ => panic!("Expected Cumulative temporality"),
+                }
+            }
+            _ => panic!("Expected Periodic reader"),
+        }
+    }
+
+    #[test]
+    fn test_deserialize_pull_reader() {
+        let yaml_data = r#"
+        pull:
+          exporter:
+            prometheus:
+              host: "localhost"
+              port: 9090
+        "#;
+        let reader: Reader = serde_yaml::from_str(yaml_data).unwrap();
+        match reader {
+            Reader::Pull(pull) => {
+                assert!(pull.exporter.is_some());
+                let exporter = pull.exporter.unwrap();
+                assert!(exporter.prometheus.is_some());
+                let prometheus = exporter.prometheus.unwrap();
+                assert_eq!(prometheus.host, "localhost");
+                assert_eq!(prometheus.port, 9090);
+            }
+            _ => panic!("Expected Pull reader"),
+        }
+    }
+
+    #[test]
+    fn test_deserialize_invalid_reader() {
+        let yaml_data = r#"
+        unknown:
+          some_field: value
+        "#;
+        let result: Result<Reader, _> = serde_yaml::from_str(yaml_data);
+        assert!(result.is_err());
+    }
+}

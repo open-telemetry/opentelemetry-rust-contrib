@@ -10,5 +10,3 @@ rust-version = "1.75.0"
 
 [dependencies]
 opentelemetry-config = { path = "../../"}
-opentelemetry_sdk = { version = "0.31.0", features = ["experimental_metrics_custom_reader"] }
-opentelemetry-stdout = { version = "0.31.0" }

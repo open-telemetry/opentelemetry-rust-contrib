@@ -181,6 +181,7 @@ mod tests {
           service.name: "test-service"
           service.version: "1.0.0"
           replica.count: 3
+          cores: 4.5
           development: true
         "#;
 
@@ -207,5 +208,19 @@ mod tests {
             .downcast_ref::<MockMetricsReadersPeriodicExporterConsoleConfigurator>()
             .unwrap();
         assert_eq!(configurator.get_call_count(), 1);
+    }
+
+    #[test]
+    fn test_telemetry_configurator_default() {
+        let telemetry_configurator = TelemetryConfigurator::default();
+        let configurator_manager = ConfiguratorManager::default();
+        let telemetry = Telemetry {
+            resource: HashMap::new(),
+            metrics: None,
+        };
+        let providers = telemetry_configurator
+            .configure(&configurator_manager, &telemetry)
+            .unwrap();
+        assert!(providers.meter_provider.is_none());
     }
 }
