@@ -47,13 +47,11 @@ pub struct MetadataFields {
     pub role: String,
     pub role_instance: String,
     pub namespace: String,
-    pub event_version: String,
-    /// Pre-formatted metadata string for CentralBlob (computed once at initialization)
-    metadata_string: String,
+    pub event_version: String, // TODO - do we need both env_ver and event_version?
+    metadata_string: String,   // preformatted metadata string for central blob
 }
 
 impl MetadataFields {
-    /// Create MetadataFields with pre-formatted metadata string (avoids hot-path allocation)
     pub fn new(
         env_name: String,
         env_ver: String,
