@@ -3,6 +3,7 @@
 use crate::config_service::client::{AuthMethod, GenevaConfigClient, GenevaConfigClientConfig};
 // ManagedIdentitySelector removed; no re-export needed.
 use crate::ingestion_service::uploader::{GenevaUploader, GenevaUploaderConfig};
+use crate::payload_encoder::otlp_encoder::MetadataFields;
 use crate::payload_encoder::otlp_encoder::OtlpEncoder;
 use opentelemetry_proto::tonic::logs::v1::ResourceLogs;
 use opentelemetry_proto::tonic::trace::v1::ResourceSpans;
@@ -41,7 +42,7 @@ pub struct GenevaClientConfig {
 pub struct GenevaClient {
     uploader: Arc<GenevaUploader>,
     encoder: OtlpEncoder,
-    metadata: String,
+    metadata_fields: MetadataFields,
 }
 
 impl GenevaClient {
@@ -105,16 +106,22 @@ impl GenevaClient {
 
         let config_version = format!("Ver{}v0", cfg.config_major_version);
 
-        let metadata = format!(
-            "namespace={}/eventVersion={}/tenant={}/role={}/roleinstance={}",
-            cfg.namespace, config_version, cfg.tenant, cfg.role_name, cfg.role_instance,
+        // Create metadata fields that will appear as Bond schema fields in Geneva
+        let metadata_fields = MetadataFields::new(
+            cfg.environment,
+            config_version.clone(),
+            cfg.tenant,
+            cfg.role_name,
+            cfg.role_instance,
+            cfg.namespace,
+            config_version,
         );
 
         let uploader_config = GenevaUploaderConfig {
-            namespace: cfg.namespace.clone(),
+            namespace: metadata_fields.namespace.clone(),
             source_identity,
-            environment: cfg.environment,
-            config_version: config_version.clone(),
+            environment: metadata_fields.env_name.clone(),
+            config_version: metadata_fields.event_version.clone(),
         };
 
         let uploader =
@@ -137,7 +144,7 @@ impl GenevaClient {
         Ok(Self {
             uploader: Arc::new(uploader),
             encoder: OtlpEncoder::new(),
-            metadata,
+            metadata_fields,
         })
     }
 
@@ -159,7 +166,7 @@ impl GenevaClient {
             .flat_map(|scope_log| scope_log.log_records.iter());
 
         self.encoder
-            .encode_log_batch(log_iter, &self.metadata)
+            .encode_log_batch(log_iter, &self.metadata_fields)
             .map_err(|e| {
                 debug!(
                     name: "client.encode_and_compress_logs.error",
@@ -189,7 +196,7 @@ impl GenevaClient {
             .flat_map(|scope_span| scope_span.spans.iter());
 
         self.encoder
-            .encode_span_batch(span_iter, &self.metadata)
+            .encode_span_batch(span_iter, &self.metadata_fields)
             .map_err(|e| {
                 debug!(
                     name: "client.encode_and_compress_spans.error",

@@ -24,6 +24,11 @@ const FIELD_SEVERITY_NUMBER: &str = "SeverityNumber";
 const FIELD_SEVERITY_TEXT: &str = "SeverityText";
 const FIELD_BODY: &str = "body";
 
+// Tenant/Role/RoleInstance fields
+const FIELD_TENANT: &str = "Tenant";
+const FIELD_ROLE: &str = "Role";
+const FIELD_ROLE_INSTANCE: &str = "RoleInstance";
+
 // Span-specific field constants
 const FIELD_KIND: &str = "kind";
 const FIELD_START_TIME: &str = "startTime";
@@ -32,6 +37,53 @@ const FIELD_TRACE_STATE: &str = "traceState";
 const FIELD_PARENT_ID: &str = "parentId";
 const FIELD_LINKS: &str = "links";
 const FIELD_STATUS_MESSAGE: &str = "statusMessage";
+
+/// Metadata fields that should appear as Bond schema fields (queryable in Geneva)
+#[derive(Clone, Debug)]
+pub(crate) struct MetadataFields {
+    pub env_name: String,
+    pub env_ver: String,
+    pub tenant: String,
+    pub role: String,
+    pub role_instance: String,
+    pub namespace: String,
+    pub event_version: String, // TODO - do we need both env_ver and event_version?
+    metadata_string: String,   // preformatted metadata string for central blob
+}
+
+impl MetadataFields {
+    pub fn new(
+        env_name: String,
+        env_ver: String,
+        tenant: String,
+        role: String,
+        role_instance: String,
+        namespace: String,
+        event_version: String,
+    ) -> Self {
+        let metadata_string = format!(
+            "namespace={}/eventVersion={}/tenant={}/role={}/roleinstance={}",
+            namespace, event_version, tenant, role, role_instance
+        );
+
+        Self {
+            env_name,
+            env_ver,
+            tenant,
+            role,
+            role_instance,
+            namespace,
+            event_version,
+            metadata_string,
+        }
+    }
+
+    /// Get pre-formatted metadata string (zero allocation in hot path)
+    #[inline]
+    pub(crate) fn metadata_string(&self) -> &str {
+        &self.metadata_string
+    }
+}
 
 /// Encoder to write OTLP payload in bond form.
 #[derive(Clone)]
@@ -48,7 +100,7 @@ impl OtlpEncoder {
     pub(crate) fn encode_log_batch<'a, I>(
         &self,
         logs: I,
-        metadata: &str,
+        metadata_fields: &MetadataFields,
     ) -> Result<Vec<EncodedBatch>, String>
     where
         I: IntoIterator<Item = &'a opentelemetry_proto::tonic::logs::v1::LogRecord>,
@@ -149,7 +201,7 @@ impl OtlpEncoder {
             };
 
             // 4. Encode row
-            let row_buffer = self.write_row_data(log_record, &field_info);
+            let row_buffer = self.write_row_data(log_record, &field_info, metadata_fields);
             let level = log_record.severity_number as u8;
 
             // 5. Create CentralEventEntry directly (optimization: no intermediate EncodedRow)
@@ -174,7 +226,7 @@ impl OtlpEncoder {
             let blob = CentralBlob {
                 version: 1,
                 format: 2,
-                metadata: metadata.to_string(),
+                metadata: metadata_fields.metadata_string().to_owned(),
                 schemas: batch_data.schemas,
                 events: batch_data.events,
             };
@@ -218,7 +270,7 @@ impl OtlpEncoder {
     pub(crate) fn encode_span_batch<'a, I>(
         &self,
         spans: I,
-        metadata: &str,
+        metadata_fields: &MetadataFields,
     ) -> Result<Vec<EncodedBatch>, String>
     where
         I: IntoIterator<Item = &'a Span>,
@@ -266,7 +318,7 @@ impl OtlpEncoder {
             };
 
             // 4. Encode row
-            let row_buffer = self.write_span_row_data(span, &field_info);
+            let row_buffer = self.write_span_row_data(span, &field_info, metadata_fields);
             let level = 5; // Default level for spans (INFO equivalent)
 
             // 5. Create CentralEventEntry
@@ -324,7 +376,7 @@ impl OtlpEncoder {
         let blob = CentralBlob {
             version: 1,
             format: 2,
-            metadata: metadata.to_string(),
+            metadata: metadata_fields.metadata_string().to_owned(),
             schemas,
             events,
         };
@@ -362,7 +414,7 @@ impl OtlpEncoder {
     /// Determine fields for a log record
     fn determine_fields(log: &LogRecord, _event_name: &str) -> Vec<FieldDef> {
         // Pre-allocate with estimated capacity to avoid reallocations
-        let estimated_capacity = 7 + 4 + log.attributes.len();
+        let estimated_capacity = 10 + 4 + log.attributes.len(); // 7 base fields + 3 tenant/role fields + 4 conditional + attributes
         let mut fields = Vec::with_capacity(estimated_capacity);
 
         // Part A - Always present fields
@@ -370,6 +422,9 @@ impl OtlpEncoder {
         fields.push((FIELD_ENV_VER.into(), BondDataType::BT_STRING));
         fields.push((FIELD_TIMESTAMP.into(), BondDataType::BT_STRING));
         fields.push((FIELD_ENV_TIME.into(), BondDataType::BT_STRING));
+        fields.push((FIELD_TENANT.into(), BondDataType::BT_STRING));
+        fields.push((FIELD_ROLE.into(), BondDataType::BT_STRING));
+        fields.push((FIELD_ROLE_INSTANCE.into(), BondDataType::BT_STRING));
 
         // Part A extension - Conditional fields
         if !log.trace_id.is_empty() {
@@ -427,7 +482,7 @@ impl OtlpEncoder {
     /// Determine span fields
     fn determine_span_fields(span: &Span, _event_name: &str) -> Vec<FieldDef> {
         // Pre-allocate with estimated capacity to avoid reallocations
-        let estimated_capacity = 15 + span.attributes.len(); // 7 always + 8 max conditional + attributes
+        let estimated_capacity = 18 + span.attributes.len(); // 7 base + 3 tenant/role + 3 span-specific + 5 max conditional + attributes
         let mut fields = Vec::with_capacity(estimated_capacity);
 
         // Part A - Always present fields for spans
@@ -435,6 +490,9 @@ impl OtlpEncoder {
         fields.push((FIELD_ENV_VER.into(), BondDataType::BT_STRING));
         fields.push((FIELD_TIMESTAMP.into(), BondDataType::BT_STRING));
         fields.push((FIELD_ENV_TIME.into(), BondDataType::BT_STRING));
+        fields.push((FIELD_TENANT.into(), BondDataType::BT_STRING));
+        fields.push((FIELD_ROLE.into(), BondDataType::BT_STRING));
+        fields.push((FIELD_ROLE_INSTANCE.into(), BondDataType::BT_STRING));
 
         // Span-specific required fields
         fields.push((FIELD_KIND.into(), BondDataType::BT_INT32));
@@ -531,7 +589,12 @@ impl OtlpEncoder {
 
     /// Write span row data directly from Span
     // TODO - code duplication between write_span_row_data() and write_row_data() - consider extracting common field handling
-    fn write_span_row_data(&self, span: &Span, fields: &[FieldDef]) -> Vec<u8> {
+    fn write_span_row_data(
+        &self,
+        span: &Span,
+        fields: &[FieldDef],
+        metadata_fields: &MetadataFields,
+    ) -> Vec<u8> {
         let mut buffer = Vec::with_capacity(fields.len() * 50);
 
         // Pre-calculate timestamp (use start time as primary timestamp for both fields)
@@ -539,8 +602,13 @@ impl OtlpEncoder {
 
         for field in fields {
             match field.name.as_ref() {
-                FIELD_ENV_NAME => BondWriter::write_string(&mut buffer, "TestEnv"), // TODO - placeholder
-                FIELD_ENV_VER => BondWriter::write_string(&mut buffer, "4.0"), // TODO - placeholder
+                FIELD_ENV_NAME => BondWriter::write_string(&mut buffer, &metadata_fields.env_name),
+                FIELD_ENV_VER => BondWriter::write_string(&mut buffer, &metadata_fields.env_ver),
+                FIELD_TENANT => BondWriter::write_string(&mut buffer, &metadata_fields.tenant),
+                FIELD_ROLE => BondWriter::write_string(&mut buffer, &metadata_fields.role),
+                FIELD_ROLE_INSTANCE => {
+                    BondWriter::write_string(&mut buffer, &metadata_fields.role_instance)
+                }
                 FIELD_TIMESTAMP | FIELD_ENV_TIME => {
                     BondWriter::write_string(&mut buffer, &formatted_timestamp);
                 }
@@ -616,7 +684,12 @@ impl OtlpEncoder {
     }
 
     /// Write row data directly from LogRecord
-    fn write_row_data(&self, log: &LogRecord, sorted_fields: &[FieldDef]) -> Vec<u8> {
+    fn write_row_data(
+        &self,
+        log: &LogRecord,
+        sorted_fields: &[FieldDef],
+        metadata_fields: &MetadataFields,
+    ) -> Vec<u8> {
         let mut buffer = Vec::with_capacity(sorted_fields.len() * 50); //TODO - estimate better
 
         // Pre-calculate timestamp to avoid duplicate computation for FIELD_TIMESTAMP and FIELD_ENV_TIME
@@ -631,8 +704,13 @@ impl OtlpEncoder {
 
         for field in sorted_fields {
             match field.name.as_ref() {
-                FIELD_ENV_NAME => BondWriter::write_string(&mut buffer, "TestEnv"), // TODO - placeholder for actual env name
-                FIELD_ENV_VER => BondWriter::write_string(&mut buffer, "4.0"), // TODO - placeholder for actual env version
+                FIELD_ENV_NAME => BondWriter::write_string(&mut buffer, &metadata_fields.env_name),
+                FIELD_ENV_VER => BondWriter::write_string(&mut buffer, &metadata_fields.env_ver),
+                FIELD_TENANT => BondWriter::write_string(&mut buffer, &metadata_fields.tenant),
+                FIELD_ROLE => BondWriter::write_string(&mut buffer, &metadata_fields.role),
+                FIELD_ROLE_INSTANCE => {
+                    BondWriter::write_string(&mut buffer, &metadata_fields.role_instance)
+                }
                 FIELD_TIMESTAMP | FIELD_ENV_TIME => {
                     BondWriter::write_string(&mut buffer, &formatted_timestamp);
                 }
@@ -796,6 +874,18 @@ mod tests {
     use super::*;
     use opentelemetry_proto::tonic::common::v1::{AnyValue, KeyValue};
 
+    fn make_metadata(namespace: &str) -> MetadataFields {
+        MetadataFields::new(
+            "TestEnv".to_string(),
+            "Ver1v0".to_string(),
+            "TestTenant".to_string(),
+            "TestRole".to_string(),
+            "TestRoleInstance".to_string(),
+            namespace.to_string(),
+            "Ver1v0".to_string(),
+        )
+    }
+
     #[test]
     fn test_encoding() {
         let encoder = OtlpEncoder::new();
@@ -823,8 +913,8 @@ mod tests {
             }),
         });
 
-        let metadata = "namespace=testNamespace/eventVersion=Ver1v0";
-        let result = encoder.encode_log_batch([log].iter(), metadata).unwrap();
+        let metadata = make_metadata("testNamespace");
+        let result = encoder.encode_log_batch([log].iter(), &metadata).unwrap();
 
         assert!(!result.is_empty());
     }
@@ -868,11 +958,11 @@ mod tests {
             }),
         });
 
-        let metadata = "namespace=test";
+        let metadata = make_metadata("test");
 
         // Encode multiple log records with different schema structures but same event_name
         let result = encoder
-            .encode_log_batch([log1, log2, log3].iter(), metadata)
+            .encode_log_batch([log1, log2, log3].iter(), &metadata)
             .unwrap();
 
         // Should create one batch (same event_name = "user_action")
@@ -922,7 +1012,8 @@ mod tests {
             ..Default::default()
         };
 
-        let result = encoder.encode_log_batch([log].iter(), "test").unwrap();
+        let metadata = make_metadata("test");
+        let result = encoder.encode_log_batch([log].iter(), &metadata).unwrap();
 
         assert_eq!(result.len(), 1);
         assert_eq!(result[0].event_name, "test_event");
@@ -963,7 +1054,7 @@ mod tests {
         });
 
         let result = encoder
-            .encode_log_batch([log1, log2, log3].iter(), "test")
+            .encode_log_batch([log1, log2, log3].iter(), &make_metadata("test"))
             .unwrap();
 
         // All should be in one batch with same event_name
@@ -990,8 +1081,9 @@ mod tests {
             ..Default::default()
         };
 
+        let metadata = make_metadata("test");
         let result = encoder
-            .encode_log_batch([log1, log2].iter(), "test")
+            .encode_log_batch([log1, log2].iter(), &metadata)
             .unwrap();
 
         // Should create 2 separate batches
@@ -1015,7 +1107,8 @@ mod tests {
             ..Default::default()
         };
 
-        let result = encoder.encode_log_batch([log].iter(), "test").unwrap();
+        let metadata = make_metadata("test");
+        let result = encoder.encode_log_batch([log].iter(), &metadata).unwrap();
 
         assert_eq!(result.len(), 1);
         assert_eq!(result[0].event_name, "Log"); // Should default to "Log"
@@ -1061,8 +1154,9 @@ mod tests {
             }),
         });
 
+        let metadata = make_metadata("test");
         let result = encoder
-            .encode_log_batch([log1, log2, log3, log4].iter(), "test")
+            .encode_log_batch([log1, log2, log3, log4].iter(), &metadata)
             .unwrap();
 
         // Should create 3 batches: "user_action", "system_alert", "Log"
@@ -1123,8 +1217,8 @@ mod tests {
             }),
         });
 
-        let metadata = "namespace=testNamespace/eventVersion=Ver1v0";
-        let result = encoder.encode_span_batch([span].iter(), metadata).unwrap();
+        let metadata = make_metadata("testNamespace");
+        let result = encoder.encode_span_batch([span].iter(), &metadata).unwrap();
 
         assert_eq!(result.len(), 1);
         assert_eq!(result[0].event_name, "Span"); // All spans use "Span" event name for routing
@@ -1160,7 +1254,8 @@ mod tests {
             ..Default::default()
         });
 
-        let result = encoder.encode_span_batch([span].iter(), "test").unwrap();
+        let metadata = make_metadata("test");
+        let result = encoder.encode_span_batch([span].iter(), &metadata).unwrap();
 
         assert_eq!(result.len(), 1);
         assert_eq!(result[0].event_name, "Span"); // All spans use "Span" event name for routing
@@ -1188,7 +1283,8 @@ mod tests {
             code: StatusCode::Error as i32,
         });
 
-        let result = encoder.encode_span_batch([span].iter(), "test").unwrap();
+        let metadata = make_metadata("test");
+        let result = encoder.encode_span_batch([span].iter(), &metadata).unwrap();
 
         assert_eq!(result.len(), 1);
         assert_eq!(result[0].event_name, "Span"); // All spans use "Span" event name for routing
@@ -1238,8 +1334,9 @@ mod tests {
             "Span with non-empty name should include 'name' field in schema"
         );
 
+        let metadata = make_metadata("test");
         let result = encoder
-            .encode_span_batch([span1, span2].iter(), "test")
+            .encode_span_batch([span1, span2].iter(), &metadata)
             .unwrap();
 
         // Should create one batch with same event_name
@@ -1333,9 +1430,8 @@ mod tests {
             },
         ];
 
-        let result = encoder
-            .encode_log_batch(logs.iter(), "namespace=test")
-            .unwrap();
+        let metadata = make_metadata("test");
+        let result = encoder.encode_log_batch(logs.iter(), &metadata).unwrap();
 
         assert_eq!(result.len(), 1);
         assert_eq!(result[0].row_count, 3);
@@ -1354,9 +1450,8 @@ mod tests {
             },
         ];
 
-        let span_result = encoder
-            .encode_span_batch(spans.iter(), "namespace=test")
-            .unwrap();
+        let metadata = make_metadata("test");
+        let span_result = encoder.encode_span_batch(spans.iter(), &metadata).unwrap();
 
         assert_eq!(span_result.len(), 1);
         assert_eq!(span_result[0].row_count, 2);
