@@ -5,7 +5,6 @@
 //! for metrics, traces, and exporters in a structured manner.
 
 use std::{
-    any::type_name,
     collections::HashMap,
     error,
     fmt::{self, Display},
@@ -16,6 +15,7 @@ use opentelemetry_sdk::{
     metrics::{MeterProviderBuilder, SdkMeterProvider},
     trace::SdkTracerProvider,
 };
+use serde_yaml::Value;
 
 pub mod model;
 pub mod providers;
@@ -49,34 +49,34 @@ impl Default for ConfigurationProvidersRegistry {
 
 /// Registry for metrics configuration providers.
 pub struct MetricsProvidersRegistry {
-    readers_periodic_exporters: HashMap<String, Box<dyn MetricsReaderPeriodicExporterProvider>>,
+    readers_periodic_exporters_providers:
+        HashMap<String, Box<dyn MetricsReaderPeriodicExporterProvider>>,
 }
 
 impl MetricsProvidersRegistry {
     pub fn new() -> Self {
         Self {
-            readers_periodic_exporters: HashMap::new(),
+            readers_periodic_exporters_providers: HashMap::new(),
         }
     }
 
-    pub fn register_periodic_exporter_provider<T: 'static + std::any::Any + ?Sized>(
+    pub fn register_periodic_exporter_provider(
         &mut self,
+        key: String,
         provider: Box<dyn MetricsReaderPeriodicExporterProvider>,
     ) {
-        let name: String = type_name::<T>().to_string();
-        self.readers_periodic_exporters.insert(
-            name,
+        self.readers_periodic_exporters_providers.insert(
+            key,
             provider as Box<dyn MetricsReaderPeriodicExporterProvider>,
         );
     }
 
-    pub fn readers_periodic_exporter<T>(
+    pub fn readers_periodic_exporter_provider(
         &self,
-        //type_name: &str,
+        exporter_id: &str,
     ) -> Option<&dyn MetricsReaderPeriodicExporterProvider> {
-        let type_name = type_name::<T>().to_string();
-        self.readers_periodic_exporters
-            .get(&type_name)
+        self.readers_periodic_exporters_providers
+            .get(exporter_id)
             .map(|b| b.as_ref())
     }
 }
@@ -87,12 +87,25 @@ impl Default for MetricsProvidersRegistry {
     }
 }
 
+/// Enum representing different metrics exporter identifiers.
+pub enum MetricsExporterId {
+    PeriodicExporter,
+}
+
+impl MetricsExporterId {
+    pub fn qualified_name(self, exporter_name: &str) -> String {
+        match self {
+            Self::PeriodicExporter => format!("readers::periodic::exporter::{}", exporter_name),
+        }
+    }
+}
+
 /// Trait for providing metrics reader periodic exporter configurations.
 pub trait MetricsReaderPeriodicExporterProvider {
     fn provide(
         &self,
         meter_provider_builder: MeterProviderBuilder,
-        config: &dyn std::any::Any,
+        config: &Value,
     ) -> MeterProviderBuilder;
 
     fn as_any(&self) -> &dyn std::any::Any;
@@ -178,8 +191,6 @@ impl Display for ProviderError {
 mod tests {
     use std::cell::Cell;
 
-    use crate::model::metrics::reader::PeriodicExporterConsole;
-
     use super::*;
 
     #[test]
@@ -205,7 +216,7 @@ mod tests {
             fn provide(
                 &self,
                 meter_provider_builder: MeterProviderBuilder,
-                _config: &dyn std::any::Any,
+                _config: &Value,
             ) -> MeterProviderBuilder {
                 self.call_count.set(self.call_count.get() + 1);
                 meter_provider_builder
@@ -220,25 +231,28 @@ mod tests {
         let mut registry = ConfigurationProvidersRegistry::new();
 
         // Act
+        let key = MetricsExporterId::PeriodicExporter.qualified_name("console");
         registry
             .metrics_mut()
-            .register_periodic_exporter_provider::<PeriodicExporterConsole>(mock_provider);
+            .register_periodic_exporter_provider(key.clone(), mock_provider);
 
         // Assert
-        let type_name = type_name::<PeriodicExporterConsole>().to_string();
         assert!(registry
             .metrics()
-            .readers_periodic_exporters
-            .contains_key(&type_name));
+            .readers_periodic_exporters_providers
+            .contains_key(key.as_str()));
 
-        let provider_option = registry
-            .metrics()
-            .readers_periodic_exporter::<PeriodicExporterConsole>();
+        let console_config = serde_yaml::to_value(
+            r#"
+            console:
+              temporality: cumulative
+            "#,
+        )
+        .unwrap();
+
+        let provider_option = registry.metrics().readers_periodic_exporter_provider(&key);
         if let Some(provider) = provider_option {
-            provider.provide(
-                MeterProviderBuilder::default(),
-                &PeriodicExporterConsole { temporality: None },
-            );
+            provider.provide(MeterProviderBuilder::default(), &console_config);
             let provider_cast = provider
                 .as_any()
                 .downcast_ref::<MockPeriodicExporterProvider>()
@@ -254,7 +268,7 @@ mod tests {
         let provider_manager = ConfigurationProvidersRegistry::default();
         assert!(provider_manager
             .metrics()
-            .readers_periodic_exporters
+            .readers_periodic_exporters_providers
             .is_empty());
     }
 
@@ -262,7 +276,7 @@ mod tests {
     fn test_metrics_provider_manager_default() {
         let metrics_provider_manager = MetricsProvidersRegistry::default();
         assert!(metrics_provider_manager
-            .readers_periodic_exporters
+            .readers_periodic_exporters_providers
             .is_empty());
     }
 

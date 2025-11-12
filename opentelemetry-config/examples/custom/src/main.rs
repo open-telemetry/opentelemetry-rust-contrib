@@ -1,45 +1,41 @@
-//! # Example OpenTelemetry Config Console
+//! # Example OpenTelemetry Config Custom exporter
 //!
 //! This example demonstrates how to configure OpenTelemetry Metrics
-//! using the OpenTelemetry Config crate with a Mock Console Exporter.
+//! using the OpenTelemetry Config crate with a Mock Custom Exporter.
 //! It is helpful to implement and test custom exporters.
 
 use opentelemetry_config::{
-    model::metrics::reader::PeriodicExporterConsole, providers::TelemetryProvider,
-    ConfigurationProvidersRegistry, MetricsReaderPeriodicExporterProvider,
+    providers::TelemetryProvider, ConfigurationProvidersRegistry, MetricsExporterId,
+    MetricsReaderPeriodicExporterProvider,
 };
-use opentelemetry_sdk::metrics::Temporality;
 use opentelemetry_sdk::{
     error::OTelSdkResult,
     metrics::{data::ResourceMetrics, exporter::PushMetricExporter, MeterProviderBuilder},
 };
-use std::time::Duration;
-
+use serde_yaml::Value;
 use std::env;
+use std::time::Duration;
 
 pub fn main() -> Result<(), Box<dyn std::error::Error>> {
     let args: Vec<String> = env::args().collect();
 
     if args.len() == 1 || (args.len() > 1 && args[1] == "--help") {
-        println!("Usage: cargo run -- --file ../metrics_console.yaml");
-        println!("This example demonstrates how to configure OpenTelemetry Metrics using the OpenTelemetry Config crate with a Console Exporter.");
+        println!("Usage: cargo run -- --file ../metrics_custom.yaml");
+        println!("This example demonstrates how to configure OpenTelemetry Metrics using the OpenTelemetry Config crate with a custom Exporter.");
         return Ok(());
     }
     if args.len() < 3 || args[1] != "--file" {
         println!("Error: Configuration file path not provided.");
-        println!("Usage: cargo run -- --file ../metrics_console.yaml");
+        println!("Usage: cargo run -- --file ../metrics_custom.yaml");
         return Ok(());
     }
     let config_file = &args[2];
 
-    // Setup configuration registry with console exporter provider.
-    let provider = Box::new(MockPeriodicExporterProvider::new());
+    // Setup configuration registry with custom exporter provider.
     let mut registry = ConfigurationProvidersRegistry::new();
 
-    // Register the console exporter provider for the specific exporter type.
-    registry
-        .metrics_mut()
-        .register_periodic_exporter_provider::<PeriodicExporterConsole>(provider);
+    // Register the custom exporter provider.
+    MockPeriodicExporterProvider::register_into(&mut registry);
 
     let telemetry_provider = TelemetryProvider::new();
     let providers = telemetry_provider
@@ -76,83 +72,84 @@ impl MockPeriodicExporterProvider {
     fn new() -> Self {
         Self {}
     }
+
+    pub fn register_into(registry: &mut ConfigurationProvidersRegistry) {
+        let key = MetricsExporterId::PeriodicExporter.qualified_name("custom");
+        registry
+            .metrics_mut()
+            .register_periodic_exporter_provider(key, Box::new(Self::new()));
+    }
 }
 
-pub struct MockConsoleExporter {
-    temporality: Temporality,
+pub struct MockCustomExporter {
+    custom_config: Option<MockCustomConfig>,
 }
 
-impl MockConsoleExporter {
+impl MockCustomExporter {
     fn new() -> Self {
-        let temporality = Temporality::Delta;
-        Self { temporality }
+        Self {
+            custom_config: None,
+        }
     }
 
-    pub fn set_temporality(&mut self, temporality: Temporality) {
-        self.temporality = temporality;
+    pub fn set_custom_config(&mut self, custom_config: MockCustomConfig) {
+        self.custom_config = Some(custom_config);
     }
 }
 
-impl PushMetricExporter for MockConsoleExporter {
+impl PushMetricExporter for MockCustomExporter {
     async fn export(&self, metrics: &ResourceMetrics) -> OTelSdkResult {
         println!(
-            "MockConsoleExporter exporting metrics {:?} with temporality: {:?}",
-            metrics, self.temporality
+            "MockCustomExporter exporting metrics {:?} with custom config: {:?}",
+            metrics, self.custom_config
         );
         Ok(())
     }
 
-    /// Flushes any metric data held by an exporter.
     fn force_flush(&self) -> OTelSdkResult {
-        println!("MockConsoleExporter force flushing metrics.");
+        println!("MockCustomExporter force flushing metrics.");
         Ok(())
     }
 
-    /// Releases any held computational resources.
-    ///
-    /// After Shutdown is called, calls to Export will perform no operation and
-    /// instead will return an error indicating the shutdown state.
     fn shutdown_with_timeout(&self, timeout: Duration) -> OTelSdkResult {
         println!(
-            "MockConsoleExporter shutting down with timeout: {:?}",
+            "MockCustomExporter shutting down with timeout: {:?}",
             timeout
         );
         Ok(())
     }
 
-    /// Shutdown with the default timeout of 5 seconds.
     fn shutdown(&self) -> OTelSdkResult {
         self.shutdown_with_timeout(Duration::from_secs(5))
     }
 
-    /// Access the [Temporality] of the MetricExporter.
-    fn temporality(&self) -> Temporality {
-        self.temporality
+    fn temporality(&self) -> opentelemetry_sdk::metrics::Temporality {
+        opentelemetry_sdk::metrics::Temporality::Cumulative
     }
+}
+
+#[derive(serde::Deserialize, Debug)]
+pub struct MockCustomConfig {
+    pub custom_string_field: String,
+    pub custom_int_field: i32,
 }
 
 impl MetricsReaderPeriodicExporterProvider for MockPeriodicExporterProvider {
     fn provide(
         &self,
         mut meter_provider_builder: MeterProviderBuilder,
-        config: &dyn std::any::Any,
+        config: &Value,
     ) -> MeterProviderBuilder {
-        let mut exporter = MockConsoleExporter::new();
+        let mut exporter = MockCustomExporter::new();
 
-        let config = config
-            .downcast_ref::<PeriodicExporterConsole>()
-            .expect("Invalid config type. Expected PeriodicExporterConsole.");
+        let config = serde_yaml::from_value::<MockCustomConfig>(config.clone())
+            .expect("Failed to deserialize MockCustomConfig");
+        println!(
+            "Configuring MockCustomExporter with string field: {} and int field: {}",
+            config.custom_string_field, config.custom_int_field
+        );
 
-        if let Some(temporality) = &config.temporality {
-            match temporality {
-                opentelemetry_config::model::metrics::reader::Temporality::Delta => {
-                    exporter.set_temporality(Temporality::Delta);
-                }
-                opentelemetry_config::model::metrics::reader::Temporality::Cumulative => {
-                    exporter.set_temporality(Temporality::Cumulative);
-                }
-            }
-        }
+        exporter.set_custom_config(config);
 
         meter_provider_builder = meter_provider_builder.with_periodic_exporter(exporter);
         meter_provider_builder

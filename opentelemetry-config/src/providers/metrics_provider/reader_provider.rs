@@ -4,10 +4,10 @@
 //! in OpenTelemetry SDKs using declarative YAML configurations.
 
 use opentelemetry_sdk::metrics::MeterProviderBuilder;
+use serde_yaml::Value;
 
 use crate::{
-    model::metrics::reader::{PeriodicExporterConsole, PeriodicExporterOtlp, Reader},
-    MetricsProvidersRegistry, ProviderError,
+    model::metrics::reader::Reader, MetricsExporterId, MetricsProvidersRegistry, ProviderError,
 };
 
 /// Provider for Metrics readers
@@ -18,7 +18,7 @@ pub struct ReaderProvider {
 impl ReaderProvider {
     pub fn new() -> Self {
         ReaderProvider {
-            periodic_reader_provider: PeriodicReaderProvider::new(),
+            periodic_reader_provider: PeriodicReaderProvider::default(),
         }
     }
     /// Provisions a metrics reader based on the provided configuration
@@ -59,7 +59,7 @@ impl PeriodicReaderProvider {
     /// Creates a new PeriodicReaderProvider
     pub fn new() -> Self {
         PeriodicReaderProvider {
-            periodic_exporter_provider: PeriodicExporterProvider::new(),
+            periodic_exporter_provider: PeriodicExporterProvider::default(),
         }
     }
 
@@ -70,14 +70,11 @@ impl PeriodicReaderProvider {
         mut meter_provider_builder: opentelemetry_sdk::metrics::MeterProviderBuilder,
         config: &crate::model::metrics::reader::Periodic,
     ) -> Result<opentelemetry_sdk::metrics::MeterProviderBuilder, ProviderError> {
-        if let Some(exporter_config) = &config.exporter {
-            meter_provider_builder = self.periodic_exporter_provider.provide(
-                metrics_registry,
-                meter_provider_builder,
-                exporter_config,
-            )?;
-        }
-
+        meter_provider_builder = self.periodic_exporter_provider.provide(
+            metrics_registry,
+            meter_provider_builder,
+            &config.exporter,
+        )?;
         Ok(meter_provider_builder)
     }
 }
@@ -97,33 +94,54 @@ impl PeriodicExporterProvider {
         PeriodicExporterProvider {}
     }
 
+    fn registry_key(&self, exporter_name: &str) -> String {
+        MetricsExporterId::PeriodicExporter.qualified_name(exporter_name)
+    }
+
     /// Configures a periodic metrics exporter based on the provided configuration
     pub fn provide(
         &self,
         metrics_registry: &MetricsProvidersRegistry,
         mut meter_provider_builder: opentelemetry_sdk::metrics::MeterProviderBuilder,
-        config: &crate::model::metrics::reader::PeriodicExporter,
+        config: &Value,
     ) -> Result<opentelemetry_sdk::metrics::MeterProviderBuilder, ProviderError> {
-        if let Some(console_config) = &config.console {
-            let provider_option =
-                metrics_registry.readers_periodic_exporter::<PeriodicExporterConsole>();
-            if let Some(provider) = provider_option {
-                meter_provider_builder = provider.provide(meter_provider_builder, console_config);
-            } else {
-                return Err(ProviderError::NotRegisteredProvider("No provider found for PeriodicExporterConsole. Make sure it is registered as provider.".to_string()));
+        match config.as_mapping() {
+            Some(exporter_map) => {
+                for key in exporter_map.keys() {
+                    match key {
+                        Value::String(exporter_name) => {
+                            let registry_key = self.registry_key(exporter_name);
+                            let exporter_provider_option =
+                                metrics_registry.readers_periodic_exporter_provider(&registry_key);
+                            match exporter_provider_option {
+                                Some(provider) => {
+                                    let config =
+                                        &exporter_map[&Value::String(exporter_name.clone())];
+                                    meter_provider_builder =
+                                        provider.provide(meter_provider_builder, config);
+                                }
+                                None => {
+                                    return Err(ProviderError::NotRegisteredProvider(format!(
+                                        "No provider found for periodic exporter: {}. Make sure it is registered as provider.",
+                                        registry_key
+                                    )));
+                                }
+                            }
+                        }
+                        _ => {
+                            return Err(ProviderError::InvalidConfiguration(
+                                "Exporter name must be a string.".to_string(),
+                            ));
+                        }
+                    }
+                }
+            }
+            None => {
+                return Err(ProviderError::InvalidConfiguration(
+                    "Expecting a configuration object for periodic exporter.".to_string(),
+                ));
             }
         }
-
-        if let Some(otlp_config) = &config.otlp {
-            let provider_option =
-                metrics_registry.readers_periodic_exporter::<PeriodicExporterOtlp>();
-            if let Some(provider) = provider_option {
-                meter_provider_builder = provider.provide(meter_provider_builder, otlp_config);
-            } else {
-                return Err(ProviderError::NotRegisteredProvider("No provider found for PeriodicExporterOtlp. Make sure it is registered as provider.".to_string()));
-            }
-        }
-
         Ok(meter_provider_builder)
     }
 }
@@ -143,7 +161,7 @@ impl PullReaderProvider {
     /// Creates a new PullReaderProvider
     pub fn new() -> Self {
         PullReaderProvider {
-            pull_exporter_provider: PullExporterProvider::new(),
+            pull_exporter_provider: PullExporterProvider::default(),
         }
     }
 
@@ -207,7 +225,7 @@ mod tests {
 
     use opentelemetry_sdk::metrics::SdkMeterProvider;
 
-    use crate::MetricsReaderPeriodicExporterProvider;
+    use crate::{model::metrics::reader::PullExporter, MetricsReaderPeriodicExporterProvider};
 
     use super::*;
 
@@ -219,11 +237,10 @@ mod tests {
         }
 
         fn register_into(registry: &mut crate::ConfigurationProvidersRegistry) {
+            let key = MetricsExporterId::PeriodicExporter.qualified_name("console");
             registry
                 .metrics_mut()
-                .register_periodic_exporter_provider::<PeriodicExporterConsole>(Box::new(
-                    Self::new(),
-                ));
+                .register_periodic_exporter_provider(key, Box::new(Self::new()));
         }
     }
 
@@ -231,7 +248,7 @@ mod tests {
         fn provide(
             &self,
             meter_provider_builder: opentelemetry_sdk::metrics::MeterProviderBuilder,
-            _config: &dyn std::any::Any,
+            _config: &Value,
         ) -> opentelemetry_sdk::metrics::MeterProviderBuilder {
             // Mock implementation: just return the builder as is
             meter_provider_builder
@@ -244,19 +261,23 @@ mod tests {
 
     #[test]
     fn test_reader_provider_configure() {
-        let provider = ReaderProvider::new();
+        let provider = ReaderProvider::default();
         let mut configuration_registry = crate::ConfigurationProvidersRegistry::new();
         MockMetricsReadersPeriodicExporterConsoleProvider::register_into(
             &mut configuration_registry,
         );
         let meter_provider_builder = SdkMeterProvider::builder();
 
+        let console_object = serde_yaml::from_str(
+            r#"
+            console:
+                temporality: cumulative
+            "#,
+        )
+        .unwrap();
         let config = crate::model::metrics::reader::Reader::Periodic(
             crate::model::metrics::reader::Periodic {
-                exporter: Some(crate::model::metrics::reader::PeriodicExporter {
-                    console: Some(PeriodicExporterConsole { temporality: None }),
-                    otlp: None,
-                }),
+                exporter: console_object,
             },
         );
 
@@ -269,24 +290,29 @@ mod tests {
 
     #[test]
     fn test_reader_provider_provide_console_provider_not_registered() {
-        let provider = ReaderProvider::new();
+        let provider = ReaderProvider::default();
         let metrics_registry = MetricsProvidersRegistry::new();
         let meter_provider_builder = SdkMeterProvider::builder();
 
+        let console_config = serde_yaml::from_str(
+            r#"
+            console:
+                temporality: cumulative
+            "#,
+        )
+        .unwrap();
+
         let config = crate::model::metrics::reader::Reader::Periodic(
             crate::model::metrics::reader::Periodic {
-                exporter: Some(crate::model::metrics::reader::PeriodicExporter {
-                    console: Some(PeriodicExporterConsole { temporality: None }),
-                    otlp: None,
-                }),
+                exporter: console_config,
             },
         );
 
         let result = provider.provide(&metrics_registry, meter_provider_builder, &config);
         if let Err(e) = result {
-            assert!(e
-                .to_string()
-                .contains("No provider found for PeriodicExporterConsole"));
+            assert!(e.to_string().contains(
+                "No provider found for periodic exporter: readers::periodic::exporter::console"
+            ));
         } else {
             panic!("Expected error due to missing provider, but got Ok");
         }
@@ -298,24 +324,25 @@ mod tests {
         let metrics_registry = MetricsProvidersRegistry::new();
         let meter_provider_builder = SdkMeterProvider::builder();
 
+        let console_config = serde_yaml::from_str(
+            r#"
+            otlp:
+              temporality: cumulative
+            "#,
+        )
+        .unwrap();
+
         let config = crate::model::metrics::reader::Reader::Periodic(
             crate::model::metrics::reader::Periodic {
-                exporter: Some(crate::model::metrics::reader::PeriodicExporter {
-                    console: None,
-                    otlp: Some(PeriodicExporterOtlp {
-                        endpoint: None,
-                        protocol: None,
-                        temporality: None,
-                    }),
-                }),
+                exporter: console_config,
             },
         );
 
         let result = provider.provide(&metrics_registry, meter_provider_builder, &config);
         if let Err(e) = result {
-            assert!(e
-                .to_string()
-                .contains("No provider found for PeriodicExporterOtlp"));
+            assert!(e.to_string().contains(
+                "No provider found for periodic exporter: readers::periodic::exporter::otlp"
+            ));
         } else {
             panic!("Expected error due to missing provider, but got Ok");
         }
@@ -340,5 +367,22 @@ mod tests {
         } else {
             panic!("Expected error due to unsupported exporter, but got Ok");
         }
+    }
+
+    #[test]
+    fn test_pull_reader_provider_configure_basic() {
+        let provider = PullReaderProvider::default();
+        let configuration_registry = crate::ConfigurationProvidersRegistry::new();
+        let meter_provider_builder = SdkMeterProvider::builder();
+
+        let config = crate::model::metrics::reader::Pull {
+            exporter: Some(PullExporter { prometheus: None }),
+        };
+
+        let metrics_registry = configuration_registry.metrics();
+
+        _ = provider
+            .configure(metrics_registry, meter_provider_builder, &config)
+            .unwrap();
     }
 }

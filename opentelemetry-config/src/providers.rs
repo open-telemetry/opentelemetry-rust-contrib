@@ -119,13 +119,12 @@ impl Default for TelemetryProvider {
 
 #[cfg(test)]
 mod tests {
-    use std::{any::Any, cell::Cell};
+    use std::cell::Cell;
 
     use opentelemetry_sdk::metrics::MeterProviderBuilder;
+    use serde_yaml::Value;
 
-    use crate::{
-        model::metrics::reader::PeriodicExporterConsole, MetricsReaderPeriodicExporterProvider,
-    };
+    use crate::{MetricsExporterId, MetricsReaderPeriodicExporterProvider};
 
     use super::*;
 
@@ -149,13 +148,10 @@ mod tests {
         fn provide(
             &self,
             meter_provider_builder: MeterProviderBuilder,
-            config: &(dyn Any + 'static),
+            config: &Value,
         ) -> MeterProviderBuilder {
             // Mock implementation: In a real scenario, configure the console exporter here
             self.call_count.set(self.call_count.get() + 1);
-            let config = config
-                .downcast_ref::<PeriodicExporterConsole>()
-                .expect("Invalid config type");
             println!("Mock configure called with config: {:?}", config);
             meter_provider_builder
         }
@@ -186,9 +182,8 @@ mod tests {
 
         let mut configuration_registry = ConfigurationProvidersRegistry::new();
         let metrics_provider_manager = configuration_registry.metrics_mut();
-        //metrics_provider_manager.register_periodic_exporter_console_provider(provider);
-        metrics_provider_manager
-            .register_periodic_exporter_provider::<PeriodicExporterConsole>(provider);
+        let key = MetricsExporterId::PeriodicExporter.qualified_name("console");
+        metrics_provider_manager.register_periodic_exporter_provider(key.clone(), provider);
 
         let telemetry_provider = TelemetryProvider::new();
         let providers = telemetry_provider
@@ -198,7 +193,7 @@ mod tests {
 
         let provider = configuration_registry
             .metrics()
-            .readers_periodic_exporter::<PeriodicExporterConsole>()
+            .readers_periodic_exporter_provider(&key)
             .unwrap();
         let provider = provider
             .as_any()

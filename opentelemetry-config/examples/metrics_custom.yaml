@@ -2,8 +2,9 @@ metrics:
     readers:
         - periodic:
             exporter:
-                console:
-                    temporality: delta
+                custom:
+                    custom_string_field: delta
+                    custom_int_field: 42
 resource:
     service.name: "test-service"
     service.version: "1.0.0"

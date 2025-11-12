@@ -4,10 +4,9 @@
 //! that enables exporting metrics to the console (stdout) using
 //! the OpenTelemetry Config crate.
 
-use opentelemetry_config::{
-    model::metrics::reader::PeriodicExporterConsole, MetricsReaderPeriodicExporterProvider,
-};
+use opentelemetry_config::{MetricsExporterId, MetricsReaderPeriodicExporterProvider};
 use opentelemetry_sdk::metrics::MeterProviderBuilder;
+use serde_yaml::Value;
 
 #[derive(Clone)]
 pub struct ConsolePeriodicExporterProvider {}
@@ -21,34 +20,45 @@ impl ConsolePeriodicExporterProvider {
         configuration_registry: &mut opentelemetry_config::ConfigurationProvidersRegistry,
     ) {
         let provider = ConsolePeriodicExporterProvider::new();
+
+        let key = MetricsExporterId::PeriodicExporter.qualified_name("console");
         configuration_registry
             .metrics_mut()
-            .register_periodic_exporter_provider::<PeriodicExporterConsole>(Box::new(
-                provider.clone(),
-            ));
+            .register_periodic_exporter_provider(key, Box::new(provider.clone()));
         // TODO: Add logs and traces providers registration.
     }
+}
+
+#[derive(serde::Deserialize, serde::Serialize, Clone, Debug)]
+pub struct PeriodicExporterConsole {
+    pub temporality: Option<Temporality>,
+}
+
+#[derive(serde::Deserialize, serde::Serialize, Clone, Debug)]
+#[serde(rename_all = "lowercase")]
+pub enum Temporality {
+    Delta,
+    Cumulative,
 }
 
 impl MetricsReaderPeriodicExporterProvider for ConsolePeriodicExporterProvider {
     fn provide(
         &self,
         mut meter_provider_builder: MeterProviderBuilder,
-        config: &dyn std::any::Any,
+        config: &Value,
     ) -> MeterProviderBuilder {
         let mut exporter_builder = opentelemetry_stdout::MetricExporter::builder();
 
-        let config = config
-            .downcast_ref::<PeriodicExporterConsole>()
-            .expect("Invalid config type. Expected PeriodicExporterConsole.");
+        let config = serde_yaml::from_value::<PeriodicExporterConsole>(config.clone())
+            .expect("Failed to deserialize PeriodicExporterConsole configuration");
 
         if let Some(temporality) = &config.temporality {
             match temporality {
-                opentelemetry_config::model::metrics::reader::Temporality::Delta => {
+                Temporality::Delta => {
                     exporter_builder = exporter_builder
                         .with_temporality(opentelemetry_sdk::metrics::Temporality::Delta);
                 }
-                opentelemetry_config::model::metrics::reader::Temporality::Cumulative => {
+                Temporality::Cumulative => {
                     exporter_builder = exporter_builder
                         .with_temporality(opentelemetry_sdk::metrics::Temporality::Cumulative);
                 }
@@ -84,9 +94,10 @@ mod tests {
         // Act
         ConsolePeriodicExporterProvider::register_into(&mut configuration_registry);
 
+        let key = MetricsExporterId::PeriodicExporter.qualified_name("console");
         let provider_option = configuration_registry
             .metrics()
-            .readers_periodic_exporter::<PeriodicExporterConsole>();
+            .readers_periodic_exporter_provider(&key);
 
         // Assert
         assert!(provider_option.is_some());
@@ -100,8 +111,10 @@ mod tests {
 
         let config = PeriodicExporterConsole { temporality: None };
 
+        let config_yaml = serde_yaml::to_value(config).unwrap();
+
         // Act
-        let configured_builder = provider.provide(meter_provider_builder, &config);
+        let configured_builder = provider.provide(meter_provider_builder, &config_yaml);
 
         // Assert
         // Since the MeterProviderBuilder does not expose its internal state,
@@ -119,11 +132,13 @@ mod tests {
         let meter_provider_builder = opentelemetry_sdk::metrics::SdkMeterProvider::builder();
 
         let config = PeriodicExporterConsole {
-            temporality: Some(opentelemetry_config::model::metrics::reader::Temporality::Delta),
+            temporality: Some(Temporality::Delta),
         };
 
+        let config_yaml = serde_yaml::to_value(config).unwrap();
+
         // Act
-        let configured_builder = provider.provide(meter_provider_builder, &config);
+        let configured_builder = provider.provide(meter_provider_builder, &config_yaml);
 
         // Assert
         // Since the MeterProviderBuilder does not expose its internal state,
@@ -141,13 +156,13 @@ mod tests {
         let meter_provider_builder = opentelemetry_sdk::metrics::SdkMeterProvider::builder();
 
         let config = PeriodicExporterConsole {
-            temporality: Some(
-                opentelemetry_config::model::metrics::reader::Temporality::Cumulative,
-            ),
+            temporality: Some(Temporality::Cumulative),
         };
 
+        let config_yaml = serde_yaml::to_value(config).unwrap();
+
         // Act
-        let configured_builder = provider.provide(meter_provider_builder, &config);
+        let configured_builder = provider.provide(meter_provider_builder, &config_yaml);
 
         // Assert
         // Since the MeterProviderBuilder does not expose its internal state,

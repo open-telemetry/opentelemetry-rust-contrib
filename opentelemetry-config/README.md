@@ -42,7 +42,7 @@ metrics:
   readers:
     - periodic:
         exporter:
-          console:
+          custom:
             temporality: delta
 
 resource:
@@ -50,17 +50,58 @@ resource:
   service.version: "1.0.0"
 ```
 
-### 2. Load and Apply Configuration
+### 2. Implement an Exporter Provider
 
 ```rust
+use opentelemetry_config::{
+    ConfigurationProvidersRegistry,
+    MetricsExporterId,
+    MetricsReaderPeriodicExporterProvider,
+};
+use opentelemetry_sdk::metrics::MeterProviderBuilder;
+use serde_yaml::Value;
+
+struct CustomExporterProvider;
+
+impl CustomExporterProvider {
+    pub fn register_into(registry: &mut ConfigurationProvidersRegistry) {
+        let key = MetricsExporterId::PeriodicExporter
+            .qualified_name("custom");
+        registry
+            .metrics_mut()
+            .register_periodic_exporter_provider(key, Box::new(Self));
+    }
+}
+
+impl MetricsReaderPeriodicExporterProvider for CustomExporterProvider {
+    fn provide(
+        &self,
+        meter_provider_builder: MeterProviderBuilder,
+        _config: &Value,
+    ) -> MeterProviderBuilder {
+        let exporter = opentelemetry_stdout::MetricExporter::builder()
+            .build();
+        
+        meter_provider_builder.with_periodic_exporter(exporter)
+    }
+
+    fn as_any(&self) -> &dyn std::any::Any {
+        self
+    }
+}
+```
+
+### 3. Load and Apply Configuration
+
+```rust
+use opentelemetry_config::providers::TelemetryProvider;
+
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Create a configuration registry and register exporters
     let mut registry = ConfigurationProvidersRegistry::new();
-    registry
-        .metrics_mut()
-        .register_periodic_exporter_provider::<PeriodicExporterConsole>(
-            Box::new(ConsoleExporterProvider)
-        );
+    
+    // Register the custom exporter provider
+    CustomExporterProvider::register_into(&mut registry);
 
     // Load configuration from YAML file
     let telemetry_provider = TelemetryProvider::new();
@@ -70,7 +111,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Use the configured providers
     if let Some(meter_provider) = providers.meter_provider() {
         // Your application code here
-
+        
         // Shutdown the meter provider
         meter_provider.shutdown()?;
     }
@@ -83,24 +124,31 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
 ### Core Components
 
-- **`ConfigurationProvidersRegistry`**: Central registry for configuration providers
-- **`TelemetryProvider`**: Orchestrates the configuration process from YAML to providers
+- **`ConfigurationProvidersRegistry`**: Central registry for configuration providers across all telemetry signals
+- **`MetricsProvidersRegistry`**: Registry specifically for metrics exporter providers
+- **`TelemetryProvider`**: Orchestrates the configuration process from YAML to SDK providers
 - **`TelemetryProviders`**: Holds configured meter, tracer, and logger providers
-- **`MetricsReaderPeriodicExporterProvider`**: Trait for implementing custom metric exporters
+- **`MetricsReaderPeriodicExporterProvider`**: Trait for implementing custom metric exporter providers
+- **`MetricsExporterId`**: Enum for building qualified registry keys for different exporter types
 
 ### Design Pattern
 
-This crate follows a **decoupled implementation pattern**:
+This crate follows a **provider-based decoupled implementation pattern**:
 
-- **Centralized Configuration Model**: The configuration schema (YAML structure and data models) is defined and maintained centrally in this crate, ensuring alignment with the OpenTelemetry Configuration Standard
-- **Decoupled Implementations**: Actual exporter implementations live in external crates, allowing the community to contribute custom exporters without modifying the core configuration model
-- **Community Control**: By keeping the configuration model centralized and standardized, the community maintains consistency across all implementations while enabling extensibility
+- **Centralized Configuration Model**: The configuration schema (YAML structure and data models) is defined and maintained centrally in this crate, ensuring alignment with the OpenTelemetry Configuration Standard. The general structure (metrics, traces, logs, resource) is enforced to maintain compatibility.
+- **Extensible Configuration**: While the top-level structure is controlled, exporter-specific configurations are fully extensible. Providers can define their own configuration schemas that are deserialized from the YAML at runtime, enabling custom properties without modifying the core model.
+- **Decoupled Implementations**: Actual exporter implementations live in external crates or user code, allowing the community to contribute custom exporters without modifying the core configuration model. Each provider handles its own configuration deserialization and exporter instantiation.
+- **Provider Trait Pattern**: Exporters are registered via provider traits that receive YAML configuration as `serde_yaml::Value`, allowing them to deserialize into any custom configuration structure they need.
+- **Registry-Based Discovery**: A central registry maps exporter names to their provider implementations, enabling dynamic configuration. The registry key is built using `MetricsExporterId::qualified_name()` with the exporter name from the YAML.
+- **Community Control**: By keeping the top-level configuration model centralized and standardized, the community maintains consistency across all implementations while enabling complete flexibility for exporter-specific configurations.
 
 This design enables:
-- **Standard Compliance**: All configurations follow the official OpenTelemetry schema
-- **Easy Extension**: Contributors can add new exporters by implementing traits in their own crates
-- **Version Independence**: Exporter implementations can evolve independently from the configuration schema
-- **Flexibility**: Users can mix official and custom exporters using the same configuration format
+- **Standard Compliance**: All configurations follow the official OpenTelemetry schema at the top level
+- **Easy Extension**: Contributors can add new exporters with custom configurations by implementing the provider trait in their own crates
+- **Configuration Flexibility**: Each exporter can define its own configuration structure without requiring changes to the core crate
+- **Version Independence**: Exporter implementations and their configurations can evolve independently from the core configuration schema
+- **Mixed Exporters**: Users can combine official and custom exporters using the same configuration format
+- **Type Safety**: Strong typing throughout the configuration pipeline with runtime validation and deserialization errors
 
 ### Configuration Model
 
@@ -115,9 +163,10 @@ The configuration is structured around the `Telemetry` model which includes:
 
 ### Console Exporter Example
 
-See the [examples/console](examples/console) directory for a complete working example that demonstrates:
+See the [examples/custom](examples/custom) directory for a complete working example that demonstrates:
 
-- Setting up a console exporter provider
+- Implementing a custom exporter provider
+- Registering the provider with the configuration registry
 - Loading configuration from a YAML file
 - Configuring a meter provider
 - Proper shutdown handling
@@ -125,8 +174,8 @@ See the [examples/console](examples/console) directory for a complete working ex
 To run the example:
 
 ```bash
-cd examples/console
-cargo run -- --file ../metrics_console.yaml
+cd examples/custom
+cargo run -- --file ../metrics_custom.yaml
 ```
 
 ## Configuration Schema
@@ -160,11 +209,11 @@ resource:
 
 To add support for a custom exporter:
 
-1. Define your exporter configuration model:
+1. Define your exporter configuration model (optional):
 
 ```rust
-#[derive(Debug, Deserialize)]
-pub struct MyCustomExporter {
+#[derive(Debug, serde::Deserialize)]
+pub struct MyCustomConfig {
     pub endpoint: String,
     pub timeout: Option<u64>,
 }
@@ -173,17 +222,24 @@ pub struct MyCustomExporter {
 2. Implement the provider trait:
 
 ```rust
-impl MetricsReaderPeriodicExporterProvider for MyCustomProvider {
+use opentelemetry_config::MetricsReaderPeriodicExporterProvider;
+use opentelemetry_sdk::metrics::MeterProviderBuilder;
+use serde_yaml::Value;
+
+struct MyCustomExporterProvider;
+
+impl MetricsReaderPeriodicExporterProvider for MyCustomExporterProvider {
     fn provide(
         &self,
         meter_provider_builder: MeterProviderBuilder,
-        config: &dyn std::any::Any,
+        config: &Value,
     ) -> MeterProviderBuilder {
-        let config = config.downcast_ref::<PeriodicExporterConsole>()
-            .expect("Invalid config type");
+        // Deserialize your custom config
+        let custom_config = serde_yaml::from_value::<MyCustomConfig>(config.clone())
+            .expect("Failed to deserialize custom config");
         
         // Build your exporter with the config
-        let exporter = MyExporter::new(config);
+        let exporter = MyExporter::new(&custom_config);
         meter_provider_builder.with_periodic_exporter(exporter)
     }
 
@@ -196,11 +252,47 @@ impl MetricsReaderPeriodicExporterProvider for MyCustomProvider {
 3. Register it with the ConfigurationProvidersRegistry:
 
 ```rust
+use opentelemetry_config::MetricsExporterId;
+
+let mut registry = ConfigurationProvidersRegistry::new();
+let key = MetricsExporterId::PeriodicExporter
+    .qualified_name("my-custom-exporter");
+
 registry
     .metrics_mut()
-    .register_periodic_exporter_provider::<PeriodicExporterConsole>(
-        Box::new(MyCustomProvider)
-    );
+    .register_periodic_exporter_provider(key, Box::new(MyCustomExporterProvider));
+```
+
+4. Use it in your YAML configuration:
+
+```yaml
+metrics:
+  readers:
+    - periodic:
+        exporter:
+          my-custom-exporter:
+            endpoint: "http://localhost:4318"
+            timeout: 5000
+```
+
+### Helper Method Pattern
+
+For cleaner registration, add a helper method to your provider:
+
+```rust
+impl MyCustomExporterProvider {
+    pub fn register_into(registry: &mut ConfigurationProvidersRegistry) {
+        let key = MetricsExporterId::PeriodicExporter
+            .qualified_name("my-custom-exporter");
+        registry
+            .metrics_mut()
+            .register_periodic_exporter_provider(key, Box::new(Self));
+    }
+}
+
+// Usage:
+let mut registry = ConfigurationProvidersRegistry::new();
+MyCustomExporterProvider::register_into(&mut registry);
 ```
 
 ## Current Limitations

@@ -48,28 +48,7 @@ impl<'de> Deserialize<'de> for Reader {
 #[derive(serde::Deserialize, Debug)]
 #[serde(deny_unknown_fields)]
 pub struct Periodic {
-    pub exporter: Option<PeriodicExporter>,
-}
-
-#[derive(serde::Deserialize, Debug)]
-#[serde(deny_unknown_fields)]
-pub struct PeriodicExporter {
-    pub console: Option<PeriodicExporterConsole>,
-    pub otlp: Option<PeriodicExporterOtlp>,
-}
-
-#[derive(serde::Deserialize, Debug)]
-#[serde(deny_unknown_fields)]
-pub struct PeriodicExporterConsole {
-    pub temporality: Option<Temporality>,
-}
-
-#[derive(serde::Deserialize, Debug)]
-#[serde(deny_unknown_fields)]
-pub struct PeriodicExporterOtlp {
-    pub protocol: Option<Protocol>,
-    pub endpoint: Option<String>,
-    pub temporality: Option<Temporality>,
+    pub exporter: serde_yaml::Value,
 }
 
 #[derive(serde::Deserialize, Debug)]
@@ -123,13 +102,13 @@ mod tests {
         let reader: Reader = serde_yaml::from_str(yaml_data).unwrap();
         match reader {
             Reader::Periodic(periodic) => {
-                assert!(periodic.exporter.is_some());
-                let exporter = periodic.exporter.unwrap();
-                assert!(exporter.console.is_some());
-                let console = exporter.console.unwrap();
-                match console.temporality {
-                    Some(Temporality::Cumulative) => {}
-                    _ => panic!("Expected Cumulative temporality"),
+                let exporter = periodic.exporter;
+                if let serde_yaml::Value::Mapping(exporter_map) = exporter {
+                    assert!(exporter_map
+                        .get(&serde_yaml::Value::String("console".to_string()))
+                        .is_some());
+                } else {
+                    panic!("Expected Mapping for exporter");
                 }
             }
             _ => panic!("Expected Periodic reader"),

@@ -54,8 +54,8 @@ resource:
 metrics:
   readers:
     - periodic:
-        exporter:
-          invalid_console: {}
+        exporter_invalid_field:
+          console: {}
 resource:
   service.name: "example-service"
   service.version: "1.0.0"
@@ -63,7 +63,9 @@ resource:
         let telemetry_result: Result<Telemetry, _> = serde_yaml::from_str(yaml_str);
 
         if let Err(e) = telemetry_result {
-            assert!(e.to_string().contains("unknown field `invalid_console`"));
+            assert!(e
+                .to_string()
+                .contains("unknown field `exporter_invalid_field`, expected `exporter`"));
         } else {
             panic!("Expected error due to invalid field, but got Ok");
         }
