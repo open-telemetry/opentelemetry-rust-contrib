@@ -40,7 +40,7 @@ const FIELD_STATUS_MESSAGE: &str = "statusMessage";
 
 /// Metadata fields that should appear as Bond schema fields (queryable in Geneva)
 #[derive(Clone, Debug)]
-pub struct MetadataFields {
+pub(crate) struct MetadataFields {
     pub env_name: String,
     pub env_ver: String,
     pub tenant: String,
