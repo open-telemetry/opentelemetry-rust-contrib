@@ -105,7 +105,7 @@ mod tests {
                 let exporter = periodic.exporter;
                 if let serde_yaml::Value::Mapping(exporter_map) = exporter {
                     assert!(exporter_map
-                        .get(&serde_yaml::Value::String("console".to_string()))
+                        .get(serde_yaml::Value::String("console".to_string()))
                         .is_some());
                 } else {
                     panic!("Expected Mapping for exporter");
