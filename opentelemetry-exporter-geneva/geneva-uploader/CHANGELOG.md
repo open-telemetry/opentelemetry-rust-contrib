@@ -1,6 +1,6 @@
 # Changelog
 
-## [Unreleased]
+## [0.4.0] - 2025-11-12
 
 ### Changed
 - Updated `azure_core` dependency from 0.27.0 to 0.29.0

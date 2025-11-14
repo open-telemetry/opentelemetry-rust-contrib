@@ -36,7 +36,7 @@ opentelemetry-user-events-logs = { path = "../opentelemetry-user-events-logs", f
 opentelemetry-etw-logs = { path = "../opentelemetry-etw-logs"}
 tracing = { version = "0.1", default-features = false, features = ["std"] }
 tracing-subscriber = { version = "0.3.0", default-features = false, features = ["env-filter","registry", "std"] }
-geneva-uploader = { version = "0.3.0", path = "../opentelemetry-exporter-geneva/geneva-uploader", features = ["mock_auth"]}
+geneva-uploader = { version = "0.4.0", path = "../opentelemetry-exporter-geneva/geneva-uploader", features = ["mock_auth"]}
 
 [features]
 stats = ["sysinfo"]
