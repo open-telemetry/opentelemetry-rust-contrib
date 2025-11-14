@@ -28,7 +28,8 @@ impl TelemetryProvider {
         }
     }
 
-    pub fn provide(
+    /// Configures the Telemetry providers based on the provided configuration
+    pub fn configure(
         &self,
         configuration_registry: &ConfigurationProvidersRegistry,
         config: &Telemetry,
@@ -38,7 +39,7 @@ impl TelemetryProvider {
         if let Some(metrics_config) = &config.metrics {
             let mut meter_provider_builder =
                 SdkMeterProvider::builder().with_resource(resource.clone());
-            meter_provider_builder = self.metrics_provider.provide(
+            meter_provider_builder = self.metrics_provider.configure(
                 configuration_registry.metrics(),
                 meter_provider_builder,
                 metrics_config,
@@ -52,7 +53,8 @@ impl TelemetryProvider {
         Ok(providers)
     }
 
-    pub fn provide_from_yaml(
+    /// Configures the Telemetry providers from a YAML string
+    pub fn configure_from_yaml(
         &self,
         configuration_registry: &ConfigurationProvidersRegistry,
         yaml_str: &str,
@@ -63,10 +65,11 @@ impl TelemetryProvider {
                 e
             ))
         })?;
-        self.provide(configuration_registry, &config)
+        self.configure(configuration_registry, &config)
     }
 
-    pub fn provide_from_yaml_file(
+    /// Configures the Telemetry providers from a YAML file
+    pub fn configure_from_yaml_file(
         &self,
         configuration_registry: &ConfigurationProvidersRegistry,
         file_path: &str,
@@ -77,7 +80,7 @@ impl TelemetryProvider {
                 e
             ))
         })?;
-        self.provide_from_yaml(configuration_registry, &yaml_str)
+        self.configure_from_yaml(configuration_registry, &yaml_str)
     }
 
     /// Converts resource attributes from HashMap to Resource
@@ -119,46 +122,55 @@ impl Default for TelemetryProvider {
 
 #[cfg(test)]
 mod tests {
-    use std::cell::Cell;
-
-    use opentelemetry_sdk::metrics::MeterProviderBuilder;
-    use serde_yaml::Value;
-
-    use crate::{MetricsExporterId, MetricsReaderPeriodicExporterProvider};
+    use crate::ConfigurationError;
+    use opentelemetry_sdk::{
+        error::OTelSdkResult,
+        metrics::{
+            data::ResourceMetrics, exporter::PushMetricExporter, MeterProviderBuilder, Temporality,
+        },
+    };
 
     use super::*;
 
-    struct MockMetricsReadersPeriodicExporterConsoleProvider {
-        call_count: Cell<u16>,
-    }
-
-    impl MockMetricsReadersPeriodicExporterConsoleProvider {
+    struct MockExporter {}
+    impl MockExporter {
         fn new() -> Self {
-            Self {
-                call_count: Cell::new(0),
-            }
-        }
-
-        pub fn get_call_count(&self) -> u16 {
-            self.call_count.get()
+            Self {}
         }
     }
 
-    impl MetricsReaderPeriodicExporterProvider for MockMetricsReadersPeriodicExporterConsoleProvider {
-        fn provide(
+    impl PushMetricExporter for MockExporter {
+        fn export(
             &self,
-            meter_provider_builder: MeterProviderBuilder,
-            config: &Value,
-        ) -> MeterProviderBuilder {
-            // Mock implementation: In a real scenario, configure the console exporter here
-            self.call_count.set(self.call_count.get() + 1);
-            println!("Mock configure called with config: {:?}", config);
-            meter_provider_builder
+            _metrics: &ResourceMetrics,
+        ) -> impl std::future::Future<Output = OTelSdkResult> + Send {
+            async move { Ok(()) }
         }
 
-        fn as_any(&self) -> &dyn std::any::Any {
-            self
+        fn force_flush(&self) -> OTelSdkResult {
+            Ok(())
         }
+
+        fn shutdown_with_timeout(&self, _timeout: std::time::Duration) -> OTelSdkResult {
+            Ok(())
+        }
+
+        fn temporality(&self) -> Temporality {
+            Temporality::Delta
+        }
+
+        fn shutdown(&self) -> OTelSdkResult {
+            self.shutdown_with_timeout(std::time::Duration::from_secs(5))
+        }
+    }
+
+    pub fn register_mock_exporter(
+        mut builder: MeterProviderBuilder,
+        _config: &serde_yaml::Value,
+    ) -> Result<MeterProviderBuilder, ConfigurationError> {
+        let exporter = MockExporter::new();
+        builder = builder.with_periodic_exporter(exporter);
+        Ok(builder)
     }
 
     #[test]
@@ -178,28 +190,17 @@ mod tests {
           development: true
         "#;
 
-        let provider = Box::new(MockMetricsReadersPeriodicExporterConsoleProvider::new());
-
         let mut configuration_registry = ConfigurationProvidersRegistry::new();
         let metrics_provider_manager = configuration_registry.metrics_mut();
-        let key = MetricsExporterId::PeriodicExporter.qualified_name("console");
-        metrics_provider_manager.register_periodic_exporter_provider(key.clone(), provider);
+        let name = "console";
+        metrics_provider_manager
+            .register_periodic_exporter_factory(name.to_string(), register_mock_exporter);
 
         let telemetry_provider = TelemetryProvider::new();
         let providers = telemetry_provider
-            .provide_from_yaml(&configuration_registry, yaml_str)
+            .configure_from_yaml(&configuration_registry, yaml_str)
             .unwrap();
         assert!(providers.meter_provider.is_some());
-
-        let provider = configuration_registry
-            .metrics()
-            .readers_periodic_exporter_provider(&key)
-            .unwrap();
-        let provider = provider
-            .as_any()
-            .downcast_ref::<MockMetricsReadersPeriodicExporterConsoleProvider>()
-            .unwrap();
-        assert_eq!(provider.get_call_count(), 1);
     }
 
     #[test]
@@ -211,7 +212,18 @@ mod tests {
             metrics: None,
         };
         let providers = telemetry_provider
-            .provide(&configuration_registry, &telemetry)
+            .configure(&configuration_registry, &telemetry)
+            .unwrap();
+        assert!(providers.meter_provider.is_none());
+    }
+
+    #[test]
+    fn test_telemetry_provider_default_empty_yaml() {
+        let telemetry_provider = TelemetryProvider::default();
+        let configuration_registry = ConfigurationProvidersRegistry::default();
+        let telemetry: Telemetry = serde_yaml::from_str("").unwrap();
+        let providers = telemetry_provider
+            .configure(&configuration_registry, &telemetry)
             .unwrap();
         assert!(providers.meter_provider.is_none());
     }

@@ -6,9 +6,7 @@
 use opentelemetry_sdk::metrics::MeterProviderBuilder;
 use serde_yaml::Value;
 
-use crate::{
-    model::metrics::reader::Reader, MetricsExporterId, MetricsProvidersRegistry, ProviderError,
-};
+use crate::{model::metrics::reader::Reader, MetricsProvidersRegistry, ProviderError};
 
 /// Provider for Metrics readers
 pub struct ReaderProvider {
@@ -21,8 +19,8 @@ impl ReaderProvider {
             periodic_reader_provider: PeriodicReaderProvider::default(),
         }
     }
-    /// Provisions a metrics reader based on the provided configuration
-    pub fn provide(
+    /// Configures a metrics reader based on the provided configuration
+    pub fn configure(
         &self,
         metrics_registry: &MetricsProvidersRegistry,
         mut meter_provider_builder: MeterProviderBuilder,
@@ -30,7 +28,7 @@ impl ReaderProvider {
     ) -> Result<MeterProviderBuilder, ProviderError> {
         match config {
             crate::model::metrics::reader::Reader::Periodic(periodic_config) => {
-                meter_provider_builder = self.periodic_reader_provider.provide(
+                meter_provider_builder = self.periodic_reader_provider.configure(
                     metrics_registry,
                     meter_provider_builder,
                     periodic_config,
@@ -63,14 +61,14 @@ impl PeriodicReaderProvider {
         }
     }
 
-    /// Provisions a periodic metrics reader based on the provided configuration
-    pub fn provide(
+    /// Configures a periodic metrics reader based on the provided configuration
+    pub fn configure(
         &self,
         metrics_registry: &MetricsProvidersRegistry,
         mut meter_provider_builder: opentelemetry_sdk::metrics::MeterProviderBuilder,
         config: &crate::model::metrics::reader::Periodic,
     ) -> Result<opentelemetry_sdk::metrics::MeterProviderBuilder, ProviderError> {
-        meter_provider_builder = self.periodic_exporter_provider.provide(
+        meter_provider_builder = self.periodic_exporter_provider.configure(
             metrics_registry,
             meter_provider_builder,
             &config.exporter,
@@ -94,12 +92,8 @@ impl PeriodicExporterProvider {
         PeriodicExporterProvider {}
     }
 
-    fn registry_key(&self, exporter_name: &str) -> String {
-        MetricsExporterId::PeriodicExporter.qualified_name(exporter_name)
-    }
-
     /// Configures a periodic metrics exporter based on the provided configuration
-    pub fn provide(
+    pub fn configure(
         &self,
         metrics_registry: &MetricsProvidersRegistry,
         mut meter_provider_builder: opentelemetry_sdk::metrics::MeterProviderBuilder,
@@ -110,20 +104,34 @@ impl PeriodicExporterProvider {
                 for key in exporter_map.keys() {
                     match key {
                         Value::String(exporter_name) => {
-                            let registry_key = self.registry_key(exporter_name);
-                            let exporter_provider_option =
-                                metrics_registry.readers_periodic_exporter_provider(&registry_key);
-                            match exporter_provider_option {
-                                Some(provider) => {
+                            let exporter_factory_option =
+                                metrics_registry.periodic_exporter_factory(&exporter_name);
+                            match exporter_factory_option {
+                                Some(factory_function) => {
                                     let config =
                                         &exporter_map[&Value::String(exporter_name.clone())];
-                                    meter_provider_builder =
-                                        provider.provide(meter_provider_builder, config);
+                                    let meter_provider_builder_result =
+                                        factory_function(meter_provider_builder, config);
+                                    meter_provider_builder = match meter_provider_builder_result {
+                                        Ok(builder) => builder,
+                                        Err(e) => match e {
+                                            crate::ConfigurationError::InvalidConfiguration(
+                                                msg,
+                                            ) => {
+                                                return Err(ProviderError::InvalidConfiguration(
+                                                    msg,
+                                                ));
+                                            }
+                                            crate::ConfigurationError::RegistrationError(msg) => {
+                                                return Err(ProviderError::RegistrationError(msg));
+                                            }
+                                        },
+                                    };
                                 }
                                 None => {
                                     return Err(ProviderError::NotRegisteredProvider(format!(
-                                        "No provider found for periodic exporter: {}. Make sure it is registered as provider.",
-                                        registry_key
+                                        "No provider found for periodic exporter '{}'. Make sure it is registered with its factory.",
+                                        exporter_name
                                     )));
                                 }
                             }
@@ -223,49 +231,25 @@ impl Default for PullExporterProvider {
 #[cfg(test)]
 mod tests {
 
+    use super::*;
+    use crate::{model::metrics::reader::PullExporter, ConfigurationError};
     use opentelemetry_sdk::metrics::SdkMeterProvider;
 
-    use crate::{model::metrics::reader::PullExporter, MetricsReaderPeriodicExporterProvider};
-
-    use super::*;
-
-    struct MockMetricsReadersPeriodicExporterConsoleProvider {}
-
-    impl MockMetricsReadersPeriodicExporterConsoleProvider {
-        fn new() -> Self {
-            MockMetricsReadersPeriodicExporterConsoleProvider {}
-        }
-
-        fn register_into(registry: &mut crate::ConfigurationProvidersRegistry) {
-            let key = MetricsExporterId::PeriodicExporter.qualified_name("console");
-            registry
-                .metrics_mut()
-                .register_periodic_exporter_provider(key, Box::new(Self::new()));
-        }
-    }
-
-    impl MetricsReaderPeriodicExporterProvider for MockMetricsReadersPeriodicExporterConsoleProvider {
-        fn provide(
-            &self,
-            meter_provider_builder: opentelemetry_sdk::metrics::MeterProviderBuilder,
-            _config: &Value,
-        ) -> opentelemetry_sdk::metrics::MeterProviderBuilder {
-            // Mock implementation: just return the builder as is
-            meter_provider_builder
-        }
-
-        fn as_any(&self) -> &dyn std::any::Any {
-            todo!()
-        }
+    pub fn register_mock_exporter(
+        builder: MeterProviderBuilder,
+        _config: &serde_yaml::Value,
+    ) -> Result<MeterProviderBuilder, ConfigurationError> {
+        // Mock implementation: just return the builder as is
+        Ok(builder)
     }
 
     #[test]
     fn test_reader_provider_configure() {
         let provider = ReaderProvider::default();
         let mut configuration_registry = crate::ConfigurationProvidersRegistry::new();
-        MockMetricsReadersPeriodicExporterConsoleProvider::register_into(
-            &mut configuration_registry,
-        );
+        configuration_registry
+            .metrics_mut()
+            .register_periodic_exporter_factory("console".to_string(), register_mock_exporter);
         let meter_provider_builder = SdkMeterProvider::builder();
 
         let console_object = serde_yaml::from_str(
@@ -284,12 +268,12 @@ mod tests {
         let metrics_registry = configuration_registry.metrics();
 
         _ = provider
-            .provide(metrics_registry, meter_provider_builder, &config)
+            .configure(metrics_registry, meter_provider_builder, &config)
             .unwrap();
     }
 
     #[test]
-    fn test_reader_provider_provide_console_provider_not_registered() {
+    fn test_reader_provider_configure_console_factory_not_registered() {
         let provider = ReaderProvider::default();
         let metrics_registry = MetricsProvidersRegistry::new();
         let meter_provider_builder = SdkMeterProvider::builder();
@@ -308,18 +292,19 @@ mod tests {
             },
         );
 
-        let result = provider.provide(&metrics_registry, meter_provider_builder, &config);
+        let result = provider.configure(&metrics_registry, meter_provider_builder, &config);
         if let Err(e) = result {
-            assert!(e.to_string().contains(
-                "No provider found for periodic exporter: readers::periodic::exporter::console"
-            ));
+            println!("Error: {}", e);
+            assert!(e
+                .to_string()
+                .contains("No provider found for periodic exporter 'console'"));
         } else {
             panic!("Expected error due to missing provider, but got Ok");
         }
     }
 
     #[test]
-    fn test_reader_provider_provide_otlp_provider_not_registered() {
+    fn test_reader_provider_provide_otlp_factory_not_registered() {
         let provider = ReaderProvider::new();
         let metrics_registry = MetricsProvidersRegistry::new();
         let meter_provider_builder = SdkMeterProvider::builder();
@@ -338,11 +323,11 @@ mod tests {
             },
         );
 
-        let result = provider.provide(&metrics_registry, meter_provider_builder, &config);
+        let result = provider.configure(&metrics_registry, meter_provider_builder, &config);
         if let Err(e) = result {
-            assert!(e.to_string().contains(
-                "No provider found for periodic exporter: readers::periodic::exporter::otlp"
-            ));
+            assert!(e
+                .to_string()
+                .contains("No provider found for periodic exporter 'otlp'"));
         } else {
             panic!("Expected error due to missing provider, but got Ok");
         }

@@ -32,15 +32,15 @@ mod tests {
     #[test]
     fn test_deserialize_telemetry() {
         let yaml_str = r#"
-metrics:
-  readers:
-    - periodic:
-        exporter:
-          console: {}
-resource:
-  service.name: "example-service"
-  service.version: "1.0.0"
-"#;
+          metrics:
+            readers:
+              - periodic:
+                  exporter:
+                    console: {}
+          resource:
+            service.name: "example-service"
+            service.version: "1.0.0"
+        "#;
         let telemetry: Telemetry = serde_yaml::from_str(yaml_str).unwrap();
         assert!(telemetry.metrics.is_some());
         let resource = telemetry.resource;
@@ -51,15 +51,15 @@ resource:
     #[test]
     fn test_deserialize_invalid_telemetry() {
         let yaml_str = r#"
-metrics:
-  readers:
-    - periodic:
-        exporter_invalid_field:
-          console: {}
-resource:
-  service.name: "example-service"
-  service.version: "1.0.0"
-"#;
+          metrics:
+            readers:
+              - periodic:
+                  exporter_invalid_field:
+                    console: {}
+          resource:
+            service.name: "example-service"
+            service.version: "1.0.0"
+          "#;
         let telemetry_result: Result<Telemetry, _> = serde_yaml::from_str(yaml_str);
 
         if let Err(e) = telemetry_result {

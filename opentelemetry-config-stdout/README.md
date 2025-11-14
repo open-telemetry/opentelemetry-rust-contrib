@@ -50,13 +50,16 @@ resource:
 ### 2. Load and Apply Configuration
 
 ```rust
-use opentelemetry_config::{ConfigurationProvidersRegistry, TelemetryProvider};
-use opentelemetry_config_stdout::ConsolePeriodicExporterProvider;
+use opentelemetry_config::{ConfigurationProvidersRegistry, providers::TelemetryProvider};
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
-    // Create configuration registry and register stdout exporter
+    // Create configuration registry and register console exporter
     let mut registry = ConfigurationProvidersRegistry::new();
-    ConsolePeriodicExporterRegistry::register_into(&mut registry);
+    let metrics_registry = registry.metrics_mut();
+    metrics_registry.register_periodic_exporter_factory(
+        "console".to_string(),
+        opentelemetry_config_stdout::register_console_exporter
+    );
 
     // Load configuration from YAML file
     let telemetry_provider = TelemetryProvider::new();
@@ -67,7 +70,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     if let Some(meter_provider) = providers.meter_provider() {
         // Your application code here
 
-        // Shutdown the created meter provider.
+        // Shutdown the created meter provider when done.
         meter_provider.shutdown()?;
     }
 
@@ -81,7 +84,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
 See the [examples/console](examples/console) directory for a complete working example that demonstrates:
 
-- Setting up a console exporter provider
+- Setting up a console exporter factory
 - Loading configuration from a YAML file
 - Configuring a meter provider
 - Proper shutdown handling
@@ -106,6 +109,12 @@ metrics:
             temporality: delta  # or cumulative
 ```
 
+#### Configuration Options
+
+- **`temporality`** (optional): Controls how metrics are aggregated
+  - `delta`: Reports the change since the last export (useful for rate-based metrics like requests per second)
+  - `cumulative`: Reports the total accumulated value since the start (default, useful for gauges and cumulative counters)
+
 ## Contributing
 
 Contributions are welcome! Please feel free to submit issues or pull requests.
@@ -116,4 +125,4 @@ This project is licensed under the Apache-2.0 license.
 
 ## Release Notes
 
-You can find the release notes (changelog) [here](https://github.com/open-telemetry/opentelemetry-rust-contrib/tree/main/opentelemetry-config-stdout/CHANGELOG.md).
+You can find the release notes (changelog) [here](CHANGELOG.md).

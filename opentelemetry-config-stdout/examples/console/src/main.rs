@@ -4,7 +4,6 @@
 //! using the OpenTelemetry Config crate with a Console Exporter.
 
 use opentelemetry_config::{providers::TelemetryProvider, ConfigurationProvidersRegistry};
-use opentelemetry_config_stdout::ConsolePeriodicExporterProvider;
 
 use std::env;
 
@@ -25,11 +24,15 @@ pub fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     // Setup configuration registry with console exporter provider.
     let mut configuration_providers_registry = ConfigurationProvidersRegistry::new();
-    ConsolePeriodicExporterProvider::register_into(&mut configuration_providers_registry);
+    let metrics_registry = configuration_providers_registry.metrics_mut();
+    metrics_registry.register_periodic_exporter_factory(
+        "console".to_string(),
+        opentelemetry_config_stdout::register_console_exporter,
+    );
 
     let telemetry_provider = TelemetryProvider::new();
     let providers = telemetry_provider
-        .provide_from_yaml_file(&configuration_providers_registry, config_file)?;
+        .configure_from_yaml_file(&configuration_providers_registry, config_file)?;
 
     if let Some(meter_provider) = providers.meter_provider() {
         println!("Meter provider is configured. Shutting it down...");

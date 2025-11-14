@@ -6,7 +6,7 @@
 
 use std::{
     collections::HashMap,
-    error,
+    error::{self, Error},
     fmt::{self, Display},
 };
 
@@ -49,35 +49,31 @@ impl Default for ConfigurationProvidersRegistry {
 
 /// Registry for metrics configuration providers.
 pub struct MetricsProvidersRegistry {
-    readers_periodic_exporters_providers:
-        HashMap<String, Box<dyn MetricsReaderPeriodicExporterProvider>>,
+    periodic_exporter_factories: HashMap<String, Box<MetricConfigFactory>>,
+    // TODO: Add other types of providers registries.
 }
 
 impl MetricsProvidersRegistry {
     pub fn new() -> Self {
         Self {
-            readers_periodic_exporters_providers: HashMap::new(),
+            periodic_exporter_factories: HashMap::new(),
         }
     }
 
-    pub fn register_periodic_exporter_provider(
+    pub fn register_periodic_exporter_factory(
         &mut self,
-        key: String,
-        provider: Box<dyn MetricsReaderPeriodicExporterProvider>,
+        name: String,
+        factory: impl Fn(MeterProviderBuilder, &Value) -> Result<MeterProviderBuilder, ConfigurationError>
+            + Send
+            + Sync
+            + 'static,
     ) {
-        self.readers_periodic_exporters_providers.insert(
-            key,
-            provider as Box<dyn MetricsReaderPeriodicExporterProvider>,
-        );
+        self.periodic_exporter_factories
+            .insert(name, Box::new(factory));
     }
 
-    pub fn readers_periodic_exporter_provider(
-        &self,
-        exporter_id: &str,
-    ) -> Option<&dyn MetricsReaderPeriodicExporterProvider> {
-        self.readers_periodic_exporters_providers
-            .get(exporter_id)
-            .map(|b| b.as_ref())
+    pub fn periodic_exporter_factory(&self, name: &str) -> Option<&Box<MetricConfigFactory>> {
+        self.periodic_exporter_factories.get(name)
     }
 }
 
@@ -87,29 +83,35 @@ impl Default for MetricsProvidersRegistry {
     }
 }
 
-/// Enum representing different metrics exporter identifiers.
-pub enum MetricsExporterId {
-    PeriodicExporter,
+/// Errors reported by the component factory.
+#[derive(Debug)]
+pub enum ConfigurationError {
+    /// Indicates an invalid configuration was provided.
+    InvalidConfiguration(String),
+
+    /// Indicates an error occurred while registering a component.
+    RegistrationError(String),
 }
 
-impl MetricsExporterId {
-    pub fn qualified_name(self, exporter_name: &str) -> String {
+impl Error for ConfigurationError {}
+
+impl fmt::Display for ConfigurationError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            Self::PeriodicExporter => format!("readers::periodic::exporter::{}", exporter_name),
+            ConfigurationError::InvalidConfiguration(details) => {
+                write!(f, "Invalid configuration: {}", details)
+            }
+            ConfigurationError::RegistrationError(details) => {
+                write!(f, "Registration error: {}", details)
+            }
         }
     }
 }
 
-/// Trait for providing metrics reader periodic exporter configurations.
-pub trait MetricsReaderPeriodicExporterProvider {
-    fn provide(
-        &self,
-        meter_provider_builder: MeterProviderBuilder,
-        config: &Value,
-    ) -> MeterProviderBuilder;
-
-    fn as_any(&self) -> &dyn std::any::Any;
-}
+/// Type alias for metric configuration factory functions
+pub type MetricConfigFactory = dyn Fn(MeterProviderBuilder, &Value) -> Result<MeterProviderBuilder, ConfigurationError>
+    + Send
+    + Sync;
 
 /// Holds the configured telemetry providers
 pub struct TelemetryProviders {
@@ -167,6 +169,7 @@ pub enum ProviderError {
     InvalidConfiguration(String),
     UnsupportedExporter(String),
     NotRegisteredProvider(String),
+    RegistrationError(String),
 }
 
 impl error::Error for ProviderError {}
@@ -183,64 +186,82 @@ impl Display for ProviderError {
             ProviderError::NotRegisteredProvider(details) => {
                 write!(f, "Not registered provider: {}", details)
             }
+            ProviderError::RegistrationError(details) => {
+                write!(f, "Registration error: {}", details)
+            }
         }
     }
 }
 
 #[cfg(test)]
 mod tests {
-    use std::cell::Cell;
+    use std::sync::{atomic::AtomicI16, Arc};
+
+    use opentelemetry_sdk::{
+        error::OTelSdkResult,
+        metrics::{data::ResourceMetrics, exporter::PushMetricExporter},
+    };
 
     use super::*;
 
     #[test]
     fn test_register_periodic_exporter_provider() {
         // Arrange
-        struct MockPeriodicExporterProvider {
-            call_count: Cell<i16>,
-        }
+        struct MockPeriodicExporter {}
 
-        impl MockPeriodicExporterProvider {
-            fn new() -> Self {
-                Self {
-                    call_count: Cell::new(0),
-                }
+        impl PushMetricExporter for MockPeriodicExporter {
+            async fn export(&self, _metrics: &ResourceMetrics) -> OTelSdkResult {
+                Ok(())
             }
 
-            pub fn get_call_count(&self) -> i16 {
-                self.call_count.get()
-            }
-        }
-
-        impl MetricsReaderPeriodicExporterProvider for MockPeriodicExporterProvider {
-            fn provide(
-                &self,
-                meter_provider_builder: MeterProviderBuilder,
-                _config: &Value,
-            ) -> MeterProviderBuilder {
-                self.call_count.set(self.call_count.get() + 1);
-                meter_provider_builder
+            fn force_flush(&self) -> OTelSdkResult {
+                Ok(())
             }
 
-            fn as_any(&self) -> &dyn std::any::Any {
-                self
+            fn shutdown_with_timeout(&self, _timeout: std::time::Duration) -> OTelSdkResult {
+                Ok(())
+            }
+
+            fn shutdown(&self) -> OTelSdkResult {
+                Ok(())
+            }
+
+            fn temporality(&self) -> opentelemetry_sdk::metrics::Temporality {
+                opentelemetry_sdk::metrics::Temporality::Cumulative
             }
         }
 
-        let mock_provider = Box::new(MockPeriodicExporterProvider::new());
+        let call_count = Arc::new(AtomicI16::new(0));
+        let call_count_clone = Arc::clone(&call_count);
+
+        // Wrapper clousure to capture call_count_clone
+        let register_mock_exporter_clousure =
+            move |builder: MeterProviderBuilder, _config: &serde_yaml::Value| {
+                call_count_clone.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+                register_mock_exporter(builder, _config)
+            };
+
+        pub fn register_mock_exporter(
+            mut builder: MeterProviderBuilder,
+            _config: &serde_yaml::Value,
+        ) -> Result<MeterProviderBuilder, ConfigurationError> {
+            builder = builder.with_periodic_exporter(MockPeriodicExporter {});
+            Ok(builder)
+        }
+
         let mut registry = ConfigurationProvidersRegistry::new();
 
         // Act
-        let key = MetricsExporterId::PeriodicExporter.qualified_name("console");
+        let name = "console";
         registry
             .metrics_mut()
-            .register_periodic_exporter_provider(key.clone(), mock_provider);
+            .register_periodic_exporter_factory(name.to_string(), register_mock_exporter_clousure);
 
         // Assert
         assert!(registry
             .metrics()
-            .readers_periodic_exporters_providers
-            .contains_key(key.as_str()));
+            .periodic_exporter_factories
+            .contains_key(name));
 
         let console_config = serde_yaml::to_value(
             r#"
@@ -250,14 +271,12 @@ mod tests {
         )
         .unwrap();
 
-        let provider_option = registry.metrics().readers_periodic_exporter_provider(&key);
-        if let Some(provider) = provider_option {
-            provider.provide(MeterProviderBuilder::default(), &console_config);
-            let provider_cast = provider
-                .as_any()
-                .downcast_ref::<MockPeriodicExporterProvider>()
-                .unwrap();
-            assert_eq!(provider_cast.get_call_count(), 1);
+        let factory_function_option = registry.metrics().periodic_exporter_factory(&name);
+        if let Some(factory_function) = factory_function_option {
+            let builder = MeterProviderBuilder::default();
+            _ = factory_function(builder, &console_config).unwrap();
+            // Verify that the factory function was called
+            assert_eq!(call_count.load(std::sync::atomic::Ordering::SeqCst), 1);
         } else {
             panic!("Provider not found");
         }
@@ -268,15 +287,15 @@ mod tests {
         let provider_manager = ConfigurationProvidersRegistry::default();
         assert!(provider_manager
             .metrics()
-            .readers_periodic_exporters_providers
+            .periodic_exporter_factories
             .is_empty());
     }
 
     #[test]
-    fn test_metrics_provider_manager_default() {
-        let metrics_provider_manager = MetricsProvidersRegistry::default();
-        assert!(metrics_provider_manager
-            .readers_periodic_exporters_providers
+    fn test_metrics_provider_registry_default() {
+        let metrics_provider_registry = MetricsProvidersRegistry::default();
+        assert!(metrics_provider_registry
+            .periodic_exporter_factories
             .is_empty());
     }
 
@@ -294,11 +313,10 @@ mod tests {
         let traces_provider = SdkTracerProvider::builder().build();
         let logs_provider = SdkLoggerProvider::builder().build();
 
-        let telemetry_providers = TelemetryProviders {
-            meter_provider: Some(meter_provider),
-            traces_provider: Some(traces_provider),
-            logs_provider: Some(logs_provider),
-        };
+        let telemetry_providers = TelemetryProviders::new()
+            .with_logs_provider(logs_provider)
+            .with_traces_provider(traces_provider)
+            .with_meter_provider(meter_provider);
 
         assert!(telemetry_providers.meter_provider().is_some());
         assert!(telemetry_providers.traces_provider().is_some());

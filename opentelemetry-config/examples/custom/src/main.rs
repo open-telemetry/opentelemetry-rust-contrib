@@ -5,14 +5,12 @@
 //! It is helpful to implement and test custom exporters.
 
 use opentelemetry_config::{
-    providers::TelemetryProvider, ConfigurationProvidersRegistry, MetricsExporterId,
-    MetricsReaderPeriodicExporterProvider,
+    providers::TelemetryProvider, ConfigurationError, ConfigurationProvidersRegistry,
 };
 use opentelemetry_sdk::{
     error::OTelSdkResult,
     metrics::{data::ResourceMetrics, exporter::PushMetricExporter, MeterProviderBuilder},
 };
-use serde_yaml::Value;
 use std::env;
 use std::time::Duration;
 
@@ -35,11 +33,15 @@ pub fn main() -> Result<(), Box<dyn std::error::Error>> {
     let mut registry = ConfigurationProvidersRegistry::new();
 
     // Register the custom exporter provider.
-    MockPeriodicExporterProvider::register_into(&mut registry);
+    registry.metrics_mut().register_periodic_exporter_factory(
+        "custom".to_string(),
+        MockPeriodicExporterProvider::register_mock_exporter,
+    );
 
+    // Configure telemetry from the provided YAML file.
     let telemetry_provider = TelemetryProvider::new();
     let providers = telemetry_provider
-        .provide_from_yaml_file(&registry, config_file)
+        .configure_from_yaml_file(&registry, config_file)
         .unwrap();
 
     if let Some(meter_provider) = providers.meter_provider() {
@@ -69,16 +71,34 @@ pub fn main() -> Result<(), Box<dyn std::error::Error>> {
 pub struct MockPeriodicExporterProvider {}
 
 impl MockPeriodicExporterProvider {
-    fn new() -> Self {
-        Self {}
-    }
+    pub fn register_mock_exporter(
+        mut meter_provider_builder: MeterProviderBuilder,
+        config: &serde_yaml::Value,
+    ) -> Result<MeterProviderBuilder, ConfigurationError> {
+        let mut exporter = MockCustomExporter::new();
 
-    pub fn register_into(registry: &mut ConfigurationProvidersRegistry) {
-        let key = MetricsExporterId::PeriodicExporter.qualified_name("custom");
-        registry
-            .metrics_mut()
-            .register_periodic_exporter_provider(key, Box::new(Self::new()));
+        let config = serde_yaml::from_value::<MockCustomConfig>(config.clone()).map_err(|e| {
+            ConfigurationError::InvalidConfiguration(format!(
+                "Failed to parse MockCustomConfig: {}",
+                e
+            ))
+        })?;
+        println!(
+            "Configuring MockCustomExporter with string field: {} and int field: {}",
+            config.custom_string_field, config.custom_int_field
+        );
+
+        exporter.set_custom_config(config);
+
+        meter_provider_builder = meter_provider_builder.with_periodic_exporter(exporter);
+        Ok(meter_provider_builder)
     }
+}
+
+#[derive(serde::Deserialize, Debug)]
+pub struct MockCustomConfig {
+    pub custom_string_field: String,
+    pub custom_int_field: i32,
 }
 
 pub struct MockCustomExporter {
@@ -125,37 +145,5 @@ impl PushMetricExporter for MockCustomExporter {
 
     fn temporality(&self) -> opentelemetry_sdk::metrics::Temporality {
         opentelemetry_sdk::metrics::Temporality::Cumulative
-    }
-}
-
-#[derive(serde::Deserialize, Debug)]
-pub struct MockCustomConfig {
-    pub custom_string_field: String,
-    pub custom_int_field: i32,
-}
-
-impl MetricsReaderPeriodicExporterProvider for MockPeriodicExporterProvider {
-    fn provide(
-        &self,
-        mut meter_provider_builder: MeterProviderBuilder,
-        config: &Value,
-    ) -> MeterProviderBuilder {
-        let mut exporter = MockCustomExporter::new();
-
-        let config = serde_yaml::from_value::<MockCustomConfig>(config.clone())
-            .expect("Failed to deserialize MockCustomConfig");
-        println!(
-            "Configuring MockCustomExporter with string field: {} and int field: {}",
-            config.custom_string_field, config.custom_int_field
-        );
-
-        exporter.set_custom_config(config);
-
-        meter_provider_builder = meter_provider_builder.with_periodic_exporter(exporter);
-        meter_provider_builder
-    }
-
-    fn as_any(&self) -> &dyn std::any::Any {
-        self
     }
 }
