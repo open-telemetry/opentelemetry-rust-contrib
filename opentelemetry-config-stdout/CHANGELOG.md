@@ -6,4 +6,4 @@
 
 ### Added
 
-- Initial declarative configuration for stdout (console)
+- Initial declarative configuration for stdout (console) exporter for metrics.
