@@ -10,74 +10,80 @@ use std::{
     fmt::{self, Display},
 };
 
-use opentelemetry_sdk::{
-    logs::SdkLoggerProvider,
-    metrics::{MeterProviderBuilder, SdkMeterProvider},
-    trace::SdkTracerProvider,
-};
-use serde_yaml::Value;
+use opentelemetry_sdk::metrics::MeterProviderBuilder;
 
 pub mod model;
 pub mod providers;
 
 /// Registry for different configuration providers.
-pub struct ConfigurationProvidersRegistry {
-    metrics: MetricsProvidersRegistry,
+pub struct ConfigurationProviderRegistry {
+    metrics: MeterProviderRegistry,
+    // TODO: Add logs and traces providers registries.
 }
 
-impl ConfigurationProvidersRegistry {
+impl ConfigurationProviderRegistry {
     pub fn new() -> Self {
         Self {
-            metrics: MetricsProvidersRegistry::new(),
+            metrics: MeterProviderRegistry::new(),
         }
     }
 
-    pub fn metrics_mut(&mut self) -> &mut MetricsProvidersRegistry {
+    pub fn metrics_mut(&mut self) -> &mut MeterProviderRegistry {
         &mut self.metrics
-    }
-
-    pub fn metrics(&self) -> &MetricsProvidersRegistry {
-        &self.metrics
     }
 }
 
-impl Default for ConfigurationProvidersRegistry {
+impl Default for ConfigurationProviderRegistry {
     fn default() -> Self {
         Self::new()
     }
 }
 
 /// Registry for metrics configuration providers.
-pub struct MetricsProvidersRegistry {
-    periodic_exporter_factories: HashMap<String, Box<MetricConfigFactory>>,
+pub struct MeterProviderRegistry {
+    periodic_reader_factories: HashMap<&'static str, Box<MetricPeriodicReaderFactory>>,
     // TODO: Add other types of providers registries.
 }
 
-impl MetricsProvidersRegistry {
+impl MeterProviderRegistry {
+    /// Creates a new `MeterProviderRegistry`.
     pub fn new() -> Self {
         Self {
-            periodic_exporter_factories: HashMap::new(),
+            periodic_reader_factories: HashMap::new(),
         }
     }
 
-    pub fn register_periodic_exporter_factory(
+    /// Registers a new periodic reader factory with the given name.
+    pub fn register_periodic_reader_factory(
         &mut self,
-        name: String,
-        factory: impl Fn(MeterProviderBuilder, &Value) -> Result<MeterProviderBuilder, ConfigurationError>
-            + Send
-            + Sync
+        name: &'static str,
+        factory: impl Fn(
+                MeterProviderBuilder,
+                &crate::model::metrics::reader::Periodic,
+            ) -> Result<MeterProviderBuilder, ConfigurationError>
             + 'static,
     ) {
-        self.periodic_exporter_factories
+        self.periodic_reader_factories
             .insert(name, Box::new(factory));
     }
 
-    pub fn periodic_exporter_factory(&self, name: &str) -> Option<&Box<MetricConfigFactory>> {
-        self.periodic_exporter_factories.get(name)
+    /// Retrieves a periodic reader factory by name.
+    pub(crate) fn periodic_reader_factory(
+        &self,
+        name: &str,
+    ) -> Option<&MetricPeriodicReaderFactory> {
+        self.periodic_reader_factories
+            .get(name)
+            .map(|boxed_factory| boxed_factory.as_ref())
+    }
+
+    /// Checks if a periodic reader factory is registered with the given name.
+    pub fn has_periodic_reader_factory(&self, name: &str) -> bool {
+        self.periodic_reader_factories.contains_key(name)
     }
 }
 
-impl Default for MetricsProvidersRegistry {
+impl Default for MeterProviderRegistry {
     fn default() -> Self {
         Self::new()
     }
@@ -108,60 +114,11 @@ impl fmt::Display for ConfigurationError {
     }
 }
 
-/// Type alias for metric configuration factory functions
-pub type MetricConfigFactory = dyn Fn(MeterProviderBuilder, &Value) -> Result<MeterProviderBuilder, ConfigurationError>
-    + Send
-    + Sync;
-
-/// Holds the configured telemetry providers
-pub struct TelemetryProviders {
-    meter_provider: Option<SdkMeterProvider>,
-    traces_provider: Option<SdkTracerProvider>,
-    logs_provider: Option<SdkLoggerProvider>,
-}
-
-impl TelemetryProviders {
-    pub fn new() -> Self {
-        TelemetryProviders {
-            meter_provider: None,
-            traces_provider: None,
-            logs_provider: None,
-        }
-    }
-
-    pub fn with_meter_provider(mut self, meter_provider: SdkMeterProvider) -> Self {
-        self.meter_provider = Some(meter_provider);
-        self
-    }
-
-    pub fn with_traces_provider(mut self, traces_provider: SdkTracerProvider) -> Self {
-        self.traces_provider = Some(traces_provider);
-        self
-    }
-    pub fn with_logs_provider(mut self, logs_provider: SdkLoggerProvider) -> Self {
-        self.logs_provider = Some(logs_provider);
-        self
-    }
-
-    pub fn meter_provider(&self) -> Option<&SdkMeterProvider> {
-        self.meter_provider.as_ref()
-    }
-
-    pub fn traces_provider(&self) -> Option<&SdkTracerProvider> {
-        self.traces_provider.as_ref()
-    }
-
-    pub fn logs_provider(&self) -> Option<&SdkLoggerProvider> {
-        self.logs_provider.as_ref()
-    }
-}
-
-/// Default implementation for TelemetryProviders
-impl Default for TelemetryProviders {
-    fn default() -> Self {
-        Self::new()
-    }
-}
+/// Type alias for metric periodic reader factory functions
+type MetricPeriodicReaderFactory = dyn Fn(
+    MeterProviderBuilder,
+    &crate::model::metrics::reader::Periodic,
+) -> Result<MeterProviderBuilder, ConfigurationError>;
 
 /// Errors related to providers and configuration management.
 #[derive(Debug)]
@@ -195,19 +152,29 @@ impl Display for ProviderError {
 
 #[cfg(test)]
 mod tests {
-    use std::sync::{atomic::AtomicI16, Arc};
+    use std::{cell::Cell, rc::Rc};
 
     use opentelemetry_sdk::{
         error::OTelSdkResult,
-        metrics::{data::ResourceMetrics, exporter::PushMetricExporter},
+        metrics::{data::ResourceMetrics, exporter::PushMetricExporter, PeriodicReader},
     };
+
+    use crate::model::metrics::reader::Periodic;
 
     use super::*;
 
     #[test]
-    fn test_register_periodic_exporter_provider() {
+    fn test_register_periodic_reader_factory() {
         // Arrange
-        struct MockPeriodicExporter {}
+        #[derive(serde::Deserialize, Debug)]
+        pub struct MockPeriodicExporter {
+            pub console: Option<MockConsoleConfig>,
+        }
+
+        #[derive(serde::Deserialize, Debug)]
+        pub struct MockConsoleConfig {
+            pub temporality: Option<String>,
+        }
 
         impl PushMetricExporter for MockPeriodicExporter {
             async fn export(&self, _metrics: &ResourceMetrics) -> OTelSdkResult {
@@ -231,52 +198,70 @@ mod tests {
             }
         }
 
-        let call_count = Arc::new(AtomicI16::new(0));
-        let call_count_clone = Arc::clone(&call_count);
+        let call_count = Rc::new(Cell::new(0));
+        let call_count_clone = Rc::clone(&call_count);
 
         // Wrapper clousure to capture call_count_clone
-        let register_mock_exporter_clousure =
-            move |builder: MeterProviderBuilder, _config: &serde_yaml::Value| {
-                call_count_clone.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
-                register_mock_exporter(builder, _config)
+        let register_mock_reader_clousure =
+            move |builder: MeterProviderBuilder, periodic_config: &Periodic| {
+                call_count_clone.set(call_count_clone.get() + 1);
+                register_mock_reader(builder, periodic_config)
             };
 
-        pub fn register_mock_exporter(
+        pub fn register_mock_reader(
             mut builder: MeterProviderBuilder,
-            _config: &serde_yaml::Value,
+            config: &Periodic,
         ) -> Result<MeterProviderBuilder, ConfigurationError> {
-            builder = builder.with_periodic_exporter(MockPeriodicExporter {});
+            let exporter: MockPeriodicExporter = serde_yaml::from_value(config.exporter.clone())
+                .map_err(|e| {
+                    ConfigurationError::InvalidConfiguration(format!(
+                        "Failed to parse MockPeriodicExporter: {}",
+                        e
+                    ))
+                })?;
+            assert!(exporter
+                .console
+                .as_ref()
+                .and_then(|c| c.temporality.as_ref())
+                .is_some());
+            let reader = PeriodicReader::builder(exporter)
+                .with_interval(std::time::Duration::from_millis(config.interval))
+                .build();
+            builder = builder.with_reader(reader);
             Ok(builder)
         }
 
-        let mut registry = ConfigurationProvidersRegistry::new();
+        let mut registry = ConfigurationProviderRegistry::new();
 
         // Act
         let name = "console";
         registry
             .metrics_mut()
-            .register_periodic_exporter_factory(name.to_string(), register_mock_exporter_clousure);
+            .register_periodic_reader_factory(name, register_mock_reader_clousure);
 
         // Assert
         assert!(registry
-            .metrics()
-            .periodic_exporter_factories
+            .metrics
+            .periodic_reader_factories
             .contains_key(name));
 
-        let console_config = serde_yaml::to_value(
+        let periodic_config: Periodic = serde_yaml::from_str(
             r#"
-            console:
-              temporality: cumulative
+            interval: 1000
+            timeout: 5000
+            exporter:
+              console:
+                temporality: cumulative
             "#,
         )
         .unwrap();
 
-        let factory_function_option = registry.metrics().periodic_exporter_factory(&name);
+        let factory_function_option = registry.metrics.periodic_reader_factory(&name);
         if let Some(factory_function) = factory_function_option {
             let builder = MeterProviderBuilder::default();
-            _ = factory_function(builder, &console_config).unwrap();
+            _ = factory_function(builder, &periodic_config).unwrap();
             // Verify that the factory function was called
-            assert_eq!(call_count.load(std::sync::atomic::Ordering::SeqCst), 1);
+            assert_eq!(call_count.get(), 1);
         } else {
             panic!("Provider not found");
         }
@@ -284,42 +269,27 @@ mod tests {
 
     #[test]
     fn test_provider_manager_default() {
-        let provider_manager = ConfigurationProvidersRegistry::default();
+        let provider_manager = ConfigurationProviderRegistry::default();
         assert!(provider_manager
-            .metrics()
-            .periodic_exporter_factories
+            .metrics
+            .periodic_reader_factories
             .is_empty());
     }
 
     #[test]
     fn test_metrics_provider_registry_default() {
-        let metrics_provider_registry = MetricsProvidersRegistry::default();
+        let metrics_provider_registry = MeterProviderRegistry::default();
         assert!(metrics_provider_registry
-            .periodic_exporter_factories
+            .periodic_reader_factories
             .is_empty());
     }
 
     #[test]
-    fn test_telemetry_providers_default() {
-        let telemetry_providers = TelemetryProviders::default();
-        assert!(telemetry_providers.meter_provider.is_none());
-        assert!(telemetry_providers.traces_provider.is_none());
-        assert!(telemetry_providers.logs_provider.is_none());
-    }
-
-    #[test]
-    fn test_telemetry_providers_with_methods() {
-        let meter_provider = SdkMeterProvider::builder().build();
-        let traces_provider = SdkTracerProvider::builder().build();
-        let logs_provider = SdkLoggerProvider::builder().build();
-
-        let telemetry_providers = TelemetryProviders::new()
-            .with_logs_provider(logs_provider)
-            .with_traces_provider(traces_provider)
-            .with_meter_provider(meter_provider);
-
-        assert!(telemetry_providers.meter_provider().is_some());
-        assert!(telemetry_providers.traces_provider().is_some());
-        assert!(telemetry_providers.logs_provider().is_some());
+    fn test_has_periodic_reader_factory() {
+        let mut registry = MeterProviderRegistry::new();
+        let name = "test_factory";
+        assert!(!registry.has_periodic_reader_factory(name));
+        registry.register_periodic_reader_factory(name, |builder, _| Ok(builder));
+        assert!(registry.has_periodic_reader_factory(name));
     }
 }

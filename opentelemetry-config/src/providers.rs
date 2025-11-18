@@ -3,60 +3,95 @@
 //! This module provides the different element providers to configure
 //! OpenTelemetry SDKs using declarative YAML configurations.
 
-pub mod metrics_provider;
+mod meter_provider;
 
 use std::collections::HashMap;
 
 use opentelemetry::KeyValue;
-use opentelemetry_sdk::{metrics::SdkMeterProvider, Resource};
-
-use crate::{
-    model::Telemetry, providers::metrics_provider::MetricsProvider, ConfigurationProvidersRegistry,
-    ProviderError, TelemetryProviders,
+use opentelemetry_sdk::{
+    logs::SdkLoggerProvider, metrics::SdkMeterProvider, trace::SdkTracerProvider, Resource,
 };
 
-/// Provider for Telemetry object
-pub struct TelemetryProvider {
-    metrics_provider: MetricsProvider,
+use crate::{
+    model::Telemetry, providers::meter_provider::MeterProvider, ConfigurationProviderRegistry,
+    ProviderError,
+};
+
+/// Holds the configured telemetry providers
+pub struct TelemetryProviders {
+    meter_provider: Option<SdkMeterProvider>,
+    logs_provider: Option<SdkLoggerProvider>,
+    traces_provider: Option<SdkTracerProvider>,
 }
 
-impl TelemetryProvider {
-    /// Creates a new TelemetryProvider
-    pub fn new() -> Self {
-        Self {
-            metrics_provider: MetricsProvider::new(),
+impl TelemetryProviders {
+    pub fn new(
+        meter_provider: Option<SdkMeterProvider>,
+        logs_provider: Option<SdkLoggerProvider>,
+        traces_provider: Option<SdkTracerProvider>,
+    ) -> Self {
+        TelemetryProviders {
+            meter_provider,
+            logs_provider,
+            traces_provider,
         }
+    }
+
+    /// Returns a reference to the configured MeterProvider, if any
+    pub fn meter_provider(&self) -> Option<&SdkMeterProvider> {
+        self.meter_provider.as_ref()
+    }
+
+    /// Returns a reference to the configured LoggerProvider, if any
+    pub fn logs_provider(&self) -> Option<&SdkLoggerProvider> {
+        self.logs_provider.as_ref()
+    }
+
+    /// Returns a reference to the configured TracerProvider, if any
+    pub fn traces_provider(&self) -> Option<&SdkTracerProvider> {
+        self.traces_provider.as_ref()
     }
 
     /// Configures the Telemetry providers based on the provided configuration
     pub fn configure(
-        &self,
-        configuration_registry: &ConfigurationProvidersRegistry,
+        configuration_registry: &ConfigurationProviderRegistry,
         config: &Telemetry,
     ) -> Result<TelemetryProviders, ProviderError> {
-        let mut providers = TelemetryProviders::new();
-        let resource: Resource = self.as_resource(&config.resource);
+        let resource: Resource = Self::as_resource(&config.resource);
+
+        let meter_provider_option: Option<SdkMeterProvider>;
         if let Some(metrics_config) = &config.metrics {
             let mut meter_provider_builder =
                 SdkMeterProvider::builder().with_resource(resource.clone());
-            meter_provider_builder = self.metrics_provider.configure(
-                configuration_registry.metrics(),
+            meter_provider_builder = MeterProvider::configure(
+                &configuration_registry.metrics,
                 meter_provider_builder,
                 metrics_config,
             )?;
             let meter_provider = meter_provider_builder.build();
-            providers = providers.with_meter_provider(meter_provider);
+            meter_provider_option = Some(meter_provider);
+        } else {
+            meter_provider_option = None;
         }
 
-        // TODO: Add traces and logs configuration
+        // TODO: Add logs configuration
+        let logs_provider_option = None;
+
+        // TODO: Add traces configuration
+        let traces_provider_option = None;
+
+        let providers = TelemetryProviders::new(
+            meter_provider_option,
+            logs_provider_option,
+            traces_provider_option,
+        );
 
         Ok(providers)
     }
 
     /// Configures the Telemetry providers from a YAML string
     pub fn configure_from_yaml(
-        &self,
-        configuration_registry: &ConfigurationProvidersRegistry,
+        configuration_registry: &ConfigurationProviderRegistry,
         yaml_str: &str,
     ) -> Result<TelemetryProviders, ProviderError> {
         let config: crate::model::Telemetry = serde_yaml::from_str(yaml_str).map_err(|e| {
@@ -65,13 +100,12 @@ impl TelemetryProvider {
                 e
             ))
         })?;
-        self.configure(configuration_registry, &config)
+        Self::configure(configuration_registry, &config)
     }
 
     /// Configures the Telemetry providers from a YAML file
     pub fn configure_from_yaml_file(
-        &self,
-        configuration_registry: &ConfigurationProvidersRegistry,
+        configuration_registry: &ConfigurationProviderRegistry,
         file_path: &str,
     ) -> Result<TelemetryProviders, ProviderError> {
         let yaml_str = std::fs::read_to_string(file_path).map_err(|e| {
@@ -80,15 +114,15 @@ impl TelemetryProvider {
                 e
             ))
         })?;
-        self.configure_from_yaml(configuration_registry, &yaml_str)
+        Self::configure_from_yaml(configuration_registry, &yaml_str)
     }
 
     /// Converts resource attributes from HashMap to Resource
-    fn as_resource(&self, attributes: &HashMap<String, serde_yaml::Value>) -> Resource {
+    fn as_resource(attributes: &HashMap<String, serde_yaml::Value>) -> Resource {
         let mut builder = Resource::builder();
 
         for (key, value) in attributes {
-            let resource_attribute = self.as_resource_attribute(key, value);
+            let resource_attribute = Self::as_resource_attribute(key, value);
             builder = builder.with_attribute(resource_attribute);
         }
 
@@ -96,7 +130,8 @@ impl TelemetryProvider {
     }
 
     /// Converts a single resource attribute from serde_yaml::Value to KeyValue
-    fn as_resource_attribute(&self, key: &str, value: &serde_yaml::Value) -> KeyValue {
+    fn as_resource_attribute(key: &str, value: &serde_yaml::Value) -> KeyValue {
+        // TODO: Add support for arrays.
         match value {
             serde_yaml::Value::String(s) => KeyValue::new(key.to_string(), s.clone()),
             serde_yaml::Value::Number(n) => {
@@ -111,12 +146,6 @@ impl TelemetryProvider {
             serde_yaml::Value::Bool(b) => KeyValue::new(key.to_string(), *b),
             _ => KeyValue::new(key.to_string(), format!("{:?}", value)),
         }
-    }
-}
-
-impl Default for TelemetryProvider {
-    fn default() -> Self {
-        Self::new()
     }
 }
 
@@ -164,9 +193,9 @@ mod tests {
         }
     }
 
-    pub fn register_mock_exporter(
+    pub fn register_mock_reader_factory(
         mut builder: MeterProviderBuilder,
-        _config: &serde_yaml::Value,
+        _config: &crate::model::metrics::reader::Periodic,
     ) -> Result<MeterProviderBuilder, ConfigurationError> {
         let exporter = MockExporter::new();
         builder = builder.with_periodic_exporter(exporter);
@@ -190,41 +219,33 @@ mod tests {
           development: true
         "#;
 
-        let mut configuration_registry = ConfigurationProvidersRegistry::new();
+        let mut configuration_registry = ConfigurationProviderRegistry::new();
         let metrics_provider_manager = configuration_registry.metrics_mut();
         let name = "console";
         metrics_provider_manager
-            .register_periodic_exporter_factory(name.to_string(), register_mock_exporter);
+            .register_periodic_reader_factory(name, register_mock_reader_factory);
 
-        let telemetry_provider = TelemetryProvider::new();
-        let providers = telemetry_provider
-            .configure_from_yaml(&configuration_registry, yaml_str)
-            .unwrap();
+        let providers =
+            TelemetryProviders::configure_from_yaml(&configuration_registry, yaml_str).unwrap();
         assert!(providers.meter_provider.is_some());
     }
 
     #[test]
     fn test_telemetry_provider_default() {
-        let telemetry_provider = TelemetryProvider::default();
-        let configuration_registry = ConfigurationProvidersRegistry::default();
+        let configuration_registry = ConfigurationProviderRegistry::default();
         let telemetry = Telemetry {
             resource: HashMap::new(),
             metrics: None,
         };
-        let providers = telemetry_provider
-            .configure(&configuration_registry, &telemetry)
-            .unwrap();
+        let providers = TelemetryProviders::configure(&configuration_registry, &telemetry).unwrap();
         assert!(providers.meter_provider.is_none());
     }
 
     #[test]
     fn test_telemetry_provider_default_empty_yaml() {
-        let telemetry_provider = TelemetryProvider::default();
-        let configuration_registry = ConfigurationProvidersRegistry::default();
+        let configuration_registry = ConfigurationProviderRegistry::default();
         let telemetry: Telemetry = serde_yaml::from_str("").unwrap();
-        let providers = telemetry_provider
-            .configure(&configuration_registry, &telemetry)
-            .unwrap();
+        let providers = TelemetryProviders::configure(&configuration_registry, &telemetry).unwrap();
         assert!(providers.meter_provider.is_none());
     }
 }

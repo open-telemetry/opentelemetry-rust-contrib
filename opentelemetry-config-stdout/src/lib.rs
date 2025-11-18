@@ -4,23 +4,25 @@
 //! that enables exporting metrics to the console (stdout) using
 //! the OpenTelemetry Config crate.
 
-use opentelemetry_config::ConfigurationError;
-use opentelemetry_sdk::metrics::MeterProviderBuilder;
+use opentelemetry_config::{model::metrics::reader::Periodic, ConfigurationError};
+use opentelemetry_sdk::metrics::{MeterProviderBuilder, PeriodicReader};
 
-pub fn register_console_exporter(
+pub fn register_console_meter_reader_factory(
     mut builder: MeterProviderBuilder,
-    config: &serde_yaml::Value,
+    periodic_config: &Periodic,
 ) -> Result<MeterProviderBuilder, ConfigurationError> {
     let mut exporter_builder = opentelemetry_stdout::MetricExporter::builder();
 
-    let config =
-        serde_yaml::from_value::<PeriodicExporterConsole>(config.clone()).map_err(|e| {
-            ConfigurationError::InvalidConfiguration(format!(
-                "Failed to deserialize PeriodicExporterConsole configuration: {}",
-                e
-            ))
-        })?;
+    let console_config =
+        serde_yaml::from_value::<MeterConsoleReaderConfig>(periodic_config.exporter.clone())
+            .map_err(|e| {
+                ConfigurationError::InvalidConfiguration(format!(
+                    "Failed to deserialize Console Reader configuration: {}",
+                    e
+                ))
+            })?;
 
+    let config = console_config.console;
     if let Some(temporality) = &config.temporality {
         match temporality {
             Temporality::Delta => {
@@ -35,12 +37,23 @@ pub fn register_console_exporter(
     }
 
     let exporter = exporter_builder.build();
-    builder = builder.with_periodic_exporter(exporter);
+    // TODO: Configure time interval from config
+    let reader = PeriodicReader::builder(exporter)
+        .with_interval(std::time::Duration::from_millis(periodic_config.interval))
+        .build();
+    builder = builder.with_reader(reader);
     Ok(builder)
 }
 
 #[derive(serde::Deserialize, serde::Serialize, Clone, Debug)]
-pub struct PeriodicExporterConsole {
+#[serde(deny_unknown_fields)]
+struct MeterConsoleReaderConfig {
+    console: MeterConsoleExporterConfig,
+}
+
+#[derive(serde::Deserialize, serde::Serialize, Clone, Debug)]
+#[serde(deny_unknown_fields)]
+struct MeterConsoleExporterConfig {
     pub temporality: Option<Temporality>,
 }
 
@@ -58,18 +71,15 @@ mod tests {
     #[test]
     fn test_console_provider_registration() {
         // Arrange
-        let mut configuration_registry =
-            opentelemetry_config::ConfigurationProvidersRegistry::new();
+        let mut configuration_registry = opentelemetry_config::ConfigurationProviderRegistry::new();
 
         // Act
         let metrics_registry = configuration_registry.metrics_mut();
         metrics_registry
-            .register_periodic_exporter_factory("console".to_string(), register_console_exporter);
+            .register_periodic_reader_factory("console", register_console_meter_reader_factory);
 
         // Assert
-        assert!(metrics_registry
-            .periodic_exporter_factory("console")
-            .is_some());
+        assert!(metrics_registry.has_periodic_reader_factory("console"))
     }
 
     #[test]
@@ -77,13 +87,17 @@ mod tests {
         // Arrange
         let meter_provider_builder = opentelemetry_sdk::metrics::SdkMeterProvider::builder();
 
-        let config = PeriodicExporterConsole { temporality: None };
+        let periodic_config_yaml = r#"
+            exporter:
+                console:
+            "#;
 
-        let config_yaml = serde_yaml::to_value(config).unwrap();
+        let periodic_config: Periodic = serde_yaml::from_str(periodic_config_yaml).unwrap();
 
         // Act
         let configured_builder =
-            register_console_exporter(meter_provider_builder, &config_yaml).unwrap();
+            register_console_meter_reader_factory(meter_provider_builder, &periodic_config)
+                .unwrap();
 
         // Assert
         // Since the MeterProviderBuilder does not expose its internal state,
@@ -99,15 +113,18 @@ mod tests {
         // Arrange
         let meter_provider_builder = opentelemetry_sdk::metrics::SdkMeterProvider::builder();
 
-        let config = PeriodicExporterConsole {
-            temporality: Some(Temporality::Delta),
-        };
+        let periodic_config_yaml = r#"
+            exporter:
+                console:
+                    temporality: delta
+            "#;
 
-        let config_yaml = serde_yaml::to_value(config).unwrap();
+        let periodic_config: Periodic = serde_yaml::from_str(periodic_config_yaml).unwrap();
 
         // Act
         let configured_builder =
-            register_console_exporter(meter_provider_builder, &config_yaml).unwrap();
+            register_console_meter_reader_factory(meter_provider_builder, &periodic_config)
+                .unwrap();
 
         // Assert
         // Since the MeterProviderBuilder does not expose its internal state,
@@ -123,15 +140,17 @@ mod tests {
         // Arrange
         let meter_provider_builder = opentelemetry_sdk::metrics::SdkMeterProvider::builder();
 
-        let config = PeriodicExporterConsole {
-            temporality: Some(Temporality::Cumulative),
-        };
+        let periodic_config_yaml = r#"
+            exporter:
+                console:
+                    temporality: cumulative
+            "#;
 
-        let config_yaml = serde_yaml::to_value(config).unwrap();
-
+        let periodic_config: Periodic = serde_yaml::from_str(periodic_config_yaml).unwrap();
         // Act
         let configured_builder =
-            register_console_exporter(meter_provider_builder, &config_yaml).unwrap();
+            register_console_meter_reader_factory(meter_provider_builder, &periodic_config)
+                .unwrap();
 
         // Assert
         // Since the MeterProviderBuilder does not expose its internal state,
@@ -146,22 +165,45 @@ mod tests {
     fn test_console_provider_invalid_configuration() {
         // Arrange
         let meter_provider_builder = opentelemetry_sdk::metrics::SdkMeterProvider::builder();
-        let invalid_config_yaml = serde_yaml::from_str::<serde_yaml::Value>(
-            r#"
-            temporality: invalid_value
-        "#,
-        )
-        .unwrap();
+        let invalid_config_yaml = r#"
+            exporter:
+                console:
+                    temporality: invalid_value
+        "#;
 
+        let periodic_config: Periodic = serde_yaml::from_str(invalid_config_yaml).unwrap();
         // Act
-        let result = register_console_exporter(meter_provider_builder, &invalid_config_yaml);
+        let result =
+            register_console_meter_reader_factory(meter_provider_builder, &periodic_config);
 
         // Assert
         match result {
             Err(ConfigurationError::InvalidConfiguration(details)) => {
-                assert!(
-                    details.contains("Failed to deserialize PeriodicExporterConsole configuration")
-                );
+                assert!(details.contains("Failed to deserialize"));
+            }
+            _ => panic!("Expected InvalidConfiguration error"),
+        }
+    }
+
+    #[test]
+    fn test_console_provider_unknown_field_configuration() {
+        // Arrange
+        let meter_provider_builder = opentelemetry_sdk::metrics::SdkMeterProvider::builder();
+        let invalid_config_yaml = r#"
+            exporter:
+                console:
+                    temporality2: delta
+        "#;
+
+        let periodic_config: Periodic = serde_yaml::from_str(invalid_config_yaml).unwrap();
+        // Act
+        let result =
+            register_console_meter_reader_factory(meter_provider_builder, &periodic_config);
+
+        // Assert
+        match result {
+            Err(ConfigurationError::InvalidConfiguration(details)) => {
+                assert!(details.contains("Failed to deserialize"));
             }
             _ => panic!("Expected InvalidConfiguration error"),
         }

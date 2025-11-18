@@ -3,7 +3,7 @@
 //! This example demonstrates how to configure OpenTelemetry Metrics
 //! using the OpenTelemetry Config crate with a Console Exporter.
 
-use opentelemetry_config::{providers::TelemetryProvider, ConfigurationProvidersRegistry};
+use opentelemetry_config::{providers::TelemetryProviders, ConfigurationProviderRegistry};
 
 use std::env;
 
@@ -23,16 +23,17 @@ pub fn main() -> Result<(), Box<dyn std::error::Error>> {
     let config_file = &args[2];
 
     // Setup configuration registry with console exporter provider.
-    let mut configuration_providers_registry = ConfigurationProvidersRegistry::new();
+    let mut configuration_providers_registry = ConfigurationProviderRegistry::new();
     let metrics_registry = configuration_providers_registry.metrics_mut();
-    metrics_registry.register_periodic_exporter_factory(
-        "console".to_string(),
-        opentelemetry_config_stdout::register_console_exporter,
+    metrics_registry.register_periodic_reader_factory(
+        "console",
+        opentelemetry_config_stdout::register_console_meter_reader_factory,
     );
 
-    let telemetry_provider = TelemetryProvider::new();
-    let providers = telemetry_provider
-        .configure_from_yaml_file(&configuration_providers_registry, config_file)?;
+    let providers = TelemetryProviders::configure_from_yaml_file(
+        &configuration_providers_registry,
+        config_file,
+    )?;
 
     if let Some(meter_provider) = providers.meter_provider() {
         println!("Meter provider is configured. Shutting it down...");

@@ -65,7 +65,7 @@ mod tests {
         if let Err(e) = telemetry_result {
             assert!(e
                 .to_string()
-                .contains("unknown field `exporter_invalid_field`, expected `exporter`"));
+                .contains("unknown field `exporter_invalid_field`"));
         } else {
             panic!("Expected error due to invalid field, but got Ok");
         }

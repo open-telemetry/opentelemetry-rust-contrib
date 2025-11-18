@@ -50,21 +50,22 @@ resource:
 ### 2. Load and Apply Configuration
 
 ```rust
-use opentelemetry_config::{ConfigurationProvidersRegistry, providers::TelemetryProvider};
+use opentelemetry_config::{ConfigurationProviderRegistry, providers::TelemetryProviders};
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Create configuration registry and register console exporter
-    let mut registry = ConfigurationProvidersRegistry::new();
+    let mut registry = ConfigurationProviderRegistry::new();
     let metrics_registry = registry.metrics_mut();
-    metrics_registry.register_periodic_exporter_factory(
-        "console".to_string(),
-        opentelemetry_config_stdout::register_console_exporter
+    metrics_registry.register_periodic_reader_factory(
+        "console",
+        opentelemetry_config_stdout::register_console_meter_reader_factory
     );
 
     // Load configuration from YAML file
-    let telemetry_provider = TelemetryProvider::new();
-    let providers = telemetry_provider
-        .configure_from_yaml_file(&registry, "otel-config.yaml")?;
+    let providers = TelemetryProviders::configure_from_yaml_file(
+        &registry,
+        "otel-config.yaml"
+    )?;
 
     // Use the configured providers
     if let Some(meter_provider) = providers.meter_provider() {
@@ -84,7 +85,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
 See the [examples/console](examples/console) directory for a complete working example that demonstrates:
 
-- Setting up a console exporter factory
+- Setting up a console periodic reader factory
 - Loading configuration from a YAML file
 - Configuring a meter provider
 - Proper shutdown handling
@@ -104,16 +105,18 @@ cargo run -- --file ../metrics_console.yaml
 metrics:
   readers:
     - periodic:
+        interval: 5000  # milliseconds (optional)
         exporter:
           console:
-            temporality: delta  # or cumulative
+            temporality: delta  # or cumulative (optional)
 ```
 
 #### Configuration Options
 
+- **`interval`** (optional): Export interval in milliseconds for the periodic reader
 - **`temporality`** (optional): Controls how metrics are aggregated
   - `delta`: Reports the change since the last export (useful for rate-based metrics like requests per second)
-  - `cumulative`: Reports the total accumulated value since the start (default, useful for gauges and cumulative counters)
+  - `cumulative`: Reports the total accumulated value since the start (useful for gauges and cumulative counters)
 
 ## Contributing
 

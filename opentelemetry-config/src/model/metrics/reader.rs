@@ -48,7 +48,28 @@ impl<'de> Deserialize<'de> for Reader {
 #[derive(serde::Deserialize, Debug)]
 #[serde(deny_unknown_fields)]
 pub struct Periodic {
+    /// Configure delay interval (in milliseconds) between start of two consecutive exports.
+    /// Value must be non-negative.
+    /// If omitted or null, 60000 is used.
+    #[serde(default = "default_interval")]
+    pub interval: u64,
+
+    /// Configure maximum allowed time (in milliseconds) to export data.
+    /// Value must be non-negative. A value of 0 indicates no limit (infinity).
+    /// If omitted or null, 30000 is used.
+    #[serde(default = "default_timeout")]
+    pub timeout: u64,
+
+    /// Exporter configuration
     pub exporter: serde_yaml::Value,
+}
+
+fn default_interval() -> u64 {
+    60000
+}
+
+fn default_timeout() -> u64 {
+    30000
 }
 
 #[derive(serde::Deserialize, Debug)]

@@ -5,11 +5,15 @@
 //! It is helpful to implement and test custom exporters.
 
 use opentelemetry_config::{
-    providers::TelemetryProvider, ConfigurationError, ConfigurationProvidersRegistry,
+    model::metrics::reader::Periodic, providers::TelemetryProviders, ConfigurationError,
+    ConfigurationProviderRegistry,
 };
+
 use opentelemetry_sdk::{
     error::OTelSdkResult,
-    metrics::{data::ResourceMetrics, exporter::PushMetricExporter, MeterProviderBuilder},
+    metrics::{
+        data::ResourceMetrics, exporter::PushMetricExporter, MeterProviderBuilder, PeriodicReader,
+    },
 };
 use std::env;
 use std::time::Duration;
@@ -30,19 +34,16 @@ pub fn main() -> Result<(), Box<dyn std::error::Error>> {
     let config_file = &args[2];
 
     // Setup configuration registry with custom exporter provider.
-    let mut registry = ConfigurationProvidersRegistry::new();
+    let mut registry = ConfigurationProviderRegistry::new();
 
     // Register the custom exporter provider.
-    registry.metrics_mut().register_periodic_exporter_factory(
-        "custom".to_string(),
-        MockPeriodicExporterProvider::register_mock_exporter,
+    registry.metrics_mut().register_periodic_reader_factory(
+        "custom",
+        MockPeriodicReaderProvider::register_mock_reader_factory,
     );
 
     // Configure telemetry from the provided YAML file.
-    let telemetry_provider = TelemetryProvider::new();
-    let providers = telemetry_provider
-        .configure_from_yaml_file(&registry, config_file)
-        .unwrap();
+    let providers = TelemetryProviders::configure_from_yaml_file(&registry, config_file).unwrap();
 
     if let Some(meter_provider) = providers.meter_provider() {
         println!("Meter provider configured successfully. Shutting it down...");
@@ -68,16 +69,28 @@ pub fn main() -> Result<(), Box<dyn std::error::Error>> {
     Ok(())
 }
 
-pub struct MockPeriodicExporterProvider {}
+#[derive(Debug, serde::Deserialize)]
+#[serde(deny_unknown_fields)]
+struct MockCustomConfig {
+    pub custom: CustomData,
+}
 
-impl MockPeriodicExporterProvider {
-    pub fn register_mock_exporter(
+#[derive(Debug, serde::Deserialize)]
+#[serde(deny_unknown_fields)]
+struct CustomData {
+    pub custom_string_field: String,
+    pub custom_int_field: i32,
+}
+
+struct MockPeriodicReaderProvider {}
+
+impl MockPeriodicReaderProvider {
+    pub fn register_mock_reader_factory(
         mut meter_provider_builder: MeterProviderBuilder,
-        config: &serde_yaml::Value,
+        periodic_config: &Periodic,
     ) -> Result<MeterProviderBuilder, ConfigurationError> {
-        let mut exporter = MockCustomExporter::new();
-
-        let config = serde_yaml::from_value::<MockCustomConfig>(config.clone()).map_err(|e| {
+        let config = serde_yaml::from_value::<MockCustomConfig>(periodic_config.exporter.clone())
+            .map_err(|e| {
             ConfigurationError::InvalidConfiguration(format!(
                 "Failed to parse MockCustomConfig: {}",
                 e
@@ -85,36 +98,25 @@ impl MockPeriodicExporterProvider {
         })?;
         println!(
             "Configuring MockCustomExporter with string field: {} and int field: {}",
-            config.custom_string_field, config.custom_int_field
+            config.custom.custom_string_field, config.custom.custom_int_field
         );
 
-        exporter.set_custom_config(config);
+        let exporter = MockCustomExporter {
+            custom_config: config,
+        };
 
-        meter_provider_builder = meter_provider_builder.with_periodic_exporter(exporter);
+        // TODO: Add timeout from config
+        let reader = PeriodicReader::builder(exporter)
+            .with_interval(std::time::Duration::from_millis(periodic_config.interval))
+            .build();
+
+        meter_provider_builder = meter_provider_builder.with_reader(reader);
         Ok(meter_provider_builder)
     }
 }
 
-#[derive(serde::Deserialize, Debug)]
-pub struct MockCustomConfig {
-    pub custom_string_field: String,
-    pub custom_int_field: i32,
-}
-
-pub struct MockCustomExporter {
-    custom_config: Option<MockCustomConfig>,
-}
-
-impl MockCustomExporter {
-    fn new() -> Self {
-        Self {
-            custom_config: None,
-        }
-    }
-
-    pub fn set_custom_config(&mut self, custom_config: MockCustomConfig) {
-        self.custom_config = Some(custom_config);
-    }
+struct MockCustomExporter {
+    custom_config: MockCustomConfig,
 }
 
 impl PushMetricExporter for MockCustomExporter {
