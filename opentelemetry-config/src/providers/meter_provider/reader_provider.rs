@@ -49,7 +49,7 @@ impl PeriodicReaderProvider {
         config: &crate::model::metrics::reader::Periodic,
     ) -> Result<opentelemetry_sdk::metrics::MeterProviderBuilder, ProviderError> {
         meter_provider_builder =
-            PeriodicExporterProvider::configure(metrics_registry, meter_provider_builder, &config)?;
+            PeriodicExporterProvider::configure(metrics_registry, meter_provider_builder, config)?;
         Ok(meter_provider_builder)
     }
 }
