@@ -179,9 +179,9 @@ mod tests {
 
     #[test]
     fn test_reader_provider_configure() {
-        let mut configuration_registry = crate::ConfigurationProviderRegistry::new();
+        let mut configuration_registry = crate::ConfigurationProviderRegistry::default();
         configuration_registry
-            .metrics_mut()
+            .metrics()
             .register_periodic_reader_factory("console", register_mock_reader_factory);
         let meter_provider_builder = SdkMeterProvider::builder();
 
@@ -203,7 +203,7 @@ mod tests {
 
     #[test]
     fn test_reader_provider_configure_console_factory_not_registered() {
-        let metrics_registry = MeterProviderRegistry::new();
+        let metrics_registry = MeterProviderRegistry::default();
         let meter_provider_builder = SdkMeterProvider::builder();
 
         let config: Reader = serde_yaml::from_str(
@@ -230,7 +230,7 @@ mod tests {
 
     #[test]
     fn test_reader_provider_provide_otlp_factory_not_registered() {
-        let metrics_registry = MeterProviderRegistry::new();
+        let metrics_registry = MeterProviderRegistry::default();
         let meter_provider_builder = SdkMeterProvider::builder();
 
         let config: Reader = serde_yaml::from_str(
@@ -257,7 +257,7 @@ mod tests {
 
     #[test]
     fn test_periodic_exporter_provider_configure_unsupported_exporter() {
-        let metrics_provider_manager = MeterProviderRegistry::new();
+        let metrics_provider_manager = MeterProviderRegistry::default();
         let meter_provider_builder = SdkMeterProvider::builder();
         let config = crate::model::metrics::reader::PullExporter {
             prometheus: Some(crate::model::metrics::reader::PullExporterPrometheus {
@@ -281,7 +281,7 @@ mod tests {
 
     #[test]
     fn test_pull_reader_provider_configure_basic() {
-        let configuration_registry = crate::ConfigurationProviderRegistry::new();
+        let configuration_registry = crate::ConfigurationProviderRegistry::default();
         let meter_provider_builder = SdkMeterProvider::builder();
 
         let config = crate::model::metrics::reader::Pull {

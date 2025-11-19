@@ -71,10 +71,11 @@ mod tests {
     #[test]
     fn test_console_provider_registration() {
         // Arrange
-        let mut configuration_registry = opentelemetry_config::ConfigurationProviderRegistry::new();
+        let mut configuration_registry =
+            opentelemetry_config::ConfigurationProviderRegistry::default();
 
         // Act
-        let metrics_registry = configuration_registry.metrics_mut();
+        let metrics_registry = configuration_registry.metrics();
         metrics_registry
             .register_periodic_reader_factory("console", register_console_meter_reader_factory);
 

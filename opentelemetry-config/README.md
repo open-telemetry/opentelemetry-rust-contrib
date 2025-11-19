@@ -67,7 +67,7 @@ use opentelemetry_config::{
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Create a configuration registry
-    let mut registry = ConfigurationProviderRegistry::new();
+    let mut registry = ConfigurationProviderRegistry::default();
     
     // Register the periodic reader factory function
     registry
@@ -217,7 +217,7 @@ fn create_my_custom_reader(
 ### 4. Register with the registry:
 
 ```rust
-let mut registry = ConfigurationProviderRegistry::new();
+let mut registry = ConfigurationProviderRegistry::default();
 
 registry
     .metrics_mut()

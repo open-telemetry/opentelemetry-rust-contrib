@@ -34,10 +34,10 @@ pub fn main() -> Result<(), Box<dyn std::error::Error>> {
     let config_file = &args[2];
 
     // Setup configuration registry with custom exporter provider.
-    let mut registry = ConfigurationProviderRegistry::new();
+    let mut registry = ConfigurationProviderRegistry::default();
 
     // Register the custom exporter provider.
-    registry.metrics_mut().register_periodic_reader_factory(
+    registry.metrics().register_periodic_reader_factory(
         "custom",
         MockPeriodicReaderProvider::register_mock_reader_factory,
     );

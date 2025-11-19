@@ -162,8 +162,9 @@ mod tests {
     use super::*;
 
     struct MockExporter {}
-    impl MockExporter {
-        fn new() -> Self {
+
+    impl Default for MockExporter {
+        fn default() -> Self {
             Self {}
         }
     }
@@ -197,7 +198,7 @@ mod tests {
         mut builder: MeterProviderBuilder,
         _config: &crate::model::metrics::reader::Periodic,
     ) -> Result<MeterProviderBuilder, ConfigurationError> {
-        let exporter = MockExporter::new();
+        let exporter = MockExporter::default();
         builder = builder.with_periodic_exporter(exporter);
         Ok(builder)
     }
@@ -219,8 +220,8 @@ mod tests {
           development: true
         "#;
 
-        let mut configuration_registry = ConfigurationProviderRegistry::new();
-        let metrics_provider_manager = configuration_registry.metrics_mut();
+        let mut configuration_registry = ConfigurationProviderRegistry::default();
+        let metrics_provider_manager = configuration_registry.metrics();
         let name = "console";
         metrics_provider_manager
             .register_periodic_reader_factory(name, register_mock_reader_factory);

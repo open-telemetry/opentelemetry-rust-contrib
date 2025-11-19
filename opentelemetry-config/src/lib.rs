@@ -22,20 +22,17 @@ pub struct ConfigurationProviderRegistry {
 }
 
 impl ConfigurationProviderRegistry {
-    pub fn new() -> Self {
-        Self {
-            metrics: MeterProviderRegistry::new(),
-        }
-    }
-
-    pub fn metrics_mut(&mut self) -> &mut MeterProviderRegistry {
+    /// Returns a mutable reference to the metrics provider registry.
+    pub fn metrics(&mut self) -> &mut MeterProviderRegistry {
         &mut self.metrics
     }
 }
 
 impl Default for ConfigurationProviderRegistry {
     fn default() -> Self {
-        Self::new()
+        Self {
+            metrics: MeterProviderRegistry::default(),
+        }
     }
 }
 
@@ -46,13 +43,6 @@ pub struct MeterProviderRegistry {
 }
 
 impl MeterProviderRegistry {
-    /// Creates a new `MeterProviderRegistry`.
-    pub fn new() -> Self {
-        Self {
-            periodic_reader_factories: HashMap::new(),
-        }
-    }
-
     /// Registers a new periodic reader factory with the given name.
     pub fn register_periodic_reader_factory(
         &mut self,
@@ -85,7 +75,9 @@ impl MeterProviderRegistry {
 
 impl Default for MeterProviderRegistry {
     fn default() -> Self {
-        Self::new()
+        Self {
+            periodic_reader_factories: HashMap::new(),
+        }
     }
 }
 
@@ -231,12 +223,12 @@ mod tests {
             Ok(builder)
         }
 
-        let mut registry = ConfigurationProviderRegistry::new();
+        let mut registry = ConfigurationProviderRegistry::default();
 
         // Act
         let name = "console";
         registry
-            .metrics_mut()
+            .metrics()
             .register_periodic_reader_factory(name, register_mock_reader_clousure);
 
         // Assert
@@ -286,7 +278,7 @@ mod tests {
 
     #[test]
     fn test_has_periodic_reader_factory() {
-        let mut registry = MeterProviderRegistry::new();
+        let mut registry = MeterProviderRegistry::default();
         let name = "test_factory";
         assert!(!registry.has_periodic_reader_factory(name));
         registry.register_periodic_reader_factory(name, |builder, _| Ok(builder));

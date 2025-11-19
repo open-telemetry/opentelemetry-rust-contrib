@@ -23,8 +23,8 @@ pub fn main() -> Result<(), Box<dyn std::error::Error>> {
     let config_file = &args[2];
 
     // Setup configuration registry with console exporter provider.
-    let mut configuration_providers_registry = ConfigurationProviderRegistry::new();
-    let metrics_registry = configuration_providers_registry.metrics_mut();
+    let mut configuration_providers_registry = ConfigurationProviderRegistry::default();
+    let metrics_registry = configuration_providers_registry.metrics();
     metrics_registry.register_periodic_reader_factory(
         "console",
         opentelemetry_config_stdout::register_console_meter_reader_factory,

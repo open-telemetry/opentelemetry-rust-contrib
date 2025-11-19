@@ -45,7 +45,7 @@ mod tests {
                   custom: {}
         "#;
         let metrics_config: Metrics = serde_yaml::from_str(yaml_str).unwrap();
-        let mut registry = MeterProviderRegistry::new();
+        let mut registry = MeterProviderRegistry::default();
 
         fn mock_factory(
             builder: MeterProviderBuilder,
