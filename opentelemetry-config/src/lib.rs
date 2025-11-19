@@ -16,6 +16,7 @@ pub mod model;
 pub mod providers;
 
 /// Registry for different configuration providers.
+#[derive(Default)]
 pub struct ConfigurationProviderRegistry {
     metrics: MeterProviderRegistry,
     // TODO: Add logs and traces providers registries.
@@ -28,15 +29,8 @@ impl ConfigurationProviderRegistry {
     }
 }
 
-impl Default for ConfigurationProviderRegistry {
-    fn default() -> Self {
-        Self {
-            metrics: MeterProviderRegistry::default(),
-        }
-    }
-}
-
 /// Registry for metrics configuration providers.
+#[derive(Default)]
 pub struct MeterProviderRegistry {
     periodic_reader_factories: HashMap<&'static str, Box<MetricPeriodicReaderFactory>>,
     // TODO: Add other types of providers registries.
@@ -70,14 +64,6 @@ impl MeterProviderRegistry {
     /// Checks if a periodic reader factory is registered with the given name.
     pub fn has_periodic_reader_factory(&self, name: &str) -> bool {
         self.periodic_reader_factories.contains_key(name)
-    }
-}
-
-impl Default for MeterProviderRegistry {
-    fn default() -> Self {
-        Self {
-            periodic_reader_factories: HashMap::new(),
-        }
     }
 }
 

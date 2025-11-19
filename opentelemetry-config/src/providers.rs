@@ -161,13 +161,8 @@ mod tests {
 
     use super::*;
 
+    #[derive(Default)]
     struct MockExporter {}
-
-    impl Default for MockExporter {
-        fn default() -> Self {
-            Self {}
-        }
-    }
 
     impl PushMetricExporter for MockExporter {
         fn export(
