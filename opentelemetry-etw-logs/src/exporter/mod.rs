@@ -1,4 +1,6 @@
+use std::borrow::Cow;
 use std::cell::RefCell;
+use std::collections::HashSet;
 use std::fmt::Debug;
 use std::pin::Pin;
 use std::sync::Arc;
@@ -6,7 +8,7 @@ use std::sync::Arc;
 use tracelogging_dynamic as tld;
 
 use opentelemetry::logs::Severity;
-use opentelemetry::Key;
+use opentelemetry::{logs::AnyValue, otel_debug, Key, Value};
 use opentelemetry_sdk::error::{OTelSdkError, OTelSdkResult};
 
 pub(crate) mod common;
@@ -26,12 +28,14 @@ thread_local! {
 struct Resource {
     pub cloud_role: Option<String>,
     pub cloud_role_instance: Option<String>,
+    pub attributes_from_resource: Vec<(Key, AnyValue)>,
 }
 
 pub(crate) struct ETWExporter {
     provider: Pin<Arc<tld::Provider>>,
     resource: Resource,
     options: Options,
+    resource_attribute_keys: HashSet<Cow<'static, str>>,
 }
 
 fn enabled_callback_noop(
@@ -65,9 +69,12 @@ impl ETWExporter {
             provider.as_ref().register();
         }
 
+        let resource_attribute_keys = options.resource_attribute_keys().clone();
+
         ETWExporter {
             provider,
             resource: Default::default(),
+            resource_attribute_keys,
             options,
         }
     }
@@ -110,7 +117,7 @@ impl ETWExporter {
 
             part_a::populate_part_a(event, &self.resource, log_record, field_tag);
 
-            let event_id = part_c::populate_part_c(event, log_record, field_tag);
+            let event_id = part_c::populate_part_c(event, log_record, &self.resource, field_tag);
 
             part_b::populate_part_b(event, log_record, otel_level, event_id);
 
@@ -150,12 +157,26 @@ impl opentelemetry_sdk::logs::LogExporter for ETWExporter {
     }
 
     fn set_resource(&mut self, resource: &opentelemetry_sdk::Resource) {
-        self.resource.cloud_role = resource
-            .get(&Key::from_static_str("service.name"))
-            .map(|v| v.to_string());
-        self.resource.cloud_role_instance = resource
-            .get(&Key::from_static_str("service.instance.id"))
-            .map(|v| v.to_string());
+        // Clear previous resource attributes
+        self.resource.attributes_from_resource.clear();
+
+        // Process resource attributes
+        for (key, value) in resource.iter() {
+            // Special handling for cloud role and instance
+            // as they are used in PartA of the Common Schema format.
+            if key.as_str() == "service.name" {
+                self.resource.cloud_role = Some(value.to_string());
+            } else if key.as_str() == "service.instance.id" {
+                self.resource.cloud_role_instance = Some(value.to_string());
+            } else if self.resource_attribute_keys.contains(key.as_str()) {
+                self.resource
+                    .attributes_from_resource
+                    .push((key.clone(), val_to_any_value(value)));
+            } else {
+                // Other attributes are ignored
+                otel_debug!(name: "UserEvents.ResourceAttributeIgnored", key = key.as_str(), message = "To include this attribute, add it via with_resource_attributes() method in the processor builder.");
+            }
+        }
     }
 
     fn shutdown(&self) -> OTelSdkResult {
@@ -166,6 +187,16 @@ impl opentelemetry_sdk::logs::LogExporter for ETWExporter {
             )));
         }
         Ok(())
+    }
+}
+
+fn val_to_any_value(val: &Value) -> AnyValue {
+    match val {
+        Value::Bool(b) => AnyValue::Boolean(*b),
+        Value::I64(i) => AnyValue::Int(*i),
+        Value::F64(f) => AnyValue::Double(*f),
+        Value::String(s) => AnyValue::String(s.clone()),
+        _ => AnyValue::String("".into()),
     }
 }
 
@@ -218,6 +249,60 @@ mod tests {
                 ])
                 .build(),
         );
+        let instrumentation = common::test_utils::new_instrumentation_scope();
+        let result = exporter.export_log_data(&log_record, &instrumentation);
+
+        assert!(result.is_ok());
+    }
+
+    #[test]
+    fn test_event_resources_with_custom_attributes() {
+        use opentelemetry::logs::LogRecord;
+        use opentelemetry::KeyValue;
+
+        let mut log_record = common::test_utils::new_sdk_log_record();
+        log_record.set_event_name("event-name");
+
+        // Create exporter with custom resource attributes
+        let options = Options::new("test_provider")
+            .with_resource_attributes(vec!["custom_attribute1", "custom_attribute2"]);
+
+        let mut exporter = ETWExporter::new(options);
+
+        exporter.set_resource(
+            &opentelemetry_sdk::Resource::builder()
+                .with_attributes([
+                    KeyValue::new("service.name", "test-service"),
+                    KeyValue::new("service.instance.id", "test-instance"),
+                    KeyValue::new("custom_attribute1", "value1"),
+                    KeyValue::new("custom_attribute2", "value2"),
+                    KeyValue::new("custom_attribute3", "value3"), // This should be ignored
+                ])
+                .build(),
+        );
+
+        // Verify that only the configured attributes are stored
+        assert_eq!(
+            exporter.resource.cloud_role,
+            Some("test-service".to_string())
+        );
+        assert_eq!(
+            exporter.resource.cloud_role_instance,
+            Some("test-instance".to_string())
+        );
+        assert_eq!(exporter.resource.attributes_from_resource.len(), 2);
+
+        // Check that the correct attributes are stored
+        let attrs: std::collections::HashMap<String, String> = exporter
+            .resource
+            .attributes_from_resource
+            .iter()
+            .map(|(k, v)| (k.as_str().to_string(), format!("{:?}", v)))
+            .collect();
+        assert!(attrs.contains_key("custom_attribute1"));
+        assert!(attrs.contains_key("custom_attribute2"));
+        assert!(!attrs.contains_key("custom_attribute3"));
+
         let instrumentation = common::test_utils::new_instrumentation_scope();
         let result = exporter.export_log_data(&log_record, &instrumentation);
 
