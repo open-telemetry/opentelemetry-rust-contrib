@@ -165,11 +165,11 @@ mod tests {
     struct MockExporter {}
 
     impl PushMetricExporter for MockExporter {
-        fn export(
+        async fn export(
             &self,
             _metrics: &ResourceMetrics,
-        ) -> impl std::future::Future<Output = OTelSdkResult> + Send {
-            async move { Ok(()) }
+        ) -> OTelSdkResult {
+            Ok(())
         }
 
         fn force_flush(&self) -> OTelSdkResult {

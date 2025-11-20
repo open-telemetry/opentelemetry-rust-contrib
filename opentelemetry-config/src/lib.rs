@@ -234,7 +234,7 @@ mod tests {
         )
         .unwrap();
 
-        let factory_function_option = registry.metrics.periodic_reader_factory(&name);
+        let factory_function_option = registry.metrics.periodic_reader_factory(name);
         if let Some(factory_function) = factory_function_option {
             let builder = MeterProviderBuilder::default();
             _ = factory_function(builder, &periodic_config).unwrap();
