@@ -7,6 +7,7 @@ pub mod model;
 pub mod mock_provider;
 
 use opentelemetry_config::{
+    RegistryKey,
     model::Telemetry,
     providers::TelemetryProviders,
     ConfigurationProviderRegistry,
@@ -72,9 +73,10 @@ pub fn main() -> Result<(), Box<dyn std::error::Error>> {
 fn initialize_telemetry_registry() -> ConfigurationProviderRegistry {
     let mut registry = ConfigurationProviderRegistry::default();
 
+    let key = crate::RegistryKey::ReadersPeriodicExporter("custom".to_string());
     // Register the custom exporter provider.
-    registry.metrics().register_periodic_reader_factory(
-        "custom",
+    registry.register_meter_provider_factory(
+        key,
         mock_provider::MockPeriodicReaderProvider::register_mock_reader_factory,
     );
 

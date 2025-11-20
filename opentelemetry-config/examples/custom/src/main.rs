@@ -5,8 +5,9 @@
 //! It is helpful to implement and test custom exporters.
 
 use opentelemetry_config::{
-    model::metrics::reader::Periodic, providers::TelemetryProviders, ConfigurationError,
+    providers::TelemetryProviders, ConfigurationError,
     ConfigurationProviderRegistry,
+    RegistryKey,
 };
 
 use opentelemetry_sdk::{
@@ -17,6 +18,7 @@ use opentelemetry_sdk::{
 };
 use std::env;
 use std::time::Duration;
+use serde_yaml::Value;
 
 pub fn main() -> Result<(), Box<dyn std::error::Error>> {
     let args: Vec<String> = env::args().collect();
@@ -36,9 +38,10 @@ pub fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Setup configuration registry with custom exporter provider.
     let mut registry = ConfigurationProviderRegistry::default();
 
+    let key = RegistryKey::ReadersPeriodicExporter("custom".to_string());
     // Register the custom exporter provider.
-    registry.metrics().register_periodic_reader_factory(
-        "custom",
+    registry.register_meter_provider_factory(
+        key,
         MockPeriodicReaderProvider::register_mock_reader_factory,
     );
 
@@ -87,9 +90,9 @@ struct MockPeriodicReaderProvider {}
 impl MockPeriodicReaderProvider {
     pub fn register_mock_reader_factory(
         mut meter_provider_builder: MeterProviderBuilder,
-        periodic_config: &Periodic,
+        periodic_config: &Value,
     ) -> Result<MeterProviderBuilder, ConfigurationError> {
-        let config = serde_yaml::from_value::<MockCustomConfig>(periodic_config.exporter.clone())
+        let config = serde_yaml::from_value::<MockCustomConfig>(periodic_config["exporter"].clone())
             .map_err(|e| {
             ConfigurationError::InvalidConfiguration(format!(
                 "Failed to parse MockCustomConfig: {}",
@@ -105,9 +108,13 @@ impl MockPeriodicReaderProvider {
             custom_config: config,
         };
 
+        let interval_millis = periodic_config["interval"]
+            .as_u64()
+            .unwrap_or(60000);
+
         // TODO: Add timeout from config
         let reader = PeriodicReader::builder(exporter)
-            .with_interval(std::time::Duration::from_millis(periodic_config.interval))
+            .with_interval(std::time::Duration::from_millis(interval_millis))
             .build();
 
         meter_provider_builder = meter_provider_builder.with_reader(reader);

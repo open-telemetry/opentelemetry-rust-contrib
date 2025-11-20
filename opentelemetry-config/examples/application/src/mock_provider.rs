@@ -1,6 +1,4 @@
-use opentelemetry_config::{
-    model::metrics::reader::Periodic, ConfigurationError,
-};
+use opentelemetry_config::ConfigurationError;
 
 use opentelemetry_sdk::{
     error::OTelSdkResult,
@@ -10,6 +8,8 @@ use opentelemetry_sdk::{
 };
 
 use std::time::Duration;
+
+use serde_yaml::Value;
 
 #[derive(Debug, serde::Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -29,9 +29,9 @@ pub(crate) struct MockPeriodicReaderProvider {}
 impl MockPeriodicReaderProvider {
     pub fn register_mock_reader_factory(
         mut meter_provider_builder: MeterProviderBuilder,
-        periodic_config: &Periodic,
+        periodic_config: &Value,
     ) -> Result<MeterProviderBuilder, ConfigurationError> {
-        let config = serde_yaml::from_value::<MockCustomConfig>(periodic_config.exporter.clone())
+        let config = serde_yaml::from_value::<MockCustomConfig>(periodic_config["exporter"].clone())
             .map_err(|e| {
             ConfigurationError::InvalidConfiguration(format!(
                 "Failed to parse MockCustomConfig: {}",
@@ -47,9 +47,13 @@ impl MockPeriodicReaderProvider {
             custom_config: config,
         };
 
+        let interval_millis = periodic_config
+            .get("interval")
+            .and_then(|v| v.as_u64())
+            .unwrap_or(60000);
         // TODO: Add timeout from config
         let reader = PeriodicReader::builder(exporter)
-            .with_interval(std::time::Duration::from_millis(periodic_config.interval))
+            .with_interval(std::time::Duration::from_millis(interval_millis))
             .build();
 
         meter_provider_builder = meter_provider_builder.with_reader(reader);

@@ -46,7 +46,7 @@ impl PeriodicReaderProvider {
     fn configure(
         metrics_registry: &MeterProviderRegistry,
         mut meter_provider_builder: opentelemetry_sdk::metrics::MeterProviderBuilder,
-        config: &crate::model::metrics::reader::Periodic,
+        config: &Value,
     ) -> Result<opentelemetry_sdk::metrics::MeterProviderBuilder, ProviderError> {
         meter_provider_builder =
             PeriodicExporterProvider::configure(metrics_registry, meter_provider_builder, config)?;
@@ -62,20 +62,20 @@ impl PeriodicExporterProvider {
     fn configure(
         metrics_registry: &MeterProviderRegistry,
         mut meter_provider_builder: opentelemetry_sdk::metrics::MeterProviderBuilder,
-        periodic_config: &crate::model::metrics::reader::Periodic,
+        periodic_config: &Value,
     ) -> Result<opentelemetry_sdk::metrics::MeterProviderBuilder, ProviderError> {
-        let config = &periodic_config.exporter;
+        let config = &periodic_config["exporter"];
         match config.as_mapping() {
             Some(exporter_map) => {
                 for key in exporter_map.keys() {
                     match key {
                         Value::String(exporter_name) => {
-                            let reader_factory_option =
-                                metrics_registry.periodic_reader_factory(exporter_name);
+                            let key =
+                                crate::RegistryKey::ReadersPeriodicExporter(exporter_name.clone());
+
+                            let reader_factory_option = metrics_registry.provider_factory(&key);
                             match reader_factory_option {
                                 Some(factory_function) => {
-                                    /*let config =
-                                    &exporter_map[&Value::String(exporter_name.clone())];*/
                                     let meter_provider_builder_result =
                                         factory_function(meter_provider_builder, periodic_config);
                                     meter_provider_builder = match meter_provider_builder_result {
@@ -128,13 +128,13 @@ impl PullReaderProvider {
     fn configure(
         metrics_registry: &MeterProviderRegistry,
         mut meter_provider_builder: opentelemetry_sdk::metrics::MeterProviderBuilder,
-        config: &crate::model::metrics::reader::Pull,
+        config: &Value,
     ) -> Result<opentelemetry_sdk::metrics::MeterProviderBuilder, ProviderError> {
-        if let Some(exporter_config) = &config.exporter {
+        if let Some(exporter_config) = config["exporter"].as_mapping() {
             meter_provider_builder = PullExporterProvider::configure(
                 metrics_registry,
                 meter_provider_builder,
-                exporter_config,
+                &Value::Mapping(exporter_config.clone()),
             )?;
         }
         Ok(meter_provider_builder)
@@ -149,10 +149,10 @@ impl PullExporterProvider {
     fn configure(
         _metrics_registry: &MeterProviderRegistry,
         meter_provider_builder: opentelemetry_sdk::metrics::MeterProviderBuilder,
-        config: &crate::model::metrics::reader::PullExporter,
+        config: &Value,
     ) -> Result<opentelemetry_sdk::metrics::MeterProviderBuilder, ProviderError> {
         // TODO: Implement other pull exporters.
-        if let Some(_prometheus_config) = &config.prometheus {
+        if let Some(_prometheus_config) = config["prometheus"].as_mapping() {
             // Explicitly Prometheus exporter is not supported in this provider.
             return Err(ProviderError::UnsupportedExporter(
                 "Prometheus exporter is not supported.".to_string(),
@@ -166,12 +166,12 @@ impl PullExporterProvider {
 mod tests {
 
     use super::*;
-    use crate::{model::metrics::reader::PullExporter, ConfigurationError};
+    use crate::{ConfigurationError, RegistryKey};
     use opentelemetry_sdk::metrics::SdkMeterProvider;
 
     pub fn register_mock_reader_factory(
         builder: MeterProviderBuilder,
-        _config: &crate::model::metrics::reader::Periodic,
+        _config: &Value,
     ) -> Result<MeterProviderBuilder, ConfigurationError> {
         // Mock implementation: just return the builder as is
         Ok(builder)
@@ -179,10 +179,9 @@ mod tests {
 
     #[test]
     fn test_reader_provider_configure() {
-        let mut configuration_registry = crate::ConfigurationProviderRegistry::default();
-        configuration_registry
-            .metrics()
-            .register_periodic_reader_factory("console", register_mock_reader_factory);
+        let mut registry = crate::ConfigurationProviderRegistry::default();
+        let key = RegistryKey::ReadersPeriodicExporter("console".to_string());
+        registry.register_meter_provider_factory(key, register_mock_reader_factory);
         let meter_provider_builder = SdkMeterProvider::builder();
 
         let config: Reader = serde_yaml::from_str(
@@ -196,7 +195,7 @@ mod tests {
         )
         .unwrap();
 
-        let metrics_registry = configuration_registry.metrics;
+        let metrics_registry = registry.metrics;
 
         _ = ReaderProvider::configure(&metrics_registry, meter_provider_builder, &config).unwrap();
     }
@@ -259,12 +258,12 @@ mod tests {
     fn test_periodic_exporter_provider_configure_unsupported_exporter() {
         let metrics_provider_manager = MeterProviderRegistry::default();
         let meter_provider_builder = SdkMeterProvider::builder();
-        let config = crate::model::metrics::reader::PullExporter {
-            prometheus: Some(crate::model::metrics::reader::PullExporterPrometheus {
-                host: "localhost".to_string(),
-                port: 9090,
-            }),
-        };
+        let confg_yaml = r#"
+            prometheus:
+                host: localhost
+                port: 9090
+        "#;
+        let config: Value = serde_yaml::from_str(confg_yaml).unwrap();
         let result = PullExporterProvider::configure(
             &metrics_provider_manager,
             meter_provider_builder,
@@ -284,9 +283,8 @@ mod tests {
         let configuration_registry = crate::ConfigurationProviderRegistry::default();
         let meter_provider_builder = SdkMeterProvider::builder();
 
-        let config = crate::model::metrics::reader::Pull {
-            exporter: Some(PullExporter { prometheus: None }),
-        };
+        let config_yaml = "";
+        let config: Value = serde_yaml::from_str(config_yaml).unwrap();
 
         let metrics_registry = configuration_registry.metrics;
 

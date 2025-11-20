@@ -151,13 +151,14 @@ impl TelemetryProviders {
 
 #[cfg(test)]
 mod tests {
-    use crate::ConfigurationError;
+    use crate::{ConfigurationError, RegistryKey};
     use opentelemetry_sdk::{
         error::OTelSdkResult,
         metrics::{
             data::ResourceMetrics, exporter::PushMetricExporter, MeterProviderBuilder, Temporality,
         },
     };
+    use serde_yaml::Value;
 
     use super::*;
 
@@ -165,10 +166,7 @@ mod tests {
     struct MockExporter {}
 
     impl PushMetricExporter for MockExporter {
-        async fn export(
-            &self,
-            _metrics: &ResourceMetrics,
-        ) -> OTelSdkResult {
+        async fn export(&self, _metrics: &ResourceMetrics) -> OTelSdkResult {
             Ok(())
         }
 
@@ -191,7 +189,7 @@ mod tests {
 
     pub fn register_mock_reader_factory(
         mut builder: MeterProviderBuilder,
-        _config: &crate::model::metrics::reader::Periodic,
+        _config: &Value,
     ) -> Result<MeterProviderBuilder, ConfigurationError> {
         let exporter = MockExporter::default();
         builder = builder.with_periodic_exporter(exporter);
@@ -215,14 +213,12 @@ mod tests {
           development: true
         "#;
 
-        let mut configuration_registry = ConfigurationProviderRegistry::default();
-        let metrics_provider_manager = configuration_registry.metrics();
-        let name = "console";
-        metrics_provider_manager
-            .register_periodic_reader_factory(name, register_mock_reader_factory);
+        let mut registry = ConfigurationProviderRegistry::default();
+        let name = "console".to_string();
+        let key = RegistryKey::ReadersPeriodicExporter(name);
+        registry.register_meter_provider_factory(key, register_mock_reader_factory);
 
-        let providers =
-            TelemetryProviders::configure_from_yaml(&configuration_registry, yaml_str).unwrap();
+        let providers = TelemetryProviders::configure_from_yaml(&registry, yaml_str).unwrap();
         assert!(providers.meter_provider.is_some());
     }
 

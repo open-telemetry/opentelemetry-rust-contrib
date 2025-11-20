@@ -32,9 +32,9 @@ impl MeterProvider {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::model::metrics::Metrics;
+    use crate::{model::metrics::Metrics, RegistryKey};
     use opentelemetry_sdk::metrics::SdkMeterProvider;
-    use serde_yaml;
+    use serde_yaml::{self, Value};
 
     #[test]
     fn test_configure_metrics_provider() {
@@ -49,12 +49,13 @@ mod tests {
 
         fn mock_factory(
             builder: MeterProviderBuilder,
-            _config: &crate::model::metrics::reader::Periodic,
+            _config: &Value,
         ) -> Result<MeterProviderBuilder, crate::ConfigurationError> {
             Ok(builder)
         }
+        let key = RegistryKey::ReadersPeriodicExporter("custom".to_string());
 
-        registry.register_periodic_reader_factory("custom", mock_factory);
+        registry.register_provider_factory(key, mock_factory);
         let meter_provider_builder = SdkMeterProvider::builder();
         let result = MeterProvider::configure(&registry, meter_provider_builder, &metrics_config);
         assert!(result.is_ok());

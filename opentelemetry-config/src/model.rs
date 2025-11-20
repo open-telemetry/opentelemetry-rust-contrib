@@ -52,9 +52,9 @@ mod tests {
     fn test_deserialize_invalid_telemetry() {
         let yaml_str = r#"
           metrics:
-            readers:
+            readers_invalid_field:
               - periodic:
-                  exporter_invalid_field:
+                  exporter:
                     console: {}
           resource:
             service.name: "example-service"
@@ -65,7 +65,7 @@ mod tests {
         if let Err(e) = telemetry_result {
             assert!(e
                 .to_string()
-                .contains("unknown field `exporter_invalid_field`"));
+                .contains("unknown field `readers_invalid_field`"));
         } else {
             panic!("Expected error due to invalid field, but got Ok");
         }
