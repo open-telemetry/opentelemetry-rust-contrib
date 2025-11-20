@@ -1,12 +1,5 @@
-//! # Example OpenTelemetry Config Custom exporter
-//!
-//! This example demonstrates how to configure OpenTelemetry Metrics
-//! using the OpenTelemetry Config crate with a Mock Custom Exporter.
-//! It is helpful to implement and test custom exporters.
-
 use opentelemetry_config::{
-    model::metrics::reader::Periodic, providers::TelemetryProviders, ConfigurationError,
-    ConfigurationProviderRegistry,
+    model::metrics::reader::Periodic, ConfigurationError,
 };
 
 use opentelemetry_sdk::{
@@ -15,59 +8,8 @@ use opentelemetry_sdk::{
         data::ResourceMetrics, exporter::PushMetricExporter, MeterProviderBuilder, PeriodicReader,
     },
 };
-use std::env;
+
 use std::time::Duration;
-
-pub fn main() -> Result<(), Box<dyn std::error::Error>> {
-    let args: Vec<String> = env::args().collect();
-
-    if args.len() == 1 || (args.len() > 1 && args[1] == "--help") {
-        println!("Usage: cargo run -- --file metrics_custom.yaml");
-        println!("This example demonstrates how to configure OpenTelemetry Metrics using the OpenTelemetry Config crate with a custom Exporter.");
-        return Ok(());
-    }
-    if args.len() < 3 || args[1] != "--file" {
-        println!("Error: Configuration file path not provided.");
-        println!("Usage: cargo run -- --file metrics_custom.yaml");
-        return Ok(());
-    }
-    let config_file = &args[2];
-
-    // Setup configuration registry with custom exporter provider.
-    let mut registry = ConfigurationProviderRegistry::default();
-
-    // Register the custom exporter provider.
-    registry.metrics().register_periodic_reader_factory(
-        "custom",
-        MockPeriodicReaderProvider::register_mock_reader_factory,
-    );
-
-    // Configure telemetry from the provided YAML file.
-    let providers = TelemetryProviders::configure_from_yaml_file(&registry, config_file).unwrap();
-
-    if let Some(meter_provider) = providers.meter_provider() {
-        println!("Meter provider configured successfully. Shutting it down...");
-        meter_provider.shutdown()?;
-    } else {
-        println!("No Meter provider configured.");
-    }
-
-    if let Some(logs_provider) = providers.logs_provider() {
-        println!("Logs provider configured successfully. Shutting it down...");
-        logs_provider.shutdown()?;
-    } else {
-        println!("No Logs provider configured.");
-    }
-
-    if let Some(traces_provider) = providers.traces_provider() {
-        println!("Traces provider configured successfully. Shutting it down...");
-        traces_provider.shutdown()?;
-    } else {
-        println!("No Traces provider configured.");
-    }
-
-    Ok(())
-}
 
 #[derive(Debug, serde::Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -82,7 +24,7 @@ struct CustomData {
     pub custom_int_field: i32,
 }
 
-struct MockPeriodicReaderProvider {}
+pub(crate) struct MockPeriodicReaderProvider {}
 
 impl MockPeriodicReaderProvider {
     pub fn register_mock_reader_factory(
