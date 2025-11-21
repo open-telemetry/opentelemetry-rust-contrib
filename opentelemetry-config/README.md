@@ -104,9 +104,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 ### Core Components
 
 - **`ConfigurationProviderRegistry`**: Central registry for configuration providers across all telemetry signals
-- **`TelemetryProviders`**: Holds configured meter, tracer, and logger providers with static `configure_*` methods
+- **`TelemetryProviders`**: Holds configured meter, tracer, and logger providers with static `configure_from_yaml` method
 - **`RegistryKey`**: Enum for identifying different types of exporters (e.g., `ReadersPeriodicExporter`, `ReadersPullExporter`)
-- **`MeterProviderFactory`**: Type alias for factory functions: `Fn(MeterProviderBuilder, &Value) -> Result<MeterProviderBuilder, ConfigurationError>`
+- **`MeterProviderFactory`**: Type alias for factory functions: `Fn(MeterProviderBuilder, &str) -> Result<MeterProviderBuilder, ConfigurationError>`
 - **`ConfigurationError`**: Error type for configuration and registration failures
 - **`ProviderError`**: Error type for provider-related failures
 
@@ -117,7 +117,7 @@ This crate follows a **factory-based decoupled implementation pattern**:
 - **Centralized Configuration Model**: The configuration schema (YAML structure and data models) is defined and maintained centrally in this crate, ensuring alignment with the OpenTelemetry Configuration Standard. The general structure (metrics, traces, logs, resource) is enforced to maintain compatibility.
 - **Extensible Configuration**: While the top-level structure is controlled, exporter-specific configurations are fully extensible. Factory functions can define their own configuration schemas that are deserialized from the YAML at runtime, enabling custom properties without modifying the core model.
 - **Decoupled Implementations**: Actual exporter implementations live in external crates or user code, allowing the community to contribute custom exporters without modifying the core configuration model. Each factory function handles its own configuration deserialization and exporter instantiation.
-- **Factory Function Pattern**: Periodic readers are registered via factory functions (`Fn(MeterProviderBuilder, &Value) -> Result<MeterProviderBuilder, ConfigurationError>`) that receive the meter provider builder and raw YAML `Value` configuration, allowing them to deserialize custom config structures and create readers with custom exporters.
+- **Factory Function Pattern**: Periodic readers are registered via factory functions (`Fn(MeterProviderBuilder, &str) -> Result<MeterProviderBuilder, ConfigurationError>`) that receive the meter provider builder and YAML configuration string, allowing them to deserialize custom config structures and create readers with custom exporters.
 - **Registry-Based Discovery**: A central registry maps exporter names (string keys) to their factory functions, enabling dynamic configuration. Exporter names from the YAML are used as registry keys to look up the appropriate factory.
 - **Community Control**: By keeping the top-level configuration model centralized and standardized, the community maintains consistency across all implementations while enabling complete flexibility for exporter-specific configurations.
 
