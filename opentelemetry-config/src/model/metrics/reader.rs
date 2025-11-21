@@ -80,21 +80,21 @@ mod tests {
             Reader::Pull(pull) => {
                 let exporter = pull["exporter"].as_mapping().unwrap();
                 assert!(exporter
-                    .get(&serde_yaml::Value::String("prometheus".to_string()))
+                    .get(serde_yaml::Value::String("prometheus".to_string()))
                     .is_some());
                 let prometheus = exporter
-                    .get(&serde_yaml::Value::String("prometheus".to_string()))
+                    .get(serde_yaml::Value::String("prometheus".to_string()))
                     .unwrap();
                 if let serde_yaml::Value::Mapping(prometheus_map) = prometheus {
                     assert_eq!(
                         prometheus_map
-                            .get(&serde_yaml::Value::String("host".to_string()))
+                            .get(serde_yaml::Value::String("host".to_string()))
                             .unwrap(),
                         "localhost"
                     );
                     assert_eq!(
                         prometheus_map
-                            .get(&serde_yaml::Value::String("port".to_string()))
+                            .get(serde_yaml::Value::String("port".to_string()))
                             .unwrap(),
                         9090
                     );
