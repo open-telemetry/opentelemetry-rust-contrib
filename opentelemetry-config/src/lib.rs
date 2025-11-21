@@ -35,11 +35,12 @@ impl ConfigurationProviderRegistry {
     }
 }
 
+/// Keys used to identify different types of configuration providers.
 #[derive(Hash, Eq, PartialEq, Debug, Clone)]
 pub enum RegistryKey {
-    /// References a periodic exporter. Path: readers.periodic.[name]
+    /// References a periodic exporter. Path: readers.periodic.exporter.[name]
     ReadersPeriodicExporter(String),
-    /// References a pull exporter. Path: readers.pull.[name]
+    /// References a pull exporter. Path: readers.pull.exporter.[name]
     ReadersPullExporter(String),
 }
 

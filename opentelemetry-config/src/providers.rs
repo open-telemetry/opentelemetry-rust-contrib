@@ -53,7 +53,7 @@ impl TelemetryProviders {
     }
 
     /// Configures the Telemetry providers based on the provided configuration
-    pub fn configure(
+    fn configure(
         configuration_registry: &ConfigurationProviderRegistry,
         config: &Telemetry,
     ) -> Result<TelemetryProviders, ProviderError> {
@@ -101,20 +101,6 @@ impl TelemetryProviders {
             ))
         })?;
         Self::configure(configuration_registry, &config)
-    }
-
-    /// Configures the Telemetry providers from a YAML file
-    pub fn configure_from_yaml_file(
-        configuration_registry: &ConfigurationProviderRegistry,
-        file_path: &str,
-    ) -> Result<TelemetryProviders, ProviderError> {
-        let yaml_str = std::fs::read_to_string(file_path).map_err(|e| {
-            ProviderError::InvalidConfiguration(format!(
-                "Failed to read YAML configuration file: {}",
-                e
-            ))
-        })?;
-        Self::configure_from_yaml(configuration_registry, &yaml_str)
     }
 
     /// Converts resource attributes from HashMap to Resource

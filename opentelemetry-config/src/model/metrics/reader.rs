@@ -10,7 +10,7 @@ use serde_yaml::Value;
 
 /// Metrics reader configuration
 #[derive(Debug)]
-pub enum Reader {
+pub(crate) enum Reader {
     Periodic(Value),
     Pull(Value),
 }

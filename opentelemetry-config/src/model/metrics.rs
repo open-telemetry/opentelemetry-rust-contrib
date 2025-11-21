@@ -12,7 +12,7 @@ use crate::model::metrics::reader::Reader;
 /// Configuration for Metrics
 #[derive(Deserialize, Debug)]
 #[serde(deny_unknown_fields)]
-pub struct Metrics {
+pub(crate) struct Metrics {
     /// Readers configuration for Metrics telemetry
-    pub readers: Vec<Reader>,
+    pub(crate) readers: Vec<Reader>,
 }

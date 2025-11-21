@@ -31,13 +31,14 @@ impl MockPeriodicReaderProvider {
         mut meter_provider_builder: MeterProviderBuilder,
         periodic_config: &Value,
     ) -> Result<MeterProviderBuilder, ConfigurationError> {
-        let config = serde_yaml::from_value::<MockCustomConfig>(periodic_config["exporter"].clone())
-            .map_err(|e| {
-            ConfigurationError::InvalidConfiguration(format!(
-                "Failed to parse MockCustomConfig: {}",
-                e
-            ))
-        })?;
+        let config =
+            serde_yaml::from_value::<MockCustomConfig>(periodic_config["exporter"].clone())
+                .map_err(|e| {
+                    ConfigurationError::InvalidConfiguration(format!(
+                        "Failed to parse MockCustomConfig: {}",
+                        e
+                    ))
+                })?;
         println!(
             "Configuring MockCustomExporter with string field: {} and int field: {}",
             config.custom.custom_string_field, config.custom.custom_int_field

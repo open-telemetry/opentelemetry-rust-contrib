@@ -15,7 +15,7 @@ use crate::model::metrics::Metrics;
 /// Configuration for Telemetry
 #[derive(Deserialize, Debug)]
 #[serde(deny_unknown_fields)]
-pub struct Telemetry {
+pub(crate) struct Telemetry {
     /// Metrics telemetry configuration
     pub metrics: Option<Metrics>,
 

@@ -3,14 +3,11 @@
 //! This example demonstrates how to configure OpenTelemetry Metrics using the OpenTelemetry Config crate
 //! with a custom Exporter within an application.
 
-pub mod model;
 pub mod mock_provider;
+pub mod model;
 
 use opentelemetry_config::{
-    RegistryKey,
-    model::Telemetry,
-    providers::TelemetryProviders,
-    ConfigurationProviderRegistry,
+    providers::TelemetryProviders, ConfigurationProviderRegistry, RegistryKey,
 };
 
 use std::env;
@@ -31,7 +28,26 @@ pub fn main() -> Result<(), Box<dyn std::error::Error>> {
     let config_file = &args[2];
 
     // Load application specific configuration
-    let app_config: model::Application = serde_yaml::from_reader(std::fs::File::open(config_file)?)?;
+    let file = match std::fs::File::open(config_file) {
+        Ok(f) => f,
+        Err(e) => {
+            eprintln!(
+                "Error: Unable to open configuration file '{}': {}",
+                config_file, e
+            );
+            return Ok(());
+        }
+    };
+    let app_config: model::Application = match serde_yaml::from_reader(file) {
+        Ok(config) => config,
+        Err(e) => {
+            eprintln!(
+                "Error: Failed to load configuration from '{}': {}",
+                config_file, e
+            );
+            return Ok(());
+        }
+    };
 
     // Configure the application itself
     println!(
@@ -43,7 +59,17 @@ pub fn main() -> Result<(), Box<dyn std::error::Error>> {
     let registry = initialize_telemetry_registry();
 
     // Configure telemetry from the application configuration.
-    let telemetry_providers = configure_telemetry(&registry, &app_config.service.telemetry)?;
+    let telemetry_config_yaml = serde_yaml::to_string(&app_config.service.telemetry)?;
+    let telemetry_providers = match configure_telemetry(&registry, &telemetry_config_yaml) {
+        Ok(providers) => providers,
+        Err(e) => {
+            println!(
+                "Error: Failed to configure telemetry from the application configuration: {}",
+                e
+            );
+            return Ok(());
+        }
+    };
 
     // Use and verify the telemetry configuration
     if let Some(meter_provider) = telemetry_providers.meter_provider() {
@@ -84,7 +110,10 @@ fn initialize_telemetry_registry() -> ConfigurationProviderRegistry {
 }
 
 /// Configures telemetry providers from the given telemetry configuration.
-fn configure_telemetry(registry: &ConfigurationProviderRegistry, telemetry_config: &Telemetry) -> Result<TelemetryProviders, Box<dyn std::error::Error>> {
-    let providers = TelemetryProviders::configure(&registry, telemetry_config)?;
+fn configure_telemetry(
+    registry: &ConfigurationProviderRegistry,
+    telemetry_config: &str,
+) -> Result<TelemetryProviders, Box<dyn std::error::Error>> {
+    let providers = TelemetryProviders::configure_from_yaml(&registry, telemetry_config)?;
     Ok(providers)
 }

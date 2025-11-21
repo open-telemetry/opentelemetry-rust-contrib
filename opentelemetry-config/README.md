@@ -79,10 +79,12 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         create_custom_reader,
     );
 
-    // Load configuration from YAML file
-    let providers = TelemetryProviders::configure_from_yaml_file(
+    let yaml = "<yaml configuration>";
+
+    // Load configuration from YAML string
+    let providers = TelemetryProviders::configure_from_yaml(
         &registry,
-        "otel-config.yaml"
+        yaml
     )?;
 
     // Use the configured providers

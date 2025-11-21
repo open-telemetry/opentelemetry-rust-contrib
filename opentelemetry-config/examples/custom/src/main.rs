@@ -5,9 +5,7 @@
 //! It is helpful to implement and test custom exporters.
 
 use opentelemetry_config::{
-    providers::TelemetryProviders, ConfigurationError,
-    ConfigurationProviderRegistry,
-    RegistryKey,
+    providers::TelemetryProviders, ConfigurationError, ConfigurationProviderRegistry, RegistryKey,
 };
 
 use opentelemetry_sdk::{
@@ -16,9 +14,9 @@ use opentelemetry_sdk::{
         data::ResourceMetrics, exporter::PushMetricExporter, MeterProviderBuilder, PeriodicReader,
     },
 };
-use std::env;
-use std::time::Duration;
 use serde_yaml::Value;
+use std::time::Duration;
+use std::{env, fs};
 
 pub fn main() -> Result<(), Box<dyn std::error::Error>> {
     let args: Vec<String> = env::args().collect();
@@ -33,7 +31,18 @@ pub fn main() -> Result<(), Box<dyn std::error::Error>> {
         println!("Usage: cargo run -- --file metrics_custom.yaml");
         return Ok(());
     }
+
     let config_file = &args[2];
+    let config_yaml = match fs::read_to_string(config_file) {
+        Ok(content) => content,
+        Err(e) => {
+            println!(
+                "Error: Unable to read the configuration file at path: {}: {}",
+                config_file, e
+            );
+            return Ok(());
+        }
+    };
 
     // Setup configuration registry with custom exporter provider.
     let mut registry = ConfigurationProviderRegistry::default();
@@ -46,7 +55,16 @@ pub fn main() -> Result<(), Box<dyn std::error::Error>> {
     );
 
     // Configure telemetry from the provided YAML file.
-    let providers = TelemetryProviders::configure_from_yaml_file(&registry, config_file).unwrap();
+    let providers = match TelemetryProviders::configure_from_yaml(&registry, &config_yaml) {
+        Ok(providers) => providers,
+        Err(e) => {
+            println!(
+                "Error: Failed to configure telemetry from the provided YAML file: {}",
+                e
+            );
+            return Ok(());
+        }
+    };
 
     if let Some(meter_provider) = providers.meter_provider() {
         println!("Meter provider configured successfully. Shutting it down...");
@@ -92,13 +110,14 @@ impl MockPeriodicReaderProvider {
         mut meter_provider_builder: MeterProviderBuilder,
         periodic_config: &Value,
     ) -> Result<MeterProviderBuilder, ConfigurationError> {
-        let config = serde_yaml::from_value::<MockCustomConfig>(periodic_config["exporter"].clone())
-            .map_err(|e| {
-            ConfigurationError::InvalidConfiguration(format!(
-                "Failed to parse MockCustomConfig: {}",
-                e
-            ))
-        })?;
+        let config =
+            serde_yaml::from_value::<MockCustomConfig>(periodic_config["exporter"].clone())
+                .map_err(|e| {
+                    ConfigurationError::InvalidConfiguration(format!(
+                        "Failed to parse MockCustomConfig: {}",
+                        e
+                    ))
+                })?;
         println!(
             "Configuring MockCustomExporter with string field: {} and int field: {}",
             config.custom.custom_string_field, config.custom.custom_int_field
@@ -108,9 +127,7 @@ impl MockPeriodicReaderProvider {
             custom_config: config,
         };
 
-        let interval_millis = periodic_config["interval"]
-            .as_u64()
-            .unwrap_or(60000);
+        let interval_millis = periodic_config["interval"].as_u64().unwrap_or(60000);
 
         // TODO: Add timeout from config
         let reader = PeriodicReader::builder(exporter)
