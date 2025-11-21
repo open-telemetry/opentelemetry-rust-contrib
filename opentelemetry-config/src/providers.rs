@@ -144,7 +144,6 @@ mod tests {
             data::ResourceMetrics, exporter::PushMetricExporter, MeterProviderBuilder, Temporality,
         },
     };
-    use serde_yaml::Value;
 
     use super::*;
 
@@ -175,7 +174,7 @@ mod tests {
 
     pub fn register_mock_reader_factory(
         mut builder: MeterProviderBuilder,
-        _config: &Value,
+        _config_yaml: &str,
     ) -> Result<MeterProviderBuilder, ConfigurationError> {
         let exporter = MockExporter::default();
         builder = builder.with_periodic_exporter(exporter);
@@ -202,7 +201,7 @@ mod tests {
         let mut registry = ConfigurationProviderRegistry::default();
         let name = "console".to_string();
         let key = RegistryKey::ReadersPeriodicExporter(name);
-        registry.register_meter_provider_factory(key, register_mock_reader_factory);
+        registry.register_metric_exporter_factory(key, register_mock_reader_factory);
 
         let providers = TelemetryProviders::configure_from_yaml(&registry, yaml_str).unwrap();
         assert!(providers.meter_provider.is_some());

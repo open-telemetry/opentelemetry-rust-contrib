@@ -76,8 +76,18 @@ impl PeriodicExporterProvider {
                             let reader_factory_option = metrics_registry.provider_factory(&key);
                             match reader_factory_option {
                                 Some(factory_function) => {
-                                    let meter_provider_builder_result =
-                                        factory_function(meter_provider_builder, periodic_config);
+                                    let periodic_config_str =
+                                        serde_yaml::to_string(&periodic_config).map_err(|e| {
+                                            ProviderError::RegistrationError(format!(
+                                                "Failed to serialize periodic configuration: {}",
+                                                e
+                                            ))
+                                        })?;
+
+                                    let meter_provider_builder_result = factory_function(
+                                        meter_provider_builder,
+                                        &periodic_config_str,
+                                    );
                                     meter_provider_builder = match meter_provider_builder_result {
                                         Ok(builder) => builder,
                                         Err(e) => match e {
@@ -169,9 +179,9 @@ mod tests {
     use crate::{ConfigurationError, RegistryKey};
     use opentelemetry_sdk::metrics::SdkMeterProvider;
 
-    pub fn register_mock_reader_factory(
+    pub fn register_mock_exporter_factory(
         builder: MeterProviderBuilder,
-        _config: &Value,
+        _config: &str,
     ) -> Result<MeterProviderBuilder, ConfigurationError> {
         // Mock implementation: just return the builder as is
         Ok(builder)
@@ -181,7 +191,7 @@ mod tests {
     fn test_reader_provider_configure() {
         let mut registry = crate::ConfigurationProviderRegistry::default();
         let key = RegistryKey::ReadersPeriodicExporter("console".to_string());
-        registry.register_meter_provider_factory(key, register_mock_reader_factory);
+        registry.register_metric_exporter_factory(key, register_mock_exporter_factory);
         let meter_provider_builder = SdkMeterProvider::builder();
 
         let config: Reader = serde_yaml::from_str(

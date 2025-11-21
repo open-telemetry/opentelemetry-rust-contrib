@@ -11,7 +11,6 @@ use std::{
 };
 
 use opentelemetry_sdk::metrics::MeterProviderBuilder;
-use serde_yaml::Value;
 
 pub mod model;
 pub mod providers;
@@ -25,13 +24,15 @@ pub struct ConfigurationProviderRegistry {
 
 impl ConfigurationProviderRegistry {
     /// Registers a new MeterProvider factory with the given name.
-    pub fn register_meter_provider_factory(
+    /// The factory is a function that takes a MeterProviderBuilder and a YAML configuration string,
+    /// and returns a configured MeterProviderBuilder or a ConfigurationError.
+    pub fn register_metric_exporter_factory(
         &mut self,
         key: RegistryKey,
-        factory: impl Fn(MeterProviderBuilder, &Value) -> Result<MeterProviderBuilder, ConfigurationError>
+        factory: impl Fn(MeterProviderBuilder, &str) -> Result<MeterProviderBuilder, ConfigurationError>
             + 'static,
     ) {
-        self.metrics.register_provider_factory(key, factory);
+        self.metrics.register_exporter_factory(key, factory);
     }
 }
 
@@ -52,11 +53,13 @@ pub(crate) struct MeterProviderRegistry {
 }
 
 impl MeterProviderRegistry {
-    /// Registers a new provider factory with the given name.
-    pub(crate) fn register_provider_factory(
+    /// Registers a new exporter factory with the given name.
+    /// The factory is a function that takes a MeterProviderBuilder and a YAML configuration string,
+    /// and returns a configured MeterProviderBuilder or a ConfigurationError.
+    pub(crate) fn register_exporter_factory(
         &mut self,
         key: RegistryKey,
-        factory: impl Fn(MeterProviderBuilder, &Value) -> Result<MeterProviderBuilder, ConfigurationError>
+        factory: impl Fn(MeterProviderBuilder, &str) -> Result<MeterProviderBuilder, ConfigurationError>
             + 'static,
     ) {
         self.provider_factories.insert(key, Box::new(factory));
@@ -96,8 +99,9 @@ impl fmt::Display for ConfigurationError {
 }
 
 /// Type alias for meter provider factory functions
+/// that create meter providers based on a given yaml configuration string.
 type MeterProviderFactory =
-    dyn Fn(MeterProviderBuilder, &Value) -> Result<MeterProviderBuilder, ConfigurationError>;
+    dyn Fn(MeterProviderBuilder, &str) -> Result<MeterProviderBuilder, ConfigurationError>;
 
 /// Errors related to providers and configuration management.
 #[derive(Debug)]
@@ -137,6 +141,8 @@ mod tests {
         error::OTelSdkResult,
         metrics::{data::ResourceMetrics, exporter::PushMetricExporter, PeriodicReader},
     };
+
+    use serde_yaml::Value;
 
     use super::*;
 
@@ -180,15 +186,21 @@ mod tests {
 
         // Wrapper clousure to capture call_count_clone
         let register_mock_reader_clousure =
-            move |builder: MeterProviderBuilder, periodic_config: &Value| {
+            move |builder: MeterProviderBuilder, periodic_config: &str| {
                 call_count_clone.set(call_count_clone.get() + 1);
                 register_mock_reader(builder, periodic_config)
             };
 
         pub fn register_mock_reader(
             mut builder: MeterProviderBuilder,
-            config: &Value,
+            config_yaml_str: &str,
         ) -> Result<MeterProviderBuilder, ConfigurationError> {
+            let config: Value = serde_yaml::from_str(config_yaml_str).map_err(|e| {
+                ConfigurationError::InvalidConfiguration(format!(
+                    "Failed to parse configuration YAML: {}",
+                    e
+                ))
+            })?;
             let exporter: MockPeriodicExporter = serde_yaml::from_value(config["exporter"].clone())
                 .map_err(|e| {
                     ConfigurationError::InvalidConfiguration(format!(
@@ -214,26 +226,23 @@ mod tests {
         // Act
         let name = "console".to_string();
         let key = RegistryKey::ReadersPeriodicExporter(name);
-        registry.register_meter_provider_factory(key.clone(), register_mock_reader_clousure);
+        registry.register_metric_exporter_factory(key.clone(), register_mock_reader_clousure);
 
         // Assert
         assert!(registry.metrics.provider_factories.contains_key(&key));
 
-        let periodic_config: Value = serde_yaml::from_str(
-            r#"
+        let periodic_config_yaml = r#"
             interval: 1000
             timeout: 5000
             exporter:
               console:
                 temporality: cumulative
-            "#,
-        )
-        .unwrap();
+            "#;
 
         let factory_function_option = registry.metrics.provider_factory(&key);
         if let Some(factory_function) = factory_function_option {
             let builder = MeterProviderBuilder::default();
-            _ = factory_function(builder, &periodic_config).unwrap();
+            _ = factory_function(builder, &periodic_config_yaml).unwrap();
             // Verify that the factory function was called
             assert_eq!(call_count.get(), 1);
         } else {
@@ -259,7 +268,7 @@ mod tests {
         let name = "test_factory".to_string();
         let key = RegistryKey::ReadersPeriodicExporter(name);
         assert!(!registry.provider_factories.contains_key(&key));
-        registry.register_provider_factory(key.clone(), |builder, _| Ok(builder));
+        registry.register_exporter_factory(key.clone(), |builder, _| Ok(builder));
         assert!(registry.provider_factories.contains_key(&key));
     }
 }

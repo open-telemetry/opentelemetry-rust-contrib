@@ -9,7 +9,12 @@ use opentelemetry_sdk::{
 
 use std::time::Duration;
 
-use serde_yaml::Value;
+#[derive(Debug, serde::Deserialize)]
+#[serde(deny_unknown_fields)]
+struct PeriodicConfig {
+    pub interval: Option<u64>,
+    pub exporter: MockCustomConfig,
+}
 
 #[derive(Debug, serde::Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -27,31 +32,31 @@ struct CustomData {
 pub(crate) struct MockPeriodicReaderProvider {}
 
 impl MockPeriodicReaderProvider {
-    pub fn register_mock_reader_factory(
+    pub fn register_mock_exporter_factory(
         mut meter_provider_builder: MeterProviderBuilder,
-        periodic_config: &Value,
+        periodic_config_yaml: &str,
     ) -> Result<MeterProviderBuilder, ConfigurationError> {
-        let config =
-            serde_yaml::from_value::<MockCustomConfig>(periodic_config["exporter"].clone())
-                .map_err(|e| {
-                    ConfigurationError::InvalidConfiguration(format!(
-                        "Failed to parse MockCustomConfig: {}",
-                        e
-                    ))
-                })?;
+        let periodic_config: PeriodicConfig =
+            serde_yaml::from_str(periodic_config_yaml).map_err(|e| {
+                ConfigurationError::InvalidConfiguration(format!(
+                    "Failed to parse PeriodicConfig: {}",
+                    e
+                ))
+            })?;
+
+        let config_exporter = periodic_config.exporter;
+
         println!(
             "Configuring MockCustomExporter with string field: {} and int field: {}",
-            config.custom.custom_string_field, config.custom.custom_int_field
+            config_exporter.custom.custom_string_field, config_exporter.custom.custom_int_field
         );
 
         let exporter = MockCustomExporter {
-            custom_config: config,
+            custom_config: config_exporter,
         };
 
-        let interval_millis = periodic_config
-            .get("interval")
-            .and_then(|v| v.as_u64())
-            .unwrap_or(60000);
+        let interval_millis = periodic_config.interval.unwrap_or(60000);
+
         // TODO: Add timeout from config
         let reader = PeriodicReader::builder(exporter)
             .with_interval(std::time::Duration::from_millis(interval_millis))

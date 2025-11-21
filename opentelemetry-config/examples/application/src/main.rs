@@ -100,10 +100,10 @@ fn initialize_telemetry_registry() -> ConfigurationProviderRegistry {
     let mut registry = ConfigurationProviderRegistry::default();
 
     let key = crate::RegistryKey::ReadersPeriodicExporter("custom".to_string());
-    // Register the custom exporter provider.
-    registry.register_meter_provider_factory(
+    // Register the custom exporter factory.
+    registry.register_metric_exporter_factory(
         key,
-        mock_provider::MockPeriodicReaderProvider::register_mock_reader_factory,
+        mock_provider::MockPeriodicReaderProvider::register_mock_exporter_factory,
     );
 
     registry

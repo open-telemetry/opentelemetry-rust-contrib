@@ -14,7 +14,6 @@ use opentelemetry_sdk::{
         data::ResourceMetrics, exporter::PushMetricExporter, MeterProviderBuilder, PeriodicReader,
     },
 };
-use serde_yaml::Value;
 use std::time::Duration;
 use std::{env, fs};
 
@@ -49,9 +48,9 @@ pub fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let key = RegistryKey::ReadersPeriodicExporter("custom".to_string());
     // Register the custom exporter provider.
-    registry.register_meter_provider_factory(
+    registry.register_metric_exporter_factory(
         key,
-        MockPeriodicReaderProvider::register_mock_reader_factory,
+        MockPeriodicReaderProvider::register_mock_exporter_factory,
     );
 
     // Configure telemetry from the provided YAML file.
@@ -92,6 +91,13 @@ pub fn main() -> Result<(), Box<dyn std::error::Error>> {
 
 #[derive(Debug, serde::Deserialize)]
 #[serde(deny_unknown_fields)]
+struct PeriodicConfig {
+    pub interval: Option<u64>,
+    pub exporter: MockCustomConfig,
+}
+
+#[derive(Debug, serde::Deserialize)]
+#[serde(deny_unknown_fields)]
 struct MockCustomConfig {
     pub custom: CustomData,
 }
@@ -106,28 +112,30 @@ struct CustomData {
 struct MockPeriodicReaderProvider {}
 
 impl MockPeriodicReaderProvider {
-    pub fn register_mock_reader_factory(
+    pub fn register_mock_exporter_factory(
         mut meter_provider_builder: MeterProviderBuilder,
-        periodic_config: &Value,
+        periodic_config_str: &str,
     ) -> Result<MeterProviderBuilder, ConfigurationError> {
-        let config =
-            serde_yaml::from_value::<MockCustomConfig>(periodic_config["exporter"].clone())
-                .map_err(|e| {
-                    ConfigurationError::InvalidConfiguration(format!(
-                        "Failed to parse MockCustomConfig: {}",
-                        e
-                    ))
-                })?;
+        let periodic_config: PeriodicConfig =
+            serde_yaml::from_str(periodic_config_str).map_err(|e| {
+                ConfigurationError::InvalidConfiguration(format!(
+                    "Failed to parse PeriodicConfig: {}",
+                    e
+                ))
+            })?;
+
+        let exporter_config = periodic_config.exporter;
+
         println!(
             "Configuring MockCustomExporter with string field: {} and int field: {}",
-            config.custom.custom_string_field, config.custom.custom_int_field
+            exporter_config.custom.custom_string_field, exporter_config.custom.custom_int_field
         );
 
         let exporter = MockCustomExporter {
-            custom_config: config,
+            custom_config: exporter_config,
         };
 
-        let interval_millis = periodic_config["interval"].as_u64().unwrap_or(60000);
+        let interval_millis = periodic_config.interval.unwrap_or(60000);
 
         // TODO: Add timeout from config
         let reader = PeriodicReader::builder(exporter)
