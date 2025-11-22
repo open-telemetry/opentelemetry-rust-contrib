@@ -2,6 +2,14 @@
 
 ## vNext
 
+## v0.24.0
+
+### Changed
+
+* Update `actix-http` dependencies to 3.11
+* Update `actix-web` dependencies to 4.12
+* Update `awc` dependencies to 3.8
+
 ## v0.23.0
 
 ### Changed
