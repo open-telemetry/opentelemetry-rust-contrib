@@ -28,27 +28,18 @@ impl ConfigurationProviderRegistry {
     /// and returns a configured MeterProviderBuilder or a ConfigurationError.
     pub fn register_metric_exporter_factory(
         &mut self,
-        key: RegistryKey,
+        name: &str,
         factory: impl Fn(MeterProviderBuilder, &str) -> Result<MeterProviderBuilder, ConfigurationError>
             + 'static,
     ) {
-        self.metrics.register_exporter_factory(key, factory);
+        self.metrics.register_exporter_factory(name, factory);
     }
-}
-
-/// Keys used to identify different types of configuration providers.
-#[derive(Hash, Eq, PartialEq, Debug, Clone)]
-pub enum RegistryKey {
-    /// References a periodic exporter. Path: readers.periodic.exporter.[name]
-    ReadersPeriodicExporter(String),
-    /// References a pull exporter. Path: readers.pull.exporter.[name]
-    ReadersPullExporter(String),
 }
 
 /// Registry for metrics configuration providers.
 #[derive(Default)]
 pub(crate) struct MeterProviderRegistry {
-    provider_factories: HashMap<RegistryKey, Box<MeterProviderFactory>>,
+    provider_factories: HashMap<String, Box<MeterProviderFactory>>,
     // TODO: Add other types of providers registries.
 }
 
@@ -58,17 +49,18 @@ impl MeterProviderRegistry {
     /// and returns a configured MeterProviderBuilder or a ConfigurationError.
     pub(crate) fn register_exporter_factory(
         &mut self,
-        key: RegistryKey,
+        name: &str,
         factory: impl Fn(MeterProviderBuilder, &str) -> Result<MeterProviderBuilder, ConfigurationError>
             + 'static,
     ) {
-        self.provider_factories.insert(key, Box::new(factory));
+        self.provider_factories
+            .insert(name.to_string(), Box::new(factory));
     }
 
     /// Retrieves a provider factory by name.
-    pub(crate) fn provider_factory(&self, key: &RegistryKey) -> Option<&MeterProviderFactory> {
+    pub(crate) fn provider_factory(&self, name: &str) -> Option<&MeterProviderFactory> {
         self.provider_factories
-            .get(key)
+            .get(name)
             .map(|boxed_factory| boxed_factory.as_ref())
     }
 }
@@ -224,13 +216,11 @@ mod tests {
         let mut registry = ConfigurationProviderRegistry::default();
 
         // Act
-        let name = "console".to_string();
-        let key = RegistryKey::ReadersPeriodicExporter(name);
-        registry.register_metric_exporter_factory(key.clone(), register_mock_reader_clousure);
+        let name = "console";
+        registry.register_metric_exporter_factory(name, register_mock_reader_clousure);
 
         // Assert
-        assert!(registry.metrics.provider_factories.contains_key(&key));
-
+        assert!(registry.metrics.provider_factories.contains_key(name));
         let periodic_config_yaml = r#"
             interval: 1000
             timeout: 5000
@@ -239,7 +229,7 @@ mod tests {
                 temporality: cumulative
             "#;
 
-        let factory_function_option = registry.metrics.provider_factory(&key);
+        let factory_function_option = registry.metrics.provider_factory(name);
         if let Some(factory_function) = factory_function_option {
             let builder = MeterProviderBuilder::default();
             _ = factory_function(builder, &periodic_config_yaml).unwrap();
@@ -265,10 +255,9 @@ mod tests {
     #[test]
     fn test_has_periodic_reader_factory() {
         let mut registry = MeterProviderRegistry::default();
-        let name = "test_factory".to_string();
-        let key = RegistryKey::ReadersPeriodicExporter(name);
-        assert!(!registry.provider_factories.contains_key(&key));
-        registry.register_exporter_factory(key.clone(), |builder, _| Ok(builder));
-        assert!(registry.provider_factories.contains_key(&key));
+        let name = "test_factory";
+        assert!(!registry.provider_factories.contains_key(name));
+        registry.register_exporter_factory(name, |builder, _| Ok(builder));
+        assert!(registry.provider_factories.contains_key(name));
     }
 }

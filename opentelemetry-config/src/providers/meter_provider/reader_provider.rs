@@ -70,10 +70,8 @@ impl PeriodicExporterProvider {
                 for key in exporter_map.keys() {
                     match key {
                         Value::String(exporter_name) => {
-                            let key =
-                                crate::RegistryKey::ReadersPeriodicExporter(exporter_name.clone());
-
-                            let reader_factory_option = metrics_registry.provider_factory(&key);
+                            let reader_factory_option =
+                                metrics_registry.provider_factory(exporter_name);
                             match reader_factory_option {
                                 Some(factory_function) => {
                                     let periodic_config_str =
@@ -176,7 +174,7 @@ impl PullExporterProvider {
 mod tests {
 
     use super::*;
-    use crate::{ConfigurationError, RegistryKey};
+    use crate::ConfigurationError;
     use opentelemetry_sdk::metrics::SdkMeterProvider;
 
     pub fn register_mock_exporter_factory(
@@ -190,8 +188,8 @@ mod tests {
     #[test]
     fn test_reader_provider_configure() {
         let mut registry = crate::ConfigurationProviderRegistry::default();
-        let key = RegistryKey::ReadersPeriodicExporter("console".to_string());
-        registry.register_metric_exporter_factory(key, register_mock_exporter_factory);
+        let name = "console";
+        registry.register_metric_exporter_factory(name, register_mock_exporter_factory);
         let meter_provider_builder = SdkMeterProvider::builder();
 
         let config: Reader = serde_yaml::from_str(

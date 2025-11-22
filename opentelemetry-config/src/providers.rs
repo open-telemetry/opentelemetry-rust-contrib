@@ -137,7 +137,7 @@ impl TelemetryProviders {
 
 #[cfg(test)]
 mod tests {
-    use crate::{ConfigurationError, RegistryKey};
+    use crate::ConfigurationError;
     use opentelemetry_sdk::{
         error::OTelSdkResult,
         metrics::{
@@ -199,9 +199,8 @@ mod tests {
         "#;
 
         let mut registry = ConfigurationProviderRegistry::default();
-        let name = "console".to_string();
-        let key = RegistryKey::ReadersPeriodicExporter(name);
-        registry.register_metric_exporter_factory(key, register_mock_reader_factory);
+        let name = "console";
+        registry.register_metric_exporter_factory(name, register_mock_reader_factory);
 
         let providers = TelemetryProviders::configure_from_yaml(&registry, yaml_str).unwrap();
         assert!(providers.meter_provider.is_some());

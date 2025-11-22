@@ -5,7 +5,7 @@
 //! It is helpful to implement and test custom exporters.
 
 use opentelemetry_config::{
-    providers::TelemetryProviders, ConfigurationError, ConfigurationProviderRegistry, RegistryKey,
+    providers::TelemetryProviders, ConfigurationError, ConfigurationProviderRegistry,
 };
 
 use opentelemetry_sdk::{
@@ -46,12 +46,8 @@ pub fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Setup configuration registry with custom exporter provider.
     let mut registry = ConfigurationProviderRegistry::default();
 
-    let key = RegistryKey::ReadersPeriodicExporter("custom".to_string());
     // Register the custom exporter provider.
-    registry.register_metric_exporter_factory(
-        key,
-        MockPeriodicReaderProvider::register_mock_exporter_factory,
-    );
+    MockPeriodicExporterProvider::register_into(&mut registry);
 
     // Configure telemetry from the provided YAML file.
     let providers = match TelemetryProviders::configure_from_yaml(&registry, &config_yaml) {
@@ -109,9 +105,18 @@ struct CustomData {
     pub custom_int_field: i32,
 }
 
-struct MockPeriodicReaderProvider {}
+struct MockPeriodicExporterProvider {}
 
-impl MockPeriodicReaderProvider {
+impl MockPeriodicExporterProvider {
+    pub fn register_into(
+        registry: &mut opentelemetry_config::ConfigurationProviderRegistry,
+    ) {
+        registry.register_metric_exporter_factory(
+            "custom",
+            MockPeriodicExporterProvider::register_mock_exporter_factory,
+        );
+    }
+
     pub fn register_mock_exporter_factory(
         mut meter_provider_builder: MeterProviderBuilder,
         periodic_config_str: &str,
