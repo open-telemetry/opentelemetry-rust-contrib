@@ -1,0 +1,15 @@
+[package]
+name = "custom-application"
+version = "0.1.0"
+description = "Sample application using dynamic configuration with a block for telemetry"
+license = "Apache-2.0"
+edition = "2021"
+rust-version = "1.75.0"
+
+[workspace]
+
+[dependencies]
+opentelemetry-config = { path = "../../"}
+opentelemetry_sdk = { version = "0.31.0" }
+serde = { version = "1.0", features = ["derive"] }
+serde_yaml = { version = "0.9.34" }
