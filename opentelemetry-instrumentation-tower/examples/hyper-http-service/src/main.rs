@@ -64,10 +64,10 @@ async fn main() {
 
     global::set_meter_provider(meter_provider);
 
-    let otel_metrics_service_layer = HTTPLayer::new();
+    let otel_service_layer = HTTPLayer::new();
 
     let tower_service = ServiceBuilder::new()
-        .layer(otel_metrics_service_layer)
+        .layer(otel_service_layer)
         .service_fn(handle);
     let hyper_service = hyper_util::service::TowerToHyperService::new(tower_service);
 

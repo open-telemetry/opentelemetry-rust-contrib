@@ -59,13 +59,13 @@ async fn main() {
 
     global::set_meter_provider(meter_provider);
 
-    let otel_metrics_service_layer = HTTPLayer::new();
+    let otel_service_layer = HTTPLayer::new();
 
     let app = Router::new()
         .route("/", get(handle))
         .route("/", post(handle))
         .route("/", put(handle))
-        .layer(otel_metrics_service_layer);
+        .layer(otel_service_layer);
 
     let listener = tokio::net::TcpListener::bind("0.0.0.0:5000").await.unwrap();
     let server = axum::serve(listener, app);
