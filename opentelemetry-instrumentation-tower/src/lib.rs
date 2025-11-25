@@ -391,7 +391,7 @@ struct ResponseFutureState {
     custom_request_attributes: Vec<KeyValue>,
 
     // Tracing fields
-    otel_context: OtelContext,
+    guard: ContextGuard,
 }
 
 pin_project! {
@@ -491,6 +491,7 @@ where
             .start_with_context(&tracer, &parent_cx);
 
         let cx = OtelContext::current_with_span(span);
+        let guard = cx.attach();
 
         self.state
             .server_active_requests
@@ -510,7 +511,7 @@ where
                 route_kv_opt,
                 custom_request_attributes,
 
-                otel_context: cx,
+                guard,
             },
             response_extractor: self.response_extractor.clone(),
         }
@@ -551,7 +552,8 @@ where
         label_superset.extend(custom_response_attributes.clone());
 
         // Update span
-        let span = this.future_state.otel_context.span();
+        let cx = OtelContext::current();
+        let span = cx.span();
         span.set_attribute(KeyValue::new(
             semconv::trace::HTTP_RESPONSE_STATUS_CODE,
             status.as_u16() as i64,
