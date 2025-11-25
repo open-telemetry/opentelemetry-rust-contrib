@@ -12,12 +12,13 @@ use std::{fmt, result};
 use axum::extract::MatchedPath;
 use futures_util::ready;
 use opentelemetry::global::{self, BoxedTracer};
-use opentelemetry::metrics::{Histogram, MeterProvider, UpDownCounter};
-use opentelemetry::trace::{SpanKind, Status, TraceContextExt, Tracer, TracerProvider};
+use opentelemetry::metrics::Meter;
+use opentelemetry::metrics::MeterProvider;
+use opentelemetry::metrics::{Histogram, UpDownCounter};
+use opentelemetry::trace::{SpanKind, Status, TraceContextExt, Tracer};
 use opentelemetry::Context as OtelContext;
 use opentelemetry::KeyValue;
 use opentelemetry_http::HeaderExtractor;
-use opentelemetry_sdk::trace::SdkTracerProvider;
 use opentelemetry_semantic_conventions as semconv;
 use pin_project_lite::pin_project;
 use tower_layer::Layer;
@@ -124,14 +125,11 @@ where
 }
 
 /// State scoped to the entire middleware Layer.
-///
-/// Holds metrics instruments.
 struct HTTPLayerState {
     pub server_request_duration: Histogram<f64>,
     pub server_active_requests: UpDownCounter<i64>,
     pub server_request_body_size: Histogram<u64>,
     pub server_response_body_size: Histogram<u64>,
-    pub tracer_provider: Option<SdkTracerProvider>,
 }
 
 #[derive(Clone)]
@@ -141,6 +139,7 @@ pub struct HTTPService<S, ReqExt = NoOpExtractor, ResExt = NoOpExtractor> {
     request_extractor: ReqExt,
     response_extractor: ResExt,
     inner_service: S,
+    tracer: Arc<BoxedTracer>,
 }
 
 #[derive(Clone)]
@@ -149,6 +148,7 @@ pub struct HTTPLayer<ReqExt = NoOpExtractor, ResExt = NoOpExtractor> {
     state: Arc<HTTPLayerState>,
     request_extractor: ReqExt,
     response_extractor: ResExt,
+    tracer: Arc<BoxedTracer>,
 }
 
 impl HTTPLayer {
@@ -165,8 +165,8 @@ impl Default for HTTPLayer {
 }
 
 pub struct HTTPLayerBuilder<ReqExt = NoOpExtractor, ResExt = NoOpExtractor> {
-    tracer_provider: Option<SdkTracerProvider>,
-    meter_provider: Option<Box<dyn MeterProvider + Send + Sync>>,
+    tracer_provider: Option<BoxedTracer>,
+    meter: Option<Meter>,
     req_dur_bounds: Option<Vec<f64>>,
     request_extractor: ReqExt,
     response_extractor: ResExt,
@@ -212,7 +212,7 @@ impl HTTPLayerBuilder {
     pub fn builder() -> Self {
         HTTPLayerBuilder {
             tracer_provider: None,
-            meter_provider: None,
+            meter: None,
             req_dur_bounds: Some(LIBRARY_DEFAULT_HTTP_SERVER_DURATION_BOUNDARIES.to_vec()),
             request_extractor: NoOpExtractor,
             response_extractor: NoOpExtractor,
@@ -230,7 +230,7 @@ impl<ReqExt, ResExt> HTTPLayerBuilder<ReqExt, ResExt> {
         NewReqExt: RequestAttributeExtractor<B>,
     {
         HTTPLayerBuilder {
-            meter_provider: self.meter_provider,
+            meter: self.meter,
             tracer_provider: self.tracer_provider,
             req_dur_bounds: self.req_dur_bounds,
             request_extractor: extractor,
@@ -247,7 +247,7 @@ impl<ReqExt, ResExt> HTTPLayerBuilder<ReqExt, ResExt> {
         NewResExt: ResponseAttributeExtractor<B>,
     {
         HTTPLayerBuilder {
-            meter_provider: self.meter_provider,
+            meter: self.meter,
             tracer_provider: self.tracer_provider,
             req_dur_bounds: self.req_dur_bounds,
             request_extractor: self.request_extractor,
@@ -282,14 +282,20 @@ impl<ReqExt, ResExt> HTTPLayerBuilder<ReqExt, ResExt> {
             .req_dur_bounds
             .unwrap_or_else(|| LIBRARY_DEFAULT_HTTP_SERVER_DURATION_BOUNDARIES.to_vec());
 
+        let tracer: BoxedTracer = self
+            .tracer_provider
+            .unwrap_or_else(|| global::tracer("opentelemetry-instrumentation-tower"));
+        let tracer = Arc::new(tracer);
+
+        let meter: Meter = self
+            .meter
+            .unwrap_or_else(|| global::meter("opentelemetry-instrumentation-tower"));
+
         Ok(HTTPLayer {
-            state: Arc::from(Self::make_state(
-                self.meter_provider,
-                self.tracer_provider,
-                req_dur_bounds,
-            )),
+            state: Arc::from(Self::make_state(meter, req_dur_bounds)),
             request_extractor: self.request_extractor,
             response_extractor: self.response_extractor,
+            tracer: tracer,
         })
     }
 
@@ -304,26 +310,11 @@ impl<ReqExt, ResExt> HTTPLayerBuilder<ReqExt, ResExt> {
     where
         M: MeterProvider + Send + Sync + 'static,
     {
-        self.meter_provider = Some(Box::new(provider));
+        self.meter = Some(provider.meter("opentelemetry-instrumentation-tower"));
         self
     }
 
-    /// Set a meter provider to use for creating a meter.
-    /// If none is specified, the global provider is used.
-    pub fn with_tracer_provider(mut self, provider: SdkTracerProvider) -> Self {
-        self.tracer_provider = Some(provider);
-        self
-    }
-
-    fn make_state(
-        meter_provider: Option<Box<dyn MeterProvider + Send + Sync>>,
-        tracer_provider: Option<SdkTracerProvider>,
-        req_dur_bounds: Vec<f64>,
-    ) -> HTTPLayerState {
-        let meter = match meter_provider {
-            Some(provider) => provider.meter("opentelemetry-instrumentation-tower"),
-            None => global::meter("opentelemetry-instrumentation-tower"),
-        };
+    fn make_state(meter: Meter, req_dur_bounds: Vec<f64>) -> HTTPLayerState {
         HTTPLayerState {
             server_request_duration: meter
                 .f64_histogram(Cow::from(HTTP_SERVER_DURATION_METRIC))
@@ -346,7 +337,6 @@ impl<ReqExt, ResExt> HTTPLayerBuilder<ReqExt, ResExt> {
                 .with_description("Size of HTTP server response bodies.")
                 .with_unit(HTTP_SERVER_RESPONSE_BODY_SIZE_UNIT)
                 .build(),
-            tracer_provider,
         }
     }
 }
@@ -364,6 +354,7 @@ where
             request_extractor: self.request_extractor.clone(),
             response_extractor: self.response_extractor.clone(),
             inner_service: service,
+            tracer: self.tracer.clone(),
         }
     }
 }
@@ -478,18 +469,12 @@ where
 
         let span_name = format!("{} {}", method, req.uri().path());
 
-        let tracer = match &self.state.tracer_provider {
-            Some(tp) => {
-                BoxedTracer::new(Box::new(tp.tracer("opentelemetry-instrumentation-tower")))
-            }
-            None => global::tracer("opentelemetry-instrumentation-tower"),
-        };
-
-        let span = tracer
+        let span = self
+            .tracer
             .span_builder(span_name)
             .with_kind(SpanKind::Server)
             .with_attributes(span_attributes)
-            .start_with_context(&tracer, &parent_cx);
+            .start_with_context(self.tracer.as_ref(), &parent_cx);
 
         let cx = OtelContext::current_with_span(span);
 
@@ -623,6 +608,7 @@ mod tests {
     use super::*;
 
     use http::{Request, Response, StatusCode};
+    use opentelemetry::trace::TracerProvider;
     use opentelemetry::trace::{FutureExt, TraceContextExt, Tracer};
     use opentelemetry_sdk::metrics::SdkMeterProvider;
     use opentelemetry_sdk::metrics::{
@@ -641,12 +627,12 @@ mod tests {
             .with_simple_exporter(trace_exporter.clone())
             .build();
 
-        let tracer = tracer_provider.tracer("test_tracer");
+        let tracer = Arc::new(BoxedTracer::new(Box::new(
+            tracer_provider.tracer("test_tracer"),
+        )));
 
-        let layer = HTTPLayerBuilder::builder()
-            .with_tracer_provider(tracer_provider.clone())
-            .build()
-            .unwrap();
+        let mut layer = HTTPLayerBuilder::builder().build().unwrap();
+        layer.tracer = tracer.clone();
 
         let mut service = ServiceBuilder::new()
             .layer(layer)
