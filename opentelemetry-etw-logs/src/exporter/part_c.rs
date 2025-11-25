@@ -6,6 +6,7 @@ pub(crate) const EVENT_ID: &str = "event_id";
 pub(crate) fn populate_part_c(
     event: &mut tld::EventBuilder,
     log_record: &opentelemetry_sdk::logs::SdkLogRecord,
+    resource: &super::Resource,
     field_tag: u32,
 ) -> Option<i64> {
     //populate CS PartC
@@ -25,9 +26,17 @@ pub(crate) fn populate_part_c(
         }
     }
 
+    // Count resource attributes
+    cs_c_count += resource.attributes_from_resource.len();
+
     // If there are additional PartC attributes, add them to the event
     if cs_c_count > 0 {
-        event.add_struct("PartC", cs_c_count, field_tag);
+        event.add_struct("PartC", cs_c_count.try_into().unwrap_or(u8::MAX), field_tag);
+
+        // Add resource attributes first
+        for (key, value) in &resource.attributes_from_resource {
+            super::common::add_attribute_to_event(event, key, value);
+        }
 
         // TODO: This 2nd iteration is not optimal, and can be optimized
         for (key, value) in log_record.attributes_iter() {

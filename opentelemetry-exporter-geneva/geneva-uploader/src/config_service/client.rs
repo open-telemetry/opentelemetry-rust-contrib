@@ -8,7 +8,7 @@ use reqwest::{
 use serde::Deserialize;
 use std::time::Duration;
 use thiserror::Error;
-use tracing::{debug, info};
+use tracing::{debug, error, info};
 use uuid::Uuid;
 
 use chrono::{DateTime, Utc};
@@ -402,7 +402,21 @@ impl GenevaConfigClient {
     fn build_static_headers(agent_identity: &str, agent_version: &str) -> HeaderMap {
         let mut headers = HeaderMap::new();
         let user_agent = format!("{agent_identity}-{agent_version}");
-        headers.insert(USER_AGENT, HeaderValue::from_str(&user_agent).unwrap());
+        // Gracefully fallback to default header if formatting fails (though hardcoded values should always be valid)
+        headers.insert(
+            USER_AGENT,
+            HeaderValue::from_str(&user_agent).unwrap_or_else(|e| {
+                error!(
+                    name: "config_client.build_static_headers.error",
+                    target: "geneva-uploader",
+                    error = %e,
+                    agent_identity = agent_identity,
+                    agent_version = agent_version,
+                    "User-Agent header creation failed, using 'GenevaUploader-0.1'"
+                );
+                HeaderValue::from_static("GenevaUploader-0.1")
+            }),
+        );
         headers.insert(ACCEPT, HeaderValue::from_static("application/json"));
         headers
     }

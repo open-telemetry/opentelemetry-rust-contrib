@@ -13,7 +13,7 @@ mod tests {
     use crate::payload_encoder::bond_encoder::FieldDef;
 
     fn create_payload(fields: Vec<FieldDef>, row_data: Vec<u8>) -> Vec<u8> {
-        let schema_obj = BondEncodedSchema::from_fields("MdsContainer", "testNamespace", fields);
+        let schema_obj = BondEncodedSchema::from_fields("MdsContainer", "testNamespace", &fields);
         let schema_bytes = schema_obj.as_bytes();
         let schema_md5 = md5::compute(schema_bytes).0;
         let schema_id = 1u64;
@@ -22,6 +22,7 @@ mod tests {
             id: schema_id,
             md5: schema_md5,
             schema: schema_obj,
+            fields,
         };
 
         let event = CentralEventEntry {
