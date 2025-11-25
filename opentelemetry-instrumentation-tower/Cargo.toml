@@ -22,7 +22,7 @@ futures-util = { version = "0.3", default-features = false }
 http = { version = "1", features = ["std"], default-features = false }
 http-body = { version = "1", default-features = false }
 opentelemetry = { workspace = true, features = ["futures", "metrics", "trace"] }
-opentelemetry_sdk = { workspace = true, features = ["trace"] }
+opentelemetry-http = "0.31"
 opentelemetry-semantic-conventions = { workspace = true, features = ["semconv_experimental"] }
 pin-project-lite = { version = "0.2", default-features = false }
 tower-service = { version = "0.3", default-features = false }
