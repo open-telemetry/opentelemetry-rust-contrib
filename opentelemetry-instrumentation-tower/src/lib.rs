@@ -13,7 +13,6 @@ use axum::extract::MatchedPath;
 use futures_util::ready;
 use opentelemetry::global::{self, BoxedTracer};
 use opentelemetry::metrics::Meter;
-use opentelemetry::metrics::MeterProvider;
 use opentelemetry::metrics::{Histogram, UpDownCounter};
 use opentelemetry::trace::{SpanKind, Status, TraceContextExt, Tracer};
 use opentelemetry::Context as OtelContext;
@@ -292,18 +291,13 @@ impl<ReqExt, ResExt> HTTPLayerBuilder<ReqExt, ResExt> {
         })
     }
 
-    pub fn with_request_duration_bounds(mut self, bounds: Vec<f64>) -> Self {
-        self.req_dur_bounds = Some(bounds);
+    pub fn with_meter(mut self, meter: Meter) -> Self {
+        self.meter = Some(meter);
         self
     }
 
-    /// Set a meter provider to use for creating a meter.
-    /// If none is specified, the global provider is used.
-    pub fn with_meter_provider<M>(mut self, provider: M) -> Self
-    where
-        M: MeterProvider + Send + Sync + 'static,
-    {
-        self.meter = Some(provider.meter("opentelemetry-instrumentation-tower"));
+    pub fn with_request_duration_bounds(mut self, bounds: Vec<f64>) -> Self {
+        self.req_dur_bounds = Some(bounds);
         self
     }
 
@@ -717,10 +711,10 @@ mod tests {
             .with_interval(Duration::from_millis(100))
             .build();
         let meter_provider = SdkMeterProvider::builder().with_reader(reader).build();
+        let meter = meter_provider.meter("test");
 
-        // Use the new API with optional provider override instead of global providers
         let layer = HTTPLayerBuilder::builder()
-            .with_meter_provider(meter_provider.clone())
+            .with_meter(meter)
             .build()
             .unwrap();
 
