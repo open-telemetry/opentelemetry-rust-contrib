@@ -566,8 +566,6 @@ where
             span.set_status(Status::Error {
                 description: format!("HTTP {}", status.as_u16()).into(),
             });
-        } else {
-            span.set_status(Status::Ok);
         }
 
         span.end();
