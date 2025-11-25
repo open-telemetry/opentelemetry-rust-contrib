@@ -165,7 +165,6 @@ impl Default for HTTPLayer {
 }
 
 pub struct HTTPLayerBuilder<ReqExt = NoOpExtractor, ResExt = NoOpExtractor> {
-    tracer_provider: Option<BoxedTracer>,
     meter: Option<Meter>,
     req_dur_bounds: Option<Vec<f64>>,
     request_extractor: ReqExt,
@@ -211,7 +210,6 @@ impl fmt::Debug for Error {
 impl HTTPLayerBuilder {
     pub fn builder() -> Self {
         HTTPLayerBuilder {
-            tracer_provider: None,
             meter: None,
             req_dur_bounds: Some(LIBRARY_DEFAULT_HTTP_SERVER_DURATION_BOUNDARIES.to_vec()),
             request_extractor: NoOpExtractor,
@@ -231,7 +229,6 @@ impl<ReqExt, ResExt> HTTPLayerBuilder<ReqExt, ResExt> {
     {
         HTTPLayerBuilder {
             meter: self.meter,
-            tracer_provider: self.tracer_provider,
             req_dur_bounds: self.req_dur_bounds,
             request_extractor: extractor,
             response_extractor: self.response_extractor,
@@ -248,7 +245,6 @@ impl<ReqExt, ResExt> HTTPLayerBuilder<ReqExt, ResExt> {
     {
         HTTPLayerBuilder {
             meter: self.meter,
-            tracer_provider: self.tracer_provider,
             req_dur_bounds: self.req_dur_bounds,
             request_extractor: self.request_extractor,
             response_extractor: extractor,
@@ -282,10 +278,7 @@ impl<ReqExt, ResExt> HTTPLayerBuilder<ReqExt, ResExt> {
             .req_dur_bounds
             .unwrap_or_else(|| LIBRARY_DEFAULT_HTTP_SERVER_DURATION_BOUNDARIES.to_vec());
 
-        let tracer: BoxedTracer = self
-            .tracer_provider
-            .unwrap_or_else(|| global::tracer("opentelemetry-instrumentation-tower"));
-        let tracer = Arc::new(tracer);
+        let tracer = Arc::new(global::tracer("opentelemetry-instrumentation-tower"));
 
         let meter: Meter = self
             .meter
