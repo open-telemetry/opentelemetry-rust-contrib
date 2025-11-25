@@ -15,7 +15,6 @@ use opentelemetry::global::{self, BoxedTracer};
 use opentelemetry::metrics::{Histogram, MeterProvider, UpDownCounter};
 use opentelemetry::trace::{SpanKind, Status, TraceContextExt, Tracer, TracerProvider};
 use opentelemetry::Context as OtelContext;
-use opentelemetry::ContextGuard;
 use opentelemetry::KeyValue;
 use opentelemetry_http::HeaderExtractor;
 use opentelemetry_sdk::trace::SdkTracerProvider;
