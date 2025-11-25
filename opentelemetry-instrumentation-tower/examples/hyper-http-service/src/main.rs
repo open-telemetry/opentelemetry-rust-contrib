@@ -3,8 +3,9 @@ use hyper::body::Bytes;
 use hyper::{Request, Response};
 use opentelemetry::global;
 use opentelemetry_instrumentation_tower::HTTPLayer;
-use opentelemetry_otlp::MetricExporter;
+use opentelemetry_otlp::{MetricExporter, SpanExporter};
 use opentelemetry_sdk::metrics::{PeriodicReader, SdkMeterProvider};
+use opentelemetry_sdk::trace::SdkTracerProvider;
 use std::convert::Infallible;
 use std::net::SocketAddr;
 use std::time::Duration;
@@ -47,22 +48,39 @@ async fn handle(_req: Request<hyper::body::Incoming>) -> Result<Response<Full<By
 
 #[tokio::main]
 async fn main() {
-    let exporter = MetricExporter::builder()
-        .with_tonic()
-        // .with_endpoint("http://localhost:4317")  // default; leave out in favor of env var OTEL_EXPORTER_OTLP_ENDPOINT
-        .build()
-        .unwrap();
+    {
+        let exporter = MetricExporter::builder()
+            .with_tonic()
+            // .with_endpoint("http://localhost:4317")  // default; leave out in favor of env var OTEL_EXPORTER_OTLP_ENDPOINT
+            .build()
+            .unwrap();
 
-    let reader = PeriodicReader::builder(exporter)
-        .with_interval(_OTEL_METRIC_EXPORT_INTERVAL)
-        .build();
+        let reader = PeriodicReader::builder(exporter)
+            .with_interval(_OTEL_METRIC_EXPORT_INTERVAL)
+            .build();
 
-    let meter_provider = SdkMeterProvider::builder()
-        .with_reader(reader)
-        .with_resource(init_otel_resource())
-        .build();
+        let provider = SdkMeterProvider::builder()
+            .with_reader(reader)
+            .with_resource(init_otel_resource())
+            .build();
 
-    global::set_meter_provider(meter_provider);
+        global::set_meter_provider(provider);
+    }
+
+    {
+        let exporter = SpanExporter::builder()
+            .with_tonic()
+            // .with_endpoint("http://localhost:4317")  // default; leave out in favor of env var OTEL_EXPORTER_OTLP_ENDPOINT
+            .build()
+            .unwrap();
+
+        let provider = SdkTracerProvider::builder()
+            .with_batch_exporter(exporter)
+            .with_resource(init_otel_resource())
+            .build();
+
+        global::set_tracer_provider(provider);
+    }
 
     let otel_service_layer = HTTPLayer::new();
 
