@@ -450,7 +450,11 @@ where
         // Extract custom request attributes
         let custom_request_attributes = self.request_extractor.extract_attributes(&req);
 
-        // Start tracing span
+        // Extract the context from the incoming request headers
+        let parent_cx = global::get_text_map_propagator(|propagator| {
+            propagator.extract(&HeaderExtractor(req.headers()))
+        });
+
         let mut span_attributes = vec![
             KeyValue::new(semconv::trace::HTTP_REQUEST_METHOD, method.clone()),
             url_scheme_kv.clone(),
@@ -484,7 +488,7 @@ where
             .span_builder(span_name)
             .with_kind(SpanKind::Server)
             .with_attributes(span_attributes)
-            .start(&tracer);
+            .start_with_context(&tracer, &parent_cx);
 
         let cx = OtelContext::current_with_span(span);
 
