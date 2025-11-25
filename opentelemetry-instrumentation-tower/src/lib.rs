@@ -18,6 +18,7 @@ use opentelemetry::Context as OtelContext;
 use opentelemetry::ContextGuard;
 use opentelemetry::KeyValue;
 use opentelemetry_http::HeaderExtractor;
+use opentelemetry_sdk::trace::SdkTracerProvider;
 use opentelemetry_semantic_conventions as semconv;
 use pin_project_lite::pin_project;
 use tower_layer::Layer;
