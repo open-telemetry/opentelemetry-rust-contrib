@@ -3,23 +3,21 @@ use std::future::Future;
 use std::pin::Pin;
 use std::string::String;
 use std::sync::Arc;
-use std::task::Poll::Ready;
 use std::task::{Context, Poll};
 use std::time::Instant;
 use std::{fmt, result};
 
 #[cfg(feature = "axum")]
 use axum::extract::MatchedPath;
-use futures_util::ready;
+use futures_util::FutureExt;
 use opentelemetry::global::{self, BoxedTracer};
 use opentelemetry::metrics::Meter;
 use opentelemetry::metrics::{Histogram, UpDownCounter};
-use opentelemetry::trace::{SpanKind, Status, TraceContextExt, Tracer};
+use opentelemetry::trace::{FutureExt as OtelFutureExt, SpanKind, Status, TraceContextExt, Tracer};
 use opentelemetry::Context as OtelContext;
 use opentelemetry::KeyValue;
 use opentelemetry_http::HeaderExtractor;
 use opentelemetry_semantic_conventions as semconv;
-use pin_project_lite::pin_project;
 use tower_layer::Layer;
 use tower_service::Service;
 
@@ -129,6 +127,19 @@ struct HTTPLayerState {
     pub server_active_requests: UpDownCounter<i64>,
     pub server_request_body_size: Histogram<u64>,
     pub server_response_body_size: Histogram<u64>,
+}
+
+/// Request data extracted before the inner service call.
+/// This data is needed for metrics and span finalization after the response is received.
+struct RequestData {
+    duration_start: Instant,
+    req_body_size: Option<u64>,
+    protocol_name_kv: KeyValue,
+    protocol_version_kv: KeyValue,
+    url_scheme_kv: KeyValue,
+    method_kv: KeyValue,
+    route_kv_opt: Option<KeyValue>,
+    custom_request_attributes: Vec<KeyValue>,
 }
 
 #[derive(Clone)]
@@ -346,55 +357,18 @@ where
     }
 }
 
-/// ResponseFutureState holds request-scoped data for metrics, tracing and their attributes.
-///
-/// ResponseFutureState lives inside the response future, as it needs to hold data
-/// initialized or extracted from the request before it is forwarded to the inner Service.
-/// The rest of the data (e.g. status code, error) can be extracted from the response
-/// or calculated with respect to the data held here (e.g., duration = now - duration start).
-struct ResponseFutureState {
-    // fields for the metric values
-    // https://opentelemetry.io/docs/specs/semconv/http/http-metrics/#metric-httpserverrequestduration
-    duration_start: Instant,
-    // https://opentelemetry.io/docs/specs/semconv/http/http-metrics/#metric-httpserverrequestbodysize
-    req_body_size: Option<u64>,
-
-    // fields for metric labels
-    protocol_name_kv: KeyValue,
-    protocol_version_kv: KeyValue,
-    url_scheme_kv: KeyValue,
-    method_kv: KeyValue,
-    route_kv_opt: Option<KeyValue>,
-
-    // Custom attributes from request
-    custom_request_attributes: Vec<KeyValue>,
-
-    // Tracing fields
-    otel_context: OtelContext,
-}
-
-pin_project! {
-    /// Response [`Future`] for [`HTTPService`].
-    pub struct HTTPResponseFuture<F, ResExt> {
-        #[pin]
-        inner_response_future: F,
-        layer_state: Arc<HTTPLayerState>,
-        future_state: ResponseFutureState,
-        response_extractor: ResExt,
-    }
-}
-
 impl<S, ReqBody, ResBody, ReqExt, ResExt> Service<http::Request<ReqBody>>
     for HTTPService<S, ReqExt, ResExt>
 where
     S: Service<http::Request<ReqBody>, Response = http::Response<ResBody>>,
+    S::Future: Send + 'static,
     ResBody: http_body::Body,
     ReqExt: RequestAttributeExtractor<ReqBody>,
     ResExt: ResponseAttributeExtractor<ResBody>,
 {
     type Response = S::Response;
     type Error = S::Error;
-    type Future = HTTPResponseFuture<S::Future, ResExt>;
+    type Future = Pin<Box<dyn Future<Output = result::Result<Self::Response, Self::Error>> + Send>>;
 
     fn poll_ready(&mut self, cx: &mut Context<'_>) -> Poll<result::Result<(), Self::Error>> {
         self.inner_service.poll_ready(cx)
@@ -418,13 +392,14 @@ where
         let method = req.method().as_str().to_owned();
         let method_kv = KeyValue::new(HTTP_REQUEST_METHOD_LABEL, method.clone());
 
-        #[allow(unused_mut)]
-        let mut route_kv_opt = None;
         #[cfg(feature = "axum")]
-        if let Some(matched_path) = req.extensions().get::<MatchedPath>() {
-            let route = matched_path.as_str().to_owned();
-            route_kv_opt = Some(KeyValue::new(HTTP_ROUTE_LABEL, route.clone()));
-        };
+        let route_kv_opt = req
+            .extensions()
+            .get::<MatchedPath>()
+            .map(|matched_path| KeyValue::new(HTTP_ROUTE_LABEL, matched_path.as_str().to_owned()));
+
+        #[cfg(not(feature = "axum"))]
+        let route_kv_opt = None;
 
         // Extract custom request attributes
         let custom_request_attributes = self.request_extractor.extract_attributes(&req);
@@ -463,118 +438,114 @@ where
             .with_attributes(span_attributes)
             .start_with_context(self.tracer.as_ref(), &parent_cx);
 
-        let cx = OtelContext::current_with_span(span);
+        let cx = parent_cx.with_span(span);
 
         self.state
             .server_active_requests
             .add(1, &[url_scheme_kv.clone(), method_kv.clone()]);
 
-        HTTPResponseFuture {
-            inner_response_future: self.inner_service.call(req),
-            layer_state: self.state.clone(),
-            future_state: ResponseFutureState {
-                duration_start,
-                req_body_size: content_length,
+        let request_data = RequestData {
+            duration_start,
+            req_body_size: content_length,
+            protocol_name_kv,
+            protocol_version_kv,
+            url_scheme_kv,
+            method_kv,
+            route_kv_opt,
+            custom_request_attributes,
+        };
 
-                protocol_name_kv,
-                protocol_version_kv,
-                url_scheme_kv,
-                method_kv,
-                route_kv_opt,
-                custom_request_attributes,
+        let layer_state = self.state.clone();
+        let response_extractor = self.response_extractor.clone();
 
-                otel_context: cx,
-            },
-            response_extractor: self.response_extractor.clone(),
-        }
+        Box::pin(
+            self.inner_service
+                .call(req)
+                .with_context(cx.clone())
+                .map(move |result| {
+                    finalize_request(result, cx, request_data, layer_state, response_extractor)
+                }),
+        )
     }
 }
 
-impl<F, ResBody, E, ResExt> Future for HTTPResponseFuture<F, ResExt>
+/// Finalizes the request by updating the span and recording metrics after the response is received.
+fn finalize_request<ResBody, E, ResExt>(
+    result: result::Result<http::Response<ResBody>, E>,
+    cx: OtelContext,
+    request_data: RequestData,
+    layer_state: Arc<HTTPLayerState>,
+    response_extractor: ResExt,
+) -> result::Result<http::Response<ResBody>, E>
 where
-    F: Future<Output = result::Result<http::Response<ResBody>, E>>,
     ResBody: http_body::Body,
     ResExt: ResponseAttributeExtractor<ResBody>,
 {
-    type Output = F::Output;
+    let response = result?;
+    let status = response.status();
 
-    fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
-        let this = self.project();
-        let response = ready!(this.inner_response_future.poll(cx))?;
-        let status = response.status();
+    // Build base label set
+    let mut label_superset = vec![
+        request_data.protocol_name_kv,
+        request_data.protocol_version_kv,
+        request_data.url_scheme_kv.clone(),
+        request_data.method_kv.clone(),
+        KeyValue::new(HTTP_RESPONSE_STATUS_CODE_LABEL, i64::from(status.as_u16())),
+    ];
 
-        // Build base label set
-        let mut label_superset = vec![
-            this.future_state.protocol_name_kv.clone(),
-            this.future_state.protocol_version_kv.clone(),
-            this.future_state.url_scheme_kv.clone(),
-            this.future_state.method_kv.clone(),
-            KeyValue::new(HTTP_RESPONSE_STATUS_CODE_LABEL, i64::from(status.as_u16())),
-        ];
-
-        if let Some(route_kv) = this.future_state.route_kv_opt.clone() {
-            label_superset.push(route_kv);
-        }
-
-        // Add custom request attributes
-        label_superset.extend(this.future_state.custom_request_attributes.clone());
-
-        // Extract and add custom response attributes
-        let custom_response_attributes = this.response_extractor.extract_attributes(&response);
-        label_superset.extend(custom_response_attributes.clone());
-
-        // Update span
-        let span = this.future_state.otel_context.span();
-        span.set_attribute(KeyValue::new(
-            semconv::trace::HTTP_RESPONSE_STATUS_CODE,
-            status.as_u16() as i64,
-        ));
-
-        // Add custom response attributes to span
-        for attr in &custom_response_attributes {
-            span.set_attribute(attr.clone());
-        }
-
-        // Set span status based on HTTP status code
-        // Following server-side semantic conventions:
-        // - 5xx server errors indicate server failure and should be marked as span errors
-        // - 4xx client errors indicate client mistakes, not server failures
-        if status.is_server_error() {
-            span.set_status(Status::Error {
-                description: format!("HTTP {}", status.as_u16()).into(),
-            });
-        }
-
-        span.end();
-
-        this.layer_state.server_request_duration.record(
-            this.future_state.duration_start.elapsed().as_secs_f64(),
-            &label_superset,
-        );
-
-        if let Some(req_content_length) = this.future_state.req_body_size {
-            this.layer_state
-                .server_request_body_size
-                .record(req_content_length, &label_superset);
-        }
-
-        // use same approach for `http.server.response.body.size` as hyper does to set content-length
-        if let Some(resp_content_length) = response.body().size_hint().exact() {
-            this.layer_state
-                .server_response_body_size
-                .record(resp_content_length, &label_superset);
-        }
-
-        this.layer_state.server_active_requests.add(
-            -1,
-            &[
-                this.future_state.url_scheme_kv.clone(),
-                this.future_state.method_kv.clone(),
-            ],
-        );
-
-        Ready(Ok(response))
+    if let Some(route_kv) = request_data.route_kv_opt {
+        label_superset.push(route_kv);
     }
+
+    // Add custom request attributes
+    label_superset.extend(request_data.custom_request_attributes);
+
+    // Extract and add custom response attributes
+    let custom_response_attributes = response_extractor.extract_attributes(&response);
+    label_superset.extend(custom_response_attributes.clone());
+
+    // Update span
+    let span = cx.span();
+    span.set_attribute(KeyValue::new(
+        semconv::trace::HTTP_RESPONSE_STATUS_CODE,
+        status.as_u16() as i64,
+    ));
+
+    // Add custom response attributes to span
+    for attr in &custom_response_attributes {
+        span.set_attribute(attr.clone());
+    }
+
+    // Set span status based on HTTP status code
+    if status.is_server_error() {
+        span.set_status(Status::Error {
+            description: format!("HTTP {}", status.as_u16()).into(),
+        });
+    }
+
+    // Record metrics
+    layer_state.server_request_duration.record(
+        request_data.duration_start.elapsed().as_secs_f64(),
+        &label_superset,
+    );
+
+    if let Some(req_content_length) = request_data.req_body_size {
+        layer_state
+            .server_request_body_size
+            .record(req_content_length, &label_superset);
+    }
+
+    if let Some(resp_content_length) = response.body().size_hint().exact() {
+        layer_state
+            .server_response_body_size
+            .record(resp_content_length, &label_superset);
+    }
+
+    layer_state
+        .server_active_requests
+        .add(-1, &[request_data.url_scheme_kv, request_data.method_kv]);
+
+    Ok(response)
 }
 
 fn split_and_format_protocol_version(http_version: http::Version) -> (String, String) {
@@ -946,5 +917,53 @@ mod tests {
                 assert_eq!(url_scheme.value.as_str(), "https");
             }
         }
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn test_context_available_in_handler() {
+        let trace_exporter = InMemorySpanExporterBuilder::new().build();
+        let tracer_provider = SdkTracerProvider::builder()
+            .with_simple_exporter(trace_exporter.clone())
+            .build();
+
+        let tracer = Arc::new(BoxedTracer::new(Box::new(
+            tracer_provider.tracer("test_tracer"),
+        )));
+
+        let mut layer = HTTPLayerBuilder::builder().build().unwrap();
+        layer.tracer = tracer.clone();
+
+        let service = tower::service_fn(|_req: Request<String>| async {
+            // Access the current context - this should have the HTTP span
+            let cx = OtelContext::current();
+            let span = cx.span();
+
+            // Verify we can get span context (means context is attached)
+            let span_context = span.span_context();
+            assert!(span_context.is_valid(), "Span context should be valid");
+
+            Ok::<_, std::convert::Infallible>(
+                Response::builder()
+                    .status(StatusCode::OK)
+                    .body(String::from("OK"))
+                    .unwrap(),
+            )
+        });
+
+        let mut service = layer.layer(service);
+
+        let request = Request::builder()
+            .method("GET")
+            .uri("http://example.com/test")
+            .body("test".to_string())
+            .unwrap();
+
+        let _response = service.call(request).await.unwrap();
+
+        tracer_provider.force_flush().unwrap();
+
+        let spans = trace_exporter.get_finished_spans().unwrap();
+        assert_eq!(spans.len(), 1, "Expected one HTTP span");
+        assert_eq!(spans[0].name, "GET /test");
     }
 }
