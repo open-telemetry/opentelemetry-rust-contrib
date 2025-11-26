@@ -287,7 +287,7 @@ impl<ReqExt, ResExt> HTTPLayerBuilder<ReqExt, ResExt> {
             state: Arc::from(Self::make_state(meter, req_dur_bounds)),
             request_extractor: self.request_extractor,
             response_extractor: self.response_extractor,
-            tracer: tracer,
+            tracer,
         })
     }
 
@@ -595,6 +595,7 @@ mod tests {
     use super::*;
 
     use http::{Request, Response, StatusCode};
+    use opentelemetry::metrics::MeterProvider;
     use opentelemetry::trace::TracerProvider;
     use opentelemetry::trace::{FutureExt, TraceContextExt, Tracer};
     use opentelemetry_sdk::metrics::SdkMeterProvider;
