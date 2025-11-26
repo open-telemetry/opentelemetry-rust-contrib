@@ -128,19 +128,6 @@ struct HTTPLayerState {
     pub server_response_body_size: Histogram<u64>,
 }
 
-/// Request data extracted before the inner service call.
-/// This data is needed for metrics and span finalization after the response is received.
-struct RequestData {
-    duration_start: Instant,
-    req_body_size: Option<u64>,
-    protocol_name_kv: KeyValue,
-    protocol_version_kv: KeyValue,
-    url_scheme_kv: KeyValue,
-    method_kv: KeyValue,
-    route_kv_opt: Option<KeyValue>,
-    custom_request_attributes: Vec<KeyValue>,
-}
-
 #[derive(Clone)]
 /// [`Service`] used by [`HTTPLayer`]
 pub struct HTTPService<S, ReqExt = NoOpExtractor, ResExt = NoOpExtractor> {
@@ -354,6 +341,26 @@ where
             tracer: self.tracer.clone(),
         }
     }
+}
+
+/// Request data extracted before the inner service call.
+/// This data is needed for metrics and span finalization after the response is received.
+struct RequestData {
+    // fields for the metric values
+    // https://opentelemetry.io/docs/specs/semconv/http/http-metrics/#metric-httpserverrequestduration
+    duration_start: Instant,
+    // https://opentelemetry.io/docs/specs/semconv/http/http-metrics/#metric-httpserverrequestbodysize
+    req_body_size: Option<u64>,
+
+    // fields for metric labels
+    protocol_name_kv: KeyValue,
+    protocol_version_kv: KeyValue,
+    url_scheme_kv: KeyValue,
+    method_kv: KeyValue,
+    route_kv_opt: Option<KeyValue>,
+
+    // Custom attributes from request
+    custom_request_attributes: Vec<KeyValue>,
 }
 
 impl<S, ReqBody, ResBody, ReqExt, ResExt> Service<http::Request<ReqBody>>
