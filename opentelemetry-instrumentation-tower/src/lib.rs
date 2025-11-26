@@ -9,7 +9,6 @@ use std::{fmt, result};
 
 #[cfg(feature = "axum")]
 use axum::extract::MatchedPath;
-use futures_util::FutureExt;
 use opentelemetry::global::{self, BoxedTracer};
 use opentelemetry::metrics::Meter;
 use opentelemetry::metrics::{Histogram, UpDownCounter};
@@ -362,6 +361,7 @@ impl<S, ReqBody, ResBody, ReqExt, ResExt> Service<http::Request<ReqBody>>
 where
     S: Service<http::Request<ReqBody>, Response = http::Response<ResBody>>,
     S::Future: Send + 'static,
+    S::Error: std::fmt::Debug,
     ResBody: http_body::Body,
     ReqExt: RequestAttributeExtractor<ReqBody>,
     ResExt: ResponseAttributeExtractor<ResBody>,
@@ -458,94 +458,122 @@ where
         let layer_state = self.state.clone();
         let response_extractor = self.response_extractor.clone();
 
+        let inner_future = self.inner_service.call(req);
+
         Box::pin(
-            self.inner_service
-                .call(req)
-                .with_context(cx.clone())
-                .map(move |result| {
-                    finalize_request(result, cx, request_data, layer_state, response_extractor)
-                }),
+            async move {
+                let result = inner_future.await;
+                finalize_request(&result, &request_data, &layer_state, &response_extractor);
+                result
+            }
+            .with_context(cx),
         )
     }
 }
 
 /// Finalizes the request by updating the span and recording metrics after the response is received.
 fn finalize_request<ResBody, E, ResExt>(
-    result: result::Result<http::Response<ResBody>, E>,
-    cx: OtelContext,
-    request_data: RequestData,
-    layer_state: Arc<HTTPLayerState>,
-    response_extractor: ResExt,
-) -> result::Result<http::Response<ResBody>, E>
-where
+    result: &result::Result<http::Response<ResBody>, E>,
+    request_data: &RequestData,
+    layer_state: &Arc<HTTPLayerState>,
+    response_extractor: &ResExt,
+) where
     ResBody: http_body::Body,
     ResExt: ResponseAttributeExtractor<ResBody>,
+    E: std::fmt::Debug,
 {
-    let response = result?;
-    let status = response.status();
-
-    // Build base label set
-    let mut label_superset = vec![
-        request_data.protocol_name_kv,
-        request_data.protocol_version_kv,
-        request_data.url_scheme_kv.clone(),
-        request_data.method_kv.clone(),
-        KeyValue::new(HTTP_RESPONSE_STATUS_CODE_LABEL, i64::from(status.as_u16())),
-    ];
-
-    if let Some(route_kv) = request_data.route_kv_opt {
-        label_superset.push(route_kv);
-    }
-
-    // Add custom request attributes
-    label_superset.extend(request_data.custom_request_attributes);
-
-    // Extract and add custom response attributes
-    let custom_response_attributes = response_extractor.extract_attributes(&response);
-    label_superset.extend(custom_response_attributes.clone());
-
-    // Update span
+    let cx = OtelContext::current();
     let span = cx.span();
-    span.set_attribute(KeyValue::new(
-        semconv::trace::HTTP_RESPONSE_STATUS_CODE,
-        status.as_u16() as i64,
-    ));
 
-    // Add custom response attributes to span
-    for attr in &custom_response_attributes {
-        span.set_attribute(attr.clone());
+    match result {
+        Ok(response) => {
+            let status = response.status();
+
+            // Build base label set
+            let mut label_superset = vec![
+                request_data.protocol_name_kv.clone(),
+                request_data.protocol_version_kv.clone(),
+                request_data.url_scheme_kv.clone(),
+                request_data.method_kv.clone(),
+                KeyValue::new(HTTP_RESPONSE_STATUS_CODE_LABEL, i64::from(status.as_u16())),
+            ];
+
+            if let Some(route_kv) = &request_data.route_kv_opt {
+                label_superset.push(route_kv.clone());
+            }
+
+            // Add custom request attributes
+            label_superset.extend(request_data.custom_request_attributes.clone());
+
+            // Extract and add custom response attributes
+            let custom_response_attributes = response_extractor.extract_attributes(response);
+            label_superset.extend(custom_response_attributes.clone());
+
+            // Update span
+            span.set_attribute(KeyValue::new(
+                semconv::trace::HTTP_RESPONSE_STATUS_CODE,
+                status.as_u16() as i64,
+            ));
+
+            // Add custom response attributes to span
+            for attr in &custom_response_attributes {
+                span.set_attribute(attr.clone());
+            }
+
+            // Set span status based on HTTP status code
+            if status.is_server_error() {
+                span.set_status(Status::Error {
+                    description: format!("HTTP {}", status.as_u16()).into(),
+                });
+            }
+
+            // Record metrics
+            layer_state.server_request_duration.record(
+                request_data.duration_start.elapsed().as_secs_f64(),
+                &label_superset,
+            );
+
+            if let Some(req_content_length) = request_data.req_body_size {
+                layer_state
+                    .server_request_body_size
+                    .record(req_content_length, &label_superset);
+            }
+
+            if let Some(resp_content_length) = response.body().size_hint().exact() {
+                layer_state
+                    .server_response_body_size
+                    .record(resp_content_length, &label_superset);
+            }
+        }
+        Err(error) => {
+            // Mark span as error
+            span.set_status(Status::Error {
+                description: format!("{:?}", error).into(),
+            });
+
+            // Still record duration metric with error label
+            let label_superset = vec![
+                request_data.protocol_name_kv.clone(),
+                request_data.protocol_version_kv.clone(),
+                request_data.url_scheme_kv.clone(),
+                request_data.method_kv.clone(),
+            ];
+
+            layer_state.server_request_duration.record(
+                request_data.duration_start.elapsed().as_secs_f64(),
+                &label_superset,
+            );
+        }
     }
 
-    // Set span status based on HTTP status code
-    if status.is_server_error() {
-        span.set_status(Status::Error {
-            description: format!("HTTP {}", status.as_u16()).into(),
-        });
-    }
-
-    // Record metrics
-    layer_state.server_request_duration.record(
-        request_data.duration_start.elapsed().as_secs_f64(),
-        &label_superset,
+    // Always decrement active requests counter
+    layer_state.server_active_requests.add(
+        -1,
+        &[
+            request_data.url_scheme_kv.clone(),
+            request_data.method_kv.clone(),
+        ],
     );
-
-    if let Some(req_content_length) = request_data.req_body_size {
-        layer_state
-            .server_request_body_size
-            .record(req_content_length, &label_superset);
-    }
-
-    if let Some(resp_content_length) = response.body().size_hint().exact() {
-        layer_state
-            .server_response_body_size
-            .record(resp_content_length, &label_superset);
-    }
-
-    layer_state
-        .server_active_requests
-        .add(-1, &[request_data.url_scheme_kv, request_data.method_kv]);
-
-    Ok(response)
 }
 
 fn split_and_format_protocol_version(http_version: http::Version) -> (String, String) {
