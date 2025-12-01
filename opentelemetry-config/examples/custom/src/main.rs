@@ -50,7 +50,7 @@ pub fn main() -> Result<(), Box<dyn std::error::Error>> {
     MockPeriodicExporterProvider::register_into(&mut registry);
 
     // Configure telemetry from the provided YAML file.
-    let providers = match TelemetryProviders::configure_from_yaml(&registry, &config_yaml) {
+    let providers = match TelemetryProviders::configure_from_yaml_str(&registry, &config_yaml) {
         Ok(providers) => providers,
         Err(e) => {
             println!(

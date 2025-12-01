@@ -25,7 +25,7 @@ pub struct TelemetryProviders {
 }
 
 impl TelemetryProviders {
-    pub fn new(
+    fn new(
         meter_provider: Option<SdkMeterProvider>,
         logs_provider: Option<SdkLoggerProvider>,
         traces_provider: Option<SdkTracerProvider>,
@@ -90,7 +90,7 @@ impl TelemetryProviders {
     }
 
     /// Configures the Telemetry providers from a YAML string
-    pub fn configure_from_yaml(
+    pub fn configure_from_yaml_str(
         configuration_registry: &ConfigurationProviderRegistry,
         yaml_str: &str,
     ) -> Result<TelemetryProviders, ProviderError> {
@@ -202,7 +202,7 @@ mod tests {
         let name = "console";
         registry.register_metric_exporter_factory(name, register_mock_reader_factory);
 
-        let providers = TelemetryProviders::configure_from_yaml(&registry, yaml_str).unwrap();
+        let providers = TelemetryProviders::configure_from_yaml_str(&registry, yaml_str).unwrap();
         assert!(providers.meter_provider.is_some());
     }
 

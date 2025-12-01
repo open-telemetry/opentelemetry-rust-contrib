@@ -32,15 +32,6 @@ struct CustomData {
 pub(crate) struct MockPeriodicExporterProvider {}
 
 impl MockPeriodicExporterProvider {
-    pub fn register_into(
-        registry: &mut opentelemetry_config::ConfigurationProviderRegistry,
-    ) {
-        registry.register_metric_exporter_factory(
-            "custom",
-            MockPeriodicExporterProvider::register_mock_exporter_factory,
-        );
-    }
-
     pub fn register_mock_exporter_factory(
         mut meter_provider_builder: MeterProviderBuilder,
         periodic_config_yaml: &str,

@@ -232,7 +232,7 @@ mod tests {
         let factory_function_option = registry.metrics.provider_factory(name);
         if let Some(factory_function) = factory_function_option {
             let builder = MeterProviderBuilder::default();
-            _ = factory_function(builder, &periodic_config_yaml).unwrap();
+            _ = factory_function(builder, periodic_config_yaml).unwrap();
             // Verify that the factory function was called
             assert_eq!(call_count.get(), 1);
         } else {

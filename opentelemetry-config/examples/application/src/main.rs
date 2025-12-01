@@ -7,8 +7,8 @@ pub mod mock_provider;
 pub mod model;
 use std::env;
 
-use opentelemetry_config::{providers::TelemetryProviders, ConfigurationProviderRegistry};
 use crate::mock_provider::MockPeriodicExporterProvider;
+use opentelemetry_config::{providers::TelemetryProviders, ConfigurationProviderRegistry};
 
 pub fn main() -> Result<(), Box<dyn std::error::Error>> {
     let args: Vec<String> = env::args().collect();
@@ -98,7 +98,10 @@ fn initialize_telemetry_registry() -> ConfigurationProviderRegistry {
     let mut registry = ConfigurationProviderRegistry::default();
 
     // Register the custom exporter factory.
-    MockPeriodicExporterProvider::register_into(&mut registry);
+    registry.register_metric_exporter_factory(
+        "custom",
+        MockPeriodicExporterProvider::register_mock_exporter_factory,
+    );
 
     registry
 }
@@ -108,6 +111,6 @@ fn configure_telemetry(
     registry: &ConfigurationProviderRegistry,
     telemetry_config: &str,
 ) -> Result<TelemetryProviders, Box<dyn std::error::Error>> {
-    let providers = TelemetryProviders::configure_from_yaml(&registry, telemetry_config)?;
+    let providers = TelemetryProviders::configure_from_yaml_str(&registry, telemetry_config)?;
     Ok(providers)
 }
