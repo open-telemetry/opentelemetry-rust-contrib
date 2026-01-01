@@ -24,7 +24,7 @@ chrono = "0.4"
 url = "2.2"
 md5 = "0.8.0"
 hex = "0.4"
-lz4_flex = { version = "0.11", features = ["safe-encode"], default-features = false }
+lz4_flex = { version = "0.12", features = ["safe-encode"], default-features = false }
 # Azure Identity dependencies - using public crates.io versions
 azure_identity = "0.29"
 azure_core = "0.29"
@@ -43,7 +43,7 @@ tempfile = "3.5"
 wiremock = "=0.5.22"
 futures = "0.3"
 num_cpus = "1.16"
-lz4_flex = { version = "0.11" }
+lz4_flex = { version = "0.12" }
 criterion = {version = "0.7"}
 rand = {version = "0.9"}
 
