@@ -11,7 +11,7 @@ keywords = ["opentelemetry", "log", "trace", "user_events"]
 license = "Apache-2.0"
 
 [dependencies]
-eventheader = "0.4.0"
+eventheader = "0.5.0"
 eventheader_dynamic = "0.4.0"
 opentelemetry = { version= "0.31", features = ["trace"] }
 opentelemetry_sdk = { version= "0.31", features = ["trace"] }
