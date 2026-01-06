@@ -26,13 +26,11 @@ impl XRayExtractor {
             values.insert(TRACE_ID_HEADER.to_string(), value);
         }
 
-        for (header_name, header_value) in header_map {
-            if let Some(key) = header_name {
-                if let Ok(value) = header_value.to_str() {
-                    values.insert(key.to_string(), value.to_string());
-                }
+        header_map.iter().for_each(|(key, value)| {
+            if let Ok(value) = value.to_str() {
+                values.insert(key.to_string(), value.to_string());
             }
-        }
+        });
 
         XRayExtractor { values }
     }
