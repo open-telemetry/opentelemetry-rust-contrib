@@ -42,7 +42,6 @@ opentelemetry-instrumentation-actix-web = { path = ".", features = [
   "awc",
 ] }
 opentelemetry_sdk = { workspace = true, features = [
-  "spec_unstable_metrics_views",
   "metrics",
 ] }
 opentelemetry-stdout = { workspace = true, features = ["trace", "metrics"] }
