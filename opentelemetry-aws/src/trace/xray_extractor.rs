@@ -2,9 +2,9 @@ use http::HeaderMap;
 use opentelemetry::propagation::Extractor;
 use std::{collections::HashMap, env};
 
-const TRACE_ID_ENVIRONMENT_VARIABLE: &str = "_X_AMZN_TRACE_ID";
+pub const TRACE_ID_ENVIRONMENT_VARIABLE: &str = "_X_AMZN_TRACE_ID";
 
-const TRACE_ID_HEADER: &str = "x-amzn-trace-id";
+pub const TRACE_ID_HEADER: &str = "x-amzn-trace-id";
 
 /// Extractor to provide the X-Ray Trace ID based on the [`TRACE_ID_HEADER`] and using the [`TRACE_ID_ENVIRONMENT_VARIABLE`] as a fallback.
 #[derive(Clone, Debug, Default)]
