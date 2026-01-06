@@ -93,7 +93,7 @@ impl ETWExporter {
         log_record: &opentelemetry_sdk::logs::SdkLogRecord,
         _instrumentation: &opentelemetry::InstrumentationScope,
     ) {
-        // TODO: If severity_number is not set, then fail the export than assuming Debug.
+        // TODO: If severity_number is not set, then fail the export rather than assuming Debug.
         let otel_level = log_record.severity_number().unwrap_or(Severity::Debug);
         let level = common::convert_severity_to_level(otel_level);
 
