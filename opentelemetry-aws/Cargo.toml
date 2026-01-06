@@ -31,7 +31,7 @@ opentelemetry_sdk = { workspace = true, optional = true }
 opentelemetry-semantic-conventions = { workspace = true, optional = true, features = [
     "semconv_experimental",
 ] }
-tracing = { version = "0.1", optional = true}
+tracing = { version = "0.1", optional = true }
 
 [dev-dependencies]
 opentelemetry_sdk = { workspace = true, features = ["testing"] }
