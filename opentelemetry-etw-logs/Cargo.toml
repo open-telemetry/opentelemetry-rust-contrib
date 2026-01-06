@@ -15,7 +15,6 @@ chrono = { version = "0.4.40", default-features = false, features = [
     "alloc",
     "std",
 ] }
-futures-executor = "0.3.31"
 opentelemetry = { workspace = true, features = ["logs"] }
 opentelemetry_sdk = { workspace = true, features = ["logs"] }
 serde_json = { version = "1.0.113", optional = true }
