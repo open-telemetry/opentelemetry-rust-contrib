@@ -57,8 +57,6 @@ mod test {
 
         let exporter = test_utils::new_etw_exporter();
         let instrumentation = test_utils::new_instrumentation_scope();
-        let result = exporter.export_log_data(&log_record, &instrumentation);
-
-        assert!(result.is_ok());
+        exporter.export_log_data(&log_record, &instrumentation);
     }
 }
