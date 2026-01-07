@@ -528,4 +528,27 @@ mod tests {
         // The actual resource attributes will be tested in the exporter tests
         assert!(processor.force_flush().is_ok());
     }
+
+    #[test]
+    fn test_block_on() {
+        use opentelemetry_appender_tracing::layer::OpenTelemetryTracingBridge;
+        use opentelemetry_sdk::logs::SdkLoggerProvider;
+        use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
+
+        let processor = Processor::builder("TestApp").build().unwrap();
+        let provider = SdkLoggerProvider::builder()
+            .with_log_processor(processor)
+            .build();
+        tracing_subscriber::registry()
+            .with(OpenTelemetryTracingBridge::new(&provider))
+            .init();
+
+        std::thread::spawn(|| {
+            futures_executor::block_on(async {
+                tracing::info!("This message doesn't cause panic");
+            });
+        })
+        .join()
+        .unwrap();
+    }
 }
