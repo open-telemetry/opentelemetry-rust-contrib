@@ -4,6 +4,11 @@
 
 [splash]: https://raw.githubusercontent.com/open-telemetry/opentelemetry-rust/main/assets/logo-text.png
 
+| Status        |           |
+| ------------- |-----------|
+| Stability     | alpha     |
+| Owners        | TBD       |
+
 Community supported vendor integrations for applications instrumented with [`OpenTelemetry`].
 
 [![Crates.io: opentelemetry-contrib](https://img.shields.io/crates/v/opentelemetry-contrib.svg)](https://crates.io/crates/opentelemetry-contrib)

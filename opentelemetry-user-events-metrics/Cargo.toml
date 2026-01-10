@@ -16,7 +16,6 @@ opentelemetry_sdk = { version= "0.31", features = ["metrics"] }
 opentelemetry-proto = { version= "0.31", features = ["gen-tonic", "metrics"], default-features = false }
 eventheader = { version = "= 0.5.0" }
 prost = "0.14"
-tracing = {version = "0.1", optional = true}
 
 [dev-dependencies]
 tokio = { version = "1.0", features = ["full"] }
@@ -24,7 +23,7 @@ tracing-subscriber = { version = "0.3", features = ["env-filter","registry", "st
 serde_json = "1.0"
 
 [features]
-internal-logs = ["tracing", "opentelemetry/internal-logs", "opentelemetry_sdk/internal-logs", "opentelemetry-proto/internal-logs"]
+internal-logs = ["opentelemetry/internal-logs", "opentelemetry_sdk/internal-logs", "opentelemetry-proto/internal-logs"]
 default = ["internal-logs"]
 
 [package.metadata.cargo-machete]
