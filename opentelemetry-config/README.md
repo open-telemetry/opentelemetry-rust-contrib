@@ -4,6 +4,11 @@
 
 [splash]: https://raw.githubusercontent.com/open-telemetry/opentelemetry-rust/main/assets/logo-text.png
 
+| Status        |           |
+| ------------- |-----------|
+| Stability     | alpha     |
+| Owners        | [Andres Borja](https://github.com/andborja) |
+
 Declarative configuration for applications instrumented with [`OpenTelemetry`]. 
 
 [`OpenTelemetry`]: https://crates.io/crates/opentelemetry
