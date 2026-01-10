@@ -533,17 +533,17 @@ mod tests {
     fn test_block_on() {
         use opentelemetry_appender_tracing::layer::OpenTelemetryTracingBridge;
         use opentelemetry_sdk::logs::SdkLoggerProvider;
-        use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
+        use tracing_subscriber::layer::SubscriberExt;
 
         let processor = Processor::builder("TestApp").build().unwrap();
         let provider = SdkLoggerProvider::builder()
             .with_log_processor(processor)
             .build();
-        tracing_subscriber::registry()
-            .with(OpenTelemetryTracingBridge::new(&provider))
-            .init();
+        let subscriber =
+            tracing_subscriber::registry().with(OpenTelemetryTracingBridge::new(&provider));
 
-        std::thread::spawn(|| {
+        std::thread::spawn(move || {
+            let _guard = tracing::subscriber::set_default(subscriber);
             futures_executor::block_on(async {
                 tracing::info!("This message doesn't cause panic");
             });
