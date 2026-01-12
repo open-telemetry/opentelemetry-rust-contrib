@@ -1,6 +1,6 @@
 [package]
 name = "opentelemetry-instrumentation-actix-web"
-version = "0.24.0"
+version = "0.25.0"
 description = "OpenTelemetry instrumentation for Actix Web apps"
 homepage = "https://github.com/open-telemetry/opentelemetry-rust-contrib/tree/main/opentelemetry-instrumentation-actix-web"
 repository = "https://github.com/open-telemetry/opentelemetry-rust-contrib/tree/main/opentelemetry-instrumentation-actix-web"
@@ -10,6 +10,10 @@ keywords = ["actix", "actix-web", "opentelemetry"]
 license = "Apache-2.0"
 edition = "2021"
 rust-version = "1.75.0"
+
+[package.metadata.docs.rs]
+all-features = true
+rustdoc-args = ["--cfg", "docsrs"]
 
 [features]
 metrics = ["opentelemetry/metrics"]
@@ -46,10 +50,6 @@ opentelemetry_sdk = { workspace = true, features = [
   "metrics",
 ] }
 opentelemetry-stdout = { workspace = true, features = ["trace", "metrics"] }
-
-[package.metadata.docs.rs]
-all-features = true
-rustdoc-args = ["--cfg", "docsrs"]
 
 [lints]
 workspace = true

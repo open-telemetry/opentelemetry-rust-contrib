@@ -22,10 +22,10 @@ use crate::RouteFormatter;
 // https://github.com/open-telemetry/opentelemetry-specification/blob/main/specification/metrics/semantic_conventions/http-metrics.md
 use opentelemetry_semantic_conventions::trace::HTTP_RESPONSE_STATUS_CODE;
 
-const HTTP_SERVER_DURATION: &str = "http.server.duration";
-const HTTP_SERVER_ACTIVE_REQUESTS: &str = "http.server.active_requests";
-const HTTP_SERVER_REQUEST_SIZE: &str = "http.server.request.size";
-const HTTP_SERVER_RESPONSE_SIZE: &str = "http.server.response.size";
+use opentelemetry_semantic_conventions::metric::HTTP_SERVER_ACTIVE_REQUESTS;
+use opentelemetry_semantic_conventions::metric::HTTP_SERVER_REQUEST_BODY_SIZE;
+use opentelemetry_semantic_conventions::metric::HTTP_SERVER_REQUEST_DURATION;
+use opentelemetry_semantic_conventions::metric::HTTP_SERVER_RESPONSE_BODY_SIZE;
 
 /// Records http server metrics
 ///
@@ -44,7 +44,7 @@ impl Metrics {
     /// Create a new [`RequestMetrics`]
     fn new(meter: Meter) -> Self {
         let http_server_duration = meter
-            .f64_histogram(HTTP_SERVER_DURATION)
+            .f64_histogram(HTTP_SERVER_REQUEST_DURATION)
             .with_description("Measures the duration of inbound HTTP requests.")
             .with_unit("s")
             .build();
@@ -57,13 +57,13 @@ impl Metrics {
             .build();
 
         let http_server_request_size = meter
-            .u64_histogram(HTTP_SERVER_REQUEST_SIZE)
+            .u64_histogram(HTTP_SERVER_REQUEST_BODY_SIZE)
             .with_description("Measures the size of HTTP request messages (compressed).")
             .with_unit("By")
             .build();
 
         let http_server_response_size = meter
-            .u64_histogram(HTTP_SERVER_RESPONSE_SIZE)
+            .u64_histogram(HTTP_SERVER_RESPONSE_BODY_SIZE)
             .with_description("Measures the size of HTTP response messages (compressed).")
             .with_unit("By")
             .build();
