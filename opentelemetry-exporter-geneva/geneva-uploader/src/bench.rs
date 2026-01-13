@@ -1,7 +1,7 @@
 #[cfg(test)]
 mod benchmarks {
     use crate::payload_encoder::lz4_chunked_compression::lz4_chunked_compression;
-    use crate::payload_encoder::otlp_encoder::OtlpEncoder;
+    use crate::payload_encoder::otlp_encoder::{MetadataFields, OtlpEncoder};
     use criterion::{BenchmarkId, Criterion, Throughput};
     use opentelemetry_proto::tonic::common::v1::{AnyValue, KeyValue};
     use opentelemetry_proto::tonic::logs::v1::LogRecord;
@@ -13,6 +13,18 @@ mod benchmarks {
         let mut rng = StdRng::seed_from_u64(42);
         rng.fill(&mut data[..]);
         data
+    }
+
+    fn make_metadata(namespace: &str) -> MetadataFields {
+        MetadataFields::new(
+            "BenchmarkEnv".to_string(),
+            "Ver1v0".to_string(),
+            "BenchmarkTenant".to_string(),
+            "BenchmarkRole".to_string(),
+            "BenchmarkRoleInstance".to_string(),
+            namespace.to_string(),
+            "Ver1v0".to_string(),
+        )
     }
 
     /*
@@ -152,7 +164,7 @@ mod benchmarks {
     fn encode_log_batch_benchmark() {
         let mut criterion = Criterion::default();
         let encoder = OtlpEncoder::new();
-        let metadata = "namespace=benchmark/eventVersion=Ver1v0";
+        let metadata = make_metadata("benchmark");
 
         // Benchmark 1: Different numbers of attributes
         let mut group = criterion.benchmark_group("encode_log_batch_attributes");
@@ -179,7 +191,7 @@ mod benchmarks {
 
                     b.iter(|| {
                         let res = encoder
-                            .encode_log_batch(black_box(logs.iter()), black_box(metadata))
+                            .encode_log_batch(black_box(logs.iter()), black_box(&metadata))
                             .unwrap();
                         black_box(res); // double sure the return value is generated
                     });
@@ -209,7 +221,7 @@ mod benchmarks {
                     b.iter(|| {
                         let res = black_box(
                             encoder
-                                .encode_log_batch(black_box(logs.iter()), black_box(metadata))
+                                .encode_log_batch(black_box(logs.iter()), black_box(&metadata))
                                 .unwrap(),
                         );
                         black_box(res); // double sure the return value is generated
@@ -236,7 +248,7 @@ mod benchmarks {
             b.iter(|| {
                 let res = black_box(
                     encoder
-                        .encode_log_batch(black_box(logs.iter()), black_box(metadata))
+                        .encode_log_batch(black_box(logs.iter()), black_box(&metadata))
                         .unwrap(),
                 );
                 black_box(res);

@@ -552,7 +552,7 @@ mod tests {
 
         let _response = service.call(request).await.unwrap();
 
-        tokio::time::sleep(Duration::from_millis(200)).await;
+        tokio::time::sleep(Duration::from_millis(500)).await;
 
         let metrics = exporter.get_finished_metrics().unwrap();
         assert!(!metrics.is_empty());

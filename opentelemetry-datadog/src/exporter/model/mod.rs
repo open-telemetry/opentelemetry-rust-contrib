@@ -215,8 +215,8 @@ pub(crate) mod tests {
 
     pub(crate) fn get_span(trace_id: u128, parent_span_id: u64, span_id: u64) -> trace::SpanData {
         let span_context = SpanContext::new(
-            TraceId::from_u128(trace_id),
-            SpanId::from_u64(span_id),
+            TraceId::from(trace_id),
+            SpanId::from(span_id),
             TraceFlags::default(),
             false,
             TraceState::default(),
@@ -232,7 +232,8 @@ pub(crate) mod tests {
 
         trace::SpanData {
             span_context,
-            parent_span_id: SpanId::from_u64(parent_span_id),
+            parent_span_id: SpanId::from(parent_span_id),
+            parent_span_is_remote: false,
             span_kind: SpanKind::Client,
             name: "resource".into(),
             start_time,

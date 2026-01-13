@@ -1,4 +1,30 @@
 //! run with `$ cargo run --example basic
+//!
+//! # Geneva Uploader Internal Logs
+//!
+//! By default, this example enables DEBUG level logs for geneva-uploader, showing all internal
+//! operations including initialization, auth, encoding, compression, and uploads.
+//!
+//! ## Default behavior (no RUST_LOG needed)
+//! ```bash
+//! cargo run --example basic
+//! ```
+//! This shows DEBUG level logs from geneva-uploader.
+//!
+//! ## Override to INFO level (initialization, auth token acquisition, GCS config only)
+//! ```bash
+//! RUST_LOG=geneva-uploader=info cargo run --example basic
+//! ```
+//!
+//! ## Disable geneva-uploader logs
+//! ```bash
+//! RUST_LOG=geneva-uploader=off cargo run --example basic
+//! ```
+//!
+//! ## Filter out noisy dependencies while keeping geneva-uploader at DEBUG
+//! ```bash
+//! RUST_LOG=hyper=off,reqwest=off cargo run --example basic
+//! ```
 
 use geneva_uploader::client::{GenevaClient, GenevaClientConfig};
 use geneva_uploader::AuthMethod;
@@ -62,6 +88,7 @@ async fn main() {
         tenant,
         role_name,
         role_instance,
+        msi_resource: None,
     };
 
     let geneva_client = GenevaClient::new(config).expect("Failed to create GenevaClient");
@@ -101,13 +128,32 @@ async fn main() {
         .add_directive("reqwest=off".parse().unwrap());
     let otel_layer = layer::OpenTelemetryTracingBridge::new(&provider).with_filter(filter_otel);
 
-    // Create a new tracing::Fmt layer to print the logs to stdout. It has a
-    // default filter of `info` level and above, and `debug` and above for logs
-    // from OpenTelemetry crates. The filter levels can be customized as needed.
-    let filter_fmt = EnvFilter::new("info")
+    // Create a new tracing::Fmt layer to print the logs to stdout.
+    // Default filter: info level for most logs, debug level for opentelemetry, hyper, reqwest, and geneva-uploader.
+    // Users can override these defaults with RUST_LOG (later directives override earlier ones).
+    // Examples:
+    //   cargo run --example basic                                    # Uses defaults (geneva-uploader=debug)
+    //   RUST_LOG=geneva-uploader=info cargo run --example basic      # Override to info level
+    //   RUST_LOG=geneva-uploader=off cargo run --example basic       # Disable geneva-uploader logs
+    //   RUST_LOG=hyper=off,reqwest=off cargo run --example basic     # Quiet noisy deps, keep geneva-uploader=debug
+    let mut filter_fmt = EnvFilter::new("info")
+        .add_directive("opentelemetry=debug".parse().unwrap())
         .add_directive("hyper=debug".parse().unwrap())
         .add_directive("reqwest=debug".parse().unwrap())
-        .add_directive("opentelemetry=debug".parse().unwrap());
+        .add_directive("geneva-uploader=debug".parse().unwrap());
+
+    if let Ok(spec) = std::env::var("RUST_LOG") {
+        for part in spec.split(',') {
+            let p = part.trim();
+            if p.is_empty() {
+                continue;
+            }
+            if let Ok(d) = p.parse() {
+                filter_fmt = filter_fmt.add_directive(d);
+            }
+        }
+    }
+
     let fmt_layer = tracing_subscriber::fmt::layer()
         .with_thread_names(true)
         .with_filter(filter_fmt);
@@ -117,28 +163,19 @@ async fn main() {
         .with(fmt_layer)
         .init();
 
-    // User registration event
+    // Generate logs to trigger batch processing and GCS calls
     info!(name: "Log", target: "my-system", event_id = 20, user_name = "user1", user_email = "user1@opentelemetry.io", message = "Registration successful");
-    // User checkout event
     info!(name: "Log", target: "my-system", event_id = 51, user_name = "user2", user_email = "user2@opentelemetry.io", message = "Checkout successful");
-    // Login event
     info!(name: "Log", target: "my-system", event_id = 30, user_name = "user3", user_email = "user3@opentelemetry.io", message = "User login successful");
-    // Payment processed
     info!(name: "Log", target: "my-system", event_id = 52, user_name = "user2", user_email = "user2@opentelemetry.io", message = "Payment processed successfully");
-    // Error event - Failed login
     error!(name: "Log", target: "my-system", event_id = 31, user_name = "user4", user_email = "user4@opentelemetry.io", message = "Login failed - invalid credentials");
-    // Warning event - Cart abandoned
     warn!(name: "Log", target: "my-system", event_id = 53, user_name = "user5", user_email = "user5@opentelemetry.io", message = "Shopping cart abandoned");
-
-    // Password reset
     info!(name: "Log", target: "my-system", event_id = 32, user_name = "user1", user_email = "user1@opentelemetry.io", message = "Password reset requested");
-
-    // Order shipped
     info!(name: "Log", target: "my-system", event_id = 54, user_name = "user2", user_email = "user2@opentelemetry.io", message = "Order shipped successfully");
 
-    // sleep for a while
-    println!("Sleeping for 5 seconds...");
-    thread::sleep(Duration::from_secs(5));
+    println!("Sleeping for 30 seconds...");
+    thread::sleep(Duration::from_secs(30));
+
     let _ = provider.shutdown();
     println!("Shutting down provider");
 }

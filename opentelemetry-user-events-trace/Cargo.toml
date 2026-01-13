@@ -1,7 +1,7 @@
 [package]
 name = "opentelemetry-user-events-trace"
 description = "OpenTelemetry-Rust exporter to user_events"
-version = "0.3.0"
+version = "0.4.0"
 edition = "2021"
 homepage = "https://github.com/open-telemetry/opentelemetry-rust-contrib/tree/main/opentelemetry-user-events-traces"
 repository = "https://github.com/open-telemetry/opentelemetry-rust-contrib/tree/main/opentelemetry-user-events-traces"
@@ -11,12 +11,11 @@ keywords = ["opentelemetry", "log", "trace", "user_events"]
 license = "Apache-2.0"
 
 [dependencies]
-eventheader = "0.4.0"
-eventheader_dynamic = "0.4.0"
-opentelemetry = { version= "0.30", features = ["trace"] }
-opentelemetry_sdk = { version= "0.30", features = ["trace"] }
+eventheader = "0.5.0"
+eventheader_dynamic = "0.5.0"
+opentelemetry = { version= "0.31", features = ["trace"] }
+opentelemetry_sdk = { version= "0.31", features = ["trace"] }
 chrono = { version = "0.4", default-features = false, features = ["std"] }
-tracing = { version = "0.1", optional = true }
 futures-executor = "0.3"
 
 [dev-dependencies]
@@ -28,7 +27,7 @@ criterion = "0.7"
 serde_json = "1.0.140"
 
 [features]
-internal-logs = ["tracing", "opentelemetry/internal-logs", "opentelemetry_sdk/internal-logs"]
+internal-logs = ["opentelemetry/internal-logs", "opentelemetry_sdk/internal-logs"]
 default = ["internal-logs"]
 
 [[bench]]

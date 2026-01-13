@@ -1,5 +1,10 @@
 # Tower OTEL Metrics Middleware
 
+| Status        |           |
+| ------------- |-----------|
+| Stability     | alpha     |
+| Owners        | [Franco Posa](https://github.com/francoposa)       |
+
 OpenTelemetry Metrics Middleware for Tower-compatible Rust HTTP servers.
 
 ## Examples
