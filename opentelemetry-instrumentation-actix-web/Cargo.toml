@@ -1,6 +1,6 @@
 [package]
 name = "opentelemetry-instrumentation-actix-web"
-version = "0.22.0"
+version = "0.24.0"
 description = "OpenTelemetry instrumentation for Actix Web apps"
 homepage = "https://github.com/open-telemetry/opentelemetry-rust-contrib/tree/main/opentelemetry-instrumentation-actix-web"
 repository = "https://github.com/open-telemetry/opentelemetry-rust-contrib/tree/main/opentelemetry-instrumentation-actix-web"
@@ -16,13 +16,13 @@ metrics = ["opentelemetry/metrics"]
 sync-middleware = []
 
 [dependencies]
-actix-http = { version = "3.0", default-features = false, features = [
+actix-http = { version = "3.11", default-features = false, features = [
   "compress-zstd",
 ] }
-actix-web = { version = "4.0", default-features = false, features = [
+actix-web = { version = "4.12", default-features = false, features = [
   "compress-zstd",
 ] }
-awc = { version = "3.0", optional = true, default-features = false, features = [
+awc = { version = "3.8", optional = true, default-features = false, features = [
   "compress-zstd",
 ] }
 futures-util = { version = "0.3", default-features = false, features = [
@@ -35,7 +35,7 @@ opentelemetry-semantic-conventions = { workspace = true, features = [
 serde = "1.0"
 
 [dev-dependencies]
-actix-web = { version = "4.0", features = ["macros"] }
+actix-web = { version = "4.12", features = ["macros"] }
 opentelemetry-instrumentation-actix-web = { path = ".", features = [
   "metrics",
   "sync-middleware",

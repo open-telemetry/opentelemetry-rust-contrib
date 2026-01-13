@@ -1,7 +1,7 @@
 [package]
 name = "opentelemetry-etw-logs"
 description = "OpenTelemetry logs exporter to ETW (Event Tracing for Windows)"
-version = "0.9.1"
+version = "0.10.1"
 edition = "2021"
 homepage = "https://github.com/open-telemetry/opentelemetry-rust-contrib/tree/main/opentelemetry-etw-logs"
 repository = "https://github.com/open-telemetry/opentelemetry-rust-contrib/tree/main/opentelemetry-etw-logs"
@@ -15,7 +15,6 @@ chrono = { version = "0.4.40", default-features = false, features = [
     "alloc",
     "std",
 ] }
-futures-executor = "0.3.31"
 opentelemetry = { workspace = true, features = ["logs"] }
 opentelemetry_sdk = { workspace = true, features = ["logs"] }
 serde_json = { version = "1.0.113", optional = true }
@@ -23,6 +22,7 @@ tracelogging_dynamic = "1.2.4"
 tracing = { version = "0.1", optional = true }
 
 [dev-dependencies]
+futures-executor = "0.3.31"
 opentelemetry-appender-tracing = { workspace = true }
 opentelemetry_sdk = { workspace = true, features = ["logs", "trace"] }
 tokio = { version = "1.0", features = ["full"] }
