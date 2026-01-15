@@ -288,7 +288,17 @@ impl<ReqExt, ResExt> HTTPLayerBuilder<ReqExt, ResExt> {
         })
     }
 
-    pub fn with_meter(mut self, meter: Meter) -> Self {
+    /// Override the meter used for metrics collection.
+    ///
+    /// This method exists primarily for testing purposes, allowing tests to inject
+    /// a custom meter (e.g., backed by an in-memory exporter) without relying on
+    /// global state. Using global providers in tests can cause interference between
+    /// concurrent tests.
+    ///
+    /// In production, the default behavior of using the global meter provider
+    /// (via `opentelemetry::global::meter()`) is recommended.
+    #[cfg(test)]
+    fn with_meter(mut self, meter: Meter) -> Self {
         self.meter = Some(meter);
         self
     }
