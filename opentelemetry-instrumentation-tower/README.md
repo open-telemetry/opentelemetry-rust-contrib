@@ -1,9 +1,13 @@
 # Tower OTEL HTTP Instrumentation Middleware
 
+![OpenTelemetry — An observability framework for cloud-native software.][splash]
+
+[splash]: https://raw.githubusercontent.com/open-telemetry/opentelemetry-rust/main/assets/logo-text.png
+
 | Status        |           |
 | ------------- |-----------|
 | Stability     | alpha     |
-| Owners        | [Franco Posa](https://github.com/francoposa)       |
+| Owners        | [Franco Posa](https://github.com/francoposa) |
 
 OpenTelemetry HTTP Metrics and Tracing Middleware for Tower-compatible Rust HTTP servers.
 
