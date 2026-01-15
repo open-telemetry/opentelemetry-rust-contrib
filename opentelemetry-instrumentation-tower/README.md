@@ -1,11 +1,47 @@
-# Tower OTEL Metrics Middleware
+# Tower OTEL HTTP Instrumentation Middleware
+
+![OpenTelemetry — An observability framework for cloud-native software.][splash]
+
+[splash]: https://raw.githubusercontent.com/open-telemetry/opentelemetry-rust/main/assets/logo-text.png
 
 | Status        |           |
 | ------------- |-----------|
 | Stability     | alpha     |
-| Owners        | [Franco Posa](https://github.com/francoposa)       |
+| Owners        | [Franco Posa](https://github.com/francoposa) |
 
-OpenTelemetry Metrics Middleware for Tower-compatible Rust HTTP servers.
+OpenTelemetry HTTP Metrics and Tracing Middleware for Tower-compatible Rust HTTP servers.
+
+This middleware provides both metrics and distributed tracing for HTTP requests, following OpenTelemetry semantic conventions.
+
+## Features
+
+- **HTTP Metrics**: Request duration, active requests, request/response body sizes
+- **Distributed Tracing**: HTTP spans with semantic attributes
+- **Semantic Conventions**: Uses OpenTelemetry semantic conventions for consistent attribute naming
+- **Flexible Configuration**: Support for custom attribute extractors and tracer configuration
+- **Framework Support**: Works with any Tower-compatible HTTP framework (Axum, Hyper, Tonic etc.)
+
+## Usage
+
+## Metrics
+
+The middleware exports the following metrics:
+
+- `http.server.request.duration` - Duration of HTTP requests
+- `http.server.active_requests` - Number of active HTTP requests  
+- `http.server.request.body.size` - Size of HTTP request bodies
+- `http.server.response.body.size` - Size of HTTP response bodies
+
+## Tracing
+
+HTTP spans are created with the following attributes (following OpenTelemetry semantic conventions):
+
+- `http.request.method` - HTTP method
+- `url.scheme` - URL scheme (http/https)
+- `url.path` - Request path
+- `url.full` - Full URL
+- `user_agent.original` - User agent string
+- `http.response.status_code` - HTTP response status code
 
 ## Examples
 
