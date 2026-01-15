@@ -2,6 +2,10 @@
 
 ## vNext
 
+- Fixed a panic that would trigger if logging from inside a blocked on async block due to nested `block_on()`s.
+
+## v0.10.1
+
 - Added a `with_resource_attributes` method to the processor builder, allowing
   users to specify which resource attribute keys are exported with each log
   record.

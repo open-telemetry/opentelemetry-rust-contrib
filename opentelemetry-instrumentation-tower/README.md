@@ -1,5 +1,10 @@
 # Tower OTEL HTTP Instrumentation Middleware
 
+| Status        |           |
+| ------------- |-----------|
+| Stability     | alpha     |
+| Owners        | [Franco Posa](https://github.com/francoposa)       |
+
 OpenTelemetry HTTP Metrics and Tracing Middleware for Tower-compatible Rust HTTP servers.
 
 This middleware provides both metrics and distributed tracing for HTTP requests, following OpenTelemetry semantic conventions.

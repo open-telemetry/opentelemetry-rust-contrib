@@ -4,6 +4,11 @@
 
 [splash]: https://raw.githubusercontent.com/open-telemetry/opentelemetry-rust/main/assets/logo-text.png
 
+| Status        |           |
+| ------------- |-----------|
+| Stability     | alpha     |
+| Owners        | TBD       |
+
 [OpenTelemetry](https://opentelemetry.io/) instrumentation for [Actix Web](https://actix.rs/).
 
 [![Crates.io: opentelemetry-instrumentation-actix-web](https://img.shields.io/crates/v/opentelemetry-instrumentation-actix-web.svg)](https://crates.io/crates/opentelemetry-instrumentation-actix-web)

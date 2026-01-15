@@ -92,13 +92,13 @@ impl ETWExporter {
         &self,
         log_record: &opentelemetry_sdk::logs::SdkLogRecord,
         _instrumentation: &opentelemetry::InstrumentationScope,
-    ) -> opentelemetry_sdk::error::OTelSdkResult {
-        // TODO: If severity_number is not set, then fail the export than assuming Debug.
+    ) {
+        // TODO: If severity_number is not set, then fail the export rather than assuming Debug.
         let otel_level = log_record.severity_number().unwrap_or(Severity::Debug);
         let level = common::convert_severity_to_level(otel_level);
 
         if !self.enabled(level) {
-            return Ok(());
+            return;
         };
 
         let event_tags: u32 = 0; // TBD name and event_tag values
@@ -124,39 +124,36 @@ impl ETWExporter {
             // Write event to ETW
             let result = event.write(&self.provider, None, None);
 
+            // event.write() above returns 0 for success or a Win32 error from EventWrite for failure.
+            // The return value is for diagnostic purposes only and should generally be ignored in retail builds.
             match result {
-                0 => Ok(()),
-                _ => Err(OTelSdkError::InternalFailure(format!(
-                    "Failed to write event to ETW. ETW reason: {result}"
-                ))),
+                0 => (),
+                _ => debug_assert!(false, "Failed to write event to ETW. ETW reason: {result}"),
             }
         })
     }
-}
 
-impl Debug for ETWExporter {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.write_str("ETW log exporter")
-    }
-}
-
-impl opentelemetry_sdk::logs::LogExporter for ETWExporter {
-    async fn export(&self, batch: opentelemetry_sdk::logs::LogBatch<'_>) -> OTelSdkResult {
-        if let Some((record, instrumentation)) = batch.iter().next() {
-            self.export_log_data(record, instrumentation)
-        } else {
-            Err(OTelSdkError::InternalFailure(
-                "Batch is expected to have one and only one record, but none was found".to_string(),
-            ))
+    pub(crate) fn shutdown(&self) -> OTelSdkResult {
+        let res = self.provider.as_ref().unregister();
+        if res != 0 {
+            return Err(OTelSdkError::InternalFailure(format!(
+                "Failed to unregister provider. Win32 error: {res}"
+            )));
         }
+        Ok(())
     }
 
     #[cfg(feature = "spec_unstable_logs_enabled")]
-    fn event_enabled(&self, level: Severity, _target: &str, _name: Option<&str>) -> bool {
+    pub(crate) fn event_enabled(
+        &self,
+        level: Severity,
+        _target: &str,
+        _name: Option<&str>,
+    ) -> bool {
         self.enabled(common::convert_severity_to_level(level))
     }
 
-    fn set_resource(&mut self, resource: &opentelemetry_sdk::Resource) {
+    pub(crate) fn set_resource(&mut self, resource: &opentelemetry_sdk::Resource) {
         // Clear previous resource attributes
         self.resource.attributes_from_resource.clear();
 
@@ -178,15 +175,11 @@ impl opentelemetry_sdk::logs::LogExporter for ETWExporter {
             }
         }
     }
+}
 
-    fn shutdown(&self) -> OTelSdkResult {
-        let res = self.provider.as_ref().unregister();
-        if res != 0 {
-            return Err(OTelSdkError::InternalFailure(format!(
-                "Failed to unregister provider. Win32 error: {res}"
-            )));
-        }
-        Ok(())
+impl Debug for ETWExporter {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("ETW log exporter")
     }
 }
 
@@ -202,8 +195,6 @@ fn val_to_any_value(val: &Value) -> AnyValue {
 
 #[cfg(test)]
 mod tests {
-    use opentelemetry_sdk::logs::LogExporter;
-
     use super::*;
 
     #[test]
@@ -212,8 +203,7 @@ mod tests {
         let exporter = common::test_utils::new_etw_exporter();
         let instrumentation = common::test_utils::new_instrumentation_scope();
 
-        let result = exporter.export_log_data(&record, &instrumentation);
-        assert!(result.is_ok());
+        exporter.export_log_data(&record, &instrumentation);
     }
 
     #[test]
@@ -226,9 +216,7 @@ mod tests {
 
         let exporter = common::test_utils::new_etw_exporter();
         let instrumentation = common::test_utils::new_instrumentation_scope();
-        let result = exporter.export_log_data(&log_record, &instrumentation);
-
-        assert!(result.is_ok());
+        exporter.export_log_data(&log_record, &instrumentation);
     }
 
     #[test]
@@ -250,9 +238,7 @@ mod tests {
                 .build(),
         );
         let instrumentation = common::test_utils::new_instrumentation_scope();
-        let result = exporter.export_log_data(&log_record, &instrumentation);
-
-        assert!(result.is_ok());
+        exporter.export_log_data(&log_record, &instrumentation);
     }
 
     #[test]
@@ -304,9 +290,7 @@ mod tests {
         assert!(!attrs.contains_key("custom_attribute3"));
 
         let instrumentation = common::test_utils::new_instrumentation_scope();
-        let result = exporter.export_log_data(&log_record, &instrumentation);
-
-        assert!(result.is_ok());
+        exporter.export_log_data(&log_record, &instrumentation);
     }
 
     #[test]
@@ -314,37 +298,6 @@ mod tests {
         let exporter = common::test_utils::new_etw_exporter();
         let result = format!("{exporter:?}");
         assert_eq!(result, "ETW log exporter");
-    }
-
-    #[tokio::test]
-    async fn test_export() {
-        use opentelemetry_sdk::logs::LogBatch;
-        use opentelemetry_sdk::logs::LogExporter;
-
-        let log_record = common::test_utils::new_sdk_log_record();
-        let instrumentation = common::test_utils::new_instrumentation_scope();
-
-        let records = [(&log_record, &instrumentation)];
-        let batch = LogBatch::new(&records);
-
-        let exporter = common::test_utils::new_etw_exporter();
-        let result = exporter.export(batch);
-
-        assert!(result.await.is_ok());
-    }
-
-    #[tokio::test]
-    async fn test_export_empty_batch_produces_failure() {
-        use opentelemetry_sdk::logs::LogBatch;
-        use opentelemetry_sdk::logs::LogExporter;
-
-        let records = [];
-        let batch = LogBatch::new(&records);
-
-        let exporter = common::test_utils::new_etw_exporter();
-        let result = exporter.export(batch);
-
-        assert!(result.await.is_err());
     }
 
     #[test]
