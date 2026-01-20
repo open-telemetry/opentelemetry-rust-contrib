@@ -34,17 +34,18 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync + 'static>> {
         .with_attribute(KeyValue::new("service.name", "actix_client"))
         .build();
 
-    let tracer = SdkTracerProvider::builder()
-        .with_batch_exporter(SpanExporter::default())
+    let tracer_provider = SdkTracerProvider::builder()
+        .with_simple_exporter(SpanExporter::default())
         .with_resource(service_name_resource)
         .build();
+    global::set_tracer_provider(tracer_provider.clone());
 
     let client = awc::Client::new();
     let response = execute_request(client).await?;
 
     println!("Response: {response}");
 
-    tracer.shutdown()?;
+    tracer_provider.shutdown()?;
 
     Ok(())
 }
