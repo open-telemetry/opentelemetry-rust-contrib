@@ -1,7 +1,12 @@
 use axum::routing::{get, post, put, Router};
 use bytes::Bytes;
 use opentelemetry::global;
-use opentelemetry_instrumentation_tower as otel_tower_metrics;
+use opentelemetry_instrumentation_tower::HTTPLayer;
+use opentelemetry_otlp::{MetricExporter, SpanExporter};
+use opentelemetry_sdk::{
+    metrics::{PeriodicReader, SdkMeterProvider},
+    trace::SdkTracerProvider,
+};
 use std::time::Duration;
 
 const SERVICE_NAME: &str = "example-axum-http-service";
@@ -40,34 +45,47 @@ async fn handle() -> Bytes {
 
 #[tokio::main]
 async fn main() {
-    let exporter = opentelemetry_otlp::MetricExporter::builder()
-        .with_tonic()
-        // .with_endpoint("http://localhost:4317")  // default; leave out in favor of env var OTEL_EXPORTER_OTLP_ENDPOINT
-        .build()
-        .unwrap();
+    {
+        let exporter = MetricExporter::builder()
+            .with_tonic()
+            // .with_endpoint("http://localhost:4317")  // default; leave out in favor of env var OTEL_EXPORTER_OTLP_ENDPOINT
+            .build()
+            .unwrap();
 
-    let reader = opentelemetry_sdk::metrics::PeriodicReader::builder(exporter)
-        .with_interval(_OTEL_METRIC_EXPORT_INTERVAL)
-        .build();
+        let reader = PeriodicReader::builder(exporter)
+            .with_interval(_OTEL_METRIC_EXPORT_INTERVAL)
+            .build();
 
-    let meter_provider = opentelemetry_sdk::metrics::SdkMeterProvider::builder()
-        .with_reader(reader)
-        .with_resource(init_otel_resource())
-        .build();
+        let provider = SdkMeterProvider::builder()
+            .with_reader(reader)
+            .with_resource(init_otel_resource())
+            .build();
 
-    global::set_meter_provider(meter_provider);
-    // init our otel metrics middleware
-    let global_meter = global::meter(SERVICE_NAME);
-    let otel_metrics_service_layer = otel_tower_metrics::HTTPMetricsLayerBuilder::builder()
-        .with_meter(global_meter)
-        .build()
-        .unwrap();
+        global::set_meter_provider(provider);
+    }
+
+    {
+        let exporter = SpanExporter::builder()
+            .with_tonic()
+            // .with_endpoint("http://localhost:4317")  // default; leave out in favor of env var OTEL_EXPORTER_OTLP_ENDPOINT
+            .build()
+            .unwrap();
+
+        let provider = SdkTracerProvider::builder()
+            .with_batch_exporter(exporter)
+            .with_resource(init_otel_resource())
+            .build();
+
+        global::set_tracer_provider(provider);
+    }
+
+    let otel_service_layer = HTTPLayer::new();
 
     let app = Router::new()
         .route("/", get(handle))
         .route("/", post(handle))
         .route("/", put(handle))
-        .layer(otel_metrics_service_layer);
+        .layer(otel_service_layer);
 
     let listener = tokio::net::TcpListener::bind("0.0.0.0:5000").await.unwrap();
     let server = axum::serve(listener, app);
