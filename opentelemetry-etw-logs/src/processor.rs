@@ -1,6 +1,6 @@
 use opentelemetry::InstrumentationScope;
 use opentelemetry_sdk::error::OTelSdkResult;
-use opentelemetry_sdk::logs::{LogBatch, LogExporter, SdkLogRecord};
+use opentelemetry_sdk::logs::SdkLogRecord;
 use opentelemetry_sdk::Resource;
 use std::borrow::Cow;
 use std::error::Error;
@@ -78,9 +78,7 @@ enum ProviderNameCompatMode {
 
 impl opentelemetry_sdk::logs::LogProcessor for Processor {
     fn emit(&self, data: &mut SdkLogRecord, instrumentation: &InstrumentationScope) {
-        let log_tuple = &[(data as &SdkLogRecord, instrumentation)];
-        // TODO: How to log if export() returns Err? Maybe a metric? or eprintln?
-        let _ = futures_executor::block_on(self.event_exporter.export(LogBatch::new(log_tuple)));
+        self.event_exporter.export_log_data(data, instrumentation);
     }
 
     // Nothing to flush as this processor does not buffer
@@ -99,8 +97,6 @@ impl opentelemetry_sdk::logs::LogProcessor for Processor {
         target: &str,
         name: Option<&str>,
     ) -> bool {
-        use opentelemetry_sdk::logs::LogExporter;
-
         self.event_exporter.event_enabled(level, target, name)
     }
 
@@ -531,5 +527,28 @@ mod tests {
         // Test that the processor was created successfully
         // The actual resource attributes will be tested in the exporter tests
         assert!(processor.force_flush().is_ok());
+    }
+
+    #[test]
+    fn test_block_on() {
+        use opentelemetry_appender_tracing::layer::OpenTelemetryTracingBridge;
+        use opentelemetry_sdk::logs::SdkLoggerProvider;
+        use tracing_subscriber::layer::SubscriberExt;
+
+        let processor = Processor::builder("TestApp").build().unwrap();
+        let provider = SdkLoggerProvider::builder()
+            .with_log_processor(processor)
+            .build();
+        let subscriber =
+            tracing_subscriber::registry().with(OpenTelemetryTracingBridge::new(&provider));
+
+        std::thread::spawn(move || {
+            let _guard = tracing::subscriber::set_default(subscriber);
+            futures_executor::block_on(async {
+                tracing::info!("This message doesn't cause panic");
+            });
+        })
+        .join()
+        .unwrap();
     }
 }
