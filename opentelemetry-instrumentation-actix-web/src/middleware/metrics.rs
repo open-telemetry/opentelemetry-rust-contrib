@@ -291,10 +291,7 @@ where
             // Ignore actix errors for metrics
             if let Ok(res) = res {
                 let status_code = res.status().as_u16();
-                attributes.push(KeyValue::new(
-                    HTTP_RESPONSE_STATUS_CODE,
-                    status_code as i64,
-                ));
+                attributes.push(KeyValue::new(HTTP_RESPONSE_STATUS_CODE, status_code as i64));
 
                 // Add error.type for 4xx and 5xx responses per semconv
                 if status_code >= 400 {

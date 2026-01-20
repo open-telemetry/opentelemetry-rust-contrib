@@ -312,10 +312,7 @@ fn record_response<T>(response: &ClientResponse<T>, cx: &Context) {
     let status_code = response.status().as_u16();
     let status = convert_status(response.status());
 
-    span.set_attribute(KeyValue::new(
-        HTTP_RESPONSE_STATUS_CODE,
-        status_code as i64,
-    ));
+    span.set_attribute(KeyValue::new(HTTP_RESPONSE_STATUS_CODE, status_code as i64));
 
     // Per semconv: set error.type to status code for error responses
     if status_code >= 400 {
