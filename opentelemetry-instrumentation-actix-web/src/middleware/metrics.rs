@@ -18,64 +18,63 @@ use super::get_scope;
 use crate::util::metrics_attributes_from_request;
 use crate::RouteFormatter;
 
-// Follows the experimental semantic conventions for HTTP metrics:
-// https://github.com/open-telemetry/opentelemetry-specification/blob/main/specification/metrics/semantic_conventions/http-metrics.md
+// Follows the stable semantic conventions for HTTP metrics:
+// https://opentelemetry.io/docs/specs/semconv/http/http-metrics/
+use opentelemetry_semantic_conventions::attribute::ERROR_TYPE;
+use opentelemetry_semantic_conventions::metric::{
+    HTTP_SERVER_ACTIVE_REQUESTS, HTTP_SERVER_REQUEST_BODY_SIZE, HTTP_SERVER_REQUEST_DURATION,
+    HTTP_SERVER_RESPONSE_BODY_SIZE,
+};
 use opentelemetry_semantic_conventions::trace::HTTP_RESPONSE_STATUS_CODE;
-
-const HTTP_SERVER_DURATION: &str = "http.server.duration";
-const HTTP_SERVER_ACTIVE_REQUESTS: &str = "http.server.active_requests";
-const HTTP_SERVER_REQUEST_SIZE: &str = "http.server.request.size";
-const HTTP_SERVER_RESPONSE_SIZE: &str = "http.server.response.size";
 
 /// Records http server metrics
 ///
 /// See the [spec] for details.
 ///
-/// [spec]: https://github.com/open-telemetry/semantic-conventions/blob/v1.21.0/docs/http/http-metrics.md#http-server
+/// [spec]: https://opentelemetry.io/docs/specs/semconv/http/http-metrics/#http-server
 #[derive(Clone, Debug)]
 struct Metrics {
-    http_server_duration: Histogram<f64>,
+    http_server_request_duration: Histogram<f64>,
     http_server_active_requests: UpDownCounter<i64>,
-    http_server_request_size: Histogram<u64>,
-    http_server_response_size: Histogram<u64>,
+    http_server_request_body_size: Histogram<u64>,
+    http_server_response_body_size: Histogram<u64>,
 }
 
 impl Metrics {
     /// Create a new [`RequestMetrics`]
     fn new(meter: Meter) -> Self {
-        let http_server_duration = meter
-            .f64_histogram(HTTP_SERVER_DURATION)
+        let http_server_request_duration = meter
+            .f64_histogram(HTTP_SERVER_REQUEST_DURATION)
             .with_boundaries(vec![
                 0.005, 0.01, 0.025, 0.05, 0.075, 0.1, 0.25, 0.5, 0.75, 1.0, 2.5, 5.0, 7.5, 10.0,
             ])
-            .with_description("Measures the duration of inbound HTTP requests.")
+            .with_description("Duration of HTTP server requests.")
             .with_unit("s")
             .build();
 
         let http_server_active_requests = meter
             .i64_up_down_counter(HTTP_SERVER_ACTIVE_REQUESTS)
-            .with_description(
-                "Measures the number of concurrent HTTP requests that are currently in-flight.",
-            )
+            .with_description("Number of active HTTP server requests.")
+            .with_unit("{request}")
             .build();
 
-        let http_server_request_size = meter
-            .u64_histogram(HTTP_SERVER_REQUEST_SIZE)
-            .with_description("Measures the size of HTTP request messages (compressed).")
+        let http_server_request_body_size = meter
+            .u64_histogram(HTTP_SERVER_REQUEST_BODY_SIZE)
+            .with_description("Size of HTTP server request bodies.")
             .with_unit("By")
             .build();
 
-        let http_server_response_size = meter
-            .u64_histogram(HTTP_SERVER_RESPONSE_SIZE)
-            .with_description("Measures the size of HTTP response messages (compressed).")
+        let http_server_response_body_size = meter
+            .u64_histogram(HTTP_SERVER_RESPONSE_BODY_SIZE)
+            .with_description("Size of HTTP server response bodies.")
             .with_unit("By")
             .build();
 
         Metrics {
             http_server_active_requests,
-            http_server_duration,
-            http_server_request_size,
-            http_server_response_size,
+            http_server_request_duration,
+            http_server_request_body_size,
+            http_server_response_body_size,
         }
     }
 }
@@ -280,7 +279,7 @@ where
             .and_then(|len| len.to_str().ok().and_then(|s| s.parse().ok()))
             .unwrap_or(0);
         self.metrics
-            .http_server_request_size
+            .http_server_request_body_size
             .record(content_length, &attributes);
 
         let request_metrics = self.metrics.clone();
@@ -291,19 +290,26 @@ where
 
             // Ignore actix errors for metrics
             if let Ok(res) = res {
+                let status_code = res.status().as_u16();
                 attributes.push(KeyValue::new(
                     HTTP_RESPONSE_STATUS_CODE,
-                    res.status().as_u16() as i64,
+                    status_code as i64,
                 ));
+
+                // Add error.type for 4xx and 5xx responses per semconv
+                if status_code >= 400 {
+                    attributes.push(KeyValue::new(ERROR_TYPE, status_code.to_string()));
+                }
+
                 let response_size = match res.response().body().size() {
                     BodySize::Sized(size) => size,
                     _ => 0,
                 };
                 request_metrics
-                    .http_server_response_size
+                    .http_server_response_body_size
                     .record(response_size, &attributes);
 
-                request_metrics.http_server_duration.record(
+                request_metrics.http_server_request_duration.record(
                     timer.elapsed().map(|t| t.as_secs_f64()).unwrap_or_default(),
                     &attributes,
                 );

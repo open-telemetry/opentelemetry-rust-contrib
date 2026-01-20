@@ -2,9 +2,22 @@
 
 ## vNext
 
-### Changed
+### Breaking Changes
 
-* `http.server.duration` histogram now uses custom boundaries to comply with OpenTelemetry semantic conventions: `[0.005, 0.01, 0.025, 0.05, 0.075, 0.1, 0.25, 0.5, 0.75, 1.0, 2.5, 5.0, 7.5, 10.0]` (in seconds)
+* **Update to stable HTTP semantic conventions**: Metric names have been updated
+  to align with the latest stable OpenTelemetry HTTP semantic conventions:
+  * `http.server.duration` → `http.server.request.duration`
+  * `http.server.request.size` → `http.server.request.body.size`
+  * `http.server.response.size` → `http.server.response.body.size`
+
+* **Attribute changes**:
+  * Replaced incorrect `messaging.message.body.size` attribute with
+    `http.request.body.size` for HTTP request content length
+  * Added `error.type` attribute for 4xx and 5xx HTTP responses
+
+* `http.server.request.duration` uses custom histogram bucket bounds: `[0.005,
+  0.01, 0.025, 0.05, 0.075, 0.1, 0.25, 0.5, 0.75, 1.0, 2.5, 5.0, 7.5, 10.0]` (in
+  seconds)
 
 ## v0.24.0
 
