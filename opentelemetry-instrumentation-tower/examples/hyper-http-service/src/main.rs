@@ -2,7 +2,9 @@ use http_body_util::Full;
 use hyper::body::Bytes;
 use hyper::{Request, Response};
 use opentelemetry::global;
-use opentelemetry_instrumentation_tower::HTTPLayer;
+use opentelemetry_instrumentation_tower::{
+    HTTPLayerBuilder, ALTERNATE_HTTP_SERVER_DURATION_BOUNDS,
+};
 use opentelemetry_otlp::{MetricExporter, SpanExporter};
 use opentelemetry_sdk::metrics::{PeriodicReader, SdkMeterProvider};
 use opentelemetry_sdk::trace::SdkTracerProvider;
@@ -37,11 +39,11 @@ const MAX_SLOW_REQUEST_SEC: u64 = 16;
 const MAX_BODY_SIZE_MULTIPLE: u64 = 16;
 
 async fn handle(_req: Request<hyper::body::Incoming>) -> Result<Response<Full<Bytes>>, Infallible> {
-    if rand_09::random_range(0..100) < PCT_SLOW_REQUESTS {
-        let slow_request_secs = rand_09::random_range(0..=MAX_SLOW_REQUEST_SEC);
+    if rand::random_range(0..100) < PCT_SLOW_REQUESTS {
+        let slow_request_secs = rand::random_range(0..=MAX_SLOW_REQUEST_SEC);
         tokio::time::sleep(Duration::from_secs(slow_request_secs)).await;
     };
-    let body_size_multiple = rand_09::random_range(0..=MAX_BODY_SIZE_MULTIPLE);
+    let body_size_multiple = rand::random_range(0..=MAX_BODY_SIZE_MULTIPLE);
     let body = Bytes::from("hello world\n".repeat(body_size_multiple as usize));
     Ok(Response::new(Full::new(body)))
 }
@@ -82,7 +84,10 @@ async fn main() {
         global::set_tracer_provider(provider);
     }
 
-    let otel_service_layer = HTTPLayer::new();
+    let otel_service_layer = HTTPLayerBuilder::builder()
+        .with_request_duration_bounds(Vec::from(ALTERNATE_HTTP_SERVER_DURATION_BOUNDS))
+        .build()
+        .unwrap();
 
     let tower_service = ServiceBuilder::new()
         .layer(otel_service_layer)

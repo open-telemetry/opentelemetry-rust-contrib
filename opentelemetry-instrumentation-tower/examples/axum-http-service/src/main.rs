@@ -1,7 +1,9 @@
 use axum::routing::{get, post, put, Router};
 use bytes::Bytes;
 use opentelemetry::global;
-use opentelemetry_instrumentation_tower::HTTPLayer;
+use opentelemetry_instrumentation_tower::{
+    HTTPLayerBuilder, ALTERNATE_HTTP_SERVER_DURATION_BOUNDS,
+};
 use opentelemetry_otlp::{MetricExporter, SpanExporter};
 use opentelemetry_sdk::{
     metrics::{PeriodicReader, SdkMeterProvider},
@@ -35,11 +37,11 @@ const MAX_BODY_SIZE_MULTIPLE: u64 = 16;
 
 #[axum::debug_handler]
 async fn handle() -> Bytes {
-    if rand_09::random_range(0..100) < PCT_SLOW_REQUESTS {
-        let slow_request_secs = rand_09::random_range(0..=MAX_SLOW_REQUEST_SEC);
+    if rand::random_range(0..100) < PCT_SLOW_REQUESTS {
+        let slow_request_secs = rand::random_range(0..=MAX_SLOW_REQUEST_SEC);
         tokio::time::sleep(Duration::from_secs(slow_request_secs)).await;
     };
-    let body_size_multiple = rand_09::random_range(0..=MAX_BODY_SIZE_MULTIPLE);
+    let body_size_multiple = rand::random_range(0..=MAX_BODY_SIZE_MULTIPLE);
     Bytes::from("hello world\n".repeat(body_size_multiple as usize))
 }
 
@@ -79,7 +81,10 @@ async fn main() {
         global::set_tracer_provider(provider);
     }
 
-    let otel_service_layer = HTTPLayer::new();
+    let otel_service_layer = HTTPLayerBuilder::builder()
+        .with_request_duration_bounds(Vec::from(ALTERNATE_HTTP_SERVER_DURATION_BOUNDS))
+        .build()
+        .unwrap();
 
     let app = Router::new()
         .route("/", get(handle))
