@@ -196,10 +196,10 @@ where
 }
 
 #[cfg(feature = "axum")]
-pub type DefaultRouteExtractor = AxumMatchedPathExtractor;
+type DefaultRouteExtractor = AxumMatchedPathExtractor;
 
 #[cfg(not(feature = "axum"))]
-pub type DefaultRouteExtractor = NoRouteExtractor;
+type DefaultRouteExtractor = NoRouteExtractor;
 
 /// Trait for extracting custom attributes from HTTP requests
 pub trait RequestAttributeExtractor<B>: Clone + Send + Sync + 'static {
