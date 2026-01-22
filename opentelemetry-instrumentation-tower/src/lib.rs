@@ -669,6 +669,10 @@ where
             ));
         }
 
+        if let Some(ref r) = route {
+            span_attributes.push(KeyValue::new(HTTP_ROUTE_LABEL, r.clone()));
+        }
+
         span_attributes.extend(custom_request_attributes.clone());
 
         let span = self
@@ -937,6 +941,7 @@ mod tests {
                 semconv::trace::USER_AGENT_ORIGINAL,
                 "tower-test-client/1.0".to_string(),
             ),
+            KeyValue::new(semconv::trace::HTTP_ROUTE, "/api/users/123".to_string()),
             KeyValue::new(semconv::trace::HTTP_RESPONSE_STATUS_CODE, 200),
         ];
 
