@@ -4,16 +4,17 @@
 
 ### Added
 
-* Configurable span name extraction with built-in extractors:
-  - `MethodOnlySpanNameExtractor` - Uses only HTTP method (e.g., `GET`), safest for cardinality
-  - `MethodAndPathSpanNameExtractor` - Uses method and path without query params (e.g., `GET /users/123`)
-  - `NormalizedPathSpanNameExtractor` - Normalizes numeric IDs to `{id}` and UUIDs to `{uuid}` (requires `uuid` feature)
-  - `AxumMatchedPathSpanNameExtractor` - Uses Axum's `MatchedPath` for route templates (requires `axum` feature)
-  - `FnSpanNameExtractor` - Custom function-based extraction via `with_span_name_extractor_fn()`
-* New `uuid` feature flag for UUID detection in `NormalizedPathSpanNameExtractor`
-* Default span name extractor depends on features:
-  - With `axum` feature: Uses `AxumMatchedPathSpanNameExtractor` (route templates, low cardinality)
-  - Without `axum` feature: Uses `MethodOnlySpanNameExtractor` (method only, safest)
+* Configurable route extraction with built-in extractors:
+  - `NoRouteExtractor` - No route, uses only HTTP method (e.g., `GET`), safest for cardinality
+  - `PathExtractor` - Uses the URL path without query params (e.g., `/users/123`)
+  - `NormalizedPathExtractor` - Normalizes numeric IDs to `{id}` and UUIDs to `{uuid}` (requires `uuid` feature)
+  - `AxumMatchedPathExtractor` - Uses Axum's `MatchedPath` for route templates (requires `axum` feature)
+  - `FnRouteExtractor` - Custom function-based extraction via `with_route_extractor_fn()`
+* New `uuid` feature flag for UUID detection in `NormalizedPathExtractor`
+* Default route extractor depends on features:
+  - With `axum` feature: Uses `AxumMatchedPathExtractor` (route templates, low cardinality)
+  - Without `axum` feature: Uses `NoRouteExtractor` (method only, safest)
+* Route extraction now provides both span names and `http.route` metric attribute from the same source
 
 ### Changed
 
@@ -27,38 +28,38 @@
 
 ### Migration Guide
 
-#### Span Name Configuration
+#### Route Extraction Configuration
 
 ```rust
 use opentelemetry_instrumentation_tower::{
     HTTPLayerBuilder,
-    MethodOnlySpanNameExtractor,
-    MethodAndPathSpanNameExtractor,
-    NormalizedPathSpanNameExtractor,
+    NoRouteExtractor,
+    PathExtractor,
+    NormalizedPathExtractor,
 };
 
-// Method only (default without axum feature)
+// No route (default without axum feature) - span name: "GET"
 let layer = HTTPLayerBuilder::builder()
-    .with_span_name_extractor(MethodOnlySpanNameExtractor)
+    .with_route_extractor(NoRouteExtractor)
     .build()
     .unwrap();
 
-// Method and path (strips query params)
+// Path (strips query params) - span name: "GET /users/123"
 let layer = HTTPLayerBuilder::builder()
-    .with_span_name_extractor(MethodAndPathSpanNameExtractor)
+    .with_route_extractor(PathExtractor)
     .build()
     .unwrap();
 
-// Normalized path (replaces IDs with {id}, UUIDs with {uuid})
+// Normalized path (replaces IDs with {id}, UUIDs with {uuid}) - span name: "GET /users/{id}"
 let layer = HTTPLayerBuilder::builder()
-    .with_span_name_extractor(NormalizedPathSpanNameExtractor)
+    .with_route_extractor(NormalizedPathExtractor)
     .build()
     .unwrap();
 
-// Custom function
+// Custom function - return Some(route) or None for method-only
 let layer = HTTPLayerBuilder::builder()
-    .with_span_name_extractor_fn(|req: &http::Request<_>| {
-        format!("{} {}", req.method(), req.uri().path())
+    .with_route_extractor_fn(|req: &http::Request<_>| {
+        Some(req.uri().path().to_owned())
     })
     .build()
     .unwrap();
