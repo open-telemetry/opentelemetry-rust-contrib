@@ -181,14 +181,18 @@ impl NormalizedPathExtractor {
 impl<B> RouteExtractor<B> for NormalizedPathExtractor {
     fn extract_route(&self, req: &http::Request<B>) -> Option<String> {
         let path = req.uri().path();
+        // Use path.len() as capacity heuristic: normalized paths are typically
+        // smaller (UUIDs shrink from 36 to 6 chars) or similar in length.
+        let mut result = String::with_capacity(path.len());
 
-        let normalized: String = path
-            .split('/')
-            .map(Self::normalize_segment)
-            .collect::<Vec<_>>()
-            .join("/");
+        for (i, segment) in path.split('/').enumerate() {
+            if i > 0 {
+                result.push('/');
+            }
+            result.push_str(Self::normalize_segment(segment));
+        }
 
-        Some(normalized)
+        Some(result)
     }
 }
 
@@ -687,7 +691,7 @@ where
             ));
         }
 
-        if let Some(ref r) = route {
+        if let Some(r) = &route {
             span_attributes.push(KeyValue::new(HTTP_ROUTE_LABEL, r.clone()));
         }
 
