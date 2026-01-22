@@ -272,7 +272,12 @@ struct HTTPLayerState {
 
 #[derive(Clone)]
 /// [`Service`] used by [`HTTPLayer`]
-pub struct HTTPService<S, SpanName = DefaultSpanNameExtractor, ReqExt = NoOpExtractor, ResExt = NoOpExtractor> {
+pub struct HTTPService<
+    S,
+    SpanName = DefaultSpanNameExtractor,
+    ReqExt = NoOpExtractor,
+    ResExt = NoOpExtractor,
+> {
     pub(crate) state: Arc<HTTPLayerState>,
     span_name_extractor: SpanName,
     request_extractor: ReqExt,
@@ -283,7 +288,11 @@ pub struct HTTPService<S, SpanName = DefaultSpanNameExtractor, ReqExt = NoOpExtr
 
 #[derive(Clone)]
 /// [`Layer`] which applies the OTEL HTTP server metrics and tracing middleware
-pub struct HTTPLayer<SpanName = DefaultSpanNameExtractor, ReqExt = NoOpExtractor, ResExt = NoOpExtractor> {
+pub struct HTTPLayer<
+    SpanName = DefaultSpanNameExtractor,
+    ReqExt = NoOpExtractor,
+    ResExt = NoOpExtractor,
+> {
     state: Arc<HTTPLayerState>,
     span_name_extractor: SpanName,
     request_extractor: ReqExt,
@@ -304,7 +313,11 @@ impl Default for HTTPLayer {
     }
 }
 
-pub struct HTTPLayerBuilder<SpanName = DefaultSpanNameExtractor, ReqExt = NoOpExtractor, ResExt = NoOpExtractor> {
+pub struct HTTPLayerBuilder<
+    SpanName = DefaultSpanNameExtractor,
+    ReqExt = NoOpExtractor,
+    ResExt = NoOpExtractor,
+> {
     meter: Option<Meter>,
     req_dur_bounds: Option<Vec<f64>>,
     span_name_extractor: SpanName,
