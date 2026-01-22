@@ -93,8 +93,26 @@ impl<B> RouteExtractor<B> for NoRouteExtractor {
 /// path (e.g., `/users/123`), providing low-cardinality span names and route attributes
 /// that are safe for production use.
 ///
-/// Returns `None` if `MatchedPath` is not available in the request extensions,
-/// falling back to method-only span names.
+/// # When `MatchedPath` is unavailable
+///
+/// Returns `None` (falling back to method-only span names) when `MatchedPath` is not
+/// present in the request extensions. This can happen when:
+///
+/// - The OpenTelemetry layer is placed *before* Axum's router in the middleware stack.
+///   The layer must be placed *after* the router to access route information.
+/// - The request does not match any defined route (404 responses).
+/// - Using Axum's `fallback` handler, which does not set `MatchedPath`.
+///
+/// For correct route extraction, ensure the middleware order is:
+///
+/// ```ignore
+/// let app = Router::new()
+///     .route("/users/:id", get(handler))
+///     .layer(otel_layer);  // Layer applied after routes
+/// ```
+///
+/// See the [Axum documentation on middleware ordering](https://docs.rs/axum/latest/axum/middleware/index.html#ordering)
+/// for more details.
 #[cfg(feature = "axum")]
 #[derive(Clone, Default)]
 pub struct AxumMatchedPathExtractor;
