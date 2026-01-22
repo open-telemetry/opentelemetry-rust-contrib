@@ -2,6 +2,19 @@
 
 ## vNext
 
+### Added
+
+* Configurable span name extraction with built-in extractors:
+  - `MethodOnlySpanNameExtractor` - Uses only HTTP method (e.g., `GET`), safest for cardinality
+  - `MethodAndPathSpanNameExtractor` - Uses method and path without query params (e.g., `GET /users/123`)
+  - `NormalizedPathSpanNameExtractor` - Normalizes numeric IDs to `{id}` and UUIDs to `{uuid}` (requires `uuid` feature)
+  - `AxumMatchedPathSpanNameExtractor` - Uses Axum's `MatchedPath` for route templates (requires `axum` feature)
+  - `FnSpanNameExtractor` - Custom function-based extraction via `with_span_name_extractor_fn()`
+* New `uuid` feature flag for UUID detection in `NormalizedPathSpanNameExtractor`
+* Default span name extractor depends on features:
+  - With `axum` feature: Uses `AxumMatchedPathSpanNameExtractor` (route templates, low cardinality)
+  - Without `axum` feature: Uses `MethodOnlySpanNameExtractor` (method only, safest)
+
 ### Changed
 
 * **BREAKING**: Removed public `with_meter()` method. The middleware now uses global meter and tracer providers by default via `opentelemetry::global::meter()` and `opentelemetry::global::tracer()`. The `with_meter()` method is retained as a non-public test utility to allow injecting custom meters without relying on global state.
@@ -13,6 +26,43 @@
 * Added OpenTelemetry trace support
 
 ### Migration Guide
+
+#### Span Name Configuration
+
+```rust
+use opentelemetry_instrumentation_tower::{
+    HTTPLayerBuilder,
+    MethodOnlySpanNameExtractor,
+    MethodAndPathSpanNameExtractor,
+    NormalizedPathSpanNameExtractor,
+};
+
+// Method only (default without axum feature)
+let layer = HTTPLayerBuilder::builder()
+    .with_span_name_extractor(MethodOnlySpanNameExtractor)
+    .build()
+    .unwrap();
+
+// Method and path (strips query params)
+let layer = HTTPLayerBuilder::builder()
+    .with_span_name_extractor(MethodAndPathSpanNameExtractor)
+    .build()
+    .unwrap();
+
+// Normalized path (replaces IDs with {id}, UUIDs with {uuid})
+let layer = HTTPLayerBuilder::builder()
+    .with_span_name_extractor(NormalizedPathSpanNameExtractor)
+    .build()
+    .unwrap();
+
+// Custom function
+let layer = HTTPLayerBuilder::builder()
+    .with_span_name_extractor_fn(|req: &http::Request<_>| {
+        format!("{} {}", req.method(), req.uri().path())
+    })
+    .build()
+    .unwrap();
+```
 
 #### API Changes
 

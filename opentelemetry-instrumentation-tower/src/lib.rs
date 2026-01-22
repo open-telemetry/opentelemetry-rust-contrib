@@ -52,6 +52,148 @@ const HTTP_REQUEST_METHOD_LABEL: &str = semconv::attribute::HTTP_REQUEST_METHOD;
 const HTTP_ROUTE_LABEL: &str = semconv::attribute::HTTP_ROUTE;
 const HTTP_RESPONSE_STATUS_CODE_LABEL: &str = semconv::attribute::HTTP_RESPONSE_STATUS_CODE;
 
+/// Trait for extracting the span name from HTTP requests.
+///
+/// This allows customizing how span names are generated.
+pub trait SpanNameExtractor<B>: Clone + Send + Sync + 'static {
+    fn extract_span_name(&self, req: &http::Request<B>) -> String;
+}
+
+/// Span name extractor that uses only the HTTP method.
+///
+/// This is the safest option as it avoids cardinality explosion from dynamic
+/// path segments (e.g., `/users/123`, `/users/456` all become `GET`).
+#[derive(Clone, Default)]
+pub struct MethodOnlySpanNameExtractor;
+
+impl<B> SpanNameExtractor<B> for MethodOnlySpanNameExtractor {
+    fn extract_span_name(&self, req: &http::Request<B>) -> String {
+        req.method().as_str().to_owned()
+    }
+}
+
+/// Span name extractor that uses Axum's `MatchedPath` for low-cardinality span names.
+///
+/// This extractor uses the route template (e.g., `/users/:id`) instead of the actual
+/// path (e.g., `/users/123`), providing low-cardinality span names that are safe for
+/// production use.
+///
+/// Falls back to method-only if `MatchedPath` is not available in the request extensions.
+#[cfg(feature = "axum")]
+#[derive(Clone, Default)]
+pub struct AxumMatchedPathSpanNameExtractor;
+
+#[cfg(feature = "axum")]
+impl<B> SpanNameExtractor<B> for AxumMatchedPathSpanNameExtractor {
+    fn extract_span_name(&self, req: &http::Request<B>) -> String {
+        let method = req.method().as_str();
+        if let Some(matched_path) = req.extensions().get::<MatchedPath>() {
+            format!("{} {}", method, matched_path.as_str())
+        } else {
+            method.to_owned()
+        }
+    }
+}
+
+/// Span name extractor that includes the URL path (without query parameters).
+///
+/// # Warning: Cardinality
+///
+/// Using this extractor can cause **high cardinality** issues if your routes contain
+/// dynamic path segments (e.g., `/users/{id}`, `/orders/{order_id}/items/{item_id}`).
+/// Each unique path will create a unique span name, potentially overwhelming your
+/// tracing backend with millions of unique metric series.
+///
+/// **Only use this if**:
+/// - Your routes are static (no path parameters)
+/// - You understand and accept the cardinality implications
+///
+/// Consider using [`NormalizedPathSpanNameExtractor`] instead.
+#[derive(Clone, Default)]
+pub struct MethodAndPathSpanNameExtractor;
+
+impl<B> SpanNameExtractor<B> for MethodAndPathSpanNameExtractor {
+    fn extract_span_name(&self, req: &http::Request<B>) -> String {
+        let method = req.method().as_str();
+        let path = req.uri().path();
+        format!("{} {}", method, path)
+    }
+}
+
+/// Span name extractor that normalizes dynamic path segments to reduce cardinality.
+///
+/// This extractor replaces common dynamic path segments with placeholders:
+/// - Numeric IDs (e.g., `123`, `456789`) → `{id}`
+/// - UUIDs (e.g., `550e8400-e29b-41d4-a716-446655440000`) → `{uuid}` (requires `uuid` feature)
+///
+/// Query parameters are stripped from the path.
+///
+/// # Example
+///
+/// - `/users/123/orders/456` → `/users/{id}/orders/{id}`
+/// - `/items/550e8400-e29b-41d4-a716-446655440000` → `/items/{uuid}` (with `uuid` feature)
+/// - `/api/v1/users?page=1` → `/api/v1/users`
+#[derive(Clone, Default)]
+pub struct NormalizedPathSpanNameExtractor;
+
+impl NormalizedPathSpanNameExtractor {
+    fn normalize_segment(segment: &str) -> &str {
+        if segment.is_empty() {
+            return segment;
+        }
+        #[cfg(feature = "uuid")]
+        if uuid::Uuid::try_parse(segment).is_ok() {
+            return "{uuid}";
+        }
+        if segment.chars().all(|c| c.is_ascii_digit()) {
+            return "{id}";
+        }
+        segment
+    }
+}
+
+impl<B> SpanNameExtractor<B> for NormalizedPathSpanNameExtractor {
+    fn extract_span_name(&self, req: &http::Request<B>) -> String {
+        let method = req.method().as_str();
+        let path = req.uri().path();
+
+        let normalized: String = path
+            .split('/')
+            .map(Self::normalize_segment)
+            .collect::<Vec<_>>()
+            .join("/");
+
+        format!("{} {}", method, normalized)
+    }
+}
+
+/// A function-based span name extractor.
+#[derive(Clone)]
+pub struct FnSpanNameExtractor<F> {
+    extractor: F,
+}
+
+impl<F> FnSpanNameExtractor<F> {
+    pub fn new(extractor: F) -> Self {
+        Self { extractor }
+    }
+}
+
+impl<F, B> SpanNameExtractor<B> for FnSpanNameExtractor<F>
+where
+    F: Fn(&http::Request<B>) -> String + Clone + Send + Sync + 'static,
+{
+    fn extract_span_name(&self, req: &http::Request<B>) -> String {
+        (self.extractor)(req)
+    }
+}
+
+#[cfg(feature = "axum")]
+pub type DefaultSpanNameExtractor = AxumMatchedPathSpanNameExtractor;
+
+#[cfg(not(feature = "axum"))]
+pub type DefaultSpanNameExtractor = MethodOnlySpanNameExtractor;
+
 /// Trait for extracting custom attributes from HTTP requests
 pub trait RequestAttributeExtractor<B>: Clone + Send + Sync + 'static {
     fn extract_attributes(&self, req: &http::Request<B>) -> Vec<KeyValue>;
@@ -130,8 +272,9 @@ struct HTTPLayerState {
 
 #[derive(Clone)]
 /// [`Service`] used by [`HTTPLayer`]
-pub struct HTTPService<S, ReqExt = NoOpExtractor, ResExt = NoOpExtractor> {
+pub struct HTTPService<S, SpanName = DefaultSpanNameExtractor, ReqExt = NoOpExtractor, ResExt = NoOpExtractor> {
     pub(crate) state: Arc<HTTPLayerState>,
+    span_name_extractor: SpanName,
     request_extractor: ReqExt,
     response_extractor: ResExt,
     inner_service: S,
@@ -140,8 +283,9 @@ pub struct HTTPService<S, ReqExt = NoOpExtractor, ResExt = NoOpExtractor> {
 
 #[derive(Clone)]
 /// [`Layer`] which applies the OTEL HTTP server metrics and tracing middleware
-pub struct HTTPLayer<ReqExt = NoOpExtractor, ResExt = NoOpExtractor> {
+pub struct HTTPLayer<SpanName = DefaultSpanNameExtractor, ReqExt = NoOpExtractor, ResExt = NoOpExtractor> {
     state: Arc<HTTPLayerState>,
+    span_name_extractor: SpanName,
     request_extractor: ReqExt,
     response_extractor: ResExt,
     tracer: Arc<BoxedTracer>,
@@ -160,9 +304,10 @@ impl Default for HTTPLayer {
     }
 }
 
-pub struct HTTPLayerBuilder<ReqExt = NoOpExtractor, ResExt = NoOpExtractor> {
+pub struct HTTPLayerBuilder<SpanName = DefaultSpanNameExtractor, ReqExt = NoOpExtractor, ResExt = NoOpExtractor> {
     meter: Option<Meter>,
     req_dur_bounds: Option<Vec<f64>>,
+    span_name_extractor: SpanName,
     request_extractor: ReqExt,
     response_extractor: ResExt,
 }
@@ -208,24 +353,73 @@ impl HTTPLayerBuilder {
         HTTPLayerBuilder {
             meter: None,
             req_dur_bounds: Some(LIBRARY_DEFAULT_HTTP_SERVER_DURATION_BOUNDARIES.to_vec()),
+            span_name_extractor: DefaultSpanNameExtractor::default(),
             request_extractor: NoOpExtractor,
             response_extractor: NoOpExtractor,
         }
     }
 }
 
-impl<ReqExt, ResExt> HTTPLayerBuilder<ReqExt, ResExt> {
+impl<SpanName, ReqExt, ResExt> HTTPLayerBuilder<SpanName, ReqExt, ResExt> {
+    /// Set a custom span name extractor.
+    ///
+    /// See [`SpanNameExtractor`] for details on implementing custom extractors.
+    ///
+    /// # Example
+    ///
+    /// ```ignore
+    /// let layer = HTTPLayerBuilder::builder()
+    ///     .with_span_name_extractor(NormalizedPathSpanNameExtractor)
+    ///     .build()
+    ///     .unwrap();
+    /// ```
+    pub fn with_span_name_extractor<NewSpanName>(
+        self,
+        extractor: NewSpanName,
+    ) -> HTTPLayerBuilder<NewSpanName, ReqExt, ResExt> {
+        HTTPLayerBuilder {
+            meter: self.meter,
+            req_dur_bounds: self.req_dur_bounds,
+            span_name_extractor: extractor,
+            request_extractor: self.request_extractor,
+            response_extractor: self.response_extractor,
+        }
+    }
+
+    /// Convenience method to set a function-based span name extractor.
+    ///
+    /// # Example
+    ///
+    /// ```ignore
+    /// let layer = HTTPLayerBuilder::builder()
+    ///     .with_span_name_extractor_fn(|req: &http::Request<_>| {
+    ///         format!("{} {}", req.method(), req.uri().path())
+    ///     })
+    ///     .build()
+    ///     .unwrap();
+    /// ```
+    pub fn with_span_name_extractor_fn<F, B>(
+        self,
+        f: F,
+    ) -> HTTPLayerBuilder<FnSpanNameExtractor<F>, ReqExt, ResExt>
+    where
+        F: Fn(&http::Request<B>) -> String + Clone + Send + Sync + 'static,
+    {
+        self.with_span_name_extractor(FnSpanNameExtractor::new(f))
+    }
+
     /// Set a request attribute extractor
     pub fn with_request_extractor<NewReqExt, B>(
         self,
         extractor: NewReqExt,
-    ) -> HTTPLayerBuilder<NewReqExt, ResExt>
+    ) -> HTTPLayerBuilder<SpanName, NewReqExt, ResExt>
     where
         NewReqExt: RequestAttributeExtractor<B>,
     {
         HTTPLayerBuilder {
             meter: self.meter,
             req_dur_bounds: self.req_dur_bounds,
+            span_name_extractor: self.span_name_extractor,
             request_extractor: extractor,
             response_extractor: self.response_extractor,
         }
@@ -235,13 +429,14 @@ impl<ReqExt, ResExt> HTTPLayerBuilder<ReqExt, ResExt> {
     pub fn with_response_extractor<NewResExt, B>(
         self,
         extractor: NewResExt,
-    ) -> HTTPLayerBuilder<ReqExt, NewResExt>
+    ) -> HTTPLayerBuilder<SpanName, ReqExt, NewResExt>
     where
         NewResExt: ResponseAttributeExtractor<B>,
     {
         HTTPLayerBuilder {
             meter: self.meter,
             req_dur_bounds: self.req_dur_bounds,
+            span_name_extractor: self.span_name_extractor,
             request_extractor: self.request_extractor,
             response_extractor: extractor,
         }
@@ -251,7 +446,7 @@ impl<ReqExt, ResExt> HTTPLayerBuilder<ReqExt, ResExt> {
     pub fn with_request_extractor_fn<F, B>(
         self,
         f: F,
-    ) -> HTTPLayerBuilder<FnRequestExtractor<F>, ResExt>
+    ) -> HTTPLayerBuilder<SpanName, FnRequestExtractor<F>, ResExt>
     where
         F: Fn(&http::Request<B>) -> Vec<KeyValue> + Clone + Send + Sync + 'static,
     {
@@ -262,14 +457,14 @@ impl<ReqExt, ResExt> HTTPLayerBuilder<ReqExt, ResExt> {
     pub fn with_response_extractor_fn<F, B>(
         self,
         f: F,
-    ) -> HTTPLayerBuilder<ReqExt, FnResponseExtractor<F>>
+    ) -> HTTPLayerBuilder<SpanName, ReqExt, FnResponseExtractor<F>>
     where
         F: Fn(&http::Response<B>) -> Vec<KeyValue> + Clone + Send + Sync + 'static,
     {
         self.with_response_extractor(FnResponseExtractor::new(f))
     }
 
-    pub fn build(self) -> Result<HTTPLayer<ReqExt, ResExt>> {
+    pub fn build(self) -> Result<HTTPLayer<SpanName, ReqExt, ResExt>> {
         let req_dur_bounds = self
             .req_dur_bounds
             .unwrap_or_else(|| LIBRARY_DEFAULT_HTTP_SERVER_DURATION_BOUNDARIES.to_vec());
@@ -282,6 +477,7 @@ impl<ReqExt, ResExt> HTTPLayerBuilder<ReqExt, ResExt> {
 
         Ok(HTTPLayer {
             state: Arc::from(Self::make_state(meter, req_dur_bounds)),
+            span_name_extractor: self.span_name_extractor,
             request_extractor: self.request_extractor,
             response_extractor: self.response_extractor,
             tracer,
@@ -335,16 +531,18 @@ impl<ReqExt, ResExt> HTTPLayerBuilder<ReqExt, ResExt> {
     }
 }
 
-impl<S, ReqExt, ResExt> Layer<S> for HTTPLayer<ReqExt, ResExt>
+impl<S, SpanName, ReqExt, ResExt> Layer<S> for HTTPLayer<SpanName, ReqExt, ResExt>
 where
+    SpanName: Clone,
     ReqExt: Clone,
     ResExt: Clone,
 {
-    type Service = HTTPService<S, ReqExt, ResExt>;
+    type Service = HTTPService<S, SpanName, ReqExt, ResExt>;
 
     fn layer(&self, service: S) -> Self::Service {
         HTTPService {
             state: self.state.clone(),
+            span_name_extractor: self.span_name_extractor.clone(),
             request_extractor: self.request_extractor.clone(),
             response_extractor: self.response_extractor.clone(),
             inner_service: service,
@@ -373,13 +571,14 @@ struct RequestData {
     custom_request_attributes: Vec<KeyValue>,
 }
 
-impl<S, ReqBody, ResBody, ReqExt, ResExt> Service<http::Request<ReqBody>>
-    for HTTPService<S, ReqExt, ResExt>
+impl<S, ReqBody, ResBody, SpanName, ReqExt, ResExt> Service<http::Request<ReqBody>>
+    for HTTPService<S, SpanName, ReqExt, ResExt>
 where
     S: Service<http::Request<ReqBody>, Response = http::Response<ResBody>>,
     S::Future: Send + 'static,
     S::Error: std::fmt::Debug,
     ResBody: http_body::Body,
+    SpanName: SpanNameExtractor<ReqBody>,
     ReqExt: RequestAttributeExtractor<ReqBody>,
     ResExt: ResponseAttributeExtractor<ResBody>,
 {
@@ -446,7 +645,7 @@ where
 
         span_attributes.extend(custom_request_attributes.clone());
 
-        let span_name = format!("{} {}", method, req.uri().path());
+        let span_name = self.span_name_extractor.extract_span_name(&req);
 
         let span = self
             .tracer
@@ -635,7 +834,10 @@ mod tests {
             tracer_provider.tracer("test_tracer"),
         )));
 
-        let mut layer = HTTPLayerBuilder::builder().build().unwrap();
+        let mut layer = HTTPLayerBuilder::builder()
+            .with_span_name_extractor(MethodAndPathSpanNameExtractor)
+            .build()
+            .unwrap();
         layer.tracer = tracer.clone();
 
         let mut service = ServiceBuilder::new()
@@ -975,7 +1177,10 @@ mod tests {
             tracer_provider.tracer("test_tracer"),
         )));
 
-        let mut layer = HTTPLayerBuilder::builder().build().unwrap();
+        let mut layer = HTTPLayerBuilder::builder()
+            .with_span_name_extractor(MethodAndPathSpanNameExtractor)
+            .build()
+            .unwrap();
         layer.tracer = tracer.clone();
 
         let service = tower::service_fn(|_req: Request<String>| async {
@@ -1010,5 +1215,244 @@ mod tests {
         let spans = trace_exporter.get_finished_spans().unwrap();
         assert_eq!(spans.len(), 1, "Expected one HTTP span");
         assert_eq!(spans[0].name, "GET /test");
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn test_method_only_span_name() {
+        let trace_exporter = InMemorySpanExporterBuilder::new().build();
+        let tracer_provider = SdkTracerProvider::builder()
+            .with_simple_exporter(trace_exporter.clone())
+            .build();
+
+        let tracer = Arc::new(BoxedTracer::new(Box::new(
+            tracer_provider.tracer("test_tracer"),
+        )));
+
+        // Explicitly use method-only span names
+        let mut layer = HTTPLayerBuilder::builder()
+            .with_span_name_extractor(MethodOnlySpanNameExtractor)
+            .build()
+            .unwrap();
+        layer.tracer = tracer.clone();
+
+        let service = tower::service_fn(|_req: Request<String>| async {
+            Ok::<_, std::convert::Infallible>(
+                Response::builder()
+                    .status(StatusCode::OK)
+                    .body(String::from("OK"))
+                    .unwrap(),
+            )
+        });
+
+        let mut service = layer.layer(service);
+
+        let request = Request::builder()
+            .method("POST")
+            .uri("http://example.com/users/123/orders?include=items")
+            .body("test".to_string())
+            .unwrap();
+
+        let _response = service.call(request).await.unwrap();
+
+        tracer_provider.force_flush().unwrap();
+
+        let spans = trace_exporter.get_finished_spans().unwrap();
+        assert_eq!(spans.len(), 1, "Expected one HTTP span");
+        // Should be method-only
+        assert_eq!(spans[0].name, "POST");
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn test_path_span_name_strips_query_params() {
+        let trace_exporter = InMemorySpanExporterBuilder::new().build();
+        let tracer_provider = SdkTracerProvider::builder()
+            .with_simple_exporter(trace_exporter.clone())
+            .build();
+
+        let tracer = Arc::new(BoxedTracer::new(Box::new(
+            tracer_provider.tracer("test_tracer"),
+        )));
+
+        let mut layer = HTTPLayerBuilder::builder()
+            .with_span_name_extractor(MethodAndPathSpanNameExtractor)
+            .build()
+            .unwrap();
+        layer.tracer = tracer.clone();
+
+        let service = tower::service_fn(|_req: Request<String>| async {
+            Ok::<_, std::convert::Infallible>(
+                Response::builder()
+                    .status(StatusCode::OK)
+                    .body(String::from("OK"))
+                    .unwrap(),
+            )
+        });
+
+        let mut service = layer.layer(service);
+
+        let request = Request::builder()
+            .method("GET")
+            .uri("http://example.com/users?page=1&limit=10")
+            .body("test".to_string())
+            .unwrap();
+
+        let _response = service.call(request).await.unwrap();
+
+        tracer_provider.force_flush().unwrap();
+
+        let spans = trace_exporter.get_finished_spans().unwrap();
+        assert_eq!(spans.len(), 1, "Expected one HTTP span");
+        // Query parameters should be stripped
+        assert_eq!(spans[0].name, "GET /users");
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn test_custom_span_name_extractor() {
+        let trace_exporter = InMemorySpanExporterBuilder::new().build();
+        let tracer_provider = SdkTracerProvider::builder()
+            .with_simple_exporter(trace_exporter.clone())
+            .build();
+
+        let tracer = Arc::new(BoxedTracer::new(Box::new(
+            tracer_provider.tracer("test_tracer"),
+        )));
+
+        // Custom extractor that normalizes path parameters
+        let mut layer = HTTPLayerBuilder::builder()
+            .with_span_name_extractor_fn(|req: &Request<String>| {
+                let method = req.method().as_str();
+                let path = req.uri().path();
+                // Simple normalization: replace numeric IDs with {id}
+                let normalized = path
+                    .split('/')
+                    .map(|segment| {
+                        if segment.parse::<u64>().is_ok() {
+                            "{id}"
+                        } else {
+                            segment
+                        }
+                    })
+                    .collect::<Vec<_>>()
+                    .join("/");
+                format!("{} {}", method, normalized)
+            })
+            .build()
+            .unwrap();
+        layer.tracer = tracer.clone();
+
+        let service = tower::service_fn(|_req: Request<String>| async {
+            Ok::<_, std::convert::Infallible>(
+                Response::builder()
+                    .status(StatusCode::OK)
+                    .body(String::from("OK"))
+                    .unwrap(),
+            )
+        });
+
+        let mut service = layer.layer(service);
+
+        let request = Request::builder()
+            .method("GET")
+            .uri("http://example.com/users/12345/orders/67890")
+            .body("test".to_string())
+            .unwrap();
+
+        let _response = service.call(request).await.unwrap();
+
+        tracer_provider.force_flush().unwrap();
+
+        let spans = trace_exporter.get_finished_spans().unwrap();
+        assert_eq!(spans.len(), 1, "Expected one HTTP span");
+        // Numeric IDs should be normalized
+        assert_eq!(spans[0].name, "GET /users/{id}/orders/{id}");
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn test_normalized_path_span_name() {
+        let trace_exporter = InMemorySpanExporterBuilder::new().build();
+        let tracer_provider = SdkTracerProvider::builder()
+            .with_simple_exporter(trace_exporter.clone())
+            .build();
+
+        let tracer = Arc::new(BoxedTracer::new(Box::new(
+            tracer_provider.tracer("test_tracer"),
+        )));
+
+        let mut layer = HTTPLayerBuilder::builder()
+            .with_span_name_extractor(NormalizedPathSpanNameExtractor)
+            .build()
+            .unwrap();
+        layer.tracer = tracer.clone();
+
+        let service = tower::service_fn(|_req: Request<String>| async {
+            Ok::<_, std::convert::Infallible>(
+                Response::builder()
+                    .status(StatusCode::OK)
+                    .body(String::from("OK"))
+                    .unwrap(),
+            )
+        });
+
+        let mut service = layer.layer(service);
+
+        // Test numeric IDs
+        let request = Request::builder()
+            .method("GET")
+            .uri("http://example.com/users/12345/orders/67890")
+            .body("test".to_string())
+            .unwrap();
+
+        let _response = service.call(request).await.unwrap();
+
+        tracer_provider.force_flush().unwrap();
+
+        let spans = trace_exporter.get_finished_spans().unwrap();
+        assert_eq!(spans.len(), 1, "Expected one HTTP span");
+        assert_eq!(spans[0].name, "GET /users/{id}/orders/{id}");
+    }
+
+    #[cfg(feature = "uuid")]
+    #[tokio::test(flavor = "current_thread")]
+    async fn test_normalized_path_with_uuid() {
+        let trace_exporter = InMemorySpanExporterBuilder::new().build();
+        let tracer_provider = SdkTracerProvider::builder()
+            .with_simple_exporter(trace_exporter.clone())
+            .build();
+
+        let tracer = Arc::new(BoxedTracer::new(Box::new(
+            tracer_provider.tracer("test_tracer"),
+        )));
+
+        let mut layer = HTTPLayerBuilder::builder()
+            .with_span_name_extractor(NormalizedPathSpanNameExtractor)
+            .build()
+            .unwrap();
+        layer.tracer = tracer.clone();
+
+        let service = tower::service_fn(|_req: Request<String>| async {
+            Ok::<_, std::convert::Infallible>(
+                Response::builder()
+                    .status(StatusCode::OK)
+                    .body(String::from("OK"))
+                    .unwrap(),
+            )
+        });
+
+        let mut service = layer.layer(service);
+
+        // Test UUID
+        let request = Request::builder()
+            .method("DELETE")
+            .uri("http://example.com/items/550e8400-e29b-41d4-a716-446655440000")
+            .body("test".to_string())
+            .unwrap();
+
+        let _response = service.call(request).await.unwrap();
+
+        tracer_provider.force_flush().unwrap();
+
+        let spans = trace_exporter.get_finished_spans().unwrap();
+        assert_eq!(spans.len(), 1, "Expected one HTTP span");
+        assert_eq!(spans[0].name, "DELETE /items/{uuid}");
     }
 }
