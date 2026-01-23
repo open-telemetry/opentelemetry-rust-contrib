@@ -64,7 +64,7 @@ const HTTP_RESPONSE_STATUS_CODE_LABEL: &str = semconv::attribute::HTTP_RESPONSE_
 ///
 /// The route should be a low-cardinality value (e.g., a route template like `/users/:id`)
 /// rather than the actual path (e.g., `/users/123`). High-cardinality routes can overwhelm
-/// tracing and metrics backends.
+/// the OpenTelemetry SDK's built-in cardinality limits and downstream backends.
 pub trait RouteExtractor<B>: Clone + Send + Sync + 'static {
     /// Extracts the route from the request, if available.
     ///
