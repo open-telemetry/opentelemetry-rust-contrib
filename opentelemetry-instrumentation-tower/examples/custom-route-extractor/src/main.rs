@@ -79,7 +79,7 @@ fn normalize_route(known_usernames: Arc<HashSet<String>>, path: &str) -> Option<
 
 #[tokio::main]
 async fn main() {
-    {
+    let meter_provider = {
         let exporter = MetricExporter::builder().with_tonic().build().unwrap();
 
         let reader = PeriodicReader::builder(exporter)
@@ -91,10 +91,11 @@ async fn main() {
             .with_resource(init_otel_resource())
             .build();
 
-        global::set_meter_provider(provider);
-    }
+        global::set_meter_provider(provider.clone());
+        provider
+    };
 
-    {
+    let tracer_provider = {
         let exporter = SpanExporter::builder().with_tonic().build().unwrap();
 
         let provider = SdkTracerProvider::builder()
@@ -102,8 +103,9 @@ async fn main() {
             .with_resource(init_otel_resource())
             .build();
 
-        global::set_tracer_provider(provider);
-    }
+        global::set_tracer_provider(provider.clone());
+        provider
+    };
 
     // Known usernames that should be normalized to {username}.
     // In production, this could be loaded from a database, config file,
@@ -148,5 +150,13 @@ async fn main() {
 
     if let Err(err) = server.await {
         eprintln!("server error: {err}");
+    }
+
+    // Gracefully shutdown the providers to ensure all spans and metrics are flushed.
+    if let Err(err) = tracer_provider.shutdown() {
+        eprintln!("tracer provider shutdown error: {err}");
+    }
+    if let Err(err) = meter_provider.shutdown() {
+        eprintln!("meter provider shutdown error: {err}");
     }
 }
