@@ -2,7 +2,10 @@ use http_body_util::Full;
 use hyper::body::Bytes;
 use hyper::{Request, Response};
 use opentelemetry::global;
-use opentelemetry_instrumentation_tower as otel_tower_metrics;
+use opentelemetry_instrumentation_tower::HTTPLayer;
+use opentelemetry_otlp::{MetricExporter, SpanExporter};
+use opentelemetry_sdk::metrics::{PeriodicReader, SdkMeterProvider};
+use opentelemetry_sdk::trace::SdkTracerProvider;
 use std::convert::Infallible;
 use std::net::SocketAddr;
 use std::time::Duration;
@@ -45,31 +48,44 @@ async fn handle(_req: Request<hyper::body::Incoming>) -> Result<Response<Full<By
 
 #[tokio::main]
 async fn main() {
-    let exporter = opentelemetry_otlp::MetricExporter::builder()
-        .with_tonic()
-        // .with_endpoint("http://localhost:4317")  // default; leave out in favor of env var OTEL_EXPORTER_OTLP_ENDPOINT
-        .build()
-        .unwrap();
+    {
+        let exporter = MetricExporter::builder()
+            .with_tonic()
+            // .with_endpoint("http://localhost:4317")  // default; leave out in favor of env var OTEL_EXPORTER_OTLP_ENDPOINT
+            .build()
+            .unwrap();
 
-    let reader = opentelemetry_sdk::metrics::PeriodicReader::builder(exporter)
-        .with_interval(_OTEL_METRIC_EXPORT_INTERVAL)
-        .build();
+        let reader = PeriodicReader::builder(exporter)
+            .with_interval(_OTEL_METRIC_EXPORT_INTERVAL)
+            .build();
 
-    let meter_provider = opentelemetry_sdk::metrics::SdkMeterProvider::builder()
-        .with_reader(reader)
-        .with_resource(init_otel_resource())
-        .build();
+        let provider = SdkMeterProvider::builder()
+            .with_reader(reader)
+            .with_resource(init_otel_resource())
+            .build();
 
-    global::set_meter_provider(meter_provider);
-    // init our otel metrics middleware
-    let global_meter = global::meter(SERVICE_NAME);
-    let otel_metrics_service_layer = otel_tower_metrics::HTTPMetricsLayerBuilder::builder()
-        .with_meter(global_meter)
-        .build()
-        .unwrap();
+        global::set_meter_provider(provider);
+    }
+
+    {
+        let exporter = SpanExporter::builder()
+            .with_tonic()
+            // .with_endpoint("http://localhost:4317")  // default; leave out in favor of env var OTEL_EXPORTER_OTLP_ENDPOINT
+            .build()
+            .unwrap();
+
+        let provider = SdkTracerProvider::builder()
+            .with_batch_exporter(exporter)
+            .with_resource(init_otel_resource())
+            .build();
+
+        global::set_tracer_provider(provider);
+    }
+
+    let otel_service_layer = HTTPLayer::new();
 
     let tower_service = ServiceBuilder::new()
-        .layer(otel_metrics_service_layer)
+        .layer(otel_service_layer)
         .service_fn(handle);
     let hyper_service = hyper_util::service::TowerToHyperService::new(tower_service);
 
