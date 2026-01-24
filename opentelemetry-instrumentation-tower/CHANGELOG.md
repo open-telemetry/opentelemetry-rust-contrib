@@ -2,6 +2,20 @@
 
 ## vNext
 
+### Added
+
+* Configurable route extraction with built-in extractors:
+  - `NoRouteExtractor` - No route, uses only HTTP method (e.g., `GET`), safest for cardinality
+  - `PathExtractor` - Uses the URL path without query params (e.g., `/users/123`)
+  - `NormalizedPathExtractor` - Normalizes numeric IDs to `{id}` and UUIDs to `{uuid}` (requires `uuid` feature)
+  - `AxumMatchedPathExtractor` - Uses Axum's `MatchedPath` for route templates (requires `axum` feature)
+  - `FnRouteExtractor` - Custom function-based extraction via `with_route_extractor_fn()`
+* New `uuid` feature flag for UUID detection in `NormalizedPathExtractor`
+* Default route extractor depends on features:
+  - With `axum` feature: Uses `AxumMatchedPathExtractor` (route templates, low cardinality)
+  - Without `axum` feature: Uses `NoRouteExtractor` (method only, safest)
+* Route extraction now provides both span names and `http.route` metric attribute from the same source
+
 ### Changed
 
 * **BREAKING**: Removed public `with_meter()` method. The middleware now uses global meter and tracer providers by default via `opentelemetry::global::meter()` and `opentelemetry::global::tracer()`. The `with_meter()` method is retained as a non-public test utility to allow injecting custom meters without relying on global state.
@@ -13,6 +27,43 @@
 * Added OpenTelemetry trace support
 
 ### Migration Guide
+
+#### Route Extraction Configuration
+
+```rust
+use opentelemetry_instrumentation_tower::{
+    HTTPLayerBuilder,
+    NoRouteExtractor,
+    PathExtractor,
+    NormalizedPathExtractor,
+};
+
+// No route (default without axum feature) - span name: "GET"
+let layer = HTTPLayerBuilder::builder()
+    .with_route_extractor(NoRouteExtractor)
+    .build()
+    .unwrap();
+
+// Path (strips query params) - span name: "GET /users/123"
+let layer = HTTPLayerBuilder::builder()
+    .with_route_extractor(PathExtractor)
+    .build()
+    .unwrap();
+
+// Normalized path (replaces IDs with {id}, UUIDs with {uuid}) - span name: "GET /users/{id}"
+let layer = HTTPLayerBuilder::builder()
+    .with_route_extractor(NormalizedPathExtractor)
+    .build()
+    .unwrap();
+
+// Custom function - return Some(route) or None for method-only
+let layer = HTTPLayerBuilder::builder()
+    .with_route_extractor_fn(|req: &http::Request<_>| {
+        Some(req.uri().path().to_owned())
+    })
+    .build()
+    .unwrap();
+```
 
 #### API Changes
 
