@@ -2,10 +2,15 @@ use http_body_util::Full;
 use hyper::body::Bytes;
 use hyper::{Request, Response};
 use opentelemetry::global;
-use opentelemetry_instrumentation_tower::HTTPLayer;
+use opentelemetry_instrumentation_tower::HTTPLayerBuilder;
 use opentelemetry_otlp::{MetricExporter, SpanExporter};
-use opentelemetry_sdk::metrics::{PeriodicReader, SdkMeterProvider};
-use opentelemetry_sdk::trace::SdkTracerProvider;
+use opentelemetry_sdk::metrics::Aggregation::ExplicitBucketHistogram;
+use opentelemetry_sdk::metrics::{Instrument, Stream};
+use opentelemetry_sdk::{
+    metrics::{PeriodicReader, SdkMeterProvider},
+    trace::SdkTracerProvider,
+};
+use opentelemetry_semantic_conventions as semconv;
 use std::convert::Infallible;
 use std::net::SocketAddr;
 use std::time::Duration;
@@ -37,14 +42,19 @@ const MAX_SLOW_REQUEST_SEC: u64 = 16;
 const MAX_BODY_SIZE_MULTIPLE: u64 = 16;
 
 async fn handle(_req: Request<hyper::body::Incoming>) -> Result<Response<Full<Bytes>>, Infallible> {
-    if rand_09::random_range(0..100) < PCT_SLOW_REQUESTS {
-        let slow_request_secs = rand_09::random_range(0..=MAX_SLOW_REQUEST_SEC);
+    if rand::random_range(0..100) < PCT_SLOW_REQUESTS {
+        let slow_request_secs = rand::random_range(0..=MAX_SLOW_REQUEST_SEC);
         tokio::time::sleep(Duration::from_secs(slow_request_secs)).await;
     };
-    let body_size_multiple = rand_09::random_range(0..=MAX_BODY_SIZE_MULTIPLE);
+    let body_size_multiple = rand::random_range(0..=MAX_BODY_SIZE_MULTIPLE);
     let body = Bytes::from("hello world\n".repeat(body_size_multiple as usize));
     Ok(Response::new(Full::new(body)))
 }
+
+// Example of alternate bucket bounds to capture granularity in higher latencies
+const HISTOGRAM_BUCKET_BOUNDS: [f64; 14] = [
+    0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1.0, 2.5, 5.0, 10.0, 30.0, 60.0, 120.0, 300.0,
+];
 
 #[tokio::main]
 async fn main() {
@@ -59,9 +69,25 @@ async fn main() {
             .with_interval(_OTEL_METRIC_EXPORT_INTERVAL)
             .build();
 
+        // Example of OTel View to apply alternate histogram bucket boundaries
+        let http_server_request_duration_view = |i: &Instrument| {
+            if i.name() == semconv::metric::HTTP_SERVER_REQUEST_DURATION {
+                Stream::builder()
+                    .with_aggregation(ExplicitBucketHistogram {
+                        boundaries: Vec::from(HISTOGRAM_BUCKET_BOUNDS),
+                        record_min_max: true,
+                    })
+                    .build()
+                    .ok()
+            } else {
+                None
+            }
+        };
+
         let provider = SdkMeterProvider::builder()
             .with_reader(reader)
             .with_resource(init_otel_resource())
+            .with_view(http_server_request_duration_view)
             .build();
 
         global::set_meter_provider(provider);
@@ -82,7 +108,7 @@ async fn main() {
         global::set_tracer_provider(provider);
     }
 
-    let otel_service_layer = HTTPLayer::new();
+    let otel_service_layer = HTTPLayerBuilder::builder().build().unwrap();
 
     let tower_service = ServiceBuilder::new()
         .layer(otel_service_layer)
