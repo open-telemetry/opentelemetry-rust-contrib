@@ -41,41 +41,6 @@ HTTP spans are created with the following attributes (following OpenTelemetry se
 - `user_agent.original` - User agent string
 - `http.response.status_code` - HTTP response status code
 
-## Recommended Usage
-
-### Histogram Bucket Boundaries
-
-This library defaults to the OpenTelemetry semantic conventions for `http.server.request.duration` bucket boundaries:
-`[ 0.005, 0.01, 0.025, 0.05, 0.075, 0.1, 0.25, 0.5, 0.75, 1, 2.5, 5, 7.5, 10 ]` with seconds as the unit.
-
-These boundaries do not capture durations over 10 seconds, which may be limiting for an http server.
-
-To capture longer requests with some rough granularity on the upper end, the library also exports an alternate constant:
-
-```rust
-pub const ALTERNATE_HTTP_SERVER_DURATION_BOUNDS: [f64; 14] = [
-    0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1.0, 2.5, 5.0, 10.0, 30.0, 60.0, 120.0, 300.0,
-];
-```
-
-The alternate constant or any other custom boundaries may be applied via the builder interface:
-
-```rust
-use opentelemetry_instrumentation_tower::{
-    HTTPLayerBuilder, ALTERNATE_HTTP_SERVER_DURATION_BOUNDS,
-};
-
-// ...
-
-fn main() {
-    let otel_service_layer = HTTPLayerBuilder::builder()
-        .with_request_duration_bounds(Vec::from(ALTERNATE_HTTP_SERVER_DURATION_BOUNDS))
-        .build()
-        .unwrap();
-    // ...
-}
-```
-
 ## Examples
 
 See `examples` directory in repo for runnable code and supporting config files.

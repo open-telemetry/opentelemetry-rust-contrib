@@ -14,6 +14,8 @@
     - `HTTPMetricsLayerBuilder` → `HTTPLayerBuilder`
 * Added OpenTelemetry trace support
 * **BREAKING**: Update default  `http.server.request.duration` histogram boundaries to OTel semantic conventions.
+* **BREAKING**: Remove `with_request_duration_bounds` builder method.
+  Alternate histogram bucket boundaries can be applied with the standard OpenTelemetry Views; see `examples` directory in crate for usage.
 
 ### Migration Guide
 
@@ -49,23 +51,6 @@ let layer = HTTPLayer::new();
 - Replace `HTTPMetricsLayer` with `HTTPLayer`
 - Replace `HTTPMetricsService` with `HTTPService`
 - Replace `HTTPMetricsResponseFuture` with `HTTPResponseFuture`
-
-#### Default Bucket Boundary Changes
-
-Before:
-
-```rust
-let otel_service_layer = HTTPLayer::new();
-```
-
-After:
-
-```rust
-let otel_service_layer = HTTPLayerBuilder::builder()
-.with_request_duration_bounds(Vec::from(ALTERNATE_HTTP_SERVER_DURATION_BOUNDS)) // exported constant for previous defaults
-.build()
-.unwrap();
-```
 
 ## v0.17.0
 

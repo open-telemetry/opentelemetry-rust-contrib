@@ -301,11 +301,6 @@ impl<ReqExt, ResExt> HTTPLayerBuilder<ReqExt, ResExt> {
         self
     }
 
-    pub fn with_request_duration_bounds(mut self, bounds: Vec<f64>) -> Self {
-        self.req_dur_bounds = Some(bounds);
-        self
-    }
-
     fn make_state(meter: Meter, req_dur_bounds: Vec<f64>) -> HTTPLayerState {
         HTTPLayerState {
             server_request_duration: meter
