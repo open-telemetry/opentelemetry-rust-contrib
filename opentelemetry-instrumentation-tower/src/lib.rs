@@ -27,11 +27,6 @@ const OTEL_DEFAULT_HTTP_SERVER_DURATION_BOUNDS: [f64; 14] = [
     0.005, 0.01, 0.025, 0.05, 0.075, 0.1, 0.25, 0.5, 0.75, 1.0, 2.5, 5.0, 7.5, 10.0,
 ];
 
-// OTEL default does not capture duration over 10s which may be limiting for an http server;
-// this alternate set captures longer requests with some rough granularity on the upper end.
-pub const ALTERNATE_HTTP_SERVER_DURATION_BOUNDS: [f64; 14] = [
-    0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1.0, 2.5, 5.0, 10.0, 30.0, 60.0, 120.0, 300.0,
-];
 const HTTP_SERVER_ACTIVE_REQUESTS_METRIC: &str = semconv::metric::HTTP_SERVER_ACTIVE_REQUESTS;
 const HTTP_SERVER_ACTIVE_REQUESTS_UNIT: &str = "{request}";
 
