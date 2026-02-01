@@ -34,7 +34,7 @@ jobs:
         submodules: true
 
     - name: Initialize CodeQL
-      uses: github/codeql-action/init@b20883b0cd1f46c72ae0ba6d1090936928f9fa30 # v3.29.5
+      uses: github/codeql-action/init@b20883b0cd1f46c72ae0ba6d1090936928f9fa30 # v4.32.0
       with:
         languages: rust
 
