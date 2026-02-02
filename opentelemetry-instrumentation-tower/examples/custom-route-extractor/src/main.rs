@@ -61,20 +61,20 @@ async fn index() -> &'static str {
 /// - Use regex patterns for more complex matching
 /// - Combine multiple normalization rules
 fn normalize_route(known_usernames: Arc<HashSet<String>>, path: &str) -> Option<String> {
-    let segments: Vec<&str> = path.split('/').collect();
+    let mut result = String::with_capacity(path.len());
 
-    let normalized: Vec<&str> = segments
-        .iter()
-        .map(|segment| {
-            if known_usernames.contains(*segment) {
-                "{username}"
-            } else {
-                segment
-            }
-        })
-        .collect();
+    for (i, segment) in path.split('/').enumerate() {
+        if i > 0 {
+            result.push('/');
+        }
+        if known_usernames.contains(segment) {
+            result.push_str("{username}");
+        } else {
+            result.push_str(segment);
+        }
+    }
 
-    Some(normalized.join("/"))
+    Some(result)
 }
 
 #[tokio::main]
