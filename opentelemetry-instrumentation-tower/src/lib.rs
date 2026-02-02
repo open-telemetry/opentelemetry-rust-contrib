@@ -23,17 +23,10 @@ use tower_service::Service;
 const HTTP_SERVER_DURATION_METRIC: &str = semconv::metric::HTTP_SERVER_REQUEST_DURATION;
 const HTTP_SERVER_DURATION_UNIT: &str = "s";
 
-const _OTEL_DEFAULT_HTTP_SERVER_DURATION_BOUNDARIES: [f64; 14] = [
+const OTEL_DEFAULT_HTTP_SERVER_DURATION_BOUNDS: [f64; 14] = [
     0.005, 0.01, 0.025, 0.05, 0.075, 0.1, 0.25, 0.5, 0.75, 1.0, 2.5, 5.0, 7.5, 10.0,
 ];
 
-// OTEL default does not capture duration over 10s - a poor choice for an arbitrary http server;
-// we want to capture longer requests with some rough granularity on the upper end.
-// These choices are adapted from various recommendations in
-// https://github.com/open-telemetry/semantic-conventions/issues/336.
-const LIBRARY_DEFAULT_HTTP_SERVER_DURATION_BOUNDARIES: [f64; 14] = [
-    0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1.0, 2.5, 5.0, 10.0, 30.0, 60.0, 120.0, 300.0,
-];
 const HTTP_SERVER_ACTIVE_REQUESTS_METRIC: &str = semconv::metric::HTTP_SERVER_ACTIVE_REQUESTS;
 const HTTP_SERVER_ACTIVE_REQUESTS_UNIT: &str = "{request}";
 
@@ -391,7 +384,7 @@ impl HTTPLayerBuilder {
     pub fn builder() -> Self {
         HTTPLayerBuilder {
             meter: None,
-            req_dur_bounds: Some(LIBRARY_DEFAULT_HTTP_SERVER_DURATION_BOUNDARIES.to_vec()),
+            req_dur_bounds: Some(Vec::from(OTEL_DEFAULT_HTTP_SERVER_DURATION_BOUNDS)),
             route_extractor: DefaultRouteExtractor::default(),
             request_extractor: NoOpExtractor,
             response_extractor: NoOpExtractor,
@@ -512,7 +505,7 @@ impl<Route, ReqExt, ResExt> HTTPLayerBuilder<Route, ReqExt, ResExt> {
     pub fn build(self) -> Result<HTTPLayer<Route, ReqExt, ResExt>> {
         let req_dur_bounds = self
             .req_dur_bounds
-            .unwrap_or_else(|| LIBRARY_DEFAULT_HTTP_SERVER_DURATION_BOUNDARIES.to_vec());
+            .unwrap_or_else(|| Vec::from(OTEL_DEFAULT_HTTP_SERVER_DURATION_BOUNDS));
 
         let tracer = Arc::new(global::tracer("opentelemetry-instrumentation-tower"));
 
@@ -541,11 +534,6 @@ impl<Route, ReqExt, ResExt> HTTPLayerBuilder<Route, ReqExt, ResExt> {
     #[cfg(test)]
     fn with_meter(mut self, meter: Meter) -> Self {
         self.meter = Some(meter);
-        self
-    }
-
-    pub fn with_request_duration_bounds(mut self, bounds: Vec<f64>) -> Self {
-        self.req_dur_bounds = Some(bounds);
         self
     }
 

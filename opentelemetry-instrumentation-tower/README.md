@@ -4,10 +4,10 @@
 
 [splash]: https://raw.githubusercontent.com/open-telemetry/opentelemetry-rust/main/assets/logo-text.png
 
-| Status        |           |
-| ------------- |-----------|
-| Stability     | alpha     |
-| Owners        | [Franco Posa](https://github.com/francoposa) |
+| Status    |                                              |
+|-----------|----------------------------------------------|
+| Stability | alpha                                        |
+| Owners    | [Franco Posa](https://github.com/francoposa) |
 
 OpenTelemetry HTTP Metrics and Tracing Middleware for Tower-compatible Rust HTTP servers.
 
@@ -21,14 +21,12 @@ This middleware provides both metrics and distributed tracing for HTTP requests,
 - **Flexible Configuration**: Support for custom attribute extractors and tracer configuration
 - **Framework Support**: Works with any Tower-compatible HTTP framework (Axum, Hyper, Tonic etc.)
 
-## Usage
-
 ## Metrics
 
 The middleware exports the following metrics:
 
 - `http.server.request.duration` - Duration of HTTP requests
-- `http.server.active_requests` - Number of active HTTP requests  
+- `http.server.active_requests` - Number of active HTTP requests
 - `http.server.request.body.size` - Size of HTTP request bodies
 - `http.server.response.body.size` - Size of HTTP response bodies
 
