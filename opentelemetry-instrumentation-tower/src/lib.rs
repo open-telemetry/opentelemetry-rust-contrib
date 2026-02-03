@@ -249,12 +249,12 @@ struct HTTPLayerState {
 /// [`Service`] used by [`HTTPLayer`]
 pub struct HTTPService<
     S,
-    Route = DefaultRouteExtractor,
+    RouteExt = DefaultRouteExtractor,
     ReqExt = NoOpExtractor,
     ResExt = NoOpExtractor,
 > {
     pub(crate) state: Arc<HTTPLayerState>,
-    route_extractor: Route,
+    route_extractor: RouteExt,
     request_extractor: ReqExt,
     response_extractor: ResExt,
     inner_service: S,
@@ -263,10 +263,10 @@ pub struct HTTPService<
 
 #[derive(Clone)]
 /// [`Layer`] which applies the OTEL HTTP server metrics and tracing middleware
-pub struct HTTPLayer<Route = DefaultRouteExtractor, ReqExt = NoOpExtractor, ResExt = NoOpExtractor>
+pub struct HTTPLayer<RouteExt = DefaultRouteExtractor, ReqExt = NoOpExtractor, ResExt = NoOpExtractor>
 {
     state: Arc<HTTPLayerState>,
-    route_extractor: Route,
+    route_extractor: RouteExt,
     request_extractor: ReqExt,
     response_extractor: ResExt,
     tracer: Arc<BoxedTracer>,
@@ -286,13 +286,13 @@ impl Default for HTTPLayer {
 }
 
 pub struct HTTPLayerBuilder<
-    Route = DefaultRouteExtractor,
+    RouteExt = DefaultRouteExtractor,
     ReqExt = NoOpExtractor,
     ResExt = NoOpExtractor,
 > {
     meter: Option<Meter>,
     req_dur_bounds: Option<Vec<f64>>,
-    route_extractor: Route,
+    route_extractor: RouteExt,
     request_extractor: ReqExt,
     response_extractor: ResExt,
 }
@@ -345,7 +345,7 @@ impl HTTPLayerBuilder {
     }
 }
 
-impl<Route, ReqExt, ResExt> HTTPLayerBuilder<Route, ReqExt, ResExt> {
+impl<RouteExt, ReqExt, ResExt> HTTPLayerBuilder<RouteExt, ReqExt, ResExt> {
     /// Set a custom route extractor.
     ///
     /// The route extractor determines how the route is extracted from requests.
@@ -403,7 +403,7 @@ impl<Route, ReqExt, ResExt> HTTPLayerBuilder<Route, ReqExt, ResExt> {
     pub fn with_request_extractor<NewReqExt, B>(
         self,
         extractor: NewReqExt,
-    ) -> HTTPLayerBuilder<Route, NewReqExt, ResExt>
+    ) -> HTTPLayerBuilder<RouteExt, NewReqExt, ResExt>
     where
         NewReqExt: RequestAttributeExtractor<B>,
     {
@@ -420,7 +420,7 @@ impl<Route, ReqExt, ResExt> HTTPLayerBuilder<Route, ReqExt, ResExt> {
     pub fn with_response_extractor<NewResExt, B>(
         self,
         extractor: NewResExt,
-    ) -> HTTPLayerBuilder<Route, ReqExt, NewResExt>
+    ) -> HTTPLayerBuilder<RouteExt, ReqExt, NewResExt>
     where
         NewResExt: ResponseAttributeExtractor<B>,
     {
@@ -437,7 +437,7 @@ impl<Route, ReqExt, ResExt> HTTPLayerBuilder<Route, ReqExt, ResExt> {
     pub fn with_request_extractor_fn<F, B>(
         self,
         f: F,
-    ) -> HTTPLayerBuilder<Route, FnRequestExtractor<F>, ResExt>
+    ) -> HTTPLayerBuilder<RouteExt, FnRequestExtractor<F>, ResExt>
     where
         F: Fn(&http::Request<B>) -> Vec<KeyValue> + Clone + Send + Sync + 'static,
     {
@@ -448,14 +448,14 @@ impl<Route, ReqExt, ResExt> HTTPLayerBuilder<Route, ReqExt, ResExt> {
     pub fn with_response_extractor_fn<F, B>(
         self,
         f: F,
-    ) -> HTTPLayerBuilder<Route, ReqExt, FnResponseExtractor<F>>
+    ) -> HTTPLayerBuilder<RouteExt, ReqExt, FnResponseExtractor<F>>
     where
         F: Fn(&http::Response<B>) -> Vec<KeyValue> + Clone + Send + Sync + 'static,
     {
         self.with_response_extractor(FnResponseExtractor::new(f))
     }
 
-    pub fn build(self) -> Result<HTTPLayer<Route, ReqExt, ResExt>> {
+    pub fn build(self) -> Result<HTTPLayer<RouteExt, ReqExt, ResExt>> {
         let req_dur_bounds = self
             .req_dur_bounds
             .unwrap_or_else(|| Vec::from(OTEL_DEFAULT_HTTP_SERVER_DURATION_BOUNDS));
@@ -517,13 +517,13 @@ impl<Route, ReqExt, ResExt> HTTPLayerBuilder<Route, ReqExt, ResExt> {
     }
 }
 
-impl<S, Route, ReqExt, ResExt> Layer<S> for HTTPLayer<Route, ReqExt, ResExt>
+impl<S, RouteExt, ReqExt, ResExt> Layer<S> for HTTPLayer<RouteExt, ReqExt, ResExt>
 where
-    Route: Clone,
+    RouteExt: Clone,
     ReqExt: Clone,
     ResExt: Clone,
 {
-    type Service = HTTPService<S, Route, ReqExt, ResExt>;
+    type Service = HTTPService<S, RouteExt, ReqExt, ResExt>;
 
     fn layer(&self, service: S) -> Self::Service {
         HTTPService {
