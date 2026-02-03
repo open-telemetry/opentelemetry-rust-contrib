@@ -263,8 +263,11 @@ pub struct HTTPService<
 
 #[derive(Clone)]
 /// [`Layer`] which applies the OTEL HTTP server metrics and tracing middleware
-pub struct HTTPLayer<RouteExt = DefaultRouteExtractor, ReqExt = NoOpExtractor, ResExt = NoOpExtractor>
-{
+pub struct HTTPLayer<
+    RouteExt = DefaultRouteExtractor,
+    ReqExt = NoOpExtractor,
+    ResExt = NoOpExtractor,
+> {
     state: Arc<HTTPLayerState>,
     route_extractor: RouteExt,
     request_extractor: ReqExt,
