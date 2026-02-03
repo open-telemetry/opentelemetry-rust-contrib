@@ -15,7 +15,6 @@ include = ["src/"]
 [features]
 default = []
 axum = ["dep:axum"]
-uuid = ["dep:uuid"]
 
 [dependencies]
 axum = { features = ["matched-path", "macros"], version = "0.8", default-features = false, optional = true }
@@ -26,7 +25,6 @@ opentelemetry-http = "0.31"
 opentelemetry-semantic-conventions = { workspace = true, features = ["semconv_experimental"] }
 tower-service = { version = "0.3", default-features = false }
 tower-layer = { version = "0.3", default-features = false }
-uuid = { version = "1.19", default-features = false, optional = true }
 
 [dev-dependencies]
 opentelemetry_sdk = { workspace = true, features = ["metrics", "testing"] }

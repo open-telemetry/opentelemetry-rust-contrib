@@ -132,60 +132,13 @@ impl<B> RouteExtractor<B> for AxumMatchedPathExtractor {
 /// - Your routes are static (no path parameters)
 /// - You understand and accept the cardinality implications
 ///
-/// Consider using [`NormalizedPathExtractor`] instead.
+/// Consider using a custom [`FnRouteExtractor`] with path normalization instead.
 #[derive(Clone, Default)]
 pub struct PathExtractor;
 
 impl<B> RouteExtractor<B> for PathExtractor {
     fn extract_route(&self, req: &http::Request<B>) -> Option<String> {
         Some(req.uri().path().to_owned())
-    }
-}
-
-/// Route extractor that normalizes dynamic path segments to reduce cardinality.
-///
-/// This extractor replaces common dynamic path segments with placeholders:
-/// - Numeric IDs (e.g., `123`, `456789`) → `{id}`
-/// - UUIDs (e.g., `550e8400-e29b-41d4-a716-446655440000`) → `{uuid}` (requires `uuid` feature)
-///
-/// # Example
-///
-/// - `/users/123/orders/456` → `/users/{id}/orders/{id}`
-/// - `/items/550e8400-e29b-41d4-a716-446655440000` → `/items/{uuid}` (with `uuid` feature)
-#[derive(Clone, Default)]
-pub struct NormalizedPathExtractor;
-
-impl NormalizedPathExtractor {
-    fn normalize_segment(segment: &str) -> &str {
-        if segment.is_empty() {
-            return segment;
-        }
-        #[cfg(feature = "uuid")]
-        if uuid::Uuid::try_parse(segment).is_ok() {
-            return "{uuid}";
-        }
-        if segment.chars().all(|c| c.is_ascii_digit()) {
-            return "{id}";
-        }
-        segment
-    }
-}
-
-impl<B> RouteExtractor<B> for NormalizedPathExtractor {
-    fn extract_route(&self, req: &http::Request<B>) -> Option<String> {
-        let path = req.uri().path();
-        // Use path.len() as capacity heuristic: normalized paths are typically
-        // smaller (UUIDs shrink from 36 to 6 chars) or similar in length.
-        let mut result = String::with_capacity(path.len());
-
-        for (i, segment) in path.split('/').enumerate() {
-            if i > 0 {
-                result.push('/');
-            }
-            result.push_str(Self::normalize_segment(segment));
-        }
-
-        Some(result)
     }
 }
 
@@ -406,7 +359,7 @@ impl<Route, ReqExt, ResExt> HTTPLayerBuilder<Route, ReqExt, ResExt> {
     ///
     /// ```ignore
     /// let layer = HTTPLayerBuilder::builder()
-    ///     .with_route_extractor(NormalizedPathExtractor)
+    ///     .with_route_extractor(PathExtractor)
     ///     .build()
     ///     .unwrap();
     /// ```
@@ -1403,95 +1356,6 @@ mod tests {
         assert_eq!(spans.len(), 1, "Expected one HTTP span");
         // Numeric IDs should be normalized
         assert_eq!(spans[0].name, "GET /users/{id}/orders/{id}");
-    }
-
-    #[tokio::test(flavor = "current_thread")]
-    async fn test_normalized_path_span_name() {
-        let trace_exporter = InMemorySpanExporterBuilder::new().build();
-        let tracer_provider = SdkTracerProvider::builder()
-            .with_simple_exporter(trace_exporter.clone())
-            .build();
-
-        let tracer = Arc::new(BoxedTracer::new(Box::new(
-            tracer_provider.tracer("test_tracer"),
-        )));
-
-        let mut layer = HTTPLayerBuilder::builder()
-            .with_route_extractor(NormalizedPathExtractor)
-            .build()
-            .unwrap();
-        layer.tracer = tracer.clone();
-
-        let service = tower::service_fn(|_req: Request<String>| async {
-            Ok::<_, std::convert::Infallible>(
-                Response::builder()
-                    .status(StatusCode::OK)
-                    .body(String::from("OK"))
-                    .unwrap(),
-            )
-        });
-
-        let mut service = layer.layer(service);
-
-        // Test numeric IDs
-        let request = Request::builder()
-            .method("GET")
-            .uri("http://example.com/users/12345/orders/67890")
-            .body("test".to_string())
-            .unwrap();
-
-        let _response = service.call(request).await.unwrap();
-
-        tracer_provider.force_flush().unwrap();
-
-        let spans = trace_exporter.get_finished_spans().unwrap();
-        assert_eq!(spans.len(), 1, "Expected one HTTP span");
-        assert_eq!(spans[0].name, "GET /users/{id}/orders/{id}");
-    }
-
-    #[cfg(feature = "uuid")]
-    #[tokio::test(flavor = "current_thread")]
-    async fn test_normalized_path_with_uuid() {
-        let trace_exporter = InMemorySpanExporterBuilder::new().build();
-        let tracer_provider = SdkTracerProvider::builder()
-            .with_simple_exporter(trace_exporter.clone())
-            .build();
-
-        let tracer = Arc::new(BoxedTracer::new(Box::new(
-            tracer_provider.tracer("test_tracer"),
-        )));
-
-        let mut layer = HTTPLayerBuilder::builder()
-            .with_route_extractor(NormalizedPathExtractor)
-            .build()
-            .unwrap();
-        layer.tracer = tracer.clone();
-
-        let service = tower::service_fn(|_req: Request<String>| async {
-            Ok::<_, std::convert::Infallible>(
-                Response::builder()
-                    .status(StatusCode::OK)
-                    .body(String::from("OK"))
-                    .unwrap(),
-            )
-        });
-
-        let mut service = layer.layer(service);
-
-        // Test UUID
-        let request = Request::builder()
-            .method("DELETE")
-            .uri("http://example.com/items/550e8400-e29b-41d4-a716-446655440000")
-            .body("test".to_string())
-            .unwrap();
-
-        let _response = service.call(request).await.unwrap();
-
-        tracer_provider.force_flush().unwrap();
-
-        let spans = trace_exporter.get_finished_spans().unwrap();
-        assert_eq!(spans.len(), 1, "Expected one HTTP span");
-        assert_eq!(spans[0].name, "DELETE /items/{uuid}");
     }
 
     #[cfg(feature = "axum")]

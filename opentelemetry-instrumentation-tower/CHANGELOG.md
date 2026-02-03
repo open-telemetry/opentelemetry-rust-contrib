@@ -7,10 +7,8 @@
 * Configurable route extraction with built-in extractors:
   - `NoRouteExtractor` - No route, uses only HTTP method (e.g., `GET`), safest for cardinality
   - `PathExtractor` - Uses the URL path without query params (e.g., `/users/123`)
-  - `NormalizedPathExtractor` - Normalizes numeric IDs to `{id}` and UUIDs to `{uuid}` (requires `uuid` feature)
   - `AxumMatchedPathExtractor` - Uses Axum's `MatchedPath` for route templates (requires `axum` feature)
   - `FnRouteExtractor` - Custom function-based extraction via `with_route_extractor_fn()`
-* New `uuid` feature flag for UUID detection in `NormalizedPathExtractor`
 * Default route extractor depends on features:
   - With `axum` feature: Uses `AxumMatchedPathExtractor` (route templates, low cardinality)
   - Without `axum` feature: Uses `NoRouteExtractor` (method only, safest)
@@ -40,7 +38,6 @@ use opentelemetry_instrumentation_tower::{
     HTTPLayerBuilder,
     NoRouteExtractor,
     PathExtractor,
-    NormalizedPathExtractor,
 };
 
 // No route (default without axum feature) - span name: "GET"
@@ -52,12 +49,6 @@ let layer = HTTPLayerBuilder::builder()
 // Path (strips query params) - span name: "GET /users/123"
 let layer = HTTPLayerBuilder::builder()
     .with_route_extractor(PathExtractor)
-    .build()
-    .unwrap();
-
-// Normalized path (replaces IDs with {id}, UUIDs with {uuid}) - span name: "GET /users/{id}"
-let layer = HTTPLayerBuilder::builder()
-    .with_route_extractor(NormalizedPathExtractor)
     .build()
     .unwrap();
 
