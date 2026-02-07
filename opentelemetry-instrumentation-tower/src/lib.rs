@@ -41,9 +41,133 @@ const NETWORK_PROTOCOL_VERSION_LABEL: &str = semconv::attribute::NETWORK_PROTOCO
 const URL_SCHEME_LABEL: &str = semconv::attribute::URL_SCHEME;
 
 const HTTP_REQUEST_METHOD_LABEL: &str = semconv::attribute::HTTP_REQUEST_METHOD;
-#[cfg(feature = "axum")]
 const HTTP_ROUTE_LABEL: &str = semconv::attribute::HTTP_ROUTE;
 const HTTP_RESPONSE_STATUS_CODE_LABEL: &str = semconv::attribute::HTTP_RESPONSE_STATUS_CODE;
+
+/// Trait for extracting the route/target from HTTP requests.
+///
+/// Implementations return an optional route string. When present, this is used for:
+/// - Span names: `"{method} {route}"` (e.g., `"GET /users/:id"`)
+/// - The `http.route` metric attribute
+///
+/// When `None` is returned, span names use method-only (e.g., `"GET"`) and no
+/// `http.route` attribute is set.
+///
+/// # Cardinality Considerations
+///
+/// The route should be a low-cardinality value (e.g., a route template like `/users/:id`)
+/// rather than the actual path (e.g., `/users/123`). High-cardinality routes can overwhelm
+/// the OpenTelemetry SDK's built-in cardinality limits and downstream backends.
+pub trait RouteExtractor<B>: Clone + Send + Sync + 'static {
+    /// Extracts the route from the request, if available.
+    ///
+    /// Returns `None` to use method-only span names and skip the `http.route` attribute.
+    fn extract_route(&self, req: &http::Request<B>) -> Option<String>;
+}
+
+/// Route extractor that returns no route (method-only span names).
+///
+/// This is the safest option as it avoids cardinality explosion from dynamic
+/// path segments. Span names will be just the HTTP method (e.g., `"GET"`).
+///
+/// The `http.route` attribute will not be set when using this extractor.
+#[derive(Clone, Default)]
+pub struct NoRouteExtractor;
+
+impl<B> RouteExtractor<B> for NoRouteExtractor {
+    fn extract_route(&self, _req: &http::Request<B>) -> Option<String> {
+        None
+    }
+}
+
+/// Route extractor that uses Axum's `MatchedPath` for low-cardinality routes.
+///
+/// This extractor uses the route template (e.g., `/users/:id`) instead of the actual
+/// path (e.g., `/users/123`), providing low-cardinality span names and route attributes
+/// that are safe for production use.
+///
+/// # When `MatchedPath` is unavailable
+///
+/// Returns `None` (falling back to method-only span names) when `MatchedPath` is not
+/// present in the request extensions. This can happen when:
+///
+/// - The OpenTelemetry layer is placed *before* Axum's router in the middleware stack.
+///   The layer must be placed *after* the router to access route information.
+/// - The request does not match any defined route (404 responses).
+/// - Using Axum's `fallback` handler, which does not set `MatchedPath`.
+///
+/// For correct route extraction, ensure the middleware order is:
+///
+/// ```ignore
+/// let app = Router::new()
+///     .route("/users/:id", get(handler))
+///     .layer(otel_layer);  // Layer applied after routes
+/// ```
+///
+/// See the [Axum documentation on middleware ordering](https://docs.rs/axum/latest/axum/middleware/index.html#ordering)
+/// for more details.
+#[cfg(feature = "axum")]
+#[derive(Clone, Default)]
+pub struct AxumMatchedPathExtractor;
+
+#[cfg(feature = "axum")]
+impl<B> RouteExtractor<B> for AxumMatchedPathExtractor {
+    fn extract_route(&self, req: &http::Request<B>) -> Option<String> {
+        req.extensions()
+            .get::<MatchedPath>()
+            .map(|matched_path| matched_path.as_str().to_owned())
+    }
+}
+
+/// Route extractor that uses the URL path (without query parameters).
+///
+/// # Warning: Cardinality
+///
+/// Using this extractor can cause **high cardinality** issues if your routes contain
+/// dynamic path segments (e.g., `/users/{id}`, `/orders/{order_id}/items/{item_id}`).
+/// Each unique path will create a unique span name and route attribute, potentially
+/// overwhelming your tracing and metrics backends with millions of unique series.
+///
+/// **Only use this if**:
+/// - Your routes are static (no path parameters)
+/// - You understand and accept the cardinality implications
+///
+/// Consider using a custom [`FnRouteExtractor`] with path normalization instead.
+#[derive(Clone, Default)]
+pub struct PathExtractor;
+
+impl<B> RouteExtractor<B> for PathExtractor {
+    fn extract_route(&self, req: &http::Request<B>) -> Option<String> {
+        Some(req.uri().path().to_owned())
+    }
+}
+
+/// A function-based route extractor.
+#[derive(Clone)]
+pub struct FnRouteExtractor<F> {
+    extractor: F,
+}
+
+impl<F> FnRouteExtractor<F> {
+    pub fn new(extractor: F) -> Self {
+        Self { extractor }
+    }
+}
+
+impl<F, B> RouteExtractor<B> for FnRouteExtractor<F>
+where
+    F: Fn(&http::Request<B>) -> Option<String> + Clone + Send + Sync + 'static,
+{
+    fn extract_route(&self, req: &http::Request<B>) -> Option<String> {
+        (self.extractor)(req)
+    }
+}
+
+#[cfg(feature = "axum")]
+type DefaultRouteExtractor = AxumMatchedPathExtractor;
+
+#[cfg(not(feature = "axum"))]
+type DefaultRouteExtractor = NoRouteExtractor;
 
 /// Trait for extracting custom attributes from HTTP requests
 pub trait RequestAttributeExtractor<B>: Clone + Send + Sync + 'static {
@@ -123,8 +247,14 @@ struct HTTPLayerState {
 
 #[derive(Clone)]
 /// [`Service`] used by [`HTTPLayer`]
-pub struct HTTPService<S, ReqExt = NoOpExtractor, ResExt = NoOpExtractor> {
+pub struct HTTPService<
+    S,
+    RouteExt = DefaultRouteExtractor,
+    ReqExt = NoOpExtractor,
+    ResExt = NoOpExtractor,
+> {
     pub(crate) state: Arc<HTTPLayerState>,
+    route_extractor: RouteExt,
     request_extractor: ReqExt,
     response_extractor: ResExt,
     inner_service: S,
@@ -133,8 +263,13 @@ pub struct HTTPService<S, ReqExt = NoOpExtractor, ResExt = NoOpExtractor> {
 
 #[derive(Clone)]
 /// [`Layer`] which applies the OTEL HTTP server metrics and tracing middleware
-pub struct HTTPLayer<ReqExt = NoOpExtractor, ResExt = NoOpExtractor> {
+pub struct HTTPLayer<
+    RouteExt = DefaultRouteExtractor,
+    ReqExt = NoOpExtractor,
+    ResExt = NoOpExtractor,
+> {
     state: Arc<HTTPLayerState>,
+    route_extractor: RouteExt,
     request_extractor: ReqExt,
     response_extractor: ResExt,
     tracer: Arc<BoxedTracer>,
@@ -153,9 +288,14 @@ impl Default for HTTPLayer {
     }
 }
 
-pub struct HTTPLayerBuilder<ReqExt = NoOpExtractor, ResExt = NoOpExtractor> {
+pub struct HTTPLayerBuilder<
+    RouteExt = DefaultRouteExtractor,
+    ReqExt = NoOpExtractor,
+    ResExt = NoOpExtractor,
+> {
     meter: Option<Meter>,
     req_dur_bounds: Option<Vec<f64>>,
+    route_extractor: RouteExt,
     request_extractor: ReqExt,
     response_extractor: ResExt,
 }
@@ -201,24 +341,79 @@ impl HTTPLayerBuilder {
         HTTPLayerBuilder {
             meter: None,
             req_dur_bounds: Some(Vec::from(OTEL_DEFAULT_HTTP_SERVER_DURATION_BOUNDS)),
+            route_extractor: DefaultRouteExtractor::default(),
             request_extractor: NoOpExtractor,
             response_extractor: NoOpExtractor,
         }
     }
 }
 
-impl<ReqExt, ResExt> HTTPLayerBuilder<ReqExt, ResExt> {
+impl<RouteExt, ReqExt, ResExt> HTTPLayerBuilder<RouteExt, ReqExt, ResExt> {
+    /// Set a custom route extractor.
+    ///
+    /// The route extractor determines how the route is extracted from requests.
+    /// The extracted route is used for:
+    /// - Span names: `"{method} {route}"` or just `"{method}"` if no route
+    /// - The `http.route` metric attribute
+    ///
+    /// See [`RouteExtractor`] for details on implementing custom extractors.
+    ///
+    /// # Example
+    ///
+    /// ```ignore
+    /// let layer = HTTPLayerBuilder::builder()
+    ///     .with_route_extractor(PathExtractor)
+    ///     .build()
+    ///     .unwrap();
+    /// ```
+    pub fn with_route_extractor<NewRoute>(
+        self,
+        extractor: NewRoute,
+    ) -> HTTPLayerBuilder<NewRoute, ReqExt, ResExt> {
+        HTTPLayerBuilder {
+            meter: self.meter,
+            req_dur_bounds: self.req_dur_bounds,
+            route_extractor: extractor,
+            request_extractor: self.request_extractor,
+            response_extractor: self.response_extractor,
+        }
+    }
+
+    /// Convenience method to set a function-based route extractor.
+    ///
+    /// # Example
+    ///
+    /// ```ignore
+    /// let layer = HTTPLayerBuilder::builder()
+    ///     .with_route_extractor_fn(|req: &http::Request<_>| {
+    ///         // Return Some(route) or None for method-only
+    ///         Some(req.uri().path().to_owned())
+    ///     })
+    ///     .build()
+    ///     .unwrap();
+    /// ```
+    pub fn with_route_extractor_fn<F, B>(
+        self,
+        f: F,
+    ) -> HTTPLayerBuilder<FnRouteExtractor<F>, ReqExt, ResExt>
+    where
+        F: Fn(&http::Request<B>) -> Option<String> + Clone + Send + Sync + 'static,
+    {
+        self.with_route_extractor(FnRouteExtractor::new(f))
+    }
+
     /// Set a request attribute extractor
     pub fn with_request_extractor<NewReqExt, B>(
         self,
         extractor: NewReqExt,
-    ) -> HTTPLayerBuilder<NewReqExt, ResExt>
+    ) -> HTTPLayerBuilder<RouteExt, NewReqExt, ResExt>
     where
         NewReqExt: RequestAttributeExtractor<B>,
     {
         HTTPLayerBuilder {
             meter: self.meter,
             req_dur_bounds: self.req_dur_bounds,
+            route_extractor: self.route_extractor,
             request_extractor: extractor,
             response_extractor: self.response_extractor,
         }
@@ -228,13 +423,14 @@ impl<ReqExt, ResExt> HTTPLayerBuilder<ReqExt, ResExt> {
     pub fn with_response_extractor<NewResExt, B>(
         self,
         extractor: NewResExt,
-    ) -> HTTPLayerBuilder<ReqExt, NewResExt>
+    ) -> HTTPLayerBuilder<RouteExt, ReqExt, NewResExt>
     where
         NewResExt: ResponseAttributeExtractor<B>,
     {
         HTTPLayerBuilder {
             meter: self.meter,
             req_dur_bounds: self.req_dur_bounds,
+            route_extractor: self.route_extractor,
             request_extractor: self.request_extractor,
             response_extractor: extractor,
         }
@@ -244,7 +440,7 @@ impl<ReqExt, ResExt> HTTPLayerBuilder<ReqExt, ResExt> {
     pub fn with_request_extractor_fn<F, B>(
         self,
         f: F,
-    ) -> HTTPLayerBuilder<FnRequestExtractor<F>, ResExt>
+    ) -> HTTPLayerBuilder<RouteExt, FnRequestExtractor<F>, ResExt>
     where
         F: Fn(&http::Request<B>) -> Vec<KeyValue> + Clone + Send + Sync + 'static,
     {
@@ -255,14 +451,14 @@ impl<ReqExt, ResExt> HTTPLayerBuilder<ReqExt, ResExt> {
     pub fn with_response_extractor_fn<F, B>(
         self,
         f: F,
-    ) -> HTTPLayerBuilder<ReqExt, FnResponseExtractor<F>>
+    ) -> HTTPLayerBuilder<RouteExt, ReqExt, FnResponseExtractor<F>>
     where
         F: Fn(&http::Response<B>) -> Vec<KeyValue> + Clone + Send + Sync + 'static,
     {
         self.with_response_extractor(FnResponseExtractor::new(f))
     }
 
-    pub fn build(self) -> Result<HTTPLayer<ReqExt, ResExt>> {
+    pub fn build(self) -> Result<HTTPLayer<RouteExt, ReqExt, ResExt>> {
         let req_dur_bounds = self
             .req_dur_bounds
             .unwrap_or_else(|| Vec::from(OTEL_DEFAULT_HTTP_SERVER_DURATION_BOUNDS));
@@ -275,6 +471,7 @@ impl<ReqExt, ResExt> HTTPLayerBuilder<ReqExt, ResExt> {
 
         Ok(HTTPLayer {
             state: Arc::from(Self::make_state(meter, req_dur_bounds)),
+            route_extractor: self.route_extractor,
             request_extractor: self.request_extractor,
             response_extractor: self.response_extractor,
             tracer,
@@ -323,16 +520,18 @@ impl<ReqExt, ResExt> HTTPLayerBuilder<ReqExt, ResExt> {
     }
 }
 
-impl<S, ReqExt, ResExt> Layer<S> for HTTPLayer<ReqExt, ResExt>
+impl<S, RouteExt, ReqExt, ResExt> Layer<S> for HTTPLayer<RouteExt, ReqExt, ResExt>
 where
+    RouteExt: Clone,
     ReqExt: Clone,
     ResExt: Clone,
 {
-    type Service = HTTPService<S, ReqExt, ResExt>;
+    type Service = HTTPService<S, RouteExt, ReqExt, ResExt>;
 
     fn layer(&self, service: S) -> Self::Service {
         HTTPService {
             state: self.state.clone(),
+            route_extractor: self.route_extractor.clone(),
             request_extractor: self.request_extractor.clone(),
             response_extractor: self.response_extractor.clone(),
             inner_service: service,
@@ -361,13 +560,14 @@ struct RequestData {
     custom_request_attributes: Vec<KeyValue>,
 }
 
-impl<S, ReqBody, ResBody, ReqExt, ResExt> Service<http::Request<ReqBody>>
-    for HTTPService<S, ReqExt, ResExt>
+impl<S, ReqBody, ResBody, RouteExt, ReqExt, ResExt> Service<http::Request<ReqBody>>
+    for HTTPService<S, RouteExt, ReqExt, ResExt>
 where
     S: Service<http::Request<ReqBody>, Response = http::Response<ResBody>>,
     S::Future: Send + 'static,
     S::Error: std::fmt::Debug,
     ResBody: http_body::Body,
+    RouteExt: RouteExtractor<ReqBody>,
     ReqExt: RequestAttributeExtractor<ReqBody>,
     ResExt: ResponseAttributeExtractor<ResBody>,
 {
@@ -397,14 +597,17 @@ where
         let method = req.method().as_str().to_owned();
         let method_kv = KeyValue::new(HTTP_REQUEST_METHOD_LABEL, method.clone());
 
-        #[cfg(feature = "axum")]
-        let route_kv_opt = req
-            .extensions()
-            .get::<MatchedPath>()
-            .map(|matched_path| KeyValue::new(HTTP_ROUTE_LABEL, matched_path.as_str().to_owned()));
+        // Extract route using the configured extractor
+        let route = self.route_extractor.extract_route(&req);
+        let route_kv_opt = route
+            .as_ref()
+            .map(|r| KeyValue::new(HTTP_ROUTE_LABEL, r.clone()));
 
-        #[cfg(not(feature = "axum"))]
-        let route_kv_opt = None;
+        // Build span name: "{method} {route}" or just "{method}"
+        let span_name = match &route {
+            Some(r) => format!("{} {}", method, r),
+            None => method.clone(),
+        };
 
         // Extract custom request attributes
         let custom_request_attributes = self.request_extractor.extract_attributes(&req);
@@ -432,9 +635,11 @@ where
             ));
         }
 
-        span_attributes.extend(custom_request_attributes.clone());
+        if let Some(r) = &route {
+            span_attributes.push(KeyValue::new(HTTP_ROUTE_LABEL, r.clone()));
+        }
 
-        let span_name = format!("{} {}", method, req.uri().path());
+        span_attributes.extend(custom_request_attributes.clone());
 
         let span = self
             .tracer
@@ -623,7 +828,10 @@ mod tests {
             tracer_provider.tracer("test_tracer"),
         )));
 
-        let mut layer = HTTPLayerBuilder::builder().build().unwrap();
+        let mut layer = HTTPLayerBuilder::builder()
+            .with_route_extractor(PathExtractor)
+            .build()
+            .unwrap();
         layer.tracer = tracer.clone();
 
         let mut service = ServiceBuilder::new()
@@ -699,6 +907,7 @@ mod tests {
                 semconv::trace::USER_AGENT_ORIGINAL,
                 "tower-test-client/1.0".to_string(),
             ),
+            KeyValue::new(semconv::trace::HTTP_ROUTE, "/api/users/123".to_string()),
             KeyValue::new(semconv::trace::HTTP_RESPONSE_STATUS_CODE, 200),
         ];
 
@@ -963,7 +1172,10 @@ mod tests {
             tracer_provider.tracer("test_tracer"),
         )));
 
-        let mut layer = HTTPLayerBuilder::builder().build().unwrap();
+        let mut layer = HTTPLayerBuilder::builder()
+            .with_route_extractor(PathExtractor)
+            .build()
+            .unwrap();
         layer.tracer = tracer.clone();
 
         let service = tower::service_fn(|_req: Request<String>| async {
@@ -998,5 +1210,200 @@ mod tests {
         let spans = trace_exporter.get_finished_spans().unwrap();
         assert_eq!(spans.len(), 1, "Expected one HTTP span");
         assert_eq!(spans[0].name, "GET /test");
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn test_method_only_span_name() {
+        let trace_exporter = InMemorySpanExporterBuilder::new().build();
+        let tracer_provider = SdkTracerProvider::builder()
+            .with_simple_exporter(trace_exporter.clone())
+            .build();
+
+        let tracer = Arc::new(BoxedTracer::new(Box::new(
+            tracer_provider.tracer("test_tracer"),
+        )));
+
+        // Explicitly use method-only span names (no route extractor)
+        let mut layer = HTTPLayerBuilder::builder()
+            .with_route_extractor(NoRouteExtractor)
+            .build()
+            .unwrap();
+        layer.tracer = tracer.clone();
+
+        let service = tower::service_fn(|_req: Request<String>| async {
+            Ok::<_, std::convert::Infallible>(
+                Response::builder()
+                    .status(StatusCode::OK)
+                    .body(String::from("OK"))
+                    .unwrap(),
+            )
+        });
+
+        let mut service = layer.layer(service);
+
+        let request = Request::builder()
+            .method("POST")
+            .uri("http://example.com/users/123/orders?include=items")
+            .body("test".to_string())
+            .unwrap();
+
+        let _response = service.call(request).await.unwrap();
+
+        tracer_provider.force_flush().unwrap();
+
+        let spans = trace_exporter.get_finished_spans().unwrap();
+        assert_eq!(spans.len(), 1, "Expected one HTTP span");
+        // Should be method-only
+        assert_eq!(spans[0].name, "POST");
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn test_path_span_name_strips_query_params() {
+        let trace_exporter = InMemorySpanExporterBuilder::new().build();
+        let tracer_provider = SdkTracerProvider::builder()
+            .with_simple_exporter(trace_exporter.clone())
+            .build();
+
+        let tracer = Arc::new(BoxedTracer::new(Box::new(
+            tracer_provider.tracer("test_tracer"),
+        )));
+
+        let mut layer = HTTPLayerBuilder::builder()
+            .with_route_extractor(PathExtractor)
+            .build()
+            .unwrap();
+        layer.tracer = tracer.clone();
+
+        let service = tower::service_fn(|_req: Request<String>| async {
+            Ok::<_, std::convert::Infallible>(
+                Response::builder()
+                    .status(StatusCode::OK)
+                    .body(String::from("OK"))
+                    .unwrap(),
+            )
+        });
+
+        let mut service = layer.layer(service);
+
+        let request = Request::builder()
+            .method("GET")
+            .uri("http://example.com/users?page=1&limit=10")
+            .body("test".to_string())
+            .unwrap();
+
+        let _response = service.call(request).await.unwrap();
+
+        tracer_provider.force_flush().unwrap();
+
+        let spans = trace_exporter.get_finished_spans().unwrap();
+        assert_eq!(spans.len(), 1, "Expected one HTTP span");
+        // Query parameters should be stripped
+        assert_eq!(spans[0].name, "GET /users");
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn test_custom_span_name_extractor() {
+        let trace_exporter = InMemorySpanExporterBuilder::new().build();
+        let tracer_provider = SdkTracerProvider::builder()
+            .with_simple_exporter(trace_exporter.clone())
+            .build();
+
+        let tracer = Arc::new(BoxedTracer::new(Box::new(
+            tracer_provider.tracer("test_tracer"),
+        )));
+
+        // Custom extractor that normalizes path parameters
+        let mut layer = HTTPLayerBuilder::builder()
+            .with_route_extractor_fn(|req: &Request<String>| {
+                let path = req.uri().path();
+                // Simple normalization: replace numeric IDs with {id}
+                let normalized = path
+                    .split('/')
+                    .map(|segment| {
+                        if segment.parse::<u64>().is_ok() {
+                            "{id}"
+                        } else {
+                            segment
+                        }
+                    })
+                    .collect::<Vec<_>>()
+                    .join("/");
+                Some(normalized)
+            })
+            .build()
+            .unwrap();
+        layer.tracer = tracer.clone();
+
+        let service = tower::service_fn(|_req: Request<String>| async {
+            Ok::<_, std::convert::Infallible>(
+                Response::builder()
+                    .status(StatusCode::OK)
+                    .body(String::from("OK"))
+                    .unwrap(),
+            )
+        });
+
+        let mut service = layer.layer(service);
+
+        let request = Request::builder()
+            .method("GET")
+            .uri("http://example.com/users/12345/orders/67890")
+            .body("test".to_string())
+            .unwrap();
+
+        let _response = service.call(request).await.unwrap();
+
+        tracer_provider.force_flush().unwrap();
+
+        let spans = trace_exporter.get_finished_spans().unwrap();
+        assert_eq!(spans.len(), 1, "Expected one HTTP span");
+        // Numeric IDs should be normalized
+        assert_eq!(spans[0].name, "GET /users/{id}/orders/{id}");
+    }
+
+    #[cfg(feature = "axum")]
+    #[tokio::test(flavor = "current_thread")]
+    async fn test_axum_matched_path_extractor_fallback() {
+        let trace_exporter = InMemorySpanExporterBuilder::new().build();
+        let tracer_provider = SdkTracerProvider::builder()
+            .with_simple_exporter(trace_exporter.clone())
+            .build();
+
+        let tracer = Arc::new(BoxedTracer::new(Box::new(
+            tracer_provider.tracer("test_tracer"),
+        )));
+
+        let mut layer = HTTPLayerBuilder::builder()
+            .with_route_extractor(AxumMatchedPathExtractor)
+            .build()
+            .unwrap();
+        layer.tracer = tracer.clone();
+
+        let service = tower::service_fn(|_req: Request<String>| async {
+            Ok::<_, std::convert::Infallible>(
+                Response::builder()
+                    .status(StatusCode::OK)
+                    .body(String::from("OK"))
+                    .unwrap(),
+            )
+        });
+
+        let mut service = layer.layer(service);
+
+        // Request WITHOUT MatchedPath extension - should fall back to method-only
+        let request = Request::builder()
+            .method("GET")
+            .uri("http://example.com/users/123")
+            .body("test".to_string())
+            .unwrap();
+
+        let _response = service.call(request).await.unwrap();
+
+        tracer_provider.force_flush().unwrap();
+
+        let spans = trace_exporter.get_finished_spans().unwrap();
+        assert_eq!(spans.len(), 1, "Expected one HTTP span");
+        // Falls back to method-only when MatchedPath is not available
+        assert_eq!(spans[0].name, "GET");
     }
 }
