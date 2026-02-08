@@ -160,9 +160,13 @@ impl CentralBlob {
         //   + 8 (terminator, u64)
         let meta_utf16 = utf8_to_utf16le_bytes(&self.metadata);
 
-        // Cache UTF-16 event name conversion. Events within a blob typically share the same
-        // event name (Arc), so we convert once and reuse by checking Arc pointer identity.
-        let mut evname_cache: Option<(usize, Vec<u8>)> = None; // (Arc ptr, utf16 bytes)
+        // A CentralBlob is homogeneous by event name: logs are grouped by event_name in
+        // encode_log_batch, and spans all use "Span". Precompute UTF-16LE once.
+        let evname_utf16 = self
+            .events
+            .first()
+            .map(|e| utf8_to_utf16le_bytes(&e.event_name))
+            .unwrap_or_default();
 
         let mut estimated_size = 8 + 4 + meta_utf16.len();
         estimated_size += self
@@ -175,18 +179,7 @@ impl CentralBlob {
             .iter()
             .map(|e| {
                 let row_len = 4 + e.row.len(); // SP header (4), row_bytes
-                // Use cached UTF-16 length if same Arc, otherwise compute and cache
-                let ptr = Arc::as_ptr(&e.event_name) as usize;
-                let evname_len = match &evname_cache {
-                    Some((cached_ptr, cached_bytes)) if *cached_ptr == ptr => cached_bytes.len(),
-                    _ => {
-                        let utf16 = utf8_to_utf16le_bytes(&e.event_name);
-                        let len = utf16.len();
-                        evname_cache = Some((ptr, utf16));
-                        len
-                    }
-                };
-                2 + 8 + 1 + 2 + 4 + evname_len + row_len + 8
+                2 + 8 + 1 + 2 + 4 + evname_utf16.len() + row_len + 8
             })
             .sum::<usize>();
 
@@ -213,16 +206,10 @@ impl CentralBlob {
 
         // EVENTS (type 2)
         for event in &self.events {
-            // Reuse cached UTF-16 event name if same Arc pointer, otherwise convert and cache
-            let ptr = Arc::as_ptr(&event.event_name) as usize;
-            let needs_update = match &evname_cache {
-                Some((cached_ptr, _)) => *cached_ptr != ptr,
-                None => true,
-            };
-            if needs_update {
-                evname_cache = Some((ptr, utf8_to_utf16le_bytes(&event.event_name)));
-            }
-            let evname_utf16 = &evname_cache.as_ref().unwrap().1;
+            debug_assert!(
+                self.events.first().map_or(true, |first| Arc::ptr_eq(&first.event_name, &event.event_name)),
+                "CentralBlob invariant violated: all events must share the same event name"
+            );
 
             buf.extend_from_slice(&2u16.to_le_bytes()); // entity type 2
             buf.extend_from_slice(&event.schema_id.to_le_bytes());
@@ -230,7 +217,7 @@ impl CentralBlob {
 
             // event name (UTF-16LE, prefixed with u16 len in bytes)
             buf.extend_from_slice(&(evname_utf16.len() as u16).to_le_bytes()); // TODO - check for overflow
-            buf.extend_from_slice(evname_utf16);
+            buf.extend_from_slice(&evname_utf16);
 
             let total_len = 4 + event.row.len(); // SP header + data
 
