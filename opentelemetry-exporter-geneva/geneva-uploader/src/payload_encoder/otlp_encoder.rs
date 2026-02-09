@@ -112,7 +112,7 @@ impl OtlpEncoder {
             schemas: Vec<CentralSchemaEntry>,
             events: Vec<CentralEventEntry>,
             metadata: BatchMetadata,
-            event_name_arc: Arc<String>,
+            event_name: Arc<String>,
         }
 
         impl BatchData {
@@ -171,7 +171,7 @@ impl OtlpEncoder {
                     end_time: timestamp,
                     schema_ids: String::new(),
                 },
-                event_name_arc: Arc::new(event_name_str.to_string()),
+                event_name: Arc::new(event_name_str.to_string()),
             });
 
             // Update timestamp range
@@ -210,7 +210,7 @@ impl OtlpEncoder {
             let central_event = CentralEventEntry {
                 schema_id,
                 level,
-                event_name: Arc::clone(&entry.event_name_arc),
+                event_name: Arc::clone(&entry.event_name),
                 row: row_buffer,
             };
             entry.events.push(central_event);
@@ -279,7 +279,7 @@ impl OtlpEncoder {
     {
         // All spans use "Span" as event name for routing - no grouping by span name
         const EVENT_NAME: &str = "Span";
-        let event_name_arc = Arc::new(EVENT_NAME.to_string());
+        let event_name = Arc::new(EVENT_NAME.to_string());
 
         let mut schemas = Vec::new();
         let mut events = Vec::new();
@@ -328,7 +328,7 @@ impl OtlpEncoder {
             let central_event = CentralEventEntry {
                 schema_id,
                 level,
-                event_name: Arc::clone(&event_name_arc),
+                event_name: Arc::clone(&event_name),
                 row: row_buffer,
             };
             events.push(central_event);
