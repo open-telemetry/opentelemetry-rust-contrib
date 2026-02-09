@@ -24,7 +24,7 @@ use opentelemetry::{
     Context, KeyValue,
 };
 use opentelemetry_semantic_conventions::{
-    attribute::MESSAGING_MESSAGE_BODY_SIZE,
+    attribute::{ERROR_TYPE, HTTP_REQUEST_BODY_SIZE},
     trace::{
         HTTP_REQUEST_METHOD, HTTP_RESPONSE_STATUS_CODE, SERVER_ADDRESS, SERVER_PORT, URL_FULL,
         USER_AGENT_ORIGINAL,
@@ -174,7 +174,7 @@ impl InstrumentedClientRequest {
         let tracer = global::tracer_with_scope(get_scope());
 
         // Client attributes
-        // https://github.com/open-telemetry/semantic-conventions/blob/v1.21.0/docs/http/http-spans.md#http-client
+        // https://opentelemetry.io/docs/specs/semconv/http/http-spans/#http-client
         self.attrs.extend(
             &mut [
                 KeyValue::new(
@@ -217,7 +217,7 @@ impl InstrumentedClientRequest {
                 .and_then(|str_len| str_len.parse::<i64>().ok())
         }) {
             self.attrs
-                .push(KeyValue::new(MESSAGING_MESSAGE_BODY_SIZE, content_length))
+                .push(KeyValue::new(HTTP_REQUEST_BODY_SIZE, content_length))
         }
 
         let span = tracer
@@ -297,7 +297,7 @@ impl InstrumentedClientRequest {
 }
 
 // convert http status code to span status following the rules described by the spec:
-// https://github.com/open-telemetry/opentelemetry-specification/blob/main/specification/trace/semantic_conventions/http.md#status
+// https://opentelemetry.io/docs/specs/semconv/http/http-spans/#status
 fn convert_status(status: http::StatusCode) -> Status {
     match status.as_u16() {
         100..=399 => Status::Unset,
@@ -309,18 +309,25 @@ fn convert_status(status: http::StatusCode) -> Status {
 
 fn record_response<T>(response: &ClientResponse<T>, cx: &Context) {
     let span = cx.span();
+    let status_code = response.status().as_u16();
     let status = convert_status(response.status());
+
+    span.set_attribute(KeyValue::new(HTTP_RESPONSE_STATUS_CODE, status_code as i64));
+
+    // Per semconv: set error.type to status code for error responses
+    if status_code >= 400 {
+        span.set_attribute(KeyValue::new(ERROR_TYPE, status_code.to_string()));
+    }
+
     span.set_status(status);
-    span.set_attribute(KeyValue::new(
-        HTTP_RESPONSE_STATUS_CODE,
-        response.status().as_u16() as i64,
-    ));
     span.end();
 }
 
 fn record_err<T: fmt::Debug>(err: T, cx: &Context) {
     let span = cx.span();
-    span.set_status(Status::error(format!("{err:?}")));
+    let error_msg = format!("{err:?}");
+    span.set_attribute(KeyValue::new(ERROR_TYPE, error_msg.clone()));
+    span.set_status(Status::error(error_msg));
     span.end();
 }
 

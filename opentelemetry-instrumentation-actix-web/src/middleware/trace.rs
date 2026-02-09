@@ -12,6 +12,7 @@ use opentelemetry::{
     trace::{FutureExt as OtelFutureExt, SpanKind, Status, TraceContextExt, Tracer},
     KeyValue,
 };
+use opentelemetry_semantic_conventions::attribute::ERROR_TYPE;
 use opentelemetry_semantic_conventions::trace::HTTP_RESPONSE_STATUS_CODE;
 
 use super::{get_scope, route_formatter::RouteFormatter};
@@ -196,11 +197,15 @@ where
             .map(move |res| match res {
                 Ok(ok_res) => {
                     let span = cx.span();
+                    let status_code = ok_res.status().as_u16();
                     span.set_attribute(KeyValue::new(
                         HTTP_RESPONSE_STATUS_CODE,
-                        ok_res.status().as_u16() as i64,
+                        status_code as i64,
                     ));
+                    // Per semconv: set error.type to status code for 4xx/5xx responses
+                    // For server spans, only 5xx is considered an error for span status
                     if ok_res.status().is_server_error() {
+                        span.set_attribute(KeyValue::new(ERROR_TYPE, status_code.to_string()));
                         span.set_status(Status::error(
                             ok_res
                                 .status()
@@ -208,13 +213,18 @@ where
                                 .map(ToString::to_string)
                                 .unwrap_or_default(),
                         ));
-                    };
+                    } else if ok_res.status().is_client_error() {
+                        // For 4xx, set error.type attribute but don't set span status to error
+                        span.set_attribute(KeyValue::new(ERROR_TYPE, status_code.to_string()));
+                    }
                     span.end();
                     Ok(ok_res)
                 }
                 Err(err) => {
                     let span = cx.span();
-                    span.set_status(Status::error(format!("{err:?}")));
+                    let error_msg = format!("{err:?}");
+                    span.set_attribute(KeyValue::new(ERROR_TYPE, error_msg.clone()));
+                    span.set_status(Status::error(error_msg));
                     span.end();
                     Err(err)
                 }
