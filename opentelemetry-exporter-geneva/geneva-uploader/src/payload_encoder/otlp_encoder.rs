@@ -94,6 +94,21 @@ impl OtlpEncoder {
         OtlpEncoder {}
     }
 
+    /// Check if an attribute has a supported value type for Bond encoding.
+    /// Used by both `determine_fields` (schema construction) and `write_*_row_data`
+    /// (row encoding) to ensure they filter attributes identically.
+    fn is_supported_attr(attr: &&opentelemetry_proto::tonic::common::v1::KeyValue) -> bool {
+        matches!(
+            attr.value.as_ref().and_then(|v| v.value.as_ref()),
+            Some(
+                Value::StringValue(_)
+                    | Value::IntValue(_)
+                    | Value::DoubleValue(_)
+                    | Value::BoolValue(_)
+            )
+        )
+    }
+
     /// Encode a batch of logs into a vector of (event_name, compressed_bytes, schema_ids, start_time_nanos, end_time_nanos)
     /// The returned `data` field contains LZ4 chunked compressed bytes.
     /// On compression failure, the error is returned (no logging, no fallback).
@@ -457,17 +472,16 @@ impl OtlpEncoder {
         }
 
         // Part C - Dynamic attributes
-        for attr in &log.attributes {
-            if let Some(val) = attr.value.as_ref().and_then(|v| v.value.as_ref()) {
-                let type_id = match val {
-                    Value::StringValue(_) => BondDataType::BT_STRING,
-                    Value::IntValue(_) => BondDataType::BT_INT64,
-                    Value::DoubleValue(_) => BondDataType::BT_DOUBLE,
-                    Value::BoolValue(_) => BondDataType::BT_BOOL,
-                    _ => continue,
-                };
-                fields.push((attr.key.clone().into(), type_id));
-            }
+        for attr in log.attributes.iter().filter(Self::is_supported_attr) {
+            let val = attr.value.as_ref().unwrap().value.as_ref().unwrap();
+            let type_id = match val {
+                Value::StringValue(_) => BondDataType::BT_STRING,
+                Value::IntValue(_) => BondDataType::BT_INT64,
+                Value::DoubleValue(_) => BondDataType::BT_DOUBLE,
+                Value::BoolValue(_) => BondDataType::BT_BOOL,
+                _ => unreachable!("is_supported_attr guarantees supported type"),
+            };
+            fields.push((attr.key.clone().into(), type_id));
         }
 
         // Convert to FieldDef with field IDs
@@ -533,17 +547,16 @@ impl OtlpEncoder {
         }
 
         // Part C - Dynamic attributes
-        for attr in &span.attributes {
-            if let Some(val) = attr.value.as_ref().and_then(|v| v.value.as_ref()) {
-                let type_id = match val {
-                    Value::StringValue(_) => BondDataType::BT_STRING,
-                    Value::IntValue(_) => BondDataType::BT_INT64,
-                    Value::DoubleValue(_) => BondDataType::BT_DOUBLE,
-                    Value::BoolValue(_) => BondDataType::BT_BOOL,
-                    _ => continue,
-                };
-                fields.push((attr.key.clone().into(), type_id));
-            }
+        for attr in span.attributes.iter().filter(Self::is_supported_attr) {
+            let val = attr.value.as_ref().unwrap().value.as_ref().unwrap();
+            let type_id = match val {
+                Value::StringValue(_) => BondDataType::BT_STRING,
+                Value::IntValue(_) => BondDataType::BT_INT64,
+                Value::DoubleValue(_) => BondDataType::BT_DOUBLE,
+                Value::BoolValue(_) => BondDataType::BT_BOOL,
+                _ => unreachable!("is_supported_attr guarantees supported type"),
+            };
+            fields.push((attr.key.clone().into(), type_id));
         }
 
         // Convert to FieldDef with field IDs
@@ -603,21 +616,8 @@ impl OtlpEncoder {
         // Pre-calculate timestamp (use start time as primary timestamp for both fields)
         let formatted_timestamp = Self::format_timestamp(span.start_time_unix_nano);
 
-        // Iterator over supported attributes for O(1) sequential lookup, matching determine_span_fields() order.
-        let mut attr_iter = span.attributes.iter().filter(|a| {
-            a.value
-                .as_ref()
-                .and_then(|v| v.value.as_ref())
-                .is_some_and(|v| {
-                    matches!(
-                        v,
-                        Value::StringValue(_)
-                            | Value::IntValue(_)
-                            | Value::DoubleValue(_)
-                            | Value::BoolValue(_)
-                    )
-                })
-        });
+        // Iterator over supported attributes for sequential lookup, matching determine_span_fields() order.
+        let mut attr_iter = span.attributes.iter().filter(Self::is_supported_attr);
 
         for field in fields {
             match field.name.as_ref() {
@@ -720,23 +720,8 @@ impl OtlpEncoder {
             Self::format_timestamp(timestamp_nanos)
         };
 
-        // Index into log.attributes for O(1) dynamic field lookup.
-        // determine_fields() appends only supported-type attributes in order, skipping unsupported
-        // types. We mirror that logic here by advancing past unsupported attributes.
-        let mut attr_iter = log.attributes.iter().filter(|a| {
-            a.value
-                .as_ref()
-                .and_then(|v| v.value.as_ref())
-                .is_some_and(|v| {
-                    matches!(
-                        v,
-                        Value::StringValue(_)
-                            | Value::IntValue(_)
-                            | Value::DoubleValue(_)
-                            | Value::BoolValue(_)
-                    )
-                })
-        });
+        // Iterator over supported attributes for sequential lookup, matching determine_fields() order.
+        let mut attr_iter = log.attributes.iter().filter(Self::is_supported_attr);
 
         for field in sorted_fields {
             match field.name.as_ref() {
