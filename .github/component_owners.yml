@@ -1,0 +1,66 @@
+# Component Owners
+#
+# This file is used by .github/workflows/assign-reviewers.yml
+#
+# Each component identified by its path prefix has a list of users
+# who are responsible for that component. When a PR modifies files
+# matching a component's path, the listed users will be automatically
+# assigned as reviewers.
+#
+# Component owners are responsible for:
+#   - Reviewing and responding to issues and PRs for their components
+#   - Maintaining the component and keeping it up to date with the core SDK
+#   - Ensuring the component follows best practices and conventions
+#
+# To become a component owner, please read CONTRIBUTING.md and open a PR
+# adding yourself to this file for the relevant component(s).
+
+components:
+  opentelemetry-aws/:
+    - jj22ee
+
+  opentelemetry-config/:
+    - andborja
+
+  # opentelemetry-contrib/:
+  #   # TBD - seeking owners
+
+  opentelemetry-datadog/:
+    - gruebel
+
+  opentelemetry-etw-logs/:
+    - cijothomas
+    - lalitb
+
+  opentelemetry-etw-metrics/:
+    - cijothomas
+    - lalitb
+    - mattbodd
+    - psandana
+
+  # opentelemetry-exporter-geneva/:
+  #   # TBD - seeking owners
+
+  # opentelemetry-instrumentation-actix-web/:
+  #   # TBD - seeking owners
+
+  opentelemetry-instrumentation-tower/:
+    - francoposa
+
+  opentelemetry-resource-detectors/:
+    - gruebel
+
+  # opentelemetry-stackdriver/:
+  #   # TBD - seeking owners
+
+  opentelemetry-user-events-logs/:
+    - cijothomas
+    - lalitb
+
+  opentelemetry-user-events-metrics/:
+    - cijothomas
+    - lalitb
+
+  opentelemetry-user-events-trace/:
+    - cijothomas
+    - lalitb

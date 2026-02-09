@@ -4,6 +4,11 @@
 
 [splash]: https://raw.githubusercontent.com/open-telemetry/opentelemetry-rust/main/assets/logo-text.png
 
+| Status        |           |
+| ------------- |-----------|
+| Stability     | alpha     |
+| Owners        | TBD       |
+
 This crate provides an `opentelemetry` exporter for use with Google Stackdriver trace. It uses gRPC to send tracing spans.
 Contributions are welcome.
 

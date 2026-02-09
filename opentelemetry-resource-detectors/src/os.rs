@@ -26,7 +26,6 @@ impl ResourceDetector for OsResourceDetector {
     }
 }
 
-#[cfg(target_os = "linux")]
 #[cfg(test)]
 mod tests {
     use super::OsResourceDetector;
@@ -37,11 +36,21 @@ mod tests {
     fn test_os_resource_detector() {
         let resource = OsResourceDetector.detect();
         assert_eq!(resource.len(), 1);
+
+        #[cfg(target_os = "linux")]
+        let expected_os = "linux";
+
+        #[cfg(target_os = "windows")]
+        let expected_os = "windows";
+
+        #[cfg(target_os = "macos")]
+        let expected_os = "macos";
+
         assert_eq!(
             resource.get(&Key::from_static_str(
                 opentelemetry_semantic_conventions::attribute::OS_TYPE
             )),
-            Some(Value::from("linux"))
+            Some(Value::from(expected_os))
         )
     }
 }
