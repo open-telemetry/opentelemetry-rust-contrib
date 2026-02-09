@@ -109,6 +109,25 @@ impl OtlpEncoder {
         )
     }
 
+    /// Append supported dynamic attributes to the schema fields list.
+    /// Used by both `determine_fields` and `determine_span_fields`.
+    fn push_dynamic_attr_fields(
+        attributes: &[opentelemetry_proto::tonic::common::v1::KeyValue],
+        fields: &mut Vec<(Cow<'static, str>, BondDataType)>,
+    ) {
+        for attr in attributes.iter().filter(Self::is_supported_attr) {
+            let val = attr.value.as_ref().unwrap().value.as_ref().unwrap();
+            let type_id = match val {
+                Value::StringValue(_) => BondDataType::BT_STRING,
+                Value::IntValue(_) => BondDataType::BT_INT64,
+                Value::DoubleValue(_) => BondDataType::BT_DOUBLE,
+                Value::BoolValue(_) => BondDataType::BT_BOOL,
+                _ => unreachable!("is_supported_attr guarantees supported type"),
+            };
+            fields.push((attr.key.clone().into(), type_id));
+        }
+    }
+
     /// Encode a batch of logs into a vector of (event_name, compressed_bytes, schema_ids, start_time_nanos, end_time_nanos)
     /// The returned `data` field contains LZ4 chunked compressed bytes.
     /// On compression failure, the error is returned (no logging, no fallback).
@@ -472,17 +491,7 @@ impl OtlpEncoder {
         }
 
         // Part C - Dynamic attributes
-        for attr in log.attributes.iter().filter(Self::is_supported_attr) {
-            let val = attr.value.as_ref().unwrap().value.as_ref().unwrap();
-            let type_id = match val {
-                Value::StringValue(_) => BondDataType::BT_STRING,
-                Value::IntValue(_) => BondDataType::BT_INT64,
-                Value::DoubleValue(_) => BondDataType::BT_DOUBLE,
-                Value::BoolValue(_) => BondDataType::BT_BOOL,
-                _ => unreachable!("is_supported_attr guarantees supported type"),
-            };
-            fields.push((attr.key.clone().into(), type_id));
-        }
+        Self::push_dynamic_attr_fields(&log.attributes, &mut fields);
 
         // Convert to FieldDef with field IDs
         fields
@@ -547,17 +556,7 @@ impl OtlpEncoder {
         }
 
         // Part C - Dynamic attributes
-        for attr in span.attributes.iter().filter(Self::is_supported_attr) {
-            let val = attr.value.as_ref().unwrap().value.as_ref().unwrap();
-            let type_id = match val {
-                Value::StringValue(_) => BondDataType::BT_STRING,
-                Value::IntValue(_) => BondDataType::BT_INT64,
-                Value::DoubleValue(_) => BondDataType::BT_DOUBLE,
-                Value::BoolValue(_) => BondDataType::BT_BOOL,
-                _ => unreachable!("is_supported_attr guarantees supported type"),
-            };
-            fields.push((attr.key.clone().into(), type_id));
-        }
+        Self::push_dynamic_attr_fields(&span.attributes, &mut fields);
 
         // Convert to FieldDef with field IDs
         fields
