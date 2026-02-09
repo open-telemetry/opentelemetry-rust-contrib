@@ -207,7 +207,7 @@ impl CentralBlob {
         // EVENTS (type 2)
         for event in &self.events {
             debug_assert!(
-                self.events.first().map_or(true, |first| Arc::ptr_eq(
+                self.events.first().is_none_or(|first| Arc::ptr_eq(
                     &first.event_name,
                     &event.event_name
                 )),
