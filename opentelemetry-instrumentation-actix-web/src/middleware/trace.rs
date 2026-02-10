@@ -180,7 +180,10 @@ where
             http_route = formatter.format(&http_route).into();
         }
 
-        let mut builder = self.tracer.span_builder(http_route.clone());
+        // Span name follows semconv: "{method} {target}" where target is http.route
+        let http_method = req.method().as_str();
+        let span_name = format!("{} {}", http_method, http_route);
+        let mut builder = self.tracer.span_builder(span_name);
         builder.span_kind = Some(SpanKind::Server);
         builder.attributes = Some(trace_attributes_from_request(&req, &http_route));
 
