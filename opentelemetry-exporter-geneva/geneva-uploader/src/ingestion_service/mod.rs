@@ -51,6 +51,8 @@ mod tests {
                 source_identity,
                 environment: environment.clone(),
                 config_version,
+                onbehalf_identity: None,
+                onbehalf_annotations: None,
             };
 
             let config = GenevaConfigClientConfig {

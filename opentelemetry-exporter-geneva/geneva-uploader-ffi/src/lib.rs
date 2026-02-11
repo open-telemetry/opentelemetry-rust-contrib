@@ -511,6 +511,8 @@ pub unsafe extern "C" fn geneva_client_new(
         role_name,
         role_instance,
         msi_resource,
+        onbehalf_identity: None,
+        onbehalf_annotations: None,
     };
 
     // Create client
@@ -1203,6 +1205,8 @@ mod tests {
             role_name: "testrole".to_string(),
             role_instance: "testinstance".to_string(),
             msi_resource: None,
+            onbehalf_identity: None,
+            onbehalf_annotations: None,
         };
         let client = GenevaClient::new(cfg).expect("failed to create GenevaClient with MockAuth");
 
@@ -1317,6 +1321,8 @@ mod tests {
             role_name: "testrole".to_string(),
             role_instance: "testinstance".to_string(),
             msi_resource: None,
+            onbehalf_identity: None,
+            onbehalf_annotations: None,
         };
         let client = GenevaClient::new(cfg).expect("failed to create GenevaClient with MockAuth");
 

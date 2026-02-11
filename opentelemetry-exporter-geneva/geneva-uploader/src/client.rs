@@ -34,7 +34,14 @@ pub struct GenevaClientConfig {
     pub role_name: String,
     pub role_instance: String,
     pub msi_resource: Option<String>, // Required for Managed Identity variants
-                                      // Add event name/version here if constant, or per-upload if you want them per call.
+    // Add event name/version here if constant, or per-upload if you want them per call.
+    /// On Behalf Of identity — a resource provider name (e.g., "Microsoft.HybridCompute").
+    /// When set, the `onbehalfid` query parameter is appended to the GIG upload URI.
+    pub onbehalf_identity: Option<String>,
+    /// On Behalf Of annotations — an XML config string
+    /// (e.g., `<Config onBehalfFields="resourceId,category" .../>`).
+    /// When set, the `onbehalfannotations` query parameter is appended (URL-encoded) to the GIG upload URI.
+    pub onbehalf_annotations: Option<String>,
 }
 
 /// Main user-facing client for Geneva ingestion.
@@ -122,6 +129,8 @@ impl GenevaClient {
             source_identity,
             environment: metadata_fields.env_name.clone(),
             config_version: metadata_fields.event_version.clone(),
+            onbehalf_identity: cfg.onbehalf_identity,
+            onbehalf_annotations: cfg.onbehalf_annotations,
         };
 
         let uploader =

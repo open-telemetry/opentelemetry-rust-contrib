@@ -1,5 +1,10 @@
 # Changelog
 
+## [Unreleased]
+
+### Changed
+- Updated `GenevaClientConfig` with optional `onbehalf_identity` and `onbehalf_annotations` fields (OBO support)
+
 ## [0.4.0] - 2025-11-12
 
 ### Changed
