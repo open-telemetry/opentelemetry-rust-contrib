@@ -392,3 +392,285 @@ mod tests {
         );
     }
 }
+
+/// Metrics tests using InMemoryMetricExporter
+#[cfg(test)]
+#[cfg(feature = "metrics")]
+mod metrics_tests {
+    use actix_web::{test, web, App, HttpResponse};
+    use opentelemetry::global;
+    use opentelemetry_sdk::metrics::data::{AggregatedMetrics, MetricData};
+    use opentelemetry_sdk::metrics::{InMemoryMetricExporter, PeriodicReader, SdkMeterProvider};
+    use serial_test::serial;
+    use std::time::Duration;
+
+    use super::metrics::RequestMetrics;
+
+    /// Helper to set up a meter provider with in-memory exporter for testing
+    fn setup_test_meter() -> (SdkMeterProvider, InMemoryMetricExporter) {
+        let exporter = InMemoryMetricExporter::default();
+        // Use a very large interval to ensure metrics are only exported via force_flush
+        let reader = PeriodicReader::builder(exporter.clone())
+            .with_interval(Duration::from_secs(3600))
+            .build();
+        let provider = SdkMeterProvider::builder().with_reader(reader).build();
+        global::set_meter_provider(provider.clone());
+        (provider, exporter)
+    }
+
+    async fn index_handler() -> HttpResponse {
+        HttpResponse::Ok().body("Hello, World!")
+    }
+
+    async fn error_handler() -> HttpResponse {
+        HttpResponse::InternalServerError().body("Error")
+    }
+
+    /// Test that metrics middleware emits http.server.request.duration metric with correct attributes.
+    #[actix_web::test]
+    #[serial]
+    async fn test_request_duration_metric_emitted() {
+        let (provider, exporter) = setup_test_meter();
+
+        let app = test::init_service(
+            App::new()
+                .wrap(RequestMetrics::default())
+                .route("/api/test", web::get().to(index_handler)),
+        )
+        .await;
+
+        let req = test::TestRequest::get().uri("/api/test").to_request();
+        let resp = test::call_service(&app, req).await;
+        assert!(resp.status().is_success());
+
+        // Force flush metrics
+        provider.force_flush().unwrap();
+
+        let metrics = exporter.get_finished_metrics().unwrap();
+        assert!(!metrics.is_empty(), "Should have exported metrics");
+
+        let resource_metrics = &metrics[0];
+        let scope_metrics = resource_metrics
+            .scope_metrics()
+            .find(|sm| sm.scope().name() == "opentelemetry-instrumentation-actix-web");
+
+        assert!(scope_metrics.is_some(), "Should have scope metrics");
+        let scope_metrics = scope_metrics.unwrap();
+
+        // Check http.server.request.duration metric exists
+        let duration_metric = scope_metrics
+            .metrics()
+            .find(|m| m.name() == "http.server.request.duration");
+        assert!(
+            duration_metric.is_some(),
+            "http.server.request.duration metric should exist"
+        );
+
+        let duration_metric = duration_metric.unwrap();
+        if let AggregatedMetrics::F64(MetricData::Histogram(histogram)) = duration_metric.data() {
+            let data_point = histogram.data_points().next();
+            assert!(data_point.is_some(), "Should have data point");
+
+            let data_point = data_point.unwrap();
+            let attributes: Vec<_> = data_point.attributes().collect();
+
+            // Check required attributes are present
+            let has_method = attributes
+                .iter()
+                .any(|kv| kv.key.as_str() == "http.request.method");
+            let has_route = attributes.iter().any(|kv| kv.key.as_str() == "http.route");
+            let has_status_code = attributes
+                .iter()
+                .any(|kv| kv.key.as_str() == "http.response.status_code");
+            let has_url_scheme = attributes.iter().any(|kv| kv.key.as_str() == "url.scheme");
+
+            assert!(has_method, "Should have http.request.method attribute");
+            assert!(has_route, "Should have http.route attribute");
+            assert!(
+                has_status_code,
+                "Should have http.response.status_code attribute"
+            );
+            assert!(has_url_scheme, "Should have url.scheme attribute");
+
+            // Verify attribute values
+            let method_attr = attributes
+                .iter()
+                .find(|kv| kv.key.as_str() == "http.request.method")
+                .unwrap();
+            assert_eq!(method_attr.value.as_str(), "GET");
+
+            let route_attr = attributes
+                .iter()
+                .find(|kv| kv.key.as_str() == "http.route")
+                .unwrap();
+            assert_eq!(route_attr.value.as_str(), "/api/test");
+
+            let status_attr = attributes
+                .iter()
+                .find(|kv| kv.key.as_str() == "http.response.status_code")
+                .unwrap();
+            if let opentelemetry::Value::I64(code) = &status_attr.value {
+                assert_eq!(*code, 200);
+            } else {
+                panic!("Expected i64 status code");
+            }
+        } else {
+            panic!("Expected histogram data for duration metric");
+        }
+    }
+
+    /// Test that 5xx responses add error.type attribute to metrics.
+    #[actix_web::test]
+    #[serial]
+    async fn test_5xx_adds_error_type_to_metrics() {
+        let (provider, exporter) = setup_test_meter();
+
+        let app = test::init_service(
+            App::new()
+                .wrap(RequestMetrics::default())
+                .route("/error", web::get().to(error_handler)),
+        )
+        .await;
+
+        let req = test::TestRequest::get().uri("/error").to_request();
+        let resp = test::call_service(&app, req).await;
+        assert!(resp.status().is_server_error());
+
+        // Force flush metrics
+        provider.force_flush().unwrap();
+
+        let metrics = exporter.get_finished_metrics().unwrap();
+        assert!(!metrics.is_empty(), "Should have exported metrics");
+
+        let resource_metrics = &metrics[0];
+        let scope_metrics = resource_metrics
+            .scope_metrics()
+            .find(|sm| sm.scope().name() == "opentelemetry-instrumentation-actix-web");
+
+        assert!(scope_metrics.is_some(), "Should have scope metrics");
+        let scope_metrics = scope_metrics.unwrap();
+
+        let duration_metric = scope_metrics
+            .metrics()
+            .find(|m| m.name() == "http.server.request.duration");
+        assert!(duration_metric.is_some(), "Duration metric should exist");
+
+        let duration_metric = duration_metric.unwrap();
+        if let AggregatedMetrics::F64(MetricData::Histogram(histogram)) = duration_metric.data() {
+            let data_point = histogram.data_points().next().unwrap();
+            let attributes: Vec<_> = data_point.attributes().collect();
+
+            // Check error.type attribute is present for 5xx
+            let error_type_attr = attributes.iter().find(|kv| kv.key.as_str() == "error.type");
+            assert!(
+                error_type_attr.is_some(),
+                "error.type attribute should be present for 5xx"
+            );
+            assert_eq!(error_type_attr.unwrap().value.as_str(), "500");
+
+            // Verify status code is 500
+            let status_attr = attributes
+                .iter()
+                .find(|kv| kv.key.as_str() == "http.response.status_code")
+                .unwrap();
+            if let opentelemetry::Value::I64(code) = &status_attr.value {
+                assert_eq!(*code, 500);
+            } else {
+                panic!("Expected i64 status code");
+            }
+        } else {
+            panic!("Expected histogram data");
+        }
+    }
+
+    /// Test that body size metrics are emitted.
+    #[actix_web::test]
+    #[serial]
+    async fn test_body_size_metrics_emitted() {
+        let (provider, exporter) = setup_test_meter();
+
+        let app = test::init_service(
+            App::new()
+                .wrap(RequestMetrics::default())
+                .route("/", web::get().to(index_handler)),
+        )
+        .await;
+
+        let req = test::TestRequest::get().uri("/").to_request();
+        let resp = test::call_service(&app, req).await;
+        assert!(resp.status().is_success());
+
+        // Force flush metrics
+        provider.force_flush().unwrap();
+
+        let metrics = exporter.get_finished_metrics().unwrap();
+        assert!(!metrics.is_empty(), "Should have exported metrics");
+
+        let resource_metrics = &metrics[0];
+        let scope_metrics = resource_metrics
+            .scope_metrics()
+            .find(|sm| sm.scope().name() == "opentelemetry-instrumentation-actix-web");
+
+        assert!(scope_metrics.is_some(), "Should have scope metrics");
+        let scope_metrics = scope_metrics.unwrap();
+
+        // Collect all metric names
+        let metric_names: Vec<&str> = scope_metrics.metrics().map(|m| m.name()).collect();
+
+        // Check that response body size metric exists
+        assert!(
+            metric_names.contains(&"http.server.response.body.size"),
+            "http.server.response.body.size metric should exist. Found: {:?}",
+            metric_names
+        );
+    }
+
+    /// Test that all expected metrics are emitted with correct names.
+    #[actix_web::test]
+    #[serial]
+    async fn test_all_expected_metrics_emitted() {
+        let (provider, exporter) = setup_test_meter();
+
+        let app = test::init_service(
+            App::new()
+                .wrap(RequestMetrics::default())
+                .route("/", web::get().to(index_handler)),
+        )
+        .await;
+
+        let req = test::TestRequest::get()
+            .uri("/")
+            .insert_header(("Content-Length", "100"))
+            .to_request();
+        let resp = test::call_service(&app, req).await;
+        assert!(resp.status().is_success());
+
+        // Force flush metrics
+        provider.force_flush().unwrap();
+
+        let metrics = exporter.get_finished_metrics().unwrap();
+        assert!(!metrics.is_empty(), "Should have exported metrics");
+
+        let resource_metrics = &metrics[0];
+        let scope_metrics = resource_metrics
+            .scope_metrics()
+            .find(|sm| sm.scope().name() == "opentelemetry-instrumentation-actix-web");
+
+        assert!(scope_metrics.is_some(), "Should have scope metrics");
+        let scope_metrics = scope_metrics.unwrap();
+
+        let metric_names: Vec<&str> = scope_metrics.metrics().map(|m| m.name()).collect();
+
+        // These are the metrics that should be emitted per HTTP semantic conventions
+        assert!(
+            metric_names.contains(&"http.server.request.duration"),
+            "Should emit http.server.request.duration"
+        );
+        assert!(
+            metric_names.contains(&"http.server.response.body.size"),
+            "Should emit http.server.response.body.size"
+        );
+        // Note: http.server.request.body.size is only emitted when Content-Length > 0
+        // and http.server.active_requests is an UpDownCounter (may not show in histogram exports)
+    }
+}

@@ -4,6 +4,10 @@
 
 ### Breaking Changes
 
+* **`metrics` feature is now enabled by default**: The `metrics` feature is now
+  part of the default features. Use `default-features = false` if you only need
+  tracing without metrics.
+
 * **Span name updated to follow HTTP semantic conventions**: Span names now use
   the format `{method} {route}` (e.g., `GET /users/{id}`) instead of just the
   route. This aligns with the stable HTTP semantic conventions specification.
