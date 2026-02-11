@@ -43,8 +43,11 @@ opentelemetry-instrumentation-actix-web = { path = ".", features = [
 ] }
 opentelemetry_sdk = { workspace = true, features = [
   "metrics",
+  "trace",
+  "testing",
 ] }
 opentelemetry-stdout = { workspace = true, features = ["trace", "metrics"] }
+serial_test = "3"
 
 [package.metadata.docs.rs]
 all-features = true
