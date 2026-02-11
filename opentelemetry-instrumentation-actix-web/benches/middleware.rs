@@ -11,10 +11,9 @@
 //! ## Scenarios
 //!
 //! - **Baseline**: No middleware (control measurement)
-//! - **Tracing only**: `RequestTracing` with no-op processor (with `sync-middleware`)
-//! - **Tracing (no sync)**: `RequestTracing` without `sync-middleware` feature
-//! - **Metrics only**: `RequestMetrics` with in-memory exporter  
-//! - **Both**: Tracing + Metrics combined
+//! - **Tracing (sync)**: `RequestTracing` with `sync-middleware` feature
+//! - **Tracing (no-sync)**: `RequestTracing` without `sync-middleware` feature
+//! - **Tracing + Metrics**: Both middlewares combined
 //!
 //! ## Feature: `sync-middleware`
 //!
@@ -39,7 +38,6 @@
 //! | Baseline                    | ~600 ns   | -                    |
 //! | Tracing (sync)              | ~1.29 µs  | +~690 ns             |
 //! | Tracing (no-sync)           | ~1.26 µs  | +~660 ns             |
-//! | Metrics only                | ~1.65 µs  | +~1.05 µs            |
 //! | Tracing (sync) + Metrics    | ~2.24 µs  | +~1.64 µs            |
 //! | Tracing (no-sync) + Metrics | ~2.24 µs  | +~1.64 µs            |
 
@@ -130,29 +128,7 @@ fn benchmark_middleware(c: &mut Criterion) {
         });
     });
 
-    // Scenario 3: Metrics only
-    group.bench_function(BenchmarkId::new("request", "metrics-only"), |b| {
-        b.to_async(&rt).iter_custom(|iters| async move {
-            let (_provider, _exporter) = setup_meter();
-
-            let app = test::init_service(
-                App::new()
-                    .wrap(RequestMetrics::default())
-                    .route("/users/{id}", web::get().to(user_handler)),
-            )
-            .await;
-
-            let start = std::time::Instant::now();
-            for _ in 0..iters {
-                let req = test::TestRequest::get().uri("/users/123").to_request();
-                let resp = test::call_service(&app, req).await;
-                black_box(resp);
-            }
-            start.elapsed()
-        });
-    });
-
-    // Scenario 4: Both tracing + metrics (sync-middleware status matches tracing scenario)
+    // Scenario 3: Both tracing + metrics (sync-middleware status matches tracing scenario)
     #[cfg(feature = "sync-middleware")]
     let combined_label = "tracing-sync+metrics";
     #[cfg(not(feature = "sync-middleware"))]
