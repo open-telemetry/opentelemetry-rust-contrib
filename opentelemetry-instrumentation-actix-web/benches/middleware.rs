@@ -27,10 +27,10 @@
 //!
 //! ```sh
 //! # Run 1: Without sync-middleware (tracing-no-sync results)
-//! cargo bench --bench middleware --features "metrics"
+//! cargo bench --bench middleware
 //!
 //! # Run 2: With sync-middleware (tracing-sync results)
-//! cargo bench --bench middleware --features "metrics,sync-middleware"
+//! cargo bench --bench middleware --features "sync-middleware"
 //! ```
 //!
 //! ## Results (Apple M4 Pro)
