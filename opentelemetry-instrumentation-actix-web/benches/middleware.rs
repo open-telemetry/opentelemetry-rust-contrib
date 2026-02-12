@@ -11,9 +11,11 @@
 //! ## Scenarios
 //!
 //! - **Baseline**: No middleware (control measurement)
-//! - **Tracing (sync)**: `RequestTracing` with `sync-middleware` feature
-//! - **Tracing (no-sync)**: `RequestTracing` without `sync-middleware` feature
+//! - **Tracing**: `RequestTracing` with no-op processor (all spans sampled)
+//! - **Tracing (sampled-out)**: Same, but with `AlwaysOff` sampler (all spans dropped)
 //! - **Tracing + Metrics**: Both middlewares combined
+//!
+//! Each tracing scenario runs with and without `sync-middleware` feature.
 //!
 //! ## Feature: `sync-middleware`
 //!
@@ -35,13 +37,15 @@
 //!
 //! ## Results (Apple M4 Pro)
 //!
-//! | Scenario                    | Latency   | Overhead vs Baseline |
-//! |-----------------------------|-----------|----------------------|
-//! | Baseline                    | ~610 ns   | -                    |
-//! | Tracing (sync)              | ~1.32 µs  | +~710 ns             |
-//! | Tracing (no-sync)           | ~1.38 µs  | +~770 ns             |
-//! | Tracing (sync) + Metrics    | ~2.23 µs  | +~1.62 µs            |
-//! | Tracing (no-sync) + Metrics | ~2.45 µs  | +~1.84 µs            |
+//! | Scenario                                | Latency   | Overhead vs Baseline |
+//! |-----------------------------------------|-----------|----------------------|
+//! | Baseline                                | ~620 ns   | -                    |
+//! | Tracing (sync)                          | ~1.37 µs  | +~750 ns             |
+//! | Tracing (no-sync)                       | ~1.33 µs  | +~710 ns             |
+//! | Tracing (sync, sampled-out)             | ~1.29 µs  | +~670 ns             |
+//! | Tracing (no-sync, sampled-out)          | ~1.27 µs  | +~650 ns             |
+//! | Tracing (sync) + Metrics               | ~2.31 µs  | +~1.69 µs            |
+//! | Tracing (no-sync) + Metrics            | ~2.32 µs  | +~1.70 µs            |
 
 use actix_web::{test, web, App, HttpResponse};
 use criterion::{criterion_group, criterion_main, BenchmarkId, Criterion, Throughput};
@@ -49,7 +53,7 @@ use opentelemetry::global;
 use opentelemetry_instrumentation_actix_web::{RequestMetrics, RequestTracing};
 use opentelemetry_sdk::{
     metrics::{InMemoryMetricExporter, PeriodicReader, SdkMeterProvider},
-    trace::SdkTracerProvider,
+    trace::{Sampler, SdkTracerProvider},
 };
 use std::hint::black_box;
 use std::time::Duration;
@@ -63,6 +67,16 @@ async fn user_handler(path: web::Path<u32>) -> HttpResponse {
 fn setup_tracer() -> SdkTracerProvider {
     // No exporter = no-op processing, just measures instrumentation overhead
     let provider = SdkTracerProvider::builder().build();
+    global::set_tracer_provider(provider.clone());
+    provider
+}
+
+/// Setup tracer provider with AlwaysOff sampler (all spans are dropped).
+/// This measures the overhead of the non-sampled code path.
+fn setup_sampled_out_tracer() -> SdkTracerProvider {
+    let provider = SdkTracerProvider::builder()
+        .with_sampler(Sampler::AlwaysOff)
+        .build();
     global::set_tracer_provider(provider.clone());
     provider
 }
@@ -130,7 +144,34 @@ fn benchmark_middleware(c: &mut Criterion) {
         });
     });
 
-    // Scenario 3: Both tracing + metrics (sync-middleware status matches tracing scenario)
+    // Scenario 3: Tracing with 99% sampling drop (measures non-sampled path overhead)
+    #[cfg(feature = "sync-middleware")]
+    let sampled_out_label = "tracing-sync-sampled-out";
+    #[cfg(not(feature = "sync-middleware"))]
+    let sampled_out_label = "tracing-no-sync-sampled-out";
+
+    group.bench_function(BenchmarkId::new("request", sampled_out_label), |b| {
+        b.to_async(&rt).iter_custom(|iters| async move {
+            let _provider = setup_sampled_out_tracer();
+
+            let app = test::init_service(
+                App::new()
+                    .wrap(RequestTracing::new())
+                    .route("/users/{id}", web::get().to(user_handler)),
+            )
+            .await;
+
+            let start = std::time::Instant::now();
+            for _ in 0..iters {
+                let req = test::TestRequest::get().uri("/users/123").to_request();
+                let resp = test::call_service(&app, req).await;
+                black_box(resp);
+            }
+            start.elapsed()
+        });
+    });
+
+    // Scenario 4: Both tracing + metrics (sync-middleware status matches tracing scenario)
     #[cfg(feature = "sync-middleware")]
     let combined_label = "tracing-sync+metrics";
     #[cfg(not(feature = "sync-middleware"))]
