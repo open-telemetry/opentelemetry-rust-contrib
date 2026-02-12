@@ -23,23 +23,25 @@
 //!
 //! ## Run
 //!
-//! ```sh
-//! # With sync-middleware:
-//! cargo bench --bench middleware --features "metrics,sync-middleware"
+//! Two runs are needed to populate all results (sync vs no-sync variants):
 //!
-//! # Without sync-middleware:
+//! ```sh
+//! # Run 1: Without sync-middleware (tracing-no-sync results)
 //! cargo bench --bench middleware --features "metrics"
+//!
+//! # Run 2: With sync-middleware (tracing-sync results)
+//! cargo bench --bench middleware --features "metrics,sync-middleware"
 //! ```
 //!
-//! ## Results (Apple M1 Pro)
+//! ## Results (Apple M4 Pro)
 //!
 //! | Scenario                    | Latency   | Overhead vs Baseline |
 //! |-----------------------------|-----------|----------------------|
-//! | Baseline                    | ~600 ns   | -                    |
-//! | Tracing (sync)              | ~1.29 µs  | +~690 ns             |
-//! | Tracing (no-sync)           | ~1.26 µs  | +~660 ns             |
-//! | Tracing (sync) + Metrics    | ~2.24 µs  | +~1.64 µs            |
-//! | Tracing (no-sync) + Metrics | ~2.24 µs  | +~1.64 µs            |
+//! | Baseline                    | ~610 ns   | -                    |
+//! | Tracing (sync)              | ~1.32 µs  | +~710 ns             |
+//! | Tracing (no-sync)           | ~1.38 µs  | +~770 ns             |
+//! | Tracing (sync) + Metrics    | ~2.23 µs  | +~1.62 µs            |
+//! | Tracing (no-sync) + Metrics | ~2.45 µs  | +~1.84 µs            |
 
 use actix_web::{test, web, App, HttpResponse};
 use criterion::{criterion_group, criterion_main, BenchmarkId, Criterion, Throughput};
