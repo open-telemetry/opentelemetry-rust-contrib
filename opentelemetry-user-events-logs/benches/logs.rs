@@ -5,7 +5,7 @@
     Hardware: <Hardware specifications>
     Total Number of Cores: <number>
     (Environment details)
-    
+
     // When no listener (automatically set by benchmark)
     | Test                              | Average time |
     |-----------------------------------|--------------|
@@ -42,14 +42,14 @@ use tracing_subscriber::Registry;
 fn set_user_events_listener(enabled: bool) -> bool {
     let enable_path = "/sys/kernel/debug/tracing/events/user_events/myprovider_L2K1/enable";
     let value = if enabled { "1" } else { "0" };
-    
+
     // First try direct write (if we have permissions)
     if let Ok(mut file) = fs::OpenOptions::new().write(true).open(enable_path) {
         if file.write_all(value.as_bytes()).is_ok() {
             return true;
         }
     }
-    
+
     // Fallback to using sudo with echo command
     let output = Command::new("sudo")
         .args(["tee", enable_path])
@@ -63,7 +63,7 @@ fn set_user_events_listener(enabled: bool) -> bool {
             }
             child.wait()
         });
-    
+
     match output {
         Ok(status) => status.success(),
         Err(_) => false,
@@ -113,25 +113,24 @@ fn emit_log_event(attribute_count: u8) {
 
 fn benchmark_user_events(c: &mut Criterion) {
     let mut group = c.benchmark_group("User_Events");
-    
+
     let provider = setup_provider();
     let ot_layer = tracing_layer::OpenTelemetryTracingBridge::new(&provider);
     let subscriber = Registry::default().with(ot_layer);
 
     tracing::subscriber::with_default(subscriber, || {
         // Test configurations: (attribute_count, listener_enabled)
-        let test_configs = [
-            (4, false),
-            (4, true),
-            (6, false),
-            (6, true),
-        ];
+        let test_configs = [(4, false), (4, true), (6, false), (6, true)];
 
         for (attribute_count, listener_enabled) in test_configs {
             let test_name = format!(
                 "{}_Attributes_{}",
                 attribute_count,
-                if listener_enabled { "Enabled" } else { "Disabled" }
+                if listener_enabled {
+                    "Enabled"
+                } else {
+                    "Disabled"
+                }
             );
 
             set_user_events_listener(listener_enabled);
@@ -143,7 +142,7 @@ fn benchmark_user_events(c: &mut Criterion) {
         // Cleanup: disable listener
         set_user_events_listener(false);
     });
-    
+
     group.finish();
 }
 
