@@ -1,6 +1,7 @@
 [workspace]
 members = [
     "opentelemetry-aws",
+    "opentelemetry-config",
     "opentelemetry-contrib",
     "opentelemetry-datadog",
     "opentelemetry-etw-logs",
@@ -34,7 +35,7 @@ opentelemetry-appender-tracing = "0.31"
 opentelemetry-http = "0.31"
 opentelemetry-proto = { version = "0.31", default-features = false }
 opentelemetry_sdk = { version = "0.31", default-features = false }
-opentelemetry-stdout = "0.31"
+opentelemetry-stdout = { version = "0.31", default-features = false }
 opentelemetry-semantic-conventions = { version = "0.31", features = [
     "semconv_experimental",
 ] }

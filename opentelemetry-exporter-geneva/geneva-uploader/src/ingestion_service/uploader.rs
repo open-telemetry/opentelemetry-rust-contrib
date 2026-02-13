@@ -9,6 +9,7 @@ use std::fmt::Write;
 use std::sync::Arc;
 use std::time::Duration;
 use thiserror::Error;
+use tracing::debug;
 use url::form_urlencoded::byte_serialize;
 use uuid::Uuid;
 
@@ -162,6 +163,7 @@ impl GenevaUploader {
         data_size: usize,
         event_name: &str,
         metadata: &BatchMetadata,
+        row_count: usize,
     ) -> Result<String> {
         // Get already formatted schema IDs and format timestamps using BatchMetadata methods
         let schema_ids = &metadata.schema_ids;
@@ -180,7 +182,7 @@ impl GenevaUploader {
 
         // Create the query string
         let mut query = String::with_capacity(512); // Preallocate enough space for the query string (decided based on expected size)
-        write!(&mut query, "api/v1/ingestion/ingest?endpoint={}&moniker={}&namespace={}&event={}&version={}&sourceUniqueId={}&sourceIdentity={}&startTime={}&endTime={}&format=centralbond/lz4hc&dataSize={}&minLevel={}&schemaIds={}",
+        write!(&mut query, "api/v1/ingestion/ingest?endpoint={}&moniker={}&namespace={}&event={}&version={}&sourceUniqueId={}&sourceIdentity={}&startTime={}&endTime={}&format=centralbond/lz4hc&dataSize={}&minLevel={}&schemaIds={}&rowCount={}",
             encoded_monitoring_endpoint,
             moniker,
             self.config.namespace,
@@ -192,7 +194,8 @@ impl GenevaUploader {
             end_time_str,
             data_size,
             2,
-            schema_ids
+            schema_ids,
+            row_count
         ).map_err(|e| GenevaUploaderError::InternalError(format!("Failed to write query string: {e}")))?;
         Ok(query)
     }
@@ -204,6 +207,7 @@ impl GenevaUploader {
     /// * `event_name` - Name of the event
     /// * `event_version` - Version of the event
     /// * `metadata` - Batch metadata containing timestamps and schema information
+    /// * `row_count` - Number of rows/events in the batch
     ///
     /// # Returns
     /// * `Result<IngestionResponse>` - The response containing the ticket ID or an error
@@ -213,7 +217,16 @@ impl GenevaUploader {
         data: Vec<u8>,
         event_name: &str,
         metadata: &BatchMetadata,
+        row_count: usize,
     ) -> Result<IngestionResponse> {
+        debug!(
+            name: "uploader.upload",
+            target: "geneva-uploader",
+            event_name = %event_name,
+            size = data.len(),
+            "Starting upload"
+        );
+
         // Always get fresh auth info
         let (auth_info, moniker_info, monitoring_endpoint) =
             self.config_client.get_ingestion_info().await?;
@@ -224,12 +237,22 @@ impl GenevaUploader {
             data_size,
             event_name,
             metadata,
+            row_count,
         )?;
         let full_url = format!(
             "{}/{}",
             auth_info.endpoint.trim_end_matches('/'),
             upload_uri
         );
+
+        debug!(
+            name: "uploader.upload.post",
+            target: "geneva-uploader",
+            event_name = %event_name,
+            moniker = %moniker_info.name,
+            "Posting to ingestion gateway"
+        );
+
         // Send the upload request
         let response = self
             .http_client
@@ -245,11 +268,34 @@ impl GenevaUploader {
         let body = response.text().await?;
 
         if status == reqwest::StatusCode::ACCEPTED {
-            let ingest_response: IngestionResponse =
-                serde_json::from_str(&body).map_err(GenevaUploaderError::SerdeJson)?;
+            let ingest_response: IngestionResponse = serde_json::from_str(&body).map_err(|e| {
+                debug!(
+                    name: "uploader.upload.parse_error",
+                    target: "geneva-uploader",
+                    error = %e,
+                    "Failed to parse ingestion response"
+                );
+                GenevaUploaderError::SerdeJson(e)
+            })?;
+
+            debug!(
+                name: "uploader.upload.success",
+                target: "geneva-uploader",
+                event_name = %event_name,
+                ticket = %ingest_response.ticket,
+                "Upload successful"
+            );
 
             Ok(ingest_response)
         } else {
+            debug!(
+                name: "uploader.upload.failed",
+                target: "geneva-uploader",
+                event_name = %event_name,
+                status = status.as_u16(),
+                body = %body,
+                "Upload failed"
+            );
             Err(GenevaUploaderError::UploadFailed {
                 status: status.as_u16(),
                 message: body,

@@ -1,0 +1,17 @@
+[package]
+name = "example-custom-route-extractor"
+version = "0.1.0-alpha.0"
+edition = "2021"
+rust-version = "1.75.0"
+
+[dependencies]
+opentelemetry_instrumentation_tower = { path = "../../", package = "opentelemetry-instrumentation-tower", default-features = false }
+axum = { features = ["http1", "tokio"], version = "0.8", default-features = false }
+http = { version = "1", default-features = false }
+opentelemetry = { workspace = true }
+opentelemetry_sdk = { workspace = true, default-features = false }
+opentelemetry-otlp = { version = "0.31.0", features = ["grpc-tonic", "metrics", "trace"], default-features = false }
+tokio = { version = "1", features = ["rt-multi-thread"], default-features = false }
+
+[lints]
+workspace = true

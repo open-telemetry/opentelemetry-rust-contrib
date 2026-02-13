@@ -1,5 +1,6 @@
 use opentelemetry_sdk::logs::SdkLogRecord;
 use std::borrow::Cow;
+use std::collections::HashSet;
 use std::error::Error;
 
 type BoxedEventNameCallback = Box<dyn EventNameCallback>;
@@ -8,6 +9,7 @@ type BoxedEventNameCallback = Box<dyn EventNameCallback>;
 pub(crate) struct Options {
     provider_name: Cow<'static, str>,
     event_name_callback: Option<BoxedEventNameCallback>,
+    resource_attribute_keys: HashSet<Cow<'static, str>>,
 }
 
 impl Options {
@@ -15,12 +17,28 @@ impl Options {
         Options {
             provider_name: provider_name.into(),
             event_name_callback: None,
+            resource_attribute_keys: HashSet::new(),
         }
     }
 
     /// Returns the provider name that will be used for the ETW provider.
     pub(crate) fn provider_name(&self) -> &str {
         &self.provider_name
+    }
+
+    /// Returns the resource attribute keys that will be exported with each log record.
+    pub(crate) fn resource_attribute_keys(&self) -> &HashSet<Cow<'static, str>> {
+        &self.resource_attribute_keys
+    }
+
+    /// Sets the resource attributes for the exporter.
+    pub(crate) fn with_resource_attributes<I, S>(mut self, attributes: I) -> Self
+    where
+        I: IntoIterator<Item = S>,
+        S: Into<Cow<'static, str>>,
+    {
+        self.resource_attribute_keys = attributes.into_iter().map(|s| s.into()).collect();
+        self
     }
 
     /// Returns the default event name that will be used for the ETW events.

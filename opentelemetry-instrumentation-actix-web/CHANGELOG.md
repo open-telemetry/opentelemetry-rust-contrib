@@ -2,6 +2,41 @@
 
 ## vNext
 
+### Breaking Changes
+
+* **`metrics` feature is now enabled by default**: The `metrics` feature is now
+  part of the default features. Use `default-features = false` if you only need
+  tracing without metrics.
+
+* **Span name updated to follow HTTP semantic conventions**: Span names now use
+  the format `{method} {route}` (e.g., `GET /users/{id}`) instead of just the
+  route. This aligns with the stable HTTP semantic conventions specification.
+
+* **Update to stable HTTP semantic conventions for metrics**: Metric names have
+  been updated to align with the latest stable OpenTelemetry HTTP semantic
+  conventions:
+  * `http.server.duration` → `http.server.request.duration`
+  * `http.server.request.size` → `http.server.request.body.size`
+  * `http.server.response.size` → `http.server.response.body.size`
+
+* `http.server.request.duration` uses custom histogram bucket bounds: `[0.005,
+  0.01, 0.025, 0.05, 0.075, 0.1, 0.25, 0.5, 0.75, 1.0, 2.5, 5.0, 7.5, 10.0]`
+
+* Fixed incorrect use of `messaging.message.body.size` attribute (messaging
+  semconv) for HTTP request content length. Now correctly uses
+  `http.request.body.size`.
+
+* Added `error.type` attribute for 4xx and 5xx HTTP responses on both spans and
+  metrics, as required by stable HTTP semantic conventions.
+
+## v0.24.0
+
+### Changed
+
+* Update `actix-http` dependencies to 3.11
+* Update `actix-web` dependencies to 4.12
+* Update `awc` dependencies to 3.8
+
 ## v0.23.0
 
 ### Changed

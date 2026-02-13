@@ -1,0 +1,28 @@
+[package]
+name = "opentelemetry-config"
+version = "0.1.0"
+description = "Declarative configuration for OpenTelemetry SDK"
+homepage = "https://github.com/open-telemetry/opentelemetry-rust-contrib/tree/main/opentelemetry-config"
+repository = "https://github.com/open-telemetry/opentelemetry-rust-contrib/tree/main/opentelemetry-config"
+readme = "README.md"
+categories = [
+    "development-tools::debugging",
+    "development-tools::profiling",
+]
+keywords = ["opentelemetry", "declarative", "metrics", "tracing", "logs", "configuration"]
+license = "Apache-2.0"
+edition = "2021"
+rust-version = "1.75.0"
+
+[package.metadata.docs.rs]
+all-features = true
+rustdoc-args = ["--cfg", "docsrs"]
+
+[dependencies]
+opentelemetry = { version = "0.31.0" }
+opentelemetry_sdk = { version = "0.31.0", features = ["experimental_metrics_custom_reader"] }
+serde = { version = "1.0", features = ["derive"] }
+serde_yaml = { version = "0.9.34" }
+
+[lints]
+workspace = true

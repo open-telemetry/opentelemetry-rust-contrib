@@ -1,7 +1,8 @@
 use opentelemetry::InstrumentationScope;
 use opentelemetry_sdk::error::OTelSdkResult;
-use opentelemetry_sdk::logs::{LogBatch, LogExporter, SdkLogRecord};
+use opentelemetry_sdk::logs::SdkLogRecord;
 use opentelemetry_sdk::Resource;
+use std::borrow::Cow;
 use std::error::Error;
 use std::fmt::Debug;
 
@@ -77,9 +78,7 @@ enum ProviderNameCompatMode {
 
 impl opentelemetry_sdk::logs::LogProcessor for Processor {
     fn emit(&self, data: &mut SdkLogRecord, instrumentation: &InstrumentationScope) {
-        let log_tuple = &[(data as &SdkLogRecord, instrumentation)];
-        // TODO: How to log if export() returns Err? Maybe a metric? or eprintln?
-        let _ = futures_executor::block_on(self.event_exporter.export(LogBatch::new(log_tuple)));
+        self.event_exporter.export_log_data(data, instrumentation);
     }
 
     // Nothing to flush as this processor does not buffer
@@ -98,8 +97,6 @@ impl opentelemetry_sdk::logs::LogProcessor for Processor {
         target: &str,
         name: Option<&str>,
     ) -> bool {
-        use opentelemetry_sdk::logs::LogExporter;
-
         self.event_exporter.event_enabled(level, target, name)
     }
 
@@ -150,6 +147,44 @@ impl ProcessorBuilder {
         callback: impl Fn(&SdkLogRecord) -> &'static str + Send + Sync + 'static,
     ) -> Self {
         self.options = self.options.etw_event_name_from_callback(callback);
+        self
+    }
+
+    /// Sets the resource attributes for the processor.
+    ///
+    /// This specifies which resource attributes should be exported with each log record.
+    ///
+    /// # Performance Considerations
+    ///
+    /// **Warning**: Each specified resource attribute will be serialized and sent
+    /// with EVERY log record. This is different from OTLP exporters where resource
+    /// attributes are serialized once per batch. Consider the performance impact
+    /// when selecting which attributes to export.
+    ///
+    /// # Best Practices for ETW
+    ///
+    /// **Recommendation**: Be selective about which resource attributes to export.
+    /// Since ETW writes to a local kernel buffer and requires a local
+    /// listener/agent, the agent can often deduce many resource attributes without
+    /// requiring them to be sent with each log:
+    ///
+    /// - **Infrastructure attributes** (datacenter, region, availability zone) can
+    ///   be determined by the local agent.
+    /// - **Host attributes** (hostname, IP address, OS version) are available locally.
+    /// - **Deployment attributes** (environment, cluster) may be known to the agent.
+    ///
+    /// Focus on attributes that are truly specific to your application instance
+    /// and cannot be easily determined by the local agent.
+    ///
+    /// Nevertheless, if there are attributes that are fixed and must be emitted
+    /// with every log, modeling them as Resource attributes and using this method
+    /// is much more efficient than emitting them explicitly with every log.
+    pub fn with_resource_attributes<I, S>(mut self, attributes: I) -> Self
+    where
+        I: IntoIterator<Item = S>,
+        S: Into<Cow<'static, str>>,
+    {
+        self.options = self.options.with_resource_attributes(attributes);
         self
     }
 
@@ -311,6 +346,42 @@ mod tests {
     }
 
     #[test]
+    fn tracing_integration_test_with_resource_attributes() {
+        use opentelemetry::KeyValue;
+        use opentelemetry_appender_tracing::layer;
+        use opentelemetry_sdk::Resource;
+        use tracing::error;
+        use tracing_subscriber::prelude::*;
+
+        let processor = Processor::builder("provider_name")
+            .with_resource_attributes(["custom_attribute1", "custom_attribute2"])
+            .build()
+            .unwrap();
+
+        let logger_provider = SdkLoggerProvider::builder()
+            .with_resource(
+                Resource::builder()
+                    .with_service_name("test-service")
+                    .with_attribute(KeyValue::new("custom_attribute1", "value1"))
+                    .with_attribute(KeyValue::new("custom_attribute2", "value2"))
+                    .with_attribute(KeyValue::new("custom_attribute3", "value3")) // Should be ignored
+                    .build(),
+            )
+            .with_log_processor(processor)
+            .build();
+
+        let layer = layer::OpenTelemetryTracingBridge::new(&logger_provider);
+        let _guard = tracing_subscriber::registry().with(layer).set_default();
+
+        error!(
+            name: "event-name",
+            event_id = 20,
+            user_name = "otel user",
+            user_email = "otel@opentelemetry.io"
+        );
+    }
+
+    #[test]
     fn test_validate_empty_name() {
         assert_eq!(
             Processor::builder("").build().unwrap_err().to_string(),
@@ -426,5 +497,58 @@ mod tests {
             compat_mode,
         );
         assert!(result.is_ok());
+    }
+
+    #[test]
+    fn test_with_resource_attributes() {
+        use opentelemetry::KeyValue;
+        use opentelemetry_sdk::logs::LogProcessor;
+        use opentelemetry_sdk::Resource;
+
+        let processor = Processor::builder("test_provider")
+            .with_resource_attributes(vec!["custom_attribute1", "custom_attribute2"])
+            .build()
+            .unwrap();
+
+        let mut processor = processor; // Make mutable for set_resource
+
+        let resource = Resource::builder()
+            .with_attributes([
+                KeyValue::new("service.name", "test-service"),
+                KeyValue::new("service.instance.id", "test-instance"),
+                KeyValue::new("custom_attribute1", "value1"),
+                KeyValue::new("custom_attribute2", "value2"),
+                KeyValue::new("custom_attribute3", "value3"), // This should be ignored
+            ])
+            .build();
+
+        processor.set_resource(&resource);
+
+        // Test that the processor was created successfully
+        // The actual resource attributes will be tested in the exporter tests
+        assert!(processor.force_flush().is_ok());
+    }
+
+    #[test]
+    fn test_block_on() {
+        use opentelemetry_appender_tracing::layer::OpenTelemetryTracingBridge;
+        use opentelemetry_sdk::logs::SdkLoggerProvider;
+        use tracing_subscriber::layer::SubscriberExt;
+
+        let processor = Processor::builder("TestApp").build().unwrap();
+        let provider = SdkLoggerProvider::builder()
+            .with_log_processor(processor)
+            .build();
+        let subscriber =
+            tracing_subscriber::registry().with(OpenTelemetryTracingBridge::new(&provider));
+
+        std::thread::spawn(move || {
+            let _guard = tracing::subscriber::set_default(subscriber);
+            futures_executor::block_on(async {
+                tracing::info!("This message doesn't cause panic");
+            });
+        })
+        .join()
+        .unwrap();
     }
 }

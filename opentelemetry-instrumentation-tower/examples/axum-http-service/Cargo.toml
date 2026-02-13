@@ -10,11 +10,12 @@ rust-version = "1.75.0"
 opentelemetry_instrumentation_tower = { path = "../../", package = "opentelemetry-instrumentation-tower", features = ["axum"], default-features = false }
 axum = { features = ["http1", "tokio"], version = "0.8", default-features = false }
 bytes = { version = "1", default-features = false }
-opentelemetry = { workspace = true}
-opentelemetry_sdk = { workspace = true, default-features = false }
-opentelemetry-otlp = { version = "0.31.0", features = ["grpc-tonic", "metrics"], default-features = false }
+opentelemetry = { workspace = true }
+opentelemetry_sdk = { workspace = true, features = ["spec_unstable_metrics_views"], default-features = false }
+opentelemetry-semantic-conventions = { workspace = true, features = ["semconv_experimental"], default-features = false }
+opentelemetry-otlp = { version = "0.31.0", features = ["grpc-tonic", "metrics", "trace"], default-features = false }
 tokio = { version = "1", features = ["rt-multi-thread"], default-features = false }
-rand_09 = { package = "rand", version = "0.9" }
+rand = { version = "0.9" }
 
 [lints]
 workspace = true

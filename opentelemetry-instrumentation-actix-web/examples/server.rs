@@ -1,16 +1,28 @@
 use actix_web::{web, App, HttpResponse, HttpServer, Responder};
-use opentelemetry::{global, KeyValue};
+use opentelemetry::global;
 use opentelemetry_instrumentation_actix_web::{RequestMetrics, RequestTracing};
 use opentelemetry_sdk::{
-    metrics::{Aggregation, Instrument, SdkMeterProvider, Stream},
-    propagation::TraceContextPropagator,
-    trace::SdkTracerProvider,
+    metrics::SdkMeterProvider, propagation::TraceContextPropagator, trace::SdkTracerProvider,
     Resource,
 };
 use opentelemetry_stdout::{MetricExporter, SpanExporter};
+use std::sync::OnceLock;
+
+const SERVICE_NAME: &str = "actix_server";
+
+fn get_resource() -> Resource {
+    static RESOURCE: OnceLock<Resource> = OnceLock::new();
+    RESOURCE
+        .get_or_init(|| Resource::builder().with_service_name(SERVICE_NAME).build())
+        .clone()
+}
 
 async fn manual_hello() -> impl Responder {
     HttpResponse::Ok().body("Hey there!")
+}
+
+async fn get_user(user_id: web::Path<String>) -> impl Responder {
+    HttpResponse::Ok().body(format!("User ID: {}", user_id))
 }
 
 #[actix_web::main]
@@ -18,45 +30,19 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Start a new OTLP trace pipeline
     global::set_text_map_propagator(TraceContextPropagator::new());
 
-    let service_name_resource = Resource::builder_empty()
-        .with_attribute(KeyValue::new("service.name", "actix_server"))
-        .build();
-
-    let tracer = SdkTracerProvider::builder()
+    let tracer_provider = SdkTracerProvider::builder()
         .with_simple_exporter(SpanExporter::default())
-        .with_resource(service_name_resource)
+        .with_resource(get_resource())
         .build();
 
-    global::set_tracer_provider(tracer.clone());
+    global::set_tracer_provider(tracer_provider.clone());
 
     // Setup a OTLP metrics exporter if --features metrics is used
     #[cfg(feature = "metrics")]
     let meter_provider = {
         let provider = SdkMeterProvider::builder()
             .with_periodic_exporter(MetricExporter::default())
-            .with_resource(
-                Resource::builder_empty()
-                    .with_attribute(KeyValue::new("service.name", "my_app"))
-                    .build(),
-            )
-            .with_view(|i: &Instrument| {
-                if i.name() == "http.server.duration" {
-                    Some(
-                        Stream::builder()
-                            .with_aggregation(Aggregation::ExplicitBucketHistogram {
-                                boundaries: vec![
-                                    0.0, 0.005, 0.01, 0.025, 0.05, 0.075, 0.1, 0.25, 0.5, 0.75,
-                                    1.0, 2.5, 5.0, 7.5, 10.0,
-                                ],
-                                record_min_max: true,
-                            })
-                            .build()
-                            .unwrap(),
-                    )
-                } else {
-                    None
-                }
-            })
+            .with_resource(get_resource())
             .build();
         global::set_meter_provider(provider.clone());
 
@@ -68,13 +54,14 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             .wrap(RequestTracing::new())
             .wrap(RequestMetrics::default())
             .route("/hey", web::get().to(manual_hello))
+            .route("/users/{user_id}", web::get().to(get_user))
     })
     .bind("127.0.0.1:8080")?
     .run()
     .await?;
 
     // Ensure all spans have been reported
-    tracer.shutdown()?;
+    tracer_provider.shutdown()?;
 
     #[cfg(feature = "metrics")]
     meter_provider.shutdown()?;

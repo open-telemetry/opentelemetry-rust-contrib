@@ -5,7 +5,7 @@ use actix_web::{
 };
 use opentelemetry::{KeyValue, Value};
 use opentelemetry_semantic_conventions::{
-    attribute::MESSAGING_MESSAGE_BODY_SIZE,
+    attribute::HTTP_REQUEST_BODY_SIZE,
     trace::{
         CLIENT_ADDRESS, HTTP_REQUEST_METHOD, HTTP_ROUTE, NETWORK_PEER_ADDRESS,
         NETWORK_PROTOCOL_VERSION, SERVER_ADDRESS, SERVER_PORT, URL_PATH, URL_QUERY, URL_SCHEME,
@@ -80,7 +80,7 @@ pub(super) fn trace_attributes_from_request(
     let mut attributes = Vec::with_capacity(14);
 
     // Server attrs
-    // <https://github.com/open-telemetry/semantic-conventions/blob/v1.21.0/docs/http/http-spans.md#http-server>
+    // https://opentelemetry.io/docs/specs/semconv/http/http-spans/#http-server
     attributes.push(KeyValue::new(HTTP_ROUTE, http_route.to_owned()));
     if let Some(remote) = remote_addr {
         attributes.push(KeyValue::new(CLIENT_ADDRESS, remote.to_string()));
@@ -111,11 +111,14 @@ pub(super) fn trace_attributes_from_request(
     attributes.push(KeyValue::new(URL_SCHEME, url_scheme(conn_info.scheme())));
 
     // Common attrs
-    // <https://github.com/open-telemetry/semantic-conventions/blob/v1.21.0/docs/http/http-spans.md#common-attributes>
+    // https://opentelemetry.io/docs/specs/semconv/http/http-spans/#common-attributes
     attributes.push(KeyValue::new(
         HTTP_REQUEST_METHOD,
         http_method_str(req.method()),
     ));
+    // TODO: Add NETWORK_PROTOCOL_NAME attribute (e.g., "http").
+    // Per semconv, this is recommended when the protocol name is not "http" or "https".
+    // See: https://opentelemetry.io/docs/specs/semconv/http/http-spans/#common-attributes
     attributes.push(KeyValue::new(
         NETWORK_PROTOCOL_VERSION,
         protocol_version(req.version()),
@@ -127,7 +130,7 @@ pub(super) fn trace_attributes_from_request(
         .and_then(|len| len.to_str().ok().and_then(|s| s.parse::<i64>().ok()))
         .filter(|&len| len > 0)
     {
-        attributes.push(KeyValue::new(MESSAGING_MESSAGE_BODY_SIZE, content_length));
+        attributes.push(KeyValue::new(HTTP_REQUEST_BODY_SIZE, content_length));
     }
 
     if let Some(user_agent) = req
@@ -155,6 +158,8 @@ pub fn metrics_attributes_from_request(
         HTTP_REQUEST_METHOD,
         http_method_str(req.method()),
     ));
+    // TODO: Add NETWORK_PROTOCOL_NAME attribute (e.g., "http") for metrics.
+    // See: https://opentelemetry.io/docs/specs/semconv/http/http-metrics/#http-server
     attributes.push(KeyValue::new(
         NETWORK_PROTOCOL_VERSION,
         protocol_version(req.version()),

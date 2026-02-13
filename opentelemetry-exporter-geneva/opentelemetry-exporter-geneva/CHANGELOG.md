@@ -1,5 +1,15 @@
 # Changelog
 
+## [0.4.0] - 2025-11-12
+
+### Changed
+- Bump geneva-uploader version to 0.4.0
+
+## [0.3.0] - 2025-10-17
+
+### Changed
+- Bump geneva-uploader version to 0.3.0
+
 ## [0.2.0] - 2025-09-24
 
 ### Added

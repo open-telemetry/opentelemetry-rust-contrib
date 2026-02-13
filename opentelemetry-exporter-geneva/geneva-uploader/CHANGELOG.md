@@ -1,5 +1,16 @@
 # Changelog
 
+## [0.4.0] - 2025-11-12
+
+### Changed
+- Updated `azure_core` dependency from 0.27.0 to 0.29.0
+- Updated `azure_identity` dependency from 0.27.0 to 0.29.0
+
+## [0.3.0] - 2025-10-17
+
+### Changed
+- Minor internal updates
+
 ## [0.2.0] - 2025-09-24
 
 ### Added
