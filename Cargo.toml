@@ -23,6 +23,10 @@ members = [
 
 resolver = "2"
 
+exclude = [
+    "opentelemetry-etw-traces",
+]
+
 [profile.bench]
 # https://doc.rust-lang.org/cargo/reference/profiles.html#bench
 # See function names in profiling reports.
