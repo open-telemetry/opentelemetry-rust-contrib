@@ -12,6 +12,7 @@ edition = "2021"
 rust-version = "1.75.0"
 
 [features]
+default = ["metrics"]
 metrics = ["opentelemetry/metrics"]
 sync-middleware = []
 
@@ -35,16 +36,27 @@ opentelemetry-semantic-conventions = { workspace = true, features = [
 serde = "1.0"
 
 [dev-dependencies]
+actix-rt = "2"
 actix-web = { version = "4.12", features = ["macros"] }
-opentelemetry-instrumentation-actix-web = { path = ".", features = [
-  "metrics",
-  "sync-middleware",
-  "awc",
-] }
+awc = { version = "3.8", default-features = false, features = ["compress-zstd"] }
+criterion = { workspace = true, features = ["async_tokio"] }
 opentelemetry_sdk = { workspace = true, features = [
   "metrics",
+  "trace",
+  "testing",
 ] }
 opentelemetry-stdout = { workspace = true, features = ["trace", "metrics"] }
+serial_test = "3"
+tokio = { version = "1", features = ["rt-multi-thread"] }
+
+[[example]]
+name = "client"
+required-features = ["awc"]
+
+[[bench]]
+name = "middleware"
+harness = false
+required-features = ["metrics"]
 
 [package.metadata.docs.rs]
 all-features = true
