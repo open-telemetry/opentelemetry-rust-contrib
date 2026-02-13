@@ -39,7 +39,7 @@ opentelemetry-stdout = { version = "0.31", default-features = false }
 opentelemetry-semantic-conventions = { version = "0.31", features = [
     "semconv_experimental",
 ] }
-criterion = "0.7"
+criterion = "0.8"
 
 [workspace.lints.rust]
 rust_2024_compatibility = { level = "warn", priority = -1 }
