@@ -40,6 +40,8 @@ opentelemetry-semantic-conventions = { version = "0.31", features = [
     "semconv_experimental",
 ] }
 criterion = "0.7"
+# https://rustsec.org/advisories/RUSTSEC-2026-0009
+time = ">=0.3.47"
 
 [workspace.lints.rust]
 rust_2024_compatibility = { level = "warn", priority = -1 }

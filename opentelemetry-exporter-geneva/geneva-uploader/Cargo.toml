@@ -29,6 +29,8 @@ lz4_flex = { version = "0.11", features = ["safe-encode"], default-features = fa
 azure_identity = "0.29"
 azure_core = "0.29"
 tracing = "0.1"
+# https://rustsec.org/advisories/RUSTSEC-2026-0009
+time = { workspace = true }
 
 [features]
 self_signed_certs = [] # Empty by default for security

@@ -34,6 +34,8 @@ opentelemetry-semantic-conventions = { workspace = true, features = [
   "semconv_experimental",
 ] }
 serde = "1.0"
+# https://rustsec.org/advisories/RUSTSEC-2026-0009
+time = { workspace = true }
 
 [dev-dependencies]
 actix-rt = "2"
