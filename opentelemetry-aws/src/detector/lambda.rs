@@ -13,7 +13,7 @@ const AWS_LAMBDA_FUNCTION_VERSION_ENV_VAR: &str = "AWS_LAMBDA_FUNCTION_VERSION";
 const AWS_LAMBDA_LOG_STREAM_NAME_ENV_VAR: &str = "AWS_LAMBDA_LOG_STREAM_NAME";
 const AWS_LAMBDA_MEMORY_LIMIT_ENV_VAR: &str = "AWS_LAMBDA_FUNCTION_MEMORY_SIZE";
 const AWS_LAMBDA_LOG_GROUP_NAME_ENV_VAR: &str = "AWS_LAMBDA_LOG_GROUP_NAME";
-const ACCOUNT_ID_SYMLINK_PATH: &str = "/tmp/.otel-account-id";
+const ACCOUNT_ID_SYMLINK_PATH: &str = "/tmp/.otel-aws-account-id";
 
 /// Resource detector that collects resource information from AWS Lambda environment.
 pub struct LambdaResourceDetector;
@@ -132,7 +132,7 @@ mod tests {
 
     #[sealed_test]
     fn test_aws_lambda_detector_with_account_id_symlink() {
-        let symlink_path = std::env::temp_dir().join(".otel-account-id-test");
+        let symlink_path = std::env::temp_dir().join(".otel-aws-account-id-test");
         // Clean up any leftover from a previous test run
         let _ = std::fs::remove_file(&symlink_path);
         std::os::unix::fs::symlink("123456789012", &symlink_path).unwrap();
@@ -175,7 +175,7 @@ mod tests {
 
     #[sealed_test]
     fn test_aws_lambda_detector_missing_symlink_no_panic() {
-        let symlink_path = std::env::temp_dir().join(".otel-account-id-nonexistent");
+        let symlink_path = std::env::temp_dir().join(".otel-aws-account-id-nonexistent");
         // Ensure the symlink does not exist
         let _ = std::fs::remove_file(&symlink_path);
 
