@@ -116,6 +116,9 @@ pub(super) fn trace_attributes_from_request(
         HTTP_REQUEST_METHOD,
         http_method_str(req.method()),
     ));
+    // TODO: Add NETWORK_PROTOCOL_NAME attribute (e.g., "http").
+    // Per semconv, this is recommended when the protocol name is not "http" or "https".
+    // See: https://opentelemetry.io/docs/specs/semconv/http/http-spans/#common-attributes
     attributes.push(KeyValue::new(
         NETWORK_PROTOCOL_VERSION,
         protocol_version(req.version()),
@@ -155,6 +158,8 @@ pub fn metrics_attributes_from_request(
         HTTP_REQUEST_METHOD,
         http_method_str(req.method()),
     ));
+    // TODO: Add NETWORK_PROTOCOL_NAME attribute (e.g., "http") for metrics.
+    // See: https://opentelemetry.io/docs/specs/semconv/http/http-metrics/#http-server
     attributes.push(KeyValue::new(
         NETWORK_PROTOCOL_VERSION,
         protocol_version(req.version()),

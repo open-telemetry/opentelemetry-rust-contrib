@@ -8,8 +8,10 @@ use opentelemetry_sdk::metrics::{Instrument, Stream};
 use opentelemetry_sdk::{
     metrics::{PeriodicReader, SdkMeterProvider},
     trace::SdkTracerProvider,
+    Resource,
 };
 use opentelemetry_semantic_conventions as semconv;
+use std::sync::OnceLock;
 use std::time::Duration;
 
 const SERVICE_NAME: &str = "example-axum-http-service";
@@ -21,10 +23,11 @@ const SERVICE_NAME: &str = "example-axum-http-service";
 // OTEL SDKS also respect the env var `OTEL_METRIC_EXPORT_INTERVAL` (no underscore prefix).
 const _OTEL_METRIC_EXPORT_INTERVAL: Duration = Duration::from_secs(10);
 
-fn init_otel_resource() -> opentelemetry_sdk::Resource {
-    opentelemetry_sdk::Resource::builder()
-        .with_service_name(SERVICE_NAME)
-        .build()
+fn get_resource() -> Resource {
+    static RESOURCE: OnceLock<Resource> = OnceLock::new();
+    RESOURCE
+        .get_or_init(|| Resource::builder().with_service_name(SERVICE_NAME).build())
+        .clone()
 }
 
 // PCT_SLOW_REQUESTS and MAX_SLOW_REQUEST_SEC are used to inject latency into some responses
@@ -81,7 +84,7 @@ async fn main() {
 
         let provider = SdkMeterProvider::builder()
             .with_reader(reader)
-            .with_resource(init_otel_resource())
+            .with_resource(get_resource())
             .with_view(http_server_request_duration_view)
             .build();
 
@@ -97,7 +100,7 @@ async fn main() {
 
         let provider = SdkTracerProvider::builder()
             .with_batch_exporter(exporter)
-            .with_resource(init_otel_resource())
+            .with_resource(get_resource())
             .build();
 
         global::set_tracer_provider(provider);

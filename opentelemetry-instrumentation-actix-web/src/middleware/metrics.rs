@@ -20,6 +20,9 @@ use crate::RouteFormatter;
 
 // Follows the stable semantic conventions for HTTP metrics:
 // https://opentelemetry.io/docs/specs/semconv/http/http-metrics/
+//
+// TODO: Make http.server.request.body.size and http.server.response.body.size
+// opt-in.
 use opentelemetry_semantic_conventions::attribute::ERROR_TYPE;
 use opentelemetry_semantic_conventions::metric::{
     HTTP_SERVER_ACTIVE_REQUESTS, HTTP_SERVER_REQUEST_BODY_SIZE, HTTP_SERVER_REQUEST_DURATION,
