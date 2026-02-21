@@ -73,6 +73,11 @@
 //!
 //! Users can always use their own http clients by implementing `HttpClient` trait.
 //!
+//! ### Caution
+//!
+//! Opentelemetry SDK batch exporter creates dedicated thread for the purpose of export.
+//! Hence default async client may result in panic.
+//!
 //! ## Kitchen Sink Full Configuration
 //!
 //! Example showing how to override all configuration options. See the
