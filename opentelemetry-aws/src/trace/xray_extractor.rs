@@ -47,10 +47,6 @@ impl Extractor for XRayExtractor {
             .map(|value| value.as_str())
             .collect::<Vec<_>>()
     }
-
-    fn get_all(&self, key: &str) -> Option<Vec<&str>> {
-        self.values.get_all(key)
-    }
 }
 
 #[cfg(test)]
@@ -116,17 +112,5 @@ mod tests {
         .collect();
         let extractor = XRayExtractor::from_header_map(header_map);
         assert_eq!(extractor.keys(), vec![TRACE_ID_HEADER]);
-    }
-
-    #[test]
-    fn test_get_all() {
-        let header_map: HeaderMap = vec![(
-            HeaderName::from_static(TRACE_ID_HEADER),
-            HeaderValue::from_static("1"),
-        )]
-        .into_iter()
-        .collect();
-        let extractor = XRayExtractor::from_header_map(header_map);
-        assert_eq!(extractor.get_all(TRACE_ID_HEADER), Some(vec!["1"]));
     }
 }

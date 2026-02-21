@@ -20,12 +20,12 @@ rustdoc-args = ["--cfg", "docsrs"]
 
 [features]
 default = ["trace", "internal-logs"]
-trace = ["opentelemetry/trace", "opentelemetry_sdk/trace"]
+trace = ["http", "opentelemetry/trace", "opentelemetry_sdk/trace"]
 detector-aws-lambda = ["dep:opentelemetry-semantic-conventions"]
 internal-logs = ["tracing"]
 
 [dependencies]
-http = "1.4.0"
+http = { version = "1.4.0", optional = true }
 opentelemetry = { workspace = true }
 opentelemetry_sdk = { workspace = true, optional = true }
 opentelemetry-semantic-conventions = { workspace = true, optional = true, features = [
