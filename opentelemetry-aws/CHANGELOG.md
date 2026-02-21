@@ -2,6 +2,10 @@
 
 ## vNext
 
+### Added
+
+- `XrayExtractor` has been added to extract the X-Ray Trace ID from the `x-amzn-trace-id` HTTP header or the `_X_AMZN_TRACE_ID` environment variable as a fallback.
+
 ## v0.19.0
 
 ### Changed
