@@ -54,7 +54,7 @@ mod tests {
     use super::*;
     use http::{HeaderMap, HeaderName, HeaderValue};
     use opentelemetry::propagation::Extractor;
-    use std::env;
+    use sealed_test::prelude::{rusty_fork_test, sealed_test, tempfile};
 
     fn test_data() -> Vec<(
         Option<&'static str>,
@@ -69,36 +69,29 @@ mod tests {
         ]
     }
 
-    #[test]
+    #[sealed_test]
     fn test_get() {
         for (environment_variable, header_value, expected) in test_data() {
-            if let Some(environment_variable) = environment_variable {
-                unsafe {
-                    env::set_var(TRACE_ID_ENVIRONMENT_VARIABLE, environment_variable);
-                }
-            }
+            temp_env::with_vars(
+                [(TRACE_ID_ENVIRONMENT_VARIABLE, environment_variable)],
+                || {
+                    let extractor: XrayExtractor;
 
-            let extractor: XrayExtractor;
+                    if let Some(header_value) = header_value {
+                        let header_map = vec![(
+                            HeaderName::from_static(TRACE_ID_HEADER),
+                            HeaderValue::from_static(header_value),
+                        )]
+                        .into_iter()
+                        .collect();
+                        extractor = XrayExtractor::from_header_map(header_map);
+                    } else {
+                        extractor = XrayExtractor::new();
+                    }
 
-            if let Some(header_value) = header_value {
-                let header_map = vec![(
-                    HeaderName::from_static(TRACE_ID_HEADER),
-                    HeaderValue::from_static(header_value),
-                )]
-                .into_iter()
-                .collect();
-                extractor = XrayExtractor::from_header_map(header_map);
-            } else {
-                extractor = XrayExtractor::new();
-            }
-
-            assert_eq!(extractor.get(TRACE_ID_HEADER), expected);
-
-            if environment_variable.is_some() {
-                unsafe {
-                    env::remove_var(TRACE_ID_ENVIRONMENT_VARIABLE);
-                }
-            }
+                    assert_eq!(extractor.get(TRACE_ID_HEADER), expected);
+                },
+            );
         }
     }
 
