@@ -8,17 +8,17 @@ pub const TRACE_ID_HEADER: &str = "x-amzn-trace-id";
 
 /// Extractor to provide the X-Ray Trace ID based on the [`TRACE_ID_HEADER`] and using the [`TRACE_ID_ENVIRONMENT_VARIABLE`] as a fallback.
 #[derive(Clone, Debug, Default)]
-pub struct XRayExtractor {
+pub struct XrayExtractor {
     values: HashMap<String, String>,
 }
 
-impl XRayExtractor {
-    /// Creates a new XRayExtractor.
+impl XrayExtractor {
+    /// Creates a new XrayExtractor.
     pub fn new() -> Self {
         Self::from_header_map(HeaderMap::new())
     }
 
-    /// Creates a new XRayExtractor with the given [`HeaderMap`].
+    /// Creates a new XrayExtractor with the given [`HeaderMap`].
     pub fn from_header_map(header_map: HeaderMap) -> Self {
         let mut values: HashMap<String, String> = HashMap::new();
 
@@ -32,11 +32,11 @@ impl XRayExtractor {
             }
         });
 
-        XRayExtractor { values }
+        XrayExtractor { values }
     }
 }
 
-impl Extractor for XRayExtractor {
+impl Extractor for XrayExtractor {
     fn get(&self, key: &str) -> Option<&str> {
         self.values.get(key).map(|x| x.as_str())
     }
@@ -78,7 +78,7 @@ mod tests {
                 }
             }
 
-            let extractor: XRayExtractor;
+            let extractor: XrayExtractor;
 
             if let Some(header_value) = header_value {
                 let header_map = vec![(
@@ -87,9 +87,9 @@ mod tests {
                 )]
                 .into_iter()
                 .collect();
-                extractor = XRayExtractor::from_header_map(header_map);
+                extractor = XrayExtractor::from_header_map(header_map);
             } else {
-                extractor = XRayExtractor::new();
+                extractor = XrayExtractor::new();
             }
 
             assert_eq!(extractor.get(TRACE_ID_HEADER), expected);
@@ -110,7 +110,7 @@ mod tests {
         )]
         .into_iter()
         .collect();
-        let extractor = XRayExtractor::from_header_map(header_map);
+        let extractor = XrayExtractor::from_header_map(header_map);
         assert_eq!(extractor.keys(), vec![TRACE_ID_HEADER]);
     }
 }
