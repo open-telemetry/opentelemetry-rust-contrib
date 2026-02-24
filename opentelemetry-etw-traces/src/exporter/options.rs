@@ -1,5 +1,4 @@
 use std::borrow::Cow;
-use std::collections::HashSet;
 
 /// Configuration options for the ETW trace exporter.
 #[derive(Debug)]
@@ -14,12 +13,12 @@ pub(crate) struct Options {
     /// Resource attribute keys that should be exported with each span.
     /// By default, only `service.name` and `service.instance.id` are exported
     /// as Part A fields (`cloud.role` and `cloud.roleInstance`).
-    resource_attribute_keys: HashSet<Cow<'static, str>>,
+    resource_attribute_keys: Vec<Cow<'static, str>>,
 
-    /// Optional set of custom field names to promote as dedicated Part C fields.
+    /// Optional list of custom field names to promote as dedicated Part C fields.
     /// If None, all span attributes are promoted. If Some, only matching attributes
     /// are promoted; the rest go into `env_properties` JSON.
-    custom_fields: Option<HashSet<String>>,
+    custom_fields: Option<Vec<String>>,
 }
 
 impl Options {
@@ -28,7 +27,7 @@ impl Options {
         Options {
             provider_name: provider_name.into(),
             default_event_name: "Span".to_string(),
-            resource_attribute_keys: HashSet::new(),
+            resource_attribute_keys: Vec::new(),
             custom_fields: None,
         }
     }
@@ -44,12 +43,12 @@ impl Options {
     }
 
     /// Returns the resource attribute keys.
-    pub(crate) fn resource_attribute_keys(&self) -> &HashSet<Cow<'static, str>> {
+    pub(crate) fn resource_attribute_keys(&self) -> &Vec<Cow<'static, str>> {
         &self.resource_attribute_keys
     }
 
     /// Returns the custom fields set, if configured.
-    pub(crate) fn custom_fields(&self) -> Option<&HashSet<String>> {
+    pub(crate) fn custom_fields(&self) -> Option<&Vec<String>> {
         self.custom_fields.as_ref()
     }
 

@@ -16,7 +16,6 @@ use opentelemetry_sdk::error::{OTelSdkError, OTelSdkResult};
 use opentelemetry_sdk::trace::SpanData;
 use std::borrow::Cow;
 use std::cell::RefCell;
-use std::collections::HashSet;
 use std::fmt::Debug;
 use std::pin::Pin;
 use std::sync::Arc;
@@ -54,7 +53,7 @@ pub(crate) struct ETWExporter {
     provider: Pin<Arc<tld::Provider>>,
     resource: Resource,
     options: Options,
-    resource_attribute_keys: HashSet<Cow<'static, str>>,
+    resource_attribute_keys: Vec<Cow<'static, str>>,
 }
 
 impl ETWExporter {
@@ -165,7 +164,7 @@ impl ETWExporter {
                 self.resource.cloud_role = Some(value.to_string());
             } else if key.as_str() == "service.instance.id" {
                 self.resource.cloud_role_instance = Some(value.to_string());
-            } else if self.resource_attribute_keys.contains(key.as_str()) {
+            } else if self.resource_attribute_keys.iter().any(|k| k.as_ref() == key.as_str()) {
                 self.resource
                     .attributes_from_resource
                     .push((key.clone(), value.clone()));

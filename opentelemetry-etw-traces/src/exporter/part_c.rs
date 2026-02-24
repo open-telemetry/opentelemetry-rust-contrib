@@ -1,7 +1,6 @@
 use crate::exporter::common;
 use opentelemetry::Key;
 use opentelemetry_sdk::trace::SpanData;
-use std::collections::HashSet;
 use tracelogging_dynamic as tld;
 
 /// Known Part B attribute keys that map to dedicated Part B fields (per .NET CS40 mapping).
@@ -35,7 +34,7 @@ pub(crate) fn populate_part_c(
     eb: &mut tld::EventBuilder,
     span_data: &SpanData,
     resource: &super::Resource,
-    custom_fields: Option<&HashSet<String>>,
+    custom_fields: Option<&Vec<String>>,
     field_tag: u32,
 ) {
     // Separate attributes into promoted (Part C fields) and overflow (env_properties)
@@ -51,7 +50,7 @@ pub(crate) fn populate_part_c(
         }
 
         if let Some(cf) = custom_fields {
-            if cf.contains(key_str) {
+            if cf.iter().any(|s| s == key_str) {
                 promoted.push((&kv.key, &kv.value));
             } else {
                 overflow.push((key_str, &kv.value));
