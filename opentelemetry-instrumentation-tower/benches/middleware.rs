@@ -23,6 +23,25 @@
 //! because the global meter is never set in tracing-only scenarios, leaving meter
 //! instruments as no-ops by default.
 //!
+//! ## Known Performance Issues (tracked for future improvement)
+//!
+//! The `noop` scenario (~960 ns) reveals ~830 ns of fixed middleware overhead that runs
+//! unconditionally regardless of whether real telemetry is produced. Root causes:
+//!
+//! - **Heap allocations**: `scheme`, `method`, `path`, `URI`, `protocol`, `version` each
+//!   `to_string()` / `to_owned()` into a new `String` per request.
+//! - **`Vec<KeyValue>` allocations**: `span_attributes` and `label_superset` built and
+//!   populated on every request.
+//! - **`Box::pin`** wrapping the response future — heap-allocates on every request.
+//! - **`global::get_text_map_propagator`** — acquires a `RwLock` on every request.
+//!   Caching would require a new `with_propagator` builder method since there is no
+//!   public API to obtain an owned/`Arc`'d propagator from the global.
+//! - **`OtelContext::current()`** — thread-local access + clone in `finalize_request`.
+//! - **Unconditional attribute extraction**: all `KeyValue` attributes (span attrs,
+//!   metric label superset, custom extractors) are built on every request without
+//!   first checking whether the tracer or meter are no-ops and would discard them
+//!   immediately anyway.
+//!
 //! ## Run
 //!
 //! ```sh
