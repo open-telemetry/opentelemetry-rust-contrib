@@ -122,6 +122,8 @@ impl GenevaClient {
             cfg.role_instance,
             cfg.namespace,
             config_version,
+            cfg.onbehalf_identity.clone(),
+            cfg.onbehalf_annotations.clone(),
         );
 
         let uploader_config = GenevaUploaderConfig {

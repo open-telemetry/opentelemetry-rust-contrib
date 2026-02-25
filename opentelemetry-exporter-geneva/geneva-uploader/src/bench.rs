@@ -24,6 +24,8 @@ mod benchmarks {
             "BenchmarkRoleInstance".to_string(),
             namespace.to_string(),
             "Ver1v0".to_string(),
+            None,
+            None,
         )
     }
 
