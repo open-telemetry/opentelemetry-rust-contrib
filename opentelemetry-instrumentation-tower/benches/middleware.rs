@@ -11,14 +11,17 @@
 //! ## Scenarios
 //!
 //! - **Baseline**: No middleware (control measurement)
+//! - **No-op**: `HTTPLayer` present, but both tracer and meter are no-ops
 //! - **Tracing**: `HTTPLayer` with active tracer, no-op meter (all spans sampled)
 //! - **Tracing (sampled-out)**: Same, but with `AlwaysOff` sampler (all spans dropped)
 //! - **Metrics**: `HTTPLayer` with active meter, no-op tracer (no spans created)
 //! - **Tracing + Metrics**: `HTTPLayer` with both active tracer and active meter
 //!
-//! Since tower's `HTTPLayer` always creates both tracer and meter instruments from
-//! global providers, the "tracing only" scenario uses a no-op global meter (the default
-//! when no meter provider is set), making metric instruments effectively free.
+//! Each tracing scenario sets the global `TracerProvider` before building the layer so
+//! that no tracer state leaks between scenarios.  Scenarios that do not need traces use
+//! `NoopTracerProvider` (a true no-op) to reset the global.  No meter reset is needed
+//! because the global meter is never set in tracing-only scenarios, leaving meter
+//! instruments as no-ops by default.
 //!
 //! ## Run
 //!
@@ -30,14 +33,16 @@
 //!
 //! | Scenario                    | Latency   | Overhead vs Baseline |
 //! |-----------------------------|-----------|----------------------|
-//! | Baseline                    | ~189 ns   | -                    |
-//! | Tracing                     | ~1120 ns  | +~931 ns             |
-//! | Tracing (sampled-out)       | ~1001 ns  | +~812 ns             |
-//! | Metrics                     | ~1313 ns  | +~1124 ns            |
-//! | Tracing + Metrics           | ~1414 ns  | +~1225 ns            |
+//! | Baseline                    | ~131 ns   | -                    |
+//! | No-op                       | ~936 ns   | +~805 ns             |
+//! | Tracing                     | ~1100 ns  | +~969 ns             |
+//! | Tracing (sampled-out)       | ~999 ns   | +~868 ns             |
+//! | Metrics                     | ~1295 ns  | +~1164 ns            |
+//! | Tracing + Metrics           | ~1436 ns  | +~1305 ns            |
 
 use criterion::{criterion_group, criterion_main, BenchmarkId, Criterion, Throughput};
 use opentelemetry::global;
+use opentelemetry::trace::noop::NoopTracerProvider;
 use opentelemetry_instrumentation_tower::HTTPLayerBuilder;
 use opentelemetry_sdk::{
     metrics::{InMemoryMetricExporter, PeriodicReader, SdkMeterProvider},
@@ -48,9 +53,9 @@ use std::hint::black_box;
 use std::time::Duration;
 use tower::{Service, ServiceBuilder, ServiceExt};
 
-/// Simple handler to simulate a real HTTP endpoint
-async fn handler(req: http::Request<String>) -> Result<http::Response<String>, Infallible> {
-    Ok(http::Response::new(format!("Path: {}", req.uri().path())))
+/// Minimal handler — returns an empty body to keep baseline noise as low as possible.
+async fn handler(_req: http::Request<String>) -> Result<http::Response<String>, Infallible> {
+    Ok(http::Response::new(String::new()))
 }
 
 /// Setup tracer provider with no-op processor (measures instrumentation overhead only)
@@ -69,6 +74,12 @@ fn setup_sampled_out_tracer() -> SdkTracerProvider {
         .build();
     global::set_tracer_provider(provider.clone());
     provider
+}
+
+/// Reset global tracer provider to a true no-op instance.
+/// Call this in scenarios that should not generate traces.
+fn noop_tracer() {
+    global::set_tracer_provider(NoopTracerProvider::new());
 }
 
 /// Setup meter provider with in-memory exporter (minimal I/O overhead)
@@ -109,103 +120,139 @@ fn benchmark_middleware(c: &mut Criterion) {
         });
     });
 
-    // Scenario 2: Tracing only (no-op meter via default global)
+    // Scenario 2: Middleware present, but both tracer and meter are no-ops.
+    // Measures the pure overhead of the HTTPLayer machinery (attribute extraction,
+    // context propagation hooks, etc.) when no real telemetry is produced.
+    // Ideally this should be very close to the baseline.
+    group.bench_function(BenchmarkId::new("request", "noop"), |b| {
+        noop_tracer(); // reset any tracer left from a previous run
+        // meter is not set, so meter instruments are already no-op
+        let layer = HTTPLayerBuilder::builder().build().unwrap();
+        b.to_async(&rt).iter_custom(|iters| {
+            let layer = layer.clone();
+            async move {
+                let mut service = ServiceBuilder::new()
+                    .layer(layer)
+                    .service(tower::service_fn(handler));
+
+                let start = std::time::Instant::now();
+                for _ in 0..iters {
+                    let req = http::Request::builder()
+                        .method("GET")
+                        .uri("http://example.com/users/123")
+                        .body(String::new())
+                        .unwrap();
+                    let resp = service.ready().await.unwrap().call(req).await.unwrap();
+                    black_box(resp);
+                }
+                start.elapsed()
+            }
+        });
+    });
+
+    // Scenario 3: Tracing only (global meter not set, so meter instruments are no-op)
     group.bench_function(BenchmarkId::new("request", "tracing"), |b| {
-        b.to_async(&rt).iter_custom(|iters| async move {
-            let _provider = setup_tracer();
-            // Global meter is not set, so HTTPLayer's meter instruments are no-op
+        let _tracer_provider = setup_tracer();
+        let layer = HTTPLayerBuilder::builder().build().unwrap();
+        b.to_async(&rt).iter_custom(|iters| {
+            let layer = layer.clone();
+            async move {
+                let mut service = ServiceBuilder::new()
+                    .layer(layer)
+                    .service(tower::service_fn(handler));
 
-            let layer = HTTPLayerBuilder::builder().build().unwrap();
-            let mut service = ServiceBuilder::new()
-                .layer(layer)
-                .service(tower::service_fn(handler));
-
-            let start = std::time::Instant::now();
-            for _ in 0..iters {
-                let req = http::Request::builder()
-                    .method("GET")
-                    .uri("http://example.com/users/123")
-                    .body(String::new())
-                    .unwrap();
-                let resp = service.ready().await.unwrap().call(req).await.unwrap();
-                black_box(resp);
+                let start = std::time::Instant::now();
+                for _ in 0..iters {
+                    let req = http::Request::builder()
+                        .method("GET")
+                        .uri("http://example.com/users/123")
+                        .body(String::new())
+                        .unwrap();
+                    let resp = service.ready().await.unwrap().call(req).await.unwrap();
+                    black_box(resp);
+                }
+                start.elapsed()
             }
-            start.elapsed()
         });
     });
 
-    // Scenario 3: Tracing with AlwaysOff sampler (measures non-sampled path overhead)
+    // Scenario 4: Tracing with AlwaysOff sampler (global meter not set, so meter instruments are no-op)
     group.bench_function(BenchmarkId::new("request", "tracing-sampled-out"), |b| {
-        b.to_async(&rt).iter_custom(|iters| async move {
-            let _provider = setup_sampled_out_tracer();
-            // Global meter is not set, so HTTPLayer's meter instruments are no-op
+        let _tracer_provider = setup_sampled_out_tracer();
+        let layer = HTTPLayerBuilder::builder().build().unwrap();
+        b.to_async(&rt).iter_custom(|iters| {
+            let layer = layer.clone();
+            async move {
+                let mut service = ServiceBuilder::new()
+                    .layer(layer)
+                    .service(tower::service_fn(handler));
 
-            let layer = HTTPLayerBuilder::builder().build().unwrap();
-            let mut service = ServiceBuilder::new()
-                .layer(layer)
-                .service(tower::service_fn(handler));
-
-            let start = std::time::Instant::now();
-            for _ in 0..iters {
-                let req = http::Request::builder()
-                    .method("GET")
-                    .uri("http://example.com/users/123")
-                    .body(String::new())
-                    .unwrap();
-                let resp = service.ready().await.unwrap().call(req).await.unwrap();
-                black_box(resp);
+                let start = std::time::Instant::now();
+                for _ in 0..iters {
+                    let req = http::Request::builder()
+                        .method("GET")
+                        .uri("http://example.com/users/123")
+                        .body(String::new())
+                        .unwrap();
+                    let resp = service.ready().await.unwrap().call(req).await.unwrap();
+                    black_box(resp);
+                }
+                start.elapsed()
             }
-            start.elapsed()
         });
     });
 
-    // Scenario 4: Metrics only (no-op tracer via default global)
+    // Scenario 5: Metrics only (tracer reset to NoopTracerProvider)
     group.bench_function(BenchmarkId::new("request", "metrics"), |b| {
-        b.to_async(&rt).iter_custom(|iters| async move {
-            let (_meter_provider, _metric_exporter) = setup_meter();
-            // Global tracer is not set, so HTTPLayer's tracer produces no-op spans
+        noop_tracer();
+        let (_meter_provider, _metric_exporter) = setup_meter();
+        let layer = HTTPLayerBuilder::builder().build().unwrap();
+        b.to_async(&rt).iter_custom(|iters| {
+            let layer = layer.clone();
+            async move {
+                let mut service = ServiceBuilder::new()
+                    .layer(layer)
+                    .service(tower::service_fn(handler));
 
-            let layer = HTTPLayerBuilder::builder().build().unwrap();
-            let mut service = ServiceBuilder::new()
-                .layer(layer)
-                .service(tower::service_fn(handler));
-
-            let start = std::time::Instant::now();
-            for _ in 0..iters {
-                let req = http::Request::builder()
-                    .method("GET")
-                    .uri("http://example.com/users/123")
-                    .body(String::new())
-                    .unwrap();
-                let resp = service.ready().await.unwrap().call(req).await.unwrap();
-                black_box(resp);
+                let start = std::time::Instant::now();
+                for _ in 0..iters {
+                    let req = http::Request::builder()
+                        .method("GET")
+                        .uri("http://example.com/users/123")
+                        .body(String::new())
+                        .unwrap();
+                    let resp = service.ready().await.unwrap().call(req).await.unwrap();
+                    black_box(resp);
+                }
+                start.elapsed()
             }
-            start.elapsed()
         });
     });
 
-    // Scenario 5: Both tracing + metrics
+    // Scenario 6: Both tracing + metrics
     group.bench_function(BenchmarkId::new("request", "tracing+metrics"), |b| {
-        b.to_async(&rt).iter_custom(|iters| async move {
-            let _tracer_provider = setup_tracer();
-            let (_meter_provider, _metric_exporter) = setup_meter();
+        let _tracer_provider = setup_tracer();
+        let (_meter_provider, _metric_exporter) = setup_meter();
+        let layer = HTTPLayerBuilder::builder().build().unwrap();
+        b.to_async(&rt).iter_custom(|iters| {
+            let layer = layer.clone();
+            async move {
+                let mut service = ServiceBuilder::new()
+                    .layer(layer)
+                    .service(tower::service_fn(handler));
 
-            let layer = HTTPLayerBuilder::builder().build().unwrap();
-            let mut service = ServiceBuilder::new()
-                .layer(layer)
-                .service(tower::service_fn(handler));
-
-            let start = std::time::Instant::now();
-            for _ in 0..iters {
-                let req = http::Request::builder()
-                    .method("GET")
-                    .uri("http://example.com/users/123")
-                    .body(String::new())
-                    .unwrap();
-                let resp = service.ready().await.unwrap().call(req).await.unwrap();
-                black_box(resp);
+                let start = std::time::Instant::now();
+                for _ in 0..iters {
+                    let req = http::Request::builder()
+                        .method("GET")
+                        .uri("http://example.com/users/123")
+                        .body(String::new())
+                        .unwrap();
+                    let resp = service.ready().await.unwrap().call(req).await.unwrap();
+                    black_box(resp);
+                }
+                start.elapsed()
             }
-            start.elapsed()
         });
     });
 
