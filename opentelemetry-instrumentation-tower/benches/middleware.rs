@@ -126,7 +126,7 @@ fn benchmark_middleware(c: &mut Criterion) {
     // Ideally this should be very close to the baseline.
     group.bench_function(BenchmarkId::new("request", "noop"), |b| {
         noop_tracer(); // reset any tracer left from a previous run
-        // meter is not set, so meter instruments are already no-op
+                       // meter is not set, so meter instruments are already no-op
         let layer = HTTPLayerBuilder::builder().build().unwrap();
         b.to_async(&rt).iter_custom(|iters| {
             let layer = layer.clone();
