@@ -29,8 +29,8 @@ md5 = "0.8.0"
 hex = "0.4"
 lz4_flex = { version = "0.11", features = ["safe-encode"], default-features = false }
 # Azure Identity dependencies - using public crates.io versions
-azure_identity = "0.29"
-azure_core = "0.29"
+azure_identity = { version = "0.29", default-features = false }
+azure_core = { version = "0.29", default-features = false }
 tracing = "0.1"
 
 [features]
