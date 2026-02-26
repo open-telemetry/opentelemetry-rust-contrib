@@ -4,19 +4,15 @@ pub(crate) mod client;
 mod tests {
     use crate::config_service::client::{AuthMethod, GenevaConfigClient, GenevaConfigClientConfig};
     #[cfg(feature = "cert-auth")]
-    use openssl::{pkcs12::Pkcs12, pkey::PKey, x509::X509};
-    #[cfg(feature = "cert-auth")]
-    use rcgen::generate_simple_self_signed;
-    #[cfg(feature = "cert-auth")]
-    use std::io::Write;
-    #[cfg(feature = "cert-auth")]
-    use std::path::PathBuf;
-    #[cfg(feature = "cert-auth")]
-    use tempfile::NamedTempFile;
-    #[cfg(feature = "cert-auth")]
-    use wiremock::matchers::{method, path};
-    #[cfg(feature = "cert-auth")]
-    use wiremock::{Mock, MockServer, ResponseTemplate};
+    use {
+        openssl::{pkcs12::Pkcs12, pkey::PKey, x509::X509},
+        rcgen::generate_simple_self_signed,
+        std::io::Write,
+        std::path::PathBuf,
+        tempfile::NamedTempFile,
+        wiremock::matchers::{method, path},
+        wiremock::{Mock, MockServer, ResponseTemplate},
+    };
 
     #[test]
     fn test_config_fields() {
