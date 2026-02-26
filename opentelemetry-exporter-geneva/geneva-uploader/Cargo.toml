@@ -18,10 +18,6 @@ uuid = { version = "1.0", features = ["v4"] }
 # http2 feature is required by hyper-util even when using http1_only()
 reqwest = { version = "0.12", features = ["http2"], default-features = false}
 native-tls = { version = "0.2", optional = true }
-rustls = { version = "0.23", optional = true, default-features = false, features = ["ring", "std", "tls12"] }
-rustls-pki-types = { version = "1.11", optional = true }
-rustls-pemfile = { version = "2", optional = true }
-rustls-native-certs = { version = "0.8", optional = true }
 thiserror = "2.0"
 chrono = "0.4"
 url = "2.2"
@@ -35,7 +31,7 @@ tracing = "0.1"
 
 [features]
 native-tls = ["dep:native-tls", "reqwest/native-tls", "reqwest/native-tls-alpn"]
-rustls-tls = ["dep:rustls", "dep:rustls-pki-types", "dep:rustls-pemfile", "dep:rustls-native-certs", "reqwest/rustls-tls"]
+rustls-tls = ["reqwest/rustls-tls"]
 cert-auth = ["native-tls"] # Certificate-based mTLS auth (PKCS#12). Requires native-tls.
 self_signed_certs = [] # Empty by default for security
 mock_auth = [] # Disabled by default. Not to be enabled in the prod release. 
