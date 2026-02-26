@@ -3,12 +3,19 @@ pub(crate) mod client;
 #[cfg(test)]
 mod tests {
     use crate::config_service::client::{AuthMethod, GenevaConfigClient, GenevaConfigClientConfig};
+    #[cfg(feature = "cert-auth")]
     use openssl::{pkcs12::Pkcs12, pkey::PKey, x509::X509};
+    #[cfg(feature = "cert-auth")]
     use rcgen::generate_simple_self_signed;
+    #[cfg(feature = "cert-auth")]
     use std::io::Write;
+    #[cfg(feature = "cert-auth")]
     use std::path::PathBuf;
+    #[cfg(feature = "cert-auth")]
     use tempfile::NamedTempFile;
+    #[cfg(feature = "cert-auth")]
     use wiremock::matchers::{method, path};
+    #[cfg(feature = "cert-auth")]
     use wiremock::{Mock, MockServer, ResponseTemplate};
 
     #[test]
@@ -35,6 +42,7 @@ mod tests {
         }
     }
 
+    #[cfg(feature = "cert-auth")]
     fn generate_self_signed_p12() -> (NamedTempFile, String) {
         let password = "test".to_string();
 
@@ -70,6 +78,7 @@ mod tests {
         (file, password)
     }
 
+    #[cfg(feature = "cert-auth")]
     #[cfg_attr(target_os = "macos", ignore)] // cert generated not compatible with macOS
     #[tokio::test]
     async fn test_get_ingestion_info_mocked() {
@@ -134,6 +143,7 @@ mod tests {
         assert_eq!(token_endpoint, jwt_endpoint);
     }
 
+    #[cfg(feature = "cert-auth")]
     #[cfg_attr(target_os = "macos", ignore)] // cert generated not compatible with macOS
     #[tokio::test]
     async fn test_error_handling_with_non_success_status() {
@@ -178,6 +188,7 @@ mod tests {
         }
     }
 
+    #[cfg(feature = "cert-auth")]
     #[cfg_attr(target_os = "macos", ignore)] // cert generated not compatible with macOS
     #[tokio::test]
     async fn test_missing_ingestion_gateway_info() {
@@ -227,6 +238,7 @@ mod tests {
         }
     }
 
+    #[cfg(feature = "cert-auth")]
     #[cfg_attr(target_os = "macos", ignore)] // cert generated not compatible with macOS
     #[tokio::test]
     async fn test_invalid_certificate_path() {
@@ -270,7 +282,9 @@ mod tests {
     // export GENEVA_CERT_PASSWORD="your-certificate-password" // Empty string if no password
     // cargo test test_get_ingestion_info_real_server -- --ignored
     // ```
+    #[cfg(feature = "cert-auth")]
     use std::env;
+    #[cfg(feature = "cert-auth")]
     #[tokio::test]
     #[ignore] // This test is ignored by default to prevent running in CI pipelines
     async fn test_get_ingestion_info_real_server() {
