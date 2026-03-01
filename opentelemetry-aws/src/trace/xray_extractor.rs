@@ -2,11 +2,11 @@ use http::HeaderMap;
 use opentelemetry::propagation::Extractor;
 use std::{collections::HashMap, env};
 
-pub const TRACE_ID_ENVIRONMENT_VARIABLE: &str = "_X_AMZN_TRACE_ID";
+pub const AWS_XRAY_TRACE_ENVIRONMENT_VARIABLE: &str = "_X_AMZN_TRACE_ID";
 
-pub const TRACE_ID_HEADER: &str = "x-amzn-trace-id";
+pub const AWS_XRAY_TRACE_HEADER: &str = "x-amzn-trace-id";
 
-/// Extractor to provide the X-Ray Trace ID based on the [`TRACE_ID_HEADER`] and using the [`TRACE_ID_ENVIRONMENT_VARIABLE`] as a fallback.
+/// Extractor to provide the X-Ray Trace ID based on the [`AWS_XRAY_TRACE_HEADER`] and using the [`AWS_XRAY_TRACE_ENVIRONMENT_VARIABLE`] as a fallback.
 #[derive(Clone, Debug, Default)]
 pub struct XrayExtractor {
     values: HashMap<String, String>,
@@ -22,15 +22,15 @@ impl XrayExtractor {
     pub fn from_header_map(header_map: HeaderMap) -> Self {
         let mut values: HashMap<String, String> = HashMap::new();
 
-        if let Ok(value) = env::var(TRACE_ID_ENVIRONMENT_VARIABLE) {
-            values.insert(TRACE_ID_HEADER.to_string(), value);
+        if let Ok(value) = env::var(AWS_XRAY_TRACE_ENVIRONMENT_VARIABLE) {
+            values.insert(AWS_XRAY_TRACE_ENVIRONMENT_VARIABLE.to_string(), value);
         }
 
-        header_map.iter().for_each(|(key, value)| {
-            if let Ok(value) = value.to_str() {
-                values.insert(key.to_string(), value.to_string());
+        if let Some(value) = header_map.get(AWS_XRAY_TRACE_HEADER) {
+            if let Ok(header_value) = value.to_str() {
+                values.insert(AWS_XRAY_TRACE_HEADER.to_string(), header_value.to_string());
             }
-        });
+        }
 
         XrayExtractor { values }
     }
@@ -56,30 +56,50 @@ mod tests {
     use opentelemetry::propagation::Extractor;
     use sealed_test::prelude::{rusty_fork_test, sealed_test, tempfile};
 
+    const NO_TRACE_ID_HEADER: &str = "x-test";
+
     fn test_data() -> Vec<(
         Option<&'static str>,
-        Option<&'static str>,
-        Option<&'static str>,
+        Option<(&'static str, &'static str)>,
+        Option<(&'static str, &'static str)>,
     )> {
         vec![
             (None, None, None),
-            (Some("1"), None, Some("1")),
-            (None, Some("2"), Some("2")),
-            (Some("1"), Some("2"), Some("2")),
+            (None, Some((NO_TRACE_ID_HEADER, "2")), None),
+            (
+                None,
+                Some((AWS_XRAY_TRACE_HEADER, "2")),
+                Some((AWS_XRAY_TRACE_HEADER, "2")),
+            ),
+            (
+                Some("1"),
+                None,
+                Some((AWS_XRAY_TRACE_ENVIRONMENT_VARIABLE, "1")),
+            ),
+            (
+                Some("1"),
+                Some((NO_TRACE_ID_HEADER, "2")),
+                Some((AWS_XRAY_TRACE_ENVIRONMENT_VARIABLE, "1")),
+            ),
+            (
+                Some("1"),
+                Some((AWS_XRAY_TRACE_HEADER, "2")),
+                Some((AWS_XRAY_TRACE_HEADER, "2")),
+            ),
         ]
     }
 
     #[sealed_test]
     fn test_get() {
-        for (environment_variable, header_value, expected) in test_data() {
+        for (environment_variable, header_name_value, expected) in test_data() {
             temp_env::with_vars(
-                [(TRACE_ID_ENVIRONMENT_VARIABLE, environment_variable)],
+                [(AWS_XRAY_TRACE_ENVIRONMENT_VARIABLE, environment_variable)],
                 || {
                     let extractor: XrayExtractor;
 
-                    if let Some(header_value) = header_value {
+                    if let Some((header_name, header_value)) = header_name_value {
                         let header_map = vec![(
-                            HeaderName::from_static(TRACE_ID_HEADER),
+                            HeaderName::from_static(header_name),
                             HeaderValue::from_static(header_value),
                         )]
                         .into_iter()
@@ -89,7 +109,14 @@ mod tests {
                         extractor = XrayExtractor::new();
                     }
 
-                    assert_eq!(extractor.get(TRACE_ID_HEADER), expected);
+                    match expected {
+                        None => {
+                            assert_eq!(extractor.values.is_empty(), true);
+                        }
+                        Some((key, value)) => {
+                            assert_eq!(extractor.get(key), Some(value));
+                        }
+                    }
                 },
             );
         }
@@ -98,12 +125,12 @@ mod tests {
     #[test]
     fn test_keys() {
         let header_map: HeaderMap = vec![(
-            HeaderName::from_static(TRACE_ID_HEADER),
+            HeaderName::from_static(AWS_XRAY_TRACE_HEADER),
             HeaderValue::from_static(""),
         )]
         .into_iter()
         .collect();
         let extractor = XrayExtractor::from_header_map(header_map);
-        assert_eq!(extractor.keys(), vec![TRACE_ID_HEADER]);
+        assert_eq!(extractor.keys(), vec![AWS_XRAY_TRACE_HEADER]);
     }
 }
