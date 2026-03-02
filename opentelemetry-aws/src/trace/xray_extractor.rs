@@ -56,35 +56,33 @@ mod tests {
     use opentelemetry::propagation::Extractor;
     use sealed_test::prelude::{rusty_fork_test, sealed_test, tempfile};
 
+    struct Pair(&'static str, &'static str);
+
     const NO_TRACE_ID_HEADER: &str = "x-test";
 
-    fn test_data() -> Vec<(
-        Option<&'static str>,
-        Option<(&'static str, &'static str)>,
-        Option<(&'static str, &'static str)>,
-    )> {
+    fn test_data() -> Vec<(Option<&'static str>, Option<Pair>, Option<Pair>)> {
         vec![
             (None, None, None),
-            (None, Some((NO_TRACE_ID_HEADER, "2")), None),
+            (None, Some(Pair(NO_TRACE_ID_HEADER, "2")), None),
             (
                 None,
-                Some((AWS_XRAY_TRACE_HEADER, "2")),
-                Some((AWS_XRAY_TRACE_HEADER, "2")),
+                Some(Pair(AWS_XRAY_TRACE_HEADER, "2")),
+                Some(Pair(AWS_XRAY_TRACE_HEADER, "2")),
             ),
             (
                 Some("1"),
                 None,
-                Some((AWS_XRAY_TRACE_ENVIRONMENT_VARIABLE, "1")),
+                Some(Pair(AWS_XRAY_TRACE_ENVIRONMENT_VARIABLE, "1")),
             ),
             (
                 Some("1"),
-                Some((NO_TRACE_ID_HEADER, "2")),
-                Some((AWS_XRAY_TRACE_ENVIRONMENT_VARIABLE, "1")),
+                Some(Pair(NO_TRACE_ID_HEADER, "2")),
+                Some(Pair(AWS_XRAY_TRACE_ENVIRONMENT_VARIABLE, "1")),
             ),
             (
                 Some("1"),
-                Some((AWS_XRAY_TRACE_HEADER, "2")),
-                Some((AWS_XRAY_TRACE_HEADER, "2")),
+                Some(Pair(AWS_XRAY_TRACE_HEADER, "2")),
+                Some(Pair(AWS_XRAY_TRACE_HEADER, "2")),
             ),
         ]
     }
@@ -97,10 +95,10 @@ mod tests {
                 || {
                     let extractor: XrayExtractor;
 
-                    if let Some((header_name, header_value)) = header_name_value {
+                    if let Some(pair) = header_name_value {
                         let header_map = vec![(
-                            HeaderName::from_static(header_name),
-                            HeaderValue::from_static(header_value),
+                            HeaderName::from_static(pair.0),
+                            HeaderValue::from_static(pair.1),
                         )]
                         .into_iter()
                         .collect();
@@ -111,10 +109,10 @@ mod tests {
 
                     match expected {
                         None => {
-                            assert_eq!(extractor.values.is_empty(), true);
+                            assert!(extractor.values.is_empty());
                         }
-                        Some((key, value)) => {
-                            assert_eq!(extractor.get(key), Some(value));
+                        Some(pair) => {
+                            assert_eq!(extractor.get(pair.0), Some(pair.1));
                         }
                     }
                 },
