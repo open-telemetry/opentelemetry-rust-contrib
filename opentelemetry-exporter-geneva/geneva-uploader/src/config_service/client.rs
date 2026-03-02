@@ -12,10 +12,13 @@ use tracing::{debug, error, info};
 use uuid::Uuid;
 
 use chrono::{DateTime, Utc};
+#[cfg(feature = "cert-auth")]
 use native_tls::{Identity, Protocol};
 use std::fmt;
 use std::fmt::Write;
+#[cfg(feature = "cert-auth")]
 use std::fs;
+#[cfg(feature = "cert-auth")]
 use std::path::PathBuf;
 use std::sync::RwLock;
 
@@ -57,11 +60,12 @@ use azure_identity::{
 #[allow(dead_code)]
 #[derive(Clone, Debug)]
 pub enum AuthMethod {
-    /// Certificate-based authentication
+    /// Certificate-based authentication (requires `native-tls` feature)
     ///
     /// # Arguments
     /// * `path` - Path to the PKCS#12 (.p12) certificate file
     /// * `password` - Password to decrypt the PKCS#12 file
+    #[cfg(feature = "cert-auth")]
     Certificate { path: PathBuf, password: String },
     /// System-assigned managed identity (auto-detected)
     SystemManagedIdentity,
@@ -96,6 +100,7 @@ pub(crate) enum GenevaConfigClientError {
     #[error("Invalid or malformed JWT token: {0}")]
     JwtTokenError(String),
     #[error("Certificate error: {0}")]
+    #[cfg(feature = "cert-auth")]
     Certificate(String),
     #[error("Workload Identity authentication error: {0}")]
     WorkloadIdentityAuth(String),
@@ -265,12 +270,14 @@ impl GenevaConfigClient {
         let agent_identity = "GenevaUploader";
         let agent_version = "0.1";
 
+        #[allow(unused_mut)]
         let mut client_builder = Client::builder()
             .http1_only()
             .timeout(Duration::from_secs(30)) //TODO - make this configurable
             .default_headers(Self::build_static_headers(agent_identity, agent_version));
 
         match &config.auth_method {
+            #[cfg(feature = "cert-auth")]
             // TODO: Certificate auth would be removed in favor of managed identity.,
             // This is for testing, so we can use self-signed certs, and password in plain text.
             AuthMethod::Certificate { path, password } => {
@@ -355,6 +362,7 @@ impl GenevaConfigClient {
         // Use different API endpoints based on authentication method
         // Certificate auth uses "api", MSI auth and Workload Identity use "userapi"
         let api_path = match &config.auth_method {
+            #[cfg(feature = "cert-auth")]
             AuthMethod::Certificate { .. } => "api",
             AuthMethod::SystemManagedIdentity
             | AuthMethod::UserManagedIdentity { .. }
@@ -771,6 +779,7 @@ impl GenevaConfigClient {
                 let token = self.get_msi_token().await?;
                 request = request.header(AUTHORIZATION, format!("Bearer {}", token));
             }
+            #[cfg(feature = "cert-auth")]
             AuthMethod::Certificate { .. } => { /* mTLS only */ }
             #[cfg(feature = "mock_auth")]
             AuthMethod::MockAuth => { /* no auth header */ }
@@ -927,7 +936,7 @@ fn extract_endpoint_from_token(token: &str) -> Result<String> {
     ))
 }
 
-#[cfg(feature = "self_signed_certs")]
+#[cfg(all(feature = "cert-auth", feature = "self_signed_certs"))]
 fn configure_tls_connector(
     mut builder: native_tls::TlsConnectorBuilder,
     identity: native_tls::Identity,
@@ -941,7 +950,7 @@ fn configure_tls_connector(
     builder
 }
 
-#[cfg(not(feature = "self_signed_certs"))]
+#[cfg(all(feature = "cert-auth", not(feature = "self_signed_certs")))]
 fn configure_tls_connector(
     mut builder: native_tls::TlsConnectorBuilder,
     identity: native_tls::Identity,

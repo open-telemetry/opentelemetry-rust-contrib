@@ -4,6 +4,7 @@ pub(crate) mod uploader;
 mod tests {
     use std::time::Instant;
 
+    #[cfg(feature = "cert-auth")]
     mod test_helpers {
         use crate::{
             AuthMethod, GenevaConfigClient, GenevaConfigClientConfig, GenevaUploader,
@@ -85,6 +86,7 @@ mod tests {
         }
     }
 
+    #[cfg(feature = "cert-auth")]
     #[tokio::test]
     /// To run this test against a real Geneva Config Service and GIG, set the following environment variables:
     ///
@@ -167,6 +169,7 @@ mod tests {
     // 📊 Average upload duration: 133.60 ms
     // ⏱️ Total elapsed for 5 parallel uploads: 154.93ms
 
+    #[cfg(feature = "cert-auth")]
     #[tokio::test(flavor = "multi_thread")]
     #[ignore]
     async fn test_parallel_uploads() {

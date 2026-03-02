@@ -16,6 +16,7 @@ geneva-uploader = { path = "../geneva-uploader", version = "0.4.0" }
 futures = "0.3"
 
 [dev-dependencies]
+geneva-uploader = { path = "../geneva-uploader", version = "0.4.0", features = ["cert-auth"] }
 opentelemetry-appender-tracing = {workspace = true}
 opentelemetry = {workspace = true}
 opentelemetry_sdk = { workspace = true, features = ["logs", "trace", "experimental_logs_batch_log_processor_with_async_runtime", "experimental_async_runtime", "rt-tokio"] }
