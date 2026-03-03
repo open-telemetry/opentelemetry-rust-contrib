@@ -126,6 +126,8 @@ jobs:
           sed -i '/opentelemetry-exporter-geneva\/geneva-uploader/d' Cargo.toml
           sed -i '/opentelemetry-exporter-geneva\/geneva-uploader-ffi/d' Cargo.toml
           sed -i '/opentelemetry-exporter-geneva\/opentelemetry-exporter-geneva/d' Cargo.toml
+      - name: Drop lockfile for reduced 1.75 workspace graph
+        run: rm -f Cargo.lock
       - name: Check MSRV for all crates (excluding Geneva crates)
         run: bash ./scripts/msrv.sh
         env:
