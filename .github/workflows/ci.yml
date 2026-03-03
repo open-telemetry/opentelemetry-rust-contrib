@@ -117,21 +117,23 @@ jobs:
         with:
           tool: cargo-msrv
       # cargo-msrv verify runs `cargo check` in workspace context for each crate.
-      # Geneva crates depend on `otap-df-pdata-views` from a git source that is
-      # not resolvable under the 1.75 sweep, which causes unrelated crates to fail.
-      # For the 1.75 run, temporarily remove Geneva members from workspace.
-      # Geneva crates are validated separately in the `msrv-geneva` job (Rust 1.85).
+      # Geneva crates (and stress, which depends on geneva-uploader) pull
+      # `otap-df-pdata-views` from otel-arrow. That dependency requires a newer
+      # compiler and breaks the 1.75 workspace-wide sweep for unrelated crates.
+      # For the 1.75 run, temporarily remove these members from workspace.
+      # Geneva crates are validated separately in the `msrv-geneva` job (Rust 1.87).
       - name: Temporarily exclude Geneva crates from workspace for 1.75 sweep
         run: |
           sed -i '/opentelemetry-exporter-geneva\/geneva-uploader/d' Cargo.toml
           sed -i '/opentelemetry-exporter-geneva\/geneva-uploader-ffi/d' Cargo.toml
           sed -i '/opentelemetry-exporter-geneva\/opentelemetry-exporter-geneva/d' Cargo.toml
+          sed -i '/"stress"/d' Cargo.toml
       - name: Drop lockfile for reduced 1.75 workspace graph
         run: rm -f Cargo.lock
       - name: Check MSRV for all crates (excluding Geneva crates)
         run: bash ./scripts/msrv.sh
         env:
-          MSRV_EXCLUDE_PACKAGES: geneva-uploader,geneva-uploader-ffi,opentelemetry-exporter-geneva
+          MSRV_EXCLUDE_PACKAGES: geneva-uploader,geneva-uploader-ffi,opentelemetry-exporter-geneva,stress
   msrv-geneva:
     strategy:
       matrix:
@@ -149,7 +151,7 @@ jobs:
           submodules: true
       - uses: dtolnay/rust-toolchain@efa25f7f19611383d5b0ccf2d1c8914531636bf9
         with:
-          toolchain: 1.85.0
+          toolchain: 1.87.0
       - uses: taiki-e/install-action@68675c5a5f1a6950c3975d33f3ae0ef155e5bf3d # v2.68.15
         with:
           tool: cargo-msrv
