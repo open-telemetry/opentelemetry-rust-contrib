@@ -112,13 +112,6 @@ struct BatchData {
     metadata: BatchMetadata,
 }
 
-enum OwnedAttrValue {
-    String(String),
-    Int64(i64),
-    Double(f64),
-    Bool(bool),
-}
-
 impl BatchData {
     fn format_schema_ids(&self) -> String {
         use std::fmt::Write;
@@ -152,9 +145,8 @@ impl LogBatchAccumulator {
     fn push<R: GenevaLogRecord>(&mut self, record: &R, metadata_fields: &MetadataFields) {
         let timestamp = record.timestamp_nanos();
         let routing_name = record.routing_event_name().to_owned();
-        let dynamic_attributes = OtlpEncoder::collect_dynamic_attributes(record);
 
-        let field_info = OtlpEncoder::determine_fields_for(record, &dynamic_attributes);
+        let (field_info, dynamic_fields_start) = OtlpEncoder::determine_fields_for(record);
 
         let entry = self
             .batches
@@ -195,7 +187,7 @@ impl LogBatchAccumulator {
         let row_buffer = OtlpEncoder::write_row_data_for(
             record,
             &field_info,
-            &dynamic_attributes,
+            dynamic_fields_start,
             metadata_fields,
         );
         let level = record.severity_level();
@@ -460,24 +452,7 @@ impl OtlpEncoder {
     // ---------------------------------------------------------------------------
 
     /// Determine Bond schema fields for any [`GenevaLogRecord`].
-    fn collect_dynamic_attributes(record: &impl GenevaLogRecord) -> Vec<(String, OwnedAttrValue)> {
-        let mut attrs = Vec::new();
-        record.visit_attributes(&mut |key, val| {
-            let value = match val {
-                AttrValue::String(s) => OwnedAttrValue::String(s.to_owned()),
-                AttrValue::Int64(i) => OwnedAttrValue::Int64(i),
-                AttrValue::Double(d) => OwnedAttrValue::Double(d),
-                AttrValue::Bool(b) => OwnedAttrValue::Bool(b),
-            };
-            attrs.push((key.to_owned(), value));
-        });
-        attrs
-    }
-
-    fn determine_fields_for(
-        record: &impl GenevaLogRecord,
-        dynamic_attributes: &[(String, OwnedAttrValue)],
-    ) -> Vec<FieldDef> {
+    fn determine_fields_for(record: &impl GenevaLogRecord) -> (Vec<FieldDef>, usize) {
         let estimated_capacity = 14 + 3; // base + conditional; attributes appended below
         let mut fields: Vec<(Cow<'static, str>, BondDataType)> =
             Vec::with_capacity(estimated_capacity);
@@ -515,17 +490,18 @@ impl OtlpEncoder {
         }
 
         // Part C – dynamic attributes
-        for (key, val) in dynamic_attributes {
+        let dynamic_fields_start = fields.len();
+        record.visit_attributes(&mut |key, val| {
             let type_id = match val {
-                OwnedAttrValue::String(_) => BondDataType::BT_STRING,
-                OwnedAttrValue::Int64(_) => BondDataType::BT_INT64,
-                OwnedAttrValue::Double(_) => BondDataType::BT_DOUBLE,
-                OwnedAttrValue::Bool(_) => BondDataType::BT_BOOL,
+                AttrValue::String(_) => BondDataType::BT_STRING,
+                AttrValue::Int64(_) => BondDataType::BT_INT64,
+                AttrValue::Double(_) => BondDataType::BT_DOUBLE,
+                AttrValue::Bool(_) => BondDataType::BT_BOOL,
             };
             fields.push((Cow::Owned(key.to_owned()), type_id));
-        }
+        });
 
-        fields
+        let fields = fields
             .into_iter()
             .enumerate()
             .map(|(i, (name, type_id))| FieldDef {
@@ -533,35 +509,20 @@ impl OtlpEncoder {
                 type_id,
                 field_id: (i + 1) as u16,
             })
-            .collect()
+            .collect();
+        (fields, dynamic_fields_start)
     }
 
     /// Write Bond row data for any [`GenevaLogRecord`].
     fn write_row_data_for(
         record: &impl GenevaLogRecord,
         fields: &[FieldDef],
-        dynamic_attributes: &[(String, OwnedAttrValue)],
+        dynamic_fields_start: usize,
         metadata_fields: &MetadataFields,
     ) -> Vec<u8> {
         let mut buffer = Vec::with_capacity(fields.len() * 50);
         let formatted_timestamp = Self::format_timestamp(record.timestamp_nanos());
-        let dynamic_fields_start = fields.len().saturating_sub(dynamic_attributes.len());
-        let mut dynamic_idx = 0usize;
-
-        for (field_idx, field) in fields.iter().enumerate() {
-            if field_idx >= dynamic_fields_start {
-                if let Some((_, value)) = dynamic_attributes.get(dynamic_idx) {
-                    match value {
-                        OwnedAttrValue::String(s) => BondWriter::write_string(&mut buffer, s),
-                        OwnedAttrValue::Int64(i) => BondWriter::write_numeric(&mut buffer, *i),
-                        OwnedAttrValue::Double(d) => BondWriter::write_numeric(&mut buffer, *d),
-                        OwnedAttrValue::Bool(b) => BondWriter::write_bool(&mut buffer, *b),
-                    }
-                }
-                dynamic_idx += 1;
-                continue;
-            }
-
+        for field in &fields[..dynamic_fields_start] {
             match field.name.as_ref() {
                 FIELD_ENV_NAME => BondWriter::write_string(&mut buffer, &metadata_fields.env_name),
                 FIELD_ENV_VER => BondWriter::write_string(&mut buffer, &metadata_fields.env_ver),
@@ -611,6 +572,21 @@ impl OtlpEncoder {
                 }
                 _ => {}
             }
+        }
+
+        let expected_dynamic_fields = fields.len().saturating_sub(dynamic_fields_start);
+        if expected_dynamic_fields > 0 {
+            let mut written_dynamic_fields = 0usize;
+            record.visit_attributes(&mut |_, val| {
+                written_dynamic_fields += 1;
+                match val {
+                    AttrValue::String(s) => BondWriter::write_string(&mut buffer, s),
+                    AttrValue::Int64(i) => BondWriter::write_numeric(&mut buffer, i),
+                    AttrValue::Double(d) => BondWriter::write_numeric(&mut buffer, d),
+                    AttrValue::Bool(b) => BondWriter::write_bool(&mut buffer, b),
+                }
+            });
+            debug_assert_eq!(written_dynamic_fields, expected_dynamic_fields);
         }
         buffer
     }
@@ -1617,17 +1593,24 @@ mod tests {
         });
 
         let base_ref = &base_log;
-        let base_attrs = OtlpEncoder::collect_dynamic_attributes(&base_ref);
-        let base_fields = OtlpEncoder::determine_fields_for(&base_ref, &base_attrs);
-        let base_row =
-            OtlpEncoder::write_row_data_for(&base_ref, &base_fields, &base_attrs, &metadata);
+        let (base_fields, base_dynamic_fields_start) = OtlpEncoder::determine_fields_for(&base_ref);
+        let base_row = OtlpEncoder::write_row_data_for(
+            &base_ref,
+            &base_fields,
+            base_dynamic_fields_start,
+            &metadata,
+        );
 
         let dup_ref = &dup_log;
-        let dup_attrs = OtlpEncoder::collect_dynamic_attributes(&dup_ref);
-        let dup_fields = OtlpEncoder::determine_fields_for(&dup_ref, &dup_attrs);
-        let dup_row = OtlpEncoder::write_row_data_for(&dup_ref, &dup_fields, &dup_attrs, &metadata);
+        let (dup_fields, dup_dynamic_fields_start) = OtlpEncoder::determine_fields_for(&dup_ref);
+        let dup_row = OtlpEncoder::write_row_data_for(
+            &dup_ref,
+            &dup_fields,
+            dup_dynamic_fields_start,
+            &metadata,
+        );
 
-        assert_eq!(dup_attrs.len(), 2);
+        assert_eq!(dup_fields.len() - dup_dynamic_fields_start, 2);
         assert_eq!(dup_row.len() - base_row.len(), 16);
     }
 }
