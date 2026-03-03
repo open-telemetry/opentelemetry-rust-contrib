@@ -116,8 +116,35 @@ jobs:
       - uses: taiki-e/install-action@68675c5a5f1a6950c3975d33f3ae0ef155e5bf3d # v2.68.15
         with:
           tool: cargo-msrv
-      - name: Check MSRV for all crates
+      - name: Check MSRV for all crates (excluding Geneva crates)
         run: bash ./scripts/msrv.sh
+        env:
+          MSRV_EXCLUDE_PACKAGES: geneva-uploader,geneva-uploader-ffi,opentelemetry-exporter-geneva
+  msrv-geneva:
+    strategy:
+      matrix:
+        os: [ubuntu-latest, windows-2025]
+    runs-on: ${{ matrix.os }}
+    continue-on-error: true
+    steps:
+      - name: Harden the runner (Audit all outbound calls)
+        uses: step-security/harden-runner@a90bcbc6539c36a85cdfeb73f7e2f433735f215b # v2.15.0
+        with:
+          egress-policy: audit
+
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          submodules: true
+      - uses: dtolnay/rust-toolchain@efa25f7f19611383d5b0ccf2d1c8914531636bf9
+        with:
+          toolchain: 1.85.0
+      - uses: taiki-e/install-action@68675c5a5f1a6950c3975d33f3ae0ef155e5bf3d # v2.68.15
+        with:
+          tool: cargo-msrv
+      - name: Check MSRV for Geneva crates
+        run: bash ./scripts/msrv.sh
+        env:
+          MSRV_ONLY_PACKAGES: geneva-uploader,geneva-uploader-ffi,opentelemetry-exporter-geneva
   cargo-deny:
     runs-on: ubuntu-latest
     continue-on-error: true # Prevent sudden announcement of a new advisory from failing ci
