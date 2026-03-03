@@ -116,6 +116,16 @@ jobs:
       - uses: taiki-e/install-action@68675c5a5f1a6950c3975d33f3ae0ef155e5bf3d # v2.68.15
         with:
           tool: cargo-msrv
+      # cargo-msrv verify runs `cargo check` in workspace context for each crate.
+      # Geneva crates depend on `otap-df-pdata-views` from a git source that is
+      # not resolvable under the 1.75 sweep, which causes unrelated crates to fail.
+      # For the 1.75 run, temporarily remove Geneva members from workspace.
+      # Geneva crates are validated separately in the `msrv-geneva` job (Rust 1.85).
+      - name: Temporarily exclude Geneva crates from workspace for 1.75 sweep
+        run: |
+          sed -i '/opentelemetry-exporter-geneva\/geneva-uploader/d' Cargo.toml
+          sed -i '/opentelemetry-exporter-geneva\/geneva-uploader-ffi/d' Cargo.toml
+          sed -i '/opentelemetry-exporter-geneva\/opentelemetry-exporter-geneva/d' Cargo.toml
       - name: Check MSRV for all crates (excluding Geneva crates)
         run: bash ./scripts/msrv.sh
         env:
