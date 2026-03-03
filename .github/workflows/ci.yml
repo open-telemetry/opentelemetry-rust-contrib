@@ -123,12 +123,14 @@ jobs:
       # For the 1.75 run, temporarily remove these members from workspace.
       # Geneva crates are validated separately in the `msrv-geneva` job (Rust 1.87).
       - name: Temporarily exclude Geneva crates from workspace for 1.75 sweep
+        shell: bash
         run: |
           sed -i '/opentelemetry-exporter-geneva\/geneva-uploader/d' Cargo.toml
           sed -i '/opentelemetry-exporter-geneva\/geneva-uploader-ffi/d' Cargo.toml
           sed -i '/opentelemetry-exporter-geneva\/opentelemetry-exporter-geneva/d' Cargo.toml
           sed -i '/"stress"/d' Cargo.toml
       - name: Drop lockfile for reduced 1.75 workspace graph
+        shell: bash
         run: rm -f Cargo.lock
       - name: Check MSRV for all crates (excluding Geneva crates)
         run: bash ./scripts/msrv.sh
