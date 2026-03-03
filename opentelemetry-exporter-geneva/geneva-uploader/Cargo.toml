@@ -10,7 +10,7 @@ keywords = ["opentelemetry", "geneva", "logs", "uploader"]
 license = "Apache-2.0"
 
 [dependencies]
-otap-df-pdata-views = { path = "../../../otel-arrow/rust/otap-dataflow/crates/pdata-views" }
+otap-df-pdata-views = { git = "https://github.com/open-telemetry/otel-arrow", rev = "15371dc7" }
 opentelemetry-proto = {workspace = true, default-features = false, features = ["logs", "trace", "gen-tonic-messages"]}
 base64 = "0.22"
 serde = { version = "1.0", features = ["derive"] }

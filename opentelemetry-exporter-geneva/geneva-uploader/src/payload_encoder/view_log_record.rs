@@ -71,13 +71,18 @@ impl<'a, T: LogRecordView> GenevaLogRecord for LogRecordViewAdapter<'a, T> {
         self.0
             .severity_text()
             .and_then(|b| std::str::from_utf8(b).ok())
+            .filter(|s| !s.is_empty())
     }
 
     fn has_body_string(&self) -> bool {
-        self.0
-            .body()
-            .map(|b| b.value_type() == ValueType::String)
-            .unwrap_or(false)
+        let body = match self.0.body() {
+            Some(b) => b,
+            None => return false,
+        };
+        body.value_type() == ValueType::String
+            && body
+                .as_string()
+                .is_some_and(|bytes| std::str::from_utf8(bytes).is_ok())
     }
 
     /// Calls `f` with the body string if the body is a UTF-8 string.

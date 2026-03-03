@@ -17,6 +17,7 @@
 use opentelemetry_proto::tonic::{common::v1::any_value::Value, logs::v1::LogRecord};
 
 /// Typed attribute value yielded by [`GenevaLogRecord::visit_attributes`].
+#[derive(Clone, Copy)]
 pub(crate) enum AttrValue<'a> {
     /// UTF-8 string value.
     String(&'a str),

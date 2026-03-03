@@ -112,6 +112,13 @@ struct BatchData {
     metadata: BatchMetadata,
 }
 
+enum OwnedAttrValue {
+    String(String),
+    Int64(i64),
+    Double(f64),
+    Bool(bool),
+}
+
 impl BatchData {
     fn format_schema_ids(&self) -> String {
         use std::fmt::Write;
@@ -145,8 +152,9 @@ impl LogBatchAccumulator {
     fn push<R: GenevaLogRecord>(&mut self, record: &R, metadata_fields: &MetadataFields) {
         let timestamp = record.timestamp_nanos();
         let routing_name = record.routing_event_name().to_owned();
+        let dynamic_attributes = OtlpEncoder::collect_dynamic_attributes(record);
 
-        let field_info = OtlpEncoder::determine_fields_for(record);
+        let field_info = OtlpEncoder::determine_fields_for(record, &dynamic_attributes);
 
         let entry = self
             .batches
@@ -184,7 +192,12 @@ impl LogBatchAccumulator {
             }
         };
 
-        let row_buffer = OtlpEncoder::write_row_data_for(record, &field_info, metadata_fields);
+        let row_buffer = OtlpEncoder::write_row_data_for(
+            record,
+            &field_info,
+            &dynamic_attributes,
+            metadata_fields,
+        );
         let level = record.severity_level();
 
         entry.events.push(CentralEventEntry {
@@ -447,7 +460,24 @@ impl OtlpEncoder {
     // ---------------------------------------------------------------------------
 
     /// Determine Bond schema fields for any [`GenevaLogRecord`].
-    fn determine_fields_for(record: &impl GenevaLogRecord) -> Vec<FieldDef> {
+    fn collect_dynamic_attributes(record: &impl GenevaLogRecord) -> Vec<(String, OwnedAttrValue)> {
+        let mut attrs = Vec::new();
+        record.visit_attributes(&mut |key, val| {
+            let value = match val {
+                AttrValue::String(s) => OwnedAttrValue::String(s.to_owned()),
+                AttrValue::Int64(i) => OwnedAttrValue::Int64(i),
+                AttrValue::Double(d) => OwnedAttrValue::Double(d),
+                AttrValue::Bool(b) => OwnedAttrValue::Bool(b),
+            };
+            attrs.push((key.to_owned(), value));
+        });
+        attrs
+    }
+
+    fn determine_fields_for(
+        record: &impl GenevaLogRecord,
+        dynamic_attributes: &[(String, OwnedAttrValue)],
+    ) -> Vec<FieldDef> {
         let estimated_capacity = 14 + 3; // base + conditional; attributes appended below
         let mut fields: Vec<(Cow<'static, str>, BondDataType)> =
             Vec::with_capacity(estimated_capacity);
@@ -485,15 +515,15 @@ impl OtlpEncoder {
         }
 
         // Part C – dynamic attributes
-        record.visit_attributes(&mut |key, val| {
+        for (key, val) in dynamic_attributes {
             let type_id = match val {
-                AttrValue::String(_) => BondDataType::BT_STRING,
-                AttrValue::Int64(_) => BondDataType::BT_INT64,
-                AttrValue::Double(_) => BondDataType::BT_DOUBLE,
-                AttrValue::Bool(_) => BondDataType::BT_BOOL,
+                OwnedAttrValue::String(_) => BondDataType::BT_STRING,
+                OwnedAttrValue::Int64(_) => BondDataType::BT_INT64,
+                OwnedAttrValue::Double(_) => BondDataType::BT_DOUBLE,
+                OwnedAttrValue::Bool(_) => BondDataType::BT_BOOL,
             };
             fields.push((Cow::Owned(key.to_owned()), type_id));
-        });
+        }
 
         fields
             .into_iter()
@@ -510,12 +540,28 @@ impl OtlpEncoder {
     fn write_row_data_for(
         record: &impl GenevaLogRecord,
         fields: &[FieldDef],
+        dynamic_attributes: &[(String, OwnedAttrValue)],
         metadata_fields: &MetadataFields,
     ) -> Vec<u8> {
         let mut buffer = Vec::with_capacity(fields.len() * 50);
         let formatted_timestamp = Self::format_timestamp(record.timestamp_nanos());
+        let dynamic_fields_start = fields.len().saturating_sub(dynamic_attributes.len());
+        let mut dynamic_idx = 0usize;
 
-        for field in fields {
+        for (field_idx, field) in fields.iter().enumerate() {
+            if field_idx >= dynamic_fields_start {
+                if let Some((_, value)) = dynamic_attributes.get(dynamic_idx) {
+                    match value {
+                        OwnedAttrValue::String(s) => BondWriter::write_string(&mut buffer, s),
+                        OwnedAttrValue::Int64(i) => BondWriter::write_numeric(&mut buffer, *i),
+                        OwnedAttrValue::Double(d) => BondWriter::write_numeric(&mut buffer, *d),
+                        OwnedAttrValue::Bool(b) => BondWriter::write_bool(&mut buffer, *b),
+                    }
+                }
+                dynamic_idx += 1;
+                continue;
+            }
+
             match field.name.as_ref() {
                 FIELD_ENV_NAME => BondWriter::write_string(&mut buffer, &metadata_fields.env_name),
                 FIELD_ENV_VER => BondWriter::write_string(&mut buffer, &metadata_fields.env_ver),
@@ -563,21 +609,7 @@ impl OtlpEncoder {
                 FIELD_BODY => {
                     record.with_body_string(&mut |s| BondWriter::write_string(&mut buffer, s));
                 }
-                attr_name => {
-                    // Dynamic attribute — linear scan (same complexity as the OTLP-only path)
-                    // TODO: optimize by caching attribute positions alongside field_info
-                    record.visit_attributes(&mut |key, val| {
-                        if key != attr_name {
-                            return;
-                        }
-                        match val {
-                            AttrValue::String(s) => BondWriter::write_string(&mut buffer, s),
-                            AttrValue::Int64(i) => BondWriter::write_numeric(&mut buffer, i),
-                            AttrValue::Double(d) => BondWriter::write_numeric(&mut buffer, d),
-                            AttrValue::Bool(b) => BondWriter::write_bool(&mut buffer, b),
-                        }
-                    });
-                }
+                _ => {}
             }
         }
         buffer
@@ -904,6 +936,359 @@ mod tests {
     use super::*;
     use opentelemetry_proto::tonic::common::v1::{AnyValue, KeyValue};
     use opentelemetry_proto::tonic::logs::v1::LogRecord;
+    use otap_df_pdata_views::views::{
+        common::{AnyValueView, AttributeView, InstrumentationScopeView, ValueType},
+        logs::{LogRecordView, LogsDataView, ResourceLogsView, ScopeLogsView},
+        resource::ResourceView,
+    };
+
+    #[derive(Clone)]
+    enum MockAnyValue {
+        String(Vec<u8>),
+        Int64(i64),
+        Double(f64),
+        Bool(bool),
+    }
+
+    #[derive(Clone)]
+    struct MockAttribute {
+        key: Vec<u8>,
+        value: Option<MockAnyValue>,
+    }
+
+    #[derive(Clone, Default)]
+    struct MockLogRecord {
+        time_unix_nano: Option<u64>,
+        observed_time_unix_nano: Option<u64>,
+        severity_number: Option<i32>,
+        severity_text: Option<Vec<u8>>,
+        body: Option<MockAnyValue>,
+        attributes: Vec<MockAttribute>,
+        flags: Option<u32>,
+        trace_id: Option<[u8; 16]>,
+        span_id: Option<[u8; 8]>,
+        event_name: Option<Vec<u8>>,
+    }
+
+    #[derive(Clone, Default)]
+    struct MockScopeLogs {
+        log_records: Vec<MockLogRecord>,
+    }
+
+    #[derive(Clone, Default)]
+    struct MockResourceLogs {
+        scope_logs: Vec<MockScopeLogs>,
+    }
+
+    #[derive(Clone, Default)]
+    struct MockLogsData {
+        resources: Vec<MockResourceLogs>,
+    }
+
+    #[derive(Clone, Copy)]
+    struct MockAnyValueRef<'a>(&'a MockAnyValue);
+
+    #[derive(Clone, Copy)]
+    struct MockAttributeRef<'a>(&'a MockAttribute);
+
+    #[derive(Clone, Copy)]
+    struct MockLogRecordRef<'a>(&'a MockLogRecord);
+
+    #[derive(Clone, Copy)]
+    struct MockScopeLogsRef<'a>(&'a MockScopeLogs);
+
+    #[derive(Clone, Copy)]
+    struct MockResourceLogsRef<'a>(&'a MockResourceLogs);
+
+    struct MockResource;
+    struct MockScope;
+
+    struct MockResourceLogsIter<'a>(std::slice::Iter<'a, MockResourceLogs>);
+    struct MockScopeLogsIter<'a>(std::slice::Iter<'a, MockScopeLogs>);
+    struct MockLogRecordIter<'a>(std::slice::Iter<'a, MockLogRecord>);
+    struct MockAttributeIter<'a>(std::slice::Iter<'a, MockAttribute>);
+
+    impl<'a> Iterator for MockResourceLogsIter<'a> {
+        type Item = MockResourceLogsRef<'a>;
+
+        fn next(&mut self) -> Option<Self::Item> {
+            self.0.next().map(MockResourceLogsRef)
+        }
+    }
+
+    impl<'a> Iterator for MockScopeLogsIter<'a> {
+        type Item = MockScopeLogsRef<'a>;
+
+        fn next(&mut self) -> Option<Self::Item> {
+            self.0.next().map(MockScopeLogsRef)
+        }
+    }
+
+    impl<'a> Iterator for MockLogRecordIter<'a> {
+        type Item = MockLogRecordRef<'a>;
+
+        fn next(&mut self) -> Option<Self::Item> {
+            self.0.next().map(MockLogRecordRef)
+        }
+    }
+
+    impl<'a> Iterator for MockAttributeIter<'a> {
+        type Item = MockAttributeRef<'a>;
+
+        fn next(&mut self) -> Option<Self::Item> {
+            self.0.next().map(MockAttributeRef)
+        }
+    }
+
+    impl<'a> AnyValueView<'a> for MockAnyValueRef<'a> {
+        type KeyValue = MockAttributeRef<'a>;
+        type ArrayIter<'arr>
+            = std::iter::Empty<Self>
+        where
+            Self: 'arr;
+        type KeyValueIter<'kv>
+            = std::iter::Empty<Self::KeyValue>
+        where
+            Self: 'kv;
+
+        fn value_type(&self) -> ValueType {
+            match self.0 {
+                MockAnyValue::String(_) => ValueType::String,
+                MockAnyValue::Int64(_) => ValueType::Int64,
+                MockAnyValue::Double(_) => ValueType::Double,
+                MockAnyValue::Bool(_) => ValueType::Bool,
+            }
+        }
+
+        fn as_string(&self) -> Option<&[u8]> {
+            match self.0 {
+                MockAnyValue::String(v) => Some(v.as_slice()),
+                _ => None,
+            }
+        }
+
+        fn as_bool(&self) -> Option<bool> {
+            match self.0 {
+                MockAnyValue::Bool(v) => Some(*v),
+                _ => None,
+            }
+        }
+
+        fn as_int64(&self) -> Option<i64> {
+            match self.0 {
+                MockAnyValue::Int64(v) => Some(*v),
+                _ => None,
+            }
+        }
+
+        fn as_double(&self) -> Option<f64> {
+            match self.0 {
+                MockAnyValue::Double(v) => Some(*v),
+                _ => None,
+            }
+        }
+
+        fn as_bytes(&self) -> Option<&[u8]> {
+            None
+        }
+
+        fn as_array(&self) -> Option<Self::ArrayIter<'_>> {
+            None
+        }
+
+        fn as_kvlist(&self) -> Option<Self::KeyValueIter<'_>> {
+            None
+        }
+    }
+
+    impl<'a> AttributeView for MockAttributeRef<'a> {
+        type Val<'val>
+            = MockAnyValueRef<'val>
+        where
+            Self: 'val;
+
+        fn key(&self) -> &[u8] {
+            self.0.key.as_slice()
+        }
+
+        fn value(&self) -> Option<Self::Val<'_>> {
+            self.0.value.as_ref().map(MockAnyValueRef)
+        }
+    }
+
+    impl ResourceView for MockResource {
+        type Attribute<'att>
+            = MockAttributeRef<'att>
+        where
+            Self: 'att;
+        type AttributesIter<'att>
+            = std::iter::Empty<Self::Attribute<'att>>
+        where
+            Self: 'att;
+
+        fn attributes(&self) -> Self::AttributesIter<'_> {
+            std::iter::empty()
+        }
+
+        fn dropped_attributes_count(&self) -> u32 {
+            0
+        }
+    }
+
+    impl InstrumentationScopeView for MockScope {
+        type Attribute<'att>
+            = MockAttributeRef<'att>
+        where
+            Self: 'att;
+        type AttributeIter<'att>
+            = std::iter::Empty<Self::Attribute<'att>>
+        where
+            Self: 'att;
+
+        fn name(&self) -> Option<&[u8]> {
+            None
+        }
+
+        fn version(&self) -> Option<&[u8]> {
+            None
+        }
+
+        fn attributes(&self) -> Self::AttributeIter<'_> {
+            std::iter::empty()
+        }
+
+        fn dropped_attributes_count(&self) -> u32 {
+            0
+        }
+    }
+
+    impl LogsDataView for MockLogsData {
+        type ResourceLogs<'res>
+            = MockResourceLogsRef<'res>
+        where
+            Self: 'res;
+        type ResourcesIter<'res>
+            = MockResourceLogsIter<'res>
+        where
+            Self: 'res;
+
+        fn resources(&self) -> Self::ResourcesIter<'_> {
+            MockResourceLogsIter(self.resources.iter())
+        }
+    }
+
+    impl ResourceLogsView for MockResourceLogsRef<'_> {
+        type Resource<'res>
+            = MockResource
+        where
+            Self: 'res;
+        type ScopeLogs<'scp>
+            = MockScopeLogsRef<'scp>
+        where
+            Self: 'scp;
+        type ScopesIter<'scp>
+            = MockScopeLogsIter<'scp>
+        where
+            Self: 'scp;
+
+        fn resource(&self) -> Option<Self::Resource<'_>> {
+            None
+        }
+
+        fn scopes(&self) -> Self::ScopesIter<'_> {
+            MockScopeLogsIter(self.0.scope_logs.iter())
+        }
+
+        fn schema_url(&self) -> Option<&[u8]> {
+            None
+        }
+    }
+
+    impl ScopeLogsView for MockScopeLogsRef<'_> {
+        type Scope<'scp>
+            = MockScope
+        where
+            Self: 'scp;
+        type LogRecord<'rec>
+            = MockLogRecordRef<'rec>
+        where
+            Self: 'rec;
+        type LogRecordsIter<'rec>
+            = MockLogRecordIter<'rec>
+        where
+            Self: 'rec;
+
+        fn scope(&self) -> Option<Self::Scope<'_>> {
+            None
+        }
+
+        fn log_records(&self) -> Self::LogRecordsIter<'_> {
+            MockLogRecordIter(self.0.log_records.iter())
+        }
+
+        fn schema_url(&self) -> Option<&[u8]> {
+            None
+        }
+    }
+
+    impl LogRecordView for MockLogRecordRef<'_> {
+        type Attribute<'att>
+            = MockAttributeRef<'att>
+        where
+            Self: 'att;
+        type AttributeIter<'att>
+            = MockAttributeIter<'att>
+        where
+            Self: 'att;
+        type Body<'bod>
+            = MockAnyValueRef<'bod>
+        where
+            Self: 'bod;
+
+        fn time_unix_nano(&self) -> Option<u64> {
+            self.0.time_unix_nano
+        }
+
+        fn observed_time_unix_nano(&self) -> Option<u64> {
+            self.0.observed_time_unix_nano
+        }
+
+        fn severity_number(&self) -> Option<i32> {
+            self.0.severity_number
+        }
+
+        fn severity_text(&self) -> Option<&[u8]> {
+            self.0.severity_text.as_deref()
+        }
+
+        fn body(&self) -> Option<Self::Body<'_>> {
+            self.0.body.as_ref().map(MockAnyValueRef)
+        }
+
+        fn attributes(&self) -> Self::AttributeIter<'_> {
+            MockAttributeIter(self.0.attributes.iter())
+        }
+
+        fn dropped_attributes_count(&self) -> u32 {
+            0
+        }
+
+        fn flags(&self) -> Option<u32> {
+            self.0.flags
+        }
+
+        fn trace_id(&self) -> Option<&[u8; 16]> {
+            self.0.trace_id.as_ref()
+        }
+
+        fn span_id(&self) -> Option<&[u8; 8]> {
+            self.0.span_id.as_ref()
+        }
+
+        fn event_name(&self) -> Option<&[u8]> {
+            self.0.event_name.as_deref()
+        }
+    }
 
     fn make_metadata(namespace: &str) -> MetadataFields {
         MetadataFields::new(
@@ -915,6 +1300,73 @@ mod tests {
             namespace.to_string(),
             "Ver1v0".to_string(),
         )
+    }
+
+    fn single_log_view(log_record: MockLogRecord) -> MockLogsData {
+        MockLogsData {
+            resources: vec![MockResourceLogs {
+                scope_logs: vec![MockScopeLogs {
+                    log_records: vec![log_record],
+                }],
+            }],
+        }
+    }
+
+    fn mock_from_otlp(log: &LogRecord) -> MockLogRecord {
+        let trace_id = log.trace_id.as_slice().try_into().ok();
+        let span_id = log.span_id.as_slice().try_into().ok();
+        let body = match log.body.as_ref().and_then(|b| b.value.as_ref()) {
+            Some(Value::StringValue(s)) => Some(MockAnyValue::String(s.as_bytes().to_vec())),
+            _ => None,
+        };
+
+        let attributes = log
+            .attributes
+            .iter()
+            .map(|a| MockAttribute {
+                key: a.key.as_bytes().to_vec(),
+                value: a
+                    .value
+                    .as_ref()
+                    .and_then(|v| v.value.as_ref())
+                    .and_then(|v| match v {
+                        Value::StringValue(s) => Some(MockAnyValue::String(s.as_bytes().to_vec())),
+                        Value::IntValue(i) => Some(MockAnyValue::Int64(*i)),
+                        Value::DoubleValue(d) => Some(MockAnyValue::Double(*d)),
+                        Value::BoolValue(b) => Some(MockAnyValue::Bool(*b)),
+                        _ => None,
+                    }),
+            })
+            .collect();
+
+        MockLogRecord {
+            time_unix_nano: (log.time_unix_nano != 0).then_some(log.time_unix_nano),
+            observed_time_unix_nano: (log.observed_time_unix_nano != 0)
+                .then_some(log.observed_time_unix_nano),
+            severity_number: (log.severity_number != 0).then_some(log.severity_number),
+            severity_text: Some(log.severity_text.as_bytes().to_vec()),
+            body,
+            attributes,
+            flags: (log.flags != 0).then_some(log.flags),
+            trace_id,
+            span_id,
+            event_name: Some(log.event_name.as_bytes().to_vec()),
+        }
+    }
+
+    fn assert_single_batch_equal(left: &[EncodedBatch], right: &[EncodedBatch]) {
+        assert_eq!(left.len(), 1);
+        assert_eq!(right.len(), 1);
+
+        let lhs = &left[0];
+        let rhs = &right[0];
+
+        assert_eq!(lhs.event_name, rhs.event_name);
+        assert_eq!(lhs.data, rhs.data);
+        assert_eq!(lhs.metadata.start_time, rhs.metadata.start_time);
+        assert_eq!(lhs.metadata.end_time, rhs.metadata.end_time);
+        assert_eq!(lhs.metadata.schema_ids, rhs.metadata.schema_ids);
+        assert_eq!(lhs.row_count, rhs.row_count);
     }
 
     #[test]
@@ -1048,5 +1500,134 @@ mod tests {
 
         assert_eq!(result.len(), 1);
         assert_eq!(result[0].event_name, "test_event");
+    }
+
+    #[test]
+    fn test_view_encoding_matches_otlp() {
+        let encoder = OtlpEncoder::new();
+        let metadata = make_metadata("view-parity");
+
+        let mut log = LogRecord {
+            observed_time_unix_nano: 1_700_000_000_123_456_789,
+            event_name: "view_event".to_string(),
+            severity_number: 13,
+            severity_text: "WARN".to_string(),
+            body: Some(AnyValue {
+                value: Some(Value::StringValue("hello".to_string())),
+            }),
+            trace_id: vec![0x11; 16],
+            span_id: vec![0x22; 8],
+            flags: 1,
+            ..Default::default()
+        };
+        log.attributes.push(KeyValue {
+            key: "user".to_string(),
+            value: Some(AnyValue {
+                value: Some(Value::StringValue("alice".to_string())),
+            }),
+        });
+        log.attributes.push(KeyValue {
+            key: "attempt".to_string(),
+            value: Some(AnyValue {
+                value: Some(Value::IntValue(2)),
+            }),
+        });
+
+        let otlp_encoded = encoder
+            .encode_log_batch([log.clone()].iter(), &metadata)
+            .unwrap();
+        let view = single_log_view(mock_from_otlp(&log));
+        let view_encoded = encoder.encode_logs_from_view(&view, &metadata).unwrap();
+
+        assert_single_batch_equal(&otlp_encoded, &view_encoded);
+    }
+
+    #[test]
+    fn test_view_empty_severity_text_matches_otlp() {
+        let encoder = OtlpEncoder::new();
+        let metadata = make_metadata("view-empty-severity");
+
+        let log = LogRecord {
+            observed_time_unix_nano: 1_700_000_000_222_333_444,
+            event_name: "empty_severity".to_string(),
+            severity_number: 9,
+            severity_text: String::new(),
+            ..Default::default()
+        };
+
+        let otlp_encoded = encoder
+            .encode_log_batch([log.clone()].iter(), &metadata)
+            .unwrap();
+
+        let mut view_log = mock_from_otlp(&log);
+        view_log.severity_text = Some(Vec::new());
+        let view = single_log_view(view_log);
+        let view_encoded = encoder.encode_logs_from_view(&view, &metadata).unwrap();
+
+        assert_single_batch_equal(&otlp_encoded, &view_encoded);
+    }
+
+    #[test]
+    fn test_view_invalid_utf8_body_omits_body_field() {
+        let encoder = OtlpEncoder::new();
+        let metadata = make_metadata("view-invalid-body");
+
+        let log = LogRecord {
+            observed_time_unix_nano: 1_700_000_000_333_444_555,
+            event_name: "invalid_body".to_string(),
+            severity_number: 5,
+            ..Default::default()
+        };
+
+        let otlp_encoded = encoder
+            .encode_log_batch([log.clone()].iter(), &metadata)
+            .unwrap();
+
+        let mut view_log = mock_from_otlp(&log);
+        view_log.body = Some(MockAnyValue::String(vec![0xff]));
+        let view = single_log_view(view_log);
+        let view_encoded = encoder.encode_logs_from_view(&view, &metadata).unwrap();
+
+        assert_single_batch_equal(&otlp_encoded, &view_encoded);
+    }
+
+    #[test]
+    fn test_duplicate_attributes_write_once_per_field() {
+        let metadata = make_metadata("duplicate-attrs");
+
+        let base_log = LogRecord {
+            observed_time_unix_nano: 1_700_000_000_444_555_666,
+            event_name: "dup_attr".to_string(),
+            severity_number: 7,
+            ..Default::default()
+        };
+
+        let mut dup_log = base_log.clone();
+        dup_log.attributes.push(KeyValue {
+            key: "dup".to_string(),
+            value: Some(AnyValue {
+                value: Some(Value::IntValue(1)),
+            }),
+        });
+        dup_log.attributes.push(KeyValue {
+            key: "dup".to_string(),
+            value: Some(AnyValue {
+                value: Some(Value::IntValue(2)),
+            }),
+        });
+
+        let base_ref = &base_log;
+        let base_attrs = OtlpEncoder::collect_dynamic_attributes(&base_ref);
+        let base_fields = OtlpEncoder::determine_fields_for(&base_ref, &base_attrs);
+        let base_row =
+            OtlpEncoder::write_row_data_for(&base_ref, &base_fields, &base_attrs, &metadata);
+
+        let dup_ref = &dup_log;
+        let dup_attrs = OtlpEncoder::collect_dynamic_attributes(&dup_ref);
+        let dup_fields = OtlpEncoder::determine_fields_for(&dup_ref, &dup_attrs);
+        let dup_row = OtlpEncoder::write_row_data_for(&dup_ref, &dup_fields, &dup_attrs, &metadata);
+
+        assert_eq!(dup_attrs.len(), 2);
+        assert_eq!(dup_row.len() - base_row.len(), 16);
     }
 }
