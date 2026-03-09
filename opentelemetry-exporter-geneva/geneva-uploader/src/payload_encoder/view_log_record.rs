@@ -85,12 +85,7 @@ impl<'a, T: LogRecordView> GenevaLogRecord for LogRecordViewAdapter<'a, T> {
                 .is_some_and(|bytes| std::str::from_utf8(bytes).is_ok())
     }
 
-    /// Calls `f` with the body string if the body is a UTF-8 string.
-    ///
-    /// The body value is a GAT-backed temporary (`T::Body<'_>`); a callback is
-    /// used instead of returning `&str` to avoid storing a reference beyond the
-    /// temporary's lifetime.
-    fn with_body_string(&self, f: &mut dyn FnMut(&str)) -> bool {
+    fn with_body_string<F: FnMut(&str)>(&self, f: &mut F) -> bool {
         let body = match self.0.body() {
             Some(b) => b,
             None => return false,
@@ -106,7 +101,7 @@ impl<'a, T: LogRecordView> GenevaLogRecord for LogRecordViewAdapter<'a, T> {
         false
     }
 
-    fn visit_attributes(&self, visitor: &mut dyn FnMut(&str, AttrValue<'_>)) {
+    fn visit_attributes<F: FnMut(&str, AttrValue<'_>)>(&self, visitor: &mut F) {
         for attr in self.0.attributes() {
             let key = match std::str::from_utf8(attr.key()) {
                 Ok(k) => k,

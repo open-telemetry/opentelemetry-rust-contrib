@@ -34,14 +34,6 @@ pub(crate) enum AttrValue<'a> {
 /// Abstracts field access from different log record representations so that the
 /// Bond/LZ4/CentralBlob encoding pipeline is independent of the concrete record
 /// type.  Adding a new source format only requires implementing this trait.
-///
-/// # Object safety
-///
-/// The trait is intentionally object-safe.  Callback-style methods
-/// (`with_body_string`, `visit_attributes`) use `&mut dyn FnMut` so the trait
-/// can be used as `dyn GenevaLogRecord` when needed, and so that callers can
-/// monomorphise at the `encode_log_batch` call site without propagating extra
-/// type parameters into every encoder helper.
 pub(crate) trait GenevaLogRecord {
     /// Name used to route this record into its per-event batch.
     ///
@@ -83,14 +75,14 @@ pub(crate) trait GenevaLogRecord {
     /// Calls `f` with the body string when the body is a UTF-8 string, and
     /// returns `true` iff `f` was called.
     ///
-    /// Using a callback avoids lifetime issues with GAT-backed view types where
-    /// the body value is an intermediate temporary that cannot outlive the call.
-    fn with_body_string(&self, f: &mut dyn FnMut(&str)) -> bool;
+    /// A callback is used instead of returning `&str` because GAT-backed view
+    /// types produce a body temporary that cannot outlive the call.
+    fn with_body_string<F: FnMut(&str)>(&self, f: &mut F) -> bool;
 
     /// Calls `visitor` once for each attribute with a scalar value type
     /// encodable in Geneva Bond (string, i64, f64, bool).  Other value types
     /// are silently skipped.
-    fn visit_attributes(&self, visitor: &mut dyn FnMut(&str, AttrValue<'_>));
+    fn visit_attributes<F: FnMut(&str, AttrValue<'_>)>(&self, visitor: &mut F);
 }
 
 // ---------------------------------------------------------------------------
@@ -165,7 +157,7 @@ impl GenevaLogRecord for &LogRecord {
         )
     }
 
-    fn with_body_string(&self, f: &mut dyn FnMut(&str)) -> bool {
+    fn with_body_string<F: FnMut(&str)>(&self, f: &mut F) -> bool {
         if let Some(body) = &self.body {
             if let Some(Value::StringValue(s)) = &body.value {
                 f(s.as_str());
@@ -175,7 +167,7 @@ impl GenevaLogRecord for &LogRecord {
         false
     }
 
-    fn visit_attributes(&self, visitor: &mut dyn FnMut(&str, AttrValue<'_>)) {
+    fn visit_attributes<F: FnMut(&str, AttrValue<'_>)>(&self, visitor: &mut F) {
         for kv in &self.attributes {
             if let Some(val) = kv.value.as_ref().and_then(|v| v.value.as_ref()) {
                 let attr_val = match val {
