@@ -197,6 +197,129 @@ void geneva_batches_free(EncodedBatchesHandle* batches);
 void geneva_client_free(GenevaClientHandle* handle);
 
 
+/* =========================================================================
+ * Zero-copy log record path (no intermediate OTLP serialisation)
+ * =========================================================================
+ *
+ * Use these types and geneva_encode_and_compress_log_records() when you
+ * already have log records in memory and want to encode them directly to
+ * Geneva Bond format without serialising to OTLP protobuf first.
+ *
+ * If your records carry meaningful resource or instrumentation-scope
+ * attributes (service name, host, etc.) use the OTLP path instead:
+ * geneva_encode_and_compress_logs().
+ * =========================================================================
+ */
+
+/* Attribute value type tag — set GenevaAttrValueC.tag to one of these. */
+#define GENEVA_ATTR_STRING 0
+#define GENEVA_ATTR_INT64  1
+#define GENEVA_ATTR_DOUBLE 2
+#define GENEVA_ATTR_BOOL   3
+
+/* Attribute value data.  Only the member matching the tag is read. */
+typedef union {
+    const char* str_val;   /* GENEVA_ATTR_STRING: null-terminated UTF-8 */
+    int64_t     int64_val; /* GENEVA_ATTR_INT64  */
+    double      double_val;/* GENEVA_ATTR_DOUBLE */
+    uint8_t     bool_val;  /* GENEVA_ATTR_BOOL: 0 = false, else true */
+} GenevaAttrData;
+
+/* Tagged attribute value.  Set tag, then populate the matching data field. */
+typedef struct {
+    uint8_t       tag;  /* One of GENEVA_ATTR_* constants */
+    GenevaAttrData data;
+} GenevaAttrValueC;
+
+/*
+ * A single log record for zero-copy ingestion.
+ *
+ * Memory ownership
+ * ----------------
+ * Rust never takes ownership of any C memory.  All pointers are borrowed for
+ * the duration of the geneva_encode_and_compress_log_records() call only.
+ * After the call returns, every buffer may be freed or reused immediately.
+ *
+ * Zero-copy guarantee
+ * -------------------
+ * String fields (event_name, body, severity_text, attribute keys and string
+ * values) are read directly from the pointers below — no intermediate heap
+ * copy is made of the input data.  Fixed-size fields (trace_id, span_id,
+ * numeric fields) are copied by value as normal struct field access.
+ *
+ * What does allocate
+ * ------------------
+ * The output (Bond-encoded + LZ4-compressed bytes) is heap-allocated inside
+ * Rust and owned by the returned EncodedBatchesHandle.  Free it with
+ * geneva_batches_free() when no longer needed.
+ */
+typedef struct {
+    /* Event name (null-terminated). NULL or empty → default "Log". */
+    const char* event_name;
+
+    /* Primary timestamp (nanoseconds since Unix epoch). 0 = absent. */
+    uint64_t time_unix_nano;
+
+    /* Observation timestamp (nanoseconds since Unix epoch). 0 = absent. */
+    uint64_t observed_time_unix_nano;
+
+    /* OTLP severity number (0 = unspecified). */
+    int32_t severity_number;
+
+    /* Severity text (null-terminated). NULL = absent. */
+    const char* severity_text;
+
+    /* Log body as a null-terminated UTF-8 string. NULL = absent. */
+    const char* body;
+
+    /* 16-byte trace ID. Only read when trace_id_present != 0. */
+    uint8_t trace_id[16];
+    uint8_t trace_id_present; /* Non-zero if trace_id is valid. */
+
+    /* 8-byte span ID. Only read when span_id_present != 0. */
+    uint8_t span_id[8];
+    uint8_t span_id_present;  /* Non-zero if span_id is valid. */
+
+    /* Trace flags. Only used when flags_present != 0. */
+    uint32_t flags;
+    uint8_t  flags_present;   /* Non-zero if flags is meaningful. */
+
+    /* Parallel attribute arrays of length attr_count.
+       Pass NULL for both (and attr_count = 0) when there are no attributes. */
+    const char* const*         attr_keys;   /* null-terminated attribute keys */
+    const GenevaAttrValueC*    attr_values; /* one value per key              */
+    size_t                     attr_count;
+} GenevaLogRecordC;
+
+/*
+ * Encode a flat C array of log records into LZ4-compressed Geneva batches.
+ *
+ * This is the zero-copy path: records are read directly from the C array
+ * without any intermediate OTLP serialisation.
+ *
+ * Parameters:
+ *   handle        - Client handle from geneva_client_new (required).
+ *   records       - Array of record_count initialised GenevaLogRecordC values.
+ *                   All pointers inside each record must be valid for the
+ *                   duration of this call.
+ *   record_count  - Number of elements in records. Must be > 0.
+ *   out_batches   - Receives a non-null EncodedBatchesHandle on success.
+ *                   Free with geneva_batches_free() when done.
+ *   err_msg_out   - Optional buffer for a diagnostic message (may be NULL).
+ *   err_msg_len   - Byte capacity of err_msg_out (including NUL terminator).
+ *
+ * Returns GENEVA_SUCCESS on success; an error code otherwise.
+ * Upload each batch with geneva_upload_batch_sync(), then free with
+ * geneva_batches_free().
+ */
+GenevaError geneva_encode_and_compress_log_records(
+    GenevaClientHandle*       handle,
+    const GenevaLogRecordC*   records,
+    size_t                    record_count,
+    EncodedBatchesHandle**    out_batches,
+    char*                     err_msg_out,
+    size_t                    err_msg_len);
+
 #ifdef __cplusplus
 }
 #endif

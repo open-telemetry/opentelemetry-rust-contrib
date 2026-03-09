@@ -36,3 +36,16 @@ record is routed to.  Records with no event name default to the `"Log"` table.
 
 See `examples/view_basic.rs` for a complete working example including a
 minimal `LogsDataView` implementation.
+
+## C/C++ FFI
+
+For C/C++ callers, the `geneva-uploader-ffi` crate wraps `GenevaClient` behind
+a stable C ABI.  It provides two encoding paths that mirror the Rust paths above:
+
+- **OTLP bytes** (`geneva_encode_and_compress_logs`) — pass a serialised
+  `ExportLogsServiceRequest` protobuf.
+- **Direct records** (`geneva_encode_and_compress_log_records`) — pass a flat
+  `GenevaLogRecordC` array; string fields are read directly from C memory with
+  no intermediate copy.
+
+See `../geneva-uploader-ffi/README.md` for details.

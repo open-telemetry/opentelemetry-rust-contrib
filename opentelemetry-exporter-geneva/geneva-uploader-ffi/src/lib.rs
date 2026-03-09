@@ -4,6 +4,7 @@
 #![allow(unsafe_attr_outside_unsafe)]
 
 use std::ffi::CStr;
+use std::marker::PhantomData;
 use std::os::raw::{c_char, c_uint};
 use std::ptr;
 use std::sync::OnceLock;
@@ -754,6 +755,646 @@ pub unsafe extern "C" fn geneva_client_free(handle: *mut GenevaClientHandle) {
     }
 }
 
+// ============================================================
+// Zero-copy log record FFI (no intermediate OTLP conversion)
+// ============================================================
+
+use otap_df_pdata_views::views::{
+    common::{AnyValueView, AttributeView, InstrumentationScopeView, ValueType},
+    logs::{LogRecordView, LogsDataView, ResourceLogsView, ScopeLogsView},
+    resource::ResourceView,
+};
+
+/// Attribute value type tag for [`GenevaAttrValueC`].
+///
+/// Maps to Geneva Bond scalar types. Use the constants below to populate the
+/// `tag` field before setting the active union member in `data`.
+#[repr(u8)]
+#[derive(Copy, Clone, PartialEq, Eq)]
+pub enum GenevaAttrType {
+    String = 0,
+    Int64 = 1,
+    Double = 2,
+    Bool = 3,
+}
+
+/// Attribute value data union.
+///
+/// The active member is selected by [`GenevaAttrValueC::tag`].
+/// Initialise only the member that corresponds to the chosen tag;
+/// the other members are ignored.
+#[repr(C)]
+#[derive(Copy, Clone)]
+pub union GenevaAttrData {
+    /// Valid when `tag == GenevaAttrType::String`. Null-terminated UTF-8 string.
+    pub str_val: *const c_char,
+    /// Valid when `tag == GenevaAttrType::Int64`.
+    pub int64_val: i64,
+    /// Valid when `tag == GenevaAttrType::Double`.
+    pub double_val: f64,
+    /// Valid when `tag == GenevaAttrType::Bool`. 0 = false, anything else = true.
+    pub bool_val: u8,
+}
+
+/// Tagged attribute value for [`GenevaLogRecordC`].
+///
+/// Set `tag` to the desired [`GenevaAttrType`] and populate the matching
+/// field inside `data`.
+#[repr(C)]
+#[derive(Copy, Clone)]
+pub struct GenevaAttrValueC {
+    /// Discriminant — one of the [`GenevaAttrType`] constants.
+    pub tag: u8,
+    pub data: GenevaAttrData,
+}
+
+/// A single log record in C-compatible layout for zero-copy ingestion.
+///
+/// # Memory ownership
+///
+/// **Rust never takes ownership of any C memory.**  All pointer fields are
+/// borrowed for the duration of the call to
+/// [`geneva_encode_and_compress_log_records`] only.  After the call returns the
+/// caller may free or reuse every buffer immediately.
+///
+/// # What is zero-copy
+///
+/// Every field accessed through a pointer (`event_name`, `body`, `severity_text`,
+/// attribute keys and string values) is read directly from C memory — no
+/// intermediate heap copy is made of the *input* data.  Fixed-size fields
+/// (`trace_id`, `span_id`, `flags`, numeric timestamps/severity) are copied by
+/// value as part of normal struct access (a few bytes each, on the stack).
+///
+/// # What does allocate
+///
+/// The *output* (Bond-encoded + LZ4-compressed bytes) necessarily allocates:
+/// - One `Vec<u8>` per record for the Bond row encoding.
+/// - One `String` per unique `event_name` value (amortised via `Arc`).
+/// - One `Vec<u8>` per distinct event-name batch for the LZ4 output.
+///
+/// These allocations are owned by the returned [`EncodedBatchesHandle`] and
+/// freed when that handle is passed to [`geneva_batches_free`].
+///
+/// # String fields
+/// String fields use null-terminated C strings (`*const c_char`).
+/// Pass `NULL` for any optional field that is absent.
+///
+/// # Attribute arrays
+/// `attr_keys` and `attr_values` are parallel arrays of length `attr_count`.
+/// Pass `NULL` for both (and set `attr_count = 0`) when there are no attributes.
+#[repr(C)]
+pub struct GenevaLogRecordC {
+    /// Event name (null-terminated). `NULL` or empty string → default `"Log"`.
+    pub event_name: *const c_char,
+
+    /// Primary timestamp (nanoseconds since Unix epoch). `0` = absent.
+    pub time_unix_nano: u64,
+
+    /// Observation timestamp (nanoseconds since Unix epoch). `0` = absent.
+    pub observed_time_unix_nano: u64,
+
+    /// OTLP severity number (`0` = unspecified/unknown).
+    pub severity_number: i32,
+
+    /// Severity text (null-terminated). `NULL` = absent.
+    pub severity_text: *const c_char,
+
+    /// Log body as a null-terminated UTF-8 string. `NULL` = absent.
+    pub body: *const c_char,
+
+    /// 16-byte trace ID. Only read when `trace_id_present != 0`.
+    pub trace_id: [u8; 16],
+    /// Non-zero if `trace_id` carries a valid trace ID.
+    pub trace_id_present: u8,
+
+    /// 8-byte span ID. Only read when `span_id_present != 0`.
+    pub span_id: [u8; 8],
+    /// Non-zero if `span_id` carries a valid span ID.
+    pub span_id_present: u8,
+
+    /// Trace flags. Only used when `flags_present != 0`.
+    pub flags: u32,
+    /// Non-zero if `flags` is meaningful.
+    pub flags_present: u8,
+
+    /// Parallel array of null-terminated attribute keys (`attr_count` elements).
+    /// `NULL` when `attr_count == 0`.
+    pub attr_keys: *const *const c_char,
+
+    /// Parallel array of attribute values (`attr_count` elements, one per key).
+    /// `NULL` when `attr_count == 0`.
+    pub attr_values: *const GenevaAttrValueC,
+
+    /// Number of entries in `attr_keys` / `attr_values`.
+    pub attr_count: usize,
+}
+
+// ---------------------------------------------------------------------------
+// Stub view types (no resource/scope metadata required from C callers)
+// ---------------------------------------------------------------------------
+
+struct NoView;
+
+impl ResourceView for NoView {
+    type Attribute<'a> = NoAttrView where Self: 'a;
+    type AttributesIter<'a> = std::iter::Empty<NoAttrView> where Self: 'a;
+    fn attributes(&self) -> Self::AttributesIter<'_> {
+        std::iter::empty()
+    }
+    fn dropped_attributes_count(&self) -> u32 {
+        0
+    }
+}
+
+impl InstrumentationScopeView for NoView {
+    type Attribute<'a> = NoAttrView where Self: 'a;
+    type AttributeIter<'a> = std::iter::Empty<NoAttrView> where Self: 'a;
+    fn name(&self) -> Option<&[u8]> {
+        None
+    }
+    fn version(&self) -> Option<&[u8]> {
+        None
+    }
+    fn attributes(&self) -> Self::AttributeIter<'_> {
+        std::iter::empty()
+    }
+    fn dropped_attributes_count(&self) -> u32 {
+        0
+    }
+}
+
+struct NoAttrView;
+
+impl AttributeView for NoAttrView {
+    type Val<'v> = NoAnyValue where Self: 'v;
+    fn key(&self) -> &[u8] {
+        b""
+    }
+    fn value(&self) -> Option<Self::Val<'_>> {
+        None
+    }
+}
+
+struct NoAnyValue;
+
+impl<'a> AnyValueView<'a> for NoAnyValue {
+    type KeyValue = NoAttrView;
+    type ArrayIter<'arr> = std::iter::Empty<Self> where Self: 'arr;
+    type KeyValueIter<'kv> = std::iter::Empty<NoAttrView> where Self: 'kv;
+    fn value_type(&self) -> ValueType {
+        ValueType::String
+    }
+    fn as_string(&self) -> Option<&[u8]> {
+        None
+    }
+    fn as_bool(&self) -> Option<bool> {
+        None
+    }
+    fn as_int64(&self) -> Option<i64> {
+        None
+    }
+    fn as_double(&self) -> Option<f64> {
+        None
+    }
+    fn as_bytes(&self) -> Option<&[u8]> {
+        None
+    }
+    fn as_array(&self) -> Option<Self::ArrayIter<'_>> {
+        None
+    }
+    fn as_kvlist(&self) -> Option<Self::KeyValueIter<'_>> {
+        None
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Body AnyValueView (string-only; C callers pass body as *const c_char)
+// ---------------------------------------------------------------------------
+
+/// Borrows the body C string for the lifetime of the enclosing log record view.
+struct GenevaBodyRef<'a> {
+    ptr: *const c_char,
+    _marker: PhantomData<&'a c_char>,
+}
+
+impl<'a> AnyValueView<'a> for GenevaBodyRef<'a> {
+    type KeyValue = NoAttrView;
+    type ArrayIter<'arr> = std::iter::Empty<Self> where Self: 'arr;
+    type KeyValueIter<'kv> = std::iter::Empty<NoAttrView> where Self: 'kv;
+
+    fn value_type(&self) -> ValueType {
+        ValueType::String
+    }
+
+    fn as_string(&self) -> Option<&[u8]> {
+        if self.ptr.is_null() {
+            return None;
+        }
+        // Safety: ptr is non-null and C caller guarantees it is valid for 'a.
+        Some(unsafe { CStr::from_ptr(self.ptr) }.to_bytes())
+    }
+
+    fn as_bool(&self) -> Option<bool> {
+        None
+    }
+    fn as_int64(&self) -> Option<i64> {
+        None
+    }
+    fn as_double(&self) -> Option<f64> {
+        None
+    }
+    fn as_bytes(&self) -> Option<&[u8]> {
+        None
+    }
+    fn as_array(&self) -> Option<Self::ArrayIter<'_>> {
+        None
+    }
+    fn as_kvlist(&self) -> Option<Self::KeyValueIter<'_>> {
+        None
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Attribute AnyValueView (dispatches on GenevaAttrType tag)
+// ---------------------------------------------------------------------------
+
+/// Borrows one attribute value entry from the C arrays.
+struct GenevaAttrAnyValue<'a> {
+    val: *const GenevaAttrValueC,
+    _marker: PhantomData<&'a GenevaAttrValueC>,
+}
+
+impl<'a> AnyValueView<'a> for GenevaAttrAnyValue<'a> {
+    type KeyValue = NoAttrView;
+    type ArrayIter<'arr> = std::iter::Empty<Self> where Self: 'arr;
+    type KeyValueIter<'kv> = std::iter::Empty<NoAttrView> where Self: 'kv;
+
+    fn value_type(&self) -> ValueType {
+        // Safety: val is non-null (checked at GenevaAttrRef::value).
+        let tag = unsafe { (*self.val).tag };
+        match tag {
+            t if t == GenevaAttrType::String as u8 => ValueType::String,
+            t if t == GenevaAttrType::Int64 as u8 => ValueType::Int64,
+            t if t == GenevaAttrType::Double as u8 => ValueType::Double,
+            t if t == GenevaAttrType::Bool as u8 => ValueType::Bool,
+            _ => ValueType::String, // fallback; as_string returns None
+        }
+    }
+
+    fn as_string(&self) -> Option<&[u8]> {
+        // Safety: val non-null; tag/data consistent by C caller contract.
+        let entry = unsafe { &*self.val };
+        if entry.tag == GenevaAttrType::String as u8 {
+            let ptr = unsafe { entry.data.str_val };
+            if ptr.is_null() {
+                return None;
+            }
+            Some(unsafe { CStr::from_ptr(ptr) }.to_bytes())
+        } else {
+            None
+        }
+    }
+
+    fn as_int64(&self) -> Option<i64> {
+        let entry = unsafe { &*self.val };
+        if entry.tag == GenevaAttrType::Int64 as u8 {
+            Some(unsafe { entry.data.int64_val })
+        } else {
+            None
+        }
+    }
+
+    fn as_double(&self) -> Option<f64> {
+        let entry = unsafe { &*self.val };
+        if entry.tag == GenevaAttrType::Double as u8 {
+            Some(unsafe { entry.data.double_val })
+        } else {
+            None
+        }
+    }
+
+    fn as_bool(&self) -> Option<bool> {
+        let entry = unsafe { &*self.val };
+        if entry.tag == GenevaAttrType::Bool as u8 {
+            Some(unsafe { entry.data.bool_val } != 0)
+        } else {
+            None
+        }
+    }
+
+    fn as_bytes(&self) -> Option<&[u8]> {
+        None
+    }
+    fn as_array(&self) -> Option<Self::ArrayIter<'_>> {
+        None
+    }
+    fn as_kvlist(&self) -> Option<Self::KeyValueIter<'_>> {
+        None
+    }
+}
+
+// ---------------------------------------------------------------------------
+// AttributeView for one (key, value) pair from the C arrays
+// ---------------------------------------------------------------------------
+
+struct GenevaAttrRef<'a> {
+    key: *const c_char,
+    val: *const GenevaAttrValueC,
+    _marker: PhantomData<&'a GenevaLogRecordC>,
+}
+
+impl<'a> AttributeView for GenevaAttrRef<'a> {
+    type Val<'v> = GenevaAttrAnyValue<'v> where Self: 'v;
+
+    fn key(&self) -> &[u8] {
+        if self.key.is_null() {
+            return b"";
+        }
+        unsafe { CStr::from_ptr(self.key) }.to_bytes()
+    }
+
+    fn value(&self) -> Option<Self::Val<'_>> {
+        if self.val.is_null() {
+            return None;
+        }
+        Some(GenevaAttrAnyValue {
+            val: self.val,
+            _marker: PhantomData,
+        })
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Attribute iterator over the parallel C arrays
+// ---------------------------------------------------------------------------
+
+struct GenevaAttrIter<'a> {
+    keys: *const *const c_char,
+    values: *const GenevaAttrValueC,
+    len: usize,
+    pos: usize,
+    _marker: PhantomData<&'a GenevaLogRecordC>,
+}
+
+impl<'a> Iterator for GenevaAttrIter<'a> {
+    type Item = GenevaAttrRef<'a>;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        if self.pos >= self.len {
+            return None;
+        }
+        // Safety: pos < len, so both arrays have a valid element at pos.
+        let key = unsafe { *self.keys.add(self.pos) };
+        let val = unsafe { self.values.add(self.pos) };
+        self.pos += 1;
+        Some(GenevaAttrRef {
+            key,
+            val,
+            _marker: PhantomData,
+        })
+    }
+}
+
+// ---------------------------------------------------------------------------
+// LogRecordView impl for GenevaLogRecordC (via reference wrapper)
+// ---------------------------------------------------------------------------
+
+struct GenevaLogRecordRef<'a>(&'a GenevaLogRecordC);
+
+impl<'a> LogRecordView for GenevaLogRecordRef<'a> {
+    type Attribute<'att> = GenevaAttrRef<'att> where Self: 'att;
+    type AttributeIter<'att> = GenevaAttrIter<'att> where Self: 'att;
+    type Body<'bod> = GenevaBodyRef<'bod> where Self: 'bod;
+
+    fn time_unix_nano(&self) -> Option<u64> {
+        if self.0.time_unix_nano != 0 {
+            Some(self.0.time_unix_nano)
+        } else {
+            None
+        }
+    }
+
+    fn observed_time_unix_nano(&self) -> Option<u64> {
+        if self.0.observed_time_unix_nano != 0 {
+            Some(self.0.observed_time_unix_nano)
+        } else {
+            None
+        }
+    }
+
+    fn severity_number(&self) -> Option<i32> {
+        Some(self.0.severity_number)
+    }
+
+    fn severity_text(&self) -> Option<&[u8]> {
+        if self.0.severity_text.is_null() {
+            return None;
+        }
+        let bytes = unsafe { CStr::from_ptr(self.0.severity_text) }.to_bytes();
+        if bytes.is_empty() { None } else { Some(bytes) }
+    }
+
+    fn body(&self) -> Option<Self::Body<'_>> {
+        if self.0.body.is_null() {
+            return None;
+        }
+        Some(GenevaBodyRef {
+            ptr: self.0.body,
+            _marker: PhantomData,
+        })
+    }
+
+    fn attributes(&self) -> Self::AttributeIter<'_> {
+        GenevaAttrIter {
+            keys: self.0.attr_keys,
+            values: self.0.attr_values,
+            len: self.0.attr_count,
+            pos: 0,
+            _marker: PhantomData,
+        }
+    }
+
+    fn dropped_attributes_count(&self) -> u32 {
+        0
+    }
+
+    fn flags(&self) -> Option<u32> {
+        if self.0.flags_present != 0 {
+            Some(self.0.flags)
+        } else {
+            None
+        }
+    }
+
+    fn trace_id(&self) -> Option<&[u8; 16]> {
+        if self.0.trace_id_present != 0 {
+            Some(&self.0.trace_id)
+        } else {
+            None
+        }
+    }
+
+    fn span_id(&self) -> Option<&[u8; 8]> {
+        if self.0.span_id_present != 0 {
+            Some(&self.0.span_id)
+        } else {
+            None
+        }
+    }
+
+    fn event_name(&self) -> Option<&[u8]> {
+        if self.0.event_name.is_null() {
+            return None;
+        }
+        let bytes = unsafe { CStr::from_ptr(self.0.event_name) }.to_bytes();
+        if bytes.is_empty() { None } else { Some(bytes) }
+    }
+}
+
+// ---------------------------------------------------------------------------
+// View hierarchy: flat slice → single resource → single scope → records
+// ---------------------------------------------------------------------------
+
+struct FlatScopeLogs<'a>(&'a [GenevaLogRecordC]);
+
+impl<'a> ScopeLogsView for FlatScopeLogs<'a> {
+    type Scope<'s> = NoView where Self: 's;
+    type LogRecord<'r> = GenevaLogRecordRef<'r> where Self: 'r;
+    type LogRecordsIter<'r> = std::iter::Map<
+        std::slice::Iter<'r, GenevaLogRecordC>,
+        fn(&'r GenevaLogRecordC) -> GenevaLogRecordRef<'r>,
+    > where Self: 'r;
+
+    fn scope(&self) -> Option<Self::Scope<'_>> {
+        None
+    }
+
+    fn log_records(&self) -> Self::LogRecordsIter<'_> {
+        self.0.iter().map(GenevaLogRecordRef)
+    }
+
+    fn schema_url(&self) -> Option<&[u8]> {
+        None
+    }
+}
+
+struct FlatResourceLogs<'a>(&'a [GenevaLogRecordC]);
+
+impl<'a> ResourceLogsView for FlatResourceLogs<'a> {
+    type Resource<'r> = NoView where Self: 'r;
+    type ScopeLogs<'s> = FlatScopeLogs<'s> where Self: 's;
+    type ScopesIter<'s> = std::iter::Once<FlatScopeLogs<'s>> where Self: 's;
+
+    fn resource(&self) -> Option<Self::Resource<'_>> {
+        None
+    }
+
+    fn scopes(&self) -> Self::ScopesIter<'_> {
+        std::iter::once(FlatScopeLogs(self.0))
+    }
+
+    fn schema_url(&self) -> Option<&[u8]> {
+        None
+    }
+}
+
+struct FlatLogsView<'a>(&'a [GenevaLogRecordC]);
+
+impl<'a> LogsDataView for FlatLogsView<'a> {
+    type ResourceLogs<'r> = FlatResourceLogs<'r> where Self: 'r;
+    type ResourcesIter<'r> = std::iter::Once<FlatResourceLogs<'r>> where Self: 'r;
+
+    fn resources(&self) -> Self::ResourcesIter<'_> {
+        std::iter::once(FlatResourceLogs(self.0))
+    }
+}
+
+// ---------------------------------------------------------------------------
+// FFI function: encode a flat C array of log records (zero-copy, no OTLP)
+// ---------------------------------------------------------------------------
+
+/// Encode a flat C array of log records into LZ4-compressed Geneva batches.
+///
+/// This is the zero-copy path for C/C++ callers: records are read directly
+/// from `records` without any intermediate OTLP serialisation.
+///
+/// # Limitations
+/// Each record is treated as a standalone log entry.  Resource attributes
+/// (service name, host, etc.) and instrumentation scope metadata are **not**
+/// supported by this path and are silently ignored.  If your records carry
+/// meaningful resource or scope metadata, use [`geneva_encode_and_compress_logs`]
+/// instead and pass a serialised `ExportLogsServiceRequest` protobuf.
+///
+/// # Parameters
+/// - `handle`: valid client handle returned by [`geneva_client_new`].
+/// - `records`: pointer to an array of `record_count` [`GenevaLogRecordC`] structs.
+///   All pointers inside each struct must remain valid for the duration of this call.
+/// - `record_count`: number of elements in `records`.
+/// - `out_batches`: receives a non-null [`EncodedBatchesHandle`] on success.
+///   Must be freed with [`geneva_batches_free`] when no longer needed.
+/// - `err_msg_out`: optional caller-supplied buffer for a diagnostic message.
+/// - `err_msg_len`: byte capacity of `err_msg_out` (including NUL terminator).
+///
+/// # Return value
+/// [`GenevaError::Success`] on success; an error code otherwise.
+///
+/// # Safety
+/// - `handle` must be a valid pointer returned by `geneva_client_new`.
+/// - `records` must point to at least `record_count` initialised `GenevaLogRecordC` values.
+/// - Every pointer field inside each `GenevaLogRecordC` must be valid for the duration of this call.
+/// - `out_batches` must be non-null.
+/// - `err_msg_out` may be `NULL`; if non-null it must point to a buffer of at least `err_msg_len` bytes.
+#[no_mangle]
+pub unsafe extern "C" fn geneva_encode_and_compress_log_records(
+    handle: *mut GenevaClientHandle,
+    records: *const GenevaLogRecordC,
+    record_count: usize,
+    out_batches: *mut *mut EncodedBatchesHandle,
+    err_msg_out: *mut c_char,
+    err_msg_len: usize,
+) -> GenevaError {
+    if out_batches.is_null() {
+        return GenevaError::NullPointer;
+    }
+    unsafe { *out_batches = ptr::null_mut() };
+
+    if handle.is_null() {
+        return GenevaError::NullPointer;
+    }
+    if records.is_null() {
+        return GenevaError::NullPointer;
+    }
+    if record_count == 0 {
+        return GenevaError::EmptyInput;
+    }
+
+    let validation_result = unsafe { validate_handle(handle) };
+    if validation_result != GenevaError::Success {
+        return validation_result;
+    }
+
+    let handle_ref = unsafe { handle.as_ref().unwrap() };
+
+    // Safety: records is non-null and record_count elements are caller-guaranteed valid.
+    let slice = unsafe { std::slice::from_raw_parts(records, record_count) };
+    let view = FlatLogsView(slice);
+
+    match handle_ref.client.encode_and_compress_logs_view(&view) {
+        Ok(batches) => {
+            let h = EncodedBatchesHandle {
+                magic: GENEVA_HANDLE_MAGIC,
+                batches,
+            };
+            unsafe { *out_batches = Box::into_raw(Box::new(h)) };
+            GenevaError::Success
+        }
+        Err(e) => {
+            unsafe { write_error_if_provided(err_msg_out, err_msg_len, &e) };
+            GenevaError::InternalError
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -809,6 +1450,66 @@ mod tests {
             );
             assert_eq!(rc as u32, GenevaError::NullPointer as u32);
             assert!(out.is_null());
+        }
+    }
+
+    #[test]
+    fn test_encode_log_records_with_nulls() {
+        unsafe {
+            // null handle
+            let mut out: *mut EncodedBatchesHandle = std::ptr::null_mut();
+            let rc = geneva_encode_and_compress_log_records(
+                ptr::null_mut(),
+                ptr::null(),
+                0,
+                &mut out,
+                ptr::null_mut(),
+                0,
+            );
+            assert_eq!(rc as u32, GenevaError::NullPointer as u32);
+            assert!(out.is_null());
+
+            // null records pointer
+            let mut fake_handle = std::mem::MaybeUninit::<GenevaClientHandle>::uninit();
+            // write magic so validate_handle would pass (we test records=null before handle validation)
+            let rc2 = geneva_encode_and_compress_log_records(
+                ptr::null_mut(), // null handle → NullPointer before records check
+                ptr::null(),
+                1,
+                &mut out,
+                ptr::null_mut(),
+                0,
+            );
+            assert_eq!(rc2 as u32, GenevaError::NullPointer as u32);
+            drop(fake_handle);
+
+            // zero count
+            let dummy_record = GenevaLogRecordC {
+                event_name: ptr::null(),
+                time_unix_nano: 0,
+                observed_time_unix_nano: 0,
+                severity_number: 0,
+                severity_text: ptr::null(),
+                body: ptr::null(),
+                trace_id: [0u8; 16],
+                trace_id_present: 0,
+                span_id: [0u8; 8],
+                span_id_present: 0,
+                flags: 0,
+                flags_present: 0,
+                attr_keys: ptr::null(),
+                attr_values: ptr::null(),
+                attr_count: 0,
+            };
+            let rc3 = geneva_encode_and_compress_log_records(
+                ptr::null_mut(), // null handle checked first
+                &dummy_record as *const _,
+                0, // zero count → EmptyInput (but null handle checked first → NullPointer)
+                &mut out,
+                ptr::null_mut(),
+                0,
+            );
+            assert_eq!(rc3 as u32, GenevaError::NullPointer as u32);
         }
     }
 

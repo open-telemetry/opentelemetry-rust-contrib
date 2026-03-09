@@ -103,7 +103,7 @@ impl MetadataFields {
 /// "lending iterator" problem that arises when flattening GAT-backed view
 /// iterators with `flat_map`.
 struct LogBatchAccumulator {
-    batches: HashMap<String, BatchData>,
+    batches: HashMap<Arc<String>, BatchData>,
 }
 
 struct BatchData {
@@ -144,13 +144,13 @@ impl LogBatchAccumulator {
     /// Encode a single log record and append it to the appropriate batch.
     fn push<R: GenevaLogRecord>(&mut self, record: &R, metadata_fields: &MetadataFields) {
         let timestamp = record.timestamp_nanos();
-        let routing_name = record.routing_event_name().to_owned();
+        let routing_name = Arc::new(record.routing_event_name().to_owned());
 
         let (field_info, dynamic_fields_start) = OtlpEncoder::determine_fields_for(record);
 
         let entry = self
             .batches
-            .entry(routing_name.clone())
+            .entry(Arc::clone(&routing_name))
             .or_insert_with(|| BatchData {
                 schemas: Vec::new(),
                 events: Vec::new(),
@@ -195,7 +195,7 @@ impl LogBatchAccumulator {
         entry.events.push(CentralEventEntry {
             schema_id,
             level,
-            event_name: Arc::new(routing_name),
+            event_name: routing_name,
             row: row_buffer,
         });
     }
@@ -242,7 +242,7 @@ impl LogBatchAccumulator {
             );
 
             blobs.push(EncodedBatch {
-                event_name: batch_event_name,
+                event_name: (*batch_event_name).clone(),
                 data: compressed,
                 metadata: batch_data.metadata,
                 row_count: events_count,
