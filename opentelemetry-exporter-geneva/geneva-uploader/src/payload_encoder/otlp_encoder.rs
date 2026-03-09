@@ -257,6 +257,10 @@ impl LogBatchAccumulator {
 // ---------------------------------------------------------------------------
 
 /// Encoder to write OTLP/view payload in Bond form.
+///
+/// TODO: `OtlpEncoder` and `otlp_encoder.rs` are misnomers now that this
+/// encoder handles both OTLP proto and `LogsDataView`-backed records.
+/// Rename to `GenevaLogEncoder` / `log_encoder.rs` in a follow-up PR.
 #[derive(Clone)]
 pub(crate) struct OtlpEncoder;
 

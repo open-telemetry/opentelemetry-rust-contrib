@@ -203,8 +203,8 @@ impl GenevaClient {
     ///          └─ AttributeView (for attributes)
     /// ```
     ///
-    /// The [`LogRecordView::event_name`] return value controls which Geneva
-    /// event table the record is routed to.  Records with no event name (or an
+    /// The `event_name` field on each log record controls which Geneva event
+    /// table the record is routed to.  Records with no event name (or an
     /// empty one) are routed to the `"Log"` table.
     ///
     /// # Usage pattern
