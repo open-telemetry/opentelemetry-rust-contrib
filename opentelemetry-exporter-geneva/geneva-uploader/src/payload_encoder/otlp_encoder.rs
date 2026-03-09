@@ -1613,4 +1613,517 @@ mod tests {
         assert_eq!(dup_fields.len() - dup_dynamic_fields_start, 2);
         assert_eq!(dup_row.len() - base_row.len(), 16);
     }
+
+    #[test]
+    fn test_same_event_name_multiple_schemas() {
+        let encoder = OtlpEncoder::new();
+
+        // Schema 1: Basic log
+        let log1 = LogRecord {
+            event_name: "user_action".to_string(),
+            severity_number: 9,
+            ..Default::default()
+        };
+
+        // Schema 2: With trace_id
+        let mut log2 = LogRecord {
+            event_name: "user_action".to_string(),
+            severity_number: 10,
+            ..Default::default()
+        };
+        log2.trace_id = vec![1; 16];
+
+        // Schema 3: With attributes
+        let mut log3 = LogRecord {
+            event_name: "user_action".to_string(),
+            severity_number: 11,
+            ..Default::default()
+        };
+        log3.attributes.push(KeyValue {
+            key: "user_id".to_string(),
+            value: Some(AnyValue {
+                value: Some(Value::StringValue("user123".to_string())),
+            }),
+        });
+
+        let result = encoder
+            .encode_log_batch([log1, log2, log3].iter(), &make_metadata("test"))
+            .unwrap();
+
+        // All should be in one batch with same event_name
+        assert_eq!(result.len(), 1);
+        assert_eq!(result[0].event_name, "user_action");
+        assert!(!result[0].data.is_empty());
+        // Should have 3 different schema IDs (semicolon-separated)
+        assert_eq!(result[0].metadata.schema_ids.matches(';').count(), 2); // 3 schemas = 2 semicolons
+    }
+
+    #[test]
+    fn test_different_event_names() {
+        let encoder = OtlpEncoder::new();
+
+        let log1 = LogRecord {
+            event_name: "login".to_string(),
+            severity_number: 9,
+            ..Default::default()
+        };
+
+        let log2 = LogRecord {
+            event_name: "logout".to_string(),
+            severity_number: 10,
+            ..Default::default()
+        };
+
+        let metadata = make_metadata("test");
+        let result = encoder
+            .encode_log_batch([log1, log2].iter(), &metadata)
+            .unwrap();
+
+        // Should create 2 separate batches
+        assert_eq!(result.len(), 2);
+
+        let event_names: Vec<&String> = result.iter().map(|batch| &batch.event_name).collect();
+        assert!(event_names.contains(&&"login".to_string()));
+        assert!(event_names.contains(&&"logout".to_string()));
+
+        assert!(result.iter().all(|batch| !batch.data.is_empty()));
+    }
+
+    #[test]
+    fn test_empty_event_name_defaults_to_log() {
+        let encoder = OtlpEncoder::new();
+
+        let log = LogRecord {
+            event_name: "".to_string(),
+            severity_number: 9,
+            ..Default::default()
+        };
+
+        let metadata = make_metadata("test");
+        let result = encoder.encode_log_batch([log].iter(), &metadata).unwrap();
+
+        assert_eq!(result.len(), 1);
+        assert_eq!(result[0].event_name, "Log"); // Should default to "Log"
+        assert!(!result[0].data.is_empty());
+    }
+
+    #[test]
+    fn test_mixed_scenario() {
+        let encoder = OtlpEncoder::new();
+
+        // event_name1 with schema1
+        let log1 = LogRecord {
+            event_name: "user_action".to_string(),
+            severity_number: 9,
+            ..Default::default()
+        };
+
+        // event_name1 with schema2 (different schema, same event)
+        let mut log2 = LogRecord {
+            event_name: "user_action".to_string(),
+            severity_number: 10,
+            ..Default::default()
+        };
+        log2.trace_id = vec![1; 16];
+
+        // event_name2 with schema3
+        let log3 = LogRecord {
+            event_name: "system_alert".to_string(),
+            severity_number: 11,
+            ..Default::default()
+        };
+
+        // empty event_name (defaults to "Log") with schema4
+        let mut log4 = LogRecord {
+            event_name: "".to_string(),
+            severity_number: 12,
+            ..Default::default()
+        };
+        log4.attributes.push(KeyValue {
+            key: "error_code".to_string(),
+            value: Some(AnyValue {
+                value: Some(Value::IntValue(404)),
+            }),
+        });
+
+        let metadata = make_metadata("test");
+        let result = encoder
+            .encode_log_batch([log1, log2, log3, log4].iter(), &metadata)
+            .unwrap();
+
+        // Should create 3 batches: "user_action", "system_alert", "Log"
+        assert_eq!(result.len(), 3);
+
+        let user_action = result
+            .iter()
+            .find(|batch| batch.event_name == "user_action")
+            .unwrap();
+        let system_alert = result
+            .iter()
+            .find(|batch| batch.event_name == "system_alert")
+            .unwrap();
+        let log_batch = result
+            .iter()
+            .find(|batch| batch.event_name == "Log")
+            .unwrap();
+
+        assert!(!user_action.data.is_empty());
+        assert_eq!(user_action.metadata.schema_ids.matches(';').count(), 1); // 2 schemas = 1 semicolon
+        assert!(!system_alert.data.is_empty());
+        assert_eq!(system_alert.metadata.schema_ids.matches(';').count(), 0); // 1 schema = 0 semicolons
+        assert!(!log_batch.data.is_empty());
+        assert_eq!(log_batch.metadata.schema_ids.matches(';').count(), 0); // 1 schema = 0 semicolons
+    }
+
+    #[test]
+    fn test_span_encoding() {
+        let encoder = OtlpEncoder::new();
+
+        let mut span = Span {
+            trace_id: vec![1; 16],
+            span_id: vec![2; 8],
+            parent_span_id: vec![3; 8],
+            name: "test_span".to_string(),
+            kind: 1,
+            start_time_unix_nano: 1_700_000_000_000_000_000,
+            end_time_unix_nano: 1_700_000_001_000_000_000,
+            flags: 1,
+            trace_state: "key=value".to_string(),
+            ..Default::default()
+        };
+
+        span.attributes.push(KeyValue {
+            key: "http.method".to_string(),
+            value: Some(AnyValue {
+                value: Some(Value::StringValue("GET".to_string())),
+            }),
+        });
+
+        span.attributes.push(KeyValue {
+            key: "http.status_code".to_string(),
+            value: Some(AnyValue {
+                value: Some(Value::IntValue(200)),
+            }),
+        });
+
+        let metadata = make_metadata("testNamespace");
+        let result = encoder.encode_span_batch([span].iter(), &metadata).unwrap();
+
+        assert_eq!(result.len(), 1);
+        assert_eq!(result[0].event_name, "Span");
+        assert!(!result[0].data.is_empty());
+    }
+
+    #[test]
+    fn test_span_with_links() {
+        use opentelemetry_proto::tonic::trace::v1::span::Link;
+
+        let encoder = OtlpEncoder::new();
+
+        let mut span = Span {
+            trace_id: vec![1; 16],
+            span_id: vec![2; 8],
+            name: "linked_span".to_string(),
+            kind: 2,
+            start_time_unix_nano: 1_700_000_000_000_000_000,
+            end_time_unix_nano: 1_700_000_001_000_000_000,
+            ..Default::default()
+        };
+
+        span.links.push(Link {
+            trace_id: vec![4; 16],
+            span_id: vec![5; 8],
+            ..Default::default()
+        });
+
+        span.links.push(Link {
+            trace_id: vec![6; 16],
+            span_id: vec![7; 8],
+            ..Default::default()
+        });
+
+        let metadata = make_metadata("test");
+        let result = encoder.encode_span_batch([span].iter(), &metadata).unwrap();
+
+        assert_eq!(result.len(), 1);
+        assert_eq!(result[0].event_name, "Span");
+        assert!(!result[0].data.is_empty());
+    }
+
+    #[test]
+    fn test_span_with_status() {
+        use opentelemetry_proto::tonic::trace::v1::{status::StatusCode, Status};
+
+        let encoder = OtlpEncoder::new();
+
+        let mut span = Span {
+            trace_id: vec![1; 16],
+            span_id: vec![2; 8],
+            name: "error_span".to_string(),
+            kind: 1,
+            start_time_unix_nano: 1_700_000_000_000_000_000,
+            end_time_unix_nano: 1_700_000_001_000_000_000,
+            ..Default::default()
+        };
+
+        span.status = Some(Status {
+            message: "Something went wrong".to_string(),
+            code: StatusCode::Error as i32,
+        });
+
+        let metadata = make_metadata("test");
+        let result = encoder.encode_span_batch([span].iter(), &metadata).unwrap();
+
+        assert_eq!(result.len(), 1);
+        assert_eq!(result[0].event_name, "Span");
+        assert!(!result[0].data.is_empty());
+    }
+
+    #[test]
+    fn test_multiple_spans_same_name() {
+        let encoder = OtlpEncoder::new();
+
+        let span1 = Span {
+            trace_id: vec![1; 16],
+            span_id: vec![2; 8],
+            name: "database_query".to_string(),
+            kind: 3,
+            start_time_unix_nano: 1_700_000_000_000_000_000,
+            end_time_unix_nano: 1_700_000_001_000_000_000,
+            ..Default::default()
+        };
+
+        let span2 = Span {
+            trace_id: vec![3; 16],
+            span_id: vec![4; 8],
+            name: "database_query".to_string(),
+            kind: 3,
+            start_time_unix_nano: 1_700_000_002_000_000_000,
+            end_time_unix_nano: 1_700_000_003_000_000_000,
+            ..Default::default()
+        };
+
+        let fields1 = OtlpEncoder::determine_span_fields(&span1, "Span");
+        assert!(
+            fields1.iter().any(|f| f.name.as_ref() == FIELD_NAME),
+            "Span with non-empty name should include 'name' field in schema"
+        );
+
+        let fields2 = OtlpEncoder::determine_span_fields(&span2, "Span");
+        assert!(
+            fields2.iter().any(|f| f.name.as_ref() == FIELD_NAME),
+            "Span with non-empty name should include 'name' field in schema"
+        );
+
+        let metadata = make_metadata("test");
+        let result = encoder
+            .encode_span_batch([span1, span2].iter(), &metadata)
+            .unwrap();
+
+        assert_eq!(result.len(), 1);
+        assert_eq!(result[0].event_name, "Span");
+        assert!(!result[0].data.is_empty());
+        assert_eq!(result[0].metadata.schema_ids.matches(';').count(), 0); // 1 schema = 0 semicolons
+    }
+
+    #[test]
+    fn test_optimized_links_serialization() {
+        use opentelemetry_proto::tonic::trace::v1::span::Link;
+
+        let links = vec![
+            Link {
+                trace_id: vec![
+                    0x01, 0x23, 0x45, 0x67, 0x89, 0xab, 0xcd, 0xef, 0x01, 0x23, 0x45, 0x67, 0x89,
+                    0xab, 0xcd, 0xef,
+                ],
+                span_id: vec![0xfe, 0xdc, 0xba, 0x98, 0x76, 0x54, 0x32, 0x10],
+                ..Default::default()
+            },
+            Link {
+                trace_id: vec![
+                    0x11, 0x22, 0x33, 0x44, 0x55, 0x66, 0x77, 0x88, 0x99, 0xaa, 0xbb, 0xcc, 0xdd,
+                    0xee, 0xff, 0x00,
+                ],
+                span_id: vec![0x00, 0x11, 0x22, 0x33, 0x44, 0x55, 0x66, 0x77],
+                ..Default::default()
+            },
+        ];
+
+        let result = OtlpEncoder::serialize_links(&links);
+
+        assert!(result.starts_with('['));
+        assert!(result.ends_with(']'));
+        assert!(result.contains("toSpanId"));
+        assert!(result.contains("toTraceId"));
+        assert!(result.contains("fedcba9876543210"));
+        assert!(result.contains("0123456789abcdef0123456789abcdef"));
+        assert!(result.contains("0011223344556677"));
+        assert!(result.contains("112233445566778899aabbccddeeff00"));
+
+        let empty_result = OtlpEncoder::serialize_links(&[]);
+        assert_eq!(empty_result, "[]");
+
+        let single_link = vec![Link {
+            trace_id: vec![0x12; 16],
+            span_id: vec![0x34; 8],
+            ..Default::default()
+        }];
+        let single_result = OtlpEncoder::serialize_links(&single_link);
+        assert!(single_result.contains("3434343434343434"));
+        assert!(single_result.contains("12121212121212121212121212121212"));
+        assert_eq!(single_result.matches(',').count(), 1);
+        assert!(single_result.starts_with('['));
+        assert!(single_result.ends_with(']'));
+    }
+
+    #[test]
+    fn test_row_count_in_encoded_batch() {
+        let encoder = OtlpEncoder::new();
+
+        let logs = [
+            LogRecord {
+                observed_time_unix_nano: 1_700_000_000_000_000_000,
+                event_name: "test_event".to_string(),
+                severity_number: 9,
+                ..Default::default()
+            },
+            LogRecord {
+                observed_time_unix_nano: 1_700_000_001_000_000_000,
+                event_name: "test_event".to_string(),
+                severity_number: 10,
+                ..Default::default()
+            },
+            LogRecord {
+                observed_time_unix_nano: 1_700_000_002_000_000_000,
+                event_name: "test_event".to_string(),
+                severity_number: 11,
+                ..Default::default()
+            },
+        ];
+
+        let metadata = make_metadata("test");
+        let result = encoder.encode_log_batch(logs.iter(), &metadata).unwrap();
+
+        assert_eq!(result.len(), 1);
+        assert_eq!(result[0].row_count, 3);
+
+        let spans = [
+            Span {
+                start_time_unix_nano: 1_700_000_000_000_000_000,
+                end_time_unix_nano: 1_700_000_001_000_000_000,
+                ..Default::default()
+            },
+            Span {
+                start_time_unix_nano: 1_700_000_002_000_000_000,
+                end_time_unix_nano: 1_700_000_003_000_000_000,
+                ..Default::default()
+            },
+        ];
+
+        let span_result = encoder.encode_span_batch(spans.iter(), &metadata).unwrap();
+
+        assert_eq!(span_result.len(), 1);
+        assert_eq!(span_result[0].row_count, 2);
+    }
+
+    #[test]
+    fn test_view_timestamp_priority() {
+        // When both time_unix_nano and observed_time_unix_nano are non-zero,
+        // the view adapter must prefer time_unix_nano, matching the OTLP path.
+        let encoder = OtlpEncoder::new();
+        let metadata = make_metadata("ts-priority");
+
+        let log = LogRecord {
+            time_unix_nano: 1_000_000_000,
+            observed_time_unix_nano: 2_000_000_000,
+            event_name: "ts_event".to_string(),
+            severity_number: 9,
+            ..Default::default()
+        };
+
+        let otlp_encoded = encoder
+            .encode_log_batch([log.clone()].iter(), &metadata)
+            .unwrap();
+
+        let view = single_log_view(mock_from_otlp(&log));
+        let view_encoded = encoder.encode_logs_from_view(&view, &metadata).unwrap();
+
+        assert_single_batch_equal(&otlp_encoded, &view_encoded);
+
+        // Confirm the selected timestamp is time_unix_nano, not observed_time_unix_nano
+        assert_eq!(otlp_encoded[0].metadata.start_time, 1_000_000_000);
+        assert_eq!(otlp_encoded[0].metadata.end_time, 1_000_000_000);
+    }
+
+    #[test]
+    fn test_view_multi_resource_multi_scope() {
+        // encode_logs_from_view must accumulate records across all resources and scopes.
+        let encoder = OtlpEncoder::new();
+        let metadata = make_metadata("multi-res");
+
+        // Two resources, each with two scopes, each scope with one log record.
+        // Records alternate between two event names to verify per-event batching.
+        let view = MockLogsData {
+            resources: vec![
+                MockResourceLogs {
+                    scope_logs: vec![
+                        MockScopeLogs {
+                            log_records: vec![MockLogRecord {
+                                observed_time_unix_nano: Some(1_000),
+                                event_name: Some(b"alpha".to_vec()),
+                                severity_number: Some(9),
+                                ..Default::default()
+                            }],
+                        },
+                        MockScopeLogs {
+                            log_records: vec![MockLogRecord {
+                                observed_time_unix_nano: Some(2_000),
+                                event_name: Some(b"beta".to_vec()),
+                                severity_number: Some(10),
+                                ..Default::default()
+                            }],
+                        },
+                    ],
+                },
+                MockResourceLogs {
+                    scope_logs: vec![
+                        MockScopeLogs {
+                            log_records: vec![MockLogRecord {
+                                observed_time_unix_nano: Some(3_000),
+                                event_name: Some(b"alpha".to_vec()),
+                                severity_number: Some(11),
+                                ..Default::default()
+                            }],
+                        },
+                        MockScopeLogs {
+                            log_records: vec![MockLogRecord {
+                                observed_time_unix_nano: Some(4_000),
+                                event_name: Some(b"beta".to_vec()),
+                                severity_number: Some(12),
+                                ..Default::default()
+                            }],
+                        },
+                    ],
+                },
+            ],
+        };
+
+        let result = encoder.encode_logs_from_view(&view, &metadata).unwrap();
+
+        // Two event names → two batches
+        assert_eq!(result.len(), 2);
+
+        let alpha = result.iter().find(|b| b.event_name == "alpha").unwrap();
+        let beta = result.iter().find(|b| b.event_name == "beta").unwrap();
+
+        // Each batch should contain records from both resources
+        assert_eq!(alpha.row_count, 2);
+        assert_eq!(beta.row_count, 2);
+
+        // Timestamp ranges should span across resources
+        assert_eq!(alpha.metadata.start_time, 1_000);
+        assert_eq!(alpha.metadata.end_time, 3_000);
+        assert_eq!(beta.metadata.start_time, 2_000);
+        assert_eq!(beta.metadata.end_time, 4_000);
+    }
 }

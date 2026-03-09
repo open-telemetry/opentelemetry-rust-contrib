@@ -181,6 +181,46 @@ impl GenevaClient {
 
     /// Encode logs from any [`LogsDataView`] implementation into LZ4-chunked
     /// compressed batches, grouped by event name.
+    ///
+    /// # When to use this method
+    ///
+    /// Use this method when your telemetry data is already represented as a
+    /// type that implements [`LogsDataView`] — for example, an Arrow-backed
+    /// view from otap-dataflow — and you want to bypass the OpenTelemetry SDK
+    /// pipeline entirely.  For the standard OTel SDK path (tracing crate →
+    /// `GenevaExporter`) use [`encode_and_compress_logs`] instead.
+    ///
+    /// # What to implement
+    ///
+    /// Implement the following traits from `otap_df_pdata_views`:
+    ///
+    /// ```text
+    /// LogsDataView
+    /// └─ ResourceLogsView
+    ///    └─ ScopeLogsView
+    ///       └─ LogRecordView   ← one impl per log record type
+    ///          └─ AnyValueView  (for body / attributes)
+    ///          └─ AttributeView (for attributes)
+    /// ```
+    ///
+    /// The [`LogRecordView::event_name`] return value controls which Geneva
+    /// event table the record is routed to.  Records with no event name (or an
+    /// empty one) are routed to the `"Log"` table.
+    ///
+    /// # Usage pattern
+    ///
+    /// ```ignore
+    /// let batches = client.encode_and_compress_logs_view(&my_view)?;
+    /// for batch in &batches {
+    ///     client.upload_batch(batch).await?;
+    /// }
+    /// ```
+    ///
+    /// See `examples/view_basic.rs` in the `geneva-uploader` crate for a
+    /// complete working example including a minimal `LogsDataView`
+    /// implementation.
+    ///
+    /// [`encode_and_compress_logs`]: Self::encode_and_compress_logs
     pub fn encode_and_compress_logs_view<T: LogsDataView>(
         &self,
         view: &T,
