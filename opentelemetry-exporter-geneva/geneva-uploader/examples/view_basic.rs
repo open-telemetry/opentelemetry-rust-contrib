@@ -230,7 +230,10 @@ impl<'a> ScopeLogsView for SimpleScopeLogsRef<'a> {
     where
         Self: 'r;
     type LogRecordsIter<'r>
-        = std::iter::Map<std::slice::Iter<'r, SimpleLogRecord>, fn(&'r SimpleLogRecord) -> SimpleLogRecordRef<'r>>
+        = std::iter::Map<
+        std::slice::Iter<'r, SimpleLogRecord>,
+        fn(&'r SimpleLogRecord) -> SimpleLogRecordRef<'r>,
+    >
     where
         Self: 'r;
 
@@ -259,7 +262,10 @@ impl<'a> ResourceLogsView for SimpleResourceLogsRef<'a> {
     where
         Self: 's;
     type ScopesIter<'s>
-        = std::iter::Map<std::slice::Iter<'s, SimpleScopeLogs>, fn(&'s SimpleScopeLogs) -> SimpleScopeLogsRef<'s>>
+        = std::iter::Map<
+        std::slice::Iter<'s, SimpleScopeLogs>,
+        fn(&'s SimpleScopeLogs) -> SimpleScopeLogsRef<'s>,
+    >
     where
         Self: 's;
 
@@ -282,7 +288,10 @@ impl LogsDataView for SimpleLogsData {
     where
         Self: 'r;
     type ResourcesIter<'r>
-        = std::iter::Map<std::slice::Iter<'r, SimpleResourceLogs>, fn(&'r SimpleResourceLogs) -> SimpleResourceLogsRef<'r>>
+        = std::iter::Map<
+        std::slice::Iter<'r, SimpleResourceLogs>,
+        fn(&'r SimpleResourceLogs) -> SimpleResourceLogsRef<'r>,
+    >
     where
         Self: 'r;
 
@@ -303,8 +312,7 @@ async fn main() {
     let namespace = env::var("GENEVA_NAMESPACE").expect("GENEVA_NAMESPACE required");
     let region = env::var("GENEVA_REGION").expect("GENEVA_REGION required");
     let cert_path = PathBuf::from(env::var("GENEVA_CERT_PATH").expect("GENEVA_CERT_PATH required"));
-    let cert_password =
-        env::var("GENEVA_CERT_PASSWORD").expect("GENEVA_CERT_PASSWORD required");
+    let cert_password = env::var("GENEVA_CERT_PASSWORD").expect("GENEVA_CERT_PASSWORD required");
     let config_major_version: u32 = env::var("GENEVA_CONFIG_MAJOR_VERSION")
         .expect("GENEVA_CONFIG_MAJOR_VERSION required")
         .parse()
@@ -384,10 +392,7 @@ async fn main() {
 
     // Upload each batch
     for batch in &batches {
-        client
-            .upload_batch(batch)
-            .await
-            .expect("Upload failed");
+        client.upload_batch(batch).await.expect("Upload failed");
         println!("  uploaded batch: {}", batch.event_name);
     }
 

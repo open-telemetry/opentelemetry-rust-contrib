@@ -896,8 +896,14 @@ pub struct GenevaLogRecordC {
 struct NoView;
 
 impl ResourceView for NoView {
-    type Attribute<'a> = NoAttrView where Self: 'a;
-    type AttributesIter<'a> = std::iter::Empty<NoAttrView> where Self: 'a;
+    type Attribute<'a>
+        = NoAttrView
+    where
+        Self: 'a;
+    type AttributesIter<'a>
+        = std::iter::Empty<NoAttrView>
+    where
+        Self: 'a;
     fn attributes(&self) -> Self::AttributesIter<'_> {
         std::iter::empty()
     }
@@ -907,8 +913,14 @@ impl ResourceView for NoView {
 }
 
 impl InstrumentationScopeView for NoView {
-    type Attribute<'a> = NoAttrView where Self: 'a;
-    type AttributeIter<'a> = std::iter::Empty<NoAttrView> where Self: 'a;
+    type Attribute<'a>
+        = NoAttrView
+    where
+        Self: 'a;
+    type AttributeIter<'a>
+        = std::iter::Empty<NoAttrView>
+    where
+        Self: 'a;
     fn name(&self) -> Option<&[u8]> {
         None
     }
@@ -926,7 +938,10 @@ impl InstrumentationScopeView for NoView {
 struct NoAttrView;
 
 impl AttributeView for NoAttrView {
-    type Val<'v> = NoAnyValue where Self: 'v;
+    type Val<'v>
+        = NoAnyValue
+    where
+        Self: 'v;
     fn key(&self) -> &[u8] {
         b""
     }
@@ -939,8 +954,14 @@ struct NoAnyValue;
 
 impl<'a> AnyValueView<'a> for NoAnyValue {
     type KeyValue = NoAttrView;
-    type ArrayIter<'arr> = std::iter::Empty<Self> where Self: 'arr;
-    type KeyValueIter<'kv> = std::iter::Empty<NoAttrView> where Self: 'kv;
+    type ArrayIter<'arr>
+        = std::iter::Empty<Self>
+    where
+        Self: 'arr;
+    type KeyValueIter<'kv>
+        = std::iter::Empty<NoAttrView>
+    where
+        Self: 'kv;
     fn value_type(&self) -> ValueType {
         ValueType::String
     }
@@ -979,8 +1000,14 @@ struct GenevaBodyRef<'a> {
 
 impl<'a> AnyValueView<'a> for GenevaBodyRef<'a> {
     type KeyValue = NoAttrView;
-    type ArrayIter<'arr> = std::iter::Empty<Self> where Self: 'arr;
-    type KeyValueIter<'kv> = std::iter::Empty<NoAttrView> where Self: 'kv;
+    type ArrayIter<'arr>
+        = std::iter::Empty<Self>
+    where
+        Self: 'arr;
+    type KeyValueIter<'kv>
+        = std::iter::Empty<NoAttrView>
+    where
+        Self: 'kv;
 
     fn value_type(&self) -> ValueType {
         ValueType::String
@@ -1026,8 +1053,14 @@ struct GenevaAttrAnyValue<'a> {
 
 impl<'a> AnyValueView<'a> for GenevaAttrAnyValue<'a> {
     type KeyValue = NoAttrView;
-    type ArrayIter<'arr> = std::iter::Empty<Self> where Self: 'arr;
-    type KeyValueIter<'kv> = std::iter::Empty<NoAttrView> where Self: 'kv;
+    type ArrayIter<'arr>
+        = std::iter::Empty<Self>
+    where
+        Self: 'arr;
+    type KeyValueIter<'kv>
+        = std::iter::Empty<NoAttrView>
+    where
+        Self: 'kv;
 
     fn value_type(&self) -> ValueType {
         // Safety: val is non-null (checked at GenevaAttrRef::value).
@@ -1104,7 +1137,10 @@ struct GenevaAttrRef<'a> {
 }
 
 impl<'a> AttributeView for GenevaAttrRef<'a> {
-    type Val<'v> = GenevaAttrAnyValue<'v> where Self: 'v;
+    type Val<'v>
+        = GenevaAttrAnyValue<'v>
+    where
+        Self: 'v;
 
     fn key(&self) -> &[u8] {
         if self.key.is_null() {
@@ -1162,9 +1198,18 @@ impl<'a> Iterator for GenevaAttrIter<'a> {
 struct GenevaLogRecordRef<'a>(&'a GenevaLogRecordC);
 
 impl<'a> LogRecordView for GenevaLogRecordRef<'a> {
-    type Attribute<'att> = GenevaAttrRef<'att> where Self: 'att;
-    type AttributeIter<'att> = GenevaAttrIter<'att> where Self: 'att;
-    type Body<'bod> = GenevaBodyRef<'bod> where Self: 'bod;
+    type Attribute<'att>
+        = GenevaAttrRef<'att>
+    where
+        Self: 'att;
+    type AttributeIter<'att>
+        = GenevaAttrIter<'att>
+    where
+        Self: 'att;
+    type Body<'bod>
+        = GenevaBodyRef<'bod>
+    where
+        Self: 'bod;
 
     fn time_unix_nano(&self) -> Option<u64> {
         if self.0.time_unix_nano != 0 {
@@ -1191,7 +1236,11 @@ impl<'a> LogRecordView for GenevaLogRecordRef<'a> {
             return None;
         }
         let bytes = unsafe { CStr::from_ptr(self.0.severity_text) }.to_bytes();
-        if bytes.is_empty() { None } else { Some(bytes) }
+        if bytes.is_empty() {
+            None
+        } else {
+            Some(bytes)
+        }
     }
 
     fn body(&self) -> Option<Self::Body<'_>> {
@@ -1247,7 +1296,11 @@ impl<'a> LogRecordView for GenevaLogRecordRef<'a> {
             return None;
         }
         let bytes = unsafe { CStr::from_ptr(self.0.event_name) }.to_bytes();
-        if bytes.is_empty() { None } else { Some(bytes) }
+        if bytes.is_empty() {
+            None
+        } else {
+            Some(bytes)
+        }
     }
 }
 
@@ -1258,12 +1311,21 @@ impl<'a> LogRecordView for GenevaLogRecordRef<'a> {
 struct FlatScopeLogs<'a>(&'a [GenevaLogRecordC]);
 
 impl<'a> ScopeLogsView for FlatScopeLogs<'a> {
-    type Scope<'s> = NoView where Self: 's;
-    type LogRecord<'r> = GenevaLogRecordRef<'r> where Self: 'r;
-    type LogRecordsIter<'r> = std::iter::Map<
+    type Scope<'s>
+        = NoView
+    where
+        Self: 's;
+    type LogRecord<'r>
+        = GenevaLogRecordRef<'r>
+    where
+        Self: 'r;
+    type LogRecordsIter<'r>
+        = std::iter::Map<
         std::slice::Iter<'r, GenevaLogRecordC>,
         fn(&'r GenevaLogRecordC) -> GenevaLogRecordRef<'r>,
-    > where Self: 'r;
+    >
+    where
+        Self: 'r;
 
     fn scope(&self) -> Option<Self::Scope<'_>> {
         None
@@ -1281,9 +1343,18 @@ impl<'a> ScopeLogsView for FlatScopeLogs<'a> {
 struct FlatResourceLogs<'a>(&'a [GenevaLogRecordC]);
 
 impl<'a> ResourceLogsView for FlatResourceLogs<'a> {
-    type Resource<'r> = NoView where Self: 'r;
-    type ScopeLogs<'s> = FlatScopeLogs<'s> where Self: 's;
-    type ScopesIter<'s> = std::iter::Once<FlatScopeLogs<'s>> where Self: 's;
+    type Resource<'r>
+        = NoView
+    where
+        Self: 'r;
+    type ScopeLogs<'s>
+        = FlatScopeLogs<'s>
+    where
+        Self: 's;
+    type ScopesIter<'s>
+        = std::iter::Once<FlatScopeLogs<'s>>
+    where
+        Self: 's;
 
     fn resource(&self) -> Option<Self::Resource<'_>> {
         None
@@ -1301,8 +1372,14 @@ impl<'a> ResourceLogsView for FlatResourceLogs<'a> {
 struct FlatLogsView<'a>(&'a [GenevaLogRecordC]);
 
 impl<'a> LogsDataView for FlatLogsView<'a> {
-    type ResourceLogs<'r> = FlatResourceLogs<'r> where Self: 'r;
-    type ResourcesIter<'r> = std::iter::Once<FlatResourceLogs<'r>> where Self: 'r;
+    type ResourceLogs<'r>
+        = FlatResourceLogs<'r>
+    where
+        Self: 'r;
+    type ResourcesIter<'r>
+        = std::iter::Once<FlatResourceLogs<'r>>
+    where
+        Self: 'r;
 
     fn resources(&self) -> Self::ResourcesIter<'_> {
         std::iter::once(FlatResourceLogs(self.0))
