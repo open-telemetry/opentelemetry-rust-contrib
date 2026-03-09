@@ -1547,8 +1547,6 @@ mod tests {
             assert!(out.is_null());
 
             // null records pointer
-            let mut fake_handle = std::mem::MaybeUninit::<GenevaClientHandle>::uninit();
-            // write magic so validate_handle would pass (we test records=null before handle validation)
             let rc2 = geneva_encode_and_compress_log_records(
                 ptr::null_mut(), // null handle → NullPointer before records check
                 ptr::null(),
@@ -1558,7 +1556,6 @@ mod tests {
                 0,
             );
             assert_eq!(rc2 as u32, GenevaError::NullPointer as u32);
-            drop(fake_handle);
 
             // zero count
             let dummy_record = GenevaLogRecordC {
