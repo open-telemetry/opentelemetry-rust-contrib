@@ -320,6 +320,16 @@ GenevaError geneva_encode_and_compress_log_records(
     char*                     err_msg_out,
     size_t                    err_msg_len);
 
+/* Layout assertions — must match the Rust-side compile-time checks.
+   Only active on 64-bit targets where pointer size == 8. */
+#if UINTPTR_MAX == 0xffffffffffffffffu
+#include <stddef.h>
+#include <assert.h>
+static_assert(sizeof(GenevaAttrValueC)              == 16,  "GenevaAttrValueC size mismatch");
+static_assert(sizeof(GenevaLogRecordC)              == 112, "GenevaLogRecordC size mismatch");
+static_assert(offsetof(GenevaLogRecordC, attr_count)== 104, "GenevaLogRecordC attr_count offset mismatch");
+#endif
+
 #ifdef __cplusplus
 }
 #endif

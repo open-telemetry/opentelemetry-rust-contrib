@@ -103,10 +103,14 @@ impl MetadataFields {
 /// "lending iterator" problem that arises when flattening GAT-backed view
 /// iterators with `flat_map`.
 struct LogBatchAccumulator {
-    batches: HashMap<Arc<String>, BatchData>,
+    // Arc<str> as key: Borrow<str> is satisfied (unlike Arc<String>), so
+    // get_mut/contains_key can be called with a plain &str — no allocation on lookup.
+    batches: HashMap<Arc<str>, BatchData>,
 }
 
 struct BatchData {
+    // Cached Arc clone of the HashMap key for cheap reuse in CentralEventEntry.
+    routing_name: Arc<str>,
     schemas: Vec<CentralSchemaEntry>,
     events: Vec<CentralEventEntry>,
     metadata: BatchMetadata,
@@ -144,22 +148,30 @@ impl LogBatchAccumulator {
     /// Encode a single log record and append it to the appropriate batch.
     fn push<R: GenevaLogRecord>(&mut self, record: &R, metadata_fields: &MetadataFields) {
         let timestamp = record.timestamp_nanos();
-        let routing_name = Arc::new(record.routing_event_name().to_owned());
+        let routing_event_name = record.routing_event_name();
 
         let (field_info, dynamic_fields_start) = OtlpEncoder::determine_fields_for(record);
 
-        let entry = self
-            .batches
-            .entry(Arc::clone(&routing_name))
-            .or_insert_with(|| BatchData {
-                schemas: Vec::new(),
-                events: Vec::new(),
-                metadata: BatchMetadata {
-                    start_time: timestamp,
-                    end_time: timestamp,
-                    schema_ids: String::new(),
+        // Only allocate Arc<str> when we see a new event name for the first time.
+        // Arc<str>: Borrow<str>, so contains_key / get_mut accept a plain &str.
+        if !self.batches.contains_key(routing_event_name) {
+            let key: Arc<str> = Arc::from(routing_event_name);
+            self.batches.insert(
+                Arc::clone(&key),
+                BatchData {
+                    routing_name: key,
+                    schemas: Vec::new(),
+                    events: Vec::new(),
+                    metadata: BatchMetadata {
+                        start_time: timestamp,
+                        end_time: timestamp,
+                        schema_ids: String::new(),
+                    },
                 },
-            });
+            );
+        }
+
+        let entry = self.batches.get_mut(routing_event_name).unwrap();
 
         if timestamp != 0 {
             entry.metadata.start_time = entry.metadata.start_time.min(timestamp);
@@ -191,11 +203,13 @@ impl LogBatchAccumulator {
             metadata_fields,
         );
         let level = record.severity_level();
+        // Reuse the Arc already stored in BatchData — just a refcount increment.
+        let event_name = Arc::clone(&entry.routing_name);
 
         entry.events.push(CentralEventEntry {
             schema_id,
             level,
-            event_name: routing_name,
+            event_name,
             row: row_buffer,
         });
     }
@@ -242,7 +256,7 @@ impl LogBatchAccumulator {
             );
 
             blobs.push(EncodedBatch {
-                event_name: (*batch_event_name).clone(),
+                event_name: batch_event_name.to_string(),
                 data: compressed,
                 metadata: batch_data.metadata,
                 row_count: events_count,
@@ -365,7 +379,7 @@ impl OtlpEncoder {
             let central_event = CentralEventEntry {
                 schema_id,
                 level,
-                event_name: Arc::new(EVENT_NAME.to_string()),
+                event_name: Arc::from(EVENT_NAME),
                 row: row_buffer,
             };
             events.push(central_event);

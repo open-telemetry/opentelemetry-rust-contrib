@@ -30,7 +30,7 @@ mod tests {
         let event = CentralEventEntry {
             schema_id,
             level: 5,
-            event_name: std::sync::Arc::new("basename".to_string()),
+            event_name: std::sync::Arc::from("basename"),
             row: row_data,
         };
 

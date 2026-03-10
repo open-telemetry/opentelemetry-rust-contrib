@@ -82,6 +82,16 @@ pub(crate) trait GenevaLogRecord {
     /// Calls `visitor` once for each attribute with a scalar value type
     /// encodable in Geneva Bond (string, i64, f64, bool).  Other value types
     /// are silently skipped.
+    ///
+    /// # Ordering contract
+    ///
+    /// Implementations **must** yield attributes in the same order on every
+    /// call for a given record.  [`LogBatchAccumulator`] calls this method
+    /// twice per record — once during schema discovery
+    /// ([`OtlpEncoder::determine_fields_for`]) and once during row encoding
+    /// ([`OtlpEncoder::write_row_data_for`]).  If the order differs between
+    /// the two calls the Bond schema field list and the row data will be
+    /// misaligned, producing corrupt output.
     fn visit_attributes<F: FnMut(&str, AttrValue<'_>)>(&self, visitor: &mut F);
 }
 

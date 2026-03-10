@@ -759,6 +759,17 @@ pub unsafe extern "C" fn geneva_client_free(handle: *mut GenevaClientHandle) {
 // Zero-copy log record FFI (no intermediate OTLP conversion)
 // ============================================================
 
+// Layout assertions — catch accidental ABI breakage if either the Rust struct
+// or the C header is modified independently.  Values are 64-bit specific; the
+// assertions are guarded so they only fire on 64-bit targets.
+#[cfg(target_pointer_width = "64")]
+const _: () = {
+    use std::mem::{offset_of, size_of};
+    assert!(size_of::<GenevaAttrValueC>() == 16);
+    assert!(size_of::<GenevaLogRecordC>() == 112);
+    assert!(offset_of!(GenevaLogRecordC, attr_count) == 104);
+};
+
 use otap_df_pdata_views::views::{
     common::{AnyValueView, AttributeView, InstrumentationScopeView, ValueType},
     logs::{LogRecordView, LogsDataView, ResourceLogsView, ScopeLogsView},
@@ -1176,10 +1187,11 @@ impl<'a> Iterator for GenevaAttrIter<'a> {
     type Item = GenevaAttrRef<'a>;
 
     fn next(&mut self) -> Option<Self::Item> {
-        if self.pos >= self.len {
+        // Guard against a C caller setting attr_count > 0 with NULL array pointers.
+        if self.pos >= self.len || self.keys.is_null() || self.values.is_null() {
             return None;
         }
-        // Safety: pos < len, so both arrays have a valid element at pos.
+        // Safety: pos < len, and both pointers are non-null (checked above).
         let key = unsafe { *self.keys.add(self.pos) };
         let val = unsafe { self.values.add(self.pos) };
         self.pos += 1;
