@@ -23,6 +23,7 @@ http-body = { version = "1", default-features = false }
 opentelemetry = { workspace = true, features = ["futures", "metrics", "trace"] }
 opentelemetry-http = "0.31"
 opentelemetry-semantic-conventions = { workspace = true, features = ["semconv_experimental"] }
+pin-project-lite = "0.2"
 tower-service = { version = "0.3", default-features = false }
 tower-layer = { version = "0.3", default-features = false }
 
