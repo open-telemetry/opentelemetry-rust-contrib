@@ -190,11 +190,7 @@ pub(crate) mod test_utils {
             name: "test-span".into(),
             start_time: std::time::SystemTime::now(),
             end_time: std::time::SystemTime::now(),
-            attributes: if let Some(attrs) = attributes {
-                attrs
-            } else {
-                Vec::new()
-            },
+            attributes: attributes.unwrap_or_default(),
             dropped_attributes_count: 0,
             events: Default::default(),
             links: Default::default(),

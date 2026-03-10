@@ -1,9 +1,8 @@
 use crate::exporter::common;
+use opentelemetry::Key;
 use opentelemetry_sdk::trace::SpanData;
 use tracelogging_dynamic as tld;
 
-#[cfg(feature = "additional_promoted_attributes")]
-use opentelemetry::Key;
 #[cfg(feature = "additional_promoted_attributes")]
 use std::borrow::Cow;
 
@@ -25,10 +24,12 @@ pub(crate) fn populate_part_c(
     >],
     field_tag: u32,
 ) {
+    #[cfg_attr(not(feature = "additional_promoted_attributes"), allow(unused))]
+    let mut promoted: Vec<(&Key, &opentelemetry::Value)> = Vec::new();
+
     // Separate attributes into promoted (Part C fields).
     #[cfg(feature = "additional_promoted_attributes")]
     {
-        let mut promoted: Vec<(&Key, &opentelemetry::Value)> = Vec::new();
         for kv in &span_data.attributes {
             let key_str = kv.key.as_str();
 
@@ -38,11 +39,10 @@ pub(crate) fn populate_part_c(
         }
     }
 
-    let promoted_count = 0usize;
     #[cfg(feature = "additional_promoted_attributes")]
-    if promoted.len() > 0 {
-        promoted_count = promoted.len();
-    }
+    let promoted_count = promoted.len();
+    #[cfg(not(feature = "additional_promoted_attributes"))]
+    let promoted_count = 0usize;
 
     let resource_attr_count = resource.attributes_from_resource.len();
     let additional_span_data = 2u8; // 'attributes', 'events' as additional span data promoted as additional Part C fields.

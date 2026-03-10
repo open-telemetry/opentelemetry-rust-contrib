@@ -32,9 +32,9 @@ thread_local! {
 
 #[derive(Default)]
 struct Resource {
-    pub cloud_role: Option<String>,
-    pub cloud_role_instance: Option<String>,
-    pub attributes_from_resource: Vec<(Key, opentelemetry::Value)>,
+    cloud_role: Option<String>,
+    cloud_role_instance: Option<String>,
+    attributes_from_resource: Vec<(Key, opentelemetry::Value)>,
 }
 
 fn enabled_callback_noop(
