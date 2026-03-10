@@ -19,7 +19,7 @@ default = []
 additional_promoted_attributes = []
 
 [dependencies]
-chrono = "0.4.38"
+chrono = { version = "0.4.40", default-features = false, features = ["alloc", "std"] }
 opentelemetry = { version = "0.30", default-features = false, features = ["trace"] }
 opentelemetry_sdk = { version = "0.30", default-features = false, features = ["trace"] }
 tracelogging = "1.2.4"
