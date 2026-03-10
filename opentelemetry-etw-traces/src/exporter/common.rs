@@ -137,13 +137,17 @@ pub(crate) mod test_utils {
     }
 
     pub(crate) fn test_options() -> Options {
-        Options::new("ContosoProvider")
+        Options::new("TestProvider")
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use opentelemetry::trace::{Link, SpanContext, SpanId, TraceFlags, TraceId, TraceState};
+    use opentelemetry::KeyValue;
+    use opentelemetry_sdk::trace::SpanEvents;
+    use std::time::{Duration, UNIX_EPOCH};
 
     #[test]
     fn test_span_kind_to_u8() {
@@ -152,5 +156,103 @@ mod tests {
         assert_eq!(span_kind_to_u8(&SpanKind::Client), 3);
         assert_eq!(span_kind_to_u8(&SpanKind::Producer), 4);
         assert_eq!(span_kind_to_u8(&SpanKind::Consumer), 5);
+    }
+
+    #[test]
+    fn test_attributes_to_json_mixed_types() {
+        let attrs = vec![
+            KeyValue::new("str_key", "value"),
+            KeyValue::new("int_key", 42_i64),
+            KeyValue::new("float_key", 3.14_f64),
+            KeyValue::new("bool_key", true),
+        ];
+        let json = attributes_to_json(&attrs);
+        let parsed: serde_json::Value = serde_json::from_str(&json).unwrap();
+        assert_eq!(parsed["str_key"], "value");
+        assert_eq!(parsed["int_key"], 42);
+        assert_eq!(parsed["float_key"], 3.14);
+        assert_eq!(parsed["bool_key"], true);
+    }
+
+    #[test]
+    fn test_attributes_to_json_empty() {
+        let json = attributes_to_json(&[]);
+        assert_eq!(json, "{}");
+    }
+
+    #[test]
+    fn test_links_to_json_with_links() {
+        let links = vec![Link::new(
+            SpanContext::new(
+                TraceId::from_hex("0af7651916cd43dd8448eb211c80319c").unwrap(),
+                SpanId::from_hex("00f067aa0ba902b7").unwrap(),
+                TraceFlags::SAMPLED,
+                false,
+                TraceState::default(),
+            ),
+            vec![],
+            0,
+        )];
+        let json = links_to_json(&links);
+        let parsed: Vec<serde_json::Value> = serde_json::from_str(&json).unwrap();
+        assert_eq!(parsed.len(), 1);
+        assert_eq!(parsed[0]["toTraceId"], "0af7651916cd43dd8448eb211c80319c");
+        assert_eq!(parsed[0]["toSpanId"], "00f067aa0ba902b7");
+    }
+
+    #[test]
+    fn test_links_to_json_empty() {
+        let json = links_to_json(&[]);
+        assert_eq!(json, "[]");
+    }
+
+    #[test]
+    fn test_events_to_json_with_event() {
+        use opentelemetry::trace::Event;
+
+        let timestamp = UNIX_EPOCH + Duration::from_secs(1_700_000_000);
+        let mut events = SpanEvents::default();
+        events.events.push(Event::new(
+            "test-event",
+            timestamp,
+            vec![KeyValue::new("key1", "value1")],
+            0,
+        ));
+        let json = events_to_json(&events);
+        let parsed: Vec<serde_json::Value> = serde_json::from_str(&json).unwrap();
+        assert_eq!(parsed.len(), 1);
+        assert_eq!(parsed[0]["name"], "test-event");
+        assert!(parsed[0]["timestamp"].as_str().unwrap().contains("2023"));
+        assert_eq!(parsed[0]["attributes"]["key1"], "value1");
+    }
+
+    #[test]
+    fn test_events_to_json_empty() {
+        let events = SpanEvents::default();
+        let json = events_to_json(&events);
+        assert_eq!(json, "[]");
+    }
+
+    #[test]
+    fn test_events_to_json_no_attributes() {
+        use opentelemetry::trace::Event;
+
+        let timestamp = UNIX_EPOCH + Duration::from_secs(1_700_000_000);
+        let mut events = SpanEvents::default();
+        events
+            .events
+            .push(Event::new("simple-event", timestamp, vec![], 0));
+        let json = events_to_json(&events);
+        let parsed: Vec<serde_json::Value> = serde_json::from_str(&json).unwrap();
+        assert_eq!(parsed.len(), 1);
+        assert_eq!(parsed[0]["name"], "simple-event");
+        assert!(parsed[0].get("attributes").is_none());
+    }
+
+    #[test]
+    fn test_system_time_to_str() {
+        let time = UNIX_EPOCH + Duration::from_secs(1_700_000_000);
+        let result = system_time_to_str(&time);
+        assert!(result.starts_with("2023-11-14"));
     }
 }

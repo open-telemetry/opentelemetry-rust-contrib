@@ -15,7 +15,10 @@
 //! use opentelemetry_sdk::trace::SdkTracerProvider;
 //!
 //! let processor = Processor::builder("MyAppTracing")
-//!     .with_event_name("Span")
+//!     .with_event_name("MyAppEventName") // If not provided, defaults to "Span"
+//!     .with_resource_attributes(vec!["custom_attribute1", "custom_attribute2"]) // Only specified resource attributes will be promoted as Part C fields, other will be ingored.
+//!     // Requires `additional_promoted_attributes` feature:
+//!     // .with_optional_attributes(vec!["span_attribute1", "span_attribute2"])
 //!     .build()
 //!     .expect("Failed to create ETW processor");
 //!

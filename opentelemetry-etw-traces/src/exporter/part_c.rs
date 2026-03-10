@@ -3,6 +3,9 @@ use opentelemetry::Key;
 use opentelemetry_sdk::trace::SpanData;
 use tracelogging_dynamic as tld;
 
+#[cfg(feature = "additional_promoted_attributes")]
+use std::borrow::Cow;
+
 /// Populates Part C of the Common Schema on the EventBuilder.
 ///
 /// Each span attribute is serialized as a native typed TLD field (not JSON).
@@ -15,19 +18,21 @@ pub(crate) fn populate_part_c(
     event: &mut tld::EventBuilder,
     span_data: &SpanData,
     resource: &super::Resource,
-    optional_attributes_keys: Option<&Vec<String>>,
+    #[cfg(feature = "additional_promoted_attributes")] optional_attributes_keys: &Vec<
+        Cow<'static, str>,
+    >,
     field_tag: u32,
 ) {
     // Separate attributes into promoted (Part C fields).
+    #[allow(unused_mut)]
     let mut promoted: Vec<(&Key, &opentelemetry::Value)> = Vec::new();
 
+    #[cfg(feature = "additional_promoted_attributes")]
     for kv in &span_data.attributes {
         let key_str = kv.key.as_str();
 
-        if let Some(cf) = optional_attributes_keys {
-            if cf.iter().any(|s| s == key_str) {
-                promoted.push((&kv.key, &kv.value));
-            }
+        if optional_attributes_keys.iter().any(|s| s == key_str) {
+            promoted.push((&kv.key, &kv.value));
         }
     }
 
