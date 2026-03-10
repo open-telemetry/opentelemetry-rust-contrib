@@ -48,7 +48,7 @@ use opentelemetry_sdk::Resource;
 fn init_tracer_provider() -> SdkTracerProvider {
     let processor = Processor::builder("provider_name")
         .with_event_name("MyAppEventName") // If not provided, defaults to "Span"
-        .with_resource_attributes(vec!["custom_attribute1", "custom_attribute2"]) // If provided, only specified resource attributes will be promoted as Part C fields, other will be ingored.
+        .with_resource_attributes(vec!["custom_attribute1", "custom_attribute2"]) // If provided, only specified resource attributes will be promoted as Part C fields, other will be ignored.
         // Requires `additional_promoted_attributes` feature:
         // .with_optional_attributes(vec!["span_attribute1", "span_attribute2"]) // If provided, only specified span attributes will be promoted as Part C fields, other will be serialized in `attributes` JSON field.
         .build()

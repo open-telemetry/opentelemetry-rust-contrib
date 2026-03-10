@@ -87,39 +87,12 @@ pub(crate) fn populate_part_b(event: &mut tld::EventBuilder, span_data: &SpanDat
 #[cfg(test)]
 mod tests {
     use super::super::common::test_utils;
-    use opentelemetry::trace::{SpanContext, SpanId, TraceFlags, TraceId, TraceState};
-    use opentelemetry_sdk::trace::SpanData;
 
     #[test]
     fn test_export_span() {
         let exporter = test_utils::new_etw_exporter();
 
-        let span_data = create_test_span_data();
+        let span_data = test_utils::create_test_span_data(None);
         exporter.export_span_data(&span_data);
-    }
-
-    fn create_test_span_data() -> SpanData {
-        use opentelemetry::trace::{SpanKind, Status};
-
-        SpanData {
-            span_context: SpanContext::new(
-                TraceId::from_hex("0af7651916cd43dd8448eb211c80319c").unwrap(),
-                SpanId::from_hex("00f067aa0ba902b7").unwrap(),
-                TraceFlags::SAMPLED,
-                false,
-                TraceState::default(),
-            ),
-            parent_span_id: SpanId::INVALID,
-            span_kind: SpanKind::Internal,
-            name: "test-span".into(),
-            start_time: std::time::SystemTime::now(),
-            end_time: std::time::SystemTime::now(),
-            attributes: Vec::new(),
-            dropped_attributes_count: 0,
-            events: Default::default(),
-            links: Default::default(),
-            status: Status::Ok,
-            instrumentation_scope: Default::default(),
-        }
     }
 }

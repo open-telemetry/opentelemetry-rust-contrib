@@ -73,8 +73,8 @@ pub(crate) fn links_to_json(links: &[opentelemetry::trace::Link]) -> String {
     serde_json::to_string(&arr).unwrap_or_default()
 }
 
-/// Serializes key-value pairs to a JSON object string for span attributes.
-pub(crate) fn attributes_to_json(attrs: &[opentelemetry::KeyValue]) -> String {
+/// Builds a `serde_json::Value::Object` from key-value pairs.
+fn attributes_to_value(attrs: &[opentelemetry::KeyValue]) -> serde_json::Value {
     let mut map = serde_json::Map::new();
     for kv in attrs {
         let (key, value) = (kv.key.as_str(), &kv.value);
@@ -92,7 +92,12 @@ pub(crate) fn attributes_to_json(attrs: &[opentelemetry::KeyValue]) -> String {
         };
         map.insert(key.to_owned(), json_val);
     }
-    serde_json::to_string(&map).unwrap_or_default()
+    serde_json::Value::Object(map)
+}
+
+/// Serializes key-value pairs to a JSON object string for span attributes.
+pub(crate) fn attributes_to_json(attrs: &[opentelemetry::KeyValue]) -> String {
+    serde_json::to_string(&attributes_to_value(attrs)).unwrap_or_default()
 }
 
 /// Serializes span events to a JSON object string.
@@ -111,10 +116,10 @@ pub(crate) fn events_to_json(events: &SpanEvents) -> String {
                 serde_json::Value::String(system_time_to_str(&event.timestamp)),
             );
             if !event.attributes.is_empty() {
-                let attrs: serde_json::Value =
-                    serde_json::from_str(&attributes_to_json(&event.attributes))
-                        .unwrap_or(serde_json::Value::Null);
-                map.insert("attributes".to_owned(), attrs);
+                map.insert(
+                    "attributes".to_owned(),
+                    attributes_to_value(&event.attributes),
+                );
             }
             serde_json::Value::Object(map)
         })
@@ -122,7 +127,7 @@ pub(crate) fn events_to_json(events: &SpanEvents) -> String {
     serde_json::to_string(&json_value).unwrap_or_default()
 }
 
-pub fn system_time_to_str(time: &SystemTime) -> String {
+pub(crate) fn system_time_to_str(time: &SystemTime) -> String {
     let datetime: DateTime<Utc> = (*time).into();
     datetime.format("%Y-%m-%d %H:%M:%S%.f").to_string()
 }
@@ -131,6 +136,9 @@ pub fn system_time_to_str(time: &SystemTime) -> String {
 pub(crate) mod test_utils {
     use super::super::options::Options;
     use super::super::ETWExporter;
+    use opentelemetry::trace::{SpanContext, SpanId, TraceFlags, TraceId, TraceState};
+    use opentelemetry::KeyValue;
+    use opentelemetry_sdk::trace::SpanData;
 
     pub(crate) fn new_etw_exporter() -> ETWExporter {
         ETWExporter::new(test_options())
@@ -138,6 +146,35 @@ pub(crate) mod test_utils {
 
     pub(crate) fn test_options() -> Options {
         Options::new("TestProvider")
+    }
+
+    pub(crate) fn create_test_span_data(attributes: Option<Vec<KeyValue>>) -> SpanData {
+        use opentelemetry::trace::{SpanKind, Status};
+
+        SpanData {
+            span_context: SpanContext::new(
+                TraceId::from_hex("0af7651916cd43dd8448eb211c80319c").unwrap(),
+                SpanId::from_hex("00f067aa0ba902b7").unwrap(),
+                TraceFlags::SAMPLED,
+                false,
+                TraceState::default(),
+            ),
+            parent_span_id: SpanId::INVALID,
+            span_kind: SpanKind::Internal,
+            name: "test-span".into(),
+            start_time: std::time::SystemTime::now(),
+            end_time: std::time::SystemTime::now(),
+            attributes: if let Some(attrs) = attributes {
+                attrs
+            } else {
+                Vec::new()
+            },
+            dropped_attributes_count: 0,
+            events: Default::default(),
+            links: Default::default(),
+            status: Status::Ok,
+            instrumentation_scope: Default::default(),
+        }
     }
 }
 

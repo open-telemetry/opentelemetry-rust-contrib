@@ -45,13 +45,13 @@ impl Options {
     }
 
     /// Returns the resource attribute keys.
-    pub(crate) fn resource_attribute_keys(&self) -> &Vec<Cow<'static, str>> {
+    pub(crate) fn resource_attribute_keys(&self) -> &[Cow<'static, str>] {
         &self.resource_attribute_keys
     }
 
     /// Returns the optional attributes keys set, if configured.
     #[cfg(feature = "additional_promoted_attributes")]
-    pub(crate) fn optional_attributes_keys(&self) -> &Vec<Cow<'static, str>> {
+    pub(crate) fn optional_attributes_keys(&self) -> &[Cow<'static, str>] {
         &self.optional_attributes_keys
     }
 

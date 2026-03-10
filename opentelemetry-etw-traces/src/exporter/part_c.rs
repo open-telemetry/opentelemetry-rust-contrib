@@ -18,13 +18,11 @@ pub(crate) fn populate_part_c(
     event: &mut tld::EventBuilder,
     span_data: &SpanData,
     resource: &super::Resource,
-    #[cfg(feature = "additional_promoted_attributes")] optional_attributes_keys: &Vec<
-        Cow<'static, str>,
-    >,
+    #[cfg(feature = "additional_promoted_attributes")] optional_attributes_keys: &[Cow<'static, str>],
     field_tag: u32,
 ) {
     // Separate attributes into promoted (Part C fields).
-    #[allow(unused_mut)]
+    #[cfg_attr(not(feature = "additional_promoted_attributes"), allow(unused_mut))]
     let mut promoted: Vec<(&Key, &opentelemetry::Value)> = Vec::new();
 
     #[cfg(feature = "additional_promoted_attributes")]
@@ -39,10 +37,6 @@ pub(crate) fn populate_part_c(
     let resource_attr_count = resource.attributes_from_resource.len();
     let additional_span_data = 2u8; // 'attributes', 'events' as additional span data promoted as additional Part C fields.
     let total_count = promoted.len() + resource_attr_count + additional_span_data as usize;
-
-    if total_count == 0 {
-        return;
-    }
 
     event.add_struct("PartC", total_count.min(u8::MAX as usize) as u8, field_tag);
 
@@ -74,20 +68,21 @@ pub(crate) fn populate_part_c(
 #[cfg(test)]
 mod tests {
     use super::super::common::test_utils;
-    use opentelemetry::trace::{SpanContext, SpanId, TraceFlags, TraceId, TraceState};
     use opentelemetry::KeyValue;
-    use opentelemetry_sdk::trace::SpanData;
 
     #[test]
     fn test_attributes_as_typed_fields() {
         let exporter = test_utils::new_etw_exporter();
 
-        let span_data = create_test_span_data(vec![
-            KeyValue::new("string_attr", "value"),
-            KeyValue::new("int_attr", 42_i64),
-            KeyValue::new("double_attr", 1.5_f64),
-            KeyValue::new("bool_attr", true),
-        ]);
+        let span_data = test_utils::create_test_span_data(
+            (vec![
+                KeyValue::new("string_attr", "value"),
+                KeyValue::new("int_attr", 42_i64),
+                KeyValue::new("double_attr", 1.5_f64),
+                KeyValue::new("bool_attr", true),
+            ])
+            .into(),
+        );
 
         exporter.export_span_data(&span_data);
     }
@@ -96,32 +91,7 @@ mod tests {
     fn test_empty_attributes() {
         let exporter = test_utils::new_etw_exporter();
 
-        let span_data = create_test_span_data(vec![]);
+        let span_data = test_utils::create_test_span_data((vec![]).into());
         exporter.export_span_data(&span_data);
-    }
-
-    fn create_test_span_data(attributes: Vec<KeyValue>) -> SpanData {
-        use opentelemetry::trace::{SpanKind, Status};
-
-        SpanData {
-            span_context: SpanContext::new(
-                TraceId::from_hex("0af7651916cd43dd8448eb211c80319c").unwrap(),
-                SpanId::from_hex("00f067aa0ba902b7").unwrap(),
-                TraceFlags::SAMPLED,
-                false,
-                TraceState::default(),
-            ),
-            parent_span_id: SpanId::INVALID,
-            span_kind: SpanKind::Internal,
-            name: "test-span".into(),
-            start_time: std::time::SystemTime::now(),
-            end_time: std::time::SystemTime::now(),
-            attributes,
-            dropped_attributes_count: 0,
-            events: Default::default(),
-            links: Default::default(),
-            status: Status::Ok,
-            instrumentation_scope: Default::default(),
-        }
     }
 }

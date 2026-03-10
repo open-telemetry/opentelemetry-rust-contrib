@@ -79,7 +79,7 @@ impl ETWExporter {
             provider.as_ref().register();
         }
 
-        let resource_attribute_keys = options.resource_attribute_keys().clone();
+        let resource_attribute_keys = options.resource_attribute_keys().to_vec();
 
         ETWExporter {
             provider,

@@ -16,7 +16,7 @@
 //!
 //! let processor = Processor::builder("MyAppTracing")
 //!     .with_event_name("MyAppEventName") // If not provided, defaults to "Span"
-//!     .with_resource_attributes(vec!["custom_attribute1", "custom_attribute2"]) // Only specified resource attributes will be promoted as Part C fields, other will be ingored.
+//!     .with_resource_attributes(vec!["custom_attribute1", "custom_attribute2"]) // Only specified resource attributes will be promoted as Part C fields, other will be ignored.
 //!     // Requires `additional_promoted_attributes` feature:
 //!     // .with_optional_attributes(vec!["span_attribute1", "span_attribute2"])
 //!     .build()
@@ -37,8 +37,8 @@
 //!   `cloud.role`, `cloud.roleInstance`
 //! - **Part B** (payload): `_typeName="Span"`, `name`, `kind`, `startTime`,
 //!   `parentId`, `links`, `statusMessage`, `success`
-//! - **Part C** (extensions): individual typed span attributes,
-//!   promoted resource attributes, `env_properties` (overflow JSON)
+//! - **Part C** (extensions): promoted resource attributes, `attributes`, `events`,
+//!   and optionally promoted span attributes
 //!
 //! ## Platform Support
 //!
