@@ -1,5 +1,8 @@
+use chrono::{DateTime, Utc};
 use opentelemetry::trace::SpanKind;
 use opentelemetry::Key;
+use opentelemetry_sdk::trace::SpanEvents;
+use std::time::SystemTime;
 use tracelogging_dynamic as tld;
 
 /// Converts an OpenTelemetry `SpanKind` to a u8 value matching the OTel spec.
@@ -70,10 +73,11 @@ pub(crate) fn links_to_json(links: &[opentelemetry::trace::Link]) -> String {
     serde_json::to_string(&arr).unwrap_or_default()
 }
 
-/// Serializes key-value pairs to a JSON object string for env_properties.
-pub(crate) fn env_properties_to_json(attrs: &[(&str, &opentelemetry::Value)]) -> String {
+/// Serializes key-value pairs to a JSON object string for span attributes.
+pub(crate) fn attributes_to_json(attrs: &[opentelemetry::KeyValue]) -> String {
     let mut map = serde_json::Map::new();
-    for (key, value) in attrs {
+    for kv in attrs {
+        let (key, value) = (kv.key.as_str(), &kv.value);
         let json_val = match value {
             opentelemetry::Value::Bool(b) => serde_json::Value::Bool(*b),
             opentelemetry::Value::I64(i) => serde_json::Value::Number((*i).into()),
@@ -86,9 +90,41 @@ pub(crate) fn env_properties_to_json(attrs: &[(&str, &opentelemetry::Value)]) ->
             }
             _ => serde_json::Value::Null,
         };
-        map.insert(key.to_string(), json_val);
+        map.insert(key.to_owned(), json_val);
     }
     serde_json::to_string(&map).unwrap_or_default()
+}
+
+/// Serializes span events to a JSON object string.
+pub(crate) fn events_to_json(events: &SpanEvents) -> String {
+    let json_value: Vec<serde_json::Value> = events
+        .events
+        .iter()
+        .map(|event| {
+            let mut map = serde_json::Map::new();
+            map.insert(
+                "name".to_owned(),
+                serde_json::Value::String(event.name.to_string()),
+            );
+            map.insert(
+                "timestamp".to_owned(),
+                serde_json::Value::String(system_time_to_str(&event.timestamp)),
+            );
+            if !event.attributes.is_empty() {
+                let attrs: serde_json::Value =
+                    serde_json::from_str(&attributes_to_json(&event.attributes))
+                        .unwrap_or(serde_json::Value::Null);
+                map.insert("attributes".to_owned(), attrs);
+            }
+            serde_json::Value::Object(map)
+        })
+        .collect();
+    serde_json::to_string(&json_value).unwrap_or_default()
+}
+
+pub fn system_time_to_str(time: &SystemTime) -> String {
+    let datetime: DateTime<Utc> = (*time).into();
+    datetime.format("%Y-%m-%d %H:%M:%S%.f").to_string()
 }
 
 #[cfg(test)]

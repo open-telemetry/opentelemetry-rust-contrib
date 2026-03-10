@@ -16,7 +16,7 @@ use tracelogging_dynamic as tld;
 /// }
 /// ```
 pub(crate) fn populate_part_a(
-    eb: &mut tld::EventBuilder,
+    event: &mut tld::EventBuilder,
     resource: &super::Resource,
     span_data: &SpanData,
     field_tag: u32,
@@ -26,10 +26,10 @@ pub(crate) fn populate_part_a(
 
     let field_count = COUNT_TIME + COUNT_EXT_DT + get_resource_count(resource);
 
-    eb.add_struct("PartA", field_count, field_tag);
+    event.add_struct("PartA", field_count, field_tag);
 
-    // time: use end_time as the event timestamp (matches .NET TLD exporter)
-    eb.add_filetime(
+    // time: use end_time as the event timestamp.
+    event.add_filetime(
         "time",
         tld::win_filetime_from_systemtime!(span_data.end_time),
         tld::OutType::Default,
@@ -38,21 +38,21 @@ pub(crate) fn populate_part_a(
 
     // ext_dt struct: traceId and spanId
     const EXT_DT_COUNT: u8 = 2;
-    eb.add_struct("ext_dt", EXT_DT_COUNT, field_tag);
-    eb.add_str8(
+    event.add_struct("ext_dt", EXT_DT_COUNT, field_tag);
+    event.add_str8(
         "traceId",
         span_data.span_context.trace_id().to_string(),
         tld::OutType::Default,
         field_tag,
     );
-    eb.add_str8(
+    event.add_str8(
         "spanId",
         span_data.span_context.span_id().to_string(),
         tld::OutType::Default,
         field_tag,
     );
 
-    populate_resource(resource, eb, field_tag);
+    populate_resource(resource, event, field_tag);
 }
 
 fn get_resource_count(resource: &super::Resource) -> u8 {

@@ -15,6 +15,7 @@ edition = "2021"
 rust-version = "1.75.0"
 
 [dependencies]
+chrono = "0.4.38"
 opentelemetry = { version = "0.30", default-features = false, features = ["trace"] }
 opentelemetry_sdk = { version = "0.30", default-features = false, features = ["trace"] }
 tracelogging = "1.2.4"

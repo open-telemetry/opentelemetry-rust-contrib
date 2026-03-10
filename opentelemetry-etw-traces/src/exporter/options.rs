@@ -6,19 +6,19 @@ pub(crate) struct Options {
     /// Name of the ETW provider to register.
     provider_name: String,
 
-    /// Default ETW event name for span events.
+    /// ETW event name for span events.
     /// Defaults to "Span".
-    default_event_name: String,
+    event_name: String,
 
     /// Resource attribute keys that should be exported with each span.
     /// By default, only `service.name` and `service.instance.id` are exported
     /// as Part A fields (`cloud.role` and `cloud.roleInstance`).
     resource_attribute_keys: Vec<Cow<'static, str>>,
 
-    /// Optional list of custom field names to promote as dedicated Part C fields.
-    /// If None, all span attributes are promoted. If Some, only matching attributes
-    /// are promoted; the rest go into `env_properties` JSON.
-    custom_fields: Option<Vec<String>>,
+    /// Optional list of custom attributes to promote as dedicated Part C fields.
+    /// If None, no attributes are promoted. If Some, only matching ones are promoted;
+    /// The rest will go into `attributes` JSON representation.
+    optional_attributes_keys: Option<Vec<String>>,
 }
 
 impl Options {
@@ -26,9 +26,9 @@ impl Options {
     pub(crate) fn new(provider_name: impl Into<String>) -> Self {
         Options {
             provider_name: provider_name.into(),
-            default_event_name: "Span".to_string(),
+            event_name: "Span".to_string(),
             resource_attribute_keys: Vec::new(),
-            custom_fields: None,
+            optional_attributes_keys: None,
         }
     }
 
@@ -37,9 +37,9 @@ impl Options {
         &self.provider_name
     }
 
-    /// Returns the default event name.
-    pub(crate) fn default_event_name(&self) -> &str {
-        &self.default_event_name
+    /// Returns the event name.
+    pub(crate) fn event_name(&self) -> &str {
+        &self.event_name
     }
 
     /// Returns the resource attribute keys.
@@ -47,14 +47,14 @@ impl Options {
         &self.resource_attribute_keys
     }
 
-    /// Returns the custom fields set, if configured.
-    pub(crate) fn custom_fields(&self) -> Option<&Vec<String>> {
-        self.custom_fields.as_ref()
+    /// Returns the optional attributes keys set, if configured.
+    pub(crate) fn optional_attributes_keys(&self) -> Option<&Vec<String>> {
+        self.optional_attributes_keys.as_ref()
     }
 
-    /// Sets the default event name.
+    /// Sets the event name.
     pub(crate) fn with_event_name(mut self, name: &str) -> Self {
-        self.default_event_name = name.to_string();
+        self.event_name = name.to_string();
         self
     }
 

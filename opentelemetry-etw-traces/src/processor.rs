@@ -13,10 +13,6 @@ use std::time::Duration;
 
 /// Processes and exports spans to ETW.
 ///
-/// This processor exports spans without synchronization.
-/// It is specifically designed for the ETW exporter, where
-/// the underlying exporter is safe under concurrent calls.
-///
 /// Implements [`SpanProcessor`], so it can be used with
 /// [`SdkTracerProvider`](opentelemetry_sdk::trace::SdkTracerProvider).
 #[derive(Debug)]
@@ -131,7 +127,7 @@ impl ProcessorBuilder {
         }
     }
 
-    /// Sets the default ETW event name (default: "Span").
+    /// Sets the default ETW event name.
     pub fn with_event_name(mut self, name: &str) -> Self {
         self.options = self.options.with_event_name(name);
         self
@@ -139,15 +135,22 @@ impl ProcessorBuilder {
 
     /// Specifies additional resource attribute keys to include in Part C.
     ///
-    /// By default, only `service.name` and `service.instance.id` are extracted
-    /// (as `cloud.role` and `cloud.roleInstance` in Part A).
-    /// Use this to promote additional resource attributes into the ETW event.
-    ///
     /// # Performance Considerations
     ///
     /// **Warning**: Each specified resource attribute will be serialized and sent
     /// with EVERY span. Consider the performance impact when selecting which
     /// attributes to export.
+    ///
+    /// # Best Practices for ETW
+    ///
+    /// **Recommendation**: Be selective about which resource attributes to export.
+    ///
+    /// Focus on attributes that are truly specific to your application instance
+    /// and cannot be easily determined by the local agent.
+    ///
+    /// Nevertheless, if there are attributes that are fixed and must be emitted
+    /// with every log, modeling them as Resource attributes and using this method
+    /// is much more efficient than emitting them explicitly with every log.
     pub fn with_resource_attributes<I, S>(mut self, keys: I) -> Self
     where
         I: IntoIterator<Item = S>,
@@ -157,9 +160,7 @@ impl ProcessorBuilder {
         self
     }
 
-    /// Builds the `Processor`, registering the ETW provider.
-    ///
-    /// Returns an error if the provider name is invalid.
+    /// Builds the `Processor`, returning `Error` if it fails.
     pub fn build(self) -> Result<Processor, Box<dyn Error>> {
         self.validate()?;
         Ok(Processor::new(self.options))

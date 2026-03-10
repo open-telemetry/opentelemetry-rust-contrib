@@ -12,26 +12,16 @@ use tracelogging_dynamic as tld;
 ///     name: str8
 ///     kind: u8
 ///     startTime: filetime
-///     [parentId: str8]        // only if valid
+///     parentId: str8
 ///     [links: str8 (JSON)]    // only if present
 ///     [statusMessage: str8]   // only if status has description
 ///     success: bool32
 /// }
 /// ```
-pub(crate) fn populate_part_b(
-    eb: &mut tld::EventBuilder,
-    span_data: &SpanData,
-    field_tag: u32,
-) {
+pub(crate) fn populate_part_b(event: &mut tld::EventBuilder, span_data: &SpanData, field_tag: u32) {
     // Calculate field count dynamically
-    // Base fields: _typeName, name, kind, startTime, success = 5
-    let mut field_count: u8 = 5;
-
-    let parent_id_bytes = span_data.parent_span_id.to_bytes();
-    let has_parent = parent_id_bytes != [0u8; 8];
-    if has_parent {
-        field_count += 1;
-    }
+    // Base fields: _typeName, name, kind, startTime, parentId, success = 6
+    let mut field_count: u8 = 6;
 
     let has_links = !span_data.links.links.is_empty();
     if has_links {
@@ -53,53 +43,45 @@ pub(crate) fn populate_part_b(
         field_count += 1;
     }
 
-    eb.add_struct("PartB", field_count, field_tag);
+    event.add_struct("PartB", field_count, field_tag);
 
-    eb.add_str8("_typeName", "Span", tld::OutType::Default, field_tag);
-    eb.add_str8(
+    event.add_str8("_typeName", "Span", tld::OutType::Default, field_tag);
+    event.add_str8(
         "name",
         span_data.name.as_ref(),
         tld::OutType::Utf8,
         field_tag,
     );
-    eb.add_u8(
+    event.add_u8(
         "kind",
         common::span_kind_to_u8(&span_data.span_kind),
         tld::OutType::Default,
         field_tag,
     );
-    eb.add_filetime(
+    event.add_filetime(
         "startTime",
         tld::win_filetime_from_systemtime!(span_data.start_time),
         tld::OutType::Default,
         field_tag,
     );
-
-    if has_parent {
-        eb.add_str8(
-            "parentId",
-            span_data.parent_span_id.to_string(),
-            tld::OutType::Utf8,
-            field_tag,
-        );
-    }
+    event.add_str8(
+        "parentId",
+        span_data.parent_span_id.to_string(),
+        tld::OutType::Utf8,
+        field_tag,
+    );
 
     if has_links {
         let links_json = common::links_to_json(&span_data.links.links);
-        eb.add_str8("links", &links_json, tld::OutType::Utf8, field_tag);
+        event.add_str8("links", &links_json, tld::OutType::Utf8, field_tag);
     }
 
     if let Some(msg) = &status_message {
-        eb.add_str8("statusMessage", msg, tld::OutType::Utf8, field_tag);
+        event.add_str8("statusMessage", msg, tld::OutType::Utf8, field_tag);
     }
 
     let success = !matches!(&span_data.status, Status::Error { .. });
-    eb.add_u8(
-        "success",
-        success as u8,
-        tld::OutType::Boolean,
-        field_tag,
-    );
+    event.add_u8("success", success as u8, tld::OutType::Boolean, field_tag);
 }
 
 #[cfg(test)]

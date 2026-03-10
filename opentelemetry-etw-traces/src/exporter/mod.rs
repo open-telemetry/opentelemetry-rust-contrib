@@ -21,6 +21,10 @@ use std::pin::Pin;
 use std::sync::Arc;
 use tracelogging_dynamic as tld;
 
+/// Defining 0x01 as default keyword for uncategorized events.
+/// Currently used for all events.
+const DEFAULT_KEYWORD_UNCATEGORIZED: u64 = 0x01;
+
 // Thread-local EventBuilder to avoid heap allocations on every export.
 thread_local! {
     static EVENT_BUILDER: RefCell<tld::EventBuilder> = RefCell::new(tld::EventBuilder::new());
@@ -57,8 +61,6 @@ pub(crate) struct ETWExporter {
 }
 
 impl ETWExporter {
-    const KEYWORD: u64 = 1;
-
     /// Creates a new ETWExporter, registering the ETW provider.
     pub(crate) fn new(options: Options) -> Self {
         let mut provider_options = tld::Provider::options();
@@ -68,6 +70,7 @@ impl ETWExporter {
             &provider_options,
         ));
 
+        // Copied from [opentelemetry_etw_logs]:
         // SAFETY: tracelogging (ETW) enables an ETW callback into the provider
         // when `register()` is called. On dynamically created providers, the
         // lifetime of the provider is tied to the object itself, so `unregister()`
@@ -86,31 +89,18 @@ impl ETWExporter {
         }
     }
 
-    fn enabled(&self, level: tld::Level) -> bool {
-        // In unit tests, skip this check as no ETW session is listening.
-        if cfg!(test) {
-            return true;
-        }
-
-        self.provider.enabled(level, Self::KEYWORD)
-    }
-
     /// Exports a single span to ETW.
     ///
     /// Event write order follows Common Schema: reset → __csver__ → PartA → PartC → PartB → write
     pub(crate) fn export_span_data(&self, span_data: &SpanData) {
-        if !self.enabled(tld::Level::Verbose) {
-            return;
-        }
-
         let event_tags: u32 = 0;
         let field_tag: u32 = 0;
 
         EVENT_BUILDER.with_borrow_mut(|event| {
             event.reset(
-                self.options.default_event_name(),
+                self.options.event_name(),
                 tld::Level::Verbose,
-                Self::KEYWORD,
+                DEFAULT_KEYWORD_UNCATEGORIZED,
                 event_tags,
             );
 
@@ -125,7 +115,7 @@ impl ETWExporter {
                 event,
                 span_data,
                 &self.resource,
-                self.options.custom_fields(),
+                self.options.optional_attributes_keys(),
                 field_tag,
             );
 
@@ -164,7 +154,11 @@ impl ETWExporter {
                 self.resource.cloud_role = Some(value.to_string());
             } else if key.as_str() == "service.instance.id" {
                 self.resource.cloud_role_instance = Some(value.to_string());
-            } else if self.resource_attribute_keys.iter().any(|k| k.as_ref() == key.as_str()) {
+            } else if self
+                .resource_attribute_keys
+                .iter()
+                .any(|k| k.as_ref() == key.as_str())
+            {
                 self.resource
                     .attributes_from_resource
                     .push((key.clone(), value.clone()));
