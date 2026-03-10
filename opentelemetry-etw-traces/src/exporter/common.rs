@@ -45,22 +45,44 @@ pub(crate) fn add_attribute_to_event(
     }
 }
 
-fn array_to_json(arr: &opentelemetry::Array) -> String {
+fn array_to_value(arr: &opentelemetry::Array) -> serde_json::Value {
     use opentelemetry::Array;
     match arr {
-        Array::Bool(v) => serde_json::to_string(v).unwrap_or_default(),
-        Array::I64(v) => serde_json::to_string(v).unwrap_or_default(),
-        Array::F64(v) => serde_json::to_string(v).unwrap_or_default(),
-        Array::String(v) => {
-            let strs: Vec<&str> = v.iter().map(|s| s.as_str()).collect();
-            serde_json::to_string(&strs).unwrap_or_default()
+        Array::Bool(v) => {
+            serde_json::Value::Array(v.iter().map(|b| serde_json::Value::Bool(*b)).collect())
         }
-        _ => String::new(),
+        Array::I64(v) => serde_json::Value::Array(
+            v.iter()
+                .map(|i| serde_json::Value::Number((*i).into()))
+                .collect(),
+        ),
+        Array::F64(v) => serde_json::Value::Array(
+            v.iter()
+                .map(|f| {
+                    serde_json::Number::from_f64(*f)
+                        .map(serde_json::Value::Number)
+                        .unwrap_or(serde_json::Value::Null)
+                })
+                .collect(),
+        ),
+        Array::String(v) => serde_json::Value::Array(
+            v.iter()
+                .map(|s| serde_json::Value::String(s.to_string()))
+                .collect(),
+        ),
+        _ => serde_json::Value::Array(vec![]),
     }
+}
+
+fn array_to_json(arr: &opentelemetry::Array) -> String {
+    serde_json::to_string(&array_to_value(arr)).unwrap_or_default()
 }
 
 /// Serializes span links to a JSON string (array of {toTraceId, toSpanId}).
 pub(crate) fn links_to_json(links: &[opentelemetry::trace::Link]) -> String {
+    if links.is_empty() {
+        return "[]".to_string();
+    }
     let arr: Vec<serde_json::Value> = links
         .iter()
         .map(|link| {
@@ -85,9 +107,7 @@ fn attributes_to_value(attrs: &[opentelemetry::KeyValue]) -> serde_json::Value {
                 .map(serde_json::Value::Number)
                 .unwrap_or(serde_json::Value::Null),
             opentelemetry::Value::String(s) => serde_json::Value::String(s.to_string()),
-            opentelemetry::Value::Array(arr) => {
-                serde_json::from_str(&array_to_json(arr)).unwrap_or(serde_json::Value::Null)
-            }
+            opentelemetry::Value::Array(arr) => array_to_value(arr),
             _ => serde_json::Value::Null,
         };
         map.insert(key.to_owned(), json_val);
@@ -97,11 +117,17 @@ fn attributes_to_value(attrs: &[opentelemetry::KeyValue]) -> serde_json::Value {
 
 /// Serializes key-value pairs to a JSON object string for span attributes.
 pub(crate) fn attributes_to_json(attrs: &[opentelemetry::KeyValue]) -> String {
+    if attrs.is_empty() {
+        return "{}".to_string();
+    }
     serde_json::to_string(&attributes_to_value(attrs)).unwrap_or_default()
 }
 
 /// Serializes span events to a JSON object string.
 pub(crate) fn events_to_json(events: &SpanEvents) -> String {
+    if events.events.is_empty() {
+        return "[]".to_string();
+    }
     let json_value: Vec<serde_json::Value> = events
         .events
         .iter()

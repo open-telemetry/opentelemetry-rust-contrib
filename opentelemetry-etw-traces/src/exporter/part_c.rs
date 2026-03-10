@@ -1,8 +1,9 @@
 use crate::exporter::common;
-use opentelemetry::Key;
 use opentelemetry_sdk::trace::SpanData;
 use tracelogging_dynamic as tld;
 
+#[cfg(feature = "additional_promoted_attributes")]
+use opentelemetry::Key;
 #[cfg(feature = "additional_promoted_attributes")]
 use std::borrow::Cow;
 
@@ -18,25 +19,34 @@ pub(crate) fn populate_part_c(
     event: &mut tld::EventBuilder,
     span_data: &SpanData,
     resource: &super::Resource,
-    #[cfg(feature = "additional_promoted_attributes")] optional_attributes_keys: &[Cow<'static, str>],
+    #[cfg(feature = "additional_promoted_attributes")] optional_attributes_keys: &[Cow<
+        'static,
+        str,
+    >],
     field_tag: u32,
 ) {
     // Separate attributes into promoted (Part C fields).
-    #[cfg_attr(not(feature = "additional_promoted_attributes"), allow(unused_mut))]
-    let mut promoted: Vec<(&Key, &opentelemetry::Value)> = Vec::new();
-
     #[cfg(feature = "additional_promoted_attributes")]
-    for kv in &span_data.attributes {
-        let key_str = kv.key.as_str();
+    {
+        let mut promoted: Vec<(&Key, &opentelemetry::Value)> = Vec::new();
+        for kv in &span_data.attributes {
+            let key_str = kv.key.as_str();
 
-        if optional_attributes_keys.iter().any(|s| s == key_str) {
-            promoted.push((&kv.key, &kv.value));
+            if optional_attributes_keys.iter().any(|s| s == key_str) {
+                promoted.push((&kv.key, &kv.value));
+            }
         }
+    }
+
+    let promoted_count = 0usize;
+    #[cfg(feature = "additional_promoted_attributes")]
+    if promoted.len() > 0 {
+        promoted_count = promoted.len();
     }
 
     let resource_attr_count = resource.attributes_from_resource.len();
     let additional_span_data = 2u8; // 'attributes', 'events' as additional span data promoted as additional Part C fields.
-    let total_count = promoted.len() + resource_attr_count + additional_span_data as usize;
+    let total_count = promoted_count + resource_attr_count + additional_span_data as usize;
 
     event.add_struct("PartC", total_count.min(u8::MAX as usize) as u8, field_tag);
 
@@ -46,6 +56,7 @@ pub(crate) fn populate_part_c(
     }
 
     // Promoted span attributes as individual typed fields
+    #[cfg(feature = "additional_promoted_attributes")]
     for (key, value) in &promoted {
         common::add_attribute_to_event(event, key, value);
     }

@@ -30,11 +30,10 @@ pub(crate) fn populate_part_b(event: &mut tld::EventBuilder, span_data: &SpanDat
 
     let status_message = match &span_data.status {
         Status::Error { description } => {
-            let desc = description.to_string();
-            if desc.is_empty() {
+            if description.is_empty() {
                 None
             } else {
-                Some(desc)
+                Some(description.to_string())
             }
         }
         _ => None,
