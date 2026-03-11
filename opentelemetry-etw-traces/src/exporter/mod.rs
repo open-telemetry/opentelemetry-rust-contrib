@@ -111,12 +111,7 @@ impl ETWExporter {
             part_a::populate_part_a(event, &self.resource, span_data, field_tag);
 
             // Part C: custom data (individual typed attributes, resource attributes)
-            part_c::populate_part_c(
-                event,
-                span_data,
-                &self.resource,
-                field_tag,
-            );
+            part_c::populate_part_c(event, span_data, &self.resource, field_tag);
 
             // Part B: span payload (_typeName, name, kind, startTime, parentId, links, statusMessage, success)
             part_b::populate_part_b(event, span_data, field_tag);

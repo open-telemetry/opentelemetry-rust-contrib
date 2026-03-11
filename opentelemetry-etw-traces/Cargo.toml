@@ -3,7 +3,7 @@ name = "opentelemetry-etw-traces"
 version = "0.1.0"
 description = "OpenTelemetry exporter for ETW (Event Tracing for Windows) traces using TraceLogging Dynamic"
 homepage = "https://github.com/open-telemetry/opentelemetry-rust-contrib/tree/main/opentelemetry-etw-traces"
-repository = "https://github.com/open-telemetry/opentelemetry-rust-contrib"
+repository = "https://github.com/open-telemetry/opentelemetry-rust-contrib/tree/main/opentelemetry-etw-traces"
 readme = "README.md"
 categories = [
     "development-tools::debugging",

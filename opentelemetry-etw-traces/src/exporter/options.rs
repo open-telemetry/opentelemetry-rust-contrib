@@ -14,7 +14,6 @@ pub(crate) struct Options {
     /// By default, only `service.name` and `service.instance.id` are exported
     /// as Part A fields (`cloud.role` and `cloud.roleInstance`).
     resource_attribute_keys: Vec<Cow<'static, str>>,
-
 }
 
 impl Options {
@@ -57,5 +56,4 @@ impl Options {
         self.resource_attribute_keys = attributes.into_iter().map(|s| s.into()).collect();
         self
     }
-
 }
