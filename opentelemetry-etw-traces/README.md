@@ -22,23 +22,6 @@ captured by agents running locally and listening for specific ETW events.
 Spans are encoded following the [Microsoft Common Schema v4.0](https://learn.microsoft.com/en-us/opentelemetry/common-schema) format using
 [TraceLogging Dynamic](https://crates.io/crates/tracelogging_dynamic).
 
-## Usage
-
-```rust
-use opentelemetry_etw_traces::Processor;
-use opentelemetry_sdk::trace::SdkTracerProvider;
-
-let processor = Processor::builder("MyAppTracing")
-    .with_event_name("MyAppEventName") // If not provided, defaults to "Span"
-    .with_resource_attributes(vec!["custom_attribute1", "custom_attribute2"])
-    .build()
-    .expect("Failed to create ETW processor");
-
-let provider = SdkTracerProvider::builder()
-    .with_span_processor(processor)
-    .build();
-```
-
 ## Viewing ETW Traces
 
 Traces exported to ETW can be viewed using tools like `logman`, `perfview` etc.

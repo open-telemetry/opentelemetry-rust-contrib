@@ -149,8 +149,8 @@ impl ProcessorBuilder {
     /// and cannot be easily determined by the local agent.
     ///
     /// Nevertheless, if there are attributes that are fixed and must be emitted
-    /// with every log, modeling them as Resource attributes and using this method
-    /// is much more efficient than emitting them explicitly with every log.
+    /// with every span, modeling them as Resource attributes and using this method
+    /// is much more efficient than emitting them explicitly with every span.
     pub fn with_resource_attributes<I, S>(mut self, keys: I) -> Self
     where
         I: IntoIterator<Item = S>,

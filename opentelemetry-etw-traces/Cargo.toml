@@ -20,10 +20,19 @@ opentelemetry = { workspace = true, features = ["trace"] }
 opentelemetry_sdk = { workspace = true, features = ["trace"] }
 tracelogging = "1.2.4"
 tracelogging_dynamic = "1.2.4"
+tracing = { version = "0.1", optional = true }
 serde_json = "1.0"
 
 [dev-dependencies]
 opentelemetry_sdk = { workspace = true, features = ["trace", "testing"] }
+
+[features]
+internal-logs = [
+    "tracing",
+    "opentelemetry/internal-logs",
+    "opentelemetry_sdk/internal-logs",
+]
+default = ["internal-logs"]
 
 [[example]]
 name = "basic"
