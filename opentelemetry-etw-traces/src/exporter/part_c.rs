@@ -16,9 +16,13 @@ pub(crate) fn populate_part_c(
     let resource_attr_count = resource.attributes_from_resource.len();
     let span_attr_count = span_data.attributes.len();
     let additional_span_data = 1u8; // 'events'
-    let total_count = resource_attr_count + span_attr_count + additional_span_data as usize;
+    let part_c_count = resource_attr_count + span_attr_count + additional_span_data as usize;
 
-    event.add_struct("PartC", total_count.min(u8::MAX as usize) as u8, field_tag);
+    event.add_struct(
+        "PartC",
+        part_c_count.try_into().unwrap_or(u8::MAX),
+        field_tag,
+    );
 
     // Resource attributes first
     for (key, value) in &resource.attributes_from_resource {
