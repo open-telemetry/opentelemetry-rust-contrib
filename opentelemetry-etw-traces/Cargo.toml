@@ -14,9 +14,6 @@ license = "Apache-2.0"
 edition = "2021"
 rust-version = "1.75.0"
 
-[features]
-default = []
-
 [dependencies]
 chrono = { version = "0.4.40", default-features = false, features = ["alloc", "std"] }
 opentelemetry = { workspace = true, features = ["trace"] }
@@ -31,3 +28,6 @@ opentelemetry_sdk = { workspace = true, features = ["trace", "testing"] }
 [[example]]
 name = "basic"
 path = "examples/basic.rs"
+
+[lints]
+workspace = true

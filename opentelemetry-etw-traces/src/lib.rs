@@ -35,7 +35,7 @@
 //!   `cloud.role`, `cloud.roleInstance`
 //! - **Part B** (payload): `_typeName="Span"`, `name`, `kind`, `startTime`,
 //!   `parentId`, `links`, `statusMessage`, `success`
-//! - **Part C** (extensions): promoted resource attributes, `attributes`, `events`
+//! - **Part C** (extensions): promoted resource attributes, span's attributes, `events`
 //!
 //! ## Platform Support
 //!
