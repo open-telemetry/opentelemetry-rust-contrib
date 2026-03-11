@@ -115,14 +115,6 @@ fn attributes_to_value(attrs: &[opentelemetry::KeyValue]) -> serde_json::Value {
     serde_json::Value::Object(map)
 }
 
-/// Serializes key-value pairs to a JSON object string for span attributes.
-pub(crate) fn attributes_to_json(attrs: &[opentelemetry::KeyValue]) -> String {
-    if attrs.is_empty() {
-        return "{}".to_string();
-    }
-    serde_json::to_string(&attributes_to_value(attrs)).unwrap_or_default()
-}
-
 /// Serializes span events to a JSON object string.
 pub(crate) fn events_to_json(events: &SpanEvents) -> String {
     if events.events.is_empty() {
@@ -216,28 +208,6 @@ mod tests {
         assert_eq!(span_kind_to_u8(&SpanKind::Client), 3);
         assert_eq!(span_kind_to_u8(&SpanKind::Producer), 4);
         assert_eq!(span_kind_to_u8(&SpanKind::Consumer), 5);
-    }
-
-    #[test]
-    fn test_attributes_to_json_mixed_types() {
-        let attrs = vec![
-            KeyValue::new("str_key", "value"),
-            KeyValue::new("int_key", 42_i64),
-            KeyValue::new("float_key", 3.14_f64),
-            KeyValue::new("bool_key", true),
-        ];
-        let json = attributes_to_json(&attrs);
-        let parsed: serde_json::Value = serde_json::from_str(&json).unwrap();
-        assert_eq!(parsed["str_key"], "value");
-        assert_eq!(parsed["int_key"], 42);
-        assert_eq!(parsed["float_key"], 3.14);
-        assert_eq!(parsed["bool_key"], true);
-    }
-
-    #[test]
-    fn test_attributes_to_json_empty() {
-        let json = attributes_to_json(&[]);
-        assert_eq!(json, "{}");
     }
 
     #[test]

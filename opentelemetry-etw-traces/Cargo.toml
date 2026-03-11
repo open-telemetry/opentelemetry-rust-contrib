@@ -16,7 +16,6 @@ rust-version = "1.75.0"
 
 [features]
 default = []
-additional_promoted_attributes = []
 
 [dependencies]
 chrono = { version = "0.4.40", default-features = false, features = ["alloc", "std"] }

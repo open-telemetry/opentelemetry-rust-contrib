@@ -160,28 +160,6 @@ impl ProcessorBuilder {
         self
     }
 
-    /// Specifies additional attribute keys to include in Part C.
-    ///
-    /// # Performance Considerations
-    ///
-    /// **Warning**: Each specified attribute will be serialized and sent
-    /// with EVERY span. Consider the performance impact when selecting which
-    /// attributes to export.
-    ///
-    /// # Best Practices for ETW
-    ///
-    /// **Recommendation**: Be selective about which attributes to export.
-    ///
-    #[cfg(feature = "additional_promoted_attributes")]
-    pub fn with_optional_attributes<I, S>(mut self, keys: I) -> Self
-    where
-        I: IntoIterator<Item = S>,
-        S: Into<Cow<'static, str>>,
-    {
-        self.options = self.options.with_optional_attributes(keys);
-        self
-    }
-
     /// Builds the `Processor`, returning `Error` if it fails.
     pub fn build(self) -> Result<Processor, Box<dyn Error>> {
         self.validate()?;

@@ -15,11 +15,6 @@ pub(crate) struct Options {
     /// as Part A fields (`cloud.role` and `cloud.roleInstance`).
     resource_attribute_keys: Vec<Cow<'static, str>>,
 
-    /// Optional list of custom attributes to promote as dedicated Part C fields.
-    /// If empty, no additional attributes are promoted. If non-empty, only matching ones are promoted;
-    /// The rest will go into `attributes` JSON representation.
-    #[cfg(feature = "additional_promoted_attributes")]
-    optional_attributes_keys: Vec<Cow<'static, str>>,
 }
 
 impl Options {
@@ -29,8 +24,6 @@ impl Options {
             provider_name: provider_name.into(),
             event_name: "Span".to_string(),
             resource_attribute_keys: Vec::new(),
-            #[cfg(feature = "additional_promoted_attributes")]
-            optional_attributes_keys: Vec::new(),
         }
     }
 
@@ -49,12 +42,6 @@ impl Options {
         &self.resource_attribute_keys
     }
 
-    /// Returns the optional attributes keys set, if configured.
-    #[cfg(feature = "additional_promoted_attributes")]
-    pub(crate) fn optional_attributes_keys(&self) -> &[Cow<'static, str>] {
-        &self.optional_attributes_keys
-    }
-
     /// Sets the event name.
     pub(crate) fn with_event_name(mut self, name: &str) -> Self {
         self.event_name = name.to_string();
@@ -71,14 +58,4 @@ impl Options {
         self
     }
 
-    /// Sets the optional attributes to export.
-    #[cfg(feature = "additional_promoted_attributes")]
-    pub(crate) fn with_optional_attributes<I, S>(mut self, opt_attributes: I) -> Self
-    where
-        I: IntoIterator<Item = S>,
-        S: Into<Cow<'static, str>>,
-    {
-        self.optional_attributes_keys = opt_attributes.into_iter().map(|s| s.into()).collect();
-        self
-    }
 }

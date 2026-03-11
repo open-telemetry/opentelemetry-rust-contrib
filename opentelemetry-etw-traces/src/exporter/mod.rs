@@ -115,8 +115,6 @@ impl ETWExporter {
                 event,
                 span_data,
                 &self.resource,
-                #[cfg(feature = "additional_promoted_attributes")]
-                self.options.optional_attributes_keys(),
                 field_tag,
             );
 
