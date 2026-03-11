@@ -6,6 +6,7 @@ members = [
     "opentelemetry-datadog",
     "opentelemetry-etw-logs",
     "opentelemetry-etw-metrics",
+    "opentelemetry-etw-traces",
     "opentelemetry-instrumentation-actix-web",
     "opentelemetry-instrumentation-tower",
     "opentelemetry-instrumentation-tower/examples/*",
@@ -22,10 +23,6 @@ members = [
 ]
 
 resolver = "2"
-
-exclude = [
-    "opentelemetry-etw-traces",
-]
 
 [profile.bench]
 # https://doc.rust-lang.org/cargo/reference/profiles.html#bench
