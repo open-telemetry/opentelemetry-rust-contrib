@@ -17,7 +17,7 @@ right choice when your application already uses the OTel SDK or the
 
 ### 2. Log view path (direct / zero-copy)
 
-Use `GenevaClient::encode_and_compress_logs_view` when your telemetry data is
+Use `GenevaClient::encode_and_compress_logs` when your telemetry data is
 already held in a type that implements
 [`LogsDataView`](https://docs.rs/otap-df-pdata-views) — for example an
 Arrow-backed view from otap-dataflow.  This path bypasses the OTel SDK
@@ -25,7 +25,7 @@ entirely and avoids copying data into proto structs.
 
 ```rust
 // Implement LogsDataView for your data type, then:
-let batches = client.encode_and_compress_logs_view(&my_view)?;
+let batches = client.encode_and_compress_logs(&my_view)?;
 for batch in &batches {
     client.upload_batch(batch).await?;
 }

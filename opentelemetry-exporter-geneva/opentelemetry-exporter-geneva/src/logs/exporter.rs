@@ -5,6 +5,8 @@ use opentelemetry_proto::transform::common::tonic::ResourceAttributesWithSchema;
 use opentelemetry_proto::transform::logs::tonic::group_logs_by_resource_and_scope;
 use opentelemetry_sdk::error::{OTelSdkError, OTelSdkResult};
 use opentelemetry_sdk::logs::LogBatch;
+use otap_df_pdata::views::otlp::bytes::logs::RawLogsData;
+use prost::Message as _;
 use std::sync::{atomic, Arc};
 
 /// An OpenTelemetry exporter that writes logs to Geneva exporter
@@ -47,7 +49,12 @@ impl opentelemetry_sdk::logs::LogExporter for GenevaExporter {
         let otlp = group_logs_by_resource_and_scope(batch, &self.resource);
 
         // Encode and compress logs into batches
-        let compressed_batches = match self.geneva_client.encode_and_compress_logs(&otlp) {
+        let bytes = opentelemetry_proto::tonic::collector::logs::v1::ExportLogsServiceRequest {
+            resource_logs: otlp,
+        }
+        .encode_to_vec();
+        let view = RawLogsData::new(&bytes);
+        let compressed_batches = match self.geneva_client.encode_and_compress_logs(&view) {
             Ok(batches) => batches,
             Err(e) => return Err(OTelSdkError::InternalFailure(e)),
         };

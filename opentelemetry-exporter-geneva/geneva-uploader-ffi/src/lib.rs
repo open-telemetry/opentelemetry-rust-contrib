@@ -582,7 +582,8 @@ pub unsafe extern "C" fn geneva_encode_and_compress_logs(
     };
 
     let resource_logs = logs_data.resource_logs;
-    match handle_ref.client.encode_and_compress_logs(&resource_logs) {
+    let view = ProtoLogsView(&resource_logs);
+    match handle_ref.client.encode_and_compress_logs(&view) {
         Ok(batches) => {
             let h = EncodedBatchesHandle {
                 magic: GENEVA_HANDLE_MAGIC,
@@ -1399,6 +1400,268 @@ impl<'a> LogsDataView for FlatLogsView<'a> {
 }
 
 // ---------------------------------------------------------------------------
+// ProtoLogsView: LogsDataView impl for OTLP proto ResourceLogs (local to FFI)
+// ---------------------------------------------------------------------------
+
+use opentelemetry_proto::tonic::{
+    common::v1::{any_value::Value as ProtoVal, AnyValue as ProtoAnyValueT, KeyValue as ProtoKVT},
+    logs::v1::{
+        LogRecord as ProtoLogRecordT, ResourceLogs as ProtoResourceLogsT,
+        ScopeLogs as ProtoScopeLogsT,
+    },
+};
+
+struct ProtoLogsView<'a>(&'a [ProtoResourceLogsT]);
+
+impl<'a> LogsDataView for ProtoLogsView<'a> {
+    type ResourceLogs<'r>
+        = ProtoRLView<'r>
+    where
+        Self: 'r;
+    type ResourcesIter<'r>
+        = ProtoRLIter<'r>
+    where
+        Self: 'r;
+    fn resources(&self) -> Self::ResourcesIter<'_> {
+        ProtoRLIter(self.0.iter())
+    }
+}
+struct ProtoRLIter<'a>(std::slice::Iter<'a, ProtoResourceLogsT>);
+impl<'a> Iterator for ProtoRLIter<'a> {
+    type Item = ProtoRLView<'a>;
+    fn next(&mut self) -> Option<Self::Item> {
+        self.0.next().map(ProtoRLView)
+    }
+}
+struct ProtoRLView<'a>(&'a ProtoResourceLogsT);
+impl<'a> ResourceLogsView for ProtoRLView<'a> {
+    type Resource<'r>
+        = NoView
+    where
+        Self: 'r;
+    type ScopeLogs<'s>
+        = ProtoSLView<'s>
+    where
+        Self: 's;
+    type ScopesIter<'s>
+        = ProtoSLIter<'s>
+    where
+        Self: 's;
+    fn resource(&self) -> Option<Self::Resource<'_>> {
+        None
+    }
+    fn scopes(&self) -> Self::ScopesIter<'_> {
+        ProtoSLIter(self.0.scope_logs.iter())
+    }
+    fn schema_url(&self) -> Option<&[u8]> {
+        if self.0.schema_url.is_empty() {
+            None
+        } else {
+            Some(self.0.schema_url.as_bytes())
+        }
+    }
+}
+struct ProtoSLIter<'a>(std::slice::Iter<'a, ProtoScopeLogsT>);
+impl<'a> Iterator for ProtoSLIter<'a> {
+    type Item = ProtoSLView<'a>;
+    fn next(&mut self) -> Option<Self::Item> {
+        self.0.next().map(ProtoSLView)
+    }
+}
+struct ProtoSLView<'a>(&'a ProtoScopeLogsT);
+impl<'a> ScopeLogsView for ProtoSLView<'a> {
+    type Scope<'s>
+        = NoView
+    where
+        Self: 's;
+    type LogRecord<'r>
+        = ProtoLRView<'r>
+    where
+        Self: 'r;
+    type LogRecordsIter<'r>
+        = ProtoLRIter<'r>
+    where
+        Self: 'r;
+    fn scope(&self) -> Option<Self::Scope<'_>> {
+        None
+    }
+    fn log_records(&self) -> Self::LogRecordsIter<'_> {
+        ProtoLRIter(self.0.log_records.iter())
+    }
+    fn schema_url(&self) -> Option<&[u8]> {
+        if self.0.schema_url.is_empty() {
+            None
+        } else {
+            Some(self.0.schema_url.as_bytes())
+        }
+    }
+}
+struct ProtoLRIter<'a>(std::slice::Iter<'a, ProtoLogRecordT>);
+impl<'a> Iterator for ProtoLRIter<'a> {
+    type Item = ProtoLRView<'a>;
+    fn next(&mut self) -> Option<Self::Item> {
+        self.0.next().map(ProtoLRView)
+    }
+}
+struct ProtoLRView<'a>(&'a ProtoLogRecordT);
+impl<'a> LogRecordView for ProtoLRView<'a> {
+    type Attribute<'att>
+        = ProtoKVView<'att>
+    where
+        Self: 'att;
+    type AttributeIter<'att>
+        = ProtoKVIter<'att>
+    where
+        Self: 'att;
+    type Body<'bod>
+        = ProtoAVView<'bod>
+    where
+        Self: 'bod;
+    fn time_unix_nano(&self) -> Option<u64> {
+        if self.0.time_unix_nano != 0 {
+            Some(self.0.time_unix_nano)
+        } else {
+            None
+        }
+    }
+    fn observed_time_unix_nano(&self) -> Option<u64> {
+        if self.0.observed_time_unix_nano != 0 {
+            Some(self.0.observed_time_unix_nano)
+        } else {
+            None
+        }
+    }
+    fn severity_number(&self) -> Option<i32> {
+        if self.0.severity_number != 0 {
+            Some(self.0.severity_number)
+        } else {
+            None
+        }
+    }
+    fn severity_text(&self) -> Option<&[u8]> {
+        if self.0.severity_text.is_empty() {
+            None
+        } else {
+            Some(self.0.severity_text.as_bytes())
+        }
+    }
+    fn body(&self) -> Option<Self::Body<'_>> {
+        self.0.body.as_ref().map(ProtoAVView)
+    }
+    fn attributes(&self) -> Self::AttributeIter<'_> {
+        ProtoKVIter(self.0.attributes.iter())
+    }
+    fn dropped_attributes_count(&self) -> u32 {
+        self.0.dropped_attributes_count
+    }
+    fn flags(&self) -> Option<u32> {
+        if self.0.flags != 0 {
+            Some(self.0.flags)
+        } else {
+            None
+        }
+    }
+    fn trace_id(&self) -> Option<&[u8; 16]> {
+        <&[u8; 16]>::try_from(self.0.trace_id.as_slice()).ok()
+    }
+    fn span_id(&self) -> Option<&[u8; 8]> {
+        <&[u8; 8]>::try_from(self.0.span_id.as_slice()).ok()
+    }
+    fn event_name(&self) -> Option<&[u8]> {
+        if self.0.event_name.is_empty() {
+            None
+        } else {
+            Some(self.0.event_name.as_bytes())
+        }
+    }
+}
+struct ProtoAVView<'a>(&'a ProtoAnyValueT);
+impl<'a> AnyValueView<'a> for ProtoAVView<'a> {
+    type KeyValue = ProtoKVView<'a>;
+    type ArrayIter<'arr>
+        = std::iter::Empty<ProtoAVView<'a>>
+    where
+        Self: 'arr;
+    type KeyValueIter<'kv>
+        = std::iter::Empty<ProtoKVView<'a>>
+    where
+        Self: 'kv;
+    fn value_type(&self) -> ValueType {
+        match &self.0.value {
+            Some(ProtoVal::StringValue(_)) => ValueType::String,
+            Some(ProtoVal::BoolValue(_)) => ValueType::Bool,
+            Some(ProtoVal::IntValue(_)) => ValueType::Int64,
+            Some(ProtoVal::DoubleValue(_)) => ValueType::Double,
+            Some(ProtoVal::ArrayValue(_)) => ValueType::Array,
+            Some(ProtoVal::KvlistValue(_)) => ValueType::KeyValueList,
+            Some(ProtoVal::BytesValue(_)) => ValueType::Bytes,
+            None => ValueType::Empty,
+        }
+    }
+    fn as_string(&self) -> Option<&[u8]> {
+        if let Some(ProtoVal::StringValue(s)) = &self.0.value {
+            Some(s.as_bytes())
+        } else {
+            None
+        }
+    }
+    fn as_bool(&self) -> Option<bool> {
+        if let Some(ProtoVal::BoolValue(b)) = &self.0.value {
+            Some(*b)
+        } else {
+            None
+        }
+    }
+    fn as_int64(&self) -> Option<i64> {
+        if let Some(ProtoVal::IntValue(i)) = &self.0.value {
+            Some(*i)
+        } else {
+            None
+        }
+    }
+    fn as_double(&self) -> Option<f64> {
+        if let Some(ProtoVal::DoubleValue(d)) = &self.0.value {
+            Some(*d)
+        } else {
+            None
+        }
+    }
+    fn as_bytes(&self) -> Option<&[u8]> {
+        if let Some(ProtoVal::BytesValue(b)) = &self.0.value {
+            Some(b)
+        } else {
+            None
+        }
+    }
+    fn as_array(&self) -> Option<Self::ArrayIter<'_>> {
+        None
+    }
+    fn as_kvlist(&self) -> Option<Self::KeyValueIter<'_>> {
+        None
+    }
+}
+struct ProtoKVView<'a>(&'a ProtoKVT);
+struct ProtoKVIter<'a>(std::slice::Iter<'a, ProtoKVT>);
+impl<'a> Iterator for ProtoKVIter<'a> {
+    type Item = ProtoKVView<'a>;
+    fn next(&mut self) -> Option<Self::Item> {
+        self.0.next().map(ProtoKVView)
+    }
+}
+impl<'a> AttributeView for ProtoKVView<'a> {
+    type Val<'val>
+        = ProtoAVView<'val>
+    where
+        Self: 'val;
+    fn key(&self) -> &[u8] {
+        self.0.key.as_bytes()
+    }
+    fn value(&self) -> Option<Self::Val<'_>> {
+        self.0.value.as_ref().map(ProtoAVView)
+    }
+}
+
+// ---------------------------------------------------------------------------
 // FFI function: encode a flat C array of log records (zero-copy, no OTLP)
 // ---------------------------------------------------------------------------
 
@@ -1468,7 +1731,7 @@ pub unsafe extern "C" fn geneva_encode_and_compress_log_records(
     let slice = unsafe { std::slice::from_raw_parts(records, record_count) };
     let view = FlatLogsView(slice);
 
-    match handle_ref.client.encode_and_compress_logs_view(&view) {
+    match handle_ref.client.encode_and_compress_logs(&view) {
         Ok(batches) => {
             let h = EncodedBatchesHandle {
                 magic: GENEVA_HANDLE_MAGIC,

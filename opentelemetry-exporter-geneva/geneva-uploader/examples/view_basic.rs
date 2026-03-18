@@ -1,6 +1,6 @@
 //! End-to-end example: send logs via the `LogsDataView` path to Geneva.
 //!
-//! This exercises `GenevaClient::encode_and_compress_logs_view` + `upload_batch`
+//! This exercises `GenevaClient::encode_and_compress_logs` + `upload_batch`
 //! without going through the OpenTelemetry SDK.  It is the canonical test for
 //! the view-backed encoding path introduced in this PR.
 //!
@@ -377,7 +377,7 @@ async fn main() {
 
     // Encode via the view path
     let batches = client
-        .encode_and_compress_logs_view(&view)
+        .encode_and_compress_logs(&view)
         .expect("Encoding failed");
 
     println!("Encoded {} batch(es):", batches.len());
