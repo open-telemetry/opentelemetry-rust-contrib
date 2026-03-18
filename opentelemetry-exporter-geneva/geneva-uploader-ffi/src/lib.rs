@@ -12,6 +12,7 @@ use tokio::runtime::Runtime;
 
 use geneva_uploader::client::{EncodedBatch, GenevaClient, GenevaClientConfig};
 use geneva_uploader::AuthMethod;
+use opentelemetry_proto::tonic::collector::logs::v1::ExportLogsServiceRequest;
 use opentelemetry_proto::tonic::collector::trace::v1::ExportTraceServiceRequest;
 use prost::Message;
 use std::path::PathBuf;
@@ -530,10 +531,145 @@ pub unsafe extern "C" fn geneva_client_new(
     GenevaError::Success
 }
 
+/// Encode and compress logs into batches (synchronous)
+///
+/// # Safety
+/// - handle must be a valid pointer returned by geneva_client_new
+/// - data must be a valid pointer to protobuf-encoded ExportLogsServiceRequest
+/// - data_len must be the correct length of the data
+/// - out_batches must be non-null; on success it receives a non-null pointer the caller must free with geneva_batches_free
+/// - err_msg_out: optional buffer to receive error message (can be NULL)
+/// - err_msg_len: size of err_msg_out buffer
+#[no_mangle]
+pub unsafe extern "C" fn geneva_encode_and_compress_logs(
+    handle: *mut GenevaClientHandle,
+    data: *const u8,
+    data_len: usize,
+    out_batches: *mut *mut EncodedBatchesHandle,
+    err_msg_out: *mut c_char,
+    err_msg_len: usize,
+) -> GenevaError {
+    if out_batches.is_null() {
+        return GenevaError::NullPointer;
+    }
+    unsafe { *out_batches = ptr::null_mut() };
+
+    if handle.is_null() {
+        return GenevaError::NullPointer;
+    }
+    if data.is_null() {
+        return GenevaError::NullPointer;
+    }
+    if data_len == 0 {
+        return GenevaError::EmptyInput;
+    }
+
+    // Validate handle first
+    let validation_result = unsafe { validate_handle(handle) };
+    if validation_result != GenevaError::Success {
+        return validation_result;
+    }
+
+    let handle_ref = unsafe { handle.as_ref().unwrap() };
+    let data_slice = unsafe { std::slice::from_raw_parts(data, data_len) };
+
+    let logs_data: ExportLogsServiceRequest = match Message::decode(data_slice) {
+        Ok(data) => data,
+        Err(e) => {
+            unsafe { write_error_if_provided(err_msg_out, err_msg_len, &e) };
+            return GenevaError::DecodeFailed;
+        }
+    };
+
+    let resource_logs = logs_data.resource_logs;
+    let view = ProtoLogsView(&resource_logs);
+    match handle_ref.client.encode_and_compress_logs(&view) {
+        Ok(batches) => {
+            let h = EncodedBatchesHandle {
+                magic: GENEVA_HANDLE_MAGIC,
+                batches,
+            };
+            unsafe { *out_batches = Box::into_raw(Box::new(h)) };
+            GenevaError::Success
+        }
+        Err(e) => {
+            unsafe { write_error_if_provided(err_msg_out, err_msg_len, &e) };
+            GenevaError::InternalError
+        }
+    }
+}
+
+/// Encode and compress spans into batches (synchronous)
+///
+/// # Safety
+/// - handle must be a valid pointer returned by geneva_client_new
+/// - data must be a valid pointer to protobuf-encoded ExportTraceServiceRequest
+/// - data_len must be the correct length of the data
+/// - out_batches must be non-null; on success it receives a non-null pointer the caller must free with geneva_batches_free
+/// - err_msg_out: optional buffer to receive error message (can be NULL)
+/// - err_msg_len: size of err_msg_out buffer
+#[no_mangle]
+pub unsafe extern "C" fn geneva_encode_and_compress_spans(
+    handle: *mut GenevaClientHandle,
+    data: *const u8,
+    data_len: usize,
+    out_batches: *mut *mut EncodedBatchesHandle,
+    err_msg_out: *mut c_char,
+    err_msg_len: usize,
+) -> GenevaError {
+    if out_batches.is_null() {
+        return GenevaError::NullPointer;
+    }
+    unsafe { *out_batches = ptr::null_mut() };
+
+    if handle.is_null() {
+        return GenevaError::NullPointer;
+    }
+    if data.is_null() {
+        return GenevaError::NullPointer;
+    }
+    if data_len == 0 {
+        return GenevaError::EmptyInput;
+    }
+
+    // Validate handle first
+    let validation_result = unsafe { validate_handle(handle) };
+    if validation_result != GenevaError::Success {
+        return validation_result;
+    }
+
+    let handle_ref = unsafe { handle.as_ref().unwrap() };
+    let data_slice = unsafe { std::slice::from_raw_parts(data, data_len) };
+
+    let spans_data: ExportTraceServiceRequest = match Message::decode(data_slice) {
+        Ok(data) => data,
+        Err(e) => {
+            unsafe { write_error_if_provided(err_msg_out, err_msg_len, &e) };
+            return GenevaError::DecodeFailed;
+        }
+    };
+
+    let resource_spans = spans_data.resource_spans;
+    match handle_ref.client.encode_and_compress_spans(&resource_spans) {
+        Ok(batches) => {
+            let h = EncodedBatchesHandle {
+                magic: GENEVA_HANDLE_MAGIC,
+                batches,
+            };
+            unsafe { *out_batches = Box::into_raw(Box::new(h)) };
+            GenevaError::Success
+        }
+        Err(e) => {
+            unsafe { write_error_if_provided(err_msg_out, err_msg_len, &e) };
+            GenevaError::InternalError
+        }
+    }
+}
+
 /// Returns the number of batches in the encoded batches handle
 ///
 /// # Safety
-/// - batches must be a valid pointer returned by geneva_encode_and_compress_log_records, or null
+/// - batches must be a valid pointer returned by geneva_encode_and_compress_logs, or null
 #[no_mangle]
 pub unsafe extern "C" fn geneva_batches_len(batches: *const EncodedBatchesHandle) -> usize {
     // Validate batches
@@ -551,7 +687,7 @@ pub unsafe extern "C" fn geneva_batches_len(batches: *const EncodedBatchesHandle
 ///
 /// # Safety
 /// - handle must be a valid pointer returned by geneva_client_new
-/// - batches must be a valid pointer returned by geneva_encode_and_compress_log_records
+/// - batches must be a valid pointer returned by geneva_encode_and_compress_logs
 /// - index must be less than the value returned by geneva_batches_len
 /// - err_msg_out: optional buffer to receive error message (can be NULL)
 /// - err_msg_len: size of err_msg_out buffer
@@ -597,7 +733,7 @@ pub unsafe extern "C" fn geneva_upload_batch_sync(
 /// Frees encoded batches handle
 ///
 /// # Safety
-/// - batches must be a valid pointer returned by geneva_encode_and_compress_log_records, or null
+/// - batches must be a valid pointer returned by geneva_encode_and_compress_logs, or null
 /// - batches must not be used after calling this function
 #[no_mangle]
 pub unsafe extern "C" fn geneva_batches_free(batches: *mut EncodedBatchesHandle) {
@@ -1264,71 +1400,264 @@ impl<'a> LogsDataView for FlatLogsView<'a> {
 }
 
 // ---------------------------------------------------------------------------
-// FFI function: encode spans (OTLP bytes path)
+// ProtoLogsView: LogsDataView impl for OTLP proto ResourceLogs (local to FFI)
 // ---------------------------------------------------------------------------
 
-/// Encode and compress spans into batches (synchronous).
-///
-/// # Safety
-/// - `handle` must be a valid pointer returned by `geneva_client_new`.
-/// - `data` must be a valid pointer to a protobuf-encoded `ExportTraceServiceRequest`.
-/// - `data_len` must be the correct byte length of `data`.
-/// - `out_batches` must be non-null; on success receives a pointer the caller must free with `geneva_batches_free`.
-/// - `err_msg_out` may be `NULL`; if non-null must point to a buffer of at least `err_msg_len` bytes.
-#[no_mangle]
-pub unsafe extern "C" fn geneva_encode_and_compress_spans(
-    handle: *mut GenevaClientHandle,
-    data: *const u8,
-    data_len: usize,
-    out_batches: *mut *mut EncodedBatchesHandle,
-    err_msg_out: *mut c_char,
-    err_msg_len: usize,
-) -> GenevaError {
-    if out_batches.is_null() {
-        return GenevaError::NullPointer;
-    }
-    unsafe { *out_batches = ptr::null_mut() };
+use opentelemetry_proto::tonic::{
+    common::v1::{any_value::Value as ProtoVal, AnyValue as ProtoAnyValueT, KeyValue as ProtoKVT},
+    logs::v1::{
+        LogRecord as ProtoLogRecordT, ResourceLogs as ProtoResourceLogsT,
+        ScopeLogs as ProtoScopeLogsT,
+    },
+};
 
-    if handle.is_null() {
-        return GenevaError::NullPointer;
-    }
-    if data.is_null() {
-        return GenevaError::NullPointer;
-    }
-    if data_len == 0 {
-        return GenevaError::EmptyInput;
-    }
+struct ProtoLogsView<'a>(&'a [ProtoResourceLogsT]);
 
-    let validation_result = unsafe { validate_handle(handle) };
-    if validation_result != GenevaError::Success {
-        return validation_result;
+impl<'a> LogsDataView for ProtoLogsView<'a> {
+    type ResourceLogs<'r>
+        = ProtoRLView<'r>
+    where
+        Self: 'r;
+    type ResourcesIter<'r>
+        = ProtoRLIter<'r>
+    where
+        Self: 'r;
+    fn resources(&self) -> Self::ResourcesIter<'_> {
+        ProtoRLIter(self.0.iter())
     }
-
-    let handle_ref = unsafe { handle.as_ref().unwrap() };
-    let data_slice = unsafe { std::slice::from_raw_parts(data, data_len) };
-
-    let spans_data: ExportTraceServiceRequest = match Message::decode(data_slice) {
-        Ok(data) => data,
-        Err(e) => {
-            unsafe { write_error_if_provided(err_msg_out, err_msg_len, &e) };
-            return GenevaError::DecodeFailed;
+}
+struct ProtoRLIter<'a>(std::slice::Iter<'a, ProtoResourceLogsT>);
+impl<'a> Iterator for ProtoRLIter<'a> {
+    type Item = ProtoRLView<'a>;
+    fn next(&mut self) -> Option<Self::Item> {
+        self.0.next().map(ProtoRLView)
+    }
+}
+struct ProtoRLView<'a>(&'a ProtoResourceLogsT);
+impl<'a> ResourceLogsView for ProtoRLView<'a> {
+    type Resource<'r>
+        = NoView
+    where
+        Self: 'r;
+    type ScopeLogs<'s>
+        = ProtoSLView<'s>
+    where
+        Self: 's;
+    type ScopesIter<'s>
+        = ProtoSLIter<'s>
+    where
+        Self: 's;
+    fn resource(&self) -> Option<Self::Resource<'_>> {
+        None
+    }
+    fn scopes(&self) -> Self::ScopesIter<'_> {
+        ProtoSLIter(self.0.scope_logs.iter())
+    }
+    fn schema_url(&self) -> Option<&[u8]> {
+        if self.0.schema_url.is_empty() {
+            None
+        } else {
+            Some(self.0.schema_url.as_bytes())
         }
-    };
-
-    let resource_spans = spans_data.resource_spans;
-    match handle_ref.client.encode_and_compress_spans(&resource_spans) {
-        Ok(batches) => {
-            let h = EncodedBatchesHandle {
-                magic: GENEVA_HANDLE_MAGIC,
-                batches,
-            };
-            unsafe { *out_batches = Box::into_raw(Box::new(h)) };
-            GenevaError::Success
+    }
+}
+struct ProtoSLIter<'a>(std::slice::Iter<'a, ProtoScopeLogsT>);
+impl<'a> Iterator for ProtoSLIter<'a> {
+    type Item = ProtoSLView<'a>;
+    fn next(&mut self) -> Option<Self::Item> {
+        self.0.next().map(ProtoSLView)
+    }
+}
+struct ProtoSLView<'a>(&'a ProtoScopeLogsT);
+impl<'a> ScopeLogsView for ProtoSLView<'a> {
+    type Scope<'s>
+        = NoView
+    where
+        Self: 's;
+    type LogRecord<'r>
+        = ProtoLRView<'r>
+    where
+        Self: 'r;
+    type LogRecordsIter<'r>
+        = ProtoLRIter<'r>
+    where
+        Self: 'r;
+    fn scope(&self) -> Option<Self::Scope<'_>> {
+        None
+    }
+    fn log_records(&self) -> Self::LogRecordsIter<'_> {
+        ProtoLRIter(self.0.log_records.iter())
+    }
+    fn schema_url(&self) -> Option<&[u8]> {
+        if self.0.schema_url.is_empty() {
+            None
+        } else {
+            Some(self.0.schema_url.as_bytes())
         }
-        Err(e) => {
-            unsafe { write_error_if_provided(err_msg_out, err_msg_len, &e) };
-            GenevaError::InternalError
+    }
+}
+struct ProtoLRIter<'a>(std::slice::Iter<'a, ProtoLogRecordT>);
+impl<'a> Iterator for ProtoLRIter<'a> {
+    type Item = ProtoLRView<'a>;
+    fn next(&mut self) -> Option<Self::Item> {
+        self.0.next().map(ProtoLRView)
+    }
+}
+struct ProtoLRView<'a>(&'a ProtoLogRecordT);
+impl<'a> LogRecordView for ProtoLRView<'a> {
+    type Attribute<'att>
+        = ProtoKVView<'att>
+    where
+        Self: 'att;
+    type AttributeIter<'att>
+        = ProtoKVIter<'att>
+    where
+        Self: 'att;
+    type Body<'bod>
+        = ProtoAVView<'bod>
+    where
+        Self: 'bod;
+    fn time_unix_nano(&self) -> Option<u64> {
+        if self.0.time_unix_nano != 0 {
+            Some(self.0.time_unix_nano)
+        } else {
+            None
         }
+    }
+    fn observed_time_unix_nano(&self) -> Option<u64> {
+        if self.0.observed_time_unix_nano != 0 {
+            Some(self.0.observed_time_unix_nano)
+        } else {
+            None
+        }
+    }
+    fn severity_number(&self) -> Option<i32> {
+        if self.0.severity_number != 0 {
+            Some(self.0.severity_number)
+        } else {
+            None
+        }
+    }
+    fn severity_text(&self) -> Option<&[u8]> {
+        if self.0.severity_text.is_empty() {
+            None
+        } else {
+            Some(self.0.severity_text.as_bytes())
+        }
+    }
+    fn body(&self) -> Option<Self::Body<'_>> {
+        self.0.body.as_ref().map(ProtoAVView)
+    }
+    fn attributes(&self) -> Self::AttributeIter<'_> {
+        ProtoKVIter(self.0.attributes.iter())
+    }
+    fn dropped_attributes_count(&self) -> u32 {
+        self.0.dropped_attributes_count
+    }
+    fn flags(&self) -> Option<u32> {
+        if self.0.flags != 0 {
+            Some(self.0.flags)
+        } else {
+            None
+        }
+    }
+    fn trace_id(&self) -> Option<&[u8; 16]> {
+        <&[u8; 16]>::try_from(self.0.trace_id.as_slice()).ok()
+    }
+    fn span_id(&self) -> Option<&[u8; 8]> {
+        <&[u8; 8]>::try_from(self.0.span_id.as_slice()).ok()
+    }
+    fn event_name(&self) -> Option<&[u8]> {
+        if self.0.event_name.is_empty() {
+            None
+        } else {
+            Some(self.0.event_name.as_bytes())
+        }
+    }
+}
+struct ProtoAVView<'a>(&'a ProtoAnyValueT);
+impl<'a> AnyValueView<'a> for ProtoAVView<'a> {
+    type KeyValue = ProtoKVView<'a>;
+    type ArrayIter<'arr>
+        = std::iter::Empty<ProtoAVView<'a>>
+    where
+        Self: 'arr;
+    type KeyValueIter<'kv>
+        = std::iter::Empty<ProtoKVView<'a>>
+    where
+        Self: 'kv;
+    fn value_type(&self) -> ValueType {
+        match &self.0.value {
+            Some(ProtoVal::StringValue(_)) => ValueType::String,
+            Some(ProtoVal::BoolValue(_)) => ValueType::Bool,
+            Some(ProtoVal::IntValue(_)) => ValueType::Int64,
+            Some(ProtoVal::DoubleValue(_)) => ValueType::Double,
+            Some(ProtoVal::ArrayValue(_)) => ValueType::Array,
+            Some(ProtoVal::KvlistValue(_)) => ValueType::KeyValueList,
+            Some(ProtoVal::BytesValue(_)) => ValueType::Bytes,
+            None => ValueType::Empty,
+        }
+    }
+    fn as_string(&self) -> Option<&[u8]> {
+        if let Some(ProtoVal::StringValue(s)) = &self.0.value {
+            Some(s.as_bytes())
+        } else {
+            None
+        }
+    }
+    fn as_bool(&self) -> Option<bool> {
+        if let Some(ProtoVal::BoolValue(b)) = &self.0.value {
+            Some(*b)
+        } else {
+            None
+        }
+    }
+    fn as_int64(&self) -> Option<i64> {
+        if let Some(ProtoVal::IntValue(i)) = &self.0.value {
+            Some(*i)
+        } else {
+            None
+        }
+    }
+    fn as_double(&self) -> Option<f64> {
+        if let Some(ProtoVal::DoubleValue(d)) = &self.0.value {
+            Some(*d)
+        } else {
+            None
+        }
+    }
+    fn as_bytes(&self) -> Option<&[u8]> {
+        if let Some(ProtoVal::BytesValue(b)) = &self.0.value {
+            Some(b)
+        } else {
+            None
+        }
+    }
+    fn as_array(&self) -> Option<Self::ArrayIter<'_>> {
+        None
+    }
+    fn as_kvlist(&self) -> Option<Self::KeyValueIter<'_>> {
+        None
+    }
+}
+struct ProtoKVView<'a>(&'a ProtoKVT);
+struct ProtoKVIter<'a>(std::slice::Iter<'a, ProtoKVT>);
+impl<'a> Iterator for ProtoKVIter<'a> {
+    type Item = ProtoKVView<'a>;
+    fn next(&mut self) -> Option<Self::Item> {
+        self.0.next().map(ProtoKVView)
+    }
+}
+impl<'a> AttributeView for ProtoKVView<'a> {
+    type Val<'val>
+        = ProtoAVView<'val>
+    where
+        Self: 'val;
+    fn key(&self) -> &[u8] {
+        self.0.key.as_bytes()
+    }
+    fn value(&self) -> Option<Self::Val<'_>> {
+        self.0.value.as_ref().map(ProtoAVView)
     }
 }
 
@@ -1344,7 +1673,9 @@ pub unsafe extern "C" fn geneva_encode_and_compress_spans(
 /// # Limitations
 /// Each record is treated as a standalone log entry.  Resource attributes
 /// (service name, host, etc.) and instrumentation scope metadata are **not**
-/// supported by this path and are silently ignored.
+/// supported by this path and are silently ignored.  If your records carry
+/// meaningful resource or scope metadata, use [`geneva_encode_and_compress_logs`]
+/// instead and pass a serialised `ExportLogsServiceRequest` protobuf.
 ///
 /// # Parameters
 /// - `handle`: valid client handle returned by [`geneva_client_new`].
@@ -1454,6 +1785,23 @@ mod tests {
             let result =
                 geneva_upload_batch_sync(ptr::null_mut(), ptr::null(), 0, ptr::null_mut(), 0);
             assert_eq!(result as u32, GenevaError::NullPointer as u32);
+        }
+    }
+
+    #[test]
+    fn test_encode_with_nulls() {
+        unsafe {
+            let mut out: *mut EncodedBatchesHandle = std::ptr::null_mut();
+            let rc = geneva_encode_and_compress_logs(
+                ptr::null_mut(),
+                ptr::null(),
+                0,
+                &mut out,
+                ptr::null_mut(),
+                0,
+            );
+            assert_eq!(rc as u32, GenevaError::NullPointer as u32);
+            assert!(out.is_null());
         }
     }
 
@@ -1845,4 +2193,289 @@ mod tests {
         }
     }
 
+    // Integration-style test: encode via FFI then upload via FFI using MockAuth + Wiremock server.
+    // Uses otlp_builder to construct an ExportLogsServiceRequest payload.
+    #[test]
+    #[cfg(feature = "mock_auth")]
+    fn test_encode_and_upload_with_mock_server() {
+        use otlp_builder::builder::build_otlp_logs_minimal;
+        use wiremock::matchers::method;
+        use wiremock::{Mock, MockServer, ResponseTemplate};
+
+        // Start mock server on the shared runtime used by the FFI code
+        let mock_server = runtime().block_on(async { MockServer::start().await });
+        let ingestion_endpoint = mock_server.uri();
+
+        // Build JWT dynamically so the Endpoint claim matches the mock server, and compute a fresh expiry
+        let (auth_token, auth_token_expiry) =
+            generate_mock_jwt_and_expiry(&ingestion_endpoint, 24 * 3600);
+
+        // Mock config service (GET)
+        runtime().block_on(async {
+            Mock::given(method("GET"))
+                .respond_with(ResponseTemplate::new(200).set_body_string(format!(
+                    r#"{{
+                        "IngestionGatewayInfo": {{
+                            "Endpoint": "{ingestion_endpoint}",
+                            "AuthToken": "{auth_token}",
+                            "AuthTokenExpiryTime": "{auth_token_expiry}"
+                        }},
+                        "StorageAccountKeys": [{{
+                            "AccountMonikerName": "testdiagaccount",
+                            "AccountGroupName": "testgroup",
+                            "IsPrimaryMoniker": true
+                        }}],
+                        "TagId": "test"
+                    }}"#
+                )))
+                .mount(&mock_server)
+                .await;
+
+            // Mock ingestion service (POST)
+            Mock::given(method("POST"))
+                .respond_with(
+                    ResponseTemplate::new(202).set_body_string(r#"{"ticket":"accepted"}"#),
+                )
+                .mount(&mock_server)
+                .await;
+        });
+
+        // Build a real GenevaClient using MockAuth (no mTLS), then wrap it in the FFI handle.
+        let cfg = GenevaClientConfig {
+            endpoint: mock_server.uri(),
+            environment: "test".to_string(),
+            account: "test".to_string(),
+            namespace: "testns".to_string(),
+            region: "testregion".to_string(),
+            config_major_version: 1,
+            auth_method: AuthMethod::MockAuth,
+            tenant: "testtenant".to_string(),
+            role_name: "testrole".to_string(),
+            role_instance: "testinstance".to_string(),
+            msi_resource: None,
+        };
+        let client = GenevaClient::new(cfg).expect("failed to create GenevaClient with MockAuth");
+
+        // Wrap into an FFI-compatible handle
+        let handle = GenevaClientHandle {
+            magic: GENEVA_HANDLE_MAGIC,
+            client,
+        };
+        // Keep the boxed handle alive until we explicitly free it via FFI
+        let mut handle_box = Box::new(handle);
+        let handle_ptr: *mut GenevaClientHandle = &mut *handle_box;
+
+        // Build minimal OTLP logs payload bytes using the test helper
+        let bytes = build_otlp_logs_minimal("TestEvent", "hello-world", Some(("rk", "rv")));
+
+        // Encode via FFI
+        let mut batches_ptr: *mut EncodedBatchesHandle = std::ptr::null_mut();
+        let rc = unsafe {
+            geneva_encode_and_compress_logs(
+                handle_ptr,
+                bytes.as_ptr(),
+                bytes.len(),
+                &mut batches_ptr,
+                ptr::null_mut(),
+                0,
+            )
+        };
+        assert_eq!(rc as u32, GenevaError::Success as u32, "encode failed");
+        assert!(
+            !batches_ptr.is_null(),
+            "out_batches should be non-null on success"
+        );
+
+        // Validate number of batches and upload first batch via FFI (sync)
+        let len = unsafe { geneva_batches_len(batches_ptr) };
+        assert!(len >= 1, "expected at least one encoded batch");
+
+        // Attempt upload (ignore return code; we will assert via recorded requests)
+        let _ = unsafe {
+            geneva_upload_batch_sync(handle_ptr, batches_ptr as *const _, 0, ptr::null_mut(), 0)
+        };
+
+        // Cleanup: free batches and client
+        unsafe {
+            geneva_batches_free(batches_ptr);
+        }
+        // Transfer ownership of handle_box to the FFI free function
+        let raw_handle = Box::into_raw(handle_box);
+        unsafe {
+            geneva_client_free(raw_handle);
+        }
+
+        // Keep mock_server in scope until end of test
+        drop(mock_server);
+    }
+
+    // Verifies batching groups by LogRecord.event_name:
+    // multiple different event_names in one request produce multiple batches,
+    // and each batch upload hits ingestion with the corresponding event query param.
+    #[test]
+    #[cfg(feature = "mock_auth")]
+    fn test_encode_batching_by_event_name_and_upload() {
+        use wiremock::http::Method;
+        use wiremock::matchers::method;
+        use wiremock::{Mock, MockServer, ResponseTemplate};
+
+        // Start mock server
+        let mock_server = runtime().block_on(async { MockServer::start().await });
+        let ingestion_endpoint = mock_server.uri();
+        let (auth_token, auth_token_expiry) =
+            generate_mock_jwt_and_expiry(&ingestion_endpoint, 24 * 3600);
+
+        // Mock Geneva Config (GET) and Ingestion (POST)
+        runtime().block_on(async {
+            Mock::given(method("GET"))
+                .respond_with(ResponseTemplate::new(200).set_body_string(format!(
+                    r#"{{
+                        "IngestionGatewayInfo": {{
+                            "Endpoint": "{ingestion_endpoint}",
+                            "AuthToken": "{auth_token}",
+                            "AuthTokenExpiryTime": "{auth_token_expiry}"
+                        }},
+                        "StorageAccountKeys": [{{
+                            "AccountMonikerName": "testdiagaccount",
+                            "AccountGroupName": "testgroup",
+                            "IsPrimaryMoniker": true
+                        }}],
+                        "TagId": "test"
+                    }}"#
+                )))
+                .mount(&mock_server)
+                .await;
+
+            Mock::given(method("POST"))
+                .respond_with(
+                    ResponseTemplate::new(202).set_body_string(r#"{"ticket":"accepted"}"#),
+                )
+                .mount(&mock_server)
+                .await;
+        });
+
+        // Build client with MockAuth
+        let cfg = GenevaClientConfig {
+            endpoint: mock_server.uri(),
+            environment: "test".to_string(),
+            account: "test".to_string(),
+            namespace: "testns".to_string(),
+            region: "testregion".to_string(),
+            config_major_version: 1,
+            auth_method: AuthMethod::MockAuth,
+            tenant: "testtenant".to_string(),
+            role_name: "testrole".to_string(),
+            role_instance: "testinstance".to_string(),
+            msi_resource: None,
+        };
+        let client = GenevaClient::new(cfg).expect("failed to create GenevaClient with MockAuth");
+
+        // Wrap client into FFI handle
+        let mut handle_box = Box::new(GenevaClientHandle {
+            magic: GENEVA_HANDLE_MAGIC,
+            client,
+        });
+        let handle_ptr: *mut GenevaClientHandle = &mut *handle_box;
+
+        // Build ExportLogsServiceRequest with two different event_names
+        let log1 = opentelemetry_proto::tonic::logs::v1::LogRecord {
+            observed_time_unix_nano: 1_700_000_000_000_000_001,
+            event_name: "EventA".to_string(),
+            severity_number: 9,
+            ..Default::default()
+        };
+        let log2 = opentelemetry_proto::tonic::logs::v1::LogRecord {
+            observed_time_unix_nano: 1_700_000_000_000_000_002,
+            event_name: "EventB".to_string(),
+            severity_number: 10,
+            ..Default::default()
+        };
+        let scope_logs = opentelemetry_proto::tonic::logs::v1::ScopeLogs {
+            log_records: vec![log1, log2],
+            ..Default::default()
+        };
+        let resource_logs = opentelemetry_proto::tonic::logs::v1::ResourceLogs {
+            scope_logs: vec![scope_logs],
+            ..Default::default()
+        };
+        let req = ExportLogsServiceRequest {
+            resource_logs: vec![resource_logs],
+        };
+        let bytes = req.encode_to_vec();
+
+        // Encode via FFI
+        let mut batches_ptr: *mut EncodedBatchesHandle = std::ptr::null_mut();
+        let rc = unsafe {
+            geneva_encode_and_compress_logs(
+                handle_ptr,
+                bytes.as_ptr(),
+                bytes.len(),
+                &mut batches_ptr,
+                ptr::null_mut(),
+                0,
+            )
+        };
+        assert_eq!(rc as u32, GenevaError::Success as u32, "encode failed");
+        assert!(!batches_ptr.is_null());
+
+        // Expect 2 batches (EventA, EventB)
+        let len = unsafe { geneva_batches_len(batches_ptr) };
+        assert_eq!(len, 2, "expected 2 batches grouped by event_name");
+
+        // Upload all batches
+        for i in 0..len {
+            let _ = unsafe {
+                geneva_upload_batch_sync(handle_ptr, batches_ptr as *const _, i, ptr::null_mut(), 0)
+            };
+        }
+
+        // Verify requests contain event=EventA and event=EventB in their URLs
+        // Poll until both POSTs appear or timeout to avoid flakiness
+        let (urls, has_a, has_b) = runtime().block_on(async {
+            use tokio::time::{sleep, Duration};
+            let mut last_urls: Vec<String> = Vec::new();
+            for _ in 0..200 {
+                let reqs = mock_server.received_requests().await.unwrap();
+                let posts: Vec<String> = reqs
+                    .iter()
+                    .filter(|r| r.method == Method::Post)
+                    .map(|r| r.url.to_string())
+                    .collect();
+
+                let has_a = posts.iter().any(|u| u.contains("event=EventA"));
+                let has_b = posts.iter().any(|u| u.contains("event=EventB"));
+                if has_a && has_b {
+                    return (posts, true, true);
+                }
+
+                if !posts.is_empty() {
+                    last_urls = posts.clone();
+                }
+
+                sleep(Duration::from_millis(20)).await;
+            }
+
+            if last_urls.is_empty() {
+                let reqs = mock_server.received_requests().await.unwrap();
+                last_urls = reqs.into_iter().map(|r| r.url.to_string()).collect();
+            }
+            let has_a = last_urls.iter().any(|u| u.contains("event=EventA"));
+            let has_b = last_urls.iter().any(|u| u.contains("event=EventB"));
+            (last_urls, has_a, has_b)
+        });
+        assert!(
+            has_a,
+            "Expected request containing event=EventA; got: {urls:?}"
+        );
+        assert!(
+            has_b,
+            "Expected request containing event=EventB; got: {urls:?}"
+        );
+
+        // Cleanup
+        unsafe { geneva_batches_free(batches_ptr) };
+        let raw_handle = Box::into_raw(handle_box);
+        unsafe { geneva_client_free(raw_handle) };
+        drop(mock_server);
+    }
 }
