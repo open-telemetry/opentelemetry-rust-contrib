@@ -12,6 +12,8 @@ use tokio::runtime::Runtime;
 
 use geneva_uploader::client::{EncodedBatch, GenevaClient, GenevaClientConfig};
 use geneva_uploader::AuthMethod;
+use opentelemetry_proto::tonic::collector::trace::v1::ExportTraceServiceRequest;
+use prost::Message;
 use std::path::PathBuf;
 
 /// Magic number for handle validation
@@ -1258,6 +1260,75 @@ impl<'a> LogsDataView for FlatLogsView<'a> {
 
     fn resources(&self) -> Self::ResourcesIter<'_> {
         std::iter::once(FlatResourceLogs(self.0))
+    }
+}
+
+// ---------------------------------------------------------------------------
+// FFI function: encode spans (OTLP bytes path)
+// ---------------------------------------------------------------------------
+
+/// Encode and compress spans into batches (synchronous).
+///
+/// # Safety
+/// - `handle` must be a valid pointer returned by `geneva_client_new`.
+/// - `data` must be a valid pointer to a protobuf-encoded `ExportTraceServiceRequest`.
+/// - `data_len` must be the correct byte length of `data`.
+/// - `out_batches` must be non-null; on success receives a pointer the caller must free with `geneva_batches_free`.
+/// - `err_msg_out` may be `NULL`; if non-null must point to a buffer of at least `err_msg_len` bytes.
+#[no_mangle]
+pub unsafe extern "C" fn geneva_encode_and_compress_spans(
+    handle: *mut GenevaClientHandle,
+    data: *const u8,
+    data_len: usize,
+    out_batches: *mut *mut EncodedBatchesHandle,
+    err_msg_out: *mut c_char,
+    err_msg_len: usize,
+) -> GenevaError {
+    if out_batches.is_null() {
+        return GenevaError::NullPointer;
+    }
+    unsafe { *out_batches = ptr::null_mut() };
+
+    if handle.is_null() {
+        return GenevaError::NullPointer;
+    }
+    if data.is_null() {
+        return GenevaError::NullPointer;
+    }
+    if data_len == 0 {
+        return GenevaError::EmptyInput;
+    }
+
+    let validation_result = unsafe { validate_handle(handle) };
+    if validation_result != GenevaError::Success {
+        return validation_result;
+    }
+
+    let handle_ref = unsafe { handle.as_ref().unwrap() };
+    let data_slice = unsafe { std::slice::from_raw_parts(data, data_len) };
+
+    let spans_data: ExportTraceServiceRequest = match Message::decode(data_slice) {
+        Ok(data) => data,
+        Err(e) => {
+            unsafe { write_error_if_provided(err_msg_out, err_msg_len, &e) };
+            return GenevaError::DecodeFailed;
+        }
+    };
+
+    let resource_spans = spans_data.resource_spans;
+    match handle_ref.client.encode_and_compress_spans(&resource_spans) {
+        Ok(batches) => {
+            let h = EncodedBatchesHandle {
+                magic: GENEVA_HANDLE_MAGIC,
+                batches,
+            };
+            unsafe { *out_batches = Box::into_raw(Box::new(h)) };
+            GenevaError::Success
+        }
+        Err(e) => {
+            unsafe { write_error_if_provided(err_msg_out, err_msg_len, &e) };
+            GenevaError::InternalError
+        }
     }
 }
 
