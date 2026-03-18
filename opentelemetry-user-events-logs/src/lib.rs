@@ -158,14 +158,13 @@ mod tests {
     use tracing::error;
     use tracing_subscriber::{layer::SubscriberExt, EnvFilter, Layer};
 
-    // Ignore as this cannot be run in Github CI due to lack of
-    // required Kernel. Uncomment to run locally in a supported environment
+    // This test requires a Linux kernel with user_events support, perf, and perf-decode.
+    // It is run in CI via the user-events-integration-test job.
+    // To run locally: sudo -E ~/.cargo/bin/cargo test integration_test_basic -- --nocapture --ignored
 
     #[ignore]
     #[test]
     fn integration_test_basic() {
-        // Run using the below command
-        // sudo -E ~/.cargo/bin/cargo test integration_test_basic -- --nocapture --ignored
 
         // Basic check if user_events are available
         check_user_events_available().expect("Kernel does not support user_events. Verify your distribution/kernel supports user_events: https://docs.kernel.org/trace/user_events.html.");
