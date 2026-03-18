@@ -2,7 +2,7 @@
 
 The geneva-uploader-ffi is designed for Microsoft products to send data to public-facing end-points which route to Microsoft's internal data pipeline. It is not meant to be used outside of Microsoft products and is open sourced to demonstrate best practices and to be transparent about what is being collected.
 
-C/C++ FFI layer over `geneva-uploader`. Exposes a stable C ABI so that C++ agents (MA on Windows, MDSD on Linux) can encode and upload telemetry to Geneva without pulling in the Rust OTel SDK.
+C/C++ FFI layer over `geneva-uploader`. Exposes a stable C ABI so that C++ agents can encode and upload telemetry to Geneva without pulling in the Rust OTel SDK.
 
 ## Ingestion paths
 
