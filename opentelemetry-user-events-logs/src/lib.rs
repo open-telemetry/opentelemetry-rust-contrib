@@ -165,7 +165,6 @@ mod tests {
     #[ignore]
     #[test]
     fn integration_test_basic() {
-
         // Basic check if user_events are available
         check_user_events_available().expect("Kernel does not support user_events. Verify your distribution/kernel supports user_events: https://docs.kernel.org/trace/user_events.html.");
         let user_event_processor = Processor::builder("myprovider")
@@ -816,6 +815,8 @@ mod tests {
                 &duration_secs.to_string(),
                 "perf",
                 "record",
+                "-o",
+                "./perf.data",
                 "-e",
                 event,
             ])

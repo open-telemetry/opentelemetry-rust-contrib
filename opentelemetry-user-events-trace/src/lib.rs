@@ -1,5 +1,53 @@
 //! The user_events exporter will enable applications to use OpenTelemetry API
 //! to capture the telemetry events, and write to user_events subsystem.
+//!
+//! # Resource Attribute Mapping
+//!
+//! The following OpenTelemetry resource attributes are automatically mapped
+//! to fields in the exported event:
+//!
+//! | Resource Attribute      | Exported Field           |
+//! |-------------------------|--------------------------|
+//! | `service.name`          | `ext_cloud_role`         |
+//! | `service.instance.id`   | `ext_cloud_roleInstance` |
+//!
+//! These are set via the [`Resource`](opentelemetry_sdk::Resource) on the
+//! [`SdkTracerProvider`](opentelemetry_sdk::trace::SdkTracerProvider):
+//!
+//! ```no_run
+//! use opentelemetry::KeyValue;
+//! use opentelemetry_sdk::trace::SdkTracerProvider;
+//! use opentelemetry_user_events_trace::UserEventsTracerProviderBuilderExt;
+//!
+//! let provider = SdkTracerProvider::builder()
+//!     .with_resource(
+//!         opentelemetry_sdk::Resource::builder()
+//!             .with_service_name("my-service")
+//!             .with_attribute(KeyValue::new("service.instance.id", "instance-1"))
+//!             .build(),
+//!     )
+//!     .with_user_events_exporter("my_provider")
+//!     .build();
+//! ```
+//!
+//! # Well-Known Span Attributes
+//!
+//! Certain span attributes are recognized as "well-known" and mapped to
+//! dedicated fields in the exported event:
+//!
+//! | Span Attribute              | Exported Field         |
+//! |-----------------------------|------------------------|
+//! | `db.system`                 | `dbSystem`             |
+//! | `db.name`                   | `dbName`               |
+//! | `db.statement`              | `dbStatement`          |
+//! | `http.request.method`       | `httpMethod`           |
+//! | `url.full`                  | `httpUrl`              |
+//! | `http.response.status_code` | `httpStatusCode`       |
+//! | `messaging.system`          | `messagingSystem`      |
+//! | `messaging.destination`     | `messagingDestination` |
+//! | `messaging.url`             | `messagingUrl`         |
+//!
+//! All other span attributes are exported with their original keys.
 
 #![warn(missing_debug_implementations, missing_docs)]
 
@@ -26,7 +74,6 @@ mod tests {
     #[ignore]
     #[test]
     fn integration_test_basic() {
-
         // Basic check if user_events are available
         check_user_events_available().expect("Kernel does not support user_events. Verify your distribution/kernel supports user_events: https://docs.kernel.org/trace/user_events.html.");
         let provider = SdkTracerProvider::builder()
@@ -237,6 +284,8 @@ mod tests {
                 &duration_secs.to_string(),
                 "perf",
                 "record",
+                "-o",
+                "./perf.data",
                 "-e",
                 event,
             ])
