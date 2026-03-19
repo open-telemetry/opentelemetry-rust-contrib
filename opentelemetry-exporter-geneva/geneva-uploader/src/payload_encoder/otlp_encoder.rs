@@ -501,7 +501,7 @@ impl OtlpEncoder {
         if record.severity_text().filter(|b| !b.is_empty()).is_some() {
             fields.push((FIELD_SEVERITY_TEXT.into(), BondDataType::BT_STRING));
         }
-        if record.body().map_or(false, |b| {
+        if record.body().is_some_and(|b| {
             b.value_type() == ValueType::String
                 && b.as_string()
                     .and_then(|bs| std::str::from_utf8(bs).ok())
