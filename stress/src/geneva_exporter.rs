@@ -34,9 +34,12 @@
 
 */
 use geneva_uploader::{AuthMethod, GenevaClient, GenevaClientConfig};
+use opentelemetry_proto::tonic::collector::logs::v1::ExportLogsServiceRequest;
 use opentelemetry_proto::tonic::common::v1::any_value::Value;
 use opentelemetry_proto::tonic::common::v1::{AnyValue, KeyValue};
 use opentelemetry_proto::tonic::logs::v1::{LogRecord, ResourceLogs, ScopeLogs};
+use otap_df_pdata::views::otlp::bytes::logs::RawLogsData;
+use prost::Message as _;
 use std::sync::Arc;
 
 // Import the generic stream throughput test module
@@ -275,12 +278,17 @@ async fn async_main(
     // Initialize client and test data
     let (client, _mock_uri) = init_client().await?;
     let client = Arc::new(client);
-    let logs = Arc::new(create_test_logs(base_timestamp));
+    let logs_bytes = Arc::new(
+        ExportLogsServiceRequest {
+            resource_logs: create_test_logs(base_timestamp),
+        }
+        .encode_to_vec(),
+    );
 
     // Warm up the ingestion token cache
     println!("Warming up token cache...");
     let warm_batches = client
-        .encode_and_compress_logs(&logs)
+        .encode_and_compress_logs(&RawLogsData::new(&logs_bytes))
         .map_err(|e| format!("Failed to encode logs: {e}"))?;
     for batch in &warm_batches {
         client
@@ -304,9 +312,9 @@ async fn async_main(
 
             ThroughputTest::run_continuous("Geneva Upload", config, move || {
                 let client = client.clone();
-                let logs = logs.clone();
+                let logs = logs_bytes.clone();
                 async move {
-                    let batches = client.encode_and_compress_logs(&logs)?;
+                    let batches = client.encode_and_compress_logs(&RawLogsData::new(&logs))?;
 
                     // Upload batches sequentially TODO - use buffer_unordered for concurrency
                     for batch in &batches {
@@ -336,10 +344,10 @@ async fn async_main(
 
             let stats = ThroughputTest::run_fixed("Geneva Upload", config, move || {
                 let client = client.clone();
-                let logs = logs.clone();
+                let logs = logs_bytes.clone();
                 async move {
                     let batches = client
-                        .encode_and_compress_logs(&logs)
+                        .encode_and_compress_logs(&RawLogsData::new(&logs))
                         .map_err(|e| format!("Failed to encode logs: {e}"))?;
 
                     // Upload batches sequentially - TODO - use buffer_unordered for concurrency
@@ -367,12 +375,13 @@ async fn async_main(
                 target_ops,
                 move || {
                     let client = client.clone();
-                    let logs = logs.clone();
+                    let logs = logs_bytes.clone();
                     async move {
-                        let batches = match client.encode_and_compress_logs(&logs) {
-                            Ok(batches) => batches,
-                            Err(e) => return Err(format!("Failed to encode logs: {e}")),
-                        };
+                        let batches =
+                            match client.encode_and_compress_logs(&RawLogsData::new(&logs)) {
+                                Ok(batches) => batches,
+                                Err(e) => return Err(format!("Failed to encode logs: {e}")),
+                            };
                         for batch in &batches {
                             if let Err(e) = client.upload_batch(batch).await {
                                 return Err(format!("Failed to upload batch: {e}"));
