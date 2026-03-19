@@ -1082,7 +1082,7 @@ impl<'a> AnyValueView<'a> for GenevaAttrAnyValue<'a> {
             t if t == GenevaAttrType::Int64 as u8 => ValueType::Int64,
             t if t == GenevaAttrType::Double as u8 => ValueType::Double,
             t if t == GenevaAttrType::Bool as u8 => ValueType::Bool,
-            _ => ValueType::String, // fallback; as_string returns None
+            _ => ValueType::Empty, // unknown tag — skip; all as_* methods return None
         }
     }
 
@@ -1289,7 +1289,7 @@ impl<'a> LogRecordView for GenevaLogRecordRef<'a> {
     }
 
     fn trace_id(&self) -> Option<&[u8; 16]> {
-        if self.0.trace_id_present != 0 {
+        if self.0.trace_id_present != 0 && self.0.trace_id != [0u8; 16] {
             Some(&self.0.trace_id)
         } else {
             None
@@ -1297,7 +1297,7 @@ impl<'a> LogRecordView for GenevaLogRecordRef<'a> {
     }
 
     fn span_id(&self) -> Option<&[u8; 8]> {
-        if self.0.span_id_present != 0 {
+        if self.0.span_id_present != 0 && self.0.span_id != [0u8; 8] {
             Some(&self.0.span_id)
         } else {
             None
@@ -1592,8 +1592,8 @@ impl<'a> AnyValueView<'a> for ProtoAVView<'a> {
             Some(ProtoVal::BoolValue(_)) => ValueType::Bool,
             Some(ProtoVal::IntValue(_)) => ValueType::Int64,
             Some(ProtoVal::DoubleValue(_)) => ValueType::Double,
-            Some(ProtoVal::ArrayValue(_)) => ValueType::Array,
-            Some(ProtoVal::KvlistValue(_)) => ValueType::KeyValueList,
+            Some(ProtoVal::ArrayValue(_)) => ValueType::Empty, // not iterable through this view
+            Some(ProtoVal::KvlistValue(_)) => ValueType::Empty, // not iterable through this view
             Some(ProtoVal::BytesValue(_)) => ValueType::Bytes,
             None => ValueType::Empty,
         }
@@ -1673,9 +1673,10 @@ impl<'a> AttributeView for ProtoKVView<'a> {
 /// # Limitations
 /// Each record is treated as a standalone log entry.  Resource attributes
 /// (service name, host, etc.) and instrumentation scope metadata are **not**
-/// supported by this path and are silently ignored.  If your records carry
-/// meaningful resource or scope metadata, use [`geneva_encode_and_compress_logs`]
-/// instead and pass a serialised `ExportLogsServiceRequest` protobuf.
+/// supported by this path and are silently ignored.  Note that the OTLP path
+/// ([`geneva_encode_and_compress_logs`]) also does not yet propagate resource
+/// or scope attributes into the encoded output; that is a known limitation
+/// tracked for a future release.
 ///
 /// # Parameters
 /// - `handle`: valid client handle returned by [`geneva_client_new`].
