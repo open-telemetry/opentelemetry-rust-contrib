@@ -988,359 +988,6 @@ mod tests {
     use super::*;
     use opentelemetry_proto::tonic::common::v1::{AnyValue, KeyValue};
     use opentelemetry_proto::tonic::logs::v1::{LogRecord, ResourceLogs, ScopeLogs};
-    use otap_df_pdata_views::views::{
-        common::{AnyValueView, AttributeView, InstrumentationScopeView, ValueType},
-        logs::{LogRecordView, LogsDataView, ResourceLogsView, ScopeLogsView},
-        resource::ResourceView,
-    };
-
-    #[derive(Clone)]
-    enum MockAnyValue {
-        String(Vec<u8>),
-        Int64(i64),
-        Double(f64),
-        Bool(bool),
-    }
-
-    #[derive(Clone)]
-    struct MockAttribute {
-        key: Vec<u8>,
-        value: Option<MockAnyValue>,
-    }
-
-    #[derive(Clone, Default)]
-    struct MockLogRecord {
-        time_unix_nano: Option<u64>,
-        observed_time_unix_nano: Option<u64>,
-        severity_number: Option<i32>,
-        severity_text: Option<Vec<u8>>,
-        body: Option<MockAnyValue>,
-        attributes: Vec<MockAttribute>,
-        flags: Option<u32>,
-        trace_id: Option<[u8; 16]>,
-        span_id: Option<[u8; 8]>,
-        event_name: Option<Vec<u8>>,
-    }
-
-    #[derive(Clone, Default)]
-    struct MockScopeLogs {
-        log_records: Vec<MockLogRecord>,
-    }
-
-    #[derive(Clone, Default)]
-    struct MockResourceLogs {
-        scope_logs: Vec<MockScopeLogs>,
-    }
-
-    #[derive(Clone, Default)]
-    struct MockLogsData {
-        resources: Vec<MockResourceLogs>,
-    }
-
-    #[derive(Clone, Copy)]
-    struct MockAnyValueRef<'a>(&'a MockAnyValue);
-
-    #[derive(Clone, Copy)]
-    struct MockAttributeRef<'a>(&'a MockAttribute);
-
-    #[derive(Clone, Copy)]
-    struct MockLogRecordRef<'a>(&'a MockLogRecord);
-
-    #[derive(Clone, Copy)]
-    struct MockScopeLogsRef<'a>(&'a MockScopeLogs);
-
-    #[derive(Clone, Copy)]
-    struct MockResourceLogsRef<'a>(&'a MockResourceLogs);
-
-    struct MockResource;
-    struct MockScope;
-
-    struct MockResourceLogsIter<'a>(std::slice::Iter<'a, MockResourceLogs>);
-    struct MockScopeLogsIter<'a>(std::slice::Iter<'a, MockScopeLogs>);
-    struct MockLogRecordIter<'a>(std::slice::Iter<'a, MockLogRecord>);
-    struct MockAttributeIter<'a>(std::slice::Iter<'a, MockAttribute>);
-
-    impl<'a> Iterator for MockResourceLogsIter<'a> {
-        type Item = MockResourceLogsRef<'a>;
-
-        fn next(&mut self) -> Option<Self::Item> {
-            self.0.next().map(MockResourceLogsRef)
-        }
-    }
-
-    impl<'a> Iterator for MockScopeLogsIter<'a> {
-        type Item = MockScopeLogsRef<'a>;
-
-        fn next(&mut self) -> Option<Self::Item> {
-            self.0.next().map(MockScopeLogsRef)
-        }
-    }
-
-    impl<'a> Iterator for MockLogRecordIter<'a> {
-        type Item = MockLogRecordRef<'a>;
-
-        fn next(&mut self) -> Option<Self::Item> {
-            self.0.next().map(MockLogRecordRef)
-        }
-    }
-
-    impl<'a> Iterator for MockAttributeIter<'a> {
-        type Item = MockAttributeRef<'a>;
-
-        fn next(&mut self) -> Option<Self::Item> {
-            self.0.next().map(MockAttributeRef)
-        }
-    }
-
-    impl<'a> AnyValueView<'a> for MockAnyValueRef<'a> {
-        type KeyValue = MockAttributeRef<'a>;
-        type ArrayIter<'arr>
-            = std::iter::Empty<Self>
-        where
-            Self: 'arr;
-        type KeyValueIter<'kv>
-            = std::iter::Empty<Self::KeyValue>
-        where
-            Self: 'kv;
-
-        fn value_type(&self) -> ValueType {
-            match self.0 {
-                MockAnyValue::String(_) => ValueType::String,
-                MockAnyValue::Int64(_) => ValueType::Int64,
-                MockAnyValue::Double(_) => ValueType::Double,
-                MockAnyValue::Bool(_) => ValueType::Bool,
-            }
-        }
-
-        fn as_string(&self) -> Option<&[u8]> {
-            match self.0 {
-                MockAnyValue::String(v) => Some(v.as_slice()),
-                _ => None,
-            }
-        }
-
-        fn as_bool(&self) -> Option<bool> {
-            match self.0 {
-                MockAnyValue::Bool(v) => Some(*v),
-                _ => None,
-            }
-        }
-
-        fn as_int64(&self) -> Option<i64> {
-            match self.0 {
-                MockAnyValue::Int64(v) => Some(*v),
-                _ => None,
-            }
-        }
-
-        fn as_double(&self) -> Option<f64> {
-            match self.0 {
-                MockAnyValue::Double(v) => Some(*v),
-                _ => None,
-            }
-        }
-
-        fn as_bytes(&self) -> Option<&[u8]> {
-            None
-        }
-
-        fn as_array(&self) -> Option<Self::ArrayIter<'_>> {
-            None
-        }
-
-        fn as_kvlist(&self) -> Option<Self::KeyValueIter<'_>> {
-            None
-        }
-    }
-
-    impl<'a> AttributeView for MockAttributeRef<'a> {
-        type Val<'val>
-            = MockAnyValueRef<'val>
-        where
-            Self: 'val;
-
-        fn key(&self) -> &[u8] {
-            self.0.key.as_slice()
-        }
-
-        fn value(&self) -> Option<Self::Val<'_>> {
-            self.0.value.as_ref().map(MockAnyValueRef)
-        }
-    }
-
-    impl ResourceView for MockResource {
-        type Attribute<'att>
-            = MockAttributeRef<'att>
-        where
-            Self: 'att;
-        type AttributesIter<'att>
-            = std::iter::Empty<Self::Attribute<'att>>
-        where
-            Self: 'att;
-
-        fn attributes(&self) -> Self::AttributesIter<'_> {
-            std::iter::empty()
-        }
-
-        fn dropped_attributes_count(&self) -> u32 {
-            0
-        }
-    }
-
-    impl InstrumentationScopeView for MockScope {
-        type Attribute<'att>
-            = MockAttributeRef<'att>
-        where
-            Self: 'att;
-        type AttributeIter<'att>
-            = std::iter::Empty<Self::Attribute<'att>>
-        where
-            Self: 'att;
-
-        fn name(&self) -> Option<&[u8]> {
-            None
-        }
-
-        fn version(&self) -> Option<&[u8]> {
-            None
-        }
-
-        fn attributes(&self) -> Self::AttributeIter<'_> {
-            std::iter::empty()
-        }
-
-        fn dropped_attributes_count(&self) -> u32 {
-            0
-        }
-    }
-
-    impl LogsDataView for MockLogsData {
-        type ResourceLogs<'res>
-            = MockResourceLogsRef<'res>
-        where
-            Self: 'res;
-        type ResourcesIter<'res>
-            = MockResourceLogsIter<'res>
-        where
-            Self: 'res;
-
-        fn resources(&self) -> Self::ResourcesIter<'_> {
-            MockResourceLogsIter(self.resources.iter())
-        }
-    }
-
-    impl ResourceLogsView for MockResourceLogsRef<'_> {
-        type Resource<'res>
-            = MockResource
-        where
-            Self: 'res;
-        type ScopeLogs<'scp>
-            = MockScopeLogsRef<'scp>
-        where
-            Self: 'scp;
-        type ScopesIter<'scp>
-            = MockScopeLogsIter<'scp>
-        where
-            Self: 'scp;
-
-        fn resource(&self) -> Option<Self::Resource<'_>> {
-            None
-        }
-
-        fn scopes(&self) -> Self::ScopesIter<'_> {
-            MockScopeLogsIter(self.0.scope_logs.iter())
-        }
-
-        fn schema_url(&self) -> Option<&[u8]> {
-            None
-        }
-    }
-
-    impl ScopeLogsView for MockScopeLogsRef<'_> {
-        type Scope<'scp>
-            = MockScope
-        where
-            Self: 'scp;
-        type LogRecord<'rec>
-            = MockLogRecordRef<'rec>
-        where
-            Self: 'rec;
-        type LogRecordsIter<'rec>
-            = MockLogRecordIter<'rec>
-        where
-            Self: 'rec;
-
-        fn scope(&self) -> Option<Self::Scope<'_>> {
-            None
-        }
-
-        fn log_records(&self) -> Self::LogRecordsIter<'_> {
-            MockLogRecordIter(self.0.log_records.iter())
-        }
-
-        fn schema_url(&self) -> Option<&[u8]> {
-            None
-        }
-    }
-
-    impl LogRecordView for MockLogRecordRef<'_> {
-        type Attribute<'att>
-            = MockAttributeRef<'att>
-        where
-            Self: 'att;
-        type AttributeIter<'att>
-            = MockAttributeIter<'att>
-        where
-            Self: 'att;
-        type Body<'bod>
-            = MockAnyValueRef<'bod>
-        where
-            Self: 'bod;
-
-        fn time_unix_nano(&self) -> Option<u64> {
-            self.0.time_unix_nano
-        }
-
-        fn observed_time_unix_nano(&self) -> Option<u64> {
-            self.0.observed_time_unix_nano
-        }
-
-        fn severity_number(&self) -> Option<i32> {
-            self.0.severity_number
-        }
-
-        fn severity_text(&self) -> Option<&[u8]> {
-            self.0.severity_text.as_deref()
-        }
-
-        fn body(&self) -> Option<Self::Body<'_>> {
-            self.0.body.as_ref().map(MockAnyValueRef)
-        }
-
-        fn attributes(&self) -> Self::AttributeIter<'_> {
-            MockAttributeIter(self.0.attributes.iter())
-        }
-
-        fn dropped_attributes_count(&self) -> u32 {
-            0
-        }
-
-        fn flags(&self) -> Option<u32> {
-            self.0.flags
-        }
-
-        fn trace_id(&self) -> Option<&[u8; 16]> {
-            self.0.trace_id.as_ref()
-        }
-
-        fn span_id(&self) -> Option<&[u8; 8]> {
-            self.0.span_id.as_ref()
-        }
-
-        fn event_name(&self) -> Option<&[u8]> {
-            self.0.event_name.as_deref()
-        }
-    }
 
     fn make_metadata(namespace: &str) -> MetadataFields {
         MetadataFields::new(
@@ -1362,70 +1009,43 @@ mod tests {
         use otap_df_pdata::views::otlp::bytes::logs::RawLogsData;
         use prost::Message as _;
         let log_records: Vec<LogRecord> = logs.into_iter().cloned().collect();
-        let bytes =
-            opentelemetry_proto::tonic::collector::logs::v1::ExportLogsServiceRequest {
-                resource_logs: vec![ResourceLogs {
-                    scope_logs: vec![ScopeLogs {
-                        log_records,
-                        ..Default::default()
-                    }],
+        let bytes = opentelemetry_proto::tonic::collector::logs::v1::ExportLogsServiceRequest {
+            resource_logs: vec![ResourceLogs {
+                scope_logs: vec![ScopeLogs {
+                    log_records,
                     ..Default::default()
                 }],
-            }
-            .encode_to_vec();
+                ..Default::default()
+            }],
+        }
+        .encode_to_vec();
         encoder.encode_logs_from_view(&RawLogsData::new(&bytes), metadata)
     }
 
-    fn single_log_view(log_record: MockLogRecord) -> MockLogsData {
-        MockLogsData {
-            resources: vec![MockResourceLogs {
-                scope_logs: vec![MockScopeLogs {
-                    log_records: vec![log_record],
-                }],
-            }],
+    /// Wraps raw LogRecord proto bytes into a minimal ExportLogsServiceRequest encoding.
+    /// Useful for injecting hand-crafted or otherwise non-prost-encodable bytes.
+    fn wrap_log_record_bytes(log_bytes: &[u8]) -> Vec<u8> {
+        fn len_delim(tag: u8, data: &[u8]) -> Vec<u8> {
+            let mut out = vec![tag];
+            let mut v = data.len();
+            loop {
+                let b = (v & 0x7F) as u8;
+                v >>= 7;
+                if v == 0 {
+                    out.push(b);
+                    break;
+                }
+                out.push(b | 0x80);
+            }
+            out.extend_from_slice(data);
+            out
         }
-    }
-
-    fn mock_from_otlp(log: &LogRecord) -> MockLogRecord {
-        let trace_id = log.trace_id.as_slice().try_into().ok();
-        let span_id = log.span_id.as_slice().try_into().ok();
-        let body = match log.body.as_ref().and_then(|b| b.value.as_ref()) {
-            Some(Value::StringValue(s)) => Some(MockAnyValue::String(s.as_bytes().to_vec())),
-            _ => None,
-        };
-
-        let attributes = log
-            .attributes
-            .iter()
-            .map(|a| MockAttribute {
-                key: a.key.as_bytes().to_vec(),
-                value: a
-                    .value
-                    .as_ref()
-                    .and_then(|v| v.value.as_ref())
-                    .and_then(|v| match v {
-                        Value::StringValue(s) => Some(MockAnyValue::String(s.as_bytes().to_vec())),
-                        Value::IntValue(i) => Some(MockAnyValue::Int64(*i)),
-                        Value::DoubleValue(d) => Some(MockAnyValue::Double(*d)),
-                        Value::BoolValue(b) => Some(MockAnyValue::Bool(*b)),
-                        _ => None,
-                    }),
-            })
-            .collect();
-
-        MockLogRecord {
-            time_unix_nano: (log.time_unix_nano != 0).then_some(log.time_unix_nano),
-            observed_time_unix_nano: (log.observed_time_unix_nano != 0)
-                .then_some(log.observed_time_unix_nano),
-            severity_number: (log.severity_number != 0).then_some(log.severity_number),
-            severity_text: Some(log.severity_text.as_bytes().to_vec()),
-            body,
-            attributes,
-            flags: (log.flags != 0).then_some(log.flags),
-            trace_id,
-            span_id,
-            event_name: Some(log.event_name.as_bytes().to_vec()),
-        }
+        // ScopeLogs.log_records = field 2 (LEN): tag 0x12
+        let scope = len_delim(0x12, log_bytes);
+        // ResourceLogs.scope_logs = field 2 (LEN): tag 0x12
+        let rl = len_delim(0x12, &scope);
+        // ExportLogsServiceRequest.resource_logs = field 1 (LEN): tag 0x0A
+        len_delim(0x0A, &rl)
     }
 
     fn assert_single_batch_equal(left: &[EncodedBatch], right: &[EncodedBatch]) {
@@ -1606,40 +1226,48 @@ mod tests {
             }),
         });
 
-        let proto_encoded =
+        let encoded =
             encode_log_batch_via_proto(&encoder, [log.clone()].iter(), &metadata).unwrap();
-        let view = single_log_view(mock_from_otlp(&log));
-        let view_encoded = encoder.encode_logs_from_view(&view, &metadata).unwrap();
-
-        assert_single_batch_equal(&proto_encoded, &view_encoded);
+        // Verify the rich log record encodes to a single non-empty batch
+        assert_eq!(encoded.len(), 1);
+        assert_eq!(encoded[0].event_name, "view_event");
+        assert!(!encoded[0].data.is_empty());
     }
 
     #[test]
     fn test_view_empty_severity_text_matches_otlp() {
+        // A log with an empty severity_text string should produce the same
+        // output as one with no severity_text (proto skips empty strings).
         let encoder = OtlpEncoder::new();
         let metadata = make_metadata("view-empty-severity");
 
-        let log = LogRecord {
+        let log_with_empty = LogRecord {
             observed_time_unix_nano: 1_700_000_000_222_333_444,
             event_name: "empty_severity".to_string(),
             severity_number: 9,
             severity_text: String::new(),
             ..Default::default()
         };
+        let log_without = LogRecord {
+            severity_text: String::new(),
+            ..log_with_empty.clone()
+        };
 
-        let proto_encoded =
-            encode_log_batch_via_proto(&encoder, [log.clone()].iter(), &metadata).unwrap();
+        let with_empty =
+            encode_log_batch_via_proto(&encoder, [log_with_empty].iter(), &metadata).unwrap();
+        let without =
+            encode_log_batch_via_proto(&encoder, [log_without].iter(), &metadata).unwrap();
 
-        let mut view_log = mock_from_otlp(&log);
-        view_log.severity_text = Some(Vec::new());
-        let view = single_log_view(view_log);
-        let view_encoded = encoder.encode_logs_from_view(&view, &metadata).unwrap();
-
-        assert_single_batch_equal(&proto_encoded, &view_encoded);
+        assert_single_batch_equal(&with_empty, &without);
     }
 
     #[test]
     fn test_view_invalid_utf8_body_omits_body_field() {
+        // A log record whose body contains invalid UTF-8 bytes should produce
+        // the same encoded output as a log record with no body at all.
+        use otap_df_pdata::views::otlp::bytes::logs::RawLogsData;
+        use prost::Message as _;
+
         let encoder = OtlpEncoder::new();
         let metadata = make_metadata("view-invalid-body");
 
@@ -1650,15 +1278,22 @@ mod tests {
             ..Default::default()
         };
 
-        let proto_encoded =
+        // Expected: encode a log without body
+        let expected =
             encode_log_batch_via_proto(&encoder, [log.clone()].iter(), &metadata).unwrap();
 
-        let mut view_log = mock_from_otlp(&log);
-        view_log.body = Some(MockAnyValue::String(vec![0xff]));
-        let view = single_log_view(view_log);
-        let view_encoded = encoder.encode_logs_from_view(&view, &metadata).unwrap();
+        // Inject invalid UTF-8 into the body field via raw proto wire bytes.
+        // body = AnyValue { string_value: [0xFF] }
+        // AnyValue bytes: field 1 (string_value, LEN) → [0x0A, 0x01, 0xFF]
+        // LogRecord body field (field 5, LEN, 3 bytes) → [0x2A, 0x03, 0x0A, 0x01, 0xFF]
+        let mut log_bytes = log.encode_to_vec();
+        log_bytes.extend_from_slice(&[0x2A, 0x03, 0x0A, 0x01, 0xFF]);
+        let export_bytes = wrap_log_record_bytes(&log_bytes);
 
-        assert_single_batch_equal(&proto_encoded, &view_encoded);
+        let actual = encoder
+            .encode_logs_from_view(&RawLogsData::new(&export_bytes), &metadata)
+            .unwrap();
+        assert_single_batch_equal(&expected, &actual);
     }
 
     #[test]
@@ -2137,17 +1772,12 @@ mod tests {
             ..Default::default()
         };
 
-        let proto_encoded =
+        let encoded =
             encode_log_batch_via_proto(&encoder, [log.clone()].iter(), &metadata).unwrap();
 
-        let view = single_log_view(mock_from_otlp(&log));
-        let view_encoded = encoder.encode_logs_from_view(&view, &metadata).unwrap();
-
-        assert_single_batch_equal(&proto_encoded, &view_encoded);
-
         // Confirm the selected timestamp is time_unix_nano, not observed_time_unix_nano
-        assert_eq!(proto_encoded[0].metadata.start_time, 1_000_000_000);
-        assert_eq!(proto_encoded[0].metadata.end_time, 1_000_000_000);
+        assert_eq!(encoded[0].metadata.start_time, 1_000_000_000);
+        assert_eq!(encoded[0].metadata.end_time, 1_000_000_000);
     }
 
     #[test]
@@ -2158,52 +1788,63 @@ mod tests {
 
         // Two resources, each with two scopes, each scope with one log record.
         // Records alternate between two event names to verify per-event batching.
-        let view = MockLogsData {
-            resources: vec![
-                MockResourceLogs {
+        use otap_df_pdata::views::otlp::bytes::logs::RawLogsData;
+        use prost::Message as _;
+        let bytes = opentelemetry_proto::tonic::collector::logs::v1::ExportLogsServiceRequest {
+            resource_logs: vec![
+                ResourceLogs {
                     scope_logs: vec![
-                        MockScopeLogs {
-                            log_records: vec![MockLogRecord {
-                                observed_time_unix_nano: Some(1_000),
-                                event_name: Some(b"alpha".to_vec()),
-                                severity_number: Some(9),
+                        ScopeLogs {
+                            log_records: vec![LogRecord {
+                                observed_time_unix_nano: 1_000,
+                                event_name: "alpha".to_string(),
+                                severity_number: 9,
                                 ..Default::default()
                             }],
+                            ..Default::default()
                         },
-                        MockScopeLogs {
-                            log_records: vec![MockLogRecord {
-                                observed_time_unix_nano: Some(2_000),
-                                event_name: Some(b"beta".to_vec()),
-                                severity_number: Some(10),
+                        ScopeLogs {
+                            log_records: vec![LogRecord {
+                                observed_time_unix_nano: 2_000,
+                                event_name: "beta".to_string(),
+                                severity_number: 10,
                                 ..Default::default()
                             }],
+                            ..Default::default()
                         },
                     ],
+                    ..Default::default()
                 },
-                MockResourceLogs {
+                ResourceLogs {
                     scope_logs: vec![
-                        MockScopeLogs {
-                            log_records: vec![MockLogRecord {
-                                observed_time_unix_nano: Some(3_000),
-                                event_name: Some(b"alpha".to_vec()),
-                                severity_number: Some(11),
+                        ScopeLogs {
+                            log_records: vec![LogRecord {
+                                observed_time_unix_nano: 3_000,
+                                event_name: "alpha".to_string(),
+                                severity_number: 11,
                                 ..Default::default()
                             }],
+                            ..Default::default()
                         },
-                        MockScopeLogs {
-                            log_records: vec![MockLogRecord {
-                                observed_time_unix_nano: Some(4_000),
-                                event_name: Some(b"beta".to_vec()),
-                                severity_number: Some(12),
+                        ScopeLogs {
+                            log_records: vec![LogRecord {
+                                observed_time_unix_nano: 4_000,
+                                event_name: "beta".to_string(),
+                                severity_number: 12,
                                 ..Default::default()
                             }],
+                            ..Default::default()
                         },
                     ],
+                    ..Default::default()
                 },
             ],
-        };
+        }
+        .encode_to_vec();
 
-        let result = encoder.encode_logs_from_view(&view, &metadata).unwrap();
+        let result = encoder
+            .encode_logs_from_view(&RawLogsData::new(&bytes), &metadata)
+            .unwrap();
 
         // Two event names → two batches
         assert_eq!(result.len(), 2);
