@@ -1563,11 +1563,19 @@ impl<'a> LogRecordView for ProtoLRView<'a> {
     }
     fn trace_id(&self) -> Option<&[u8; 16]> {
         let id = <&[u8; 16]>::try_from(self.0.trace_id.as_slice()).ok()?;
-        if id == &[0u8; 16] { None } else { Some(id) }
+        if id == &[0u8; 16] {
+            None
+        } else {
+            Some(id)
+        }
     }
     fn span_id(&self) -> Option<&[u8; 8]> {
         let id = <&[u8; 8]>::try_from(self.0.span_id.as_slice()).ok()?;
-        if id == &[0u8; 8] { None } else { Some(id) }
+        if id == &[0u8; 8] {
+            None
+        } else {
+            Some(id)
+        }
     }
     fn event_name(&self) -> Option<&[u8]> {
         if self.0.event_name.is_empty() {
@@ -2531,7 +2539,10 @@ mod tests {
             msi_resource: None,
         };
         let client = GenevaClient::new(cfg).expect("failed to create GenevaClient with MockAuth");
-        let mut handle_box = Box::new(GenevaClientHandle { magic: GENEVA_HANDLE_MAGIC, client });
+        let mut handle_box = Box::new(GenevaClientHandle {
+            magic: GENEVA_HANDLE_MAGIC,
+            client,
+        });
         let handle_ptr: *mut GenevaClientHandle = &mut *handle_box;
 
         // Build two C log records with different event names and attributes.
@@ -2550,7 +2561,9 @@ mod tests {
         let attr_keys2 = [key2.as_ptr()];
         let attr_vals2 = [GenevaAttrValueC {
             tag: GenevaAttrType::String as u8,
-            data: GenevaAttrData { str_val: body2.as_ptr() },
+            data: GenevaAttrData {
+                str_val: body2.as_ptr(),
+            },
         }];
 
         let trace_id: [u8; 16] = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16];
@@ -2604,8 +2617,15 @@ mod tests {
                 0,
             )
         };
-        assert_eq!(rc as u32, GenevaError::Success as u32, "encode_log_records failed");
-        assert!(!batches_ptr.is_null(), "expected non-null batches on success");
+        assert_eq!(
+            rc as u32,
+            GenevaError::Success as u32,
+            "encode_log_records failed"
+        );
+        assert!(
+            !batches_ptr.is_null(),
+            "expected non-null batches on success"
+        );
 
         let len = unsafe { geneva_batches_len(batches_ptr) };
         // Two different event names → two batches
