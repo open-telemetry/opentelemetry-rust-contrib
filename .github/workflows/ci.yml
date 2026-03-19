@@ -65,6 +65,60 @@ jobs:
     - name: Test (Unix)
       if: ${{ matrix.os != 'windows-latest'}}
       run: bash ./scripts/test.sh
+  user-events-integration-test:
+    runs-on: ubuntu-latest
+    steps:
+    - name: Harden the runner (Audit all outbound calls)
+      uses: step-security/harden-runner@a90bcbc6539c36a85cdfeb73f7e2f433735f215b # v2.15.0
+      with:
+        egress-policy: audit
+    - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+      with:
+        submodules: true
+    - uses: dtolnay/rust-toolchain@efa25f7f19611383d5b0ccf2d1c8914531636bf9
+      with:
+        toolchain: stable
+    - name: Check user_events kernel support
+      run: |
+        sudo cat /sys/kernel/tracing/user_events_status || { echo "user_events not supported on this runner"; exit 1; }
+    - name: Install perf
+      run: |
+        sudo apt-get update
+        # The Azure runner's kernel (e.g. 6.14-azure) ships linux-tools packages
+        # that are stubs without actual perf binaries. Install linux-tools-generic
+        # which provides a real perf binary for the base Ubuntu kernel. The perf
+        # binary is backwards-compatible for tracepoint recording.
+        sudo apt-get install -y linux-tools-generic
+        # The /usr/bin/perf wrapper rejects kernel version mismatches.
+        # Replace it with the actual perf binary so it works under sudo.
+        # Search broadly since the path varies by Ubuntu version:
+        #   /usr/lib/linux-tools/<ver>/perf or /usr/lib/linux-tools-<ver>/perf
+        PERF_BIN=$(find /usr/lib/ -maxdepth 3 -name "perf" -type f -executable 2>/dev/null | grep -v python | head -1)
+        if [ -n "$PERF_BIN" ]; then
+          echo "Replacing /usr/bin/perf wrapper with $PERF_BIN"
+          sudo cp -f "$PERF_BIN" /usr/bin/perf
+        else
+          echo "ERROR: No perf binary found. Installed files:"
+          dpkg -L linux-tools-6.8.0-106 2>/dev/null || true
+          find /usr/lib/ -maxdepth 3 -name "perf" 2>/dev/null || true
+          exit 1
+        fi
+        perf version
+    - name: Build and install perf-decode
+      run: |
+        sudo apt-get install -y cmake build-essential
+        git clone https://github.com/microsoft/LinuxTracepoints.git
+        cd LinuxTracepoints
+        mkdir build && cd build
+        cmake ..
+        make -j$(nproc)
+        sudo cp bin/perf-decode /usr/local/bin/
+    - name: Run user_events integration tests (trace)
+      run: sudo -E $HOME/.cargo/bin/cargo test --manifest-path opentelemetry-user-events-trace/Cargo.toml --all-features -- --ignored --nocapture --test-threads=1
+    - name: Run user_events integration tests (logs)
+      run: sudo -E $HOME/.cargo/bin/cargo test --manifest-path opentelemetry-user-events-logs/Cargo.toml --all-features -- --ignored --nocapture --test-threads=1
+    - name: Run user_events integration tests (metrics)
+      run: sudo -E $HOME/.cargo/bin/cargo test --manifest-path opentelemetry-user-events-metrics/Cargo.toml --all-features -- --ignored --nocapture --test-threads=1
   lint:
     strategy:
       matrix:
