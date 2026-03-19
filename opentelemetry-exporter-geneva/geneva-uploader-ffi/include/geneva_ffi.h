@@ -117,6 +117,7 @@ GenevaError geneva_client_new(const GenevaConfig* config,
 
 /* 1) Encode and compress logs into batches (synchronous).
       `data` is a protobuf-encoded ExportLogsServiceRequest.
+      Only available when the Rust crate is built with the `otlp_bytes` feature.
       - On success returns GENEVA_SUCCESS and writes *out_batches.
       - On failure returns an error code and optionally writes diagnostic message to err_msg_out.
 
@@ -131,12 +132,14 @@ GenevaError geneva_client_new(const GenevaConfig* config,
       - err_msg_len: Size of err_msg_out buffer in bytes (ignored if err_msg_out is NULL)
 
       Caller must free *out_batches with geneva_batches_free. */
+#ifdef GENEVA_FEATURE_OTLP_BYTES
 GenevaError geneva_encode_and_compress_logs(GenevaClientHandle* handle,
                                             const uint8_t* data,
                                             size_t data_len,
                                             EncodedBatchesHandle** out_batches,
                                             char* err_msg_out,
                                             size_t err_msg_len);
+#endif /* GENEVA_FEATURE_OTLP_BYTES */
 
 /* 1.1) Encode and compress spans into batches (synchronous).
       `data` is a protobuf-encoded ExportTraceServiceRequest.
