@@ -6,9 +6,11 @@ permissions:
 on:
   pull_request:
     types: [opened, synchronize, reopened, edited]
+  merge_group:
 
 jobs:
   validate-pr-title:
+    if: github.event_name == 'pull_request'
     runs-on: ubuntu-latest
     steps:
       - name: Harden the runner (Audit all outbound calls)
