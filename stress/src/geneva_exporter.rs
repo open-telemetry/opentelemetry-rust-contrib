@@ -377,10 +377,11 @@ async fn async_main(
                     let client = client.clone();
                     let logs = logs_bytes.clone();
                     async move {
-                        let batches = match client.encode_and_compress_logs(&RawLogsData::new(&logs)) {
-                            Ok(batches) => batches,
-                            Err(e) => return Err(format!("Failed to encode logs: {e}")),
-                        };
+                        let batches =
+                            match client.encode_and_compress_logs(&RawLogsData::new(&logs)) {
+                                Ok(batches) => batches,
+                                Err(e) => return Err(format!("Failed to encode logs: {e}")),
+                            };
                         for batch in &batches {
                             if let Err(e) = client.upload_batch(batch).await {
                                 return Err(format!("Failed to upload batch: {e}"));
