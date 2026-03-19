@@ -1562,10 +1562,12 @@ impl<'a> LogRecordView for ProtoLRView<'a> {
         }
     }
     fn trace_id(&self) -> Option<&[u8; 16]> {
-        <&[u8; 16]>::try_from(self.0.trace_id.as_slice()).ok()
+        let id = <&[u8; 16]>::try_from(self.0.trace_id.as_slice()).ok()?;
+        if id == &[0u8; 16] { None } else { Some(id) }
     }
     fn span_id(&self) -> Option<&[u8; 8]> {
-        <&[u8; 8]>::try_from(self.0.span_id.as_slice()).ok()
+        let id = <&[u8; 8]>::try_from(self.0.span_id.as_slice()).ok()?;
+        if id == &[0u8; 8] { None } else { Some(id) }
     }
     fn event_name(&self) -> Option<&[u8]> {
         if self.0.event_name.is_empty() {
