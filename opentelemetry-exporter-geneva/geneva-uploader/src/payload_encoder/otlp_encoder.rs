@@ -1354,358 +1354,26 @@ mod tests {
         )
     }
 
-    // ---------------------------------------------------------------------------
-    // Minimal test-only view wrappers for proto types
-    // ---------------------------------------------------------------------------
-
-    use opentelemetry_proto::tonic::common::v1::any_value::Value as AV;
-    use otap_df_pdata_views::{SpanId, TraceId};
-
-    struct TestLogsView<'a>(&'a [ResourceLogs]);
-    struct TestResourceLogsIter<'a>(std::slice::Iter<'a, ResourceLogs>);
-    struct TestResourceLogsView<'a>(&'a ResourceLogs);
-    struct TestScopeLogsIter<'a>(std::slice::Iter<'a, ScopeLogs>);
-    struct TestScopeLogsView<'a>(&'a ScopeLogs);
-    struct TestLogRecordIter<'a>(std::slice::Iter<'a, LogRecord>);
-    struct TestLogRecord<'a>(&'a LogRecord);
-    struct TestAnyValue<'a>(&'a AnyValue);
-    struct TestKeyValue<'a>(&'a KeyValue);
-    struct TestKeyValueIter<'a>(std::slice::Iter<'a, KeyValue>);
-    struct TestNoopResource;
-    struct TestNoopScope;
-    struct TestNoopAttr;
-    struct TestNoopAnyValue;
-
-    impl<'a> LogsDataView for TestLogsView<'a> {
-        type ResourceLogs<'r>
-            = TestResourceLogsView<'r>
-        where
-            Self: 'r;
-        type ResourcesIter<'r>
-            = TestResourceLogsIter<'r>
-        where
-            Self: 'r;
-        fn resources(&self) -> Self::ResourcesIter<'_> {
-            TestResourceLogsIter(self.0.iter())
-        }
-    }
-    impl<'a> Iterator for TestResourceLogsIter<'a> {
-        type Item = TestResourceLogsView<'a>;
-        fn next(&mut self) -> Option<Self::Item> {
-            self.0.next().map(TestResourceLogsView)
-        }
-    }
-    impl<'a> ResourceLogsView for TestResourceLogsView<'a> {
-        type Resource<'r>
-            = TestNoopResource
-        where
-            Self: 'r;
-        type ScopeLogs<'s>
-            = TestScopeLogsView<'s>
-        where
-            Self: 's;
-        type ScopesIter<'s>
-            = TestScopeLogsIter<'s>
-        where
-            Self: 's;
-        fn resource(&self) -> Option<Self::Resource<'_>> {
-            None
-        }
-        fn scopes(&self) -> Self::ScopesIter<'_> {
-            TestScopeLogsIter(self.0.scope_logs.iter())
-        }
-        fn schema_url(&self) -> Option<&[u8]> {
-            None
-        }
-    }
-    impl<'a> Iterator for TestScopeLogsIter<'a> {
-        type Item = TestScopeLogsView<'a>;
-        fn next(&mut self) -> Option<Self::Item> {
-            self.0.next().map(TestScopeLogsView)
-        }
-    }
-    impl<'a> ScopeLogsView for TestScopeLogsView<'a> {
-        type Scope<'s>
-            = TestNoopScope
-        where
-            Self: 's;
-        type LogRecord<'r>
-            = TestLogRecord<'r>
-        where
-            Self: 'r;
-        type LogRecordsIter<'r>
-            = TestLogRecordIter<'r>
-        where
-            Self: 'r;
-        fn scope(&self) -> Option<Self::Scope<'_>> {
-            None
-        }
-        fn log_records(&self) -> Self::LogRecordsIter<'_> {
-            TestLogRecordIter(self.0.log_records.iter())
-        }
-        fn schema_url(&self) -> Option<&[u8]> {
-            None
-        }
-    }
-    impl<'a> Iterator for TestLogRecordIter<'a> {
-        type Item = TestLogRecord<'a>;
-        fn next(&mut self) -> Option<Self::Item> {
-            self.0.next().map(TestLogRecord)
-        }
-    }
-    impl<'a> LogRecordView for TestLogRecord<'a> {
-        type Attribute<'att>
-            = TestKeyValue<'att>
-        where
-            Self: 'att;
-        type AttributeIter<'att>
-            = TestKeyValueIter<'att>
-        where
-            Self: 'att;
-        type Body<'bod>
-            = TestAnyValue<'bod>
-        where
-            Self: 'bod;
-        fn time_unix_nano(&self) -> Option<u64> {
-            if self.0.time_unix_nano != 0 {
-                Some(self.0.time_unix_nano)
-            } else {
-                None
-            }
-        }
-        fn observed_time_unix_nano(&self) -> Option<u64> {
-            if self.0.observed_time_unix_nano != 0 {
-                Some(self.0.observed_time_unix_nano)
-            } else {
-                None
-            }
-        }
-        fn severity_number(&self) -> Option<i32> {
-            if self.0.severity_number != 0 {
-                Some(self.0.severity_number)
-            } else {
-                None
-            }
-        }
-        fn severity_text(&self) -> Option<&[u8]> {
-            if self.0.severity_text.is_empty() {
-                None
-            } else {
-                Some(self.0.severity_text.as_bytes())
-            }
-        }
-        fn body(&self) -> Option<Self::Body<'_>> {
-            self.0.body.as_ref().map(TestAnyValue)
-        }
-        fn attributes(&self) -> Self::AttributeIter<'_> {
-            TestKeyValueIter(self.0.attributes.iter())
-        }
-        fn dropped_attributes_count(&self) -> u32 {
-            self.0.dropped_attributes_count
-        }
-        fn flags(&self) -> Option<u32> {
-            if self.0.flags != 0 {
-                Some(self.0.flags)
-            } else {
-                None
-            }
-        }
-        fn trace_id(&self) -> Option<&TraceId> {
-            <&[u8; 16]>::try_from(self.0.trace_id.as_slice()).ok()
-        }
-        fn span_id(&self) -> Option<&SpanId> {
-            <&[u8; 8]>::try_from(self.0.span_id.as_slice()).ok()
-        }
-        fn event_name(&self) -> Option<&[u8]> {
-            if self.0.event_name.is_empty() {
-                None
-            } else {
-                Some(self.0.event_name.as_bytes())
-            }
-        }
-    }
-    impl<'a> AnyValueView<'a> for TestAnyValue<'a> {
-        type KeyValue = TestKeyValue<'a>;
-        type ArrayIter<'arr>
-            = std::iter::Empty<TestAnyValue<'a>>
-        where
-            Self: 'arr;
-        type KeyValueIter<'kv>
-            = std::iter::Empty<TestKeyValue<'a>>
-        where
-            Self: 'kv;
-        fn value_type(&self) -> ValueType {
-            match &self.0.value {
-                Some(AV::StringValue(_)) => ValueType::String,
-                Some(AV::BoolValue(_)) => ValueType::Bool,
-                Some(AV::IntValue(_)) => ValueType::Int64,
-                Some(AV::DoubleValue(_)) => ValueType::Double,
-                Some(AV::ArrayValue(_)) => ValueType::Array,
-                Some(AV::KvlistValue(_)) => ValueType::KeyValueList,
-                Some(AV::BytesValue(_)) => ValueType::Bytes,
-                None => ValueType::Empty,
-            }
-        }
-        fn as_string(&self) -> Option<&[u8]> {
-            if let Some(AV::StringValue(s)) = &self.0.value {
-                Some(s.as_bytes())
-            } else {
-                None
-            }
-        }
-        fn as_bool(&self) -> Option<bool> {
-            if let Some(AV::BoolValue(b)) = &self.0.value {
-                Some(*b)
-            } else {
-                None
-            }
-        }
-        fn as_int64(&self) -> Option<i64> {
-            if let Some(AV::IntValue(i)) = &self.0.value {
-                Some(*i)
-            } else {
-                None
-            }
-        }
-        fn as_double(&self) -> Option<f64> {
-            if let Some(AV::DoubleValue(d)) = &self.0.value {
-                Some(*d)
-            } else {
-                None
-            }
-        }
-        fn as_bytes(&self) -> Option<&[u8]> {
-            if let Some(AV::BytesValue(b)) = &self.0.value {
-                Some(b)
-            } else {
-                None
-            }
-        }
-        fn as_array(&self) -> Option<Self::ArrayIter<'_>> {
-            None
-        }
-        fn as_kvlist(&self) -> Option<Self::KeyValueIter<'_>> {
-            None
-        }
-    }
-    impl<'a> Iterator for TestKeyValueIter<'a> {
-        type Item = TestKeyValue<'a>;
-        fn next(&mut self) -> Option<Self::Item> {
-            self.0.next().map(TestKeyValue)
-        }
-    }
-    impl<'a> AttributeView for TestKeyValue<'a> {
-        type Val<'val>
-            = TestAnyValue<'val>
-        where
-            Self: 'val;
-        fn key(&self) -> &[u8] {
-            self.0.key.as_bytes()
-        }
-        fn value(&self) -> Option<Self::Val<'_>> {
-            self.0.value.as_ref().map(TestAnyValue)
-        }
-    }
-    impl ResourceView for TestNoopResource {
-        type Attribute<'att>
-            = TestNoopAttr
-        where
-            Self: 'att;
-        type AttributesIter<'att>
-            = std::iter::Empty<TestNoopAttr>
-        where
-            Self: 'att;
-        fn attributes(&self) -> Self::AttributesIter<'_> {
-            std::iter::empty()
-        }
-        fn dropped_attributes_count(&self) -> u32 {
-            0
-        }
-    }
-    impl InstrumentationScopeView for TestNoopScope {
-        type Attribute<'att>
-            = TestNoopAttr
-        where
-            Self: 'att;
-        type AttributeIter<'att>
-            = std::iter::Empty<TestNoopAttr>
-        where
-            Self: 'att;
-        fn name(&self) -> Option<&[u8]> {
-            None
-        }
-        fn version(&self) -> Option<&[u8]> {
-            None
-        }
-        fn attributes(&self) -> Self::AttributeIter<'_> {
-            std::iter::empty()
-        }
-        fn dropped_attributes_count(&self) -> u32 {
-            0
-        }
-    }
-    impl AttributeView for TestNoopAttr {
-        type Val<'val>
-            = TestNoopAnyValue
-        where
-            Self: 'val;
-        fn key(&self) -> &[u8] {
-            b""
-        }
-        fn value(&self) -> Option<Self::Val<'_>> {
-            None
-        }
-    }
-    impl<'val> AnyValueView<'val> for TestNoopAnyValue {
-        type KeyValue = TestNoopAttr;
-        type ArrayIter<'arr>
-            = std::iter::Empty<TestNoopAnyValue>
-        where
-            Self: 'arr;
-        type KeyValueIter<'kv>
-            = std::iter::Empty<TestNoopAttr>
-        where
-            Self: 'kv;
-        fn value_type(&self) -> ValueType {
-            ValueType::Empty
-        }
-        fn as_string(&self) -> Option<&[u8]> {
-            None
-        }
-        fn as_bool(&self) -> Option<bool> {
-            None
-        }
-        fn as_int64(&self) -> Option<i64> {
-            None
-        }
-        fn as_double(&self) -> Option<f64> {
-            None
-        }
-        fn as_bytes(&self) -> Option<&[u8]> {
-            None
-        }
-        fn as_array(&self) -> Option<Self::ArrayIter<'_>> {
-            None
-        }
-        fn as_kvlist(&self) -> Option<Self::KeyValueIter<'_>> {
-            None
-        }
-    }
-
     fn encode_log_batch_via_proto<'a>(
         encoder: &OtlpEncoder,
         logs: impl IntoIterator<Item = &'a LogRecord>,
         metadata: &MetadataFields,
     ) -> Result<Vec<EncodedBatch>, String> {
+        use otap_df_pdata::views::otlp::bytes::logs::RawLogsData;
+        use prost::Message as _;
         let log_records: Vec<LogRecord> = logs.into_iter().cloned().collect();
-        let resource_logs = vec![ResourceLogs {
-            scope_logs: vec![ScopeLogs {
-                log_records,
-                ..Default::default()
-            }],
-            ..Default::default()
-        }];
-        encoder.encode_logs_from_view(&TestLogsView(&resource_logs), metadata)
+        let bytes =
+            opentelemetry_proto::tonic::collector::logs::v1::ExportLogsServiceRequest {
+                resource_logs: vec![ResourceLogs {
+                    scope_logs: vec![ScopeLogs {
+                        log_records,
+                        ..Default::default()
+                    }],
+                    ..Default::default()
+                }],
+            }
+            .encode_to_vec();
+        encoder.encode_logs_from_view(&RawLogsData::new(&bytes), metadata)
     }
 
     fn single_log_view(log_record: MockLogRecord) -> MockLogsData {
@@ -2018,7 +1686,10 @@ mod tests {
             }),
         });
 
-        let base_ref = TestLogRecord(&base_log);
+        use otap_df_pdata::views::otlp::bytes::logs::RawLogRecord;
+        use prost::Message as _;
+        let base_bytes = base_log.encode_to_vec();
+        let base_ref = RawLogRecord::new(&base_bytes);
         let (base_fields, base_dynamic_fields_start) = OtlpEncoder::determine_fields_for(&base_ref);
         let base_row = OtlpEncoder::write_row_data_for(
             &base_ref,
@@ -2027,7 +1698,8 @@ mod tests {
             &metadata,
         );
 
-        let dup_ref = TestLogRecord(&dup_log);
+        let dup_bytes = dup_log.encode_to_vec();
+        let dup_ref = RawLogRecord::new(&dup_bytes);
         let (dup_fields, dup_dynamic_fields_start) = OtlpEncoder::determine_fields_for(&dup_ref);
         let dup_row = OtlpEncoder::write_row_data_for(
             &dup_ref,

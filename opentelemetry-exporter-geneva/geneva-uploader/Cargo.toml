@@ -37,6 +37,8 @@ mock_auth = [] # Disabled by default. Not to be enabled in the prod release.
 default = ["self_signed_certs"] # TODO - remove this feature before release
 
 [dev-dependencies]
+otap-df-pdata = { git = "https://github.com/open-telemetry/otel-arrow", rev = "15371dc7" }
+prost = "0.14"
 tokio = { version = "1", features = ["full"] }
 rcgen = "0.14"
 openssl = { version = "0.10", features = ["vendored"] }
