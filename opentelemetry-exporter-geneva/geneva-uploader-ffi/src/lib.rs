@@ -2481,4 +2481,139 @@ mod tests {
         unsafe { geneva_client_free(raw_handle) };
         drop(mock_server);
     }
+
+    // Success-path test for the zero-copy log record path (FlatLogsView).
+    #[test]
+    #[cfg(feature = "mock_auth")]
+    fn test_encode_log_records_success() {
+        use wiremock::matchers::method;
+        use wiremock::{Mock, MockServer, ResponseTemplate};
+
+        let mock_server = runtime().block_on(async { MockServer::start().await });
+        let ingestion_endpoint = mock_server.uri();
+        let (auth_token, auth_token_expiry) =
+            generate_mock_jwt_and_expiry(&ingestion_endpoint, 24 * 3600);
+
+        runtime().block_on(async {
+            Mock::given(method("GET"))
+                .respond_with(ResponseTemplate::new(200).set_body_string(format!(
+                    r#"{{
+                        "IngestionGatewayInfo": {{
+                            "Endpoint": "{ingestion_endpoint}",
+                            "AuthToken": "{auth_token}",
+                            "AuthTokenExpiryTime": "{auth_token_expiry}"
+                        }},
+                        "StorageAccountKeys": [{{"AccountMonikerName":"m","AccountGroupName":"g","IsPrimaryMoniker":true}}],
+                        "TagId": "test"
+                    }}"#
+                )))
+                .mount(&mock_server)
+                .await;
+            Mock::given(method("POST"))
+                .respond_with(
+                    ResponseTemplate::new(202).set_body_string(r#"{"ticket":"accepted"}"#),
+                )
+                .mount(&mock_server)
+                .await;
+        });
+
+        let cfg = GenevaClientConfig {
+            endpoint: mock_server.uri(),
+            environment: "test".to_string(),
+            account: "test".to_string(),
+            namespace: "testns".to_string(),
+            region: "testregion".to_string(),
+            config_major_version: 1,
+            auth_method: AuthMethod::MockAuth,
+            tenant: "testtenant".to_string(),
+            role_name: "testrole".to_string(),
+            role_instance: "testinstance".to_string(),
+            msi_resource: None,
+        };
+        let client = GenevaClient::new(cfg).expect("failed to create GenevaClient with MockAuth");
+        let mut handle_box = Box::new(GenevaClientHandle { magic: GENEVA_HANDLE_MAGIC, client });
+        let handle_ptr: *mut GenevaClientHandle = &mut *handle_box;
+
+        // Build two C log records with different event names and attributes.
+        let key1 = std::ffi::CString::new("http.status").unwrap();
+        let body1 = std::ffi::CString::new("request handled").unwrap();
+        let key2 = std::ffi::CString::new("error.kind").unwrap();
+        let body2 = std::ffi::CString::new("timeout").unwrap();
+        let event1 = std::ffi::CString::new("HttpLog").unwrap();
+        let event2 = std::ffi::CString::new("ErrorLog").unwrap();
+
+        let attr_keys1 = [key1.as_ptr()];
+        let attr_vals1 = [GenevaAttrValueC {
+            tag: GenevaAttrType::Int64 as u8,
+            data: GenevaAttrData { int64_val: 200 },
+        }];
+        let attr_keys2 = [key2.as_ptr()];
+        let attr_vals2 = [GenevaAttrValueC {
+            tag: GenevaAttrType::String as u8,
+            data: GenevaAttrData { str_val: body2.as_ptr() },
+        }];
+
+        let trace_id: [u8; 16] = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16];
+        let span_id: [u8; 8] = [1, 2, 3, 4, 5, 6, 7, 8];
+
+        let records = [
+            GenevaLogRecordC {
+                event_name: event1.as_ptr(),
+                time_unix_nano: 1_000_000_000,
+                observed_time_unix_nano: 0,
+                severity_number: 9,
+                severity_text: std::ptr::null(),
+                body: body1.as_ptr(),
+                trace_id: [0u8; 16],
+                trace_id_present: 0,
+                span_id: [0u8; 8],
+                span_id_present: 0,
+                flags: 0,
+                flags_present: 0,
+                attr_keys: attr_keys1.as_ptr(),
+                attr_values: attr_vals1.as_ptr(),
+                attr_count: 1,
+            },
+            GenevaLogRecordC {
+                event_name: event2.as_ptr(),
+                time_unix_nano: 2_000_000_000,
+                observed_time_unix_nano: 0,
+                severity_number: 17,
+                severity_text: std::ptr::null(),
+                body: std::ptr::null(),
+                trace_id,
+                trace_id_present: 1,
+                span_id,
+                span_id_present: 1,
+                flags: 1,
+                flags_present: 1,
+                attr_keys: attr_keys2.as_ptr(),
+                attr_values: attr_vals2.as_ptr(),
+                attr_count: 1,
+            },
+        ];
+
+        let mut batches_ptr: *mut EncodedBatchesHandle = std::ptr::null_mut();
+        let rc = unsafe {
+            geneva_encode_and_compress_log_records(
+                handle_ptr,
+                records.as_ptr(),
+                records.len(),
+                &mut batches_ptr,
+                ptr::null_mut(),
+                0,
+            )
+        };
+        assert_eq!(rc as u32, GenevaError::Success as u32, "encode_log_records failed");
+        assert!(!batches_ptr.is_null(), "expected non-null batches on success");
+
+        let len = unsafe { geneva_batches_len(batches_ptr) };
+        // Two different event names → two batches
+        assert_eq!(len, 2, "expected one batch per event name");
+
+        unsafe { geneva_batches_free(batches_ptr) };
+        let raw_handle = Box::into_raw(handle_box);
+        unsafe { geneva_client_free(raw_handle) };
+        drop(mock_server);
+    }
 }
