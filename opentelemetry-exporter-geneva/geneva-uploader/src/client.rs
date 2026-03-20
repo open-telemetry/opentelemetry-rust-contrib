@@ -35,6 +35,8 @@ pub struct GenevaClientConfig {
     pub role_instance: String,
     pub msi_resource: Option<String>, // Required for Managed Identity variants
                                       // Add event name/version here if constant, or per-upload if you want them per call.
+    pub obo_identity: Option<String>,    // On Behalf Of service identity (e.g., "Microsoft.SomeService")
+    pub obo_annotations: Option<String>, // On Behalf Of annotations XML
 }
 
 /// Main user-facing client for Geneva ingestion.
@@ -115,6 +117,8 @@ impl GenevaClient {
             cfg.role_instance,
             cfg.namespace,
             config_version,
+            cfg.obo_identity.clone(),
+            cfg.obo_annotations.clone(),
         );
 
         let uploader_config = GenevaUploaderConfig {
@@ -122,6 +126,8 @@ impl GenevaClient {
             source_identity,
             environment: metadata_fields.env_name.clone(),
             config_version: metadata_fields.event_version.clone(),
+            obo_identity: cfg.obo_identity,
+            obo_annotations: cfg.obo_annotations,
         };
 
         let uploader =
