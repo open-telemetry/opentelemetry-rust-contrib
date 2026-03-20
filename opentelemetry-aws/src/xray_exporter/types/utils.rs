@@ -22,6 +22,7 @@ pub(super) fn annotation_key_regex() -> &'static Regex {
         .get_or_init(|| Regex::new(r"^[a-zA-Z0-9_]{1,500}$").expect("Invalid annotation key regex"))
 }
 
+/// Verifies that a string does not exceed the given maximum length.
 pub(super) fn verify_string_length(s: &str, n: usize) -> Result<(), ConstraintError> {
     if s.len() > n {
         Err(ConstraintError::StringTooLong(n))
@@ -30,7 +31,9 @@ pub(super) fn verify_string_length(s: &str, n: usize) -> Result<(), ConstraintEr
     }
 }
 
+/// Trait for types that can be conditionally skipped during serialization.
 pub(super) trait MaybeSkip {
+    /// Returns `true` if this value should be omitted from serialized output.
     fn skip(&self) -> bool;
 }
 

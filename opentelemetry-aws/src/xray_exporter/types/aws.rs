@@ -1,6 +1,6 @@
 use std::{borrow::Cow, marker::PhantomData};
 
-use crate::{field_setter, flag_setter};
+use crate::{field_setter, flag_setter, xray_exporter::types::StrList};
 use serde::Serialize;
 
 use super::{
@@ -58,6 +58,10 @@ pub(super) struct AwsData<'a> {
     /// For DynamoDB operations, the name of the table (subsegments only)
     #[serde(skip_serializing_if = "MaybeSkip::skip")]
     table_name: Option<Cow<'a, str>>,
+
+    /// For DynamoDB operations, the names of the tables (subsegments only)
+    #[serde(skip_serializing_if = "MaybeSkip::skip")]
+    table_names: Option<&'a dyn StrList>,
 }
 
 impl MaybeSkip for AwsData<'_> {
@@ -74,6 +78,7 @@ impl MaybeSkip for AwsData<'_> {
             && self.request_id.skip()
             && self.queue_url.skip()
             && self.table_name.skip()
+            && self.table_names.skip()
     }
 }
 /// Builder for constructing AWS-specific metadata.
@@ -90,6 +95,7 @@ pub(crate) struct AwsDataBuilder<'a, DBT: DocumentBuilderType> {
     request_id: Option<Cow<'a, str>>,
     queue_url: Option<Cow<'a, str>>,
     table_name: Option<Cow<'a, str>>,
+    table_names: Option<&'a dyn StrList>,
     _phatom_data: PhantomData<DBT>,
 }
 
@@ -114,6 +120,7 @@ impl<'a, DBT: DocumentBuilderType> AwsDataBuilder<'a, DBT> {
             request_id: self.request_id,
             queue_url: self.queue_url,
             table_name: self.table_name,
+            table_names: self.table_names,
         }
     }
 }
@@ -137,6 +144,7 @@ impl<'a> AwsDataBuilder<'a, Subsegment> {
     field_setter!(request_id);
     field_setter!(queue_url);
     field_setter!(table_name);
+    field_setter!(table_names: &'a dyn StrList);
 }
 
 /// Information about an Amazon EC2 instance.
@@ -311,7 +319,7 @@ impl<'a> EksMetadataBuilder<'a> {
     field_setter!(pod);
     field_setter!(container_id);
 
-    /// Builds the `EcsMetadata` instance.
+    /// Builds the `EksMetadata` instance.
     fn build(self) -> EksMetadata<'a> {
         EksMetadata {
             cluster_name: self.cluster_name,
@@ -373,10 +381,10 @@ struct XrayMetadata<'a> {
     /// The SDK name and language
     #[serde(skip_serializing_if = "MaybeSkip::skip")]
     sdk: Option<Cow<'a, str>>,
-    /// The SDK name and language
+    /// The SDK version string.
     #[serde(skip_serializing_if = "MaybeSkip::skip")]
     sdk_version: Option<Cow<'a, str>>,
-    /// The SDK name and language
+    /// Whether auto-instrumentation is enabled.
     #[serde(skip_serializing_if = "MaybeSkip::skip")]
     auto_instrumentation: bool,
 }

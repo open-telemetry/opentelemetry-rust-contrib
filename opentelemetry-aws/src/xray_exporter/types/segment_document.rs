@@ -62,7 +62,7 @@ use super::{
 /// # use opentelemetry_aws::xray_exporter::{SegmentDocument, SegmentTranslator};
 /// # use opentelemetry_sdk::trace::SpanData;
 /// # fn example(translator: &SegmentTranslator, spans: &[SpanData]) -> Result<(), Box<dyn std::error::Error>> {
-/// let documents = translator.translate_spans(spans)?;
+/// let documents = translator.translate_spans(spans);
 ///
 /// for document in &documents {
 ///     // Compact JSON string
@@ -123,7 +123,7 @@ pub struct SegmentDocument<'a> {
     #[serde(skip_serializing_if = "Option::is_none")]
     parent_id: Option<Id>,
 
-    /// The ID of the parent segment or subsegment
+    /// The namespace for subsegments (`aws` or `remote`).
     #[serde(skip_serializing_if = "Option::is_none")]
     namespace: Option<Namespace>,
 
@@ -135,7 +135,7 @@ pub struct SegmentDocument<'a> {
     #[serde(skip_serializing_if = "MaybeSkip::skip")]
     aws: AwsData<'a>,
 
-    /// AWS-specific information about the resource running the application
+    /// CloudWatch Logs configuration associated with this segment.
     #[serde(skip_serializing_if = "MaybeSkip::skip")]
     cloudwatch_logs: CloudwatchLogs<'a>,
 
@@ -1069,5 +1069,134 @@ mod tests {
             builder3.name("subseg\x00with\x01control"),
             Err(ConstraintError::InvalidName)
         ));
+    }
+
+    // Tests for DocumentBuilder::annotation — TooManyAnnotation error path
+
+    #[test]
+    fn annotation_too_many() {
+        let mut builder = create_minimal_segment_builder();
+
+        // Add 50 annotations successfully
+        for i in 0..50 {
+            let key = format!("key_{i}");
+            assert!(
+                builder
+                    .annotation(Cow::Owned(key), AnnotationValue::Int(i))
+                    .is_ok(),
+                "annotation {i} should succeed"
+            );
+        }
+
+        // The 51st annotation should fail with TooManyAnnotation
+        assert!(matches!(
+            builder.annotation(Cow::Borrowed("key_50"), AnnotationValue::Int(50)),
+            Err(ConstraintError::TooManyAnnotation)
+        ));
+    }
+
+    // Tests for DocumentBuilder::end_time — edge case: no start_time set
+
+    #[test]
+    fn end_time_without_start_time() {
+        // Calling end_time() when start_time is None should succeed (no validation error)
+        let mut builder = SegmentDocumentBuilder::default();
+        assert!(builder.end_time(1234567890.0).is_ok());
+    }
+
+    // Tests for DocumentBuilder::trace_id with skip_timestamp_validation=true
+
+    #[test]
+    fn trace_id_skip_timestamp_validation() {
+        let mut builder = SegmentDocumentBuilder::default();
+
+        // Ancient timestamp (epoch 100) — would fail normal validation but should
+        // succeed with skip_timestamp_validation=true
+        let ancient_trace_id = TraceId::from(100u128 << 96);
+        assert!(builder.trace_id(ancient_trace_id, true).is_ok());
+    }
+
+    // Tests for SegmentDocument serialization — skip_serializing_if behavior
+
+    #[test]
+    fn serialization_minimal_segment_omits_optional_fields() {
+        let builder = create_minimal_segment_builder();
+        let document = builder.build().unwrap();
+        let json = document.to_string();
+        let parsed: serde_json::Value = serde_json::from_str(&json).unwrap();
+        let obj = parsed.as_object().unwrap();
+
+        // Required fields must be present
+        assert!(obj.contains_key("name"), "name must be present");
+        assert!(obj.contains_key("id"), "id must be present");
+        assert!(obj.contains_key("start_time"), "start_time must be present");
+        assert!(obj.contains_key("trace_id"), "trace_id must be present");
+
+        // Optional fields must be absent on a minimal segment
+        assert!(!obj.contains_key("end_time"), "end_time must be absent");
+        assert!(!obj.contains_key("http"), "http must be absent");
+        assert!(!obj.contains_key("sql"), "sql must be absent");
+        assert!(!obj.contains_key("aws"), "aws must be absent");
+        assert!(!obj.contains_key("cause"), "cause must be absent");
+        assert!(
+            !obj.contains_key("annotations"),
+            "annotations must be absent"
+        );
+        assert!(!obj.contains_key("metadata"), "metadata must be absent");
+        assert!(
+            !obj.contains_key("subsegments"),
+            "subsegments must be absent"
+        );
+        assert!(!obj.contains_key("user"), "user must be absent");
+        assert!(!obj.contains_key("origin"), "origin must be absent");
+        assert!(!obj.contains_key("parent_id"), "parent_id must be absent");
+        assert!(!obj.contains_key("namespace"), "namespace must be absent");
+        assert!(!obj.contains_key("service"), "service must be absent");
+        assert!(
+            !obj.contains_key("type"),
+            "type must be absent for segments"
+        );
+        assert!(
+            !obj.contains_key("cloudwatch_logs"),
+            "cloudwatch_logs must be absent"
+        );
+        assert!(
+            !obj.contains_key("precursor_ids"),
+            "precursor_ids must be absent"
+        );
+    }
+
+    #[test]
+    fn serialization_segment_with_optional_fields() {
+        let mut builder = create_minimal_segment_builder();
+        builder.end_time(1234567900.0).unwrap();
+        builder.user(Cow::Borrowed("test_user")).unwrap();
+        builder
+            .annotation(Cow::Borrowed("my_key"), AnnotationValue::String("my_value"))
+            .unwrap();
+        builder.http().request.method(Cow::Borrowed("GET")).unwrap();
+
+        let document = builder.build().unwrap();
+        let json = document.to_string();
+        let parsed: serde_json::Value = serde_json::from_str(&json).unwrap();
+        let obj = parsed.as_object().unwrap();
+
+        // Populated optional fields must be present
+        assert!(obj.contains_key("end_time"), "end_time must be present");
+        assert!(obj.contains_key("user"), "user must be present");
+        assert!(
+            obj.contains_key("annotations"),
+            "annotations must be present"
+        );
+        assert!(obj.contains_key("http"), "http must be present");
+
+        // Verify values
+        assert_eq!(obj["end_time"].as_f64().unwrap(), 1234567900.0);
+        assert_eq!(obj["user"].as_str().unwrap(), "test_user");
+        assert!(obj["annotations"]
+            .as_object()
+            .unwrap()
+            .contains_key("my_key"));
+        assert!(obj["http"].as_object().unwrap().contains_key("request"));
     }
 }

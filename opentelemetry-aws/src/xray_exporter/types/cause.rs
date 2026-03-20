@@ -233,7 +233,7 @@ impl<'a> ExceptionBuilder<'a> {
     /// Returns `ConstraintError::MissingId` if the id field was not set.
     pub fn build(self) -> Result<Exception<'a>> {
         Ok(Exception {
-            id: self.id.unwrap_or_else(Id::new),
+            id: self.id.unwrap_or_default(),
             message: self.message,
             exception_type: self.exception_type,
             remote: self.remote,

@@ -1035,11 +1035,7 @@ fn benchmark_export_only(c: &mut Criterion) {
 
         group.bench_with_input(BenchmarkId::new("spans", batch_size), &spans, |b, spans| {
             b.to_async(&runtime).iter_batched(
-                || {
-                    translator
-                        .translate_spans(spans)
-                        .expect("Failed to translate spans")
-                },
+                || translator.translate_spans(spans),
                 |docs| async { black_box(daemon_client.export_segment_documents(docs).await) },
                 BatchSize::SmallInput,
             );

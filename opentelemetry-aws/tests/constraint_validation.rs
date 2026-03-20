@@ -280,7 +280,8 @@ async fn test_max_annotations_limit() {
 #[tokio::test]
 async fn test_string_length_constraints() {
     let mock_exporter = MockExporter::new();
-    let exporter = XrayExporter::new(mock_exporter.clone());
+    let translator = SegmentTranslator::new().metadata_all_attrs();
+    let exporter = XrayExporter::new(mock_exporter.clone()).with_translator(translator);
 
     let trace_id = create_valid_trace_id();
     let span_id = SpanId::from_bytes(0x1111111111111111u64.to_be_bytes());
@@ -494,7 +495,8 @@ async fn test_empty_span_batch() {
 #[tokio::test]
 async fn test_special_characters_in_attributes() {
     let mock_exporter = MockExporter::new();
-    let exporter = XrayExporter::new(mock_exporter.clone());
+    let translator = SegmentTranslator::new().metadata_all_attrs();
+    let exporter = XrayExporter::new(mock_exporter.clone()).with_translator(translator);
 
     let trace_id = create_valid_trace_id();
     let span_id = SpanId::from_bytes(0x1111111111111111u64.to_be_bytes());
@@ -524,4 +526,45 @@ async fn test_special_characters_in_attributes() {
         .and_then(|v| v.as_object())
         .expect("metadata should be an object");
     assert_eq!(metadata.len(), 4, "Should have exactly 4 items in metadata");
+}
+
+#[tokio::test]
+async fn test_annotation_prefix_overflow_to_metadata() {
+    let mock_exporter = MockExporter::new();
+
+    let exporter = XrayExporter::new(mock_exporter.clone());
+
+    let trace_id = create_valid_trace_id();
+    let span_id = SpanId::from_bytes(0xfafafafafafafafa_u64.to_be_bytes());
+    let mut span = create_basic_span("test-span", SpanKind::Server, trace_id, span_id, None);
+
+    // Create 50 regular attributes to fill the annotation limit
+    let mut attributes = Vec::new();
+    for i in 0..50 {
+        attributes.push(KeyValue::new(
+            format!("annotation.attr_{i:02}"),
+            format!("value_{i}"),
+        ));
+    }
+    // Add one more with annotation. prefix — this should overflow to metadata
+    attributes.push(KeyValue::new("annotation.overflow_key", "overflow_value"));
+    span.attributes = attributes;
+
+    exporter.export(vec![span]).await.unwrap();
+
+    let documents = mock_exporter.get_documents();
+    let json = &documents[0];
+
+    // Annotations should have exactly 50 entries (the limit)
+    let annotations = get_nested_value(json, "annotations")
+        .and_then(|v| v.as_object())
+        .expect("annotations should be an object");
+    assert_eq!(
+        annotations.len(),
+        50,
+        "Should have exactly 50 annotations (the limit)"
+    );
+
+    // overflow_key (stripped prefix) should appear in metadata since annotations are full
+    assert_field_eq(json, "metadata.overflow_key", "overflow_value");
 }

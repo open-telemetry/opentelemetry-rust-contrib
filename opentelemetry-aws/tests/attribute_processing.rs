@@ -180,13 +180,6 @@ async fn test_indexed_attributes_as_annotations() {
 
     // Non-Indexed attributes should NOT be in annotations
     assert_field_not_exists(json, ["annotations", "custom_other_data"].as_slice());
-
-    // Non-indexed attributes should be in metadata
-    assert_field_eq(
-        json,
-        ["metadata", "custom.other_data"].as_slice(),
-        "not_indexed",
-    );
 }
 
 #[tokio::test]
@@ -265,14 +258,8 @@ async fn test_aws_xray_annotations_attribute() {
 
     // The aws.xray.annotations attribute allows specifying which attributes to index
     span.attributes = vec![
-        KeyValue::new("custom.field1", "value1"),
+        KeyValue::new("annotation.custom.field1", "value1"),
         KeyValue::new("custom.field2", "value2"),
-        KeyValue::new(
-            "aws.xray.annotations",
-            Value::Array(opentelemetry::Array::String(vec![
-                opentelemetry::StringValue::from("custom.field1"),
-            ])),
-        ),
     ];
 
     exporter.export(vec![span]).await.unwrap();
@@ -280,11 +267,8 @@ async fn test_aws_xray_annotations_attribute() {
     let documents = mock_exporter.get_documents();
     let json = &documents[0];
 
-    // field1 should be in annotations, field2 in metadata
+    // field1 should be in annotations
     assert_field_eq(json, "annotations.custom_field1", "value1");
-
-    // field2 should be in metadata since it was not listed in aws.xray.annotations
-    assert_field_eq(json, ["metadata", "custom.field2"].as_slice(), "value2");
 }
 
 #[tokio::test]
@@ -493,4 +477,284 @@ async fn test_subsegment_preserves_timing_and_parent() {
 
     // Verify name is preserved
     assert_field_eq(json, "name", "test-subsegment");
+}
+
+// ============================================================================
+// metadata. prefix routing tests
+// ============================================================================
+
+#[tokio::test]
+async fn test_metadata_prefix_routing() {
+    let mock_exporter = MockExporter::new();
+    // Default translator — no metadata_all_attrs, no index_all_attrs
+    let exporter = XrayExporter::new(mock_exporter.clone());
+
+    let trace_id = create_valid_trace_id();
+    let span_id = SpanId::from_bytes(0xaaaaaaaaaaaaaaaa_u64.to_be_bytes());
+    let mut span = create_basic_span("test-span", SpanKind::Server, trace_id, span_id, None);
+
+    span.attributes = vec![
+        KeyValue::new("metadata.debug_info", "some debug data"),
+        KeyValue::new("metadata.trace_context", "ctx-12345"),
+    ];
+
+    exporter.export(vec![span]).await.unwrap();
+
+    let documents = mock_exporter.get_documents();
+    let json = &documents[0];
+
+    // Both should appear in metadata with prefix stripped
+    assert_field_eq(json, "metadata.debug_info", "some debug data");
+    assert_field_eq(json, "metadata.trace_context", "ctx-12345");
+
+    // They should NOT appear in annotations
+    assert_field_not_exists(json, "annotations.debug_info");
+    assert_field_not_exists(json, "annotations.trace_context");
+}
+
+#[tokio::test]
+async fn test_metadata_prefix_with_index_all_attrs_still_indexes() {
+    let mock_exporter = MockExporter::new();
+    // When index_all_attrs is enabled, the stripped key from metadata. prefix
+    // is still eligible for indexing — index_all_attrs promotes it to annotations
+    let translator = SegmentTranslator::new().index_all_attrs();
+    let exporter = XrayExporter::new(mock_exporter.clone()).with_translator(translator);
+
+    let trace_id = create_valid_trace_id();
+    let span_id = SpanId::from_bytes(0xbbbbbbbbbbbbbbbb_u64.to_be_bytes());
+    let mut span = create_basic_span("test-span", SpanKind::Server, trace_id, span_id, None);
+
+    span.attributes = vec![KeyValue::new("metadata.some_key", "some_value")];
+
+    exporter.export(vec![span]).await.unwrap();
+
+    let documents = mock_exporter.get_documents();
+    let json = &documents[0];
+
+    // With index_all_attrs, the stripped key gets indexed as an annotation
+    assert_field_eq(json, "annotations.some_key", "some_value");
+
+    // Since annotation succeeded, it should NOT also be in metadata
+    assert_field_not_exists(json, "metadata.some_key");
+}
+
+// ============================================================================
+// with_metadata_attr / with_metadata_attrs builder method tests
+// ============================================================================
+
+#[tokio::test]
+async fn test_with_metadata_attr_explicit_routing() {
+    let mock_exporter = MockExporter::new();
+    let translator = SegmentTranslator::new().with_metadata_attr("custom.field".to_string());
+    let exporter = XrayExporter::new(mock_exporter.clone()).with_translator(translator);
+
+    let trace_id = create_valid_trace_id();
+    let span_id = SpanId::from_bytes(0xcccccccccccccccc_u64.to_be_bytes());
+    let mut span = create_basic_span("test-span", SpanKind::Server, trace_id, span_id, None);
+
+    span.attributes = vec![
+        KeyValue::new("custom.field", "routed_value"),
+        KeyValue::new("other.field", "not_routed"),
+    ];
+
+    exporter.export(vec![span]).await.unwrap();
+
+    let documents = mock_exporter.get_documents();
+    let json = &documents[0];
+
+    // custom.field should appear in metadata (key contains dots, use slice notation)
+    assert_field_eq(
+        json,
+        ["metadata", "custom.field"].as_slice(),
+        "routed_value",
+    );
+
+    // other.field should NOT appear in metadata (no opt-in for it)
+    assert_field_not_exists(json, ["metadata", "other.field"].as_slice());
+}
+
+#[tokio::test]
+async fn test_with_metadata_attrs_multiple_keys() {
+    let mock_exporter = MockExporter::new();
+    let translator =
+        SegmentTranslator::new().with_metadata_attrs(vec!["key1".to_string(), "key2".to_string()]);
+    let exporter = XrayExporter::new(mock_exporter.clone()).with_translator(translator);
+
+    let trace_id = create_valid_trace_id();
+    let span_id = SpanId::from_bytes(0xdddddddddddddddd_u64.to_be_bytes());
+    let mut span = create_basic_span("test-span", SpanKind::Server, trace_id, span_id, None);
+
+    span.attributes = vec![
+        KeyValue::new("key1", "value1"),
+        KeyValue::new("key2", "value2"),
+        KeyValue::new("key3", "value3"),
+    ];
+
+    exporter.export(vec![span]).await.unwrap();
+
+    let documents = mock_exporter.get_documents();
+    let json = &documents[0];
+
+    // key1 and key2 should be in metadata
+    assert_field_eq(json, "metadata.key1", "value1");
+    assert_field_eq(json, "metadata.key2", "value2");
+
+    // key3 should NOT be in metadata (not in the explicit list)
+    assert_field_not_exists(json, "metadata.key3");
+}
+
+// ============================================================================
+// Default behavior: unrecognized attrs without metadata opt-in are dropped
+// ============================================================================
+
+#[tokio::test]
+async fn test_unrecognized_attrs_without_metadata_optin_are_dropped() {
+    let mock_exporter = MockExporter::new();
+    // Default translator — no metadata_all_attrs, no with_metadata_attr, no index_all_attrs
+    let exporter = XrayExporter::new(mock_exporter.clone());
+
+    let trace_id = create_valid_trace_id();
+    let span_id = SpanId::from_bytes(0xeeeeeeeeeeeeeeee_u64.to_be_bytes());
+    let mut span = create_basic_span("test-span", SpanKind::Server, trace_id, span_id, None);
+
+    span.attributes = vec![
+        KeyValue::new("custom.field1", "value1"),
+        KeyValue::new("custom.field2", "value2"),
+    ];
+
+    exporter.export(vec![span]).await.unwrap();
+
+    let documents = mock_exporter.get_documents();
+    let json = &documents[0];
+
+    // They should NOT appear in annotations
+    assert_field_not_exists(json, ["annotations", "custom_field1"].as_slice());
+    assert_field_not_exists(json, ["annotations", "custom_field2"].as_slice());
+
+    // They should NOT appear in metadata
+    assert_field_not_exists(json, ["metadata", "custom.field1"].as_slice());
+    assert_field_not_exists(json, ["metadata", "custom.field2"].as_slice());
+
+    // The metadata field itself should not exist
+    assert_field_not_exists(json, "metadata");
+}
+
+// ============================================================================
+// annotation. prefix with non-annotatable type (arrays) falls back to metadata
+// ============================================================================
+
+#[tokio::test]
+async fn test_annotation_prefix_with_array_value_falls_back_to_metadata() {
+    let mock_exporter = MockExporter::new();
+    // Use metadata_all_attrs so the fallback to metadata is observable
+    let translator = SegmentTranslator::new().metadata_all_attrs();
+    let exporter = XrayExporter::new(mock_exporter.clone()).with_translator(translator);
+
+    let trace_id = create_valid_trace_id();
+    let span_id = SpanId::from_bytes(0xabababababababab_u64.to_be_bytes());
+    let mut span = create_basic_span("test-span", SpanKind::Server, trace_id, span_id, None);
+
+    span.attributes = vec![KeyValue::new(
+        "annotation.my_array",
+        Value::Array(opentelemetry::Array::String(vec![
+            opentelemetry::StringValue::from("item1"),
+            opentelemetry::StringValue::from("item2"),
+        ])),
+    )];
+
+    exporter.export(vec![span]).await.unwrap();
+
+    let documents = mock_exporter.get_documents();
+    let json = &documents[0];
+
+    // my_array (stripped prefix) should NOT appear in annotations (arrays can't be annotations)
+    assert_field_not_exists(json, "annotations.my_array");
+
+    // my_array DOES appear in metadata (fallback because annotation insertion failed)
+    assert_field_exists(json, "metadata.my_array");
+}
+
+// ============================================================================
+// Both annotation. and metadata. prefixes in the same span
+// ============================================================================
+
+#[tokio::test]
+async fn test_annotation_and_metadata_prefix_coexistence() {
+    let mock_exporter = MockExporter::new();
+    // Default translator
+    let exporter = XrayExporter::new(mock_exporter.clone());
+
+    let trace_id = create_valid_trace_id();
+    let span_id = SpanId::from_bytes(0xbcbcbcbcbcbcbcbc_u64.to_be_bytes());
+    let mut span = create_basic_span("test-span", SpanKind::Server, trace_id, span_id, None);
+
+    span.attributes = vec![
+        KeyValue::new("annotation.indexed_key", "indexed_value"),
+        KeyValue::new("metadata.meta_key", "meta_value"),
+    ];
+
+    exporter.export(vec![span]).await.unwrap();
+
+    let documents = mock_exporter.get_documents();
+    let json = &documents[0];
+
+    // indexed_key should appear in annotations (annotation. prefix, string value)
+    assert_field_eq(json, "annotations.indexed_key", "indexed_value");
+
+    // meta_key should appear in metadata with prefix stripped
+    assert_field_eq(json, "metadata.meta_key", "meta_value");
+
+    // indexed_key should NOT appear in metadata
+    assert_field_not_exists(json, "metadata.indexed_key");
+
+    // meta_key should NOT appear in annotations
+    assert_field_not_exists(json, "annotations.meta_key");
+}
+
+// ============================================================================
+// metadata_all_attrs + index_all_attrs combined
+// ============================================================================
+
+#[tokio::test]
+async fn test_metadata_all_and_index_all_combined() {
+    let mock_exporter = MockExporter::new();
+    let translator = SegmentTranslator::new()
+        .index_all_attrs()
+        .metadata_all_attrs();
+    let exporter = XrayExporter::new(mock_exporter.clone()).with_translator(translator);
+
+    let trace_id = create_valid_trace_id();
+    let span_id = SpanId::from_bytes(0xcdcdcdcdcdcdcdcd_u64.to_be_bytes());
+    let mut span = create_basic_span("test-span", SpanKind::Server, trace_id, span_id, None);
+
+    span.attributes = vec![
+        KeyValue::new("str_attr1", "value1"),
+        KeyValue::new("str_attr2", "value2"),
+        KeyValue::new("str_attr3", "value3"),
+        KeyValue::new(
+            "array_attr",
+            Value::Array(opentelemetry::Array::String(vec![
+                opentelemetry::StringValue::from("a"),
+                opentelemetry::StringValue::from("b"),
+            ])),
+        ),
+    ];
+
+    exporter.export(vec![span]).await.unwrap();
+
+    let documents = mock_exporter.get_documents();
+    let json = &documents[0];
+
+    // The 3 string attributes should appear in annotations (index_all wins for annotatable types)
+    assert_field_eq(json, "annotations.str_attr1", "value1");
+    assert_field_eq(json, "annotations.str_attr2", "value2");
+    assert_field_eq(json, "annotations.str_attr3", "value3");
+
+    // The array attribute can't be annotated, so it falls back to metadata
+    assert_field_exists(json, "metadata.array_attr");
+
+    // The 3 string attributes should NOT also be in metadata (they were successfully indexed)
+    assert_field_not_exists(json, "metadata.str_attr1");
+    assert_field_not_exists(json, "metadata.str_attr2");
+    assert_field_not_exists(json, "metadata.str_attr3");
 }

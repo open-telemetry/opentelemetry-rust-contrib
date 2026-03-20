@@ -8,12 +8,18 @@ use serde::Serialize;
 ///
 /// Serialized as 16 hexadecimal characters.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
-pub(crate) struct Id(u64);
+pub struct Id(u64);
 
 impl Id {
     /// Creates a new random segment ID.
     pub fn new() -> Self {
         Self(rand::random())
+    }
+}
+
+impl Default for Id {
+    fn default() -> Self {
+        Self::new()
     }
 }
 
@@ -61,28 +67,35 @@ impl Serialize for Id {
 /// Formatted as `1-{timestamp}-{random}` where timestamp is 8 hex digits (seconds since epoch)
 /// and random is 24 hex digits.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
-pub(crate) struct TraceId {
+pub struct TraceId {
     timestamp: u32,
     id_msb: u32,
     id_lsb: u64,
 }
 
+impl Default for TraceId {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl TraceId {
-    // /// Creates a new trace ID with the current timestamp.
-    // pub fn new() -> Self {
-    //     let timestamp = SystemTime::now()
-    //         .duration_since(UNIX_EPOCH)
-    //         .unwrap()
-    //         .as_secs() as u32;
-    //     Self {
-    //         timestamp,
-    //         id_msb: rand::random(),
-    //         id_lsb: rand::random(),
-    //     }
-    // }
+    /// Creates a new trace ID with the current timestamp.
+    pub fn new() -> Self {
+        use std::time::{SystemTime, UNIX_EPOCH};
+        let timestamp = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_secs() as u32;
+        Self {
+            timestamp,
+            id_msb: rand::random(),
+            id_lsb: rand::random(),
+        }
+    }
 
     /// Returns the timestamp portion in seconds since Unix epoch.
-    pub fn timestamp(&self) -> u32 {
+    pub(crate) fn timestamp(&self) -> u32 {
         self.timestamp
     }
 }

@@ -46,6 +46,18 @@ use crate::xray_exporter::types::SegmentDocument;
 
 use super::SegmentDocumentExporter;
 
+struct BufferResetGuard<'a> {
+    buf: &'a mut Vec<u8>,
+    len: usize,
+}
+impl<'a> Drop for BufferResetGuard<'a> {
+    fn drop(&mut self) {
+        // Ensure the buffer is always truncated back to the original length,
+        // regardless of how `send_segment_document` exits.
+        self.buf.truncate(self.len);
+    }
+}
+
 /// UDP client for transmitting X-Ray segment documents to the X-Ray daemon.
 ///
 /// # Protocol
@@ -149,16 +161,22 @@ impl XrayDaemonClient {
         &self,
         segment_document: SegmentDocument<'_>,
     ) -> Result<(), io::Error> {
+        #[cfg(feature = "internal-logs")]
+        tracing::trace!("Exporting segment");
+
         // Get a mut ref on the internal buffer
         let mut buf = self.inner_buf.lock().unwrap();
+
+        let mut guard = BufferResetGuard {
+            buf: &mut buf,
+            len: Self::DAEMON_HEADER.len(),
+        };
+
         // Serialize the segment into the internal buffer, after the
-        segment_document.to_writer(&mut *buf);
+        segment_document.to_writer(&mut guard.buf);
 
         // Send
-        self.socket.send(&buf)?;
-
-        // Truncate back to the header size so the buffer can be reused
-        buf.truncate(Self::DAEMON_HEADER.len());
+        self.socket.send(&guard.buf)?;
 
         Ok(())
     }
@@ -205,10 +223,13 @@ impl Default for XrayDaemonClient {
 impl SegmentDocumentExporter for XrayDaemonClient {
     type Error = io::Error;
 
+    #[cfg_attr(feature = "internal-logs", tracing::instrument(skip(self, batch)))]
     async fn export_segment_documents(
         &self,
         batch: Vec<SegmentDocument<'_>>,
     ) -> Result<(), Self::Error> {
+        #[cfg(feature = "internal-logs")]
+        tracing::debug!("Received {} segments to export", batch.len());
         for segment_document in batch {
             self.send_segment_document(segment_document)?;
         }

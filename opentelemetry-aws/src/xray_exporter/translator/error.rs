@@ -2,29 +2,32 @@ use opentelemetry_sdk::ExportError;
 
 use crate::xray_exporter::types::error::ConstraintError;
 
-/// Errors that can occur when translating OpenTelemetry spans to X-Ray segments.
+/// Errors that can occur when translating an OpenTelemetry span to an X-Ray segment.
 ///
-/// These errors represent failures during the translation process, including missing
-/// required span data and constraint violations in the resulting segment documents.
+/// These errors represent failures during the translation of individual spans,
+/// including missing required span data and constraint violations in the resulting
+/// segment documents. The [`SegmentTranslator::translate_spans`] method handles
+/// these errors internally — spans that fail translation are silently dropped
+/// and logged (when the `internal-logs` feature is enabled) rather than
+/// propagated to the caller.
+///
+/// [`SegmentTranslator::translate_spans`]: crate::xray_exporter::SegmentTranslator::translate_spans
 ///
 /// # Examples
 ///
-/// ```no_run
-/// use opentelemetry_aws::xray_exporter::{error::TranslationError, SegmentTranslator};
-/// use opentelemetry_sdk::trace::SpanData;
+/// Matching on error variants:
 ///
-/// let translator = SegmentTranslator::new();
-/// let spans: Vec<SpanData> = vec![]; // Your span data
+/// ```
+/// use opentelemetry_aws::xray_exporter::error::{TranslationError, ConstraintError};
 ///
-/// match translator.translate_spans(&spans) {
-///     Ok(documents) => {
-///         println!("Successfully translated {} spans", documents.len());
-///     }
-///     Err(TranslationError::MissingSpanId) => {
-///         eprintln!("A span is missing a valid span ID");
-///     }
-///     Err(TranslationError::ConstraintError(err)) => {
-///         eprintln!("Segment document constraint violated: {}", err);
+/// fn handle_translation_error(err: TranslationError) {
+///     match err {
+///         TranslationError::MissingSpanId => {
+///             eprintln!("span is missing a valid span ID");
+///         }
+///         TranslationError::ConstraintError(constraint) => {
+///             eprintln!("segment constraint violated: {constraint}");
+///         }
 ///     }
 /// }
 /// ```
