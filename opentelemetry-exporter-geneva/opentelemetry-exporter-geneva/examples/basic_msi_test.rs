@@ -105,6 +105,8 @@ async fn main() {
         role_instance,
         auth_method,
         msi_resource,
+        obo_identity: None,
+        obo_annotations: None,
     };
 
     // GenevaClient::new is synchronous (returns Result), so no await is needed here.
