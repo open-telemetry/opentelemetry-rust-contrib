@@ -121,7 +121,7 @@ pub(super) fn get_string_vec(v: &Value) -> Option<&dyn StrList> {
 ///
 /// X-Ray annotations are searchable/indexable fields limited to primitive types (bool, int,
 /// float, string). Returns `None` for arrays and other complex types that cannot be annotations.
-pub(super) fn get_annotation(v: &Value) -> Option<AnnotationValue> {
+pub(super) fn get_annotation(v: &Value) -> Option<AnnotationValue<'_>> {
     match v {
         Value::Bool(b) => Some(AnnotationValue::Boolean(*b)),
         Value::I64(i) => Some(AnnotationValue::Int(*i)),
@@ -136,7 +136,7 @@ pub(super) fn get_annotation(v: &Value) -> Option<AnnotationValue> {
 /// X-Ray metadata supports both primitives and arrays of primitives, making it more flexible
 /// than annotations but not searchable. Enables zero-copy string handling by borrowing from
 /// the original value.
-pub(super) fn get_any_value(v: &Value) -> Option<AnyValue> {
+pub(super) fn get_any_value(v: &Value) -> Option<AnyValue<'_>> {
     Some(match v {
         Value::Bool(b) => AnyValue::Bool(*b),
         Value::I64(i) => AnyValue::Int(*i),

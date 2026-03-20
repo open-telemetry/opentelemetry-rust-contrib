@@ -325,7 +325,8 @@ async fn test_annotations_structure() {
 #[tokio::test]
 async fn test_metadata_structure() {
     let mock_exporter = MockExporter::new();
-    let exporter = XrayExporter::new(mock_exporter.clone());
+    let translator = SegmentTranslator::new().metadata_all_attrs();
+    let exporter = XrayExporter::new(mock_exporter.clone()).with_translator(translator);
 
     let trace_id = create_valid_trace_id();
     let span_id = SpanId::from_bytes(0x1111111111111111u64.to_be_bytes());

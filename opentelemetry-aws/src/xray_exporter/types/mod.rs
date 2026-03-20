@@ -25,8 +25,8 @@ pub(crate) use segment_document::{
     SubsegmentDocumentBuilder,
 };
 
-#[cfg(feature = "subsegment-nesting")]
-pub(crate) use id::{Id, TraceId};
+pub use id::{Id, TraceId};
+
 #[cfg(feature = "subsegment-nesting")]
 pub(crate) use segment_document::DocumentBuilderHeader;
 

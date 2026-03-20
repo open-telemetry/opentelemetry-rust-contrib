@@ -103,7 +103,7 @@ pub mod daemon_client;
 pub mod stdout_client;
 
 pub use translator::SegmentTranslator;
-pub use types::SegmentDocument;
+pub use types::{Id, SegmentDocument, TraceId};
 
 pub mod error {
     //! Error types for the AWS X-Ray exporter.
@@ -317,11 +317,21 @@ impl<Client: SegmentDocumentExporter + Send + Sync + fmt::Debug> SpanExporter
     for XrayExporter<Client>
 {
     async fn export(&self, batch: Vec<opentelemetry_sdk::trace::SpanData>) -> OTelSdkResult {
-        let doc_batch = self.translator.translate_spans(&batch).map_err(|e| {
-            #[cfg(feature = "internal-logs")]
-            tracing::error!("{e}");
-            OTelSdkError::InternalFailure(e.to_string())
-        })?;
+        let doc_batch = self.translator.translate_spans(&batch);
+        if doc_batch.len() < batch.len() {
+            if doc_batch.is_empty() {
+                return Err(OTelSdkError::InternalFailure(
+                    "All spans in batch failed translation".to_string(),
+                ));
+            } else {
+                #[cfg(feature = "internal-logs")]
+                tracing::warn!(
+                    message = "Some spans failed translation",
+                    dropped = batch.len() - doc_batch.len()
+                );
+            }
+        }
+
         self.client
             .export_segment_documents(doc_batch)
             .await

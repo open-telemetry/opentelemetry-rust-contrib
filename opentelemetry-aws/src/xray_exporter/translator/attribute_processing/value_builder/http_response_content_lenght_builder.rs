@@ -64,3 +64,97 @@ impl<'v> SpanAttributeProcessor<'v, 2> for HttpResponseContentLengthBuilder {
         ),
     ];
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::xray_exporter::types::{Id, SubsegmentDocumentBuilder, TraceId};
+
+    /// Helper: resolve the builder into a Subsegment AnyDocumentBuilder, set required fields,
+    /// build, and return the JSON string representation.
+    fn build_subsegment_json(builder: HttpResponseContentLengthBuilder) -> String {
+        let mut doc = AnyDocumentBuilder::Subsegment(SubsegmentDocumentBuilder::default());
+        builder.resolve(&mut doc).unwrap();
+        match doc {
+            AnyDocumentBuilder::Subsegment(mut b) => {
+                b.name("test").unwrap();
+                b.id(Id::from(0xABCDu64));
+                b.parent_id(Id::from(0x1234u64));
+                b.start_time(1_000_000.0);
+                b.trace_id(TraceId::new(), true).unwrap();
+                b.build().unwrap().to_string()
+            }
+            _ => panic!("expected Subsegment variant"),
+        }
+    }
+
+    #[test]
+    fn test_resolve_sets_content_length_valid() {
+        // RECEIVED with payload size 1024 → content_length=1024
+        let msg_type = Value::String("RECEIVED".into());
+        let payload_size = Value::I64(1024);
+        let mut builder = HttpResponseContentLengthBuilder::default();
+        builder.message_type_is_received(&msg_type);
+        builder.message_payload_size_bytes(&payload_size);
+        let json = build_subsegment_json(builder);
+        assert!(
+            json.contains("\"content_length\":1024"),
+            "expected content_length=1024, got: {json}"
+        );
+
+        // RECEIVED with payload size 0 → content_length=0
+        let msg_type = Value::String("RECEIVED".into());
+        let payload_size = Value::I64(0);
+        let mut builder = HttpResponseContentLengthBuilder::default();
+        builder.message_type_is_received(&msg_type);
+        builder.message_payload_size_bytes(&payload_size);
+        let json = build_subsegment_json(builder);
+        assert!(
+            json.contains("\"content_length\":0"),
+            "expected content_length=0, got: {json}"
+        );
+
+        // RECEIVED with no payload size → content_length defaults to 0
+        let msg_type = Value::String("RECEIVED".into());
+        let mut builder = HttpResponseContentLengthBuilder::default();
+        builder.message_type_is_received(&msg_type);
+        let json = build_subsegment_json(builder);
+        assert!(
+            json.contains("\"content_length\":0"),
+            "expected content_length=0 (default), got: {json}"
+        );
+    }
+
+    #[test]
+    fn test_resolve_no_content_length() {
+        // message_type=SENT → no content_length
+        let msg_type = Value::String("SENT".into());
+        let payload_size = Value::I64(512);
+        let mut builder = HttpResponseContentLengthBuilder::default();
+        builder.message_type_is_received(&msg_type);
+        builder.message_payload_size_bytes(&payload_size);
+        let json = build_subsegment_json(builder);
+        assert!(
+            !json.contains("content_length"),
+            "expected no content_length for SENT, got: {json}"
+        );
+
+        // No message_type set at all → no content_length
+        let payload_size = Value::I64(256);
+        let mut builder = HttpResponseContentLengthBuilder::default();
+        builder.message_payload_size_bytes(&payload_size);
+        let json = build_subsegment_json(builder);
+        assert!(
+            !json.contains("content_length"),
+            "expected no content_length without message_type, got: {json}"
+        );
+
+        // No attributes set at all → no content_length
+        let builder = HttpResponseContentLengthBuilder::default();
+        let json = build_subsegment_json(builder);
+        assert!(
+            !json.contains("content_length"),
+            "expected no content_length when no attributes set, got: {json}"
+        );
+    }
+}

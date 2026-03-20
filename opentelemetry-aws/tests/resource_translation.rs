@@ -9,7 +9,7 @@ pub use common::*;
 
 use opentelemetry::trace::{SpanId, SpanKind};
 use opentelemetry::KeyValue;
-use opentelemetry_aws::xray_exporter::XrayExporter;
+use opentelemetry_aws::xray_exporter::{SegmentTranslator, XrayExporter};
 use opentelemetry_sdk::trace::SpanExporter;
 use opentelemetry_sdk::Resource;
 
@@ -414,7 +414,8 @@ async fn test_multiple_resource_updates() {
 #[tokio::test]
 async fn test_resource_with_custom_attributes() {
     let mock_exporter = MockExporter::new();
-    let mut exporter = XrayExporter::new(mock_exporter.clone());
+    let translator = SegmentTranslator::new().metadata_all_attrs();
+    let mut exporter = XrayExporter::new(mock_exporter.clone()).with_translator(translator);
 
     let resource = Resource::builder()
         .with_attributes(vec![

@@ -23,6 +23,7 @@ impl StrList for Vec<String> {
     }
 }
 
+/// Iterator over elements of a [`StrList`].
 pub(crate) struct StrListIter<'a> {
     list: &'a dyn StrList,
     idx: usize,
@@ -64,6 +65,7 @@ impl Serialize for dyn StrList + '_ {
     }
 }
 
+/// Newtype wrapper around a borrowed slice for serialization.
 #[derive(Debug, Clone, Copy, Serialize)]
 pub(crate) struct Slice<'a, T>(&'a [T]);
 

@@ -765,7 +765,7 @@ impl DocumentBuilderHeaderTree {
     /// before their parents, which is required for X-Ray's export format.
     ///
     /// Placeholder nodes (with `None` data) are automatically skipped.
-    pub fn iter(&self) -> DocumentBuilderHeaderTreeIterator {
+    pub fn iter(&self) -> DocumentBuilderHeaderTreeIterator<'_> {
         DocumentBuilderHeaderTreeIterator {
             tree: &self.header_tree,
             current_level: self.header_tree.levels.len() - 1,

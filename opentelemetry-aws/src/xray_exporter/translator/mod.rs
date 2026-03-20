@@ -16,8 +16,6 @@ mod utils;
 
 use utils::{sanitize_annotation_key, translate_timestamp};
 
-use std::borrow::Cow;
-
 use opentelemetry::{trace::SpanKind, KeyValue, SpanId};
 use opentelemetry_sdk::{trace::SpanData, Resource};
 
@@ -54,11 +52,28 @@ use error::{Result, TranslationError};
 ///
 /// # Attribute Processing
 ///
-/// Attributes are processed as follow:
+/// Attributes are processed through the following pipeline:
 ///
 /// 1. **Recognized attributes** are mapped to specific X-Ray fields (e.g., `http.method` → `http.request.method`)
-/// 2. **Indexed attributes** (if configured) are added as annotations (searchable, max 50)
-/// 3. **Remaining attributes** are added as metadata (not searchable, unlimited)
+/// 2. **Prefix routing** — attributes with special prefixes are force-routed:
+///    - `annotation.` prefix → indexed as an annotation (prefix stripped, e.g., `annotation.user_id` → annotation `user_id`)
+///    - `metadata.` prefix → added as metadata (prefix stripped, e.g., `metadata.debug_info` → metadata `debug_info`)
+/// 3. **Indexed attributes** (configured via [`index_all_attrs`], [`with_indexed_attr`], or
+///    [`with_indexed_attrs`]) are added as annotations (searchable, max 50 per segment).
+///    If annotation insertion fails (incompatible type or limit reached), the attribute
+///    falls back to metadata.
+/// 4. **Metadata attributes** — remaining attributes are added as metadata only if at least
+///    one of the following is true:
+///    - [`metadata_all_attrs`] is enabled
+///    - The attribute key is in the explicit metadata list (see [`with_metadata_attr`])
+///    - The attribute was requested for indexing but failed (fallback)
+///    - The attribute has a `metadata.` prefix
+///
+/// [`index_all_attrs`]: SegmentTranslator::index_all_attrs
+/// [`with_indexed_attr`]: SegmentTranslator::with_indexed_attr
+/// [`with_indexed_attrs`]: SegmentTranslator::with_indexed_attrs
+/// [`metadata_all_attrs`]: SegmentTranslator::metadata_all_attrs
+/// [`with_metadata_attr`]: SegmentTranslator::with_metadata_attr
 ///
 /// # Examples
 ///
@@ -103,6 +118,8 @@ use error::{Result, TranslationError};
 pub struct SegmentTranslator {
     indexed_attrs: Vec<String>,
     index_all_attrs: bool,
+    metadata_attrs: Vec<String>,
+    metadata_all_attrs: bool,
     log_group_names: Vec<String>,
     skip_timestamp_validation: bool,
     #[cfg(feature = "subsegment-nesting")]
@@ -171,6 +188,8 @@ impl SegmentTranslator {
         let mut st = Self {
             indexed_attrs: Default::default(),
             index_all_attrs: Default::default(),
+            metadata_attrs: Default::default(),
+            metadata_all_attrs: Default::default(),
             log_group_names: Default::default(),
             skip_timestamp_validation: Default::default(),
             #[cfg(feature = "subsegment-nesting")]
@@ -210,6 +229,30 @@ impl SegmentTranslator {
     /// ```
     pub fn index_all_attrs(mut self) -> Self {
         self.index_all_attrs = true;
+        self
+    }
+
+    /// Enables routing all non-recognized, non-indexed attributes to X-Ray metadata.
+    ///
+    /// When enabled, every span attribute that is not mapped to a specific X-Ray field
+    /// and not successfully indexed as an annotation will be added as metadata
+    /// (not searchable, unlimited).
+    ///
+    /// If [`index_all_attrs`] is also enabled, this flag is redundant: attributes
+    /// that fail annotation insertion already fall back to metadata automatically.
+    ///
+    /// [`index_all_attrs`]: SegmentTranslator::index_all_attrs
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use opentelemetry_aws::xray_exporter::SegmentTranslator;
+    ///
+    /// let translator = SegmentTranslator::new()
+    ///     .metadata_all_attrs();
+    /// ```
+    pub fn metadata_all_attrs(mut self) -> Self {
+        self.metadata_all_attrs = true;
         self
     }
 
@@ -308,6 +351,61 @@ impl SegmentTranslator {
         self
     }
 
+    /// Adds a single attribute key to be explicitly routed to X-Ray metadata.
+    ///
+    /// Attributes whose keys match will be added as metadata (not searchable,
+    /// unlimited) regardless of other configuration. Duplicate keys are ignored.
+    /// Lookup uses binary search for efficiency.
+    ///
+    /// See [`metadata_all_attrs`] for routing *all* remaining attributes to metadata.
+    ///
+    /// [`metadata_all_attrs`]: SegmentTranslator::metadata_all_attrs
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use opentelemetry_aws::xray_exporter::SegmentTranslator;
+    ///
+    /// let translator = SegmentTranslator::new()
+    ///     .with_metadata_attr("custom.field".to_string());
+    /// ```
+    pub fn with_metadata_attr(mut self, attr: String) -> Self {
+        // Keep the metadata_attrs sorted
+        // If the attribute is already present (Result::Ok), skip it
+        if let Err(i) = self.metadata_attrs.binary_search(&attr) {
+            self.metadata_attrs.insert(i, attr);
+        }
+        self
+    }
+    /// Adds multiple attribute keys to be explicitly routed to X-Ray metadata.
+    ///
+    /// This is a convenience method equivalent to calling [`with_metadata_attr`]
+    /// for each key in the iterator. Duplicate keys are ignored.
+    ///
+    /// [`with_metadata_attr`]: SegmentTranslator::with_metadata_attr
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use opentelemetry_aws::xray_exporter::SegmentTranslator;
+    ///
+    /// let translator = SegmentTranslator::new()
+    ///     .with_metadata_attrs(vec![
+    ///         "custom.field".to_string(),
+    ///         "another.field".to_string(),
+    ///     ]);
+    /// ```
+    pub fn with_metadata_attrs(mut self, attrs: impl IntoIterator<Item = String>) -> Self {
+        for attr in attrs {
+            // Keep the metadata_attrs sorted
+            // If the attribute is already present (Result::Ok), skip it
+            if let Err(i) = self.metadata_attrs.binary_search(&attr) {
+                self.metadata_attrs.insert(i, attr);
+            }
+        }
+        self
+    }
+
     /// Sets the indexed attributes, replacing any previously configured.
     ///
     /// # Examples
@@ -400,6 +498,11 @@ impl SegmentTranslator {
     /// parent-child relationships, nests subsegments within parents when present, and
     /// sets precursor IDs for sequential subsegments.
     ///
+    /// Spans that fail translation (e.g., due to missing required fields, constraint
+    /// violations, or timestamp validation failures) are silently dropped. When the
+    /// `internal-logs` feature is enabled, these failures are logged. As a result, the
+    /// returned [`Vec`] may contain fewer documents than the number of input spans.
+    ///
     /// # Zero-Copy Translation
     ///
     /// This method takes a reference to a slice of [`SpanData`] and returns [`SegmentDocument`]s
@@ -421,32 +524,23 @@ impl SegmentTranslator {
     /// span order. The translation process uses a [`HashMap`] to establish parent-child
     /// relationships, which does not preserve ordering.
     ///
-    /// # Errors
-    ///
-    /// Returns a [`TranslationError`] if:
-    /// - A span is missing required fields (e.g., TraceId for a Server Span)
-    /// - Segment document constraints are violated during building
-    /// - Timestamp validation fails (unless disabled)
-    ///
     /// # Examples
     ///
-    /// ```no_run
+    /// ```
     /// use opentelemetry_aws::xray_exporter::SegmentTranslator;
     /// use opentelemetry_sdk::trace::SpanData;
     ///
     /// let translator = SegmentTranslator::new();
     /// let spans: Vec<SpanData> = vec![]; // Your span data
-    /// let documents = translator.translate_spans(&spans)?;
-    /// # Ok::<(), Box<dyn std::error::Error>>(())
+    /// let documents = translator.translate_spans(&spans);
     /// ```
     ///
-    /// [`TranslationError`]: error::TranslationError
     /// [ADOT documentation]: https://aws-otel.github.io/docs/getting-started/x-ray#otel-span-http-attributes-translation
-    #[cfg_attr(feature = "internal-logs", tracing::instrument(skip(batch)))]
+    #[cfg_attr(feature = "internal-logs", tracing::instrument(skip(self, batch)))]
     pub fn translate_spans<'span, 'translator: 'span>(
         &'translator self,
         batch: &'span [SpanData],
-    ) -> Result<Vec<SegmentDocument<'span>>> {
+    ) -> Vec<SegmentDocument<'span>> {
         #[cfg(feature = "internal-logs")]
         tracing::debug!("Received {} spans", batch.len());
 
@@ -464,10 +558,24 @@ impl SegmentTranslator {
     fn _translate_spans_simple<'span, 'translator: 'span>(
         &'translator self,
         batch: &'span [SpanData],
-    ) -> Result<Vec<SegmentDocument<'span>>> {
+    ) -> Vec<SegmentDocument<'span>> {
         batch
             .iter()
-            .map(|span_data| self.translate_span(span_data)?.build())
+            .filter_map(|span_data| {
+                match self
+                    .translate_span(span_data)
+                    .and_then(|builder| builder.build())
+                {
+                    Ok(segment) => Some(segment),
+                    Err(e) => {
+                        #[cfg(feature = "internal-logs")]
+                        tracing::error!(message="A segment or subsegment was lost", error=?e);
+                        #[cfg(feature = "internal-logs")]
+                        tracing::debug!(error=?e, ?span_data);
+                        None
+                    }
+                }
+            })
             .collect()
     }
 
@@ -475,7 +583,7 @@ impl SegmentTranslator {
     fn _translate_spans_nested<'span, 'translator: 'span>(
         &'translator self,
         batch: &'span [SpanData],
-    ) -> Result<Vec<SegmentDocument<'span>>> {
+    ) -> Vec<SegmentDocument<'span>> {
         use crate::xray_exporter::types::{
             error::ConstraintError, DocumentBuilderHeader, Id, TraceId,
         };
@@ -489,18 +597,32 @@ impl SegmentTranslator {
         let mut document_builder_headers_tree = DocumentBuilderHeaderTree::new(batch.len());
 
         for span_data in batch.iter() {
-            let builder = self.translate_span(span_data)?;
-            let header = match &builder {
-                AnyDocumentBuilder::Segment(builder) => builder.header(),
-                AnyDocumentBuilder::Subsegment(builder) => builder.header(),
-            };
-            let id = header.id.ok_or(ConstraintError::MissingId)?;
-            let trace_id = header.trace_id.ok_or(ConstraintError::MissingTraceId)?;
-            if document_builders.insert((trace_id, id), builder).is_some() {
-                #[cfg(feature = "internal-logs")]
-                tracing::error!("Duplicated builder (id: {id}; trace-id: {trace_id:?}), a segment or subsegment was lost");
-            } else {
-                document_builder_headers_tree.add(header)?;
+            match
+            self.translate_span(span_data).and_then(|builder| {
+                let header = match &builder {
+                    AnyDocumentBuilder::Segment(builder) => builder.header(),
+                    AnyDocumentBuilder::Subsegment(builder) => builder.header(),
+                };
+
+                let id = header.id.ok_or(ConstraintError::MissingId)?;
+                let trace_id = header.trace_id.ok_or(ConstraintError::MissingTraceId)?;
+                if document_builders.insert((trace_id, id), builder).is_some() {
+                    #[cfg(feature = "internal-logs")]
+                    tracing::error!("Duplicated builder (id: {id}; trace-id: {trace_id:?}), a segment or subsegment was lost");
+                } else {
+                    document_builder_headers_tree
+                        .add(header)
+                        .expect("id and trace_id always present at this point");
+                }
+                Ok(())
+            }) {
+                Ok(_) => {},
+                Err(e) => {
+                    #[cfg(feature = "internal-logs")]
+                    tracing::error!(message="A segment or subsegment was lost", error=?e);
+                    #[cfg(feature = "internal-logs")]
+                    tracing::debug!(error=?e, ?span_data);
+                }
             }
         }
 
@@ -593,7 +715,14 @@ impl SegmentTranslator {
         // At this point we can FINALLY return a Vec<SegmentDocument>
         document_builders
             .into_values()
-            .map(|document_builder| document_builder.build())
+            .filter_map(|document_builder| match document_builder.build() {
+                Ok(segment) => Some(segment),
+                Err(e) => {
+                    #[cfg(feature = "internal-logs")]
+                    tracing::error!(message="A segment or subsegment was lost", error=?e);
+                    None
+                }
+            })
             .collect()
     }
 
@@ -616,7 +745,7 @@ impl SegmentTranslator {
         span_data: &'span SpanData,
     ) -> Result<AnyDocumentBuilder<'span>> {
         #[cfg(feature = "internal-logs")]
-        tracing::debug!("{:?}", span_data);
+        tracing::trace!(?span_data);
 
         let SpanData {
             span_kind,
@@ -660,34 +789,6 @@ impl SegmentTranslator {
             }
         };
 
-        // The Span may have a aws.xray.annotations attribute with a &[&str] slice
-        // that contains additional attributes to add as annotations
-        // If that's the case, we extend the indexed_attributes with whatever is in this slice
-        // It means we have to pre-process every attributes before the real processing...
-        let aws_xray_annotations = attributes
-            .iter()
-            .find(|kv| kv.key.as_str() == "aws.xray.annotations");
-        let indexed_attrs: Cow<'_, [String]> = {
-            use opentelemetry::{Array, Value};
-            if let Some(KeyValue {
-                value: Value::Array(Array::String(lst)),
-                ..
-            }) = aws_xray_annotations
-            {
-                let mut indexed_attrs = self.indexed_attrs.clone();
-                for new_attr in lst {
-                    let new_attr = new_attr.to_string();
-                    match indexed_attrs.binary_search(&new_attr) {
-                        Ok(_) => (),
-                        Err(i) => indexed_attrs.insert(i, new_attr),
-                    }
-                }
-                Cow::Owned(indexed_attrs)
-            } else {
-                Cow::Borrowed(self.indexed_attrs.as_slice())
-            }
-        };
-
         // Create an iterator over all the attributes:
         //  - those of the Resource
         //  - those of the span
@@ -704,6 +805,14 @@ impl SegmentTranslator {
         // Process all the attributes
         for (key, value) in attribute_iterator {
             let key = key.as_str();
+            let (should_index, should_metadata, key) =
+                if let Some(key) = key.strip_prefix("annotation.") {
+                    (true, false, key)
+                } else if let Some(key) = key.strip_prefix("metadata.") {
+                    (false, true, key)
+                } else {
+                    (false, false, key)
+                };
 
             // Track the attribute value inclusion
             let mut attribute_included = false;
@@ -728,15 +837,18 @@ impl SegmentTranslator {
                 attribute_included = attribute_included || handler_result;
             }
 
+            let should_index = should_index
+                || (!attribute_included && self.index_all_attrs)
+                || self
+                    .indexed_attrs
+                    .binary_search_by(|s| s.as_str().cmp(key))
+                    .is_ok();
+
             // If the attribute was not included and we index all attributes
             // Or
             // If the attribute key is in the explicit list of attribute to index
             // Then we try to include it in the annotations
-            if (!attribute_included && self.index_all_attrs)
-                || indexed_attrs
-                    .binary_search_by(|s| s.as_str().cmp(key))
-                    .is_ok()
-            {
+            if should_index {
                 // If the value is compatible with metadata
                 if let Some(annotation) = get_annotation(value) {
                     let sanitized_key = sanitize_annotation_key(key);
@@ -761,8 +873,16 @@ impl SegmentTranslator {
                 }
             }
 
+            let should_metadata = should_metadata && !should_index
+                || should_index && !attribute_included
+                || (!attribute_included && self.metadata_all_attrs)
+                || self
+                    .metadata_attrs
+                    .binary_search_by(|s| s.as_str().cmp(key))
+                    .is_ok();
+
             // If still not included, add to metadata
-            if !attribute_included {
+            if should_metadata {
                 if let Some(value) = get_any_value(value) {
                     match &mut any_segment_builder {
                         AnyDocumentBuilder::Segment(builder) => {
@@ -835,5 +955,302 @@ impl SegmentTranslator {
         Ok(builder
             .with_annotation_capacity(max_annotations)
             .with_metadata_capacity(max_metadata))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    use std::time::{Duration, SystemTime, UNIX_EPOCH};
+
+    use opentelemetry::{
+        trace::{SpanContext, SpanId, TraceFlags, TraceId, TraceState},
+        InstrumentationScope, KeyValue,
+    };
+    use opentelemetry_sdk::trace::{SpanData, SpanEvents, SpanLinks};
+
+    /// Creates a valid X-Ray trace ID with the current timestamp.
+    fn create_valid_trace_id() -> TraceId {
+        let timestamp = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_secs() as u128;
+        // trace_id layout: 32-bit timestamp in the upper bits, 96-bit random in the lower bits
+        let random_part: u128 = 0xabcdef0123456789abcdef01;
+        let trace_id = (timestamp << 96) | random_part;
+        TraceId::from_bytes(trace_id.to_be_bytes())
+    }
+
+    /// Creates a minimal SpanData for testing.
+    fn create_span(
+        trace_id: TraceId,
+        span_id: SpanId,
+        kind: SpanKind,
+        attributes: Vec<KeyValue>,
+    ) -> SpanData {
+        let span_context = SpanContext::new(
+            trace_id,
+            span_id,
+            TraceFlags::SAMPLED,
+            false,
+            TraceState::default(),
+        );
+        let start_time = UNIX_EPOCH + Duration::from_secs(1_700_000_000);
+        let end_time = start_time + Duration::from_millis(100);
+
+        SpanData {
+            span_context,
+            parent_span_id: SpanId::INVALID,
+            parent_span_is_remote: false,
+            span_kind: kind,
+            name: "test-span".into(),
+            start_time,
+            end_time,
+            attributes,
+            dropped_attributes_count: 0,
+            events: SpanEvents::default(),
+            links: SpanLinks::default(),
+            status: opentelemetry::trace::Status::Unset,
+            instrumentation_scope: InstrumentationScope::builder("test").build(),
+        }
+    }
+
+    // =========================================================================
+    // Tests for init_document_builder — invalid span IDs
+    // =========================================================================
+
+    #[test]
+    fn test_init_document_builder_invalid_trace_id() {
+        // A span with TraceId::INVALID (all zeros) — the translator skips setting
+        // trace_id on the builder. For a Server span this means the resulting
+        // Segment builder will lack a trace_id, causing a ConstraintError::MissingTraceId
+        // when build() is called. translate_spans silently drops such spans.
+        let translator = SegmentTranslator::new().skip_timestamp_validation();
+        let span = create_span(
+            TraceId::INVALID,
+            SpanId::from_bytes([0, 0, 0, 0, 0, 0, 0, 1]),
+            SpanKind::Server,
+            vec![],
+        );
+
+        let batch = [span];
+        let documents = translator.translate_spans(&batch);
+        // The span is dropped because the segment builder has no trace_id
+        assert!(
+            documents.is_empty(),
+            "Span with INVALID trace_id should be silently dropped"
+        );
+    }
+
+    #[test]
+    fn test_init_document_builder_invalid_span_id() {
+        // A span with SpanId::INVALID (all zeros) → TranslationError::MissingSpanId
+        let translator = SegmentTranslator::new().skip_timestamp_validation();
+        let span = create_span(
+            create_valid_trace_id(),
+            SpanId::INVALID,
+            SpanKind::Server,
+            vec![],
+        );
+
+        let batch = [span];
+        let documents = translator.translate_spans(&batch);
+        assert!(
+            documents.is_empty(),
+            "Span with INVALID span_id should be silently dropped (MissingSpanId)"
+        );
+    }
+
+    // =========================================================================
+    // Tests for attribute routing — annotation./metadata. prefix stripping
+    // =========================================================================
+
+    #[test]
+    fn test_annotation_prefix_stripping() {
+        // An attribute with "annotation." prefix should have the prefix stripped
+        // and be added as an annotation.
+        let translator = SegmentTranslator::new().skip_timestamp_validation();
+        let span = create_span(
+            create_valid_trace_id(),
+            SpanId::from_bytes([0, 0, 0, 0, 0, 0, 0, 1]),
+            SpanKind::Server,
+            vec![KeyValue::new("annotation.my_key", "my_value")],
+        );
+        let batch = [span];
+        let documents = translator.translate_spans(&batch);
+        assert_eq!(documents.len(), 1);
+
+        let json: serde_json::Value = serde_json::to_value(&documents[0]).unwrap();
+
+        // The stripped key "my_key" should appear in annotations
+        let annotations = json.get("annotations").expect("annotations should exist");
+        assert_eq!(
+            annotations.get("my_key"),
+            Some(&serde_json::json!("my_value")),
+            "annotation.my_key should be stripped to my_key in annotations"
+        );
+
+        // It should NOT appear in metadata
+        assert!(
+            json.get("metadata").is_none() || json["metadata"].get("my_key").is_none(),
+            "annotation-prefixed key should not appear in metadata"
+        );
+    }
+
+    #[test]
+    fn test_metadata_prefix_stripping() {
+        // An attribute with "metadata." prefix should have the prefix stripped
+        // and be added as metadata.
+        let translator = SegmentTranslator::new().skip_timestamp_validation();
+        let span = create_span(
+            create_valid_trace_id(),
+            SpanId::from_bytes([0, 0, 0, 0, 0, 0, 0, 2]),
+            SpanKind::Server,
+            vec![KeyValue::new("metadata.my_key", "my_value")],
+        );
+
+        let batch = [span];
+        let documents = translator.translate_spans(&batch);
+        assert_eq!(documents.len(), 1);
+
+        let json: serde_json::Value = serde_json::to_value(&documents[0]).unwrap();
+
+        // The stripped key "my_key" should appear in metadata
+        let metadata = json.get("metadata").expect("metadata should exist");
+        assert_eq!(
+            metadata.get("my_key"),
+            Some(&serde_json::json!("my_value")),
+            "metadata.my_key should be stripped to my_key in metadata"
+        );
+
+        // It should NOT appear in annotations
+        assert!(
+            json.get("annotations").is_none() || json["annotations"].get("my_key").is_none(),
+            "metadata-prefixed key should not appear in annotations"
+        );
+    }
+
+    // =========================================================================
+    // Tests for with_indexed_attr deduplication
+    // =========================================================================
+
+    #[test]
+    fn test_with_indexed_attr_deduplication() {
+        // Calling with_indexed_attr twice with the same key should not create
+        // duplicates. We verify indirectly: the attribute should appear as an
+        // annotation (proving it's in the indexed list) and only once.
+        let translator = SegmentTranslator::new()
+            .skip_timestamp_validation()
+            .with_indexed_attr("same_key".to_string())
+            .with_indexed_attr("same_key".to_string());
+
+        let span = create_span(
+            create_valid_trace_id(),
+            SpanId::from_bytes([0, 0, 0, 0, 0, 0, 0, 3]),
+            SpanKind::Server,
+            vec![KeyValue::new("same_key", "the_value")],
+        );
+
+        let batch = [span];
+        let documents = translator.translate_spans(&batch);
+        assert_eq!(documents.len(), 1);
+
+        let json: serde_json::Value = serde_json::to_value(&documents[0]).unwrap();
+
+        // The key should appear as an annotation (indexed)
+        let annotations = json.get("annotations").expect("annotations should exist");
+        assert_eq!(
+            annotations.get("same_key"),
+            Some(&serde_json::json!("the_value")),
+            "same_key should be indexed as annotation despite duplicate with_indexed_attr calls"
+        );
+    }
+
+    // =========================================================================
+    // Tests for with_metadata_attr deduplication
+    // =========================================================================
+
+    #[test]
+    fn test_with_metadata_attr_deduplication() {
+        // Calling with_metadata_attr twice with the same key should not create
+        // duplicates. We verify indirectly: the attribute should appear in
+        // metadata (proving it's in the metadata list) and only once.
+        let translator = SegmentTranslator::new()
+            .skip_timestamp_validation()
+            .with_metadata_attr("same_key".to_string())
+            .with_metadata_attr("same_key".to_string());
+
+        let span = create_span(
+            create_valid_trace_id(),
+            SpanId::from_bytes([0, 0, 0, 0, 0, 0, 0, 4]),
+            SpanKind::Server,
+            vec![KeyValue::new("same_key", "the_value")],
+        );
+
+        let batch = [span];
+        let documents = translator.translate_spans(&batch);
+        assert_eq!(documents.len(), 1);
+
+        let json: serde_json::Value = serde_json::to_value(&documents[0]).unwrap();
+
+        // The key should appear in metadata
+        let metadata = json.get("metadata").expect("metadata should exist");
+        assert_eq!(
+            metadata.get("same_key"),
+            Some(&serde_json::json!("the_value")),
+            "same_key should be in metadata despite duplicate with_metadata_attr calls"
+        );
+
+        // Verify it appears exactly once (not duplicated in the JSON object)
+        let metadata_obj = metadata.as_object().expect("metadata should be an object");
+        let same_key_count = metadata_obj.keys().filter(|k| *k == "same_key").count();
+        assert_eq!(
+            same_key_count, 1,
+            "same_key should appear exactly once in metadata"
+        );
+    }
+
+    // =========================================================================
+    // Tests for indexed attributes overriding metadata prefix
+    // =========================================================================
+
+    #[test]
+    fn test_metadata_prefix_overridden_by_indexed_attr() {
+        // When an attribute has the "metadata." prefix but its stripped key is
+        // explicitly registered as an indexed attribute, the indexed-attr lookup
+        // wins: should_index becomes true, which flips should_metadata to false
+        // (line 876: should_metadata = should_metadata && !should_index).
+        // The attribute should therefore appear in annotations, not metadata.
+        let translator = SegmentTranslator::new()
+            .skip_timestamp_validation()
+            .with_indexed_attr("my_indexed_attr".to_string());
+
+        let span = create_span(
+            create_valid_trace_id(),
+            SpanId::from_bytes([0, 0, 0, 0, 0, 0, 0, 5]),
+            SpanKind::Server,
+            vec![KeyValue::new("metadata.my_indexed_attr", "hello")],
+        );
+
+        let batch = [span];
+        let documents = translator.translate_spans(&batch);
+        assert_eq!(documents.len(), 1);
+
+        let json: serde_json::Value = serde_json::to_value(&documents[0]).unwrap();
+
+        // The stripped key should appear in annotations (indexed wins)
+        let annotations = json.get("annotations").expect("annotations should exist");
+        assert_eq!(
+            annotations.get("my_indexed_attr"),
+            Some(&serde_json::json!("hello")),
+            "metadata.my_indexed_attr should be routed to annotations when the key is indexed"
+        );
+
+        // It should NOT appear in metadata
+        assert!(
+            json.get("metadata").is_none() || json["metadata"].get("my_indexed_attr").is_none(),
+            "indexed attr should not appear in metadata even with metadata. prefix"
+        );
     }
 }

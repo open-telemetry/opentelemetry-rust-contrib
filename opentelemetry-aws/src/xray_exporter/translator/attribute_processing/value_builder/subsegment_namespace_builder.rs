@@ -35,14 +35,12 @@ impl SubsegmentNamespaceBuilder {
         if value.as_str() == "aws-api" {
             self.rpc_system_is_aws_api = true;
         }
-
-        false
+        self.rpc_system_is_aws_api
     }
     fn aws_service_is_some(&mut self, value: &Value) -> bool {
         if !value.as_str().is_empty() {
             self.aws_service_is_some = true;
         }
-
         false
     }
 }
@@ -69,4 +67,143 @@ impl<'v> SpanAttributeProcessor<'v, 2> for SubsegmentNamespaceBuilder {
         (semconv::RPC_SYSTEM, Self::rpc_system_is_aws_api),
         (semconv::AWS_SERVICE, Self::aws_service_is_some),
     ];
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::xray_exporter::types::{
+        Id, SegmentDocumentBuilder, SubsegmentDocumentBuilder, TraceId,
+    };
+
+    /// Finalize a subsegment builder by setting required fields, build it,
+    /// and return the JSON string for assertion.
+    fn build_subsegment_json(builder: AnyDocumentBuilder<'_>) -> String {
+        match builder {
+            AnyDocumentBuilder::Subsegment(mut b) => {
+                b.name("test-subsegment").unwrap();
+                b.id(Id::from(0xABCDu64));
+                b.parent_id(Id::from(0x1234u64));
+                b.start_time(1_000_000.0);
+                b.trace_id(TraceId::new(), true).unwrap();
+                b.build().unwrap().to_string()
+            }
+            _ => panic!("expected Subsegment variant"),
+        }
+    }
+
+    /// Finalize a segment builder by setting required fields, build it,
+    /// and return the JSON string for assertion.
+    fn build_segment_json(builder: AnyDocumentBuilder<'_>) -> String {
+        match builder {
+            AnyDocumentBuilder::Segment(mut b) => {
+                b.name("test-segment").unwrap();
+                b.id(Id::from(0xABCDu64));
+                b.start_time(1_000_000.0);
+                b.trace_id(TraceId::new(), true).unwrap();
+                b.build().unwrap().to_string()
+            }
+            _ => panic!("expected Segment variant"),
+        }
+    }
+
+    /// Extract the namespace value from JSON output, or None if not present.
+    fn extract_namespace(json: &str) -> Option<String> {
+        let v: serde_json::Value = serde_json::from_str(json).unwrap();
+        v.get("namespace")
+            .and_then(|n| n.as_str())
+            .map(|s| s.to_string())
+    }
+
+    #[test]
+    fn test_resolve_namespace_aws() {
+        // rpc_system = "aws-api" → Namespace::Aws ("aws")
+        let rpc_system = Value::String("aws-api".into());
+        let mut builder = SubsegmentNamespaceBuilder::new(false);
+        builder.rpc_system_is_aws_api(&rpc_system);
+        let mut doc = AnyDocumentBuilder::Subsegment(SubsegmentDocumentBuilder::default());
+        builder.resolve(&mut doc).unwrap();
+        let json = build_subsegment_json(doc);
+        assert_eq!(
+            extract_namespace(&json).as_deref(),
+            Some("aws"),
+            "rpc_system=aws-api should produce namespace 'aws', got: {json}"
+        );
+
+        // aws_service is set (non-empty) → Namespace::Aws ("aws")
+        let aws_service = Value::String("DynamoDB".into());
+        let mut builder = SubsegmentNamespaceBuilder::new(false);
+        builder.aws_service_is_some(&aws_service);
+        let mut doc = AnyDocumentBuilder::Subsegment(SubsegmentDocumentBuilder::default());
+        builder.resolve(&mut doc).unwrap();
+        let json = build_subsegment_json(doc);
+        assert_eq!(
+            extract_namespace(&json).as_deref(),
+            Some("aws"),
+            "aws_service set should produce namespace 'aws', got: {json}"
+        );
+
+        // Both rpc_system=aws-api AND aws_service set → still Namespace::Aws
+        let rpc_system = Value::String("aws-api".into());
+        let aws_service = Value::String("S3".into());
+        let mut builder = SubsegmentNamespaceBuilder::new(true);
+        builder.rpc_system_is_aws_api(&rpc_system);
+        builder.aws_service_is_some(&aws_service);
+        let mut doc = AnyDocumentBuilder::Subsegment(SubsegmentDocumentBuilder::default());
+        builder.resolve(&mut doc).unwrap();
+        let json = build_subsegment_json(doc);
+        assert_eq!(
+            extract_namespace(&json).as_deref(),
+            Some("aws"),
+            "both aws indicators should produce namespace 'aws', got: {json}"
+        );
+    }
+
+    #[test]
+    fn test_resolve_namespace_remote_and_none() {
+        // span_kind_is_client=true, no AWS indicators → Namespace::Remote ("remote")
+        let builder = SubsegmentNamespaceBuilder::new(true);
+        let mut doc = AnyDocumentBuilder::Subsegment(SubsegmentDocumentBuilder::default());
+        builder.resolve(&mut doc).unwrap();
+        let json = build_subsegment_json(doc);
+        assert_eq!(
+            extract_namespace(&json).as_deref(),
+            Some("remote"),
+            "client span without aws indicators should produce namespace 'remote', got: {json}"
+        );
+
+        // span_kind_is_client=false, no AWS indicators → no namespace
+        let builder = SubsegmentNamespaceBuilder::new(false);
+        let mut doc = AnyDocumentBuilder::Subsegment(SubsegmentDocumentBuilder::default());
+        builder.resolve(&mut doc).unwrap();
+        let json = build_subsegment_json(doc);
+        assert!(
+            extract_namespace(&json).is_none(),
+            "non-client span without aws indicators should have no namespace, got: {json}"
+        );
+
+        // rpc_system is set but NOT "aws-api" + not client → no namespace
+        let rpc_system = Value::String("grpc".into());
+        let mut builder = SubsegmentNamespaceBuilder::new(false);
+        builder.rpc_system_is_aws_api(&rpc_system);
+        let mut doc = AnyDocumentBuilder::Subsegment(SubsegmentDocumentBuilder::default());
+        builder.resolve(&mut doc).unwrap();
+        let json = build_subsegment_json(doc);
+        assert!(
+            extract_namespace(&json).is_none(),
+            "non-aws rpc_system without client should have no namespace, got: {json}"
+        );
+
+        // Segment builder → no namespace set (subsegment-only field)
+        let rpc_system = Value::String("aws-api".into());
+        let mut builder = SubsegmentNamespaceBuilder::new(true);
+        builder.rpc_system_is_aws_api(&rpc_system);
+        let mut doc = AnyDocumentBuilder::Segment(SegmentDocumentBuilder::default());
+        builder.resolve(&mut doc).unwrap();
+        let json = build_segment_json(doc);
+        assert!(
+            extract_namespace(&json).is_none(),
+            "segment builder should not have namespace, got: {json}"
+        );
+    }
 }

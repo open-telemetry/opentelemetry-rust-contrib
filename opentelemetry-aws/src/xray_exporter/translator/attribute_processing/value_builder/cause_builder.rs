@@ -19,6 +19,7 @@ use super::ValueBuilder;
 const EXCEPTION_EVENT_NAME: &str = "exception";
 const HTTP_EVENT_NAME: &str = "HTTP request failure";
 
+/// Builds error/fault cause information from span events and HTTP status codes.
 #[derive(Debug)]
 pub(in crate::xray_exporter::translator) struct CauseBuilder<'a> {
     events: &'a [Event],
@@ -277,4 +278,754 @@ impl<'v> SpanAttributeProcessor<'v, 7> for CauseBuilder<'v> {
         ),
         (semconv::AWS_HTTP_ERROR_EVENT, Self::aws_http_error_event),
     ];
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::xray_exporter::types::{Id, SubsegmentDocumentBuilder, TraceId};
+    use opentelemetry::trace::Status;
+    use opentelemetry::{KeyValue, Value};
+    use std::time::SystemTime;
+
+    /// Helper: create an Event with the given name and attributes.
+    fn make_event(name: &'static str, attrs: Vec<KeyValue>) -> Event {
+        Event::new(name, SystemTime::now(), attrs, 0)
+    }
+
+    /// Helper: finalize a subsegment builder, build it, and return JSON string.
+    fn build_json(builder: AnyDocumentBuilder<'_>) -> String {
+        match builder {
+            AnyDocumentBuilder::Subsegment(mut b) => {
+                b.name("test").unwrap();
+                b.id(Id::from(0xABCDu64));
+                b.parent_id(Id::from(0x1234u64));
+                b.start_time(1_000_000.0);
+                b.trace_id(TraceId::new(), true).unwrap();
+                b.build().unwrap().to_string()
+            }
+            AnyDocumentBuilder::Segment(mut b) => {
+                b.name("test").unwrap();
+                b.id(Id::from(0xABCDu64));
+                b.start_time(1_000_000.0);
+                b.trace_id(TraceId::new(), true).unwrap();
+                b.build().unwrap().to_string()
+            }
+        }
+    }
+
+    /// Helper: parse JSON string into serde_json::Value for field inspection.
+    fn parse_json(json: &str) -> serde_json::Value {
+        serde_json::from_str(json).unwrap()
+    }
+
+    // ---------------------------------------------------------------
+    // Test 1: No error, no exceptions → early return, no flags set
+    // ---------------------------------------------------------------
+
+    #[test]
+    fn test_resolve_no_error_no_exceptions() {
+        let events = [];
+        let status = Status::Ok;
+        let builder = CauseBuilder::new(&events, &status, false);
+
+        let mut doc = AnyDocumentBuilder::Subsegment(SubsegmentDocumentBuilder::default());
+        builder.resolve(&mut doc).unwrap();
+
+        let json = build_json(doc);
+        let parsed = parse_json(&json);
+        let obj = parsed.as_object().unwrap();
+
+        // No fault/error/throttle/cause fields should be present
+        assert!(!obj.contains_key("fault"), "fault should be absent");
+        assert!(!obj.contains_key("error"), "error should be absent");
+        assert!(!obj.contains_key("throttle"), "throttle should be absent");
+        assert!(!obj.contains_key("cause"), "cause should be absent");
+    }
+
+    // ---------------------------------------------------------------
+    // Test 2: HTTP 429 → throttle=true, error=true, fault=false
+    // ---------------------------------------------------------------
+
+    #[test]
+    fn test_resolve_http_429_throttle() {
+        let events = [];
+        let status = Status::Error {
+            description: "".into(),
+        };
+        let val_429 = Value::I64(429);
+        let mut builder = CauseBuilder::new(&events, &status, false);
+        builder.http_response_status_code(&val_429);
+
+        let mut doc = AnyDocumentBuilder::Subsegment(SubsegmentDocumentBuilder::default());
+        builder.resolve(&mut doc).unwrap();
+
+        let json = build_json(doc);
+        let parsed = parse_json(&json);
+
+        assert_eq!(parsed["throttle"], true, "throttle should be true for 429");
+        assert_eq!(parsed["error"], true, "error should be true for 429");
+        assert!(
+            !parsed.as_object().unwrap().contains_key("fault") || parsed["fault"] == false,
+            "fault should be false/absent for 429"
+        );
+    }
+
+    // ---------------------------------------------------------------
+    // Test 3: HTTP 4xx (not 429) → error=true, fault=false, throttle=false
+    // ---------------------------------------------------------------
+
+    #[test]
+    fn test_resolve_http_404_error() {
+        let events = [];
+        let status = Status::Error {
+            description: "".into(),
+        };
+        let val_404 = Value::I64(404);
+        let mut builder = CauseBuilder::new(&events, &status, false);
+        builder.http_response_status_code(&val_404);
+
+        let mut doc = AnyDocumentBuilder::Subsegment(SubsegmentDocumentBuilder::default());
+        builder.resolve(&mut doc).unwrap();
+
+        let json = build_json(doc);
+        let parsed = parse_json(&json);
+
+        assert_eq!(parsed["error"], true, "error should be true for 404");
+        assert!(
+            !parsed.as_object().unwrap().contains_key("fault") || parsed["fault"] == false,
+            "fault should be false/absent for 404"
+        );
+        assert!(
+            !parsed.as_object().unwrap().contains_key("throttle") || parsed["throttle"] == false,
+            "throttle should be false/absent for 404"
+        );
+    }
+
+    // ---------------------------------------------------------------
+    // Test 4: HTTP 5xx → fault=true, error=false
+    // ---------------------------------------------------------------
+
+    #[test]
+    fn test_resolve_http_500_fault() {
+        let events = [];
+        let status = Status::Error {
+            description: "".into(),
+        };
+        let val_500 = Value::I64(500);
+        let mut builder = CauseBuilder::new(&events, &status, false);
+        builder.http_response_status_code(&val_500);
+
+        let mut doc = AnyDocumentBuilder::Subsegment(SubsegmentDocumentBuilder::default());
+        builder.resolve(&mut doc).unwrap();
+
+        let json = build_json(doc);
+        let parsed = parse_json(&json);
+
+        assert_eq!(parsed["fault"], true, "fault should be true for 500");
+        assert!(
+            !parsed.as_object().unwrap().contains_key("error") || parsed["error"] == false,
+            "error should be false/absent for 500"
+        );
+    }
+
+    // ---------------------------------------------------------------
+    // Test 5: span_in_error with no HTTP code → fault=true (default)
+    // ---------------------------------------------------------------
+
+    #[test]
+    fn test_resolve_span_error_no_http_code_defaults_to_fault() {
+        let events = [];
+        let status = Status::Error {
+            description: "something failed".into(),
+        };
+        let builder = CauseBuilder::new(&events, &status, false);
+
+        let mut doc = AnyDocumentBuilder::Subsegment(SubsegmentDocumentBuilder::default());
+        builder.resolve(&mut doc).unwrap();
+
+        let json = build_json(doc);
+        let parsed = parse_json(&json);
+
+        assert_eq!(
+            parsed["fault"], true,
+            "fault should be true when span is in error with no HTTP code"
+        );
+    }
+
+    // ---------------------------------------------------------------
+    // Test 6: Exception event with type and message attributes
+    // ---------------------------------------------------------------
+
+    #[test]
+    fn test_resolve_exception_event_with_type_and_message() {
+        let events = vec![make_event(
+            "exception",
+            vec![
+                KeyValue::new("exception.type", "RuntimeError"),
+                KeyValue::new("exception.message", "null pointer"),
+            ],
+        )];
+        let status = Status::Error {
+            description: "".into(),
+        };
+        let builder = CauseBuilder::new(&events, &status, false);
+
+        let mut doc = AnyDocumentBuilder::Subsegment(SubsegmentDocumentBuilder::default());
+        builder.resolve(&mut doc).unwrap();
+
+        let json = build_json(doc);
+        let parsed = parse_json(&json);
+
+        // Should have cause with exceptions
+        let cause = &parsed["cause"];
+        assert!(cause.is_object(), "cause should be present as object");
+        let exceptions = cause["exceptions"].as_array().unwrap();
+        assert_eq!(exceptions.len(), 1);
+        assert_eq!(exceptions[0]["type"], "RuntimeError");
+        assert_eq!(exceptions[0]["message"], "null pointer");
+        // remote should be absent (false is skipped)
+        assert!(
+            !exceptions[0].as_object().unwrap().contains_key("remote")
+                || exceptions[0]["remote"] == false,
+            "remote should be false/absent for non-remote span"
+        );
+    }
+
+    // ---------------------------------------------------------------
+    // Test 7: Exception event with remote span → remote=true
+    // ---------------------------------------------------------------
+
+    #[test]
+    fn test_resolve_exception_event_remote_span() {
+        let events = vec![make_event(
+            "exception",
+            vec![KeyValue::new("exception.type", "TimeoutError")],
+        )];
+        let status = Status::Error {
+            description: "timeout".into(),
+        };
+        // span_is_remote = true
+        let builder = CauseBuilder::new(&events, &status, true);
+
+        let mut doc = AnyDocumentBuilder::Subsegment(SubsegmentDocumentBuilder::default());
+        builder.resolve(&mut doc).unwrap();
+
+        let json = build_json(doc);
+        let parsed = parse_json(&json);
+
+        let exceptions = parsed["cause"]["exceptions"].as_array().unwrap();
+        assert_eq!(exceptions.len(), 1);
+        assert_eq!(
+            exceptions[0]["remote"], true,
+            "remote should be true for remote span"
+        );
+    }
+
+    // ---------------------------------------------------------------
+    // Test 8: HTTP_EVENT_NAME with rpc.system=aws-api → special message
+    // ---------------------------------------------------------------
+
+    #[test]
+    fn test_resolve_http_event_with_aws_api_rpc_system() {
+        let events = vec![make_event("HTTP request failure", vec![])];
+        let status = Status::Error {
+            description: "".into(),
+        };
+        // Bind all Value references to local variables to satisfy lifetimes
+        let val_aws_api = Value::String("aws-api".into());
+        let val_503 = Value::I64(503);
+        let val_err_msg = Value::String("Service Unavailable".into());
+        let val_err_event = Value::String("ServiceUnavailableException".into());
+
+        let mut builder = CauseBuilder::new(&events, &status, false);
+        builder.rpc_system_is_aws_api(&val_aws_api);
+        builder.http_response_status_code(&val_503);
+        builder.aws_http_error_message(&val_err_msg);
+        builder.aws_http_error_event(&val_err_event);
+
+        let mut doc = AnyDocumentBuilder::Subsegment(SubsegmentDocumentBuilder::default());
+        builder.resolve(&mut doc).unwrap();
+
+        let json = build_json(doc);
+        let parsed = parse_json(&json);
+
+        let exceptions = parsed["cause"]["exceptions"].as_array().unwrap();
+        assert_eq!(exceptions.len(), 1);
+
+        // The message format is: "{http_response_status_code}@{timestamp}@{aws_http_error_message}"
+        let message = exceptions[0]["message"].as_str().unwrap();
+        assert!(
+            message.starts_with("503@"),
+            "message should start with status code: {message}"
+        );
+        assert!(
+            message.ends_with("@Service Unavailable"),
+            "message should end with error message: {message}"
+        );
+
+        // exception_type should be the aws_http_error_event
+        assert_eq!(exceptions[0]["type"], "ServiceUnavailableException");
+
+        // remote should be true (set explicitly in the HTTP_EVENT_NAME branch)
+        assert_eq!(exceptions[0]["remote"], true);
+    }
+
+    // ---------------------------------------------------------------
+    // Test 9: Exception without message → falls back to span status description
+    // ---------------------------------------------------------------
+
+    #[test]
+    fn test_resolve_exception_without_message_falls_back_to_status_description() {
+        let events = vec![make_event(
+            "exception",
+            vec![KeyValue::new("exception.type", "IOError")],
+        )];
+        let status = Status::Error {
+            description: "disk full".into(),
+        };
+        let builder = CauseBuilder::new(&events, &status, false);
+
+        let mut doc = AnyDocumentBuilder::Subsegment(SubsegmentDocumentBuilder::default());
+        builder.resolve(&mut doc).unwrap();
+
+        let json = build_json(doc);
+        let parsed = parse_json(&json);
+
+        let exceptions = parsed["cause"]["exceptions"].as_array().unwrap();
+        assert_eq!(exceptions.len(), 1);
+        assert_eq!(exceptions[0]["type"], "IOError");
+        assert_eq!(
+            exceptions[0]["message"], "disk full",
+            "should fall back to span status description"
+        );
+    }
+
+    // ---------------------------------------------------------------
+    // Test 10: Exception without message, no status description → falls back to http_status_text
+    // ---------------------------------------------------------------
+
+    #[test]
+    fn test_resolve_exception_without_message_falls_back_to_http_status_text() {
+        let events = vec![make_event(
+            "exception",
+            vec![KeyValue::new("exception.type", "HttpError")],
+        )];
+        // Empty description so it won't be used
+        let status = Status::Error {
+            description: "".into(),
+        };
+        let val_not_found = Value::String("Not Found".into());
+        let mut builder = CauseBuilder::new(&events, &status, false);
+        builder.http_status_text(&val_not_found);
+
+        let mut doc = AnyDocumentBuilder::Subsegment(SubsegmentDocumentBuilder::default());
+        builder.resolve(&mut doc).unwrap();
+
+        let json = build_json(doc);
+        let parsed = parse_json(&json);
+
+        let exceptions = parsed["cause"]["exceptions"].as_array().unwrap();
+        assert_eq!(exceptions.len(), 1);
+        assert_eq!(
+            exceptions[0]["message"], "Not Found",
+            "should fall back to http_status_text"
+        );
+    }
+
+    // ---------------------------------------------------------------
+    // Test 11: Rust stack trace parsing
+    // ---------------------------------------------------------------
+
+    #[test]
+    fn test_resolve_rust_stack_trace_parsing() {
+        // Simulate a Rust-style backtrace
+        let stacktrace = "\
+   0: 0x55a1b2c3d4e5 - std::backtrace::Backtrace::create\n\
+             at /rustc/abc123/library/std/src/backtrace.rs:300:13\n\
+   1: myapp::handler::process_request\n\
+             at src/handler.rs:42:5\n\
+   2: 0x55a1b2c3d4e6 - core::ops::function::FnOnce::call_once\n";
+
+        let events = vec![make_event(
+            "exception",
+            vec![
+                KeyValue::new("exception.type", "PanicError"),
+                KeyValue::new("exception.stacktrace", stacktrace),
+            ],
+        )];
+        let status = Status::Error {
+            description: "panicked".into(),
+        };
+        let val_rust = Value::String("rust".into());
+        let mut builder = CauseBuilder::new(&events, &status, false);
+        builder.sdk_lang(&val_rust);
+
+        let mut doc = AnyDocumentBuilder::Subsegment(SubsegmentDocumentBuilder::default());
+        builder.resolve(&mut doc).unwrap();
+
+        let json = build_json(doc);
+        let parsed = parse_json(&json);
+
+        let exceptions = parsed["cause"]["exceptions"].as_array().unwrap();
+        assert_eq!(exceptions.len(), 1);
+
+        let stack = exceptions[0]["stack"].as_array().unwrap();
+        // Frame 0: has IP, label, path, line
+        assert_eq!(stack[0]["label"], "std::backtrace::Backtrace::create");
+        assert_eq!(
+            stack[0]["path"],
+            "/rustc/abc123/library/std/src/backtrace.rs"
+        );
+        assert_eq!(stack[0]["line"], 300);
+
+        // Frame 1: no IP, has label, path, line
+        assert_eq!(stack[1]["label"], "myapp::handler::process_request");
+        assert_eq!(stack[1]["path"], "src/handler.rs");
+        assert_eq!(stack[1]["line"], 42);
+
+        // Frame 2: has IP, label, but no path/line (no "at" line follows)
+        assert_eq!(stack[2]["label"], "core::ops::function::FnOnce::call_once");
+        assert!(
+            !stack[2].as_object().unwrap().contains_key("path"),
+            "frame 2 should have no path"
+        );
+    }
+
+    // ---------------------------------------------------------------
+    // Test: Non-rust sdk_lang does NOT parse stacktrace
+    // ---------------------------------------------------------------
+
+    #[test]
+    fn test_resolve_non_rust_sdk_lang_does_not_parse_stacktrace() {
+        let stacktrace = "\
+   0: 0x55a1b2c3d4e5 - std::backtrace::Backtrace::create\n\
+             at /rustc/abc123/library/std/src/backtrace.rs:300:13\n";
+
+        let events = vec![make_event(
+            "exception",
+            vec![
+                KeyValue::new("exception.type", "Error"),
+                KeyValue::new("exception.stacktrace", stacktrace),
+            ],
+        )];
+        let status = Status::Error {
+            description: "err".into(),
+        };
+        let val_python = Value::String("python".into());
+        let mut builder = CauseBuilder::new(&events, &status, false);
+        builder.sdk_lang(&val_python);
+
+        let mut doc = AnyDocumentBuilder::Subsegment(SubsegmentDocumentBuilder::default());
+        builder.resolve(&mut doc).unwrap();
+
+        let json = build_json(doc);
+        let parsed = parse_json(&json);
+
+        let exceptions = parsed["cause"]["exceptions"].as_array().unwrap();
+        assert_eq!(exceptions.len(), 1);
+        // Stack should be empty — non-rust sdk_lang doesn't parse stacktrace
+        assert!(
+            !exceptions[0].as_object().unwrap().contains_key("stack")
+                || exceptions[0]["stack"].as_array().unwrap().is_empty(),
+            "stack should be empty for non-rust sdk_lang"
+        );
+    }
+
+    // ---------------------------------------------------------------
+    // Test: http_status_code (deprecated) is also recognized
+    // ---------------------------------------------------------------
+
+    #[test]
+    fn test_resolve_deprecated_http_status_code() {
+        let events = [];
+        let status = Status::Error {
+            description: "".into(),
+        };
+        let val_502 = Value::I64(502);
+        let mut builder = CauseBuilder::new(&events, &status, false);
+        builder.http_status_code(&val_502);
+
+        let mut doc = AnyDocumentBuilder::Subsegment(SubsegmentDocumentBuilder::default());
+        builder.resolve(&mut doc).unwrap();
+
+        let json = build_json(doc);
+        let parsed = parse_json(&json);
+
+        assert_eq!(parsed["fault"], true, "502 should set fault=true");
+    }
+
+    // ---------------------------------------------------------------
+    // Test: http_status_code takes precedence over http_response_status_code
+    // ---------------------------------------------------------------
+
+    #[test]
+    fn test_resolve_http_status_code_precedence() {
+        // The code uses: self.http_status_code.or(self.http_response_status_code)
+        // So http_status_code takes precedence.
+        let events = [];
+        let status = Status::Error {
+            description: "".into(),
+        };
+        let val_429 = Value::I64(429);
+        let val_500 = Value::I64(500);
+        let mut builder = CauseBuilder::new(&events, &status, false);
+        builder.http_status_code(&val_429); // throttle
+        builder.http_response_status_code(&val_500); // would be fault
+
+        let mut doc = AnyDocumentBuilder::Subsegment(SubsegmentDocumentBuilder::default());
+        builder.resolve(&mut doc).unwrap();
+
+        let json = build_json(doc);
+        let parsed = parse_json(&json);
+
+        // http_status_code (429) should win → throttle + error
+        assert_eq!(
+            parsed["throttle"], true,
+            "http_status_code should take precedence"
+        );
+        assert_eq!(parsed["error"], true);
+    }
+
+    // ---------------------------------------------------------------
+    // Test: Multiple exception events produce multiple exceptions
+    // ---------------------------------------------------------------
+
+    #[test]
+    fn test_resolve_multiple_exception_events() {
+        let events = vec![
+            make_event(
+                "exception",
+                vec![
+                    KeyValue::new("exception.type", "FirstError"),
+                    KeyValue::new("exception.message", "first"),
+                ],
+            ),
+            make_event(
+                "exception",
+                vec![
+                    KeyValue::new("exception.type", "SecondError"),
+                    KeyValue::new("exception.message", "second"),
+                ],
+            ),
+        ];
+        let status = Status::Error {
+            description: "".into(),
+        };
+        let builder = CauseBuilder::new(&events, &status, false);
+
+        let mut doc = AnyDocumentBuilder::Subsegment(SubsegmentDocumentBuilder::default());
+        builder.resolve(&mut doc).unwrap();
+
+        let json = build_json(doc);
+        let parsed = parse_json(&json);
+
+        let exceptions = parsed["cause"]["exceptions"].as_array().unwrap();
+        assert_eq!(exceptions.len(), 2);
+        assert_eq!(exceptions[0]["type"], "FirstError");
+        assert_eq!(exceptions[0]["message"], "first");
+        assert_eq!(exceptions[1]["type"], "SecondError");
+        assert_eq!(exceptions[1]["message"], "second");
+    }
+
+    // ---------------------------------------------------------------
+    // Test: Exception event detected via attributes alone (not name)
+    // triggers include_exception via exception.type/message attributes
+    // ---------------------------------------------------------------
+
+    #[test]
+    fn test_resolve_exception_detected_by_attributes_not_name() {
+        // Event name is NOT "exception", but has exception.type attribute
+        // which sets include_exception = true
+        let events = vec![make_event(
+            "some_other_event",
+            vec![KeyValue::new("exception.type", "CustomError")],
+        )];
+        let status = Status::Error {
+            description: "custom".into(),
+        };
+        let builder = CauseBuilder::new(&events, &status, false);
+
+        let mut doc = AnyDocumentBuilder::Subsegment(SubsegmentDocumentBuilder::default());
+        builder.resolve(&mut doc).unwrap();
+
+        let json = build_json(doc);
+        let parsed = parse_json(&json);
+
+        let exceptions = parsed["cause"]["exceptions"].as_array().unwrap();
+        assert_eq!(exceptions.len(), 1);
+        assert_eq!(exceptions[0]["type"], "CustomError");
+        // Message should fall back to status description since exception.message not set
+        assert_eq!(exceptions[0]["message"], "custom");
+    }
+
+    // ---------------------------------------------------------------
+    // Test: has_exceptions=true but span NOT in error → resolve succeeds,
+    // but no error flags set (build would fail with CauseWithoutError)
+    // ---------------------------------------------------------------
+
+    #[test]
+    fn test_resolve_exception_event_without_span_error() {
+        let events = vec![make_event(
+            "exception",
+            vec![
+                KeyValue::new("exception.type", "Warning"),
+                KeyValue::new("exception.message", "something odd"),
+            ],
+        )];
+        // Status::Ok — span is NOT in error
+        let status = Status::Ok;
+        let builder = CauseBuilder::new(&events, &status, false);
+
+        let mut doc = AnyDocumentBuilder::Subsegment(SubsegmentDocumentBuilder::default());
+        // resolve() itself succeeds — it just sets fields on the builder
+        assert!(builder.resolve(&mut doc).is_ok());
+
+        // However, building the document will fail because cause is set
+        // without any error flag (fault/error/throttle)
+        match doc {
+            AnyDocumentBuilder::Subsegment(mut b) => {
+                b.name("test").unwrap();
+                b.id(Id::from(0xABCDu64));
+                b.parent_id(Id::from(0x1234u64));
+                b.start_time(1_000_000.0);
+                b.trace_id(TraceId::new(), true).unwrap();
+                assert!(
+                    b.build().is_err(),
+                    "build should fail with CauseWithoutError"
+                );
+            }
+            _ => panic!("expected Subsegment"),
+        }
+    }
+
+    // ---------------------------------------------------------------
+    // Test: Exception with no message AND empty status description AND empty http_status_text
+    // → no message field on exception
+    // ---------------------------------------------------------------
+
+    #[test]
+    fn test_resolve_exception_no_message_no_fallbacks() {
+        let events = vec![make_event(
+            "exception",
+            vec![KeyValue::new("exception.type", "UnknownError")],
+        )];
+        let status = Status::Error {
+            description: "".into(),
+        };
+        let val_empty = Value::String("".into());
+        let mut builder = CauseBuilder::new(&events, &status, false);
+        builder.http_status_text(&val_empty);
+
+        let mut doc = AnyDocumentBuilder::Subsegment(SubsegmentDocumentBuilder::default());
+        builder.resolve(&mut doc).unwrap();
+
+        let json = build_json(doc);
+        let parsed = parse_json(&json);
+
+        let exceptions = parsed["cause"]["exceptions"].as_array().unwrap();
+        assert_eq!(exceptions.len(), 1);
+        assert_eq!(exceptions[0]["type"], "UnknownError");
+        // No message should be set (empty description and empty http_status_text are skipped)
+        assert!(
+            !exceptions[0].as_object().unwrap().contains_key("message"),
+            "message should be absent when all fallbacks are empty"
+        );
+    }
+
+    // ---------------------------------------------------------------
+    // Test: code.file.path, code.line.number, code.module.name on event
+    // ---------------------------------------------------------------
+
+    #[test]
+    fn test_resolve_exception_with_code_attributes() {
+        let events = vec![make_event(
+            "exception",
+            vec![
+                KeyValue::new("exception.type", "CodeError"),
+                KeyValue::new("exception.message", "bad code"),
+                KeyValue::new("code.file.path", "src/main.rs"),
+                KeyValue::new("code.line.number", 42i64),
+                KeyValue::new("code.module.name", "myapp::main"),
+            ],
+        )];
+        let status = Status::Error {
+            description: "".into(),
+        };
+        let builder = CauseBuilder::new(&events, &status, false);
+
+        let mut doc = AnyDocumentBuilder::Subsegment(SubsegmentDocumentBuilder::default());
+        builder.resolve(&mut doc).unwrap();
+
+        let json = build_json(doc);
+        let parsed = parse_json(&json);
+
+        let exceptions = parsed["cause"]["exceptions"].as_array().unwrap();
+        assert_eq!(exceptions.len(), 1);
+
+        // The code attributes should produce a stack frame
+        let stack = exceptions[0]["stack"].as_array().unwrap();
+        assert_eq!(stack.len(), 1);
+        assert_eq!(stack[0]["path"], "src/main.rs");
+        assert_eq!(stack[0]["line"], 42);
+        assert_eq!(stack[0]["label"], "myapp::main");
+    }
+
+    // ---------------------------------------------------------------
+    // Test: HTTP_EVENT_NAME without rpc_system=aws-api is ignored
+    // ---------------------------------------------------------------
+
+    #[test]
+    fn test_resolve_http_event_without_aws_api_ignored() {
+        let events = vec![make_event("HTTP request failure", vec![])];
+        let status = Status::Error {
+            description: "".into(),
+        };
+        // rpc_system_is_aws_api is false by default
+        let builder = CauseBuilder::new(&events, &status, false);
+
+        let mut doc = AnyDocumentBuilder::Subsegment(SubsegmentDocumentBuilder::default());
+        builder.resolve(&mut doc).unwrap();
+
+        let json = build_json(doc);
+        let parsed = parse_json(&json);
+
+        // The HTTP event should NOT be treated as an exception
+        // Only fault should be set (span_in_error with no HTTP code)
+        assert_eq!(parsed["fault"], true);
+        assert!(
+            !parsed.as_object().unwrap().contains_key("cause"),
+            "cause should be absent when HTTP event is not recognized"
+        );
+    }
+
+    // ---------------------------------------------------------------
+    // Test: Non-exception, non-HTTP events are skipped
+    // ---------------------------------------------------------------
+
+    #[test]
+    fn test_resolve_irrelevant_events_skipped() {
+        let events = vec![
+            make_event("some_log", vec![KeyValue::new("key", "value")]),
+            make_event("another_event", vec![]),
+        ];
+        let status = Status::Error {
+            description: "".into(),
+        };
+        let builder = CauseBuilder::new(&events, &status, false);
+
+        let mut doc = AnyDocumentBuilder::Subsegment(SubsegmentDocumentBuilder::default());
+        builder.resolve(&mut doc).unwrap();
+
+        let json = build_json(doc);
+        let parsed = parse_json(&json);
+
+        // fault should be set (span_in_error, no HTTP code)
+        assert_eq!(parsed["fault"], true);
+        // No cause since no exception events
+        assert!(
+            !parsed.as_object().unwrap().contains_key("cause"),
+            "cause should be absent for irrelevant events"
+        );
+    }
 }

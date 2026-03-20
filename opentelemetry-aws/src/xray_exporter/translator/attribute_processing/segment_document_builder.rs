@@ -296,7 +296,7 @@ impl<'v> AnyDocumentBuilder<'v> {
             AnyDocumentBuilder::Subsegment(_) => false,
         }
     }
-    /// Handles `service.version` attribute for Elastic Beanstalk version (Segment-only).
+    /// Handles `enduser.id` attribute for user identification (Segment-only).
     fn enduser_id(&mut self, value: &'v Value) -> bool {
         match self {
             AnyDocumentBuilder::Segment(document_builder) => {
@@ -311,8 +311,16 @@ impl<'v> AnyDocumentBuilder<'v> {
         match self {
             AnyDocumentBuilder::Segment(_) => false,
             AnyDocumentBuilder::Subsegment(document_builder) => {
-                document_builder.sql().database_type(get_cow(value));
-                true
+                let sql_database_type = get_cow(value);
+                // The SemConv and ADOT documentation pretends that this must be set for DynamoDB,
+                // but the only effect it has on X-Ray side is to prevent it to correctly rendering
+                // the DynamoDB sub-segment operations.
+                if sql_database_type != "aws.dynamodb" {
+                    document_builder.sql().database_type(get_cow(value));
+                    true
+                } else {
+                    false
+                }
             }
         }
     }
@@ -335,7 +343,7 @@ impl<'v> AnyDocumentBuilder<'v> {
             }
         }
     }
-    /// Handles `db.query.text` attribute for SQL query (Subsegment-only).
+    /// Handles `db.connection_string` attribute for SQL connection string (Subsegment-only).
     fn sql_connection_string(&mut self, value: &'v Value) -> bool {
         match self {
             AnyDocumentBuilder::Segment(_) => false,
@@ -380,9 +388,16 @@ impl<'v> AnyDocumentBuilder<'v> {
         match self {
             AnyDocumentBuilder::Segment(_) => false,
             AnyDocumentBuilder::Subsegment(document_builder) => {
-                if let Some(table_name) = get_string_vec(value).unwrap().get(0) {
-                    document_builder.aws().table_name(Cow::from(table_name));
-                    true
+                if let Some(table_names) = get_string_vec(value) {
+                    if !table_names.is_empty() {
+                        document_builder
+                            .aws()
+                            .table_name(Cow::from(table_names.get(0).unwrap()));
+                        document_builder.aws().table_names(table_names);
+                        true
+                    } else {
+                        true
+                    }
                 } else {
                     false
                 }
@@ -511,4 +526,147 @@ impl<'v> SpanAttributeProcessor<'v, 42> for AnyDocumentBuilder<'v> {
         (semconv::AWS_TABLE_NAME, Self::aws_table_name),
         (semconv::AWS_HTTP_TRACED, Self::http_request_traced),
     ];
+}
+
+#[cfg(test)]
+mod tests {
+    use super::super::super::AnyDocumentBuilder;
+    use crate::xray_exporter::types::{Id, SubsegmentDocumentBuilder, TraceId};
+    use opentelemetry::{Array, Value};
+
+    /// Finalize a subsegment builder by setting required fields, build it,
+    /// and return the JSON string for assertion.
+    fn build_subsegment_json(builder: AnyDocumentBuilder<'_>) -> String {
+        match builder {
+            AnyDocumentBuilder::Subsegment(mut b) => {
+                b.name("test-subsegment").unwrap();
+                b.id(Id::from(0xABCDu64));
+                b.parent_id(Id::from(0x1234u64));
+                b.start_time(1_000_000.0);
+                b.trace_id(TraceId::new(), true).unwrap();
+                let doc = b.build().unwrap();
+                doc.to_string()
+            }
+            _ => panic!("expected Subsegment variant"),
+        }
+    }
+
+    // Tests for sql_database_type
+
+    #[test]
+    fn sql_database_type_skips_dynamodb() {
+        // 'aws.dynamodb' should be skipped to prevent X-Ray rendering issues
+        let mut builder = AnyDocumentBuilder::Subsegment(SubsegmentDocumentBuilder::default());
+        let value = Value::String("aws.dynamodb".into());
+        let result = builder.sql_database_type(&value);
+        assert!(!result, "aws.dynamodb should return false (not included)");
+
+        // Verify the sql.database_type field is NOT set in the output
+        let json = build_subsegment_json(builder);
+        assert!(
+            !json.contains("\"database_type\""),
+            "database_type should not appear in JSON for aws.dynamodb"
+        );
+    }
+
+    #[test]
+    fn sql_database_type_sets_for_other_db() {
+        // Non-DynamoDB db types should be accepted and set the sql.database_type field
+        let mut builder = AnyDocumentBuilder::Subsegment(SubsegmentDocumentBuilder::default());
+        let value = Value::String("postgresql".into());
+        let result = builder.sql_database_type(&value);
+        assert!(result, "postgresql should return true");
+
+        let json = build_subsegment_json(builder);
+        assert!(
+            json.contains("\"database_type\":\"postgresql\""),
+            "database_type should be 'postgresql' in JSON, got: {json}"
+        );
+    }
+
+    // Tests for aws_table_names
+
+    #[test]
+    fn aws_table_names_sets_both_fields() {
+        // Valid string array sets both table_name (first element) and table_names (all)
+        let mut builder = AnyDocumentBuilder::Subsegment(SubsegmentDocumentBuilder::default());
+        let value = Value::Array(Array::String(vec!["table1".into(), "table2".into()]));
+        let result = builder.aws_table_names(&value);
+        assert!(result, "non-empty string array should return true");
+
+        let json = build_subsegment_json(builder);
+        assert!(
+            json.contains("\"table_name\":\"table1\""),
+            "table_name should be first element 'table1', got: {json}"
+        );
+        assert!(
+            json.contains("\"table_names\""),
+            "table_names should be present in JSON, got: {json}"
+        );
+    }
+
+    #[test]
+    fn aws_table_names_empty_array() {
+        // Empty array returns true but doesn't set table_name
+        let mut builder = AnyDocumentBuilder::Subsegment(SubsegmentDocumentBuilder::default());
+        let value = Value::Array(Array::String(vec![]));
+        let result = builder.aws_table_names(&value);
+        assert!(result, "empty string array should return true");
+
+        let json = build_subsegment_json(builder);
+        assert!(
+            !json.contains("\"table_name\""),
+            "table_name should not appear for empty array, got: {json}"
+        );
+    }
+
+    #[test]
+    fn aws_table_names_non_string_array() {
+        // Non-string-array value returns false
+        let mut builder = AnyDocumentBuilder::Subsegment(SubsegmentDocumentBuilder::default());
+        let value = Value::I64(42);
+        let result = builder.aws_table_names(&value);
+        assert!(!result, "non-string-array value should return false");
+    }
+
+    // Tests for http_request_traced
+
+    #[test]
+    fn http_request_traced_true_sets_flag() {
+        // Value::Bool(true) should set the traced flag
+        let mut builder = AnyDocumentBuilder::Subsegment(SubsegmentDocumentBuilder::default());
+        let value = Value::Bool(true);
+        let result = builder.http_request_traced(&value);
+        assert!(result, "Bool(true) should return true");
+
+        let json = build_subsegment_json(builder);
+        assert!(
+            json.contains("\"traced\":true"),
+            "traced should be true in JSON, got: {json}"
+        );
+    }
+
+    #[test]
+    fn http_request_traced_false_does_not_set_flag() {
+        // Value::Bool(false) should NOT set the traced flag
+        let mut builder = AnyDocumentBuilder::Subsegment(SubsegmentDocumentBuilder::default());
+        let value = Value::Bool(false);
+        let result = builder.http_request_traced(&value);
+        assert!(!result, "Bool(false) should return false");
+
+        let json = build_subsegment_json(builder);
+        assert!(
+            !json.contains("\"traced\""),
+            "traced should not appear in JSON for false, got: {json}"
+        );
+    }
+
+    #[test]
+    fn http_request_traced_non_bool_returns_false() {
+        // Non-bool value should return false
+        let mut builder = AnyDocumentBuilder::Subsegment(SubsegmentDocumentBuilder::default());
+        let value = Value::String("true".into());
+        let result = builder.http_request_traced(&value);
+        assert!(!result, "non-bool value should return false");
+    }
 }
