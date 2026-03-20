@@ -34,9 +34,6 @@ impl<'a> AwsOperationBuilder<'a> {
 
 impl<'value> ValueBuilder<'value> for AwsOperationBuilder<'value> {
     fn resolve(self, segment_builder: &mut AnyDocumentBuilder<'value>) -> Result<()> {
-        let raw = &raw mut *segment_builder;
-
-        let segment_builder = unsafe { &mut *raw };
         if let Some(operation) = self.aws_operation.or(self.rpc_method) {
             if let AnyDocumentBuilder::Subsegment(builder) = segment_builder {
                 builder.aws().operation(Cow::Borrowed(operation));
