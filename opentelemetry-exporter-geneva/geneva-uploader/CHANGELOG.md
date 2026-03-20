@@ -1,5 +1,10 @@
 # Changelog
 
+## [Unreleased]
+
+### Added
+- On Behalf Of (OBO) upload support: `onbehalf_identity` and `onbehalf_annotations` fields on `GenevaClientConfig` for appending OBO query parameters to the GIG upload URI
+
 ## [0.4.0] - 2025-11-12
 
 ### Changed

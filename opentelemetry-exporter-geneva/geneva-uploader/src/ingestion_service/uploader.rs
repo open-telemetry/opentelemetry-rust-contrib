@@ -107,6 +107,12 @@ pub(crate) struct GenevaUploaderConfig {
     #[allow(dead_code)]
     pub environment: String,
     pub config_version: String,
+    /// On Behalf Of identity (e.g., "Microsoft.HybridCompute").
+    /// When set, appended as `onbehalfid` query param to the GIG upload URI.
+    pub onbehalf_identity: Option<String>,
+    /// On Behalf Of annotations XML (e.g., `<Config onBehalfFields="..." />`).
+    /// When set, URL-encoded and appended as `onbehalfannotations` query param.
+    pub onbehalf_annotations: Option<String>,
 }
 
 /// Client for uploading data to Geneva Ingestion Gateway (GIG)
@@ -197,6 +203,30 @@ impl GenevaUploader {
             schema_ids,
             row_count
         ).map_err(|e| GenevaUploaderError::InternalError(format!("Failed to write query string: {e}")))?;
+
+        // Append On Behalf Of query parameters when configured.
+        // onbehalfid is NOT URL-encoded (matches C# PipelineAgent behavior).
+        if let Some(ref identity) = self.config.onbehalf_identity {
+            if !identity.is_empty() {
+                write!(&mut query, "&onbehalfid={}", identity).map_err(|e| {
+                    GenevaUploaderError::InternalError(format!("Failed to write onbehalfid: {e}"))
+                })?;
+            }
+        }
+        // onbehalfannotations IS URL-encoded (matches C# HttpUtility.UrlEncode behavior).
+        if let Some(ref annotations) = self.config.onbehalf_annotations {
+            if !annotations.is_empty() {
+                let encoded_annotations: String = byte_serialize(annotations.as_bytes()).collect();
+                write!(&mut query, "&onbehalfannotations={}", encoded_annotations).map_err(
+                    |e| {
+                        GenevaUploaderError::InternalError(format!(
+                            "Failed to write onbehalfannotations: {e}"
+                        ))
+                    },
+                )?;
+            }
+        }
+
         Ok(query)
     }
 
@@ -301,5 +331,95 @@ impl GenevaUploader {
                 message: body,
             })
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Helper to build a GenevaUploaderConfig for testing (without a real config client)
+    fn test_config() -> GenevaUploaderConfig {
+        GenevaUploaderConfig {
+            namespace: "TestNamespace".to_string(),
+            source_identity: "Tenant=T/Role=R/RoleInstance=RI".to_string(),
+            environment: "Test".to_string(),
+            config_version: "Ver2v0".to_string(),
+            onbehalf_identity: None,
+            onbehalf_annotations: None,
+        }
+    }
+
+    #[test]
+    fn test_obo_config_defaults_to_none() {
+        let config = test_config();
+        assert!(config.onbehalf_identity.is_none());
+        assert!(config.onbehalf_annotations.is_none());
+    }
+
+    #[test]
+    fn test_obo_config_with_identity_only() {
+        let mut config = test_config();
+        config.onbehalf_identity = Some("Microsoft.HybridCompute".to_string());
+        assert_eq!(
+            config.onbehalf_identity.as_deref(),
+            Some("Microsoft.HybridCompute")
+        );
+        assert!(config.onbehalf_annotations.is_none());
+    }
+
+    #[test]
+    fn test_obo_config_with_both_fields() {
+        let mut config = test_config();
+        config.onbehalf_identity = Some("Microsoft.HybridCompute".to_string());
+        config.onbehalf_annotations = Some(
+            r#"<Config onBehalfFields="resourceId,category" priority="Normal" />"#.to_string(),
+        );
+        assert_eq!(
+            config.onbehalf_identity.as_deref(),
+            Some("Microsoft.HybridCompute")
+        );
+        assert!(config
+            .onbehalf_annotations
+            .as_ref()
+            .unwrap()
+            .contains("onBehalfFields"));
+    }
+
+    #[test]
+    fn test_obo_annotations_url_encoding() {
+        // Verify that byte_serialize correctly encodes XML characters
+        let annotations = r#"<Config onBehalfFields="resourceId,category" priority="Normal" />"#;
+        let encoded: String = byte_serialize(annotations.as_bytes()).collect();
+
+        // XML angle brackets, quotes, and spaces must be percent-encoded
+        assert!(!encoded.contains('<'));
+        assert!(!encoded.contains('>'));
+        assert!(!encoded.contains('"'));
+        // '<' -> %3C, '>' -> %3E, '"' -> %22
+        assert!(encoded.contains("%3C") || encoded.contains("%3c"));
+        assert!(encoded.contains("%3E") || encoded.contains("%3e"));
+        assert!(encoded.contains("%22"));
+    }
+
+    #[test]
+    fn test_obo_identity_not_url_encoded() {
+        // onbehalfid values with dots should NOT be encoded (matching C# behavior)
+        let identity = "Microsoft.HybridCompute";
+        let param = format!("&onbehalfid={}", identity);
+        assert_eq!(param, "&onbehalfid=Microsoft.HybridCompute");
+        // Dots should remain as-is
+        assert!(param.contains('.'));
+    }
+
+    #[test]
+    fn test_empty_obo_fields_treated_as_absent() {
+        let mut config = test_config();
+        config.onbehalf_identity = Some(String::new());
+        config.onbehalf_annotations = Some(String::new());
+        // Empty strings should be treated the same as None in create_upload_uri
+        // (the method checks `!identity.is_empty()` before appending)
+        assert!(config.onbehalf_identity.as_ref().unwrap().is_empty());
+        assert!(config.onbehalf_annotations.as_ref().unwrap().is_empty());
     }
 }

@@ -89,6 +89,8 @@ async fn main() {
         role_name,
         role_instance,
         msi_resource: None,
+        onbehalf_identity: None,
+        onbehalf_annotations: None,
     };
 
     let geneva_client = GenevaClient::new(config).expect("Failed to create GenevaClient");

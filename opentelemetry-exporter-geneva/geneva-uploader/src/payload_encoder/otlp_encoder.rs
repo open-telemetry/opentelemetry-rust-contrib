@@ -29,6 +29,10 @@ const FIELD_TENANT: &str = "Tenant";
 const FIELD_ROLE: &str = "Role";
 const FIELD_ROLE_INSTANCE: &str = "RoleInstance";
 
+// On Behalf Of (OBO) per-row Bond columns
+const FIELD_ONBEHALF_SERVICE_ID: &str = "onbehalfServiceId";
+const FIELD_ONBEHALF_ANNOTATIONS: &str = "onbehalfAnnotations";
+
 // Span-specific field constants
 const FIELD_KIND: &str = "kind";
 const FIELD_START_TIME: &str = "startTime";
@@ -49,6 +53,12 @@ pub(crate) struct MetadataFields {
     pub namespace: String,
     pub event_version: String, // TODO - do we need both env_ver and event_version?
     metadata_string: String,   // preformatted metadata string for central blob
+    /// On Behalf Of identity (e.g., "Microsoft.HybridCompute").
+    /// When present, included as `onbehalfServiceId` per-row Bond column.
+    pub onbehalf_service_id: Option<String>,
+    /// On Behalf Of annotations XML.
+    /// When present, included as `onbehalfAnnotations` per-row Bond column.
+    pub onbehalf_annotations: Option<String>,
 }
 
 impl MetadataFields {
@@ -60,6 +70,8 @@ impl MetadataFields {
         role_instance: String,
         namespace: String,
         event_version: String,
+        onbehalf_service_id: Option<String>,
+        onbehalf_annotations: Option<String>,
     ) -> Self {
         let metadata_string = format!(
             "namespace={}/eventVersion={}/tenant={}/role={}/roleinstance={}",
@@ -75,6 +87,8 @@ impl MetadataFields {
             namespace,
             event_version,
             metadata_string,
+            onbehalf_service_id,
+            onbehalf_annotations,
         }
     }
 
@@ -159,7 +173,7 @@ impl OtlpEncoder {
             };
 
             // 1. Get schema fields
-            let field_info = Self::determine_fields(log_record, event_name_str);
+            let field_info = Self::determine_fields(log_record, event_name_str, metadata_fields);
 
             // 2. Create or get existing batch entry with metadata tracking
             let entry = batches.entry(event_name_str).or_insert_with(|| BatchData {
@@ -285,7 +299,7 @@ impl OtlpEncoder {
 
         for span in spans {
             // 1. Get schema fields
-            let field_info = Self::determine_span_fields(span, EVENT_NAME);
+            let field_info = Self::determine_span_fields(span, EVENT_NAME, metadata_fields);
 
             // 2. Update timestamp range
             if span.start_time_unix_nano != 0 {
@@ -412,7 +426,7 @@ impl OtlpEncoder {
     }
 
     /// Determine fields for a log record
-    fn determine_fields(log: &LogRecord, _event_name: &str) -> Vec<FieldDef> {
+    fn determine_fields(log: &LogRecord, _event_name: &str, metadata_fields: &MetadataFields) -> Vec<FieldDef> {
         // Pre-allocate with estimated capacity to avoid reallocations
         let estimated_capacity = 10 + 4 + log.attributes.len(); // 7 base fields + 3 tenant/role fields + 4 conditional + attributes
         let mut fields = Vec::with_capacity(estimated_capacity);
@@ -453,6 +467,14 @@ impl OtlpEncoder {
             //TODO - handle other body types
         }
 
+        // On Behalf Of (OBO) per-row columns — conditional
+        if metadata_fields.onbehalf_service_id.is_some() {
+            fields.push((FIELD_ONBEHALF_SERVICE_ID.into(), BondDataType::BT_STRING));
+        }
+        if metadata_fields.onbehalf_annotations.is_some() {
+            fields.push((FIELD_ONBEHALF_ANNOTATIONS.into(), BondDataType::BT_STRING));
+        }
+
         // Part C - Dynamic attributes
         for attr in &log.attributes {
             if let Some(val) = attr.value.as_ref().and_then(|v| v.value.as_ref()) {
@@ -480,7 +502,7 @@ impl OtlpEncoder {
     }
 
     /// Determine span fields
-    fn determine_span_fields(span: &Span, _event_name: &str) -> Vec<FieldDef> {
+    fn determine_span_fields(span: &Span, _event_name: &str, metadata_fields: &MetadataFields) -> Vec<FieldDef> {
         // Pre-allocate with estimated capacity to avoid reallocations
         let estimated_capacity = 18 + span.attributes.len(); // 7 base + 3 tenant/role + 3 span-specific + 5 max conditional + attributes
         let mut fields = Vec::with_capacity(estimated_capacity);
@@ -527,6 +549,14 @@ impl OtlpEncoder {
             if !status.message.is_empty() {
                 fields.push((FIELD_STATUS_MESSAGE.into(), BondDataType::BT_STRING));
             }
+        }
+
+        // On Behalf Of (OBO) per-row columns — conditional
+        if metadata_fields.onbehalf_service_id.is_some() {
+            fields.push((FIELD_ONBEHALF_SERVICE_ID.into(), BondDataType::BT_STRING));
+        }
+        if metadata_fields.onbehalf_annotations.is_some() {
+            fields.push((FIELD_ONBEHALF_ANNOTATIONS.into(), BondDataType::BT_STRING));
         }
 
         // Part C - Dynamic attributes
@@ -670,6 +700,16 @@ impl OtlpEncoder {
                         BondWriter::write_string(&mut buffer, &status.message);
                     }
                 }
+                FIELD_ONBEHALF_SERVICE_ID => {
+                    if let Some(ref id) = metadata_fields.onbehalf_service_id {
+                        BondWriter::write_string(&mut buffer, id);
+                    }
+                }
+                FIELD_ONBEHALF_ANNOTATIONS => {
+                    if let Some(ref ann) = metadata_fields.onbehalf_annotations {
+                        BondWriter::write_string(&mut buffer, ann);
+                    }
+                }
                 _ => {
                     // Handle dynamic attributes
                     // TODO - optimize better - we could update determine_fields to also return a vec of bytes which has bond serialized attributes
@@ -744,6 +784,16 @@ impl OtlpEncoder {
                         if let Some(Value::StringValue(s)) = &body.value {
                             BondWriter::write_string(&mut buffer, s);
                         }
+                    }
+                }
+                FIELD_ONBEHALF_SERVICE_ID => {
+                    if let Some(ref id) = metadata_fields.onbehalf_service_id {
+                        BondWriter::write_string(&mut buffer, id);
+                    }
+                }
+                FIELD_ONBEHALF_ANNOTATIONS => {
+                    if let Some(ref ann) = metadata_fields.onbehalf_annotations {
+                        BondWriter::write_string(&mut buffer, ann);
                     }
                 }
                 _ => {
@@ -883,6 +933,8 @@ mod tests {
             "TestRoleInstance".to_string(),
             namespace.to_string(),
             "Ver1v0".to_string(),
+            None,
+            None,
         )
     }
 
@@ -1316,7 +1368,8 @@ mod tests {
         };
 
         // Verify that both spans have name field in schema
-        let fields1 = OtlpEncoder::determine_span_fields(&span1, "Span");
+        let test_meta = make_metadata("test");
+        let fields1 = OtlpEncoder::determine_span_fields(&span1, "Span", &test_meta);
         let name_field_present1 = fields1
             .iter()
             .any(|field| field.name.as_ref() == FIELD_NAME);
@@ -1325,7 +1378,7 @@ mod tests {
             "Span with non-empty name should include 'name' field in schema"
         );
 
-        let fields2 = OtlpEncoder::determine_span_fields(&span2, "Span");
+        let fields2 = OtlpEncoder::determine_span_fields(&span2, "Span", &test_meta);
         let name_field_present2 = fields2
             .iter()
             .any(|field| field.name.as_ref() == FIELD_NAME);
@@ -1455,5 +1508,193 @@ mod tests {
 
         assert_eq!(span_result.len(), 1);
         assert_eq!(span_result[0].row_count, 2);
+    }
+
+    fn make_metadata_with_obo(
+        namespace: &str,
+        service_id: Option<String>,
+        annotations: Option<String>,
+    ) -> MetadataFields {
+        MetadataFields::new(
+            "TestEnv".to_string(),
+            "Ver1v0".to_string(),
+            "TestTenant".to_string(),
+            "TestRole".to_string(),
+            "TestRoleInstance".to_string(),
+            namespace.to_string(),
+            "Ver1v0".to_string(),
+            service_id,
+            annotations,
+        )
+    }
+
+    #[test]
+    fn test_obo_fields_absent_when_none() {
+        let log = LogRecord {
+            observed_time_unix_nano: 1_700_000_000_000_000_000,
+            severity_number: 9,
+            ..Default::default()
+        };
+
+        let metadata = make_metadata("test");
+        let fields = OtlpEncoder::determine_fields(&log, "Log", &metadata);
+
+        // OBO fields should NOT be present
+        assert!(
+            !fields.iter().any(|f| f.name.as_ref() == FIELD_ONBEHALF_SERVICE_ID),
+            "onbehalfServiceId should not be in schema when OBO is None"
+        );
+        assert!(
+            !fields.iter().any(|f| f.name.as_ref() == FIELD_ONBEHALF_ANNOTATIONS),
+            "onbehalfAnnotations should not be in schema when OBO is None"
+        );
+    }
+
+    #[test]
+    fn test_obo_fields_present_in_log_schema_when_set() {
+        let log = LogRecord {
+            observed_time_unix_nano: 1_700_000_000_000_000_000,
+            severity_number: 9,
+            ..Default::default()
+        };
+
+        let metadata = make_metadata_with_obo(
+            "test",
+            Some("Microsoft.HybridCompute".to_string()),
+            Some(r#"<Config onBehalfFields="resourceId" />"#.to_string()),
+        );
+        let fields = OtlpEncoder::determine_fields(&log, "Log", &metadata);
+
+        assert!(
+            fields.iter().any(|f| f.name.as_ref() == FIELD_ONBEHALF_SERVICE_ID),
+            "onbehalfServiceId should be in log schema when OBO identity is set"
+        );
+        assert!(
+            fields.iter().any(|f| f.name.as_ref() == FIELD_ONBEHALF_ANNOTATIONS),
+            "onbehalfAnnotations should be in log schema when OBO annotations is set"
+        );
+    }
+
+    #[test]
+    fn test_obo_fields_present_in_span_schema_when_set() {
+        let span = Span {
+            trace_id: vec![1; 16],
+            span_id: vec![2; 8],
+            name: "test_span".to_string(),
+            kind: 1,
+            start_time_unix_nano: 1_700_000_000_000_000_000,
+            end_time_unix_nano: 1_700_000_001_000_000_000,
+            ..Default::default()
+        };
+
+        let metadata = make_metadata_with_obo(
+            "test",
+            Some("Microsoft.HybridCompute".to_string()),
+            Some(r#"<Config onBehalfFields="resourceId" />"#.to_string()),
+        );
+        let fields = OtlpEncoder::determine_span_fields(&span, "Span", &metadata);
+
+        assert!(
+            fields.iter().any(|f| f.name.as_ref() == FIELD_ONBEHALF_SERVICE_ID),
+            "onbehalfServiceId should be in span schema when OBO identity is set"
+        );
+        assert!(
+            fields.iter().any(|f| f.name.as_ref() == FIELD_ONBEHALF_ANNOTATIONS),
+            "onbehalfAnnotations should be in span schema when OBO annotations is set"
+        );
+    }
+
+    #[test]
+    fn test_obo_identity_only_in_schema() {
+        let log = LogRecord {
+            observed_time_unix_nano: 1_700_000_000_000_000_000,
+            severity_number: 9,
+            ..Default::default()
+        };
+
+        let metadata = make_metadata_with_obo(
+            "test",
+            Some("Microsoft.HybridCompute".to_string()),
+            None,
+        );
+        let fields = OtlpEncoder::determine_fields(&log, "Log", &metadata);
+
+        assert!(
+            fields.iter().any(|f| f.name.as_ref() == FIELD_ONBEHALF_SERVICE_ID),
+            "onbehalfServiceId should be present when identity is set"
+        );
+        assert!(
+            !fields.iter().any(|f| f.name.as_ref() == FIELD_ONBEHALF_ANNOTATIONS),
+            "onbehalfAnnotations should NOT be present when annotations is None"
+        );
+    }
+
+    #[test]
+    fn test_obo_encoding_log_batch_with_obo() {
+        let encoder = OtlpEncoder::new();
+
+        let log = LogRecord {
+            observed_time_unix_nano: 1_700_000_000_000_000_000,
+            event_name: "test_event".to_string(),
+            severity_number: 9,
+            ..Default::default()
+        };
+
+        let metadata = make_metadata_with_obo(
+            "test",
+            Some("Microsoft.HybridCompute".to_string()),
+            Some(r#"<Config onBehalfFields="resourceId,category" />"#.to_string()),
+        );
+        let result = encoder.encode_log_batch([log].iter(), &metadata).unwrap();
+
+        assert!(!result.is_empty());
+        assert!(!result[0].data.is_empty());
+    }
+
+    #[test]
+    fn test_obo_encoding_span_batch_with_obo() {
+        let encoder = OtlpEncoder::new();
+
+        let span = Span {
+            trace_id: vec![1; 16],
+            span_id: vec![2; 8],
+            name: "test_span".to_string(),
+            kind: 1,
+            start_time_unix_nano: 1_700_000_000_000_000_000,
+            end_time_unix_nano: 1_700_000_001_000_000_000,
+            ..Default::default()
+        };
+
+        let metadata = make_metadata_with_obo(
+            "test",
+            Some("Microsoft.HybridCompute".to_string()),
+            Some(r#"<Config onBehalfFields="resourceId,category" />"#.to_string()),
+        );
+        let result = encoder.encode_span_batch([span].iter(), &metadata).unwrap();
+
+        assert_eq!(result.len(), 1);
+        assert!(!result[0].data.is_empty());
+    }
+
+    #[test]
+    fn test_obo_schema_differs_from_non_obo() {
+        let log = LogRecord {
+            observed_time_unix_nano: 1_700_000_000_000_000_000,
+            severity_number: 9,
+            ..Default::default()
+        };
+
+        let metadata_no_obo = make_metadata("test");
+        let fields_no_obo = OtlpEncoder::determine_fields(&log, "Log", &metadata_no_obo);
+
+        let metadata_with_obo = make_metadata_with_obo(
+            "test",
+            Some("Microsoft.HybridCompute".to_string()),
+            Some(r#"<Config />"#.to_string()),
+        );
+        let fields_with_obo = OtlpEncoder::determine_fields(&log, "Log", &metadata_with_obo);
+
+        // OBO schema should have 2 additional fields
+        assert_eq!(fields_with_obo.len(), fields_no_obo.len() + 2);
     }
 }
