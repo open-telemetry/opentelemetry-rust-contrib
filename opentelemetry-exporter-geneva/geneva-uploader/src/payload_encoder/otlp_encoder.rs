@@ -94,6 +94,40 @@ impl OtlpEncoder {
         OtlpEncoder {}
     }
 
+    /// Check if an attribute has a supported value type for Bond encoding.
+    /// Used by both `determine_fields` (schema construction) and `write_*_row_data`
+    /// (row encoding) to ensure they filter attributes identically.
+    fn is_supported_attr(attr: &&opentelemetry_proto::tonic::common::v1::KeyValue) -> bool {
+        matches!(
+            attr.value.as_ref().and_then(|v| v.value.as_ref()),
+            Some(
+                Value::StringValue(_)
+                    | Value::IntValue(_)
+                    | Value::DoubleValue(_)
+                    | Value::BoolValue(_)
+            )
+        )
+    }
+
+    /// Append supported dynamic attributes to the schema fields list.
+    /// Used by both `determine_fields` and `determine_span_fields`.
+    fn push_dynamic_attr_fields(
+        attributes: &[opentelemetry_proto::tonic::common::v1::KeyValue],
+        fields: &mut Vec<(Cow<'static, str>, BondDataType)>,
+    ) {
+        for attr in attributes.iter().filter(Self::is_supported_attr) {
+            let val = attr.value.as_ref().unwrap().value.as_ref().unwrap();
+            let type_id = match val {
+                Value::StringValue(_) => BondDataType::BT_STRING,
+                Value::IntValue(_) => BondDataType::BT_INT64,
+                Value::DoubleValue(_) => BondDataType::BT_DOUBLE,
+                Value::BoolValue(_) => BondDataType::BT_BOOL,
+                _ => unreachable!("is_supported_attr guarantees supported type"),
+            };
+            fields.push((attr.key.clone().into(), type_id));
+        }
+    }
+
     /// Encode a batch of logs into a vector of (event_name, compressed_bytes, schema_ids, start_time_nanos, end_time_nanos)
     /// The returned `data` field contains LZ4 chunked compressed bytes.
     /// On compression failure, the error is returned (no logging, no fallback).
@@ -112,6 +146,7 @@ impl OtlpEncoder {
             schemas: Vec<CentralSchemaEntry>,
             events: Vec<CentralEventEntry>,
             metadata: BatchMetadata,
+            event_name: Arc<String>,
         }
 
         impl BatchData {
@@ -170,6 +205,7 @@ impl OtlpEncoder {
                     end_time: timestamp,
                     schema_ids: String::new(),
                 },
+                event_name: Arc::new(event_name_str.to_string()),
             });
 
             // Update timestamp range
@@ -200,15 +236,15 @@ impl OtlpEncoder {
                 }
             };
 
-            // 4. Encode row
+            // 4. Encode row — dynamic attributes are in the same order as log.attributes
             let row_buffer = self.write_row_data(log_record, &field_info, metadata_fields);
             let level = log_record.severity_number as u8;
 
-            // 5. Create CentralEventEntry directly (optimization: no intermediate EncodedRow)
+            // 5. Create CentralEventEntry reusing the batch's Arc<String>
             let central_event = CentralEventEntry {
                 schema_id,
                 level,
-                event_name: Arc::new(event_name_str.to_string()),
+                event_name: Arc::clone(&entry.event_name),
                 row: row_buffer,
             };
             entry.events.push(central_event);
@@ -277,6 +313,7 @@ impl OtlpEncoder {
     {
         // All spans use "Span" as event name for routing - no grouping by span name
         const EVENT_NAME: &str = "Span";
+        let event_name = Arc::new(EVENT_NAME.to_string());
 
         let mut schemas = Vec::new();
         let mut events = Vec::new();
@@ -317,15 +354,15 @@ impl OtlpEncoder {
                 }
             };
 
-            // 4. Encode row
+            // 4. Encode row — dynamic attributes are in the same order as span.attributes
             let row_buffer = self.write_span_row_data(span, &field_info, metadata_fields);
             let level = 5; // Default level for spans (INFO equivalent)
 
-            // 5. Create CentralEventEntry
+            // 5. Create CentralEventEntry reusing shared Arc
             let central_event = CentralEventEntry {
                 schema_id,
                 level,
-                event_name: Arc::new(EVENT_NAME.to_string()),
+                event_name: Arc::clone(&event_name),
                 row: row_buffer,
             };
             events.push(central_event);
@@ -454,18 +491,7 @@ impl OtlpEncoder {
         }
 
         // Part C - Dynamic attributes
-        for attr in &log.attributes {
-            if let Some(val) = attr.value.as_ref().and_then(|v| v.value.as_ref()) {
-                let type_id = match val {
-                    Value::StringValue(_) => BondDataType::BT_STRING,
-                    Value::IntValue(_) => BondDataType::BT_INT64,
-                    Value::DoubleValue(_) => BondDataType::BT_DOUBLE,
-                    Value::BoolValue(_) => BondDataType::BT_BOOL,
-                    _ => continue,
-                };
-                fields.push((attr.key.clone().into(), type_id));
-            }
-        }
+        Self::push_dynamic_attr_fields(&log.attributes, &mut fields);
 
         // Convert to FieldDef with field IDs
         fields
@@ -530,18 +556,7 @@ impl OtlpEncoder {
         }
 
         // Part C - Dynamic attributes
-        for attr in &span.attributes {
-            if let Some(val) = attr.value.as_ref().and_then(|v| v.value.as_ref()) {
-                let type_id = match val {
-                    Value::StringValue(_) => BondDataType::BT_STRING,
-                    Value::IntValue(_) => BondDataType::BT_INT64,
-                    Value::DoubleValue(_) => BondDataType::BT_DOUBLE,
-                    Value::BoolValue(_) => BondDataType::BT_BOOL,
-                    _ => continue,
-                };
-                fields.push((attr.key.clone().into(), type_id));
-            }
-        }
+        Self::push_dynamic_attr_fields(&span.attributes, &mut fields);
 
         // Convert to FieldDef with field IDs
         fields
@@ -599,6 +614,9 @@ impl OtlpEncoder {
 
         // Pre-calculate timestamp (use start time as primary timestamp for both fields)
         let formatted_timestamp = Self::format_timestamp(span.start_time_unix_nano);
+
+        // Iterator over supported attributes for sequential lookup, matching determine_span_fields() order.
+        let mut attr_iter = span.attributes.iter().filter(Self::is_supported_attr);
 
         for field in fields {
             match field.name.as_ref() {
@@ -671,9 +689,8 @@ impl OtlpEncoder {
                     }
                 }
                 _ => {
-                    // Handle dynamic attributes
-                    // TODO - optimize better - we could update determine_fields to also return a vec of bytes which has bond serialized attributes
-                    if let Some(attr) = span.attributes.iter().find(|a| a.key == field.name) {
+                    // Dynamic attribute: consume next from pre-filtered iterator
+                    if let Some(attr) = attr_iter.next() {
                         self.write_attribute_value(&mut buffer, attr, field.type_id);
                     }
                 }
@@ -701,6 +718,9 @@ impl OtlpEncoder {
             };
             Self::format_timestamp(timestamp_nanos)
         };
+
+        // Iterator over supported attributes for sequential lookup, matching determine_fields() order.
+        let mut attr_iter = log.attributes.iter().filter(Self::is_supported_attr);
 
         for field in sorted_fields {
             match field.name.as_ref() {
@@ -747,9 +767,8 @@ impl OtlpEncoder {
                     }
                 }
                 _ => {
-                    // Handle dynamic attributes
-                    // TODO - optimize better - we could update determine_fields to also return a vec of bytes which has bond serialized attributes
-                    if let Some(attr) = log.attributes.iter().find(|a| a.key == field.name) {
+                    // Dynamic attribute: consume next from pre-filtered iterator
+                    if let Some(attr) = attr_iter.next() {
                         self.write_attribute_value(&mut buffer, attr, field.type_id);
                     }
                 }
