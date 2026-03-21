@@ -58,6 +58,7 @@ pub(crate) struct MetadataFields {
 }
 
 impl MetadataFields {
+    #[allow(clippy::too_many_arguments)]
     pub fn new(
         env_name: String,
         env_ver: String,
