@@ -34,8 +34,8 @@ pub struct GenevaClientConfig {
     pub role_name: String,
     pub role_instance: String,
     pub msi_resource: Option<String>, // Required for Managed Identity variants
-                                      // Add event name/version here if constant, or per-upload if you want them per call.
-    pub obo_identity: Option<String>,    // On Behalf Of service identity (e.g., "Microsoft.SomeService")
+    // Add event name/version here if constant, or per-upload if you want them per call.
+    pub obo_identity: Option<String>, // On Behalf Of service identity (e.g., "Microsoft.SomeService")
     pub obo_annotations: Option<String>, // On Behalf Of annotations XML
 }
 

@@ -422,7 +422,11 @@ impl OtlpEncoder {
     }
 
     /// Determine fields for a log record
-    fn determine_fields(log: &LogRecord, _event_name: &str, metadata_fields: &MetadataFields) -> Vec<FieldDef> {
+    fn determine_fields(
+        log: &LogRecord,
+        _event_name: &str,
+        metadata_fields: &MetadataFields,
+    ) -> Vec<FieldDef> {
         // Pre-allocate with estimated capacity to avoid reallocations
         let estimated_capacity = 10 + 4 + log.attributes.len() + 2; // 7 base fields + 3 tenant/role fields + 4 conditional + attributes + 2 OBO
         let mut fields = Vec::with_capacity(estimated_capacity);
@@ -481,7 +485,11 @@ impl OtlpEncoder {
         if metadata_fields.obo_identity.is_some() {
             fields.push((FIELD_OBO_SERVICE_ID.into(), BondDataType::BT_STRING));
         }
-        if metadata_fields.obo_annotations.as_ref().is_some_and(|s| !s.is_empty()) {
+        if metadata_fields
+            .obo_annotations
+            .as_ref()
+            .is_some_and(|s| !s.is_empty())
+        {
             fields.push((FIELD_OBO_ANNOTATIONS.into(), BondDataType::BT_STRING));
         }
 
@@ -498,7 +506,11 @@ impl OtlpEncoder {
     }
 
     /// Determine span fields
-    fn determine_span_fields(span: &Span, _event_name: &str, metadata_fields: &MetadataFields) -> Vec<FieldDef> {
+    fn determine_span_fields(
+        span: &Span,
+        _event_name: &str,
+        metadata_fields: &MetadataFields,
+    ) -> Vec<FieldDef> {
         // Pre-allocate with estimated capacity to avoid reallocations
         let estimated_capacity = 18 + span.attributes.len() + 2; // 7 base + 3 tenant/role + 3 span-specific + 5 max conditional + attributes + 2 OBO
         let mut fields = Vec::with_capacity(estimated_capacity);
@@ -565,7 +577,11 @@ impl OtlpEncoder {
         if metadata_fields.obo_identity.is_some() {
             fields.push((FIELD_OBO_SERVICE_ID.into(), BondDataType::BT_STRING));
         }
-        if metadata_fields.obo_annotations.as_ref().is_some_and(|s| !s.is_empty()) {
+        if metadata_fields
+            .obo_annotations
+            .as_ref()
+            .is_some_and(|s| !s.is_empty())
+        {
             fields.push((FIELD_OBO_ANNOTATIONS.into(), BondDataType::BT_STRING));
         }
 
@@ -934,7 +950,11 @@ mod tests {
         )
     }
 
-    fn make_metadata_with_obo(namespace: &str, obo_identity: &str, obo_annotations: Option<&str>) -> MetadataFields {
+    fn make_metadata_with_obo(
+        namespace: &str,
+        obo_identity: &str,
+        obo_annotations: Option<&str>,
+    ) -> MetadataFields {
         MetadataFields::new(
             "TestEnv".to_string(),
             "Ver1v0".to_string(),
@@ -1536,11 +1556,21 @@ mod tests {
         };
 
         let fields = OtlpEncoder::determine_fields(&log, "Log", &metadata);
-        let has_obo_id = fields.iter().any(|f| f.name.as_ref() == FIELD_OBO_SERVICE_ID);
-        let has_obo_ann = fields.iter().any(|f| f.name.as_ref() == FIELD_OBO_ANNOTATIONS);
+        let has_obo_id = fields
+            .iter()
+            .any(|f| f.name.as_ref() == FIELD_OBO_SERVICE_ID);
+        let has_obo_ann = fields
+            .iter()
+            .any(|f| f.name.as_ref() == FIELD_OBO_ANNOTATIONS);
 
-        assert!(has_obo_id, "Schema should include onbehalfServiceId when OBO identity is set");
-        assert!(has_obo_ann, "Schema should include onbehalfAnnotations when OBO annotations are set");
+        assert!(
+            has_obo_id,
+            "Schema should include onbehalfServiceId when OBO identity is set"
+        );
+        assert!(
+            has_obo_ann,
+            "Schema should include onbehalfAnnotations when OBO annotations are set"
+        );
     }
 
     #[test]
@@ -1553,11 +1583,21 @@ mod tests {
         };
 
         let fields = OtlpEncoder::determine_fields(&log, "Log", &metadata);
-        let has_obo_id = fields.iter().any(|f| f.name.as_ref() == FIELD_OBO_SERVICE_ID);
-        let has_obo_ann = fields.iter().any(|f| f.name.as_ref() == FIELD_OBO_ANNOTATIONS);
+        let has_obo_id = fields
+            .iter()
+            .any(|f| f.name.as_ref() == FIELD_OBO_SERVICE_ID);
+        let has_obo_ann = fields
+            .iter()
+            .any(|f| f.name.as_ref() == FIELD_OBO_ANNOTATIONS);
 
-        assert!(!has_obo_id, "Schema should NOT include onbehalfServiceId when OBO is not configured");
-        assert!(!has_obo_ann, "Schema should NOT include onbehalfAnnotations when OBO is not configured");
+        assert!(
+            !has_obo_id,
+            "Schema should NOT include onbehalfServiceId when OBO is not configured"
+        );
+        assert!(
+            !has_obo_ann,
+            "Schema should NOT include onbehalfAnnotations when OBO is not configured"
+        );
     }
 
     #[test]
@@ -1570,11 +1610,21 @@ mod tests {
         };
 
         let fields = OtlpEncoder::determine_fields(&log, "Log", &metadata);
-        let has_obo_id = fields.iter().any(|f| f.name.as_ref() == FIELD_OBO_SERVICE_ID);
-        let has_obo_ann = fields.iter().any(|f| f.name.as_ref() == FIELD_OBO_ANNOTATIONS);
+        let has_obo_id = fields
+            .iter()
+            .any(|f| f.name.as_ref() == FIELD_OBO_SERVICE_ID);
+        let has_obo_ann = fields
+            .iter()
+            .any(|f| f.name.as_ref() == FIELD_OBO_ANNOTATIONS);
 
-        assert!(has_obo_id, "Schema should include onbehalfServiceId when OBO identity is set");
-        assert!(!has_obo_ann, "Schema should NOT include onbehalfAnnotations when annotations are None");
+        assert!(
+            has_obo_id,
+            "Schema should include onbehalfServiceId when OBO identity is set"
+        );
+        assert!(
+            !has_obo_ann,
+            "Schema should NOT include onbehalfAnnotations when annotations are None"
+        );
     }
 
     #[test]
@@ -1595,11 +1645,21 @@ mod tests {
         };
 
         let fields = OtlpEncoder::determine_span_fields(&span, "Span", &metadata);
-        let has_obo_id = fields.iter().any(|f| f.name.as_ref() == FIELD_OBO_SERVICE_ID);
-        let has_obo_ann = fields.iter().any(|f| f.name.as_ref() == FIELD_OBO_ANNOTATIONS);
+        let has_obo_id = fields
+            .iter()
+            .any(|f| f.name.as_ref() == FIELD_OBO_SERVICE_ID);
+        let has_obo_ann = fields
+            .iter()
+            .any(|f| f.name.as_ref() == FIELD_OBO_ANNOTATIONS);
 
-        assert!(has_obo_id, "Span schema should include onbehalfServiceId when OBO is configured");
-        assert!(has_obo_ann, "Span schema should include onbehalfAnnotations when OBO annotations are set");
+        assert!(
+            has_obo_id,
+            "Span schema should include onbehalfServiceId when OBO is configured"
+        );
+        assert!(
+            has_obo_ann,
+            "Span schema should include onbehalfAnnotations when OBO annotations are set"
+        );
     }
 
     #[test]
@@ -1622,7 +1682,9 @@ mod tests {
         let row_str = String::from_utf8_lossy(&row_data);
         assert!(
             row_str.contains(obo_id),
-            "Row data should contain OBO identity '{}', got: {:?}", obo_id, row_str
+            "Row data should contain OBO identity '{}', got: {:?}",
+            obo_id,
+            row_str
         );
         assert!(
             row_str.contains(obo_ann),
@@ -1653,7 +1715,9 @@ mod tests {
         let row_str = String::from_utf8_lossy(&row_data);
         assert!(
             row_str.contains(obo_id),
-            "Span row data should contain OBO identity '{}', got: {:?}", obo_id, row_str
+            "Span row data should contain OBO identity '{}', got: {:?}",
+            obo_id,
+            row_str
         );
         assert!(
             row_str.contains(obo_ann),
@@ -1682,7 +1746,10 @@ mod tests {
         let batches = result.unwrap();
         assert_eq!(batches.len(), 1);
         assert_eq!(batches[0].row_count, 1);
-        assert!(!batches[0].data.is_empty(), "Encoded batch should have data");
+        assert!(
+            !batches[0].data.is_empty(),
+            "Encoded batch should have data"
+        );
     }
 
     #[test]
@@ -1708,6 +1775,9 @@ mod tests {
         let batches = result.unwrap();
         assert_eq!(batches.len(), 1);
         assert_eq!(batches[0].row_count, 1);
-        assert!(!batches[0].data.is_empty(), "Encoded batch should have data");
+        assert!(
+            !batches[0].data.is_empty(),
+            "Encoded batch should have data"
+        );
     }
 }
