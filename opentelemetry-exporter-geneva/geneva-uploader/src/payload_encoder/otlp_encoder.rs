@@ -38,6 +38,10 @@ const FIELD_PARENT_ID: &str = "parentId";
 const FIELD_LINKS: &str = "links";
 const FIELD_STATUS_MESSAGE: &str = "statusMessage";
 
+// OBO (On Behalf Of) field constants
+const FIELD_OBO_SERVICE_ID: &str = "onbehalfServiceId";
+const FIELD_OBO_ANNOTATIONS: &str = "onbehalfAnnotations";
+
 /// Metadata fields that should appear as Bond schema fields (queryable in Geneva)
 #[derive(Clone, Debug)]
 pub(crate) struct MetadataFields {
@@ -49,9 +53,12 @@ pub(crate) struct MetadataFields {
     pub namespace: String,
     pub event_version: String, // TODO - do we need both env_ver and event_version?
     metadata_string: String,   // preformatted metadata string for central blob
+    pub obo_identity: Option<String>,
+    pub obo_annotations: Option<String>,
 }
 
 impl MetadataFields {
+    #[allow(clippy::too_many_arguments)]
     pub fn new(
         env_name: String,
         env_ver: String,
@@ -60,6 +67,8 @@ impl MetadataFields {
         role_instance: String,
         namespace: String,
         event_version: String,
+        obo_identity: Option<String>,
+        obo_annotations: Option<String>,
     ) -> Self {
         let metadata_string = format!(
             "namespace={}/eventVersion={}/tenant={}/role={}/roleinstance={}",
@@ -75,6 +84,8 @@ impl MetadataFields {
             namespace,
             event_version,
             metadata_string,
+            obo_identity,
+            obo_annotations,
         }
     }
 
@@ -159,7 +170,7 @@ impl OtlpEncoder {
             };
 
             // 1. Get schema fields
-            let field_info = Self::determine_fields(log_record, event_name_str);
+            let field_info = Self::determine_fields(log_record, event_name_str, metadata_fields);
 
             // 2. Create or get existing batch entry with metadata tracking
             let entry = batches.entry(event_name_str).or_insert_with(|| BatchData {
@@ -285,7 +296,7 @@ impl OtlpEncoder {
 
         for span in spans {
             // 1. Get schema fields
-            let field_info = Self::determine_span_fields(span, EVENT_NAME);
+            let field_info = Self::determine_span_fields(span, EVENT_NAME, metadata_fields);
 
             // 2. Update timestamp range
             if span.start_time_unix_nano != 0 {
@@ -412,9 +423,13 @@ impl OtlpEncoder {
     }
 
     /// Determine fields for a log record
-    fn determine_fields(log: &LogRecord, _event_name: &str) -> Vec<FieldDef> {
+    fn determine_fields(
+        log: &LogRecord,
+        _event_name: &str,
+        metadata_fields: &MetadataFields,
+    ) -> Vec<FieldDef> {
         // Pre-allocate with estimated capacity to avoid reallocations
-        let estimated_capacity = 10 + 4 + log.attributes.len(); // 7 base fields + 3 tenant/role fields + 4 conditional + attributes
+        let estimated_capacity = 10 + 4 + log.attributes.len() + 2; // 7 base fields + 3 tenant/role fields + 4 conditional + attributes + 2 OBO
         let mut fields = Vec::with_capacity(estimated_capacity);
 
         // Part A - Always present fields
@@ -467,6 +482,18 @@ impl OtlpEncoder {
             }
         }
 
+        // OBO fields — added after Part C, matching PipelineAgent's AddOBOTags pattern
+        if metadata_fields.obo_identity.is_some() {
+            fields.push((FIELD_OBO_SERVICE_ID.into(), BondDataType::BT_STRING));
+        }
+        if metadata_fields
+            .obo_annotations
+            .as_ref()
+            .is_some_and(|s| !s.is_empty())
+        {
+            fields.push((FIELD_OBO_ANNOTATIONS.into(), BondDataType::BT_STRING));
+        }
+
         // Convert to FieldDef with field IDs
         fields
             .into_iter()
@@ -480,9 +507,13 @@ impl OtlpEncoder {
     }
 
     /// Determine span fields
-    fn determine_span_fields(span: &Span, _event_name: &str) -> Vec<FieldDef> {
+    fn determine_span_fields(
+        span: &Span,
+        _event_name: &str,
+        metadata_fields: &MetadataFields,
+    ) -> Vec<FieldDef> {
         // Pre-allocate with estimated capacity to avoid reallocations
-        let estimated_capacity = 18 + span.attributes.len(); // 7 base + 3 tenant/role + 3 span-specific + 5 max conditional + attributes
+        let estimated_capacity = 18 + span.attributes.len() + 2; // 7 base + 3 tenant/role + 3 span-specific + 5 max conditional + attributes + 2 OBO
         let mut fields = Vec::with_capacity(estimated_capacity);
 
         // Part A - Always present fields for spans
@@ -541,6 +572,18 @@ impl OtlpEncoder {
                 };
                 fields.push((attr.key.clone().into(), type_id));
             }
+        }
+
+        // OBO fields — added after Part C, matching PipelineAgent's AddOBOTags pattern
+        if metadata_fields.obo_identity.is_some() {
+            fields.push((FIELD_OBO_SERVICE_ID.into(), BondDataType::BT_STRING));
+        }
+        if metadata_fields
+            .obo_annotations
+            .as_ref()
+            .is_some_and(|s| !s.is_empty())
+        {
+            fields.push((FIELD_OBO_ANNOTATIONS.into(), BondDataType::BT_STRING));
         }
 
         // Convert to FieldDef with field IDs
@@ -670,6 +713,16 @@ impl OtlpEncoder {
                         BondWriter::write_string(&mut buffer, &status.message);
                     }
                 }
+                FIELD_OBO_SERVICE_ID => {
+                    if let Some(ref obo_id) = metadata_fields.obo_identity {
+                        BondWriter::write_string(&mut buffer, obo_id);
+                    }
+                }
+                FIELD_OBO_ANNOTATIONS => {
+                    if let Some(ref obo_ann) = metadata_fields.obo_annotations {
+                        BondWriter::write_string(&mut buffer, obo_ann);
+                    }
+                }
                 _ => {
                     // Handle dynamic attributes
                     // TODO - optimize better - we could update determine_fields to also return a vec of bytes which has bond serialized attributes
@@ -744,6 +797,16 @@ impl OtlpEncoder {
                         if let Some(Value::StringValue(s)) = &body.value {
                             BondWriter::write_string(&mut buffer, s);
                         }
+                    }
+                }
+                FIELD_OBO_SERVICE_ID => {
+                    if let Some(ref obo_id) = metadata_fields.obo_identity {
+                        BondWriter::write_string(&mut buffer, obo_id);
+                    }
+                }
+                FIELD_OBO_ANNOTATIONS => {
+                    if let Some(ref obo_ann) = metadata_fields.obo_annotations {
+                        BondWriter::write_string(&mut buffer, obo_ann);
                     }
                 }
                 _ => {
@@ -883,6 +946,26 @@ mod tests {
             "TestRoleInstance".to_string(),
             namespace.to_string(),
             "Ver1v0".to_string(),
+            None,
+            None,
+        )
+    }
+
+    fn make_metadata_with_obo(
+        namespace: &str,
+        obo_identity: &str,
+        obo_annotations: Option<&str>,
+    ) -> MetadataFields {
+        MetadataFields::new(
+            "TestEnv".to_string(),
+            "Ver1v0".to_string(),
+            "TestTenant".to_string(),
+            "TestRole".to_string(),
+            "TestRoleInstance".to_string(),
+            namespace.to_string(),
+            "Ver1v0".to_string(),
+            Some(obo_identity.to_string()),
+            obo_annotations.map(|s| s.to_string()),
         )
     }
 
@@ -1316,7 +1399,8 @@ mod tests {
         };
 
         // Verify that both spans have name field in schema
-        let fields1 = OtlpEncoder::determine_span_fields(&span1, "Span");
+        let metadata = make_metadata("test");
+        let fields1 = OtlpEncoder::determine_span_fields(&span1, "Span", &metadata);
         let name_field_present1 = fields1
             .iter()
             .any(|field| field.name.as_ref() == FIELD_NAME);
@@ -1325,7 +1409,7 @@ mod tests {
             "Span with non-empty name should include 'name' field in schema"
         );
 
-        let fields2 = OtlpEncoder::determine_span_fields(&span2, "Span");
+        let fields2 = OtlpEncoder::determine_span_fields(&span2, "Span", &metadata);
         let name_field_present2 = fields2
             .iter()
             .any(|field| field.name.as_ref() == FIELD_NAME);
@@ -1455,5 +1539,246 @@ mod tests {
 
         assert_eq!(span_result.len(), 1);
         assert_eq!(span_result[0].row_count, 2);
+    }
+
+    // ==================== OBO (On Behalf Of) Tests ====================
+
+    #[test]
+    fn test_obo_fields_in_log_schema() {
+        let metadata = make_metadata_with_obo(
+            "TestNamespace",
+            "Microsoft.SomeService",
+            Some(r#"<Config onBehalfFields="resourceId" priority="Normal"/>"#),
+        );
+        let log = LogRecord {
+            observed_time_unix_nano: 1_700_000_000_000_000_000,
+            severity_number: 9,
+            ..Default::default()
+        };
+
+        let fields = OtlpEncoder::determine_fields(&log, "Log", &metadata);
+        let has_obo_id = fields
+            .iter()
+            .any(|f| f.name.as_ref() == FIELD_OBO_SERVICE_ID);
+        let has_obo_ann = fields
+            .iter()
+            .any(|f| f.name.as_ref() == FIELD_OBO_ANNOTATIONS);
+
+        assert!(
+            has_obo_id,
+            "Schema should include onbehalfServiceId when OBO identity is set"
+        );
+        assert!(
+            has_obo_ann,
+            "Schema should include onbehalfAnnotations when OBO annotations are set"
+        );
+    }
+
+    #[test]
+    fn test_obo_fields_absent_when_not_configured() {
+        let metadata = make_metadata("TestNamespace");
+        let log = LogRecord {
+            observed_time_unix_nano: 1_700_000_000_000_000_000,
+            severity_number: 9,
+            ..Default::default()
+        };
+
+        let fields = OtlpEncoder::determine_fields(&log, "Log", &metadata);
+        let has_obo_id = fields
+            .iter()
+            .any(|f| f.name.as_ref() == FIELD_OBO_SERVICE_ID);
+        let has_obo_ann = fields
+            .iter()
+            .any(|f| f.name.as_ref() == FIELD_OBO_ANNOTATIONS);
+
+        assert!(
+            !has_obo_id,
+            "Schema should NOT include onbehalfServiceId when OBO is not configured"
+        );
+        assert!(
+            !has_obo_ann,
+            "Schema should NOT include onbehalfAnnotations when OBO is not configured"
+        );
+    }
+
+    #[test]
+    fn test_obo_identity_only_no_annotations() {
+        let metadata = make_metadata_with_obo("TestNamespace", "Microsoft.SomeService", None);
+        let log = LogRecord {
+            observed_time_unix_nano: 1_700_000_000_000_000_000,
+            severity_number: 9,
+            ..Default::default()
+        };
+
+        let fields = OtlpEncoder::determine_fields(&log, "Log", &metadata);
+        let has_obo_id = fields
+            .iter()
+            .any(|f| f.name.as_ref() == FIELD_OBO_SERVICE_ID);
+        let has_obo_ann = fields
+            .iter()
+            .any(|f| f.name.as_ref() == FIELD_OBO_ANNOTATIONS);
+
+        assert!(
+            has_obo_id,
+            "Schema should include onbehalfServiceId when OBO identity is set"
+        );
+        assert!(
+            !has_obo_ann,
+            "Schema should NOT include onbehalfAnnotations when annotations are None"
+        );
+    }
+
+    #[test]
+    fn test_obo_fields_in_span_schema() {
+        let metadata = make_metadata_with_obo(
+            "TestNamespace",
+            "Microsoft.SomeService",
+            Some(r#"<Config onBehalfFields="resourceId"/>"#),
+        );
+        let span = Span {
+            trace_id: vec![1; 16],
+            span_id: vec![2; 8],
+            name: "test_span".to_string(),
+            kind: 1,
+            start_time_unix_nano: 1_700_000_000_000_000_000,
+            end_time_unix_nano: 1_700_000_001_000_000_000,
+            ..Default::default()
+        };
+
+        let fields = OtlpEncoder::determine_span_fields(&span, "Span", &metadata);
+        let has_obo_id = fields
+            .iter()
+            .any(|f| f.name.as_ref() == FIELD_OBO_SERVICE_ID);
+        let has_obo_ann = fields
+            .iter()
+            .any(|f| f.name.as_ref() == FIELD_OBO_ANNOTATIONS);
+
+        assert!(
+            has_obo_id,
+            "Span schema should include onbehalfServiceId when OBO is configured"
+        );
+        assert!(
+            has_obo_ann,
+            "Span schema should include onbehalfAnnotations when OBO annotations are set"
+        );
+    }
+
+    #[test]
+    fn test_obo_values_in_log_row_data() {
+        let obo_id = "Microsoft.TestService";
+        let obo_ann = r#"<Config onBehalfFields="resourceId" priority="Normal"/>"#;
+        let metadata = make_metadata_with_obo("TestNamespace", obo_id, Some(obo_ann));
+        let encoder = OtlpEncoder::new();
+
+        let log = LogRecord {
+            observed_time_unix_nano: 1_700_000_000_000_000_000,
+            severity_number: 9,
+            ..Default::default()
+        };
+
+        let fields = OtlpEncoder::determine_fields(&log, "Log", &metadata);
+        let row_data = encoder.write_row_data(&log, &fields, &metadata);
+
+        // Verify the Bond blob contains the OBO identity and annotation strings
+        let row_str = String::from_utf8_lossy(&row_data);
+        assert!(
+            row_str.contains(obo_id),
+            "Row data should contain OBO identity '{}', got: {:?}",
+            obo_id,
+            row_str
+        );
+        assert!(
+            row_str.contains(obo_ann),
+            "Row data should contain OBO annotations"
+        );
+    }
+
+    #[test]
+    fn test_obo_values_in_span_row_data() {
+        let obo_id = "Microsoft.SpanService";
+        let obo_ann = r#"<Config onBehalfFields="resourceId"/>"#;
+        let metadata = make_metadata_with_obo("TestNamespace", obo_id, Some(obo_ann));
+        let encoder = OtlpEncoder::new();
+
+        let span = Span {
+            trace_id: vec![1; 16],
+            span_id: vec![2; 8],
+            name: "test_span".to_string(),
+            kind: 1,
+            start_time_unix_nano: 1_700_000_000_000_000_000,
+            end_time_unix_nano: 1_700_000_001_000_000_000,
+            ..Default::default()
+        };
+
+        let fields = OtlpEncoder::determine_span_fields(&span, "Span", &metadata);
+        let row_data = encoder.write_span_row_data(&span, &fields, &metadata);
+
+        let row_str = String::from_utf8_lossy(&row_data);
+        assert!(
+            row_str.contains(obo_id),
+            "Span row data should contain OBO identity '{}', got: {:?}",
+            obo_id,
+            row_str
+        );
+        assert!(
+            row_str.contains(obo_ann),
+            "Span row data should contain OBO annotations"
+        );
+    }
+
+    #[test]
+    fn test_encode_log_batch_with_obo() {
+        let obo_id = "Microsoft.BatchService";
+        let obo_ann = r#"<Config onBehalfFields="resourceId"/>"#;
+        let metadata = make_metadata_with_obo("TestNamespace", obo_id, Some(obo_ann));
+        let encoder = OtlpEncoder::new();
+
+        let log = LogRecord {
+            observed_time_unix_nano: 1_700_000_000_000_000_000,
+            event_name: "TestEvent".to_string(),
+            severity_number: 9,
+            severity_text: "INFO".to_string(),
+            ..Default::default()
+        };
+
+        let result = encoder.encode_log_batch([log].iter(), &metadata);
+        assert!(result.is_ok(), "encode_log_batch with OBO should succeed");
+
+        let batches = result.unwrap();
+        assert_eq!(batches.len(), 1);
+        assert_eq!(batches[0].row_count, 1);
+        assert!(
+            !batches[0].data.is_empty(),
+            "Encoded batch should have data"
+        );
+    }
+
+    #[test]
+    fn test_encode_span_batch_with_obo() {
+        let obo_id = "Microsoft.SpanBatchService";
+        let obo_ann = r#"<Config onBehalfFields="resourceId"/>"#;
+        let metadata = make_metadata_with_obo("TestNamespace", obo_id, Some(obo_ann));
+        let encoder = OtlpEncoder::new();
+
+        let span = Span {
+            trace_id: vec![1; 16],
+            span_id: vec![2; 8],
+            name: "test_span".to_string(),
+            kind: 1,
+            start_time_unix_nano: 1_700_000_000_000_000_000,
+            end_time_unix_nano: 1_700_000_001_000_000_000,
+            ..Default::default()
+        };
+
+        let result = encoder.encode_span_batch([span].iter(), &metadata);
+        assert!(result.is_ok(), "encode_span_batch with OBO should succeed");
+
+        let batches = result.unwrap();
+        assert_eq!(batches.len(), 1);
+        assert_eq!(batches[0].row_count, 1);
+        assert!(
+            !batches[0].data.is_empty(),
+            "Encoded batch should have data"
+        );
     }
 }

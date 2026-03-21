@@ -51,6 +51,8 @@ mod tests {
                 source_identity,
                 environment: environment.clone(),
                 config_version,
+                obo_identity: None,
+                obo_annotations: None,
             };
 
             let config = GenevaConfigClientConfig {
