@@ -1,5 +1,6 @@
 use std::borrow::Cow;
 use std::future::Future;
+use std::marker::PhantomData;
 use std::pin::Pin;
 use std::string::String;
 use std::sync::Arc;
@@ -12,11 +13,12 @@ use axum::extract::MatchedPath;
 use opentelemetry::global::{self, BoxedTracer};
 use opentelemetry::metrics::Meter;
 use opentelemetry::metrics::{Histogram, UpDownCounter};
-use opentelemetry::trace::{FutureExt as OtelFutureExt, SpanKind, Status, TraceContextExt, Tracer};
+use opentelemetry::trace::{SpanKind, Status, TraceContextExt, Tracer};
 use opentelemetry::Context as OtelContext;
 use opentelemetry::KeyValue;
 use opentelemetry_http::HeaderExtractor;
 use opentelemetry_semantic_conventions as semconv;
+use pin_project_lite::pin_project;
 use tower_layer::Layer;
 use tower_service::Service;
 
@@ -560,11 +562,56 @@ struct RequestData {
     custom_request_attributes: Vec<KeyValue>,
 }
 
+struct RequestFinalization<ResExt> {
+    request_data: RequestData,
+    layer_state: Arc<HTTPLayerState>,
+    response_extractor: ResExt,
+}
+
+pin_project! {
+    /// Future type returned by [`HTTPService`].
+    ///
+    /// This is a concrete future that avoids heap allocation by embedding the
+    /// inner service future directly, rather than using `Pin<Box<dyn Future>>`.
+    pub struct ResponseFuture<F, ResBody, ResExt> {
+        #[pin]
+        inner: F,
+        otel_cx: OtelContext,
+        finalization: Option<RequestFinalization<ResExt>>,
+        _body: PhantomData<fn() -> ResBody>,
+    }
+}
+
+impl<F, ResBody, E, ResExt> Future for ResponseFuture<F, ResBody, ResExt>
+where
+    F: Future<Output = result::Result<http::Response<ResBody>, E>>,
+    E: std::fmt::Debug,
+    ResBody: http_body::Body,
+    ResExt: ResponseAttributeExtractor<ResBody>,
+{
+    type Output = F::Output;
+
+    fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
+        let this = self.project();
+        let _guard = this.otel_cx.clone().attach();
+        let result = std::task::ready!(this.inner.poll(cx));
+        if let Some(fin) = this.finalization.take() {
+            finalize_request(
+                &result,
+                &fin.request_data,
+                &fin.layer_state,
+                &fin.response_extractor,
+            );
+        }
+        Poll::Ready(result)
+    }
+}
+
 impl<S, ReqBody, ResBody, RouteExt, ReqExt, ResExt> Service<http::Request<ReqBody>>
     for HTTPService<S, RouteExt, ReqExt, ResExt>
 where
     S: Service<http::Request<ReqBody>, Response = http::Response<ResBody>>,
-    S::Future: Send + 'static,
+    S::Future: Send,
     S::Error: std::fmt::Debug,
     ResBody: http_body::Body,
     RouteExt: RouteExtractor<ReqBody>,
@@ -573,7 +620,7 @@ where
 {
     type Response = S::Response;
     type Error = S::Error;
-    type Future = Pin<Box<dyn Future<Output = result::Result<Self::Response, Self::Error>> + Send>>;
+    type Future = ResponseFuture<S::Future, ResBody, ResExt>;
 
     fn poll_ready(&mut self, cx: &mut Context<'_>) -> Poll<result::Result<(), Self::Error>> {
         self.inner_service.poll_ready(cx)
@@ -670,14 +717,16 @@ where
 
         let inner_future = self.inner_service.call(req);
 
-        Box::pin(
-            async move {
-                let result = inner_future.await;
-                finalize_request(&result, &request_data, &layer_state, &response_extractor);
-                result
-            }
-            .with_context(cx),
-        )
+        ResponseFuture {
+            inner: inner_future,
+            otel_cx: cx,
+            finalization: Some(RequestFinalization {
+                request_data,
+                layer_state,
+                response_extractor,
+            }),
+            _body: PhantomData,
+        }
     }
 }
 
