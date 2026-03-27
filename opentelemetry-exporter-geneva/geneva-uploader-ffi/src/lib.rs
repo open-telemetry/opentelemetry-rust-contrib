@@ -2131,7 +2131,7 @@ mod tests {
             scope_logs: vec![scope_logs],
             ..Default::default()
         };
-        let req = ExportLogsServiceRequest {
+        let req = opentelemetry_proto::tonic::collector::logs::v1::ExportLogsServiceRequest {
             resource_logs: vec![resource_logs],
         };
         let bytes = req.encode_to_vec();
