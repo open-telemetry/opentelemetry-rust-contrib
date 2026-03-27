@@ -172,7 +172,7 @@ impl LogBatchAccumulator {
                     schemas: Vec::new(),
                     events: Vec::new(),
                     metadata: BatchMetadata {
-                        start_time: timestamp,
+                        start_time: if timestamp == 0 { u64::MAX } else { timestamp },
                         end_time: timestamp,
                         schema_ids: String::new(),
                     },
@@ -267,7 +267,15 @@ impl LogBatchAccumulator {
             blobs.push(EncodedBatch {
                 event_name: batch_event_name.to_string(),
                 data: compressed,
-                metadata: batch_data.metadata,
+                metadata: BatchMetadata {
+                    start_time: if batch_data.metadata.start_time == u64::MAX {
+                        0
+                    } else {
+                        batch_data.metadata.start_time
+                    },
+                    end_time: batch_data.metadata.end_time,
+                    schema_ids: batch_data.metadata.schema_ids,
+                },
                 row_count: events_count,
             });
         }
@@ -498,7 +506,12 @@ impl OtlpEncoder {
             fields.push((FIELD_NAME.into(), BondDataType::BT_STRING));
         }
         fields.push((FIELD_SEVERITY_NUMBER.into(), BondDataType::BT_INT32));
-        if record.severity_text().filter(|b| !b.is_empty()).is_some() {
+        if record
+            .severity_text()
+            .and_then(|b| std::str::from_utf8(b).ok())
+            .filter(|s| !s.is_empty())
+            .is_some()
+        {
             fields.push((FIELD_SEVERITY_TEXT.into(), BondDataType::BT_STRING));
         }
         if record.body().is_some_and(|b| {
@@ -522,10 +535,38 @@ impl OtlpEncoder {
                 None => continue,
             };
             let type_id = match val.value_type() {
-                ValueType::String => BondDataType::BT_STRING,
-                ValueType::Int64 => BondDataType::BT_INT64,
-                ValueType::Double => BondDataType::BT_DOUBLE,
-                ValueType::Bool => BondDataType::BT_BOOL,
+                ValueType::String => {
+                    if val
+                        .as_string()
+                        .and_then(|bs| std::str::from_utf8(bs).ok())
+                        .is_some()
+                    {
+                        BondDataType::BT_STRING
+                    } else {
+                        continue;
+                    }
+                }
+                ValueType::Int64 => {
+                    if val.as_int64().is_some() {
+                        BondDataType::BT_INT64
+                    } else {
+                        continue;
+                    }
+                }
+                ValueType::Double => {
+                    if val.as_double().is_some() {
+                        BondDataType::BT_DOUBLE
+                    } else {
+                        continue;
+                    }
+                }
+                ValueType::Bool => {
+                    if val.as_bool().is_some() {
+                        BondDataType::BT_BOOL
+                    } else {
+                        continue;
+                    }
+                }
                 _ => continue,
             };
             fields.push((Cow::Owned(key.to_owned()), type_id));
@@ -637,29 +678,29 @@ impl OtlpEncoder {
                 };
                 match val.value_type() {
                     ValueType::String => {
-                        written_dynamic_fields += 1;
                         if let Some(bytes) = val.as_string() {
                             if let Ok(s) = std::str::from_utf8(bytes) {
                                 BondWriter::write_string(&mut buffer, s);
+                                written_dynamic_fields += 1;
                             }
                         }
                     }
                     ValueType::Int64 => {
-                        written_dynamic_fields += 1;
                         if let Some(i) = val.as_int64() {
                             BondWriter::write_numeric(&mut buffer, i);
+                            written_dynamic_fields += 1;
                         }
                     }
                     ValueType::Double => {
-                        written_dynamic_fields += 1;
                         if let Some(d) = val.as_double() {
                             BondWriter::write_numeric(&mut buffer, d);
+                            written_dynamic_fields += 1;
                         }
                     }
                     ValueType::Bool => {
-                        written_dynamic_fields += 1;
                         if let Some(b) = val.as_bool() {
                             BondWriter::write_bool(&mut buffer, b);
+                            written_dynamic_fields += 1;
                         }
                     }
                     _ => {}
@@ -1302,6 +1343,38 @@ mod tests {
     }
 
     #[test]
+    fn test_view_invalid_utf8_severity_text_omits_field() {
+        // A log record whose severity_text contains invalid UTF-8 bytes should
+        // produce the same encoded output as a log record with no severity_text.
+        use otap_df_pdata::views::otlp::bytes::logs::RawLogsData;
+        use prost::Message as _;
+
+        let encoder = OtlpEncoder::new();
+        let metadata = make_metadata("view-invalid-severity-text");
+
+        let log = LogRecord {
+            observed_time_unix_nano: 1_700_000_000_333_444_557,
+            event_name: "invalid_severity_text".to_string(),
+            severity_number: 5,
+            ..Default::default()
+        };
+
+        let expected =
+            encode_log_batch_via_proto(&encoder, [log.clone()].iter(), &metadata).unwrap();
+
+        // Inject severity_text = [0xFF] directly into the LogRecord wire bytes.
+        // severity_text field = 3 (LEN) => [0x1A, 0x01, 0xFF]
+        let mut log_bytes = log.encode_to_vec();
+        log_bytes.extend_from_slice(&[0x1A, 0x01, 0xFF]);
+        let export_bytes = wrap_log_record_bytes(&log_bytes);
+
+        let actual = encoder
+            .encode_logs_from_view(&RawLogsData::new(&export_bytes), &metadata)
+            .unwrap();
+        assert_single_batch_equal(&expected, &actual);
+    }
+
+    #[test]
     fn test_view_invalid_utf8_attribute_key_omits_attribute() {
         // A log record whose attribute key contains invalid UTF-8 should
         // produce the same encoded output as a log record with no attribute.
@@ -1818,6 +1891,45 @@ mod tests {
         // Confirm the selected timestamp is time_unix_nano, not observed_time_unix_nano
         assert_eq!(encoded[0].metadata.start_time, 1_000_000_000);
         assert_eq!(encoded[0].metadata.end_time, 1_000_000_000);
+    }
+
+    #[test]
+    fn test_view_zero_timestamp_does_not_pin_batch_start_time() {
+        let encoder = OtlpEncoder::new();
+        let metadata = make_metadata("zero-ts-start");
+        use prost::Message as _;
+
+        let bytes = opentelemetry_proto::tonic::collector::logs::v1::ExportLogsServiceRequest {
+            resource_logs: vec![ResourceLogs {
+                scope_logs: vec![ScopeLogs {
+                    log_records: vec![
+                        LogRecord {
+                            event_name: "ts_event".to_string(),
+                            severity_number: 9,
+                            ..Default::default()
+                        },
+                        LogRecord {
+                            observed_time_unix_nano: 2_000_000_000,
+                            event_name: "ts_event".to_string(),
+                            severity_number: 9,
+                            ..Default::default()
+                        },
+                    ],
+                    ..Default::default()
+                }],
+                ..Default::default()
+            }],
+        }
+        .encode_to_vec();
+
+        use otap_df_pdata::views::otlp::bytes::logs::RawLogsData;
+        let encoded = encoder
+            .encode_logs_from_view(&RawLogsData::new(&bytes), &metadata)
+            .unwrap();
+
+        assert_eq!(encoded.len(), 1);
+        assert_eq!(encoded[0].metadata.start_time, 2_000_000_000);
+        assert_eq!(encoded[0].metadata.end_time, 2_000_000_000);
     }
 
     #[test]

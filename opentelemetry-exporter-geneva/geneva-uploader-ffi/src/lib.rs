@@ -530,9 +530,10 @@ pub unsafe extern "C" fn geneva_client_new(
     GenevaError::Success
 }
 
-/// Encode and compress logs into batches (synchronous)
+/// Encode and compress logs into batches (synchronous).
 ///
-/// Available when the `otlp_bytes` feature is enabled.
+/// When the `otlp_bytes` feature is disabled, this function returns
+/// [`GenevaError::InternalError`] and optionally writes a diagnostic string.
 ///
 /// # Safety
 /// - handle must be a valid pointer returned by geneva_client_new
@@ -575,6 +576,8 @@ pub unsafe extern "C" fn geneva_encode_and_compress_logs(
     let handle_ref = unsafe { handle.as_ref().unwrap() };
     let data_slice = unsafe { std::slice::from_raw_parts(data, data_len) };
 
+    // TODO: If preserving DecodeFailed semantics matters more than avoiding
+    // an upfront parse pass, add fallible OTLP validation before RawLogsData.
     let view = otap_df_pdata::views::otlp::bytes::logs::RawLogsData::new(data_slice);
     match handle_ref.client.encode_and_compress_logs(&view) {
         Ok(batches) => {
@@ -590,6 +593,34 @@ pub unsafe extern "C" fn geneva_encode_and_compress_logs(
             GenevaError::InternalError
         }
     }
+}
+
+/// Encode and compress logs into batches (synchronous).
+///
+/// Stub exported when the `otlp_bytes` feature is disabled so the C header
+/// stays link-compatible across feature selections.
+#[cfg(not(feature = "otlp_bytes"))]
+#[no_mangle]
+pub unsafe extern "C" fn geneva_encode_and_compress_logs(
+    _handle: *mut GenevaClientHandle,
+    _data: *const u8,
+    _data_len: usize,
+    out_batches: *mut *mut EncodedBatchesHandle,
+    err_msg_out: *mut c_char,
+    err_msg_len: usize,
+) -> GenevaError {
+    if out_batches.is_null() {
+        return GenevaError::NullPointer;
+    }
+    unsafe { *out_batches = ptr::null_mut() };
+    unsafe {
+        write_error_if_provided(
+            err_msg_out,
+            err_msg_len,
+            &"geneva_encode_and_compress_logs requires the otlp_bytes feature",
+        )
+    };
+    GenevaError::InternalError
 }
 
 /// Encode and compress spans into batches (synchronous)
@@ -1554,9 +1585,14 @@ mod tests {
             assert_eq!(rc as u32, GenevaError::NullPointer as u32);
             assert!(out.is_null());
 
+            // Use valid storage for a non-null handle pointer. The function
+            // should return before attempting to validate or dereference it.
+            let mut handle_storage = std::mem::MaybeUninit::<GenevaClientHandle>::uninit();
+            let non_null_handle = handle_storage.as_mut_ptr();
+
             // null records pointer
             let rc2 = geneva_encode_and_compress_log_records(
-                ptr::null_mut(), // null handle → NullPointer before records check
+                non_null_handle,
                 ptr::null(),
                 1,
                 &mut out,
@@ -1584,14 +1620,14 @@ mod tests {
                 attr_count: 0,
             };
             let rc3 = geneva_encode_and_compress_log_records(
-                ptr::null_mut(), // null handle checked first
+                non_null_handle,
                 &dummy_record as *const _,
-                0, // zero count → EmptyInput (but null handle checked first → NullPointer)
+                0,
                 &mut out,
                 ptr::null_mut(),
                 0,
             );
-            assert_eq!(rc3 as u32, GenevaError::NullPointer as u32);
+            assert_eq!(rc3 as u32, GenevaError::EmptyInput as u32);
         }
     }
 

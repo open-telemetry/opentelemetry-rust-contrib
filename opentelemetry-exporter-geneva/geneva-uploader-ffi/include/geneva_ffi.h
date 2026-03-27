@@ -117,7 +117,8 @@ GenevaError geneva_client_new(const GenevaConfig* config,
 
 /* 1) Encode and compress logs into batches (synchronous).
       `data` is a protobuf-encoded ExportLogsServiceRequest.
-      Only available when the Rust crate is built with the `otlp_bytes` feature.
+      This symbol is always declared. If the Rust library was built without
+      the `otlp_bytes` feature, the function returns an error at runtime.
       - On success returns GENEVA_SUCCESS and writes *out_batches.
       - On failure returns an error code and optionally writes diagnostic message to err_msg_out.
 
@@ -132,14 +133,12 @@ GenevaError geneva_client_new(const GenevaConfig* config,
       - err_msg_len: Size of err_msg_out buffer in bytes (ignored if err_msg_out is NULL)
 
       Caller must free *out_batches with geneva_batches_free. */
-#ifdef GENEVA_FEATURE_OTLP_BYTES
 GenevaError geneva_encode_and_compress_logs(GenevaClientHandle* handle,
                                             const uint8_t* data,
                                             size_t data_len,
                                             EncodedBatchesHandle** out_batches,
                                             char* err_msg_out,
                                             size_t err_msg_len);
-#endif /* GENEVA_FEATURE_OTLP_BYTES */
 
 /* 1.1) Encode and compress spans into batches (synchronous).
       `data` is a protobuf-encoded ExportTraceServiceRequest.
@@ -275,11 +274,13 @@ typedef struct {
     /* Log body as a null-terminated UTF-8 string. NULL = absent. */
     const char* body;
 
-    /* 16-byte trace ID. Only read when trace_id_present != 0. */
+    /* 16-byte trace ID. Only used when trace_id_present != 0 and the ID is
+       not all zeros. All-zero IDs are treated as absent to match OTLP view semantics. */
     uint8_t trace_id[16];
     uint8_t trace_id_present; /* Non-zero if trace_id is valid. */
 
-    /* 8-byte span ID. Only read when span_id_present != 0. */
+    /* 8-byte span ID. Only used when span_id_present != 0 and the ID is
+       not all zeros. All-zero IDs are treated as absent to match OTLP view semantics. */
     uint8_t span_id[8];
     uint8_t span_id_present;  /* Non-zero if span_id is valid. */
 
