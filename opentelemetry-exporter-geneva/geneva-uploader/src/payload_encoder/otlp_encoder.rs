@@ -900,6 +900,8 @@ impl OtlpEncoder {
 
     /// Links serialization
     fn serialize_links(links: &[opentelemetry_proto::tonic::trace::v1::span::Link]) -> String {
+        use std::fmt::Write;
+
         if links.is_empty() {
             return "[]".to_string();
         }
@@ -920,14 +922,14 @@ impl OtlpEncoder {
 
             // Write hex directly to avoid temporary string allocation
             for &byte in &link.span_id {
-                json.push_str(&format!("{byte:02x}"));
+                let _ = write!(&mut json, "{byte:02x}");
             }
 
             json.push_str(r#"","toTraceId":""#);
 
             // Write hex directly to avoid temporary string allocation
             for &byte in &link.trace_id {
-                json.push_str(&format!("{byte:02x}"));
+                let _ = write!(&mut json, "{byte:02x}");
             }
 
             json.push_str(r#""}"#);
