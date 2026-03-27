@@ -2394,4 +2394,196 @@ mod tests {
         unsafe { geneva_client_free(raw_handle) };
         drop(mock_server);
     }
+
+    #[test]
+    #[cfg(all(feature = "mock_auth", feature = "otlp_bytes"))]
+    fn test_encode_log_records_all_attribute_types_match_otlp() {
+        use opentelemetry_proto::tonic::collector::logs::v1::ExportLogsServiceRequest;
+        use opentelemetry_proto::tonic::common::v1::{
+            any_value, AnyValue, InstrumentationScope, KeyValue,
+        };
+        use opentelemetry_proto::tonic::logs::v1::{LogRecord, ResourceLogs, ScopeLogs};
+        use opentelemetry_proto::tonic::resource::v1::Resource;
+        use otap_df_pdata::views::otlp::bytes::logs::RawLogsData;
+
+        let cfg = GenevaClientConfig {
+            endpoint: "https://example.invalid".to_string(),
+            environment: "test".to_string(),
+            account: "test".to_string(),
+            namespace: "testns".to_string(),
+            region: "testregion".to_string(),
+            config_major_version: 1,
+            auth_method: AuthMethod::MockAuth,
+            tenant: "testtenant".to_string(),
+            role_name: "testrole".to_string(),
+            role_instance: "testinstance".to_string(),
+            msi_resource: None,
+        };
+
+        let ffi_client =
+            GenevaClient::new(cfg.clone()).expect("failed to create GenevaClient with MockAuth");
+        let expected_client =
+            GenevaClient::new(cfg).expect("failed to create GenevaClient with MockAuth");
+
+        let mut handle_box = Box::new(GenevaClientHandle {
+            magic: GENEVA_HANDLE_MAGIC,
+            client: ffi_client,
+        });
+        let handle_ptr: *mut GenevaClientHandle = &mut *handle_box;
+
+        let event_name = std::ffi::CString::new("AttrTypes").unwrap();
+        let body = std::ffi::CString::new("all attr types").unwrap();
+        let severity_text = std::ffi::CString::new("INFO").unwrap();
+        let string_key = std::ffi::CString::new("string.attr").unwrap();
+        let int_key = std::ffi::CString::new("int.attr").unwrap();
+        let double_key = std::ffi::CString::new("double.attr").unwrap();
+        let bool_key = std::ffi::CString::new("bool.attr").unwrap();
+        let string_val = std::ffi::CString::new("value").unwrap();
+
+        let attr_keys = [
+            string_key.as_ptr(),
+            int_key.as_ptr(),
+            double_key.as_ptr(),
+            bool_key.as_ptr(),
+        ];
+        let attr_vals = [
+            GenevaAttrValueC {
+                tag: GenevaAttrType::String as u8,
+                data: GenevaAttrData {
+                    str_val: string_val.as_ptr(),
+                },
+            },
+            GenevaAttrValueC {
+                tag: GenevaAttrType::Int64 as u8,
+                data: GenevaAttrData { int64_val: 42 },
+            },
+            GenevaAttrValueC {
+                tag: GenevaAttrType::Double as u8,
+                data: GenevaAttrData { double_val: 3.5 },
+            },
+            GenevaAttrValueC {
+                tag: GenevaAttrType::Bool as u8,
+                data: GenevaAttrData { bool_val: 1 },
+            },
+        ];
+
+        let record = GenevaLogRecordC {
+            event_name: event_name.as_ptr(),
+            time_unix_nano: 1_700_000_000_000_000_000,
+            observed_time_unix_nano: 0,
+            severity_number: 9,
+            severity_text: severity_text.as_ptr(),
+            body: body.as_ptr(),
+            trace_id: [0u8; 16],
+            trace_id_present: 0,
+            span_id: [0u8; 8],
+            span_id_present: 0,
+            flags: 0,
+            flags_present: 0,
+            attr_keys: attr_keys.as_ptr(),
+            attr_values: attr_vals.as_ptr(),
+            attr_count: attr_keys.len(),
+        };
+
+        let mut batches_ptr: *mut EncodedBatchesHandle = std::ptr::null_mut();
+        let rc = unsafe {
+            geneva_encode_and_compress_log_records(
+                handle_ptr,
+                &record as *const _,
+                1,
+                &mut batches_ptr,
+                ptr::null_mut(),
+                0,
+            )
+        };
+        assert_eq!(rc as u32, GenevaError::Success as u32);
+        assert!(!batches_ptr.is_null());
+
+        let req = ExportLogsServiceRequest {
+            resource_logs: vec![ResourceLogs {
+                resource: Some(Resource {
+                    attributes: vec![KeyValue {
+                        key: "service.name".to_string(),
+                        value: Some(AnyValue {
+                            value: Some(any_value::Value::StringValue(
+                                "ffi-attr-types".to_string(),
+                            )),
+                        }),
+                    }],
+                    ..Default::default()
+                }),
+                scope_logs: vec![ScopeLogs {
+                    scope: Some(InstrumentationScope {
+                        name: "ffi.attr.types".to_string(),
+                        ..Default::default()
+                    }),
+                    log_records: vec![LogRecord {
+                        time_unix_nano: record.time_unix_nano,
+                        severity_number: record.severity_number,
+                        severity_text: "INFO".to_string(),
+                        body: Some(AnyValue {
+                            value: Some(any_value::Value::StringValue(
+                                "all attr types".to_string(),
+                            )),
+                        }),
+                        event_name: "AttrTypes".to_string(),
+                        attributes: vec![
+                            KeyValue {
+                                key: "string.attr".to_string(),
+                                value: Some(AnyValue {
+                                    value: Some(any_value::Value::StringValue("value".to_string())),
+                                }),
+                            },
+                            KeyValue {
+                                key: "int.attr".to_string(),
+                                value: Some(AnyValue {
+                                    value: Some(any_value::Value::IntValue(42)),
+                                }),
+                            },
+                            KeyValue {
+                                key: "double.attr".to_string(),
+                                value: Some(AnyValue {
+                                    value: Some(any_value::Value::DoubleValue(3.5)),
+                                }),
+                            },
+                            KeyValue {
+                                key: "bool.attr".to_string(),
+                                value: Some(AnyValue {
+                                    value: Some(any_value::Value::BoolValue(true)),
+                                }),
+                            },
+                        ],
+                        ..Default::default()
+                    }],
+                    ..Default::default()
+                }],
+                ..Default::default()
+            }],
+        };
+
+        let req_bytes = req.encode_to_vec();
+        let expected = expected_client
+            .encode_and_compress_logs(&RawLogsData::new(&req_bytes))
+            .expect("expected OTLP encoding to succeed");
+
+        let actual = unsafe { &(*batches_ptr).batches };
+        assert_eq!(actual.len(), 1);
+        assert_eq!(expected.len(), 1);
+        assert_eq!(actual[0].event_name, expected[0].event_name);
+        assert_eq!(actual[0].row_count, expected[0].row_count);
+        assert_eq!(
+            actual[0].metadata.start_time,
+            expected[0].metadata.start_time
+        );
+        assert_eq!(actual[0].metadata.end_time, expected[0].metadata.end_time);
+        assert_eq!(
+            actual[0].metadata.schema_ids,
+            expected[0].metadata.schema_ids
+        );
+        assert_eq!(actual[0].data, expected[0].data);
+
+        unsafe { geneva_batches_free(batches_ptr) };
+        let raw_handle = Box::into_raw(handle_box);
+        unsafe { geneva_client_free(raw_handle) };
+    }
 }
