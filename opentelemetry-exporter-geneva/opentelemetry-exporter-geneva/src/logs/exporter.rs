@@ -392,24 +392,21 @@ impl InstrumentationScopeView for NoView {
         = NoAttrView
     where
         Self: 'a;
-    type AttributesIter<'a>
+    type AttributeIter<'a>
         = std::iter::Empty<NoAttrView>
     where
         Self: 'a;
-    fn attributes(&self) -> Self::AttributesIter<'_> {
-        std::iter::empty()
-    }
-    fn dropped_attributes_count(&self) -> u32 {
-        0
-    }
     fn name(&self) -> Option<&[u8]> {
         None
     }
     fn version(&self) -> Option<&[u8]> {
         None
     }
-    fn schema_url(&self) -> Option<&[u8]> {
-        None
+    fn attributes(&self) -> Self::AttributeIter<'_> {
+        std::iter::empty()
+    }
+    fn dropped_attributes_count(&self) -> u32 {
+        0
     }
 }
 
