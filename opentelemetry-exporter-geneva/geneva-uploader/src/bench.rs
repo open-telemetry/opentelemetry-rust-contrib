@@ -136,8 +136,22 @@ mod benchmarks {
 
     /*
         - Criterion benchmark (encode_logs_from_view, RawLogsData-backed):
-        - Mirrors the earlier log-encoding workload shapes using the current
-          view-based entrypoint.
+            Results: (local run in this workspace)
+
+            - Attribute count scaling (10 log records each):
+                - 0 attrs:   ~8.34 us/op
+                - 4 attrs:   ~11.73 us/op
+                - 8 attrs:   ~15.41 us/op
+                - 16 attrs:  ~21.20 us/op
+
+            - Batch size scaling (each log with 4 attributes, all same schema):
+                - 1 log:     ~5.15 us/op
+                - 10 logs:   ~11.51 us/op
+                - 100 logs:  ~74.06 us/op
+                - 1000 logs: ~711.90 us/op
+
+            - Mixed event names (100 logs, 3 different event names, 4 attributes each):
+                - ~81.65 us/op
     */
     #[test]
     #[ignore = "benchmark on crate private, ignored by default during normal test runs"]
