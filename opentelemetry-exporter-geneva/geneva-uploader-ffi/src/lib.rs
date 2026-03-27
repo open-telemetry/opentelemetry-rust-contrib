@@ -12,8 +12,6 @@ use tokio::runtime::Runtime;
 
 use geneva_uploader::client::{EncodedBatch, GenevaClient, GenevaClientConfig};
 use geneva_uploader::AuthMethod;
-#[cfg(feature = "otlp_bytes")]
-use opentelemetry_proto::tonic::collector::logs::v1::ExportLogsServiceRequest;
 use opentelemetry_proto::tonic::collector::trace::v1::ExportTraceServiceRequest;
 use prost::Message;
 use std::path::PathBuf;
