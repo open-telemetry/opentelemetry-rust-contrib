@@ -184,8 +184,8 @@ impl GenevaClient {
     /// }
     /// ```
     ///
-    /// See `examples/view_basic.rs` in the `geneva-uploader` crate for a
-    /// complete working example including a minimal `LogsDataView`
+    /// See `examples/view_basic.rs` for the common `RawLogsData` usage pattern
+    /// and `examples/view_advanced.rs` for a full custom `LogsDataView`
     /// implementation.
     pub fn encode_and_compress_logs<T: LogsDataView>(
         &self,
