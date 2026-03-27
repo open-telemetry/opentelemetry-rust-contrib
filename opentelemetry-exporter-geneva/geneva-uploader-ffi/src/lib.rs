@@ -1394,9 +1394,6 @@ impl<'a> LogsDataView for FlatLogsView<'a> {
     }
 }
 
-
-
-
 // ---------------------------------------------------------------------------
 // FFI function: encode a flat C array of log records (zero-copy, no OTLP)
 // ---------------------------------------------------------------------------
