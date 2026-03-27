@@ -628,6 +628,9 @@ impl OtlpEncoder {
         if expected_dynamic_fields > 0 {
             let mut written_dynamic_fields = 0usize;
             for attr in record.attributes() {
+                if std::str::from_utf8(attr.key()).is_err() {
+                    continue;
+                }
                 let val = match attr.value() {
                     Some(v) => v,
                     None => continue,
@@ -1288,6 +1291,41 @@ mod tests {
         // LogRecord body field (field 5, LEN, 3 bytes) → [0x2A, 0x03, 0x0A, 0x01, 0xFF]
         let mut log_bytes = log.encode_to_vec();
         log_bytes.extend_from_slice(&[0x2A, 0x03, 0x0A, 0x01, 0xFF]);
+        let export_bytes = wrap_log_record_bytes(&log_bytes);
+
+        let actual = encoder
+            .encode_logs_from_view(&RawLogsData::new(&export_bytes), &metadata)
+            .unwrap();
+        assert_single_batch_equal(&expected, &actual);
+    }
+
+    #[test]
+    fn test_view_invalid_utf8_attribute_key_omits_attribute() {
+        // A log record whose attribute key contains invalid UTF-8 should
+        // produce the same encoded output as a log record with no attribute.
+        use otap_df_pdata::views::otlp::bytes::logs::RawLogsData;
+        use prost::Message as _;
+
+        let encoder = OtlpEncoder::new();
+        let metadata = make_metadata("view-invalid-attr-key");
+
+        let log = LogRecord {
+            observed_time_unix_nano: 1_700_000_000_333_444_556,
+            event_name: "invalid_attr_key".to_string(),
+            severity_number: 5,
+            ..Default::default()
+        };
+
+        let expected =
+            encode_log_batch_via_proto(&encoder, [log.clone()].iter(), &metadata).unwrap();
+
+        // Inject attributes = [ KeyValue { key: [0xFF], value: AnyValue { string_value: "a" } } ]
+        // KeyValue bytes:
+        //   key   = field 1 (LEN) => [0x0A, 0x01, 0xFF]
+        //   value = field 2 (LEN) => [0x12, 0x03, 0x0A, 0x01, 0x61]
+        // LogRecord attributes field = field 6 (LEN) => [0x32, 0x08, ...]
+        let mut log_bytes = log.encode_to_vec();
+        log_bytes.extend_from_slice(&[0x32, 0x08, 0x0A, 0x01, 0xFF, 0x12, 0x03, 0x0A, 0x01, 0x61]);
         let export_bytes = wrap_log_record_bytes(&log_bytes);
 
         let actual = encoder
