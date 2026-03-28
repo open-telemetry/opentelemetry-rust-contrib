@@ -16,6 +16,7 @@ members = [
     "opentelemetry-user-events-metrics",
     "opentelemetry-exporter-geneva/geneva-uploader",
     "opentelemetry-exporter-geneva/geneva-uploader-ffi",
+    "opentelemetry-exporter-geneva/geneva-test-server",
     "opentelemetry-exporter-geneva/opentelemetry-exporter-geneva",
     "examples/*",
     "stress",
