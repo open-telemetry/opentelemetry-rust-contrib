@@ -1,6 +1,5 @@
 use std::borrow::Cow;
 use std::future::Future;
-use std::marker::PhantomData;
 use std::pin::Pin;
 use std::string::String;
 use std::sync::Arc;
@@ -573,16 +572,15 @@ pin_project! {
     ///
     /// This is a concrete future that avoids heap allocation by embedding the
     /// inner service future directly, rather than using `Pin<Box<dyn Future>>`.
-    pub struct ResponseFuture<F, ResBody, ResExt> {
+    pub struct ResponseFuture<F, ResExt> {
         #[pin]
         inner: F,
         otel_cx: OtelContext,
         finalization: Option<RequestFinalization<ResExt>>,
-        _body: PhantomData<fn() -> ResBody>,
     }
 }
 
-impl<F, ResBody, E, ResExt> Future for ResponseFuture<F, ResBody, ResExt>
+impl<F, ResBody, E, ResExt> Future for ResponseFuture<F, ResExt>
 where
     F: Future<Output = result::Result<http::Response<ResBody>, E>>,
     E: std::fmt::Debug,
@@ -620,7 +618,7 @@ where
 {
     type Response = S::Response;
     type Error = S::Error;
-    type Future = ResponseFuture<S::Future, ResBody, ResExt>;
+    type Future = ResponseFuture<S::Future, ResExt>;
 
     fn poll_ready(&mut self, cx: &mut Context<'_>) -> Poll<result::Result<(), Self::Error>> {
         self.inner_service.poll_ready(cx)
@@ -725,7 +723,6 @@ where
                 layer_state,
                 response_extractor,
             }),
-            _body: PhantomData,
         }
     }
 }
