@@ -13,7 +13,8 @@ There are two ways to send logs:
 Use the `opentelemetry-exporter-geneva` crate which wires `GenevaClient` into
 the OTel SDK pipeline (`SdkLoggerProvider` → `GenevaExporter`).  This is the
 right choice when your application already uses the OTel SDK or the
-`tracing` crate.
+`tracing` crate and wants to send data directly to Geneva without using an
+external Agent/Collector.
 
 ### 2. Log view path (direct / zero-copy)
 

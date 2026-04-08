@@ -1507,6 +1507,28 @@ mod tests {
         (token, exp.to_rfc3339())
     }
 
+    #[cfg(feature = "mock_auth")]
+    fn make_mock_handle() -> Box<GenevaClientHandle> {
+        let cfg = GenevaClientConfig {
+            endpoint: "https://example.invalid".to_string(),
+            environment: "test".to_string(),
+            account: "test".to_string(),
+            namespace: "testns".to_string(),
+            region: "testregion".to_string(),
+            config_major_version: 1,
+            auth_method: AuthMethod::MockAuth,
+            tenant: "testtenant".to_string(),
+            role_name: "testrole".to_string(),
+            role_instance: "testinstance".to_string(),
+            msi_resource: None,
+        };
+        let client = GenevaClient::new(cfg).expect("failed to create GenevaClient with MockAuth");
+        Box::new(GenevaClientHandle {
+            magic: GENEVA_HANDLE_MAGIC,
+            client,
+        })
+    }
+
     #[test]
     fn test_geneva_client_new_with_null_config() {
         unsafe {
@@ -1566,24 +1588,28 @@ mod tests {
             );
             assert_eq!(rc as u32, GenevaError::NullPointer as u32);
             assert!(out.is_null());
+        }
+    }
 
-            // Use valid storage for a non-null handle pointer. The function
-            // should return before attempting to validate or dereference it.
-            let mut handle_storage = std::mem::MaybeUninit::<GenevaClientHandle>::uninit();
-            let non_null_handle = handle_storage.as_mut_ptr();
+    #[test]
+    #[cfg(feature = "mock_auth")]
+    fn test_encode_log_records_valid_handle_argument_checks() {
+        unsafe {
+            let mut out: *mut EncodedBatchesHandle = std::ptr::null_mut();
+            let mut handle_box = make_mock_handle();
+            let handle_ptr: *mut GenevaClientHandle = &mut *handle_box;
 
-            // null records pointer
-            let rc2 = geneva_encode_and_compress_log_records(
-                non_null_handle,
+            let rc = geneva_encode_and_compress_log_records(
+                handle_ptr,
                 ptr::null(),
                 1,
                 &mut out,
                 ptr::null_mut(),
                 0,
             );
-            assert_eq!(rc2 as u32, GenevaError::NullPointer as u32);
+            assert_eq!(rc as u32, GenevaError::NullPointer as u32);
+            assert!(out.is_null());
 
-            // zero count
             let dummy_record = GenevaLogRecordC {
                 event_name: ptr::null(),
                 time_unix_nano: 0,
@@ -1601,15 +1627,16 @@ mod tests {
                 attr_values: ptr::null(),
                 attr_count: 0,
             };
-            let rc3 = geneva_encode_and_compress_log_records(
-                non_null_handle,
+            let rc = geneva_encode_and_compress_log_records(
+                handle_ptr,
                 &dummy_record as *const _,
                 0,
                 &mut out,
                 ptr::null_mut(),
                 0,
             );
-            assert_eq!(rc3 as u32, GenevaError::EmptyInput as u32);
+            assert_eq!(rc as u32, GenevaError::EmptyInput as u32);
+            assert!(out.is_null());
         }
     }
 

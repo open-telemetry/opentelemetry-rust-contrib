@@ -151,13 +151,6 @@ impl GenevaClient {
     /// Encode logs from any [`LogsDataView`] implementation into LZ4-chunked
     /// compressed batches, grouped by event name.
     ///
-    /// # When to use this method
-    ///
-    /// Use this method when your telemetry data is already represented as a
-    /// type that implements [`LogsDataView`] — for example, an Arrow-backed
-    /// view from otap-dataflow — and you want to bypass the OpenTelemetry SDK
-    /// pipeline entirely.
-    ///
     /// # What to implement
     ///
     /// Implement the following traits from `otap_df_pdata_views`:
@@ -194,7 +187,7 @@ impl GenevaClient {
         debug!(
             name: "client.encode_and_compress_logs",
             target: "geneva-uploader",
-            "Encoding and compressing log view"
+            "Encoding and compressing logs"
         );
 
         self.encoder
@@ -204,7 +197,7 @@ impl GenevaClient {
                     name: "client.encode_and_compress_logs.error",
                     target: "geneva-uploader",
                     error = %e,
-                    "Log view compression failed"
+                    "Logs compression failed"
                 );
                 format!("Compression failed: {e}")
             })

@@ -164,7 +164,7 @@ impl LogBatchAccumulator {
             .unwrap_or(0);
         let routing_event_name = normalized_event_name(record).unwrap_or("Log");
 
-        let (field_info, dynamic_fields_start) = OtlpEncoder::determine_fields_for(record);
+        let (field_info, dynamic_fields_start) = OtlpEncoder::determine_fields(record);
 
         // Only allocate Arc<str> when we see a new event name for the first time.
         // Arc<str>: Borrow<str>, so contains_key / get_mut accept a plain &str.
@@ -210,7 +210,7 @@ impl LogBatchAccumulator {
             }
         };
 
-        let row_buffer = OtlpEncoder::write_row_data_for(
+        let row_buffer = OtlpEncoder::write_row_data(
             record,
             &field_info,
             dynamic_fields_start,
@@ -476,7 +476,7 @@ impl OtlpEncoder {
     // ---------------------------------------------------------------------------
 
     /// Determine Bond schema fields for any [`LogRecordView`].
-    fn determine_fields_for(record: &impl LogRecordView) -> (Vec<FieldDef>, usize) {
+    fn determine_fields(record: &impl LogRecordView) -> (Vec<FieldDef>, usize) {
         let estimated_capacity = 14 + 3; // base + conditional; attributes appended below
         let mut fields: Vec<(Cow<'static, str>, BondDataType)> =
             Vec::with_capacity(estimated_capacity);
@@ -589,7 +589,7 @@ impl OtlpEncoder {
     }
 
     /// Write Bond row data for any [`LogRecordView`].
-    fn write_row_data_for(
+    fn write_row_data(
         record: &impl LogRecordView,
         fields: &[FieldDef],
         dynamic_fields_start: usize,
@@ -669,7 +669,7 @@ impl OtlpEncoder {
         if expected_dynamic_fields > 0 {
             let mut written_dynamic_fields = 0usize;
             // IMPORTANT: This iteration must yield attributes in the same order as
-            // determine_fields_for. All current LogRecordView implementations are
+            // determine_fields. All current LogRecordView implementations are
             // deterministic, but this is an implicit contract not enforced by the trait.
             for attr in record.attributes() {
                 let key = match std::str::from_utf8(attr.key()) {
@@ -689,7 +689,7 @@ impl OtlpEncoder {
                                         .get(dynamic_fields_start + written_dynamic_fields)
                                         .map(|field| field.name.as_ref()),
                                     Some(key),
-                                    "attribute iteration order mismatch between determine_fields_for and write_row_data_for"
+                                    "attribute iteration order mismatch between determine_fields and write_row_data"
                                 );
                                 BondWriter::write_string(&mut buffer, s);
                                 written_dynamic_fields += 1;
@@ -703,7 +703,7 @@ impl OtlpEncoder {
                                     .get(dynamic_fields_start + written_dynamic_fields)
                                     .map(|field| field.name.as_ref()),
                                 Some(key),
-                                "attribute iteration order mismatch between determine_fields_for and write_row_data_for"
+                                "attribute iteration order mismatch between determine_fields and write_row_data"
                             );
                             BondWriter::write_numeric(&mut buffer, i);
                             written_dynamic_fields += 1;
@@ -716,7 +716,7 @@ impl OtlpEncoder {
                                     .get(dynamic_fields_start + written_dynamic_fields)
                                     .map(|field| field.name.as_ref()),
                                 Some(key),
-                                "attribute iteration order mismatch between determine_fields_for and write_row_data_for"
+                                "attribute iteration order mismatch between determine_fields and write_row_data"
                             );
                             BondWriter::write_numeric(&mut buffer, d);
                             written_dynamic_fields += 1;
@@ -729,7 +729,7 @@ impl OtlpEncoder {
                                     .get(dynamic_fields_start + written_dynamic_fields)
                                     .map(|field| field.name.as_ref()),
                                 Some(key),
-                                "attribute iteration order mismatch between determine_fields_for and write_row_data_for"
+                                "attribute iteration order mismatch between determine_fields and write_row_data"
                             );
                             BondWriter::write_bool(&mut buffer, b);
                             written_dynamic_fields += 1;
@@ -854,7 +854,7 @@ impl OtlpEncoder {
     }
 
     /// Write span row data directly from Span
-    // TODO - code duplication between write_span_row_data() and write_row_data_for() - consider extracting common field handling
+    // TODO - code duplication between write_span_row_data() and write_row_data() - consider extracting common field handling
     fn write_span_row_data(
         &self,
         span: &Span,
@@ -1291,7 +1291,7 @@ mod tests {
     }
 
     #[test]
-    fn test_view_encoding_matches_otlp() {
+    fn test_proto_view_encoding_smoke() {
         let encoder = OtlpEncoder::new();
         let metadata = make_metadata("view-parity");
 
@@ -1323,7 +1323,7 @@ mod tests {
 
         let encoded =
             encode_log_batch_via_proto(&encoder, [log.clone()].iter(), &metadata).unwrap();
-        // Verify the rich log record encodes to a single non-empty batch
+        // Smoke test: a rich proto-backed view encodes to a single non-empty batch.
         assert_eq!(encoded.len(), 1);
         assert_eq!(encoded[0].event_name, "view_event");
         assert!(!encoded[0].data.is_empty());
@@ -1487,8 +1487,8 @@ mod tests {
         use prost::Message as _;
         let base_bytes = base_log.encode_to_vec();
         let base_ref = RawLogRecord::new(&base_bytes);
-        let (base_fields, base_dynamic_fields_start) = OtlpEncoder::determine_fields_for(&base_ref);
-        let base_row = OtlpEncoder::write_row_data_for(
+        let (base_fields, base_dynamic_fields_start) = OtlpEncoder::determine_fields(&base_ref);
+        let base_row = OtlpEncoder::write_row_data(
             &base_ref,
             &base_fields,
             base_dynamic_fields_start,
@@ -1497,8 +1497,8 @@ mod tests {
 
         let dup_bytes = dup_log.encode_to_vec();
         let dup_ref = RawLogRecord::new(&dup_bytes);
-        let (dup_fields, dup_dynamic_fields_start) = OtlpEncoder::determine_fields_for(&dup_ref);
-        let dup_row = OtlpEncoder::write_row_data_for(
+        let (dup_fields, dup_dynamic_fields_start) = OtlpEncoder::determine_fields(&dup_ref);
+        let dup_row = OtlpEncoder::write_row_data(
             &dup_ref,
             &dup_fields,
             dup_dynamic_fields_start,

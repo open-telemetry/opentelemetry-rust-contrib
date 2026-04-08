@@ -93,7 +93,7 @@ impl opentelemetry_sdk::logs::LogExporter for GenevaExporter {
 
 // ---------------------------------------------------------------------------
 // ProtoLogsView: LogsDataView impl for OTLP proto ResourceLogs
-// Wraps &[ResourceLogs] directly, avoiding proto→bytes→parse round-trip.
+// Wraps `&[ResourceLogs]` directly, avoiding proto→bytes→parse round-trip.
 // ---------------------------------------------------------------------------
 
 struct ProtoLogsView<'a>(&'a [ResourceLogs]);
