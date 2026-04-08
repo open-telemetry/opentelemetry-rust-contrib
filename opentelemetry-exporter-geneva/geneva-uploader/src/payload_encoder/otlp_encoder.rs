@@ -45,6 +45,15 @@ const FIELD_PARENT_ID: &str = "parentId";
 const FIELD_LINKS: &str = "links";
 const FIELD_STATUS_MESSAGE: &str = "statusMessage";
 
+fn non_blank_utf8(bytes: &[u8]) -> Option<&str> {
+    let s = std::str::from_utf8(bytes).ok()?;
+    (!s.trim().is_empty()).then_some(s)
+}
+
+fn normalized_event_name(record: &impl LogRecordView) -> Option<&str> {
+    record.event_name().and_then(non_blank_utf8)
+}
+
 /// Metadata fields that should appear as Bond schema fields (queryable in Geneva)
 #[derive(Clone, Debug)]
 pub(crate) struct MetadataFields {
@@ -153,11 +162,7 @@ impl LogBatchAccumulator {
             .filter(|&t| t != 0)
             .or_else(|| record.observed_time_unix_nano())
             .unwrap_or(0);
-        let routing_event_name: &str = record
-            .event_name()
-            .and_then(|b| std::str::from_utf8(b).ok())
-            .filter(|s| !s.is_empty())
-            .unwrap_or("Log");
+        let routing_event_name = normalized_event_name(record).unwrap_or("Log");
 
         let (field_info, dynamic_fields_start) = OtlpEncoder::determine_fields_for(record);
 
@@ -499,8 +504,7 @@ impl OtlpEncoder {
         // Part B – core log fields
         if record
             .event_name()
-            .and_then(|b| std::str::from_utf8(b).ok())
-            .filter(|s| !s.is_empty())
+            .and_then(non_blank_utf8)
             .is_some()
         {
             fields.push((FIELD_NAME.into(), BondDataType::BT_STRING));
@@ -632,11 +636,7 @@ impl OtlpEncoder {
                 FIELD_NAME => {
                     BondWriter::write_string(
                         &mut buffer,
-                        record
-                            .event_name()
-                            .and_then(|b| std::str::from_utf8(b).ok())
-                            .filter(|s| !s.is_empty())
-                            .unwrap_or(""),
+                        normalized_event_name(record).unwrap_or(""),
                     );
                 }
                 FIELD_SEVERITY_NUMBER => {
@@ -668,10 +668,14 @@ impl OtlpEncoder {
         let expected_dynamic_fields = fields.len().saturating_sub(dynamic_fields_start);
         if expected_dynamic_fields > 0 {
             let mut written_dynamic_fields = 0usize;
+            // IMPORTANT: This iteration must yield attributes in the same order as
+            // determine_fields_for. All current LogRecordView implementations are
+            // deterministic, but this is an implicit contract not enforced by the trait.
             for attr in record.attributes() {
-                if std::str::from_utf8(attr.key()).is_err() {
-                    continue;
-                }
+                let key = match std::str::from_utf8(attr.key()) {
+                    Ok(key) => key,
+                    Err(_) => continue,
+                };
                 let val = match attr.value() {
                     Some(v) => v,
                     None => continue,
@@ -680,6 +684,13 @@ impl OtlpEncoder {
                     ValueType::String => {
                         if let Some(bytes) = val.as_string() {
                             if let Ok(s) = std::str::from_utf8(bytes) {
+                                debug_assert_eq!(
+                                    fields
+                                        .get(dynamic_fields_start + written_dynamic_fields)
+                                        .map(|field| field.name.as_ref()),
+                                    Some(key),
+                                    "attribute iteration order mismatch between determine_fields_for and write_row_data_for"
+                                );
                                 BondWriter::write_string(&mut buffer, s);
                                 written_dynamic_fields += 1;
                             }
@@ -687,18 +698,39 @@ impl OtlpEncoder {
                     }
                     ValueType::Int64 => {
                         if let Some(i) = val.as_int64() {
+                            debug_assert_eq!(
+                                fields
+                                    .get(dynamic_fields_start + written_dynamic_fields)
+                                    .map(|field| field.name.as_ref()),
+                                Some(key),
+                                "attribute iteration order mismatch between determine_fields_for and write_row_data_for"
+                            );
                             BondWriter::write_numeric(&mut buffer, i);
                             written_dynamic_fields += 1;
                         }
                     }
                     ValueType::Double => {
                         if let Some(d) = val.as_double() {
+                            debug_assert_eq!(
+                                fields
+                                    .get(dynamic_fields_start + written_dynamic_fields)
+                                    .map(|field| field.name.as_ref()),
+                                Some(key),
+                                "attribute iteration order mismatch between determine_fields_for and write_row_data_for"
+                            );
                             BondWriter::write_numeric(&mut buffer, d);
                             written_dynamic_fields += 1;
                         }
                     }
                     ValueType::Bool => {
                         if let Some(b) = val.as_bool() {
+                            debug_assert_eq!(
+                                fields
+                                    .get(dynamic_fields_start + written_dynamic_fields)
+                                    .map(|field| field.name.as_ref()),
+                                Some(key),
+                                "attribute iteration order mismatch between determine_fields_for and write_row_data_for"
+                            );
                             BondWriter::write_bool(&mut buffer, b);
                             written_dynamic_fields += 1;
                         }
@@ -1239,6 +1271,23 @@ mod tests {
 
         assert_eq!(result.len(), 1);
         assert_eq!(result[0].event_name, "test_event");
+    }
+
+    #[test]
+    fn test_whitespace_event_name_defaults_to_log() {
+        let encoder = OtlpEncoder::new();
+
+        let log = LogRecord {
+            event_name: "   \t".to_string(),
+            severity_number: 9,
+            ..Default::default()
+        };
+
+        let metadata = make_metadata("test");
+        let result = encode_log_batch_via_proto(&encoder, [log].iter(), &metadata).unwrap();
+
+        assert_eq!(result.len(), 1);
+        assert_eq!(result[0].event_name, "Log");
     }
 
     #[test]
