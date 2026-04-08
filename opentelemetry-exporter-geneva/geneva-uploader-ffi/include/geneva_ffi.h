@@ -117,8 +117,9 @@ GenevaError geneva_client_new(const GenevaConfig* config,
 
 /* 1) Encode and compress logs into batches (synchronous).
       `data` is a protobuf-encoded ExportLogsServiceRequest.
-      This symbol is always declared. If the Rust library was built without
-      the `otlp_bytes` feature, the function returns an error at runtime.
+      This symbol is only exported when the Rust library is built with the
+      `otlp_bytes` feature. Calling code should enable the same feature when
+      linking against a library that provides this entry point.
       - On success returns GENEVA_SUCCESS and writes *out_batches.
       - On failure returns an error code and optionally writes diagnostic message to err_msg_out.
 

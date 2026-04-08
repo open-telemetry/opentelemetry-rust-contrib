@@ -9,6 +9,8 @@ C/C++ FFI layer over `geneva-uploader`. Exposes a stable C ABI so that C++ agent
 ### 1. OTLP bytes path
 
 Pass a serialised `ExportLogsServiceRequest` (or `ExportTraceServiceRequest`) protobuf. Rust deserialises it and encodes to Geneva Bond+LZ4.
+This entry point is only available when `geneva-uploader-ffi` is built with
+the `otlp_bytes` feature.
 
 ```c
 GenevaError rc = geneva_encode_and_compress_logs(

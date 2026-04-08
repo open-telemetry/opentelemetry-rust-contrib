@@ -532,8 +532,7 @@ pub unsafe extern "C" fn geneva_client_new(
 
 /// Encode and compress logs into batches (synchronous).
 ///
-/// When the `otlp_bytes` feature is disabled, this function returns
-/// [`GenevaError::InternalError`] and optionally writes a diagnostic string.
+/// Available only when the `otlp_bytes` feature is enabled.
 ///
 /// # Safety
 /// - handle must be a valid pointer returned by geneva_client_new
@@ -593,34 +592,6 @@ pub unsafe extern "C" fn geneva_encode_and_compress_logs(
             GenevaError::InternalError
         }
     }
-}
-
-/// Encode and compress logs into batches (synchronous).
-///
-/// Stub exported when the `otlp_bytes` feature is disabled so the C header
-/// stays link-compatible across feature selections.
-#[cfg(not(feature = "otlp_bytes"))]
-#[no_mangle]
-pub unsafe extern "C" fn geneva_encode_and_compress_logs(
-    _handle: *mut GenevaClientHandle,
-    _data: *const u8,
-    _data_len: usize,
-    out_batches: *mut *mut EncodedBatchesHandle,
-    err_msg_out: *mut c_char,
-    err_msg_len: usize,
-) -> GenevaError {
-    if out_batches.is_null() {
-        return GenevaError::NullPointer;
-    }
-    unsafe { *out_batches = ptr::null_mut() };
-    unsafe {
-        write_error_if_provided(
-            err_msg_out,
-            err_msg_len,
-            &"geneva_encode_and_compress_logs requires the otlp_bytes feature",
-        )
-    };
-    GenevaError::InternalError
 }
 
 /// Encode and compress spans into batches (synchronous)

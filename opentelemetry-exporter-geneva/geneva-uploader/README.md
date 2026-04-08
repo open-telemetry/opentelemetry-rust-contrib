@@ -43,7 +43,8 @@ For C/C++ callers, the `geneva-uploader-ffi` crate wraps `GenevaClient` behind
 a stable C ABI.  It provides two encoding paths that mirror the Rust paths above:
 
 - **OTLP bytes** (`geneva_encode_and_compress_logs`) — pass a serialised
-  `ExportLogsServiceRequest` protobuf.
+  `ExportLogsServiceRequest` protobuf. This FFI entry point is only exported
+  when `geneva-uploader-ffi` is built with the `otlp_bytes` feature.
 - **Direct records** (`geneva_encode_and_compress_log_records`) — pass a flat
   `GenevaLogRecordC` array; string fields are read directly from C memory with
   no intermediate copy.
