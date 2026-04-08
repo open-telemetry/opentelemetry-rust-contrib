@@ -970,7 +970,7 @@ impl<'a> AnyValueView<'a> for NoAnyValue {
     where
         Self: 'kv;
     fn value_type(&self) -> ValueType {
-        ValueType::String
+        ValueType::Empty
     }
     fn as_string(&self) -> Option<&[u8]> {
         None
@@ -1542,6 +1542,13 @@ mod tests {
             assert_eq!(rc as u32, GenevaError::NullPointer as u32);
             assert!(out.is_null());
         }
+    }
+
+    #[test]
+    fn test_no_any_value_reports_empty_type() {
+        let value = NoAnyValue;
+        assert_eq!(value.value_type(), ValueType::Empty);
+        assert_eq!(value.as_string(), None);
     }
 
     #[test]
