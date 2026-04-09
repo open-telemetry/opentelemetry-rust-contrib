@@ -171,8 +171,51 @@ jobs:
       - uses: taiki-e/install-action@bfadeaba214680fb4ab63e710bcb2a6a17019fdc # v2.70.4
         with:
           tool: cargo-msrv
-      - name: Check MSRV for all crates
+      # cargo-msrv verify runs `cargo check` in workspace context for each crate.
+      # Geneva crates (and stress, which depends on geneva-uploader) pull
+      # `otap-df-pdata-views` from otel-arrow. That dependency requires a newer
+      # compiler and breaks the 1.75 workspace-wide sweep for unrelated crates.
+      # For the 1.75 run, temporarily remove these members from workspace.
+      # Geneva crates are validated separately in the `msrv-geneva` job (Rust 1.87).
+      - name: Temporarily exclude Geneva crates from workspace for 1.75 sweep
+        shell: bash
+        run: |
+          sed -i '/opentelemetry-exporter-geneva\/geneva-uploader/d' Cargo.toml
+          sed -i '/opentelemetry-exporter-geneva\/geneva-uploader-ffi/d' Cargo.toml
+          sed -i '/opentelemetry-exporter-geneva\/opentelemetry-exporter-geneva/d' Cargo.toml
+          sed -i '/"stress"/d' Cargo.toml
+      - name: Drop lockfile for reduced 1.75 workspace graph
+        shell: bash
+        run: rm -f Cargo.lock
+      - name: Check MSRV for all crates (excluding Geneva crates)
         run: bash ./scripts/msrv.sh
+        env:
+          MSRV_EXCLUDE_PACKAGES: geneva-uploader,geneva-uploader-ffi,opentelemetry-exporter-geneva,stress
+  msrv-geneva:
+    strategy:
+      matrix:
+        os: [ubuntu-latest, windows-2025]
+    runs-on: ${{ matrix.os }}
+    continue-on-error: true
+    steps:
+      - name: Harden the runner (Audit all outbound calls)
+        uses: step-security/harden-runner@a90bcbc6539c36a85cdfeb73f7e2f433735f215b # v2.15.0
+        with:
+          egress-policy: audit
+
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          submodules: true
+      - uses: dtolnay/rust-toolchain@efa25f7f19611383d5b0ccf2d1c8914531636bf9
+        with:
+          toolchain: 1.87.0
+      - uses: taiki-e/install-action@68675c5a5f1a6950c3975d33f3ae0ef155e5bf3d # v2.68.15
+        with:
+          tool: cargo-msrv
+      - name: Check MSRV for Geneva crates
+        run: bash ./scripts/msrv.sh
+        env:
+          MSRV_ONLY_PACKAGES: geneva-uploader,geneva-uploader-ffi,opentelemetry-exporter-geneva
   cargo-deny:
     runs-on: ubuntu-latest
     continue-on-error: true # Prevent sudden announcement of a new advisory from failing ci

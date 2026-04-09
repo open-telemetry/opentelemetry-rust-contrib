@@ -83,7 +83,7 @@ pub(crate) struct CentralSchemaEntry {
 pub(crate) struct CentralEventEntry {
     pub schema_id: u64,
     pub level: u8,
-    pub event_name: Arc<String>,
+    pub event_name: Arc<str>,
     pub row: Vec<u8>,
 }
 
@@ -276,7 +276,7 @@ mod tests {
         let event = CentralEventEntry {
             schema_id,
             level: 0, // e.g. ETW verbose
-            event_name: Arc::new("eventname".to_string()),
+            event_name: Arc::from("eventname"),
             row,
         };
 
