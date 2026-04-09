@@ -511,6 +511,7 @@ pub unsafe extern "C" fn geneva_client_new(
         role_name,
         role_instance,
         msi_resource,
+        obo_event_map: None,
     };
 
     // Create client
@@ -1521,6 +1522,7 @@ mod tests {
             role_name: "testrole".to_string(),
             role_instance: "testinstance".to_string(),
             msi_resource: None,
+            obo_event_map: None,
         };
         let client = GenevaClient::new(cfg).expect("failed to create GenevaClient with MockAuth");
         Box::new(GenevaClientHandle {
@@ -2031,6 +2033,7 @@ mod tests {
             role_name: "testrole".to_string(),
             role_instance: "testinstance".to_string(),
             msi_resource: None,
+            obo_event_map: None,
         };
         let client = GenevaClient::new(cfg).expect("failed to create GenevaClient with MockAuth");
 
@@ -2145,6 +2148,7 @@ mod tests {
             role_name: "testrole".to_string(),
             role_instance: "testinstance".to_string(),
             msi_resource: None,
+            obo_event_map: None,
         };
         let client = GenevaClient::new(cfg).expect("failed to create GenevaClient with MockAuth");
 
@@ -2304,6 +2308,7 @@ mod tests {
             role_name: "testrole".to_string(),
             role_instance: "testinstance".to_string(),
             msi_resource: None,
+            obo_event_map: None,
         };
         let client = GenevaClient::new(cfg).expect("failed to create GenevaClient with MockAuth");
         let mut handle_box = Box::new(GenevaClientHandle {
@@ -2427,6 +2432,7 @@ mod tests {
             role_name: "testrole".to_string(),
             role_instance: "testinstance".to_string(),
             msi_resource: None,
+            obo_event_map: None,
         };
 
         let ffi_client =
@@ -2615,6 +2621,7 @@ mod tests {
             role_name: "testrole".to_string(),
             role_instance: "testinstance".to_string(),
             msi_resource: None,
+            obo_event_map: None,
         };
 
         let ffi_client =

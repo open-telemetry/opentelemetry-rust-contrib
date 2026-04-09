@@ -5,6 +5,7 @@ use crate::config_service::client::{AuthMethod, GenevaConfigClient, GenevaConfig
 use crate::ingestion_service::uploader::{GenevaUploader, GenevaUploaderConfig};
 use crate::payload_encoder::otlp_encoder::MetadataFields;
 use crate::payload_encoder::otlp_encoder::OtlpEncoder;
+pub use crate::payload_encoder::otlp_encoder::{OboEventConfig, OboEventMap};
 use opentelemetry_proto::tonic::trace::v1::ResourceSpans;
 use otap_df_pdata_views::views::logs::LogsDataView;
 use std::sync::Arc;
@@ -34,7 +35,7 @@ pub struct GenevaClientConfig {
     pub role_name: String,
     pub role_instance: String,
     pub msi_resource: Option<String>, // Required for Managed Identity variants
-                                      // Add event name/version here if constant, or per-upload if you want them per call.
+    pub obo_event_map: Option<OboEventMap>, // Per-event OBO config (None = no OBO)
 }
 
 /// Main user-facing client for Geneva ingestion.
@@ -43,6 +44,7 @@ pub struct GenevaClient {
     uploader: Arc<GenevaUploader>,
     encoder: OtlpEncoder,
     metadata_fields: MetadataFields,
+    obo_event_map: Option<OboEventMap>,
 }
 
 impl GenevaClient {
@@ -145,6 +147,7 @@ impl GenevaClient {
             uploader: Arc::new(uploader),
             encoder: OtlpEncoder::new(),
             metadata_fields,
+            obo_event_map: cfg.obo_event_map,
         })
     }
 
@@ -191,7 +194,7 @@ impl GenevaClient {
         );
 
         self.encoder
-            .encode_logs_from_view(view, &self.metadata_fields)
+            .encode_logs_from_view(view, &self.metadata_fields, self.obo_event_map.as_ref())
             .map_err(|e| {
                 debug!(
                     name: "client.encode_and_compress_logs.error",
@@ -221,7 +224,11 @@ impl GenevaClient {
             .flat_map(|scope_span| scope_span.spans.iter());
 
         self.encoder
-            .encode_span_batch(span_iter, &self.metadata_fields)
+            .encode_span_batch(
+                span_iter,
+                &self.metadata_fields,
+                self.obo_event_map.as_ref(),
+            )
             .map_err(|e| {
                 debug!(
                     name: "client.encode_and_compress_spans.error",
@@ -244,12 +251,19 @@ impl GenevaClient {
             "Uploading batch"
         );
 
+        // Look up per-event OBO config for this batch's event name
+        let obo_config = self
+            .obo_event_map
+            .as_ref()
+            .and_then(|map| map.get(&batch.event_name));
+
         self.uploader
             .upload(
                 batch.data.clone(),
                 &batch.event_name,
                 &batch.metadata,
                 batch.row_count,
+                obo_config,
             )
             .await
             .map(|_| {
