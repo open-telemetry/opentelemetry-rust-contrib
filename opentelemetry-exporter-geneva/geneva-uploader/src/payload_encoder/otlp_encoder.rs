@@ -210,12 +210,8 @@ impl LogBatchAccumulator {
             }
         };
 
-        let row_buffer = OtlpEncoder::write_row_data(
-            record,
-            &field_info,
-            dynamic_fields_start,
-            metadata_fields,
-        );
+        let row_buffer =
+            OtlpEncoder::write_row_data(record, &field_info, dynamic_fields_start, metadata_fields);
         let level = record.severity_number().unwrap_or(0) as u8;
         // Reuse the Arc already stored in BatchData — just a refcount increment.
         let event_name = Arc::clone(&entry.routing_name);
@@ -502,11 +498,7 @@ impl OtlpEncoder {
         }
 
         // Part B – core log fields
-        if record
-            .event_name()
-            .and_then(non_blank_utf8)
-            .is_some()
-        {
+        if record.event_name().and_then(non_blank_utf8).is_some() {
             fields.push((FIELD_NAME.into(), BondDataType::BT_STRING));
         }
         fields.push((FIELD_SEVERITY_NUMBER.into(), BondDataType::BT_INT32));
@@ -1498,12 +1490,8 @@ mod tests {
         let dup_bytes = dup_log.encode_to_vec();
         let dup_ref = RawLogRecord::new(&dup_bytes);
         let (dup_fields, dup_dynamic_fields_start) = OtlpEncoder::determine_fields(&dup_ref);
-        let dup_row = OtlpEncoder::write_row_data(
-            &dup_ref,
-            &dup_fields,
-            dup_dynamic_fields_start,
-            &metadata,
-        );
+        let dup_row =
+            OtlpEncoder::write_row_data(&dup_ref, &dup_fields, dup_dynamic_fields_start, &metadata);
 
         assert_eq!(dup_fields.len() - dup_dynamic_fields_start, 2);
         assert_eq!(dup_row.len() - base_row.len(), 16);
