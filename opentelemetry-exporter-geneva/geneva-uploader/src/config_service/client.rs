@@ -159,6 +159,8 @@ pub(crate) struct GenevaConfigClientConfig {
     pub(crate) config_major_version: u32,
     pub(crate) auth_method: AuthMethod, // agent_identity and agent_version are hardcoded for now
     pub(crate) msi_resource: Option<String>, // Required when using any Managed Identity variant
+    #[cfg(test)]
+    pub(crate) test_root_ca_pem: Option<Vec<u8>>,
 }
 
 #[allow(dead_code)]
@@ -298,20 +300,26 @@ impl GenevaConfigClient {
                     );
                     GenevaConfigClientError::Certificate(e.to_string())
                 })?;
-                //TODO - use use_native_tls instead of preconfigured_tls once we no longer need self-signed certs
-                // and TLS 1.2 as the exclusive protocol.
-                let tls_connector =
-                    configure_tls_connector(native_tls::TlsConnector::builder(), identity)
-                        .build()
-                        .map_err(|e| {
-                            debug!(
-                                name: "config_client.new.tls_connector_error",
-                                target: "geneva-uploader",
-                                error = %e,
-                                "Failed to build TLS connector"
-                            );
-                            GenevaConfigClientError::Certificate(e.to_string())
-                        })?;
+                // TODO - use use_native_tls instead of preconfigured_tls once we no longer need
+                // TLS 1.2 as the exclusive protocol.
+                let tls_connector = configure_tls_connector(
+                    native_tls::TlsConnector::builder(),
+                    identity,
+                    #[cfg(test)]
+                    config.test_root_ca_pem.as_deref(),
+                    #[cfg(not(test))]
+                    None,
+                )?
+                .build()
+                .map_err(|e| {
+                    debug!(
+                        name: "config_client.new.tls_connector_error",
+                        target: "geneva-uploader",
+                        error = %e,
+                        "Failed to build TLS connector"
+                    );
+                    GenevaConfigClientError::Certificate(e.to_string())
+                })?;
                 client_builder = client_builder.use_preconfigured_tls(tls_connector);
             }
             AuthMethod::WorkloadIdentity { .. } => {
@@ -927,28 +935,22 @@ fn extract_endpoint_from_token(token: &str) -> Result<String> {
     ))
 }
 
-#[cfg(feature = "self_signed_certs")]
 fn configure_tls_connector(
     mut builder: native_tls::TlsConnectorBuilder,
     identity: native_tls::Identity,
-) -> native_tls::TlsConnectorBuilder {
-    eprintln!("WARNING: Self-signed certificates will be accepted. This should only be used in development!");
-    builder
-        .identity(identity)
-        .min_protocol_version(Some(Protocol::Tlsv12))
-        .max_protocol_version(Some(Protocol::Tlsv12))
-        .danger_accept_invalid_certs(true);
-    builder
-}
-
-#[cfg(not(feature = "self_signed_certs"))]
-fn configure_tls_connector(
-    mut builder: native_tls::TlsConnectorBuilder,
-    identity: native_tls::Identity,
-) -> native_tls::TlsConnectorBuilder {
+    test_root_ca_pem: Option<&[u8]>,
+) -> Result<native_tls::TlsConnectorBuilder> {
     builder
         .identity(identity)
         .min_protocol_version(Some(Protocol::Tlsv12))
         .max_protocol_version(Some(Protocol::Tlsv12));
-    builder
+
+    #[cfg(test)]
+    if let Some(root_ca_pem) = test_root_ca_pem {
+        let root_ca = native_tls::Certificate::from_pem(root_ca_pem)
+            .map_err(|e| GenevaConfigClientError::Certificate(e.to_string()))?;
+        builder.add_root_certificate(root_ca);
+    }
+
+    Ok(builder)
 }

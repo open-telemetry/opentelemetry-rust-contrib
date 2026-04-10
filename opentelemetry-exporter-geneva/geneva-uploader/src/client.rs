@@ -87,6 +87,8 @@ impl GenevaClient {
             config_major_version: cfg.config_major_version,
             auth_method: cfg.auth_method,
             msi_resource: cfg.msi_resource,
+            #[cfg(test)]
+            test_root_ca_pem: None,
         };
         let config_client =
             Arc::new(GenevaConfigClient::new(config_client_config).map_err(|e| {
