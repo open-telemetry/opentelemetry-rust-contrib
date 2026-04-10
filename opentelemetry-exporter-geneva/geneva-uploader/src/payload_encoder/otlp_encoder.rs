@@ -8,7 +8,7 @@ use crate::payload_encoder::central_blob::{
 };
 use crate::payload_encoder::lz4_chunked_compression::lz4_chunked_compression;
 use chrono::{TimeZone, Utc};
-use md5::{Md5, Digest as _};
+use md5::{Digest as _, Md5};
 use opentelemetry_proto::tonic::common::v1::any_value::Value;
 use opentelemetry_proto::tonic::trace::v1::Span;
 use otap_df_pdata_views::views::common::{AnyValueView, AttributeView, ValueType};

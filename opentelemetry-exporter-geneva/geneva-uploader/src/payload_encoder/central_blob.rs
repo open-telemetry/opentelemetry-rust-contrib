@@ -230,7 +230,7 @@ impl CentralBlob {
 mod tests {
     use super::*;
     use crate::payload_encoder::bond_encoder::{BondEncodedSchema, FieldDef};
-    use md5::{Md5, Digest as _};
+    use md5::{Digest as _, Md5};
     use std::borrow::Cow;
 
     //Helper to calculate MD5 hash, returns [u8;16]

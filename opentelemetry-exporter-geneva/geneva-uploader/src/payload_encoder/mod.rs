@@ -11,7 +11,7 @@ mod tests {
     };
 
     use crate::payload_encoder::bond_encoder::FieldDef;
-    use md5::{Md5, Digest as _};
+    use md5::{Digest as _, Md5};
 
     fn create_payload(fields: Vec<FieldDef>, row_data: Vec<u8>) -> Vec<u8> {
         let schema_obj = BondEncodedSchema::from_fields("MdsContainer", "testNamespace", &fields);
