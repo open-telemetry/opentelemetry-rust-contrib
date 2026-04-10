@@ -8,6 +8,7 @@ use crate::payload_encoder::central_blob::{
 };
 use crate::payload_encoder::lz4_chunked_compression::lz4_chunked_compression;
 use chrono::{TimeZone, Utc};
+use md5::{Md5, Digest as _};
 use opentelemetry_proto::tonic::common::v1::any_value::Value;
 use opentelemetry_proto::tonic::trace::v1::Span;
 use otap_df_pdata_views::views::common::{AnyValueView, AttributeView, ValueType};
@@ -128,8 +129,6 @@ struct BatchData {
 
 impl BatchData {
     fn format_schema_ids(&self) -> String {
-        use std::fmt::Write;
-
         if self.schemas.is_empty() {
             return String::new();
         }
@@ -141,7 +140,7 @@ impl BatchData {
                 if i > 0 {
                     acc.push(';');
                 }
-                let _ = write!(&mut acc, "{:x}", md5::Digest(s.md5));
+                acc.push_str(&hex::encode(s.md5));
                 acc
             },
         )
@@ -395,7 +394,6 @@ impl OtlpEncoder {
         // Format schema IDs
         // TODO: This can be shared code with log batch
         let schema_ids_string = {
-            use std::fmt::Write;
             if schemas.is_empty() {
                 String::new()
             } else {
@@ -409,7 +407,7 @@ impl OtlpEncoder {
                             acc.push(';');
                         }
                         // Use stored MD5 hash (already computed when schema was created)
-                        let _ = write!(&mut acc, "{:x}", md5::Digest(s.md5));
+                        acc.push_str(&hex::encode(s.md5));
                         acc
                     },
                 )
@@ -820,7 +818,7 @@ impl OtlpEncoder {
         let schema = BondEncodedSchema::from_fields("OtlpLogRecord", "telemetry", field_info); //TODO - use actual struct name and namespace
 
         let schema_bytes = schema.as_bytes();
-        let schema_md5 = md5::compute(schema_bytes).0;
+        let schema_md5: [u8; 16] = Md5::digest(schema_bytes).into();
 
         CentralSchemaEntry {
             id: schema_id,
@@ -835,7 +833,7 @@ impl OtlpEncoder {
         let schema = BondEncodedSchema::from_fields("OtlpSpanRecord", "telemetry", field_info);
 
         let schema_bytes = schema.as_bytes();
-        let schema_md5 = md5::compute(schema_bytes).0;
+        let schema_md5: [u8; 16] = Md5::digest(schema_bytes).into();
 
         CentralSchemaEntry {
             id: schema_id,
