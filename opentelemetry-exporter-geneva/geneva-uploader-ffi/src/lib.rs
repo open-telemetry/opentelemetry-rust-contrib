@@ -2575,7 +2575,8 @@ mod tests {
             .encode_and_compress_logs(&RawLogsData::new(&req_bytes))
             .expect("expected OTLP encoding to succeed");
 
-        let actual = unsafe { &(*batches_ptr).batches };
+        let batches = unsafe { Box::from_raw(batches_ptr) };
+        let actual = &batches.batches;
         assert_eq!(actual.len(), 1);
         assert_eq!(expected.len(), 1);
         assert_eq!(actual[0].event_name, expected[0].event_name);
@@ -2591,9 +2592,8 @@ mod tests {
         );
         assert_eq!(actual[0].data, expected[0].data);
 
-        unsafe { geneva_batches_free(batches_ptr) };
-        let raw_handle = Box::into_raw(handle_box);
-        unsafe { geneva_client_free(raw_handle) };
+        drop(batches);
+        drop(handle_box);
     }
 
     #[test]
@@ -2688,7 +2688,8 @@ mod tests {
             .encode_and_compress_logs(&RawLogsData::new(&req_bytes))
             .expect("expected OTLP encoding to succeed");
 
-        let actual = unsafe { &(*batches_ptr).batches };
+        let batches = unsafe { Box::from_raw(batches_ptr) };
+        let actual = &batches.batches;
         assert_eq!(actual.len(), 1);
         assert_eq!(expected.len(), 1);
         assert_eq!(actual[0].event_name, expected[0].event_name);
@@ -2704,8 +2705,7 @@ mod tests {
         );
         assert_eq!(actual[0].data, expected[0].data);
 
-        unsafe { geneva_batches_free(batches_ptr) };
-        let raw_handle = Box::into_raw(handle_box);
-        unsafe { geneva_client_free(raw_handle) };
+        drop(batches);
+        drop(handle_box);
     }
 }
