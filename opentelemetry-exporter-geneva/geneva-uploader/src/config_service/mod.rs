@@ -25,8 +25,13 @@ mod tests {
     use std::path::PathBuf;
     use std::thread;
     use tempfile::NamedTempFile;
+    use uuid::Uuid;
     use wiremock::matchers::{method, path};
     use wiremock::{Mock, MockServer, ResponseTemplate};
+
+    fn generate_test_password() -> String {
+        Uuid::new_v4().to_string()
+    }
 
     #[test]
     fn test_config_fields() {
@@ -54,7 +59,7 @@ mod tests {
     }
 
     fn generate_self_signed_p12() -> (NamedTempFile, String) {
-        let password = "test".to_string();
+        let password = generate_test_password();
 
         // This returns a CertifiedKey, not a Certificate
         let cert = generate_simple_self_signed(vec!["localhost".into()]).unwrap();
@@ -242,7 +247,7 @@ mod tests {
 
         let (client_cert, client_signing_key) =
             generate_signed_leaf(&ca_cert, &ca_key, "GenevaUploader Test Client", None, false);
-        let client_password = "test".to_string();
+        let client_password = generate_test_password();
         let client_p12_file = build_pkcs12(&client_cert, &client_signing_key, &client_password);
 
         GeneratedTlsMaterial {
@@ -579,7 +584,7 @@ mod tests {
             config_major_version: 1,
             auth_method: AuthMethod::Certificate {
                 path: PathBuf::from("/nonexistent/path.p12".to_string()),
-                password: "test".to_string(),
+                password: generate_test_password(),
             },
             msi_resource: None,
             test_root_ca_pem: None,
