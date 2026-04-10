@@ -938,7 +938,7 @@ fn extract_endpoint_from_token(token: &str) -> Result<String> {
 fn configure_tls_connector(
     mut builder: native_tls::TlsConnectorBuilder,
     identity: native_tls::Identity,
-    test_root_ca_pem: Option<&[u8]>,
+    _test_root_ca_pem: Option<&[u8]>,
 ) -> Result<native_tls::TlsConnectorBuilder> {
     builder
         .identity(identity)
@@ -946,7 +946,7 @@ fn configure_tls_connector(
         .max_protocol_version(Some(Protocol::Tlsv12));
 
     #[cfg(test)]
-    if let Some(root_ca_pem) = test_root_ca_pem {
+    if let Some(root_ca_pem) = _test_root_ca_pem {
         let root_ca = native_tls::Certificate::from_pem(root_ca_pem)
             .map_err(|e| GenevaConfigClientError::Certificate(e.to_string()))?;
         builder.add_root_certificate(root_ca);
