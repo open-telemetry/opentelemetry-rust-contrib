@@ -52,3 +52,6 @@ rand = {version = "0.9"}
 
 [lints]
 workspace = true
+
+[package.metadata.cargo-machete]
+ignored = ["md-5"] # cargo machete is incorrectly detecting this as an unused crate
