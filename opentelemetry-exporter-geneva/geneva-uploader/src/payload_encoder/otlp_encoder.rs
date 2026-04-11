@@ -129,6 +129,8 @@ struct BatchData {
 
 impl BatchData {
     fn format_schema_ids(&self) -> String {
+        use std::fmt::Write;
+
         if self.schemas.is_empty() {
             return String::new();
         }
@@ -140,7 +142,9 @@ impl BatchData {
                 if i > 0 {
                     acc.push(';');
                 }
-                acc.push_str(&hex::encode(s.md5));
+                for byte in s.md5 {
+                    let _ = write!(acc, "{byte:02x}");
+                }
                 acc
             },
         )
@@ -394,6 +398,7 @@ impl OtlpEncoder {
         // Format schema IDs
         // TODO: This can be shared code with log batch
         let schema_ids_string = {
+            use std::fmt::Write;
             if schemas.is_empty() {
                 String::new()
             } else {
@@ -407,7 +412,9 @@ impl OtlpEncoder {
                             acc.push(';');
                         }
                         // Use stored MD5 hash (already computed when schema was created)
-                        acc.push_str(&hex::encode(s.md5));
+                        for byte in s.md5 {
+                            let _ = write!(acc, "{byte:02x}");
+                        }
                         acc
                     },
                 )
