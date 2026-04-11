@@ -1,5 +1,3 @@
-//use md5;
-
 use crate::payload_encoder::bond_encoder::{BondEncodedSchema, FieldDef};
 use chrono::{DateTime, Datelike, Timelike, Utc};
 use std::sync::Arc;
@@ -232,11 +230,12 @@ impl CentralBlob {
 mod tests {
     use super::*;
     use crate::payload_encoder::bond_encoder::{BondEncodedSchema, FieldDef};
+    use md5::{Digest as _, Md5};
     use std::borrow::Cow;
 
     //Helper to calculate MD5 hash, returns [u8;16]
     fn md5_bytes(data: &[u8]) -> [u8; 16] {
-        md5::compute(data).0
+        Md5::digest(data).into()
     }
 
     #[test]
