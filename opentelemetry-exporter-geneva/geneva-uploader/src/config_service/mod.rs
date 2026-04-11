@@ -34,7 +34,7 @@ mod tests {
     }
 
     #[test]
-    fn test_config_fields() {
+    fn config_fields() {
         let config = GenevaConfigClientConfig {
             endpoint: "https://example.com".to_string(),
             environment: "env".to_string(),
@@ -343,7 +343,7 @@ mod tests {
 
     #[cfg_attr(target_os = "macos", ignore)] // cert generated not compatible with macOS
     #[tokio::test]
-    async fn test_get_ingestion_info_mocked() {
+    async fn get_ingestion_info_mocked() {
         let mock_server = MockServer::start().await;
         let (mock_response, jwt_endpoint, valid_token) = config_service_response();
 
@@ -390,7 +390,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_tls_rejects_untrusted_runtime_generated_ca() {
+    async fn tls_rejects_untrusted_runtime_generated_ca() {
         let tls_material = generate_ca_signed_tls_material();
         let (response_body, _, _) = config_service_response();
         let tls_server = spawn_tls_config_service(
@@ -431,7 +431,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_tls_accepts_runtime_generated_ca() {
+    async fn tls_accepts_runtime_generated_ca() {
         let tls_material = generate_ca_signed_tls_material();
         let (response_body, jwt_endpoint, valid_token) = config_service_response();
         let tls_server = spawn_tls_config_service(
@@ -479,7 +479,7 @@ mod tests {
 
     #[cfg_attr(target_os = "macos", ignore)] // cert generated not compatible with macOS
     #[tokio::test]
-    async fn test_error_handling_with_non_success_status() {
+    async fn error_handling_with_non_success_status() {
         let mock_server = MockServer::start().await;
 
         Mock::given(method("GET"))
@@ -524,7 +524,7 @@ mod tests {
 
     #[cfg_attr(target_os = "macos", ignore)] // cert generated not compatible with macOS
     #[tokio::test]
-    async fn test_missing_ingestion_gateway_info() {
+    async fn missing_ingestion_gateway_info() {
         let mock_server = MockServer::start().await;
 
         // Response without IngestionGatewayInfo
@@ -574,7 +574,7 @@ mod tests {
 
     #[cfg_attr(target_os = "macos", ignore)] // cert generated not compatible with macOS
     #[tokio::test]
-    async fn test_invalid_certificate_path() {
+    async fn invalid_certificate_path() {
         let config = GenevaConfigClientConfig {
             endpoint: "https://example.com".to_string(),
             environment: "env".to_string(),
@@ -614,12 +614,12 @@ mod tests {
     // export GENEVA_CONFIG_MAJOR_VERSION="config-version"
     // export GENEVA_CERT_PATH="/path/to/your/certificate.p12"
     // export GENEVA_CERT_PASSWORD="your-certificate-password" // Empty string if no password
-    // cargo test test_get_ingestion_info_real_server -- --ignored
+    // cargo test get_ingestion_info_real_server -- --ignored
     // ```
     use std::env;
     #[tokio::test]
     #[ignore] // This test is ignored by default to prevent running in CI pipelines
-    async fn test_get_ingestion_info_real_server() {
+    async fn get_ingestion_info_real_server() {
         // Read configuration from environment variables
         let endpoint =
             env::var("GENEVA_ENDPOINT").expect("GENEVA_ENDPOINT environment variable must be set");
