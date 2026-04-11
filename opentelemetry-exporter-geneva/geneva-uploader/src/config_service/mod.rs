@@ -3,16 +3,38 @@ pub(crate) mod client;
 #[cfg(test)]
 mod tests {
     use crate::config_service::client::{AuthMethod, GenevaConfigClient, GenevaConfigClientConfig};
-    use openssl::{pkcs12::Pkcs12, pkey::PKey, x509::X509};
+    use openssl::{
+        asn1::Asn1Time,
+        bn::{BigNum, MsbOption},
+        hash::MessageDigest,
+        pkcs12::Pkcs12,
+        pkey::{PKey, Private},
+        rsa::Rsa,
+        ssl::{SslAcceptor, SslMethod, SslVersion},
+        x509::{
+            extension::{
+                AuthorityKeyIdentifier, BasicConstraints, ExtendedKeyUsage, KeyUsage,
+                SubjectAlternativeName, SubjectKeyIdentifier,
+            },
+            X509NameBuilder, X509,
+        },
+    };
     use rcgen::generate_simple_self_signed;
-    use std::io::Write;
+    use std::io::{Read, Write};
+    use std::net::TcpListener;
     use std::path::PathBuf;
+    use std::thread;
     use tempfile::NamedTempFile;
+    use uuid::Uuid;
     use wiremock::matchers::{method, path};
     use wiremock::{Mock, MockServer, ResponseTemplate};
 
+    fn generate_test_password() -> String {
+        Uuid::new_v4().to_string()
+    }
+
     #[test]
-    fn test_config_fields() {
+    fn config_fields() {
         let config = GenevaConfigClientConfig {
             endpoint: "https://example.com".to_string(),
             environment: "env".to_string(),
@@ -24,6 +46,7 @@ mod tests {
                 resource: "https://monitor.azure.com".to_string(),
             },
             msi_resource: None,
+            test_root_ca_pem: None,
         };
 
         assert_eq!(config.environment, "env");
@@ -36,7 +59,7 @@ mod tests {
     }
 
     fn generate_self_signed_p12() -> (NamedTempFile, String) {
-        let password = "test".to_string();
+        let password = generate_test_password();
 
         // This returns a CertifiedKey, not a Certificate
         let cert = generate_simple_self_signed(vec!["localhost".into()]).unwrap();
@@ -70,14 +93,236 @@ mod tests {
         (file, password)
     }
 
-    #[cfg_attr(target_os = "macos", ignore)] // cert generated not compatible with macOS
-    #[tokio::test]
-    async fn test_get_ingestion_info_mocked() {
-        let mock_server = MockServer::start().await;
-        let jwt_endpoint = "https://test.endpoint";
-        let valid_token = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJFbmRwb2ludCI6Imh0dHBzOi8vdGVzdC5lbmRwb2ludCJ9.signature";
+    struct GeneratedTlsMaterial {
+        client_p12_file: NamedTempFile,
+        client_password: String,
+        root_ca_pem: Vec<u8>,
+        server_cert: X509,
+        server_key: PKey<Private>,
+    }
 
-        let mock_response = serde_json::json!({
+    struct LocalTlsConfigService {
+        endpoint: String,
+        handle: thread::JoinHandle<()>,
+    }
+
+    fn build_pkcs12_der(cert: &X509, key: &PKey<Private>, password: &str) -> Vec<u8> {
+        Pkcs12::builder()
+            .name("alias")
+            .pkey(key)
+            .cert(cert)
+            .build2(password)
+            .unwrap()
+            .to_der()
+            .unwrap()
+    }
+
+    fn build_pkcs12(cert: &X509, key: &PKey<Private>, password: &str) -> NamedTempFile {
+        let pkcs12 = build_pkcs12_der(cert, key, password);
+        let mut file = NamedTempFile::new().unwrap();
+        file.write_all(&pkcs12).unwrap();
+        file
+    }
+
+    fn build_serial_number() -> openssl::asn1::Asn1Integer {
+        let mut serial = BigNum::new().unwrap();
+        serial.rand(159, MsbOption::MAYBE_ZERO, false).unwrap();
+        serial.to_asn1_integer().unwrap()
+    }
+
+    fn build_subject_name(common_name: &str) -> openssl::x509::X509Name {
+        let mut name_builder = X509NameBuilder::new().unwrap();
+        name_builder
+            .append_entry_by_text("CN", common_name)
+            .unwrap();
+        name_builder.build()
+    }
+
+    fn generate_ca() -> (X509, PKey<Private>) {
+        let key = PKey::from_rsa(Rsa::generate(2048).unwrap()).unwrap();
+        let subject_name = build_subject_name("GenevaUploader Test CA");
+
+        let mut builder = X509::builder().unwrap();
+        builder.set_version(2).unwrap();
+        let serial_number = build_serial_number();
+        builder.set_serial_number(&serial_number).unwrap();
+        builder.set_subject_name(&subject_name).unwrap();
+        builder.set_issuer_name(&subject_name).unwrap();
+        builder.set_pubkey(&key).unwrap();
+        let not_before = Asn1Time::days_from_now(0).unwrap();
+        builder.set_not_before(&not_before).unwrap();
+        let not_after = Asn1Time::days_from_now(365).unwrap();
+        builder.set_not_after(&not_after).unwrap();
+        builder
+            .append_extension(BasicConstraints::new().critical().ca().build().unwrap())
+            .unwrap();
+        builder
+            .append_extension(
+                KeyUsage::new()
+                    .critical()
+                    .key_cert_sign()
+                    .crl_sign()
+                    .build()
+                    .unwrap(),
+            )
+            .unwrap();
+        let subject_key_identifier = SubjectKeyIdentifier::new()
+            .build(&builder.x509v3_context(None, None))
+            .unwrap();
+        builder.append_extension(subject_key_identifier).unwrap();
+        builder.sign(&key, MessageDigest::sha256()).unwrap();
+
+        (builder.build(), key)
+    }
+
+    fn generate_signed_leaf(
+        ca_cert: &X509,
+        ca_key: &PKey<Private>,
+        common_name: &str,
+        subject_alt_name: Option<&str>,
+        for_server: bool,
+    ) -> (X509, PKey<Private>) {
+        let key = PKey::from_rsa(Rsa::generate(2048).unwrap()).unwrap();
+        let subject_name = build_subject_name(common_name);
+
+        let mut builder = X509::builder().unwrap();
+        builder.set_version(2).unwrap();
+        let serial_number = build_serial_number();
+        builder.set_serial_number(&serial_number).unwrap();
+        builder.set_subject_name(&subject_name).unwrap();
+        builder.set_issuer_name(ca_cert.subject_name()).unwrap();
+        builder.set_pubkey(&key).unwrap();
+        let not_before = Asn1Time::days_from_now(0).unwrap();
+        builder.set_not_before(&not_before).unwrap();
+        let not_after = Asn1Time::days_from_now(365).unwrap();
+        builder.set_not_after(&not_after).unwrap();
+        builder
+            .append_extension(BasicConstraints::new().critical().build().unwrap())
+            .unwrap();
+        builder
+            .append_extension(
+                KeyUsage::new()
+                    .critical()
+                    .digital_signature()
+                    .key_encipherment()
+                    .build()
+                    .unwrap(),
+            )
+            .unwrap();
+        let mut extended_key_usage = ExtendedKeyUsage::new();
+        if for_server {
+            extended_key_usage.server_auth();
+        } else {
+            extended_key_usage.client_auth();
+        }
+        builder
+            .append_extension(extended_key_usage.build().unwrap())
+            .unwrap();
+        let subject_key_identifier = SubjectKeyIdentifier::new()
+            .build(&builder.x509v3_context(Some(ca_cert), None))
+            .unwrap();
+        builder.append_extension(subject_key_identifier).unwrap();
+        let authority_key_identifier = AuthorityKeyIdentifier::new()
+            .keyid(true)
+            .issuer(true)
+            .build(&builder.x509v3_context(Some(ca_cert), None))
+            .unwrap();
+        builder.append_extension(authority_key_identifier).unwrap();
+        if let Some(dns_name) = subject_alt_name {
+            let subject_alt_name = SubjectAlternativeName::new()
+                .dns(dns_name)
+                .build(&builder.x509v3_context(Some(ca_cert), None))
+                .unwrap();
+            builder.append_extension(subject_alt_name).unwrap();
+        }
+        builder.sign(ca_key, MessageDigest::sha256()).unwrap();
+
+        (builder.build(), key)
+    }
+
+    fn generate_ca_signed_tls_material() -> GeneratedTlsMaterial {
+        let (ca_cert, ca_key) = generate_ca();
+        let (server_cert, server_signing_key) =
+            generate_signed_leaf(&ca_cert, &ca_key, "localhost", Some("localhost"), true);
+
+        let (client_cert, client_signing_key) =
+            generate_signed_leaf(&ca_cert, &ca_key, "GenevaUploader Test Client", None, false);
+        let client_password = generate_test_password();
+        let client_p12_file = build_pkcs12(&client_cert, &client_signing_key, &client_password);
+
+        GeneratedTlsMaterial {
+            client_p12_file,
+            client_password,
+            root_ca_pem: ca_cert.to_pem().unwrap(),
+            server_cert,
+            server_key: server_signing_key,
+        }
+    }
+
+    fn spawn_tls_config_service(
+        response_body: String,
+        server_cert: X509,
+        server_key: PKey<Private>,
+    ) -> LocalTlsConfigService {
+        let mut builder = SslAcceptor::mozilla_intermediate_v5(SslMethod::tls()).unwrap();
+        builder.set_certificate(&server_cert).unwrap();
+        builder.set_private_key(&server_key).unwrap();
+        builder.check_private_key().unwrap();
+        builder
+            .set_min_proto_version(Some(SslVersion::TLS1_2))
+            .unwrap();
+        builder
+            .set_max_proto_version(Some(SslVersion::TLS1_2))
+            .unwrap();
+        let acceptor = builder.build();
+
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let endpoint = format!(
+            "https://localhost:{}",
+            listener.local_addr().unwrap().port()
+        );
+        let handle = thread::spawn(move || {
+            let (socket, _) = listener.accept().unwrap();
+            let Ok(mut tls_stream) = acceptor.accept(socket) else {
+                return;
+            };
+
+            let mut request = Vec::new();
+            let mut buffer = [0_u8; 1024];
+            loop {
+                let bytes_read = tls_stream.read(&mut buffer).unwrap();
+                if bytes_read == 0 {
+                    break;
+                }
+                request.extend_from_slice(&buffer[..bytes_read]);
+                if request.windows(4).any(|window| window == b"\r\n\r\n") {
+                    break;
+                }
+            }
+
+            let request = String::from_utf8_lossy(&request);
+            assert!(
+                request.starts_with("GET /api/agent/v3/mockenv/mockacct/MonitoringStorageKeys/?"),
+                "unexpected request: {request}",
+            );
+
+            let response = format!(
+                "HTTP/1.1 200 OK\r\ncontent-type: application/json\r\ncontent-length: {}\r\nconnection: close\r\n\r\n{}",
+                response_body.len(),
+                response_body,
+            );
+            tls_stream.write_all(response.as_bytes()).unwrap();
+            tls_stream.flush().unwrap();
+        });
+
+        LocalTlsConfigService { endpoint, handle }
+    }
+
+    fn config_service_response() -> (String, &'static str, &'static str) {
+        let jwt_endpoint = "https://test.endpoint";
+        let valid_token =
+            "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJFbmRwb2ludCI6Imh0dHBzOi8vdGVzdC5lbmRwb2ludCJ9.signature";
+        let response = serde_json::json!({
             "IngestionGatewayInfo": {
                 "Endpoint": "https://mock.ingestion.endpoint",
                 "AuthToken": valid_token,
@@ -93,11 +338,20 @@ mod tests {
             "TagId": "mock-tag-id"
         });
 
+        (response.to_string(), jwt_endpoint, valid_token)
+    }
+
+    #[cfg_attr(target_os = "macos", ignore)] // cert generated not compatible with macOS
+    #[tokio::test]
+    async fn get_ingestion_info_mocked() {
+        let mock_server = MockServer::start().await;
+        let (mock_response, jwt_endpoint, valid_token) = config_service_response();
+
         Mock::given(method("GET"))
             .and(path(
                 "/api/agent/v3/mockenv/mockacct/MonitoringStorageKeys/",
             ))
-            .respond_with(ResponseTemplate::new(200).set_body_json(mock_response))
+            .respond_with(ResponseTemplate::new(200).set_body_string(mock_response))
             .mount(&mock_server)
             .await;
 
@@ -115,6 +369,7 @@ mod tests {
                 password,
             },
             msi_resource: None,
+            test_root_ca_pem: None,
         };
 
         let client = GenevaConfigClient::new(config).unwrap();
@@ -134,9 +389,97 @@ mod tests {
         assert_eq!(token_endpoint, jwt_endpoint);
     }
 
+    #[tokio::test]
+    async fn tls_rejects_untrusted_runtime_generated_ca() {
+        let tls_material = generate_ca_signed_tls_material();
+        let (response_body, _, _) = config_service_response();
+        let tls_server = spawn_tls_config_service(
+            response_body,
+            tls_material.server_cert,
+            tls_material.server_key,
+        );
+
+        let config = GenevaConfigClientConfig {
+            endpoint: tls_server.endpoint,
+            environment: "mockenv".into(),
+            account: "mockacct".into(),
+            namespace: "mockns".into(),
+            region: "mockregion".into(),
+            config_major_version: 1,
+            auth_method: AuthMethod::Certificate {
+                path: PathBuf::from(
+                    tls_material
+                        .client_p12_file
+                        .path()
+                        .to_string_lossy()
+                        .to_string(),
+                ),
+                password: tls_material.client_password,
+            },
+            msi_resource: None,
+            test_root_ca_pem: None,
+        };
+
+        let client = GenevaConfigClient::new(config).unwrap();
+        let result = client.get_ingestion_info().await;
+
+        assert!(matches!(
+            result,
+            Err(crate::config_service::client::GenevaConfigClientError::Http(_))
+        ));
+        tls_server.handle.join().unwrap();
+    }
+
+    #[tokio::test]
+    async fn tls_accepts_runtime_generated_ca() {
+        let tls_material = generate_ca_signed_tls_material();
+        let (response_body, jwt_endpoint, valid_token) = config_service_response();
+        let tls_server = spawn_tls_config_service(
+            response_body,
+            tls_material.server_cert,
+            tls_material.server_key,
+        );
+
+        let config = GenevaConfigClientConfig {
+            endpoint: tls_server.endpoint,
+            environment: "mockenv".into(),
+            account: "mockacct".into(),
+            namespace: "mockns".into(),
+            region: "mockregion".into(),
+            config_major_version: 1,
+            auth_method: AuthMethod::Certificate {
+                path: PathBuf::from(
+                    tls_material
+                        .client_p12_file
+                        .path()
+                        .to_string_lossy()
+                        .to_string(),
+                ),
+                password: tls_material.client_password,
+            },
+            msi_resource: None,
+            test_root_ca_pem: Some(tls_material.root_ca_pem),
+        };
+
+        let client = GenevaConfigClient::new(config).unwrap();
+        let (ingestion_info, moniker_info, token_endpoint) =
+            client.get_ingestion_info().await.unwrap();
+
+        assert_eq!(ingestion_info.endpoint, "https://mock.ingestion.endpoint");
+        assert_eq!(ingestion_info.auth_token, valid_token);
+        assert_eq!(
+            ingestion_info.auth_token_expiry_time,
+            "2030-01-01T00:00:00Z"
+        );
+        assert_eq!(moniker_info.name, "mock-diag-moniker");
+        assert_eq!(moniker_info.account_group, "mock-diag-group");
+        assert_eq!(token_endpoint, jwt_endpoint);
+        tls_server.handle.join().unwrap();
+    }
+
     #[cfg_attr(target_os = "macos", ignore)] // cert generated not compatible with macOS
     #[tokio::test]
-    async fn test_error_handling_with_non_success_status() {
+    async fn error_handling_with_non_success_status() {
         let mock_server = MockServer::start().await;
 
         Mock::given(method("GET"))
@@ -161,6 +504,7 @@ mod tests {
                 password,
             },
             msi_resource: None,
+            test_root_ca_pem: None,
         };
 
         let client = GenevaConfigClient::new(config).unwrap();
@@ -180,7 +524,7 @@ mod tests {
 
     #[cfg_attr(target_os = "macos", ignore)] // cert generated not compatible with macOS
     #[tokio::test]
-    async fn test_missing_ingestion_gateway_info() {
+    async fn missing_ingestion_gateway_info() {
         let mock_server = MockServer::start().await;
 
         // Response without IngestionGatewayInfo
@@ -210,6 +554,7 @@ mod tests {
                 password,
             },
             msi_resource: None,
+            test_root_ca_pem: None,
         };
 
         let client = GenevaConfigClient::new(config).unwrap();
@@ -229,7 +574,7 @@ mod tests {
 
     #[cfg_attr(target_os = "macos", ignore)] // cert generated not compatible with macOS
     #[tokio::test]
-    async fn test_invalid_certificate_path() {
+    async fn invalid_certificate_path() {
         let config = GenevaConfigClientConfig {
             endpoint: "https://example.com".to_string(),
             environment: "env".to_string(),
@@ -239,9 +584,10 @@ mod tests {
             config_major_version: 1,
             auth_method: AuthMethod::Certificate {
                 path: PathBuf::from("/nonexistent/path.p12".to_string()),
-                password: "test".to_string(),
+                password: generate_test_password(),
             },
             msi_resource: None,
+            test_root_ca_pem: None,
         };
 
         let result = GenevaConfigClient::new(config);
@@ -268,12 +614,12 @@ mod tests {
     // export GENEVA_CONFIG_MAJOR_VERSION="config-version"
     // export GENEVA_CERT_PATH="/path/to/your/certificate.p12"
     // export GENEVA_CERT_PASSWORD="your-certificate-password" // Empty string if no password
-    // cargo test test_get_ingestion_info_real_server -- --ignored
+    // cargo test get_ingestion_info_real_server -- --ignored
     // ```
     use std::env;
     #[tokio::test]
     #[ignore] // This test is ignored by default to prevent running in CI pipelines
-    async fn test_get_ingestion_info_real_server() {
+    async fn get_ingestion_info_real_server() {
         // Read configuration from environment variables
         let endpoint =
             env::var("GENEVA_ENDPOINT").expect("GENEVA_ENDPOINT environment variable must be set");
@@ -306,6 +652,7 @@ mod tests {
                 password: cert_password,
             },
             msi_resource: None,
+            test_root_ca_pem: None,
         };
 
         println!("Connecting to real Geneva Config service...");

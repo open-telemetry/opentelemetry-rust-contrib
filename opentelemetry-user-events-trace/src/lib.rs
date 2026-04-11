@@ -1,5 +1,53 @@
 //! The user_events exporter will enable applications to use OpenTelemetry API
 //! to capture the telemetry events, and write to user_events subsystem.
+//!
+//! # Resource Attribute Mapping
+//!
+//! The following OpenTelemetry resource attributes are automatically mapped
+//! to fields in the exported event:
+//!
+//! | Resource Attribute      | Exported Field           |
+//! |-------------------------|--------------------------|
+//! | `service.name`          | `ext_cloud_role`         |
+//! | `service.instance.id`   | `ext_cloud_roleInstance` |
+//!
+//! These are set via the [`Resource`](opentelemetry_sdk::Resource) on the
+//! [`SdkTracerProvider`](opentelemetry_sdk::trace::SdkTracerProvider):
+//!
+//! ```no_run
+//! use opentelemetry::KeyValue;
+//! use opentelemetry_sdk::trace::SdkTracerProvider;
+//! use opentelemetry_user_events_trace::UserEventsTracerProviderBuilderExt;
+//!
+//! let provider = SdkTracerProvider::builder()
+//!     .with_resource(
+//!         opentelemetry_sdk::Resource::builder()
+//!             .with_service_name("my-service")
+//!             .with_attribute(KeyValue::new("service.instance.id", "instance-1"))
+//!             .build(),
+//!     )
+//!     .with_user_events_exporter("my_provider")
+//!     .build();
+//! ```
+//!
+//! # Well-Known Span Attributes
+//!
+//! Certain span attributes are recognized as "well-known" and mapped to
+//! dedicated fields in the exported event:
+//!
+//! | Span Attribute              | Exported Field         |
+//! |-----------------------------|------------------------|
+//! | `db.system`                 | `dbSystem`             |
+//! | `db.name`                   | `dbName`               |
+//! | `db.statement`              | `dbStatement`          |
+//! | `http.request.method`       | `httpMethod`           |
+//! | `url.full`                  | `httpUrl`              |
+//! | `http.response.status_code` | `httpStatusCode`       |
+//! | `messaging.system`          | `messagingSystem`      |
+//! | `messaging.destination`     | `messagingDestination` |
+//! | `messaging.url`             | `messagingUrl`         |
+//!
+//! All other span attributes are exported with their original keys.
 
 #![warn(missing_debug_implementations, missing_docs)]
 
@@ -19,21 +67,20 @@ mod tests {
     use serde_json::{from_str, Value};
     use std::process::Command;
 
-    // Ignore as this cannot be run in Github CI due to lack of
-    // required Kernel. Uncomment to run locally in a supported environment
+    // This test requires a Linux kernel with user_events support, perf, and perf-decode.
+    // It is run in CI via the user-events-integration-test job.
+    // To run locally: sudo -E ~/.cargo/bin/cargo test integration_test_basic -- --nocapture --ignored
 
     #[ignore]
     #[test]
     fn integration_test_basic() {
-        // Run using the below command
-        // sudo -E ~/.cargo/bin/cargo test integration_test_basic -- --nocapture --ignored
-
         // Basic check if user_events are available
         check_user_events_available().expect("Kernel does not support user_events. Verify your distribution/kernel supports user_events: https://docs.kernel.org/trace/user_events.html.");
         let provider = SdkTracerProvider::builder()
             .with_resource(
                 opentelemetry_sdk::Resource::builder()
                     .with_service_name("myrolename")
+                    .with_attribute(KeyValue::new("service.instance.id", "myinstance123"))
                     .build(),
             )
             .with_user_events_exporter("opentelemetry_traces")
@@ -147,11 +194,11 @@ mod tests {
         // Validate trace_id and span_id
         assert_eq!(
             part_a_ext_dt_trace_id.as_str().unwrap(),
-            format!("{trace_id_expected:x}")
+            trace_id_expected.to_string()
         );
         assert_eq!(
             part_a_ext_dt_span_id.as_str().unwrap(),
-            format!("{span_id_expected:x}")
+            span_id_expected.to_string()
         );
 
         let role = part_a
@@ -159,11 +206,20 @@ mod tests {
             .expect("PartA.ext_cloud_role is missing");
         assert_eq!(role.as_str().unwrap(), "myrolename");
 
+        let role_instance = part_a
+            .get("ext_cloud_roleInstance")
+            .expect("PartA.ext_cloud_roleInstance is missing");
+        assert_eq!(role_instance.as_str().unwrap(), "myinstance123");
+
         // Validate PartB
         let part_b = &event["PartB"];
         assert_eq!(part_b["_typeName"].as_str().unwrap(), "Span");
         assert_eq!(part_b["name"].as_str().unwrap(), "my-span-name");
-        assert_eq!(part_b["parentId"].as_str().unwrap(), "");
+        // Root span has no parent, so parentId should not be present
+        assert!(
+            part_b.get("parentId").is_none(),
+            "parentId should not be present for root span"
+        );
         // Check if startTime exists, not the actual value
         assert!(
             part_b.get("startTime").is_some(),
@@ -228,6 +284,8 @@ mod tests {
                 &duration_secs.to_string(),
                 "perf",
                 "record",
+                "-o",
+                "./perf.data",
                 "-e",
                 event,
             ])

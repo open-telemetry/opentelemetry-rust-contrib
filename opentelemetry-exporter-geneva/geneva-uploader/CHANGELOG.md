@@ -1,5 +1,11 @@
 # Changelog
 
+## [Unreleased]
+
+### Changed
+
+- Replaced `md5` crate with RustCrypto `md-5` crate
+
 ## [0.4.0] - 2025-11-12
 
 ### Changed

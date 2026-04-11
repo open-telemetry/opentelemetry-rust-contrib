@@ -50,3 +50,4 @@ tail_expr_drop_order = "allow"
 
 [workspace.lints.clippy]
 all = { level = "warn", priority = 1 }
+
