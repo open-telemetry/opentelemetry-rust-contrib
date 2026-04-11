@@ -32,9 +32,8 @@ azure_core = "0.29"
 tracing = "0.1"
 
 [features]
-self_signed_certs = [] # Empty by default for security
 mock_auth = [] # Disabled by default. Not to be enabled in the prod release. 
-default = ["self_signed_certs"] # TODO - remove this feature before release
+default = []
 
 [dev-dependencies]
 otap-df-pdata = { git = "https://github.com/open-telemetry/otel-arrow", rev = "15371dc7" }
