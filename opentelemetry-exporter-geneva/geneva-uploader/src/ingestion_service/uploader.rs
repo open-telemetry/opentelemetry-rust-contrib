@@ -111,10 +111,10 @@ pub(crate) struct GenevaUploaderConfig {
 
 /// Client for uploading data to Geneva Ingestion Gateway (GIG)
 #[derive(Debug, Clone)]
-pub struct GenevaUploader {
-    pub config_client: Arc<GenevaConfigClient>,
-    pub config: GenevaUploaderConfig,
-    pub http_client: Client,
+pub(crate) struct GenevaUploader {
+    pub(crate) config_client: Arc<GenevaConfigClient>,
+    pub(crate) config: GenevaUploaderConfig,
+    pub(crate) http_client: Client,
 }
 
 impl GenevaUploader {

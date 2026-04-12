@@ -15,8 +15,8 @@ use tracing::{debug, info};
 #[derive(Debug, Clone)]
 pub struct EncodedBatch {
     pub event_name: String,
-    pub data: Vec<u8>,
-    pub metadata: crate::payload_encoder::central_blob::BatchMetadata,
+    pub(crate) data: Vec<u8>,
+    pub(crate) metadata: crate::payload_encoder::central_blob::BatchMetadata,
     pub row_count: usize,
 }
 
