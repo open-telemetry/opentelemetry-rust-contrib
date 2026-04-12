@@ -3,7 +3,7 @@ use chrono::{DateTime, Datelike, Timelike, Utc};
 use std::sync::Arc;
 
 /// Metadata for a batch of events
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub(crate) struct BatchMetadata {
     /// Start time of the earliest event in nanoseconds since Unix epoch
     pub(crate) start_time: u64,

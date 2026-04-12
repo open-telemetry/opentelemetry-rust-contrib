@@ -2579,18 +2579,7 @@ mod tests {
         let actual = &batches.batches;
         assert_eq!(actual.len(), 1);
         assert_eq!(expected.len(), 1);
-        assert_eq!(actual[0].event_name, expected[0].event_name);
-        assert_eq!(actual[0].row_count, expected[0].row_count);
-        assert_eq!(
-            actual[0].metadata.start_time,
-            expected[0].metadata.start_time
-        );
-        assert_eq!(actual[0].metadata.end_time, expected[0].metadata.end_time);
-        assert_eq!(
-            actual[0].metadata.schema_ids,
-            expected[0].metadata.schema_ids
-        );
-        assert_eq!(actual[0].data, expected[0].data);
+        assert_eq!(actual[0], expected[0]);
 
         drop(batches);
         drop(handle_box);
@@ -2692,18 +2681,7 @@ mod tests {
         let actual = &batches.batches;
         assert_eq!(actual.len(), 1);
         assert_eq!(expected.len(), 1);
-        assert_eq!(actual[0].event_name, expected[0].event_name);
-        assert_eq!(actual[0].row_count, expected[0].row_count);
-        assert_eq!(
-            actual[0].metadata.start_time,
-            expected[0].metadata.start_time
-        );
-        assert_eq!(actual[0].metadata.end_time, expected[0].metadata.end_time);
-        assert_eq!(
-            actual[0].metadata.schema_ids,
-            expected[0].metadata.schema_ids
-        );
-        assert_eq!(actual[0].data, expected[0].data);
+        assert_eq!(actual[0], expected[0]);
 
         drop(batches);
         drop(handle_box);

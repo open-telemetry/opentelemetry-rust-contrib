@@ -12,7 +12,7 @@ use tracing::{debug, info};
 
 /// Public batch type (already LZ4 chunked compressed).
 /// Produced by `OtlpEncoder::encode_log_batch` and returned to callers.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct EncodedBatch {
     pub event_name: String,
     pub(crate) data: Vec<u8>,

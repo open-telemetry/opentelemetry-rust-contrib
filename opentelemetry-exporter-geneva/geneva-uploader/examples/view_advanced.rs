@@ -388,11 +388,7 @@ async fn main() {
 
     println!("Encoded {} batch(es):", batches.len());
     for batch in &batches {
-        println!(
-            "  event_name={} rows={}",
-            batch.event_name,
-            batch.row_count,
-        );
+        println!("  event_name={} rows={}", batch.event_name, batch.row_count,);
     }
 
     // Upload each batch
