@@ -63,7 +63,7 @@ impl SpanExporter for GenevaTraceExporter {
                 async move { client.upload_batch(&batch).await }
             })
             .buffer_unordered(self.max_concurrent_uploads)
-            .filter_map(|result| async move { result.err() })
+            .filter_map(|result| async move { result.err().map(|e| e.to_string()) })
             .collect()
             .await;
 
