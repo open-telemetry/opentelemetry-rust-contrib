@@ -5,8 +5,8 @@ use crate::config_service::client::{AuthMethod, GenevaConfigClient, GenevaConfig
 use crate::ingestion_service::uploader::{GenevaUploader, GenevaUploaderConfig};
 use crate::payload_encoder::otlp_encoder::MetadataFields;
 use crate::payload_encoder::otlp_encoder::OtlpEncoder;
-use opentelemetry_proto::tonic::logs::v1::ResourceLogs;
 use opentelemetry_proto::tonic::trace::v1::ResourceSpans;
+use otap_df_pdata_views::views::logs::LogsDataView;
 use std::sync::Arc;
 use tracing::{debug, info};
 
@@ -87,6 +87,8 @@ impl GenevaClient {
             config_major_version: cfg.config_major_version,
             auth_method: cfg.auth_method,
             msi_resource: cfg.msi_resource,
+            #[cfg(test)]
+            test_root_ca_pem: None,
         };
         let config_client =
             Arc::new(GenevaConfigClient::new(config_client_config).map_err(|e| {
@@ -148,31 +150,56 @@ impl GenevaClient {
         })
     }
 
-    /// Encode OTLP logs into LZ4 chunked compressed batches.
-    pub fn encode_and_compress_logs(
+    /// Encode logs from any [`LogsDataView`] implementation into LZ4-chunked
+    /// compressed batches, grouped by event name.
+    ///
+    /// # What to implement
+    ///
+    /// Implement the following traits from `otap_df_pdata_views`:
+    ///
+    /// ```text
+    /// LogsDataView
+    /// └─ ResourceLogsView
+    ///    └─ ScopeLogsView
+    ///       └─ LogRecordView   ← one impl per log record type
+    ///          └─ AnyValueView  (for body / attributes)
+    ///          └─ AttributeView (for attributes)
+    /// ```
+    ///
+    /// The `event_name` field on each log record controls which Geneva event
+    /// table the record is routed to.  Records with no event name (or an
+    /// empty one) are routed to the `"Log"` table.
+    ///
+    /// # Usage pattern
+    ///
+    /// ```ignore
+    /// let batches = client.encode_and_compress_logs(&my_view)?;
+    /// for batch in &batches {
+    ///     client.upload_batch(batch).await?;
+    /// }
+    /// ```
+    ///
+    /// See `examples/view_basic.rs` for the common `RawLogsData` usage pattern
+    /// and `examples/view_advanced.rs` for a full custom `LogsDataView`
+    /// implementation.
+    pub fn encode_and_compress_logs<T: LogsDataView>(
         &self,
-        logs: &[ResourceLogs],
+        view: &T,
     ) -> Result<Vec<EncodedBatch>, String> {
         debug!(
             name: "client.encode_and_compress_logs",
             target: "geneva-uploader",
-            resource_logs_count = logs.len(),
-            "Encoding and compressing resource logs"
+            "Encoding and compressing logs"
         );
 
-        let log_iter = logs
-            .iter()
-            .flat_map(|resource_log| resource_log.scope_logs.iter())
-            .flat_map(|scope_log| scope_log.log_records.iter());
-
         self.encoder
-            .encode_log_batch(log_iter, &self.metadata_fields)
+            .encode_logs_from_view(view, &self.metadata_fields)
             .map_err(|e| {
                 debug!(
                     name: "client.encode_and_compress_logs.error",
                     target: "geneva-uploader",
                     error = %e,
-                    "Log compression failed"
+                    "Logs compression failed"
                 );
                 format!("Compression failed: {e}")
             })

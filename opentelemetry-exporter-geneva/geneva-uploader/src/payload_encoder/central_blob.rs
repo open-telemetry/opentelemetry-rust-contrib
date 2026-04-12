@@ -1,5 +1,3 @@
-//use md5;
-
 use crate::payload_encoder::bond_encoder::{BondEncodedSchema, FieldDef};
 use chrono::{DateTime, Datelike, Timelike, Utc};
 use std::sync::Arc;
@@ -83,7 +81,7 @@ pub(crate) struct CentralSchemaEntry {
 pub(crate) struct CentralEventEntry {
     pub schema_id: u64,
     pub level: u8,
-    pub event_name: Arc<String>,
+    pub event_name: Arc<str>,
     pub row: Vec<u8>,
 }
 
@@ -232,11 +230,12 @@ impl CentralBlob {
 mod tests {
     use super::*;
     use crate::payload_encoder::bond_encoder::{BondEncodedSchema, FieldDef};
+    use md5::{Digest as _, Md5};
     use std::borrow::Cow;
 
     //Helper to calculate MD5 hash, returns [u8;16]
     fn md5_bytes(data: &[u8]) -> [u8; 16] {
-        md5::compute(data).0
+        Md5::digest(data).into()
     }
 
     #[test]
@@ -276,7 +275,7 @@ mod tests {
         let event = CentralEventEntry {
             schema_id,
             level: 0, // e.g. ETW verbose
-            event_name: Arc::new("eventname".to_string()),
+            event_name: Arc::from("eventname"),
             row,
         };
 
