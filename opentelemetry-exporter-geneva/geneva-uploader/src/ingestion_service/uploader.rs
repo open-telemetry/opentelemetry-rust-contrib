@@ -269,6 +269,10 @@ impl GenevaUploader {
             .send()
             .await?;
         let status = response.status();
+        // TODO: Only the delay-seconds form of Retry-After is parsed here.
+        // The HTTP-date form (e.g., "Fri, 31 Dec 2027 23:59:59 GMT") is
+        // silently ignored and results in None. Add support if the ingestion
+        // backend ever uses that form.
         let retry_after = response
             .headers()
             .get(header::RETRY_AFTER)
