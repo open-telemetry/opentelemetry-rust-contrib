@@ -3,14 +3,14 @@ use chrono::{DateTime, Datelike, Timelike, Utc};
 use std::sync::Arc;
 
 /// Metadata for a batch of events
-#[derive(Debug, Clone)]
-pub struct BatchMetadata {
+#[derive(Debug, Clone, PartialEq)]
+pub(crate) struct BatchMetadata {
     /// Start time of the earliest event in nanoseconds since Unix epoch
-    pub start_time: u64,
+    pub(crate) start_time: u64,
     /// End time of the latest event in nanoseconds since Unix epoch
-    pub end_time: u64,
+    pub(crate) end_time: u64,
     /// Schema IDs present in this batch formatted as MD5 hashes separated by semicolons
-    pub schema_ids: String,
+    pub(crate) schema_ids: String,
 }
 
 impl BatchMetadata {
