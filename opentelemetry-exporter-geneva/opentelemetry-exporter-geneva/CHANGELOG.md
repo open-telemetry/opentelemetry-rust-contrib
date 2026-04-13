@@ -1,6 +1,6 @@
 # Changelog
 
-## [0.5.0] - 2026-04-11
+## [0.5.0] - 2026-04-13
 
 ### Changed
 - Bump geneva-uploader version to 0.5.0
