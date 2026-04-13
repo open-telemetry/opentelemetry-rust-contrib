@@ -142,7 +142,7 @@ int main(void) {
     /* Upload synchronously, batch by batch */
     GenevaError first_err = GENEVA_SUCCESS;
     for (size_t i = 0; i < n; i++) {
-        GenevaError r = geneva_upload_batch_sync(client, batches, i, err_buf, sizeof(err_buf));
+        GenevaError r = geneva_upload_batch_sync(client, batches, i, err_buf, sizeof(err_buf), NULL, NULL);
         if (r != GENEVA_SUCCESS) {
             first_err = r;
             printf("Batch %zu upload failed with error %d: %s\n", i, r, err_buf);

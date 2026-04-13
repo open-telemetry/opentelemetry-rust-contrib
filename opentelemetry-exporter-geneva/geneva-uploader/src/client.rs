@@ -2,21 +2,25 @@
 
 use crate::config_service::client::{AuthMethod, GenevaConfigClient, GenevaConfigClientConfig};
 // ManagedIdentitySelector removed; no re-export needed.
-use crate::ingestion_service::uploader::{GenevaUploader, GenevaUploaderConfig};
+use crate::ingestion_service::uploader::{
+    GenevaUploader, GenevaUploaderConfig, GenevaUploaderError,
+};
 use crate::payload_encoder::otlp_encoder::MetadataFields;
 use crate::payload_encoder::otlp_encoder::OtlpEncoder;
-use opentelemetry_proto::tonic::logs::v1::ResourceLogs;
 use opentelemetry_proto::tonic::trace::v1::ResourceSpans;
+use otap_df_pdata_views::views::logs::LogsDataView;
+use std::fmt;
 use std::sync::Arc;
+use std::time::Duration;
 use tracing::{debug, info};
 
 /// Public batch type (already LZ4 chunked compressed).
 /// Produced by `OtlpEncoder::encode_log_batch` and returned to callers.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct EncodedBatch {
     pub event_name: String,
-    pub data: Vec<u8>,
-    pub metadata: crate::payload_encoder::central_blob::BatchMetadata,
+    pub(crate) data: Vec<u8>,
+    pub(crate) metadata: crate::payload_encoder::central_blob::BatchMetadata,
     pub row_count: usize,
 }
 
@@ -36,6 +40,45 @@ pub struct GenevaClientConfig {
     pub msi_resource: Option<String>, // Required for Managed Identity variants
                                       // Add event name/version here if constant, or per-upload if you want them per call.
 }
+
+/// Error type returned by [`GenevaClient::upload_batch`].
+///
+/// Provides enough information for callers to implement retry strategies:
+/// - [`HttpStatus`](UploadError::HttpStatus) carries the HTTP status code and
+///   an optional `Retry-After` duration so callers can distinguish retriable
+///   server errors (429, 5xx) from permanent client errors (4xx).
+/// - [`Transport`](UploadError::Transport) indicates a network-level failure
+///   (timeout, connection refused, DNS) that is typically retriable.
+/// - [`Other`](UploadError::Other) covers config-service or internal errors.
+#[derive(Debug)]
+pub enum UploadError {
+    /// Server returned a non-202 HTTP status.
+    HttpStatus {
+        status: u16,
+        retry_after: Option<Duration>,
+        message: String,
+    },
+    /// Network/transport failure (timeout, connection refused, DNS, etc.)
+    Transport(String),
+    /// Config service or other internal error.
+    Other(String),
+}
+
+impl fmt::Display for UploadError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::HttpStatus {
+                status, message, ..
+            } => {
+                write!(f, "upload failed with status {status}: {message}")
+            }
+            Self::Transport(msg) => write!(f, "transport error: {msg}"),
+            Self::Other(msg) => write!(f, "{msg}"),
+        }
+    }
+}
+
+impl std::error::Error for UploadError {}
 
 /// Main user-facing client for Geneva ingestion.
 #[derive(Clone)]
@@ -87,6 +130,8 @@ impl GenevaClient {
             config_major_version: cfg.config_major_version,
             auth_method: cfg.auth_method,
             msi_resource: cfg.msi_resource,
+            #[cfg(test)]
+            test_root_ca_pem: None,
         };
         let config_client =
             Arc::new(GenevaConfigClient::new(config_client_config).map_err(|e| {
@@ -148,31 +193,56 @@ impl GenevaClient {
         })
     }
 
-    /// Encode OTLP logs into LZ4 chunked compressed batches.
-    pub fn encode_and_compress_logs(
+    /// Encode logs from any [`LogsDataView`] implementation into LZ4-chunked
+    /// compressed batches, grouped by event name.
+    ///
+    /// # What to implement
+    ///
+    /// Implement the following traits from `otap_df_pdata_views`:
+    ///
+    /// ```text
+    /// LogsDataView
+    /// └─ ResourceLogsView
+    ///    └─ ScopeLogsView
+    ///       └─ LogRecordView   ← one impl per log record type
+    ///          └─ AnyValueView  (for body / attributes)
+    ///          └─ AttributeView (for attributes)
+    /// ```
+    ///
+    /// The `event_name` field on each log record controls which Geneva event
+    /// table the record is routed to.  Records with no event name (or an
+    /// empty one) are routed to the `"Log"` table.
+    ///
+    /// # Usage pattern
+    ///
+    /// ```ignore
+    /// let batches = client.encode_and_compress_logs(&my_view)?;
+    /// for batch in &batches {
+    ///     client.upload_batch(batch).await?;
+    /// }
+    /// ```
+    ///
+    /// See `examples/view_basic.rs` for the common `RawLogsData` usage pattern
+    /// and `examples/view_advanced.rs` for a full custom `LogsDataView`
+    /// implementation.
+    pub fn encode_and_compress_logs<T: LogsDataView>(
         &self,
-        logs: &[ResourceLogs],
+        view: &T,
     ) -> Result<Vec<EncodedBatch>, String> {
         debug!(
             name: "client.encode_and_compress_logs",
             target: "geneva-uploader",
-            resource_logs_count = logs.len(),
-            "Encoding and compressing resource logs"
+            "Encoding and compressing logs"
         );
 
-        let log_iter = logs
-            .iter()
-            .flat_map(|resource_log| resource_log.scope_logs.iter())
-            .flat_map(|scope_log| scope_log.log_records.iter());
-
         self.encoder
-            .encode_log_batch(log_iter, &self.metadata_fields)
+            .encode_logs_from_view(view, &self.metadata_fields)
             .map_err(|e| {
                 debug!(
                     name: "client.encode_and_compress_logs.error",
                     target: "geneva-uploader",
                     error = %e,
-                    "Log compression failed"
+                    "Logs compression failed"
                 );
                 format!("Compression failed: {e}")
             })
@@ -210,7 +280,7 @@ impl GenevaClient {
 
     /// Upload a single compressed batch.
     /// This allows for granular control over uploads, including custom retry logic for individual batches.
-    pub async fn upload_batch(&self, batch: &EncodedBatch) -> Result<(), String> {
+    pub async fn upload_batch(&self, batch: &EncodedBatch) -> Result<(), UploadError> {
         debug!(
             name: "client.upload_batch",
             target: "geneva-uploader",
@@ -243,7 +313,19 @@ impl GenevaClient {
                     error = %e,
                     "Geneva upload failed"
                 );
-                format!("Geneva upload failed: {e} Event: {}", batch.event_name)
+                match e {
+                    GenevaUploaderError::UploadFailed {
+                        status,
+                        retry_after,
+                        message,
+                    } => UploadError::HttpStatus {
+                        status,
+                        retry_after,
+                        message,
+                    },
+                    GenevaUploaderError::Http(msg) => UploadError::Transport(msg),
+                    other => UploadError::Other(other.to_string()),
+                }
             })
     }
 }
