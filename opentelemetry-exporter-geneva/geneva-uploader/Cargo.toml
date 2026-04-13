@@ -47,7 +47,7 @@ futures = "0.3"
 num_cpus = "1.16"
 lz4_flex = { version = "0.11" }
 criterion = {version = "0.7"}
-rand = {version = "0.9"}
+rand = {version = "0.10"}
 
 [lints]
 workspace = true

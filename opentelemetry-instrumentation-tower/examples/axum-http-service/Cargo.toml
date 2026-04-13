@@ -15,7 +15,7 @@ opentelemetry_sdk = { workspace = true, features = ["spec_unstable_metrics_views
 opentelemetry-semantic-conventions = { workspace = true, features = ["semconv_experimental"], default-features = false }
 opentelemetry-otlp = { version = "0.31.0", features = ["grpc-tonic", "metrics", "trace"], default-features = false }
 tokio = { version = "1", features = ["rt-multi-thread"], default-features = false }
-rand = { version = "0.9" }
+rand = { version = "0.10" }
 
 [lints]
 workspace = true
