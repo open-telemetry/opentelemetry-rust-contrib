@@ -2,12 +2,16 @@
 
 use crate::config_service::client::{AuthMethod, GenevaConfigClient, GenevaConfigClientConfig};
 // ManagedIdentitySelector removed; no re-export needed.
-use crate::ingestion_service::uploader::{GenevaUploader, GenevaUploaderConfig};
+use crate::ingestion_service::uploader::{
+    GenevaUploader, GenevaUploaderConfig, GenevaUploaderError,
+};
 use crate::payload_encoder::otlp_encoder::MetadataFields;
 use crate::payload_encoder::otlp_encoder::OtlpEncoder;
 use opentelemetry_proto::tonic::trace::v1::ResourceSpans;
 use otap_df_pdata_views::views::logs::LogsDataView;
+use std::fmt;
 use std::sync::Arc;
+use std::time::Duration;
 use tracing::{debug, info};
 
 /// Public batch type (already LZ4 chunked compressed).
@@ -36,6 +40,45 @@ pub struct GenevaClientConfig {
     pub msi_resource: Option<String>, // Required for Managed Identity variants
                                       // Add event name/version here if constant, or per-upload if you want them per call.
 }
+
+/// Error type returned by [`GenevaClient::upload_batch`].
+///
+/// Provides enough information for callers to implement retry strategies:
+/// - [`HttpStatus`](UploadError::HttpStatus) carries the HTTP status code and
+///   an optional `Retry-After` duration so callers can distinguish retriable
+///   server errors (429, 5xx) from permanent client errors (4xx).
+/// - [`Transport`](UploadError::Transport) indicates a network-level failure
+///   (timeout, connection refused, DNS) that is typically retriable.
+/// - [`Other`](UploadError::Other) covers config-service or internal errors.
+#[derive(Debug)]
+pub enum UploadError {
+    /// Server returned a non-202 HTTP status.
+    HttpStatus {
+        status: u16,
+        retry_after: Option<Duration>,
+        message: String,
+    },
+    /// Network/transport failure (timeout, connection refused, DNS, etc.)
+    Transport(String),
+    /// Config service or other internal error.
+    Other(String),
+}
+
+impl fmt::Display for UploadError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::HttpStatus {
+                status, message, ..
+            } => {
+                write!(f, "upload failed with status {status}: {message}")
+            }
+            Self::Transport(msg) => write!(f, "transport error: {msg}"),
+            Self::Other(msg) => write!(f, "{msg}"),
+        }
+    }
+}
+
+impl std::error::Error for UploadError {}
 
 /// Main user-facing client for Geneva ingestion.
 #[derive(Clone)]
@@ -237,7 +280,7 @@ impl GenevaClient {
 
     /// Upload a single compressed batch.
     /// This allows for granular control over uploads, including custom retry logic for individual batches.
-    pub async fn upload_batch(&self, batch: &EncodedBatch) -> Result<(), String> {
+    pub async fn upload_batch(&self, batch: &EncodedBatch) -> Result<(), UploadError> {
         debug!(
             name: "client.upload_batch",
             target: "geneva-uploader",
@@ -270,7 +313,19 @@ impl GenevaClient {
                     error = %e,
                     "Geneva upload failed"
                 );
-                format!("Geneva upload failed: {e} Event: {}", batch.event_name)
+                match e {
+                    GenevaUploaderError::UploadFailed {
+                        status,
+                        retry_after,
+                        message,
+                    } => UploadError::HttpStatus {
+                        status,
+                        retry_after,
+                        message,
+                    },
+                    GenevaUploaderError::Http(msg) => UploadError::Transport(msg),
+                    other => UploadError::Other(other.to_string()),
+                }
             })
     }
 }

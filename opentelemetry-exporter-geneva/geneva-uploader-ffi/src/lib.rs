@@ -10,7 +10,7 @@ use std::ptr;
 use std::sync::OnceLock;
 use tokio::runtime::Runtime;
 
-use geneva_uploader::client::{EncodedBatch, GenevaClient, GenevaClientConfig};
+use geneva_uploader::client::{EncodedBatch, GenevaClient, GenevaClientConfig, UploadError};
 use geneva_uploader::AuthMethod;
 use opentelemetry_proto::tonic::collector::trace::v1::ExportTraceServiceRequest;
 use prost::Message;
@@ -686,6 +686,10 @@ pub unsafe extern "C" fn geneva_batches_len(batches: *const EncodedBatchesHandle
 /// - index must be less than the value returned by geneva_batches_len
 /// - err_msg_out: optional buffer to receive error message (can be NULL)
 /// - err_msg_len: size of err_msg_out buffer
+/// - out_http_status: optional pointer to receive the HTTP status code on failure (can be NULL).
+///   Set to 0 if the failure was not an HTTP status error.
+/// - out_retry_after_secs: optional pointer to receive the Retry-After delay in seconds (can be NULL).
+///   Set to -1 if the server did not send a Retry-After header.
 #[no_mangle]
 pub unsafe extern "C" fn geneva_upload_batch_sync(
     handle: *mut GenevaClientHandle,
@@ -693,7 +697,17 @@ pub unsafe extern "C" fn geneva_upload_batch_sync(
     index: usize,
     err_msg_out: *mut c_char,
     err_msg_len: usize,
+    out_http_status: *mut u16,
+    out_retry_after_secs: *mut i64,
 ) -> GenevaError {
+    // Zero out optional output fields
+    if !out_http_status.is_null() {
+        unsafe { *out_http_status = 0 };
+    }
+    if !out_retry_after_secs.is_null() {
+        unsafe { *out_retry_after_secs = -1 };
+    }
+
     // Validate client handle
     match unsafe { validate_handle(handle) } {
         GenevaError::Success => {}
@@ -718,8 +732,26 @@ pub unsafe extern "C" fn geneva_upload_batch_sync(
     let res = runtime().block_on(async move { client.upload_batch(batch).await });
     match res {
         Ok(_) => GenevaError::Success,
-        Err(e) => {
-            unsafe { write_error_if_provided(err_msg_out, err_msg_len, &e) };
+        Err(
+            ref e @ UploadError::HttpStatus {
+                status,
+                ref retry_after,
+                ..
+            },
+        ) => {
+            if !out_http_status.is_null() {
+                unsafe { *out_http_status = status };
+            }
+            if !out_retry_after_secs.is_null() {
+                if let Some(d) = retry_after {
+                    unsafe { *out_retry_after_secs = d.as_secs() as i64 };
+                }
+            }
+            unsafe { write_error_if_provided(err_msg_out, err_msg_len, e) };
+            GenevaError::UploadFailed
+        }
+        Err(ref e) => {
+            unsafe { write_error_if_provided(err_msg_out, err_msg_len, e) };
             GenevaError::UploadFailed
         }
     }
@@ -1542,8 +1574,15 @@ mod tests {
     #[test]
     fn test_upload_batch_sync_with_nulls() {
         unsafe {
-            let result =
-                geneva_upload_batch_sync(ptr::null_mut(), ptr::null(), 0, ptr::null_mut(), 0);
+            let result = geneva_upload_batch_sync(
+                ptr::null_mut(),
+                ptr::null(),
+                0,
+                ptr::null_mut(),
+                0,
+                ptr::null_mut(),
+                ptr::null_mut(),
+            );
             assert_eq!(result as u32, GenevaError::NullPointer as u32);
         }
     }
@@ -2070,7 +2109,15 @@ mod tests {
 
         // Attempt upload (ignore return code; we will assert via recorded requests)
         let _ = unsafe {
-            geneva_upload_batch_sync(handle_ptr, batches_ptr as *const _, 0, ptr::null_mut(), 0)
+            geneva_upload_batch_sync(
+                handle_ptr,
+                batches_ptr as *const _,
+                0,
+                ptr::null_mut(),
+                0,
+                ptr::null_mut(),
+                ptr::null_mut(),
+            )
         };
 
         // Cleanup: free batches and client
@@ -2203,7 +2250,15 @@ mod tests {
         // Upload all batches
         for i in 0..len {
             let _ = unsafe {
-                geneva_upload_batch_sync(handle_ptr, batches_ptr as *const _, i, ptr::null_mut(), 0)
+                geneva_upload_batch_sync(
+                    handle_ptr,
+                    batches_ptr as *const _,
+                    i,
+                    ptr::null_mut(),
+                    0,
+                    ptr::null_mut(),
+                    ptr::null_mut(),
+                )
             };
         }
 
