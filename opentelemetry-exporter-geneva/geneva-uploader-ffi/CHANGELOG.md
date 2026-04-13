@@ -1,5 +1,11 @@
 # Changelog
 
+## [Unreleased]
+
+### Changed
+
+- `geneva_upload_batch_sync` now takes two additional optional out-parameters: `out_http_status` (`uint16_t*`) and `out_retry_after_secs` (`int64_t*`). Callers should use these to implement retry logic based on the HTTP status code and server-requested backoff delay.
+
 ## [0.4.0] - 2025-11-12
 
 ### Changed
