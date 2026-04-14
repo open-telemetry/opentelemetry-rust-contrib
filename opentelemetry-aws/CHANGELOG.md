@@ -2,6 +2,10 @@
 
 ## vNext
 
+### Added
+
+- AWS X-Ray span exporter (`xray-exporter` feature, enabled by default) for converting OpenTelemetry spans into X-Ray segment documents. Includes `XrayExporter`, `SegmentTranslator`, `SegmentDocumentExporter` trait, `XrayDaemonClient` (`xray-daemon-client` feature), `StdoutClient` (`xray-stdout-client` feature), and optional subsegment nesting (`subsegment-nesting` feature).
+
 ## v0.19.0
 
 ### Changed
