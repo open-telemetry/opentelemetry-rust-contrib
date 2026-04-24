@@ -11,8 +11,6 @@
   `PartA.roleInstance`). **Note**: if you have downstream consumers that relied
   on the previous flat field layout, this is a breaking change for those
   consumers.
-- Added integration tests that validate the ETW event payload end-to-end using
-  a live ETW listener.
 
 ## v0.10.1
 
