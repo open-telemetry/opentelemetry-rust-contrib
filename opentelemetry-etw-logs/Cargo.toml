@@ -22,7 +22,6 @@ tracelogging_dynamic = "1.2.4"
 tracing = { version = "0.1", optional = true }
 
 [dev-dependencies]
-ferrisetw = "1.2"
 futures-executor = "0.3.31"
 opentelemetry-appender-tracing = { workspace = true }
 opentelemetry_sdk = { workspace = true, features = ["logs", "trace"] }
@@ -35,9 +34,9 @@ tracing-subscriber = { version = "0.3.0", default-features = false, features = [
 ] }
 criterion = "0.8"
 
-[dev-dependencies.windows]
-version = "0.57"
-features = ["Win32_System_Diagnostics_Etw"]
+[target.'cfg(windows)'.dev-dependencies]
+ferrisetw = "1.2"
+windows = { version = "0.57", features = ["Win32_System_Diagnostics_Etw"] }
 
 [features]
 spec_unstable_logs_enabled = ["opentelemetry/spec_unstable_logs_enabled", "opentelemetry_sdk/spec_unstable_logs_enabled", "opentelemetry-appender-tracing/spec_unstable_logs_enabled"]

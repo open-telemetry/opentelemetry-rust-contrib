@@ -70,7 +70,7 @@ mod processor;
 pub use processor::Processor;
 pub use processor::ProcessorBuilder;
 
-#[cfg(test)]
+#[cfg(all(test, target_os = "windows"))]
 mod integration_tests {
     use std::collections::HashMap;
     use std::sync::mpsc;
