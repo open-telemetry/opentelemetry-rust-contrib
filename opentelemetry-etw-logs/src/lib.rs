@@ -193,19 +193,13 @@ mod integration_tests {
         let top_level_count = tei.TopLevelPropertyCount as usize;
         let prop_count = tei.PropertyCount as usize;
 
-        let props = std::slice::from_raw_parts(
-            tei.EventPropertyInfoArray.as_ptr(),
-            prop_count,
-        );
+        let props = std::slice::from_raw_parts(tei.EventPropertyInfoArray.as_ptr(), prop_count);
 
         // User data buffer (leaf values only; struct headers are 0 bytes)
         let data: &[u8] = if (*er).UserData.is_null() || (*er).UserDataLength == 0 {
             &[]
         } else {
-            std::slice::from_raw_parts(
-                (*er).UserData as *const u8,
-                (*er).UserDataLength as usize,
-            )
+            std::slice::from_raw_parts((*er).UserData as *const u8, (*er).UserDataLength as usize)
         };
 
         let base = buf.as_ptr();
@@ -237,7 +231,15 @@ mod integration_tests {
                     let start = unsafe { prop.Anonymous1.structType.StructStartIndex } as usize;
                     let count = unsafe { prop.Anonymous1.structType.NumOfStructMembers } as usize;
                     let child_indices: Vec<usize> = (start..start + count).collect();
-                    visit(props, &child_indices, &full_path, base, data, data_pos, result);
+                    visit(
+                        props,
+                        &child_indices,
+                        &full_path,
+                        base,
+                        data,
+                        data_pos,
+                        result,
+                    );
                 } else {
                     let in_type = unsafe { prop.Anonymous1.nonStructType.InType };
                     let (value, size) = read_leaf_value(data, *data_pos, in_type);
@@ -248,7 +250,15 @@ mod integration_tests {
         }
 
         let top_level_indices: Vec<usize> = (0..top_level_count).collect();
-        visit(props, &top_level_indices, "", base, data, &mut data_pos, &mut result);
+        visit(
+            props,
+            &top_level_indices,
+            "",
+            base,
+            data,
+            &mut data_pos,
+            &mut result,
+        );
 
         result
     }
@@ -272,17 +282,16 @@ mod integration_tests {
             // 1=UnicodeString, 2=AnsiString, 14=Binary,
             // 300=CountedString(UTF-16), 301=CountedAnsiString(UTF-8)
             1 | 2 | 14 | 300 | 301 => {
-                let byte_len =
-                    u16::from_le_bytes([data[pos], data[pos + 1]]) as usize;
+                let byte_len = u16::from_le_bytes([data[pos], data[pos + 1]]) as usize;
                 (data[pos + 2..pos + 2 + byte_len].to_vec(), 2 + byte_len)
             }
             // Fixed-size types
-            3 | 4 => (data[pos..pos + 1].to_vec(), 1),      // Int8 / UInt8
-            5 | 6 => (data[pos..pos + 2].to_vec(), 2),      // Int16 / UInt16
+            3 | 4 => (data[pos..pos + 1].to_vec(), 1), // Int8 / UInt8
+            5 | 6 => (data[pos..pos + 2].to_vec(), 2), // Int16 / UInt16
             7 | 8 | 13 => (data[pos..pos + 4].to_vec(), 4), // Int32 / UInt32 / Bool32
-            9 | 10 => (data[pos..pos + 8].to_vec(), 8),     // Int64 / UInt64
-            11 => (data[pos..pos + 4].to_vec(), 4),          // Float32
-            12 => (data[pos..pos + 8].to_vec(), 8),          // Float64
+            9 | 10 => (data[pos..pos + 8].to_vec(), 8), // Int64 / UInt64
+            11 => (data[pos..pos + 4].to_vec(), 4),    // Float32
+            12 => (data[pos..pos + 8].to_vec(), 8),    // Float64
             _ => panic!("Unsupported TDH InType: {in_type}"),
         }
     }
@@ -331,9 +340,7 @@ mod integration_tests {
             match rx.recv_timeout(deadline.saturating_sub(start.elapsed())) {
                 Ok(evt) if evt.event_name == expected_name => return evt,
                 Ok(_) => continue,
-                Err(_) => panic!(
-                    "Timed out waiting for ETW event with name '{expected_name}'"
-                ),
+                Err(_) => panic!("Timed out waiting for ETW event with name '{expected_name}'"),
             }
         }
     }
@@ -436,9 +443,7 @@ mod integration_tests {
 
         let (trace, rx) = start_etw_trace(provider_name);
 
-        let etw_processor = crate::Processor::builder(provider_name)
-            .build()
-            .unwrap();
+        let etw_processor = crate::Processor::builder(provider_name).build().unwrap();
 
         let logger_provider = SdkLoggerProvider::builder()
             .with_resource(
@@ -492,9 +497,7 @@ mod integration_tests {
 
         let (trace, rx) = start_etw_trace(provider_name);
 
-        let etw_processor = crate::Processor::builder(provider_name)
-            .build()
-            .unwrap();
+        let etw_processor = crate::Processor::builder(provider_name).build().unwrap();
 
         let logger_provider = SdkLoggerProvider::builder()
             .with_resource(Resource::builder_empty().build())
