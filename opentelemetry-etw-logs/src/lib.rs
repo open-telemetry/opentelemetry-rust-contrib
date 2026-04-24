@@ -386,7 +386,7 @@ mod integration_tests {
         record.add_attribute("user_name", AnyValue::String("otel user".into()));
         record.add_attribute("bool_field", AnyValue::Boolean(true));
         record.add_attribute("int_field", AnyValue::Int(42));
-        record.add_attribute("double_field", AnyValue::Double(3.14));
+        record.add_attribute("double_field", AnyValue::Double(1.5));
         logger.emit(record);
 
         let evt = recv_event(&rx, "Log");
@@ -412,7 +412,7 @@ mod integration_tests {
         assert_eq!(evt.get_str("PartC.user_name"), Some("otel user"));
         assert_eq!(evt.get_bool("PartC.bool_field"), Some(true));
         assert_eq!(evt.get_i64("PartC.int_field"), Some(42));
-        assert_eq!(evt.get_f64("PartC.double_field"), Some(3.14));
+        assert_eq!(evt.get_f64("PartC.double_field"), Some(1.5));
 
         // PartB
         assert_eq!(evt.get_str("PartB._typeName"), Some("Log"));
