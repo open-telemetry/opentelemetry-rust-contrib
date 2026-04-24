@@ -95,7 +95,7 @@ mod integration_tests {
     // We use TDH APIs directly to enumerate all event properties from the
     // schema (TRACE_EVENT_INFO) and read their values from the raw data
     // buffer, producing a flat HashMap keyed by dotted paths like
-    // "PartA.role" or "PartB.body".
+    // "PartA.ext_cloud.role" or "PartB.body".
     // -----------------------------------------------------------------------
 
     /// Captured event with all properties parsed into named fields.
@@ -103,7 +103,7 @@ mod integration_tests {
         event_name: String,
         level: u8,
         keyword: u64,
-        /// Properties keyed by dotted path: "PartA.role", "PartB.body", etc.
+        /// Properties keyed by dotted path: "PartA.ext_cloud.role", "PartB.body", etc.
         /// Values stored as raw bytes — use typed accessors to decode.
         properties: HashMap<String, Vec<u8>>,
     }
@@ -406,8 +406,11 @@ mod integration_tests {
         assert_eq!(evt.get_u16("__csver__"), Some(1024));
 
         // PartA
-        assert_eq!(evt.get_str("PartA.role"), Some("my_test_service"));
-        assert_eq!(evt.get_str("PartA.roleInstance"), Some("test_instance_1"));
+        assert_eq!(evt.get_str("PartA.ext_cloud.role"), Some("my_test_service"));
+        assert_eq!(
+            evt.get_str("PartA.ext_cloud.roleInstance"),
+            Some("test_instance_1")
+        );
         assert!(evt.has("PartA.time"));
 
         // PartC — resource attributes (opted-in only)
@@ -470,8 +473,8 @@ mod integration_tests {
         assert_eq!(evt.get_u16("__csver__"), Some(1024));
 
         // PartA: only role (no roleInstance)
-        assert_eq!(evt.get_str("PartA.role"), Some("minimal_service"));
-        assert!(!evt.has("PartA.roleInstance"));
+        assert_eq!(evt.get_str("PartA.ext_cloud.role"), Some("minimal_service"));
+        assert!(!evt.has("PartA.ext_cloud.roleInstance"));
         assert!(evt.has("PartA.time"));
 
         // No PartC
@@ -520,8 +523,8 @@ mod integration_tests {
         assert_eq!(evt.get_u16("__csver__"), Some(1024));
 
         // PartA: no role or roleInstance
-        assert!(!evt.has("PartA.role"));
-        assert!(!evt.has("PartA.roleInstance"));
+        assert!(!evt.has("PartA.ext_cloud.role"));
+        assert!(!evt.has("PartA.ext_cloud.roleInstance"));
         assert!(evt.has("PartA.time"));
 
         // No PartC
