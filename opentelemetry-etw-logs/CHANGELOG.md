@@ -3,6 +3,16 @@
 ## vNext
 
 - Fixed a panic that would trigger if logging from inside a blocked on async block due to nested `block_on()`s.
+- **Bug fix**: `service.name` and `service.instance.id` resource attributes are
+  now correctly wrapped in an `ext_cloud` struct in PartA
+  (`PartA.ext_cloud.role`, `PartA.ext_cloud.roleInstance`), matching the Common
+  Schema convention used by the user-events exporters. Previously these were
+  emitted as flat fields directly in PartA (`PartA.role`,
+  `PartA.roleInstance`). **Note**: if you have downstream consumers that relied
+  on the previous flat field layout, this is a breaking change for those
+  consumers.
+- Added integration tests that validate the ETW event payload end-to-end using
+  a live ETW listener.
 
 ## v0.10.1
 
