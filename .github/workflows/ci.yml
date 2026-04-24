@@ -175,14 +175,17 @@ jobs:
       # Geneva crates (and stress, which depends on geneva-uploader) pull
       # `otap-df-pdata-views` from otel-arrow. That dependency requires a newer
       # compiler and breaks the 1.75 workspace-wide sweep for unrelated crates.
+      # `opentelemetry-instrumentation-actix-web` pulls actix-http 3.12+ which
+      # requires Rust 1.88 (via sha1 0.11 edition2024).
       # For the 1.75 run, temporarily remove these members from workspace.
-      # Geneva crates are validated separately in the `msrv-geneva` job (Rust 1.87).
-      - name: Temporarily exclude Geneva crates from workspace for 1.75 sweep
+      # These crates are validated separately in the `msrv-1.88` job.
+      - name: Temporarily exclude crates with higher MSRV from workspace for 1.75 sweep
         shell: bash
         run: |
           sed -i '/opentelemetry-exporter-geneva\/geneva-uploader/d' Cargo.toml
           sed -i '/opentelemetry-exporter-geneva\/geneva-uploader-ffi/d' Cargo.toml
           sed -i '/opentelemetry-exporter-geneva\/opentelemetry-exporter-geneva/d' Cargo.toml
+          sed -i '/"opentelemetry-instrumentation-actix-web"/d' Cargo.toml
           sed -i '/"stress"/d' Cargo.toml
       - name: Drop lockfile for reduced 1.75 workspace graph
         shell: bash
@@ -190,7 +193,7 @@ jobs:
       - name: Check MSRV for all crates (excluding Geneva crates)
         run: bash ./scripts/msrv.sh
         env:
-          MSRV_EXCLUDE_PACKAGES: geneva-uploader,geneva-uploader-ffi,opentelemetry-exporter-geneva,stress
+          MSRV_EXCLUDE_PACKAGES: geneva-uploader,geneva-uploader-ffi,opentelemetry-exporter-geneva,opentelemetry-instrumentation-actix-web,stress
   msrv-geneva:
     strategy:
       matrix:
@@ -208,14 +211,14 @@ jobs:
           submodules: true
       - uses: dtolnay/rust-toolchain@efa25f7f19611383d5b0ccf2d1c8914531636bf9
         with:
-          toolchain: 1.87.0
+          toolchain: 1.88.0
       - uses: taiki-e/install-action@68675c5a5f1a6950c3975d33f3ae0ef155e5bf3d # v2.68.15
         with:
           tool: cargo-msrv
       - name: Check MSRV for Geneva crates
         run: bash ./scripts/msrv.sh
         env:
-          MSRV_ONLY_PACKAGES: geneva-uploader,geneva-uploader-ffi,opentelemetry-exporter-geneva
+          MSRV_ONLY_PACKAGES: geneva-uploader,geneva-uploader-ffi,opentelemetry-exporter-geneva,opentelemetry-instrumentation-actix-web
   cargo-deny:
     runs-on: ubuntu-latest
     continue-on-error: true # Prevent sudden announcement of a new advisory from failing ci
