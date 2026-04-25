@@ -3,14 +3,15 @@
 ## vNext
 
 - Fixed a panic that would trigger if logging from inside a blocked on async block due to nested `block_on()`s.
-- **Bug fix**: `service.name` and `service.instance.id` resource attributes are
-  now correctly wrapped in an `ext_cloud` struct in PartA
-  (`PartA.ext_cloud.role`, `PartA.ext_cloud.roleInstance`), matching the Common
-  Schema convention used by the user-events exporters. Previously these were
-  emitted as flat fields directly in PartA (`PartA.role`,
-  `PartA.roleInstance`). **Note**: if you have downstream consumers that relied
-  on the previous flat field layout, this is a breaking change for those
-  consumers.
+- **Bug fix**: `service.name` and `service.instance.id` resource attributes
+  were previously emitted as bare fields in PartA (`PartA.role`,
+  `PartA.roleInstance`) without the required `ext_cloud` namespace. They are
+  now emitted inside a nested `ext_cloud` struct (`PartA.ext_cloud.role`,
+  `PartA.ext_cloud.roleInstance`), consistent with how `ext_dt` is already
+  structured in this crate and following the Common Schema TLD mapping spec's
+  preferred nested struct convention. **Note**: downstream consumers that
+  looked for the bare field names (`role`, `roleInstance`) in PartA will need
+  to be updated.
 
 ## v0.10.1
 
