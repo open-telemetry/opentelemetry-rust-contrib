@@ -423,21 +423,11 @@ where
     }
 }
 
-impl<C> opentelemetry_sdk::logs::LogExporter for UserEventsExporter<C>
+impl<C> UserEventsExporter<C>
 where
     C: EventNameCallback,
 {
-    async fn export(&self, batch: opentelemetry_sdk::logs::LogBatch<'_>) -> OTelSdkResult {
-        if let Some((record, instrumentation)) = batch.iter().next() {
-            self.export_log_data(record, instrumentation)
-        } else {
-            Err(OTelSdkError::InternalFailure(
-                "Batch is expected to have one and only one record, but none was found".to_string(),
-            ))
-        }
-    }
-
-    fn shutdown(&self) -> OTelSdkResult {
+    pub(crate) fn shutdown(&self) -> OTelSdkResult {
         // The explicit unregister() is done in shutdown()
         // as it may not be possible to unregister during Drop
         // as Loggers are typically *not* dropped.
@@ -452,7 +442,12 @@ where
     }
 
     #[cfg(feature = "spec_unstable_logs_enabled")]
-    fn event_enabled(&self, level: Severity, _target: &str, _name: Option<&str>) -> bool {
+    pub(crate) fn event_enabled(
+        &self,
+        level: Severity,
+        _target: &str,
+        _name: Option<&str>,
+    ) -> bool {
         // EventSets are stored in the same order as their int representation,
         // so we can use the level as index to the Vec.
         let level = get_severity_level(level);
@@ -462,7 +457,7 @@ where
         }
     }
 
-    fn set_resource(&mut self, resource: &Resource) {
+    pub(crate) fn set_resource(&mut self, resource: &Resource) {
         // add attributes from resource to the attributes_from_resource
         for (key, value) in resource.iter() {
             // special handling for cloud role and instance
