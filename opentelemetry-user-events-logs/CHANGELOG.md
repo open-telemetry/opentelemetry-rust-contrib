@@ -3,6 +3,10 @@
 ## vNext
 
 - Bump eventheader and eventheader_dynamic versions to 0.5.0
+- Removed `futures-executor` dependency and `LogExporter` trait implementation.
+  The processor now calls the exporter synchronously, avoiding potential panics
+  from nested `block_on()` calls (e.g. when logging from inside an async
+  runtime).
 
 ## v0.15.0
 
