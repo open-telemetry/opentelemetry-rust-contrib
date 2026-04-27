@@ -160,6 +160,7 @@ impl GenevaUploader {
 
     /// Creates the GIG upload URI with required parameters
     #[allow(dead_code)]
+    #[allow(clippy::too_many_arguments)]
     fn create_upload_uri(
         &self,
         monitoring_endpoint: &str,
@@ -168,6 +169,7 @@ impl GenevaUploader {
         event_name: &str,
         metadata: &BatchMetadata,
         row_count: usize,
+        obo_config: Option<&crate::payload_encoder::otlp_encoder::OboEventConfig>,
     ) -> Result<String> {
         // Get already formatted schema IDs and format timestamps using BatchMetadata methods
         let schema_ids = &metadata.schema_ids;
@@ -201,6 +203,24 @@ impl GenevaUploader {
             schema_ids,
             row_count
         ).map_err(|e| GenevaUploaderError::InternalError(format!("Failed to write query string: {e}")))?;
+
+        // Append OBO query parameters if this event has OBO config
+        if let Some(config) = obo_config {
+            write!(&mut query, "&onbehalfid={}", config.identity).map_err(|e| {
+                GenevaUploaderError::InternalError(format!("Failed to write OBO identity: {e}"))
+            })?;
+            if let Some(ref ann) = config.annotations {
+                let encoded_annotations: String = byte_serialize(ann.as_bytes()).collect();
+                write!(&mut query, "&onbehalfannotations={}", encoded_annotations).map_err(
+                    |e| {
+                        GenevaUploaderError::InternalError(format!(
+                            "Failed to write OBO annotations: {e}"
+                        ))
+                    },
+                )?;
+            }
+        }
+
         Ok(query)
     }
 
@@ -222,6 +242,7 @@ impl GenevaUploader {
         event_name: &str,
         metadata: &BatchMetadata,
         row_count: usize,
+        obo_config: Option<&crate::payload_encoder::otlp_encoder::OboEventConfig>,
     ) -> Result<IngestionResponse> {
         debug!(
             name: "uploader.upload",
@@ -242,6 +263,7 @@ impl GenevaUploader {
             event_name,
             metadata,
             row_count,
+            obo_config,
         )?;
         let full_url = format!(
             "{}/{}",
@@ -316,5 +338,147 @@ impl GenevaUploader {
                 message: body,
             })
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::payload_encoder::otlp_encoder::OboEventConfig;
+
+    fn make_uploader() -> GenevaUploader {
+        let uploader_config = GenevaUploaderConfig {
+            namespace: "TestNamespace".to_string(),
+            source_identity: "Tenant=Test/Role=TestRole/RoleInstance=TestInstance".to_string(),
+            environment: "TestEnv".to_string(),
+            config_version: "Ver1v0".to_string(),
+        };
+        let mut headers = header::HeaderMap::new();
+        headers.insert(
+            header::ACCEPT,
+            header::HeaderValue::from_static("application/json"),
+        );
+        let http_client =
+            GenevaUploader::build_h1_client(headers).expect("HTTP client should build");
+        use crate::config_service::client::{AuthMethod, GenevaConfigClientConfig};
+        let config_client_config = GenevaConfigClientConfig {
+            endpoint: "https://test.endpoint.com".to_string(),
+            environment: "TestEnv".to_string(),
+            account: "TestAccount".to_string(),
+            namespace: "TestNamespace".to_string(),
+            region: "westus2".to_string(),
+            config_major_version: 1,
+            auth_method: AuthMethod::SystemManagedIdentity,
+            msi_resource: Some("https://monitor.azure.com".to_string()),
+        };
+        let config_client = Arc::new(
+            crate::config_service::client::GenevaConfigClient::new(config_client_config)
+                .expect("Config client should init"),
+        );
+        GenevaUploader {
+            config_client,
+            config: uploader_config,
+            http_client,
+        }
+    }
+
+    fn make_test_metadata() -> BatchMetadata {
+        BatchMetadata {
+            start_time: 1_700_000_000_000_000_000,
+            end_time: 1_700_000_001_000_000_000,
+            schema_ids: "abc123".to_string(),
+        }
+    }
+
+    #[test]
+    fn test_upload_uri_with_obo_identity() {
+        let uploader = make_uploader();
+        let metadata = make_test_metadata();
+        let obo_config = OboEventConfig {
+            identity: "Microsoft.TestService".to_string(),
+            annotations: None,
+        };
+        let uri = uploader
+            .create_upload_uri(
+                "https://monitor.endpoint",
+                "testmoniker",
+                1024,
+                "TestEvent",
+                &metadata,
+                10,
+                Some(&obo_config),
+            )
+            .expect("URI creation should succeed");
+        assert!(
+            uri.contains("&onbehalfid=Microsoft.TestService"),
+            "URI should contain onbehalfid, got: {}",
+            uri
+        );
+        assert!(
+            !uri.contains("&onbehalfannotations="),
+            "URI should NOT contain onbehalfannotations when not set"
+        );
+    }
+
+    #[test]
+    fn test_upload_uri_with_obo_annotations() {
+        let uploader = make_uploader();
+        let metadata = make_test_metadata();
+        let obo_config = OboEventConfig {
+            identity: "Microsoft.TestService".to_string(),
+            annotations: Some(
+                r#"<Config onBehalfFields="resourceId" priority="Normal"/>"#.to_string(),
+            ),
+        };
+        let uri = uploader
+            .create_upload_uri(
+                "https://monitor.endpoint",
+                "testmoniker",
+                1024,
+                "TestEvent",
+                &metadata,
+                10,
+                Some(&obo_config),
+            )
+            .expect("URI creation should succeed");
+        assert!(
+            uri.contains("&onbehalfid=Microsoft.TestService"),
+            "URI should contain onbehalfid"
+        );
+        assert!(
+            uri.contains("&onbehalfannotations="),
+            "URI should contain onbehalfannotations, got: {}",
+            uri
+        );
+        assert!(
+            !uri.contains("<Config"),
+            "Annotations should be URL-encoded"
+        );
+    }
+
+    #[test]
+    fn test_upload_uri_without_obo() {
+        let uploader = make_uploader();
+        let metadata = make_test_metadata();
+        let uri = uploader
+            .create_upload_uri(
+                "https://monitor.endpoint",
+                "testmoniker",
+                1024,
+                "TestEvent",
+                &metadata,
+                10,
+                None,
+            )
+            .expect("URI creation should succeed");
+        assert!(
+            !uri.contains("onbehalfid"),
+            "URI should NOT contain onbehalfid, got: {}",
+            uri
+        );
+        assert!(
+            !uri.contains("onbehalfannotations"),
+            "URI should NOT contain onbehalfannotations"
+        );
     }
 }
