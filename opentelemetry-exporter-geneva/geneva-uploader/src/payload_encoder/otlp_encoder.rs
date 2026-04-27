@@ -8,6 +8,7 @@ use crate::payload_encoder::central_blob::{
 };
 use crate::payload_encoder::lz4_chunked_compression::lz4_chunked_compression;
 use chrono::{TimeZone, Utc};
+use md5::{Digest as _, Md5};
 use opentelemetry_proto::tonic::common::v1::any_value::Value;
 use opentelemetry_proto::tonic::trace::v1::Span;
 use otap_df_pdata_views::views::common::{AnyValueView, AttributeView, ValueType};
@@ -157,7 +158,9 @@ impl BatchData {
                 if i > 0 {
                     acc.push(';');
                 }
-                let _ = write!(&mut acc, "{:x}", md5::Digest(s.md5));
+                for byte in s.md5 {
+                    let _ = write!(acc, "{byte:02x}");
+                }
                 acc
             },
         )
@@ -444,7 +447,9 @@ impl OtlpEncoder {
                             acc.push(';');
                         }
                         // Use stored MD5 hash (already computed when schema was created)
-                        let _ = write!(&mut acc, "{:x}", md5::Digest(s.md5));
+                        for byte in s.md5 {
+                            let _ = write!(acc, "{byte:02x}");
+                        }
                         acc
                     },
                 )
@@ -895,7 +900,7 @@ impl OtlpEncoder {
         let schema = BondEncodedSchema::from_fields("OtlpLogRecord", "telemetry", field_info); //TODO - use actual struct name and namespace
 
         let schema_bytes = schema.as_bytes();
-        let schema_md5 = md5::compute(schema_bytes).0;
+        let schema_md5: [u8; 16] = Md5::digest(schema_bytes).into();
 
         CentralSchemaEntry {
             id: schema_id,
@@ -910,7 +915,7 @@ impl OtlpEncoder {
         let schema = BondEncodedSchema::from_fields("OtlpSpanRecord", "telemetry", field_info);
 
         let schema_bytes = schema.as_bytes();
-        let schema_md5 = md5::compute(schema_bytes).0;
+        let schema_md5: [u8; 16] = Md5::digest(schema_bytes).into();
 
         CentralSchemaEntry {
             id: schema_id,

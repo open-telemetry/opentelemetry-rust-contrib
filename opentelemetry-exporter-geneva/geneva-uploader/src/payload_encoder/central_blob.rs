@@ -1,18 +1,16 @@
-//use md5;
-
 use crate::payload_encoder::bond_encoder::{BondEncodedSchema, FieldDef};
 use chrono::{DateTime, Datelike, Timelike, Utc};
 use std::sync::Arc;
 
 /// Metadata for a batch of events
-#[derive(Debug, Clone)]
-pub struct BatchMetadata {
+#[derive(Debug, Clone, PartialEq)]
+pub(crate) struct BatchMetadata {
     /// Start time of the earliest event in nanoseconds since Unix epoch
-    pub start_time: u64,
+    pub(crate) start_time: u64,
     /// End time of the latest event in nanoseconds since Unix epoch
-    pub end_time: u64,
+    pub(crate) end_time: u64,
     /// Schema IDs present in this batch formatted as MD5 hashes separated by semicolons
-    pub schema_ids: String,
+    pub(crate) schema_ids: String,
 }
 
 impl BatchMetadata {
@@ -232,11 +230,12 @@ impl CentralBlob {
 mod tests {
     use super::*;
     use crate::payload_encoder::bond_encoder::{BondEncodedSchema, FieldDef};
+    use md5::{Digest as _, Md5};
     use std::borrow::Cow;
 
     //Helper to calculate MD5 hash, returns [u8;16]
     fn md5_bytes(data: &[u8]) -> [u8; 16] {
-        md5::compute(data).0
+        Md5::digest(data).into()
     }
 
     #[test]

@@ -24,7 +24,11 @@ pub(crate) enum GenevaUploaderError {
     ConfigClient(String),
     #[allow(dead_code)]
     #[error("Upload failed with status {status}: {message}")]
-    UploadFailed { status: u16, message: String },
+    UploadFailed {
+        status: u16,
+        retry_after: Option<Duration>,
+        message: String,
+    },
     #[allow(dead_code)]
     #[error("Internal error: {0}")]
     InternalError(String),
@@ -111,10 +115,10 @@ pub(crate) struct GenevaUploaderConfig {
 
 /// Client for uploading data to Geneva Ingestion Gateway (GIG)
 #[derive(Debug, Clone)]
-pub struct GenevaUploader {
-    pub config_client: Arc<GenevaConfigClient>,
-    pub config: GenevaUploaderConfig,
-    pub http_client: Client,
+pub(crate) struct GenevaUploader {
+    pub(crate) config_client: Arc<GenevaConfigClient>,
+    pub(crate) config: GenevaUploaderConfig,
+    pub(crate) http_client: Client,
 }
 
 impl GenevaUploader {
@@ -287,6 +291,16 @@ impl GenevaUploader {
             .send()
             .await?;
         let status = response.status();
+        // TODO: Only the delay-seconds form of Retry-After is parsed here.
+        // The HTTP-date form (e.g., "Fri, 31 Dec 2027 23:59:59 GMT") is
+        // silently ignored and results in None. Add support if the ingestion
+        // backend ever uses that form.
+        let retry_after = response
+            .headers()
+            .get(header::RETRY_AFTER)
+            .and_then(|v| v.to_str().ok())
+            .and_then(|v| v.parse::<u64>().ok())
+            .map(Duration::from_secs);
         let body = response.text().await?;
 
         if status == reqwest::StatusCode::ACCEPTED {
@@ -320,6 +334,7 @@ impl GenevaUploader {
             );
             Err(GenevaUploaderError::UploadFailed {
                 status: status.as_u16(),
+                retry_after,
                 message: body,
             })
         }

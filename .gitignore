@@ -21,3 +21,4 @@ perf.data.old
 
 # Generated Geneva FFI example binaries
 opentelemetry-exporter-geneva/geneva-uploader-ffi/examples/*_test
+

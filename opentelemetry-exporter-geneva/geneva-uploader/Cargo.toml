@@ -1,7 +1,7 @@
 [package]
 name = "geneva-uploader"
 description = "Upload telemetry data to Geneva logs service"
-version = "0.4.0"
+version = "0.5.0"
 edition = "2021"
 homepage = "https://github.com/open-telemetry/opentelemetry-rust-contrib/tree/main/opentelemetry-exporter-geneva/geneva-uploader"
 repository = "https://github.com/open-telemetry/opentelemetry-rust-contrib/tree/main/opentelemetry-exporter-geneva/geneva-uploader"
@@ -23,7 +23,7 @@ native-tls = "0.2"
 thiserror = "2.0"
 chrono = "0.4"
 url = "2.2"
-md5 = "0.8.0"
+md-5 = "0.11.0"
 hex = "0.4"
 lz4_flex = { version = "0.11", features = ["safe-encode"], default-features = false }
 # Azure Identity dependencies - using public crates.io versions
@@ -32,9 +32,8 @@ azure_core = "0.29"
 tracing = "0.1"
 
 [features]
-self_signed_certs = [] # Empty by default for security
 mock_auth = [] # Disabled by default. Not to be enabled in the prod release. 
-default = ["self_signed_certs"] # TODO - remove this feature before release
+default = []
 
 [dev-dependencies]
 otap-df-pdata = { git = "https://github.com/open-telemetry/otel-arrow", rev = "15371dc7" }
@@ -47,8 +46,11 @@ wiremock = "=0.5.22"
 futures = "0.3"
 num_cpus = "1.16"
 lz4_flex = { version = "0.11" }
-criterion = {version = "0.7"}
+criterion = {version = "0.8"}
 rand = {version = "0.9"}
 
 [lints]
 workspace = true
+
+[package.metadata.cargo-machete]
+ignored = ["md-5"] # cargo machete is incorrectly detecting this as an unused crate

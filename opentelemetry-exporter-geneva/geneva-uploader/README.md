@@ -38,6 +38,19 @@ record is routed to.  Records with no event name default to the `"Log"` table.
 See `examples/view_basic.rs` for a complete working example including a
 minimal `LogsDataView` implementation.
 
+### 3. Span upload
+
+Use `GenevaClient::encode_and_compress_spans` when you have
+`ResourceSpans` data (from the OpenTelemetry proto crate) to send
+traces to Geneva.
+
+```rust
+let batches = client.encode_and_compress_spans(&resource_spans)?;
+for batch in &batches {
+    client.upload_batch(batch).await?;
+}
+```
+
 ## C/C++ FFI
 
 For C/C++ callers, the `geneva-uploader-ffi` crate wraps `GenevaClient` behind
