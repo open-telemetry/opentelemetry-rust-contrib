@@ -24,7 +24,7 @@ fn populate_part_a_from_record(
 ) {
     const COUNT_TIME: u8 = 1u8;
 
-    let field_count = COUNT_TIME + get_resource_count(resource);
+    let field_count = COUNT_TIME + has_ext_cloud(resource);
 
     event.add_struct("PartA", field_count, field_tag);
 
@@ -39,7 +39,7 @@ fn populate_part_a_from_context(
 ) {
     const COUNT_TIME: u8 = 1u8;
     const COUNT_EXT_DT: u8 = 1u8;
-    let field_count = COUNT_TIME + COUNT_EXT_DT + get_resource_count(resource);
+    let field_count = COUNT_TIME + COUNT_EXT_DT + has_ext_cloud(resource);
 
     event.add_struct("PartA", field_count, field_tag);
 
@@ -61,22 +61,26 @@ fn populate_part_a_from_context(
     populate_resource(resource, event, field_tag);
 }
 
-fn get_resource_count(resource: &super::Resource) -> u8 {
-    resource.cloud_role.is_some() as u8 + resource.cloud_role_instance.is_some() as u8
+fn has_ext_cloud(resource: &super::Resource) -> u8 {
+    (resource.cloud_role.is_some() || resource.cloud_role_instance.is_some()) as u8
 }
 
 fn populate_resource(resource: &super::Resource, event: &mut tld::EventBuilder, field_tag: u32) {
-    if let Some(cloud_role) = &resource.cloud_role {
-        event.add_str8("role", cloud_role, tld::OutType::Default, field_tag);
-    }
-
-    if let Some(cloud_role_instance) = &resource.cloud_role_instance {
-        event.add_str8(
-            "roleInstance",
-            cloud_role_instance,
-            tld::OutType::Default,
-            field_tag,
-        );
+    let ext_cloud_count =
+        resource.cloud_role.is_some() as u8 + resource.cloud_role_instance.is_some() as u8;
+    if ext_cloud_count > 0 {
+        event.add_struct("ext_cloud", ext_cloud_count, field_tag);
+        if let Some(cloud_role) = &resource.cloud_role {
+            event.add_str8("role", cloud_role, tld::OutType::Default, field_tag);
+        }
+        if let Some(cloud_role_instance) = &resource.cloud_role_instance {
+            event.add_str8(
+                "roleInstance",
+                cloud_role_instance,
+                tld::OutType::Default,
+                field_tag,
+            );
+        }
     }
 }
 
