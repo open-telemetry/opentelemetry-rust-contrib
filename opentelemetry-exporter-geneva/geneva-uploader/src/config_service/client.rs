@@ -1,4 +1,4 @@
-// Geneva Config Client with TLS (PKCS#12) and Azure Workload Identity support TODO: Azure Arc support
+// Geneva Config Client with TLS (PKCS#12), Azure Workload Identity, and Managed Identity support.
 
 use base64::{engine::general_purpose, Engine as _};
 use reqwest::{
@@ -203,6 +203,11 @@ struct GenevaResponse {
     // Keep tag_id as it might be used for validation
     #[serde(rename = "TagId")]
     tag_id: String,
+}
+
+#[derive(Debug, Deserialize)]
+struct MsiTokenResponse {
+    access_token: String,
 }
 
 #[allow(dead_code)]
@@ -537,6 +542,17 @@ impl GenevaConfigClient {
             scope_candidates.push(format!("{base}/"));
         }
 
+        if let AuthMethod::UserManagedIdentityByResourceId { resource_id } =
+            &self.config.auth_method
+        {
+            if let Some(token) = self
+                .try_get_local_managed_identity_token_by_resource_id(resource, resource_id)
+                .await?
+            {
+                return Ok(token);
+            }
+        }
+
         let user_assigned_id = match &self.config.auth_method {
             AuthMethod::SystemManagedIdentity => None,
             AuthMethod::UserManagedIdentity { client_id } => {
@@ -598,6 +614,91 @@ impl GenevaConfigClient {
             "Managed Identity token acquisition failed. Scopes tried: {scopes}. Last error: {detail}. IMDS fallback intentionally disabled.",
             scopes = scope_candidates.join(", ")
         )))
+    }
+
+    async fn try_get_local_managed_identity_token_by_resource_id(
+        &self,
+        resource: &str,
+        resource_id: &str,
+    ) -> Result<Option<String>> {
+        let Ok(identity_endpoint) = std::env::var("IDENTITY_ENDPOINT") else {
+            return Ok(None);
+        };
+        if identity_endpoint.is_empty() {
+            return Ok(None);
+        }
+        let Ok(identity_header) = std::env::var("IDENTITY_HEADER") else {
+            return Ok(None);
+        };
+        if identity_header.is_empty() {
+            return Ok(None);
+        }
+
+        // azure_identity 0.29 detects IDENTITY_ENDPOINT + IDENTITY_HEADER as App Service
+        // and rejects UserAssignedId::ResourceId. Local MSI endpoints used by some
+        // environments, such as Azure Arc extensions, support resource ID selection
+        // through msi_res_id.
+        let msi_resource = resource.trim_end_matches("/.default");
+        let response = self
+            .http_client
+            .get(identity_endpoint)
+            .header("Metadata", "true")
+            .header("X-IDENTITY-HEADER", identity_header)
+            .query(&[
+                ("api-version", "2018-02-01"),
+                ("resource", msi_resource),
+                ("msi_res_id", resource_id),
+            ])
+            .send()
+            .await
+            .map_err(|e| {
+                debug!(
+                    name: "config_client.get_local_msi_token.http_error",
+                    target: "geneva-uploader",
+                    error = %e,
+                    "Local Managed Identity token request failed"
+                );
+                GenevaConfigClientError::Http(e)
+            })?;
+
+        if !response.status().is_success() {
+            let status = response.status();
+            debug!(
+                name: "config_client.get_local_msi_token.failed",
+                target: "geneva-uploader",
+                status = %status.as_u16(),
+                "Local Managed Identity token request returned non-success status"
+            );
+            return Err(GenevaConfigClientError::MsiAuth(format!(
+                "Local Managed Identity token request failed with status {status}"
+            )));
+        }
+
+        let body = response.text().await.map_err(|e| {
+            debug!(
+                name: "config_client.get_local_msi_token.read_error",
+                target: "geneva-uploader",
+                error = %e,
+                "Failed to read Local Managed Identity token response"
+            );
+            GenevaConfigClientError::Http(e)
+        })?;
+        let token_response: MsiTokenResponse = serde_json::from_str(&body).map_err(|e| {
+            debug!(
+                name: "config_client.get_local_msi_token.parse_error",
+                target: "geneva-uploader",
+                error = %e,
+                "Failed to parse Local Managed Identity token response"
+            );
+            GenevaConfigClientError::SerdeJson(e)
+        })?;
+
+        info!(
+            name: "config_client.get_local_msi_token.success",
+            target: "geneva-uploader",
+            "Successfully acquired Local Managed Identity token"
+        );
+        Ok(Some(token_response.access_token))
     }
 
     /// Retrieves ingestion gateway information from the Geneva Config Service.
