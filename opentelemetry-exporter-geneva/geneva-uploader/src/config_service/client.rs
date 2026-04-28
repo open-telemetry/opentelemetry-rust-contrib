@@ -634,10 +634,10 @@ impl GenevaConfigClient {
             return Ok(None);
         }
 
-        // azure_identity 0.29 detects IDENTITY_ENDPOINT + IDENTITY_HEADER as App Service
-        // and rejects UserAssignedId::ResourceId. Local MSI endpoints used by some
-        // environments, such as Azure Arc extensions, support resource ID selection
-        // through msi_res_id.
+        // `azure_identity` 0.29 treats IDENTITY_ENDPOINT + IDENTITY_HEADER as the App Service
+        // local endpoint and does not forward `UserAssignedId::ResourceId` as `msi_res_id`.
+        // Selecting a user-assigned identity by Azure resource ID against this local endpoint
+        // requires sending `msi_res_id` directly, so this branch issues the request explicitly.
         let msi_resource = resource.trim_end_matches("/.default");
         let response = self
             .http_client
