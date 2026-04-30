@@ -541,4 +541,127 @@ mod integration_tests {
         trace.stop().unwrap();
         let _ = logger_provider.shutdown();
     }
+
+    /// Test with trace context — validates ext_dt.traceId and ext_dt.spanId in PartA.
+    #[ignore = "Requires admin privileges to start ETW trace session"]
+    #[test]
+    fn integration_test_with_trace_context() {
+        use opentelemetry::trace::{TraceContextExt, Tracer, TracerProvider};
+        use opentelemetry_sdk::trace::{Sampler, SdkTracerProvider};
+
+        let provider_name = "OTelETWLogsIntTest_TraceCtx";
+
+        let (trace, rx) = start_etw_trace(provider_name);
+
+        // Set up both trace and log providers
+        let tracer_provider = SdkTracerProvider::builder()
+            .with_sampler(Sampler::AlwaysOn)
+            .build();
+        let tracer = tracer_provider.tracer("test-tracer");
+
+        let etw_processor = crate::Processor::builder(provider_name).build().unwrap();
+
+        let logger_provider = SdkLoggerProvider::builder()
+            .with_resource(
+                Resource::builder()
+                    .with_service_name("trace_ctx_service")
+                    .build(),
+            )
+            .with_log_processor(etw_processor)
+            .build();
+
+        std::thread::sleep(Duration::from_millis(100));
+
+        // Emit a log inside a span context so trace_context is populated
+        let logger = logger_provider.logger("test");
+        let (trace_id_expected, span_id_expected) = tracer.in_span("test-span", |cx| {
+            let trace_id = cx.span().span_context().trace_id();
+            let span_id = cx.span().span_context().span_id();
+
+            let mut record = logger.create_log_record();
+            record.set_severity_number(opentelemetry::logs::Severity::Info);
+            record.set_severity_text("INFO");
+            record.set_body("log inside span".into());
+            logger.emit(record);
+
+            (trace_id, span_id)
+        });
+
+        let evt = recv_event(&rx, "Log");
+        assert_eq!(evt.level, tld::Level::Informational.as_int());
+
+        // __csver__
+        assert_eq!(evt.get_u16("__csver__"), Some(1024));
+
+        // PartA: ext_dt should contain traceId and spanId
+        assert_eq!(
+            evt.get_str("PartA.ext_dt.traceId"),
+            Some(trace_id_expected.to_string().as_str())
+        );
+        assert_eq!(
+            evt.get_str("PartA.ext_dt.spanId"),
+            Some(span_id_expected.to_string().as_str())
+        );
+
+        // PartA: ext_cloud.role should be present
+        assert_eq!(
+            evt.get_str("PartA.ext_cloud.role"),
+            Some("trace_ctx_service")
+        );
+        assert!(evt.has("PartA.time"));
+
+        // PartB
+        assert_eq!(evt.get_str("PartB._typeName"), Some("Log"));
+        assert_eq!(evt.get_str("PartB.body"), Some("log inside span"));
+        assert_eq!(
+            evt.get_i16("PartB.severityNumber"),
+            Some(opentelemetry::logs::Severity::Info as i16)
+        );
+        assert_eq!(evt.get_str("PartB.severityText"), Some("INFO"));
+
+        trace.stop().unwrap();
+        let _ = logger_provider.shutdown();
+    }
+
+    /// Test with event_name — validates the name field in PartB.
+    #[ignore = "Requires admin privileges to start ETW trace session"]
+    #[test]
+    fn integration_test_with_event_name() {
+        let provider_name = "OTelETWLogsIntTest_EvtName";
+
+        let (trace, rx) = start_etw_trace(provider_name);
+
+        let etw_processor = crate::Processor::builder(provider_name).build().unwrap();
+
+        let logger_provider = SdkLoggerProvider::builder()
+            .with_resource(Resource::builder_empty().build())
+            .with_log_processor(etw_processor)
+            .build();
+
+        std::thread::sleep(Duration::from_millis(100));
+
+        let logger = logger_provider.logger("test");
+        let mut record = logger.create_log_record();
+        record.set_severity_number(opentelemetry::logs::Severity::Warn);
+        record.set_severity_text("WARN");
+        record.set_body("event with name".into());
+        record.set_event_name("my_custom_event");
+        logger.emit(record);
+
+        let evt = recv_event(&rx, "Log");
+        assert_eq!(evt.level, tld::Level::Warning.as_int());
+
+        // PartB should include name field
+        assert_eq!(evt.get_str("PartB._typeName"), Some("Log"));
+        assert_eq!(evt.get_str("PartB.body"), Some("event with name"));
+        assert_eq!(evt.get_str("PartB.name"), Some("my_custom_event"));
+        assert_eq!(
+            evt.get_i16("PartB.severityNumber"),
+            Some(opentelemetry::logs::Severity::Warn as i16)
+        );
+        assert_eq!(evt.get_str("PartB.severityText"), Some("WARN"));
+
+        trace.stop().unwrap();
+        let _ = logger_provider.shutdown();
+    }
 }
