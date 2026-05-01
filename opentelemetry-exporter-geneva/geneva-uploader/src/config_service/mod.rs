@@ -23,15 +23,15 @@ mod tests {
     use std::io::{Read, Write};
     use std::net::TcpListener;
     use std::path::PathBuf;
-    use std::sync::Mutex;
     use std::thread;
     use tempfile::NamedTempFile;
+    use tokio::sync::Mutex;
     use uuid::Uuid;
     use wiremock::matchers::{header, method, path, query_param, query_param_is_missing};
     use wiremock::{Mock, MockServer, ResponseTemplate};
 
     // Tests that mutate IDENTITY_ENDPOINT / IDENTITY_HEADER must hold this lock.
-    static ENV_LOCK: Mutex<()> = Mutex::new(());
+    static ENV_LOCK: Mutex<()> = Mutex::const_new(());
 
     struct EnvVarGuard {
         previous: Vec<(&'static str, Option<String>)>,
@@ -427,7 +427,7 @@ mod tests {
 
     #[tokio::test(flavor = "current_thread")]
     async fn user_managed_identity_by_resource_id_uses_local_msi_res_id_endpoint() {
-        let _env_lock = ENV_LOCK.lock().unwrap_or_else(|p| p.into_inner());
+        let _env_lock = ENV_LOCK.lock().await;
         let msi_server = MockServer::start().await;
         let config_server = MockServer::start().await;
         let full_resource_id = "/subscriptions/test-sub/resourceGroups/test-rg/providers/Microsoft.Kubernetes/connectedClusters/test-cluster/providers/Microsoft.KubernetesConfiguration/extensions/test-extension-a";
@@ -495,7 +495,7 @@ mod tests {
 
     #[tokio::test(flavor = "current_thread")]
     async fn user_managed_identity_by_resource_id_returns_error_on_local_msi_failure() {
-        let _env_lock = ENV_LOCK.lock().unwrap_or_else(|p| p.into_inner());
+        let _env_lock = ENV_LOCK.lock().await;
         let msi_server = MockServer::start().await;
         let config_server = MockServer::start().await;
         let full_resource_id = "/subscriptions/test-sub/resourceGroups/test-rg/providers/Microsoft.Kubernetes/connectedClusters/test-cluster/providers/Microsoft.KubernetesConfiguration/extensions/test-extension-a";
