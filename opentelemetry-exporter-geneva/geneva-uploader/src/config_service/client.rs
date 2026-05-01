@@ -1,9 +1,9 @@
-// Geneva Config Client with TLS (PKCS#12), Azure Workload Identity, and Managed Identity support.
+// Geneva Config Client with TLS (PKCS#12), Azure Workload Identity, and Azure Managed Identity support, including local endpoint resource-ID flow.
 
 use base64::{engine::general_purpose, Engine as _};
 use reqwest::{
     header::{HeaderMap, HeaderValue, ACCEPT, AUTHORIZATION, USER_AGENT},
-    Client,
+    Client, Url,
 };
 use serde::Deserialize;
 use std::time::Duration;
@@ -542,17 +542,6 @@ impl GenevaConfigClient {
             scope_candidates.push(format!("{base}/"));
         }
 
-        if let AuthMethod::UserManagedIdentityByResourceId { resource_id } =
-            &self.config.auth_method
-        {
-            if let Some(token) = self
-                .try_get_local_managed_identity_token_by_resource_id(resource, resource_id)
-                .await?
-            {
-                return Ok(token);
-            }
-        }
-
         let user_assigned_id = match &self.config.auth_method {
             AuthMethod::SystemManagedIdentity => None,
             AuthMethod::UserManagedIdentity { client_id } => {
@@ -562,6 +551,12 @@ impl GenevaConfigClient {
                 Some(UserAssignedId::ObjectId(object_id.clone()))
             }
             AuthMethod::UserManagedIdentityByResourceId { resource_id } => {
+                if let Some(token) = self
+                    .try_get_local_managed_identity_token_by_resource_id(resource, resource_id)
+                    .await?
+                {
+                    return Ok(token);
+                }
                 Some(UserAssignedId::ResourceId(resource_id.clone()))
             }
             _ => {
@@ -633,6 +628,9 @@ impl GenevaConfigClient {
         if identity_header.is_empty() {
             return Ok(None);
         }
+        let identity_endpoint_url = Url::parse(&identity_endpoint).map_err(|e| {
+            GenevaConfigClientError::MsiAuth(format!("IDENTITY_ENDPOINT is not a valid URL: {e}"))
+        })?;
 
         // `azure_identity` 0.29 treats IDENTITY_ENDPOINT + IDENTITY_HEADER as the App Service
         // local endpoint and does not forward `UserAssignedId::ResourceId` as `msi_res_id`.
@@ -641,7 +639,7 @@ impl GenevaConfigClient {
         let msi_resource = resource.trim_end_matches("/.default");
         let response = self
             .http_client
-            .get(identity_endpoint)
+            .get(identity_endpoint_url)
             .header("Metadata", "true")
             .header("X-IDENTITY-HEADER", identity_header)
             .query(&[
