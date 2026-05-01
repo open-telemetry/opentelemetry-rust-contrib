@@ -552,7 +552,7 @@ impl GenevaConfigClient {
             }
             AuthMethod::UserManagedIdentityByResourceId { resource_id } => {
                 if let Some(token) = self
-                    .try_get_local_managed_identity_token_by_resource_id(resource, resource_id)
+                    .try_get_local_managed_identity_token_by_resource_id(base, resource_id)
                     .await?
                 {
                     return Ok(token);
@@ -613,7 +613,7 @@ impl GenevaConfigClient {
 
     async fn try_get_local_managed_identity_token_by_resource_id(
         &self,
-        resource: &str,
+        msi_resource: &str,
         resource_id: &str,
     ) -> Result<Option<String>> {
         let Ok(identity_endpoint) = std::env::var("IDENTITY_ENDPOINT") else {
@@ -638,7 +638,6 @@ impl GenevaConfigClient {
         // TODO: Re-evaluate this workaround when upgrading azure_identity beyond 0.29.
         // Selecting a user-assigned identity by Azure resource ID against this local endpoint
         // requires sending `msi_res_id` directly, so this branch issues the request explicitly.
-        let msi_resource = resource.trim_end_matches("/.default");
         let response = self
             .http_client
             .get(identity_endpoint_url)
@@ -663,14 +662,24 @@ impl GenevaConfigClient {
 
         if !response.status().is_success() {
             let status = response.status();
+            let body = response.text().await.map_err(|e| {
+                debug!(
+                    name: "config_client.get_local_msi_token.read_error",
+                    target: "geneva-uploader",
+                    error = %e,
+                    "Failed to read Local Managed Identity token error response"
+                );
+                GenevaConfigClientError::Http(e)
+            })?;
             debug!(
                 name: "config_client.get_local_msi_token.failed",
                 target: "geneva-uploader",
                 status = %status.as_u16(),
+                body = %body,
                 "Local Managed Identity token request returned non-success status"
             );
             return Err(GenevaConfigClientError::MsiAuth(format!(
-                "Local Managed Identity token request failed with status {status}"
+                "Local Managed Identity token request failed with status {status}: {body}"
             )));
         }
 
