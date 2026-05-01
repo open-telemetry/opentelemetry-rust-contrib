@@ -634,6 +634,8 @@ impl GenevaConfigClient {
 
         // `azure_identity` 0.29 treats IDENTITY_ENDPOINT + IDENTITY_HEADER as the App Service
         // local endpoint and does not forward `UserAssignedId::ResourceId` as `msi_res_id`.
+        // See https://github.com/Azure/azure-sdk-for-rust/issues/2407.
+        // TODO: Re-evaluate this workaround when upgrading azure_identity beyond 0.29.
         // Selecting a user-assigned identity by Azure resource ID against this local endpoint
         // requires sending `msi_res_id` directly, so this branch issues the request explicitly.
         let msi_resource = resource.trim_end_matches("/.default");
