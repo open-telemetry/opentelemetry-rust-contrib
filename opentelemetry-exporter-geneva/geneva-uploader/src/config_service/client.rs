@@ -12,6 +12,7 @@ use tracing::{debug, error, info};
 use uuid::Uuid;
 
 use chrono::{DateTime, Utc};
+#[cfg(all(feature = "tls-native", not(feature = "tls-rustls")))]
 use native_tls::{Identity, Protocol};
 use std::fmt;
 use std::fmt::Write;
@@ -25,6 +26,15 @@ use azure_identity::{
     ManagedIdentityCredential, ManagedIdentityCredentialOptions, UserAssignedId,
     WorkloadIdentityCredential,
 };
+
+// Compile-time guard: at least one TLS backend must be selected. Cargo features are
+// additive, so we cannot reject the both-enabled case (e.g. `--all-features`); instead
+// `tls-rustls` takes precedence when both are on. This matches reqwest's own pattern of
+// allowing `native-tls`, `rustls-tls`, etc. to coexist.
+#[cfg(not(any(feature = "tls-native", feature = "tls-rustls")))]
+compile_error!(
+    "geneva-uploader requires at least one TLS backend feature: `tls-native` or `tls-rustls`."
+);
 
 /// Authentication methods for the Geneva Config Client.
 ///
@@ -296,36 +306,62 @@ impl GenevaConfigClient {
                     );
                     GenevaConfigClientError::Certificate(e.to_string())
                 })?;
-                let identity = Identity::from_pkcs12(&p12_bytes, password).map_err(|e| {
-                    debug!(
-                        name: "config_client.new.certificate_parse_error",
-                        target: "geneva-uploader",
-                        error = %e,
-                        "Failed to parse PKCS#12 certificate"
-                    );
-                    GenevaConfigClientError::Certificate(e.to_string())
-                })?;
-                // TODO - use use_native_tls instead of preconfigured_tls once we no longer need
-                // TLS 1.2 as the exclusive protocol.
-                let tls_connector = configure_tls_connector(
-                    native_tls::TlsConnector::builder(),
-                    identity,
-                    #[cfg(test)]
-                    config.test_root_ca_pem.as_deref(),
-                    #[cfg(not(test))]
-                    None,
-                )?
-                .build()
-                .map_err(|e| {
-                    debug!(
-                        name: "config_client.new.tls_connector_error",
-                        target: "geneva-uploader",
-                        error = %e,
-                        "Failed to build TLS connector"
-                    );
-                    GenevaConfigClientError::Certificate(e.to_string())
-                })?;
-                client_builder = client_builder.use_preconfigured_tls(tls_connector);
+
+                #[cfg(all(feature = "tls-native", not(feature = "tls-rustls")))]
+                {
+                    let identity = Identity::from_pkcs12(&p12_bytes, password).map_err(|e| {
+                        debug!(
+                            name: "config_client.new.certificate_parse_error",
+                            target: "geneva-uploader",
+                            error = %e,
+                            "Failed to parse PKCS#12 certificate"
+                        );
+                        GenevaConfigClientError::Certificate(e.to_string())
+                    })?;
+                    // TODO - use use_native_tls instead of preconfigured_tls once we no longer
+                    // need TLS 1.2 as the exclusive protocol.
+                    let tls_connector = configure_native_tls_connector(
+                        native_tls::TlsConnector::builder(),
+                        identity,
+                        #[cfg(test)]
+                        config.test_root_ca_pem.as_deref(),
+                        #[cfg(not(test))]
+                        None,
+                    )?
+                    .build()
+                    .map_err(|e| {
+                        debug!(
+                            name: "config_client.new.tls_connector_error",
+                            target: "geneva-uploader",
+                            error = %e,
+                            "Failed to build TLS connector"
+                        );
+                        GenevaConfigClientError::Certificate(e.to_string())
+                    })?;
+                    client_builder = client_builder.use_preconfigured_tls(tls_connector);
+                }
+
+                #[cfg(feature = "tls-rustls")]
+                {
+                    let tls_config = build_rustls_client_config(
+                        &p12_bytes,
+                        password,
+                        #[cfg(test)]
+                        config.test_root_ca_pem.as_deref(),
+                        #[cfg(not(test))]
+                        None,
+                    )
+                    .map_err(|e| {
+                        debug!(
+                            name: "config_client.new.tls_connector_error",
+                            target: "geneva-uploader",
+                            error = %e,
+                            "Failed to build rustls client config"
+                        );
+                        e
+                    })?;
+                    client_builder = client_builder.use_preconfigured_tls(tls_config);
+                }
             }
             AuthMethod::WorkloadIdentity { .. } => {
                 info!(
@@ -1045,7 +1081,8 @@ fn extract_endpoint_from_token(token: &str) -> Result<String> {
     ))
 }
 
-fn configure_tls_connector(
+#[cfg(all(feature = "tls-native", not(feature = "tls-rustls")))]
+fn configure_native_tls_connector(
     mut builder: native_tls::TlsConnectorBuilder,
     identity: native_tls::Identity,
     _test_root_ca_pem: Option<&[u8]>,
@@ -1063,4 +1100,79 @@ fn configure_tls_connector(
     }
 
     Ok(builder)
+}
+
+#[cfg(feature = "tls-rustls")]
+fn build_rustls_client_config(
+    p12_bytes: &[u8],
+    password: &str,
+    _test_root_ca_pem: Option<&[u8]>,
+) -> Result<rustls::ClientConfig> {
+    use rustls::pki_types::{CertificateDer, PrivateKeyDer, PrivatePkcs8KeyDer};
+    use rustls::RootCertStore;
+
+    // Parse the PKCS#12 keystore to extract the client cert chain + private key.
+    let keystore = p12_keystore::KeyStore::from_pkcs12(p12_bytes, password).map_err(|e| {
+        debug!(
+            name: "config_client.new.certificate_parse_error",
+            target: "geneva-uploader",
+            error = %e,
+            "Failed to parse PKCS#12 certificate"
+        );
+        GenevaConfigClientError::Certificate(e.to_string())
+    })?;
+    let (_alias, key_chain) = keystore.private_key_chain().ok_or_else(|| {
+        GenevaConfigClientError::Certificate(
+            "PKCS#12 file contains no private key chain".to_string(),
+        )
+    })?;
+    // p12-keystore guarantees private keys are encoded in PKCS#8 (per its docs).
+    let client_key = PrivateKeyDer::Pkcs8(PrivatePkcs8KeyDer::from(key_chain.key().to_vec()));
+    let client_chain: Vec<CertificateDer<'static>> = key_chain
+        .chain()
+        .iter()
+        .map(|c| CertificateDer::from(c.as_der().to_vec()))
+        .collect();
+    if client_chain.is_empty() {
+        return Err(GenevaConfigClientError::Certificate(
+            "PKCS#12 file contains no certificate chain".to_string(),
+        ));
+    }
+
+    // Build the trust store from the system's native CAs (parity with native-tls).
+    let mut roots = RootCertStore::empty();
+    let native = rustls_native_certs::load_native_certs();
+    for err in native.errors {
+        debug!(
+            name: "config_client.new.native_root_load_error",
+            target: "geneva-uploader",
+            error = %err,
+            "Failed to load a native root certificate"
+        );
+    }
+    for cert in native.certs {
+        // Ignore individual cert add errors - rustls is strict about parsing.
+        let _ = roots.add(cert);
+    }
+
+    #[cfg(test)]
+    if let Some(root_ca_pem) = _test_root_ca_pem {
+        let mut reader = std::io::BufReader::new(root_ca_pem);
+        for cert in rustls_pemfile::certs(&mut reader) {
+            let cert = cert.map_err(|e| GenevaConfigClientError::Certificate(e.to_string()))?;
+            roots
+                .add(cert)
+                .map_err(|e| GenevaConfigClientError::Certificate(e.to_string()))?;
+        }
+    }
+
+    // Pin to TLS 1.2 (matches the native-tls path). The CryptoProvider is selected from the
+    // process-wide default if one was installed (e.g. rustls-symcrypt::default_symcrypt_provider),
+    // otherwise from the provider compiled into rustls via reqwest's `rustls-tls-native-roots`.
+    let config = rustls::ClientConfig::builder_with_protocol_versions(&[&rustls::version::TLS12])
+        .with_root_certificates(roots)
+        .with_client_auth_cert(client_chain, client_key)
+        .map_err(|e| GenevaConfigClientError::Certificate(e.to_string()))?;
+
+    Ok(config)
 }

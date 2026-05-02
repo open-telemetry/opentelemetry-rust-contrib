@@ -16,10 +16,16 @@ base64 = "0.22"
 serde = { version = "1.0", features = ["derive"] }
 serde_json = { version = "1.0", features = ["raw_value"] }
 uuid = { version = "1.0", features = ["v4"] }
-# TODO - support both native-tls and rustls
-# http2 feature is required by hyper-util even when using http1_only()
-reqwest = { version = "0.12", features = ["native-tls", "native-tls-alpn", "http2"], default-features = false}
-native-tls = "0.2"
+# TLS backend is selected via the `tls-native` (default) or `tls-rustls` feature flags below.
+# Both features are additive, like reqwest's own TLS features; if both are enabled
+# (e.g. via `--all-features`), `tls-rustls` takes precedence.
+# http2 feature is required by hyper-util even when using http1_only().
+reqwest = { version = "0.12", features = ["http2"], default-features = false }
+native-tls = { version = "0.2", optional = true }
+rustls = { version = "0.23", default-features = false, features = ["std", "tls12"], optional = true }
+rustls-pemfile = { version = "2", optional = true }
+rustls-native-certs = { version = "0.8", optional = true }
+p12-keystore = { version = "0.2", optional = true }
 thiserror = "2.0"
 chrono = "0.4"
 url = "2.2"
@@ -35,8 +41,21 @@ tracing = "0.1"
 time = ">=0.3.47"
 
 [features]
-mock_auth = [] # Disabled by default. Not to be enabled in the prod release. 
-default = []
+mock_auth = [] # Disabled by default. Not to be enabled in the prod release.
+# TLS backends. At least one must be enabled. `tls-native` is the default and matches the
+# pre-existing behavior. `tls-rustls` swaps to a pure-Rust TLS stack, which lets consumers
+# install a `rustls::crypto::CryptoProvider` (e.g. SymCrypt) at process start to satisfy
+# FIPS / OpenSSL-free deployments. The features are additive: enabling both (e.g. via
+# `--all-features`) compiles successfully and `tls-rustls` is used at runtime.
+tls-native = ["dep:native-tls", "reqwest/native-tls", "reqwest/native-tls-alpn"]
+tls-rustls = [
+    "dep:rustls",
+    "dep:rustls-pemfile",
+    "dep:rustls-native-certs",
+    "dep:p12-keystore",
+    "reqwest/rustls-tls-native-roots",
+]
+default = ["tls-native"]
 
 [dev-dependencies]
 geneva-test-server = { path = "../geneva-test-server", features = ["testing"] }
