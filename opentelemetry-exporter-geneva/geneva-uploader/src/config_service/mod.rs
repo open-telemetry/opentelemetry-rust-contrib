@@ -25,9 +25,45 @@ mod tests {
     use std::path::PathBuf;
     use std::thread;
     use tempfile::NamedTempFile;
+    use tokio::sync::Mutex;
     use uuid::Uuid;
-    use wiremock::matchers::{method, path};
+    use wiremock::matchers::{header, method, path, query_param, query_param_is_missing};
     use wiremock::{Mock, MockServer, ResponseTemplate};
+
+    // Tests that mutate IDENTITY_ENDPOINT / IDENTITY_HEADER must hold this lock.
+    static ENV_LOCK: Mutex<()> = Mutex::const_new(());
+
+    struct EnvVarGuard {
+        previous: Vec<(&'static str, Option<String>)>,
+    }
+
+    impl EnvVarGuard {
+        fn set(vars: &[(&'static str, String)]) -> Self {
+            let previous = vars
+                .iter()
+                .map(|(name, _)| (*name, std::env::var(name).ok()))
+                .collect();
+            for (name, value) in vars {
+                // Tests serialize environment mutations with ENV_LOCK.
+                unsafe { std::env::set_var(name, value) };
+            }
+            Self { previous }
+        }
+    }
+
+    impl Drop for EnvVarGuard {
+        fn drop(&mut self) {
+            for (name, value) in self.previous.drain(..) {
+                if let Some(value) = value {
+                    // Tests serialize environment mutations with ENV_LOCK.
+                    unsafe { std::env::set_var(name, value) };
+                } else {
+                    // Tests serialize environment mutations with ENV_LOCK.
+                    unsafe { std::env::remove_var(name) };
+                }
+            }
+        }
+    }
 
     fn generate_test_password() -> String {
         Uuid::new_v4().to_string()
@@ -387,6 +423,130 @@ mod tests {
         assert_eq!(moniker_info.name, "mock-diag-moniker");
         assert_eq!(moniker_info.account_group, "mock-diag-group");
         assert_eq!(token_endpoint, jwt_endpoint);
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn user_managed_identity_by_resource_id_uses_local_msi_res_id_endpoint() {
+        let _env_lock = ENV_LOCK.lock().await;
+        let msi_server = MockServer::start().await;
+        let config_server = MockServer::start().await;
+        let full_resource_id = "/subscriptions/test-sub/resourceGroups/test-rg/providers/Microsoft.Kubernetes/connectedClusters/test-cluster/providers/Microsoft.KubernetesConfiguration/extensions/test-extension-a";
+        let fake_msi_token = "fake-msi-token";
+        let (mock_response, jwt_endpoint, valid_token) = config_service_response();
+        let _env_guard = EnvVarGuard::set(&[
+            (
+                "IDENTITY_ENDPOINT",
+                format!("{}/metadata/identity/oauth2/token", msi_server.uri()),
+            ),
+            ("IDENTITY_HEADER", "fake-identity-header".to_string()),
+        ]);
+
+        Mock::given(method("GET"))
+            .and(path("/metadata/identity/oauth2/token"))
+            .and(header("Metadata", "true"))
+            .and(header("X-IDENTITY-HEADER", "fake-identity-header"))
+            .and(query_param("api-version", "2018-02-01"))
+            .and(query_param("resource", "https://monitor.core.windows.net"))
+            .and(query_param("msi_res_id", full_resource_id))
+            .and(query_param_is_missing("client_id"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                "access_token": fake_msi_token,
+                "expires_on": "1777334267",
+                "resource": "https://monitor.core.windows.net/",
+                "token_type": "Bearer"
+            })))
+            .expect(1)
+            .mount(&msi_server)
+            .await;
+
+        Mock::given(method("GET"))
+            .and(path(
+                "/userapi/agent/v3/mockenv/mockacct/MonitoringStorageKeys/",
+            ))
+            .and(header("Authorization", "Bearer fake-msi-token"))
+            .respond_with(ResponseTemplate::new(200).set_body_string(mock_response))
+            .expect(1)
+            .mount(&config_server)
+            .await;
+
+        let config = GenevaConfigClientConfig {
+            endpoint: config_server.uri(),
+            environment: "mockenv".into(),
+            account: "mockacct".into(),
+            namespace: "mockns".into(),
+            region: "mockregion".into(),
+            config_major_version: 1,
+            auth_method: AuthMethod::UserManagedIdentityByResourceId {
+                resource_id: full_resource_id.to_string(),
+            },
+            msi_resource: Some("https://monitor.core.windows.net/.default".into()),
+            test_root_ca_pem: None,
+        };
+
+        let client = GenevaConfigClient::new(config).unwrap();
+        let (ingestion_info, moniker_info, token_endpoint) =
+            client.get_ingestion_info().await.unwrap();
+
+        assert_eq!(ingestion_info.endpoint, "https://mock.ingestion.endpoint");
+        assert_eq!(ingestion_info.auth_token, valid_token);
+        assert_eq!(moniker_info.name, "mock-diag-moniker");
+        assert_eq!(token_endpoint, jwt_endpoint);
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn user_managed_identity_by_resource_id_returns_error_on_local_msi_failure() {
+        let _env_lock = ENV_LOCK.lock().await;
+        let msi_server = MockServer::start().await;
+        let config_server = MockServer::start().await;
+        let full_resource_id = "/subscriptions/test-sub/resourceGroups/test-rg/providers/Microsoft.Kubernetes/connectedClusters/test-cluster/providers/Microsoft.KubernetesConfiguration/extensions/test-extension-a";
+        let _env_guard = EnvVarGuard::set(&[
+            (
+                "IDENTITY_ENDPOINT",
+                format!("{}/metadata/identity/oauth2/token", msi_server.uri()),
+            ),
+            ("IDENTITY_HEADER", "fake-identity-header".to_string()),
+        ]);
+
+        Mock::given(method("GET"))
+            .and(path("/metadata/identity/oauth2/token"))
+            .and(query_param("msi_res_id", full_resource_id))
+            .respond_with(ResponseTemplate::new(503))
+            .expect(1)
+            .mount(&msi_server)
+            .await;
+
+        Mock::given(method("GET"))
+            .and(path(
+                "/userapi/agent/v3/mockenv/mockacct/MonitoringStorageKeys/",
+            ))
+            .respond_with(ResponseTemplate::new(200))
+            .expect(0)
+            .mount(&config_server)
+            .await;
+
+        let config = GenevaConfigClientConfig {
+            endpoint: config_server.uri(),
+            environment: "mockenv".into(),
+            account: "mockacct".into(),
+            namespace: "mockns".into(),
+            region: "mockregion".into(),
+            config_major_version: 1,
+            auth_method: AuthMethod::UserManagedIdentityByResourceId {
+                resource_id: full_resource_id.to_string(),
+            },
+            msi_resource: Some("https://monitor.core.windows.net/.default".into()),
+            test_root_ca_pem: None,
+        };
+
+        let client = GenevaConfigClient::new(config).unwrap();
+        let result = client.get_ingestion_info().await;
+
+        match result {
+            Err(crate::config_service::client::GenevaConfigClientError::MsiAuth(message)) => {
+                assert!(message.contains("503"));
+            }
+            other => panic!("Expected local MSI auth error, got: {other:?}"),
+        }
     }
 
     #[tokio::test]
