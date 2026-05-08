@@ -23,41 +23,36 @@
 //! because the global meter is never set in tracing-only scenarios, leaving meter
 //! instruments as no-ops by default.
 //!
-//! ## Known Performance Issues (tracked for future improvement)
+//! ## Known Performance Characteristics
 //!
-//! The `noop` scenario (~960 ns) reveals ~830 ns of fixed middleware overhead that runs
-//! unconditionally regardless of whether real telemetry is produced. Root causes:
+//! ### Middleware-internal (optimizable by this crate)
 //!
-//! - **Heap allocations**: `scheme`, `method`, `path`, `URI`, `protocol`, `version` each
-//!   `to_string()` / `to_owned()` into a new `String` per request.
-//! - **`Vec<KeyValue>` allocations**: `span_attributes` and `label_superset` built and
-//!   populated on every request.
-//! - **`Box::pin`** wrapping the response future — heap-allocates on every request.
-//! - **`global::get_text_map_propagator`** — acquires a `RwLock` on every request.
-//!   Caching would require a new `with_propagator` builder method since there is no
-//!   public API to obtain an owned/`Arc`'d propagator from the global.
-//! - **`OtelContext::current()`** — thread-local access + clone in `finalize_request`.
-//! - **Unconditional attribute extraction**: all `KeyValue` attributes (span attrs,
-//!   metric label superset, custom extractors) are built on every request without
-//!   first checking whether the tracer or meter are no-ops and would discard them
-//!   immediately anyway.
+//! - **Heap allocations per request**: `scheme`, `method`, `path`, `URI`,
+//!   `protocol`, `version` each `to_string()` / `to_owned()` into a new `String`.
+//! - **`Vec<KeyValue>` allocations**: `span_attributes` and `label_superset`
+//!   are built and populated on every request.
+//! - **Unconditional attribute extraction**: all `KeyValue` attributes are built
+//!   on every request without first checking whether the tracer or meter are
+//!   no-ops.
+//!
+//! ### Tower / OTel SDK (outside this middleware's control)
+//!
+//! - **`Box::pin`** wrapping the response future — heap-allocates on every
+//!   request. This is a consequence of the Tower `Service` trait design.
+//!   (See [PR #561](https://github.com/open-telemetry/opentelemetry-rust-contrib/pull/561)
+//!   for a `ResponseFuture`-based alternative.)
+//! - **`global::get_text_map_propagator`** — acquires a `RwLock` on every
+//!   request. Caching would require a new `with_propagator` builder method
+//!   since there is no public API to obtain an owned/`Arc`'d propagator from
+//!   the global.
+//! - **`OtelContext::current()`** — thread-local access + clone in
+//!   `finalize_request`.
 //!
 //! ## Run
 //!
 //! ```sh
 //! cargo bench --bench middleware -p opentelemetry-instrumentation-tower
 //! ```
-//!
-//! ## Results (Apple M4 Pro)
-//!
-//! | Scenario                    | Latency   | Overhead vs Baseline |
-//! |-----------------------------|-----------|----------------------|
-//! | Baseline                    | ~131 ns   | -                    |
-//! | No-op                       | ~936 ns   | +~805 ns             |
-//! | Tracing                     | ~1100 ns  | +~969 ns             |
-//! | Tracing (sampled-out)       | ~999 ns   | +~868 ns             |
-//! | Metrics                     | ~1295 ns  | +~1164 ns            |
-//! | Tracing + Metrics           | ~1436 ns  | +~1305 ns            |
 
 use criterion::{criterion_group, criterion_main, BenchmarkId, Criterion, Throughput};
 use opentelemetry::global;
@@ -75,6 +70,20 @@ use tower::{Service, ServiceBuilder, ServiceExt};
 /// Minimal handler — returns an empty body to keep baseline noise as low as possible.
 async fn handler(_req: http::Request<String>) -> Result<http::Response<String>, Infallible> {
     Ok(http::Response::new(String::new()))
+}
+
+/// Build requests outside the timed loop so request construction cost does not
+/// inflate the middleware overhead measurement.
+fn build_requests(n: u64) -> Vec<http::Request<String>> {
+    (0..n)
+        .map(|_| {
+            http::Request::builder()
+                .method("GET")
+                .uri("http://example.com/users/123")
+                .body(String::new())
+                .unwrap()
+        })
+        .collect()
 }
 
 /// Setup tracer provider with no-op processor (measures instrumentation overhead only)
@@ -124,14 +133,10 @@ fn benchmark_middleware(c: &mut Criterion) {
     group.bench_function(BenchmarkId::new("request", "baseline"), |b| {
         b.to_async(&rt).iter_custom(|iters| async move {
             let mut service = tower::service_fn(handler);
+            let requests = build_requests(iters);
 
             let start = std::time::Instant::now();
-            for _ in 0..iters {
-                let req = http::Request::builder()
-                    .method("GET")
-                    .uri("http://example.com/users/123")
-                    .body(String::new())
-                    .unwrap();
+            for req in requests {
                 let resp = service.ready().await.unwrap().call(req).await.unwrap();
                 black_box(resp);
             }
@@ -142,7 +147,6 @@ fn benchmark_middleware(c: &mut Criterion) {
     // Scenario 2: Middleware present, but both tracer and meter are no-ops.
     // Measures the pure overhead of the HTTPLayer machinery (attribute extraction,
     // context propagation hooks, etc.) when no real telemetry is produced.
-    // Ideally this should be very close to the baseline.
     group.bench_function(BenchmarkId::new("request", "noop"), |b| {
         noop_tracer(); // reset any tracer left from a previous run
                        // meter is not set, so meter instruments are already no-op
@@ -153,14 +157,10 @@ fn benchmark_middleware(c: &mut Criterion) {
                 let mut service = ServiceBuilder::new()
                     .layer(layer)
                     .service(tower::service_fn(handler));
+                let requests = build_requests(iters);
 
                 let start = std::time::Instant::now();
-                for _ in 0..iters {
-                    let req = http::Request::builder()
-                        .method("GET")
-                        .uri("http://example.com/users/123")
-                        .body(String::new())
-                        .unwrap();
+                for req in requests {
                     let resp = service.ready().await.unwrap().call(req).await.unwrap();
                     black_box(resp);
                 }
@@ -179,14 +179,10 @@ fn benchmark_middleware(c: &mut Criterion) {
                 let mut service = ServiceBuilder::new()
                     .layer(layer)
                     .service(tower::service_fn(handler));
+                let requests = build_requests(iters);
 
                 let start = std::time::Instant::now();
-                for _ in 0..iters {
-                    let req = http::Request::builder()
-                        .method("GET")
-                        .uri("http://example.com/users/123")
-                        .body(String::new())
-                        .unwrap();
+                for req in requests {
                     let resp = service.ready().await.unwrap().call(req).await.unwrap();
                     black_box(resp);
                 }
@@ -205,14 +201,10 @@ fn benchmark_middleware(c: &mut Criterion) {
                 let mut service = ServiceBuilder::new()
                     .layer(layer)
                     .service(tower::service_fn(handler));
+                let requests = build_requests(iters);
 
                 let start = std::time::Instant::now();
-                for _ in 0..iters {
-                    let req = http::Request::builder()
-                        .method("GET")
-                        .uri("http://example.com/users/123")
-                        .body(String::new())
-                        .unwrap();
+                for req in requests {
                     let resp = service.ready().await.unwrap().call(req).await.unwrap();
                     black_box(resp);
                 }
@@ -232,14 +224,10 @@ fn benchmark_middleware(c: &mut Criterion) {
                 let mut service = ServiceBuilder::new()
                     .layer(layer)
                     .service(tower::service_fn(handler));
+                let requests = build_requests(iters);
 
                 let start = std::time::Instant::now();
-                for _ in 0..iters {
-                    let req = http::Request::builder()
-                        .method("GET")
-                        .uri("http://example.com/users/123")
-                        .body(String::new())
-                        .unwrap();
+                for req in requests {
                     let resp = service.ready().await.unwrap().call(req).await.unwrap();
                     black_box(resp);
                 }
@@ -259,14 +247,10 @@ fn benchmark_middleware(c: &mut Criterion) {
                 let mut service = ServiceBuilder::new()
                     .layer(layer)
                     .service(tower::service_fn(handler));
+                let requests = build_requests(iters);
 
                 let start = std::time::Instant::now();
-                for _ in 0..iters {
-                    let req = http::Request::builder()
-                        .method("GET")
-                        .uri("http://example.com/users/123")
-                        .body(String::new())
-                        .unwrap();
+                for req in requests {
                     let resp = service.ready().await.unwrap().call(req).await.unwrap();
                     black_box(resp);
                 }
