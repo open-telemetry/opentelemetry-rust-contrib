@@ -10,7 +10,7 @@ axum = { features = ["http1", "tokio"], version = "0.8", default-features = fals
 http = { version = "1", default-features = false }
 opentelemetry = { workspace = true }
 opentelemetry_sdk = { workspace = true, default-features = false }
-opentelemetry-otlp = { version = "0.31.0", features = ["grpc-tonic", "metrics", "trace"], default-features = false }
+opentelemetry-otlp = { version = "0.32.0", features = ["grpc-tonic", "metrics", "trace"], default-features = false }
 tokio = { version = "1", features = ["rt-multi-thread"], default-features = false }
 
 [lints]

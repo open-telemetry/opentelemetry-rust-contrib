@@ -4,6 +4,13 @@
 
 - Bump eventheader and eventheader_dynamic versions to 0.5.0
 
+## v0.16.0
+
+- Bump opentelemetry and opentelemetry_sdk versions to 0.32
+- **Breaking** Removed the `spec_unstable_logs_enabled` cargo feature. The
+  capability is now stable and always-on in upstream `opentelemetry` 0.32, so
+  the `event_enabled` callback is unconditionally available.
+
 ## v0.15.0
 
 - Bump opentelemetry and opentelemetry_sdk versions to 0.31

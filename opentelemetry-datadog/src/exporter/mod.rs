@@ -12,7 +12,7 @@ use opentelemetry_http::{HttpClient, ResponseExt};
 use opentelemetry_sdk::{
     error::{OTelSdkError, OTelSdkResult},
     resource::{ResourceDetector, SdkProvidedResourceDetector},
-    trace::{Config, SdkTracerProvider, TraceError},
+    trace::{Config, SdkTracerProvider},
     trace::{SpanData, SpanExporter},
     Resource,
 };
@@ -116,8 +116,8 @@ impl DatadogExporter {
                 env!("CARGO_PKG_VERSION"),
             )
             .body(data)
-            .map_err(|e| OTelSdkError::InternalFailure(format!("{e:?}")));
-        Ok(req)?
+            .map_err(|e| OTelSdkError::InternalFailure(format!("{e:?}")))?;
+        Ok(req)
     }
 }
 
@@ -205,7 +205,7 @@ impl DatadogPipelineBuilder {
     /// Building a new exporter.
     ///
     /// This is useful if you are manually constructing a pipeline.
-    pub fn build_exporter(mut self) -> Result<DatadogExporter, TraceError> {
+    pub fn build_exporter(mut self) -> Result<DatadogExporter, Error> {
         let (_, service_name) = self.build_config_and_service_name();
         self.build_exporter_with_service_name(service_name)
     }
@@ -246,7 +246,7 @@ impl DatadogPipelineBuilder {
 
     // parse the endpoint and append the path based on versions.
     // keep the query and host the same.
-    fn build_endpoint(agent_endpoint: &str, version: &str) -> Result<Uri, TraceError> {
+    fn build_endpoint(agent_endpoint: &str, version: &str) -> Result<Uri, Error> {
         // build agent endpoint based on version
         let mut endpoint = agent_endpoint
             .parse::<Url>()
@@ -266,7 +266,7 @@ impl DatadogPipelineBuilder {
     fn build_exporter_with_service_name(
         self,
         service_name: String,
-    ) -> Result<DatadogExporter, TraceError> {
+    ) -> Result<DatadogExporter, Error> {
         if let Some(client) = self.client {
             let model_config = ModelConfig { service_name };
 
@@ -280,12 +280,12 @@ impl DatadogPipelineBuilder {
             );
             Ok(exporter)
         } else {
-            Err(Error::NoHttpClient.into())
+            Err(Error::NoHttpClient)
         }
     }
 
     /// Install the Datadog trace exporter pipeline using a simple span processor.
-    pub fn install_simple(mut self) -> Result<SdkTracerProvider, TraceError> {
+    pub fn install_simple(mut self) -> Result<SdkTracerProvider, Error> {
         let (config, service_name) = self.build_config_and_service_name();
         let exporter = self.build_exporter_with_service_name(service_name)?;
         Ok(SdkTracerProvider::builder()
@@ -296,7 +296,7 @@ impl DatadogPipelineBuilder {
 
     /// Install the Datadog trace exporter pipeline using a batch span processor with the specified
     /// runtime.
-    pub fn install_batch(mut self) -> Result<SdkTracerProvider, TraceError> {
+    pub fn install_batch(mut self) -> Result<SdkTracerProvider, Error> {
         let (config, service_name) = self.build_config_and_service_name();
         let exporter = self.build_exporter_with_service_name(service_name)?;
         Ok(SdkTracerProvider::builder()

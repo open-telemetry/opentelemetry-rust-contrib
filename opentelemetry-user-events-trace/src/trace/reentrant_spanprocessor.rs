@@ -38,7 +38,7 @@ impl<T: SpanExporter> opentelemetry_sdk::trace::SpanProcessor for ReentrantSpanP
 
     // Ensures all spans are flushed.
     fn force_flush(&self) -> OTelSdkResult {
-        if let Ok(mut exporter) = self.exporter.lock() {
+        if let Ok(exporter) = self.exporter.lock() {
             exporter.force_flush()
         } else {
             Ok(())
@@ -53,7 +53,7 @@ impl<T: SpanExporter> opentelemetry_sdk::trace::SpanProcessor for ReentrantSpanP
 
     // Properly shuts down the exporter.
     fn shutdown(&self) -> OTelSdkResult {
-        if let Ok(mut exporter) = self.exporter.lock() {
+        if let Ok(exporter) = self.exporter.lock() {
             exporter.shutdown()
         } else {
             Ok(())
