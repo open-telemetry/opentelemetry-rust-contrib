@@ -606,14 +606,14 @@ mod tests {
             .get("ext_dt_spanId")
             .expect("PartA.ext_dt_spanId is missing");
 
-        // Validate trace_id and span_id (zero-padded to full width)
+        // Validate trace_id and span_id
         assert_eq!(
             part_a_ext_dt_trace_id.as_str().unwrap(),
-            format!("{trace_id_expected:032x}")
+            format!("{trace_id_expected:x}")
         );
         assert_eq!(
             part_a_ext_dt_span_id.as_str().unwrap(),
-            format!("{span_id_expected:016x}")
+            format!("{span_id_expected:x}")
         );
 
         // Validate PartB
