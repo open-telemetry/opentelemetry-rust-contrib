@@ -7,7 +7,7 @@
 | Status    |                                              |
 |-----------|----------------------------------------------|
 | Stability | alpha                                        |
-| Owners    | [Franco Posa](https://github.com/francoposa) |
+| Owners    | [Franco Posa](https://github.com/francoposa), [Jan Steinke](https://github.com/jan-xyz) |
 
 OpenTelemetry HTTP Metrics and Tracing Middleware for Tower-compatible Rust HTTP servers.
 
