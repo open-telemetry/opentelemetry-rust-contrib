@@ -23,7 +23,7 @@ api = []
 default = []
 base64_format = ["base64", "binary_propagator"]
 binary_propagator = []
-jaeger_json_exporter = ["opentelemetry_sdk", "serde_json"]
+jaeger_json_exporter = ["opentelemetry_sdk", "opentelemetry_sdk/experimental_async_runtime", "serde_json"]
 rt-tokio = ["tokio", "opentelemetry_sdk/rt-tokio"]
 rt-tokio-current-thread = ["tokio", "opentelemetry_sdk/rt-tokio-current-thread"]
 

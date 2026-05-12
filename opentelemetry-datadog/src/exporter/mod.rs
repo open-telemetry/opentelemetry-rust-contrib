@@ -260,7 +260,7 @@ impl DatadogPipelineBuilder {
         let path_str = paths.join("/");
         endpoint.set_path(path_str.as_str());
 
-        Ok(endpoint.as_str().parse().map_err::<Error, _>(Into::into)?)
+        endpoint.as_str().parse().map_err::<Error, _>(Into::into)
     }
 
     fn build_exporter_with_service_name(
