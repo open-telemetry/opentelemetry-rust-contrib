@@ -17,7 +17,7 @@ This middleware provides both metrics and distributed tracing for HTTP requests,
 
 - **HTTP Metrics**: Request duration, active requests, request/response body sizes
 - **Distributed Tracing**: HTTP spans with semantic attributes
-- **Semantic Conventions**: Uses OpenTelemetry semantic conventions for consistent attribute naming
+- **Semantic Conventions**: Uses OpenTelemetry semantic conventions for consistent attribute naming (validated in CI via [Weaver live-check](https://github.com/open-telemetry/weaver/blob/main/crates/weaver_live_check/README.md))
 - **Flexible Configuration**: Support for custom attribute extractors and tracer configuration
 - **Framework Support**: Works with any Tower-compatible HTTP framework (Axum, Hyper, Tonic etc.)
 
