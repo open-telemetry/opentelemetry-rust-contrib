@@ -150,6 +150,59 @@ jobs:
 
           exit $WEAVER_EXIT
 
+      - name: Summarize live-check findings
+        if: always()
+        working-directory: opentelemetry-instrumentation-tower
+        run: |
+          set -euo pipefail
+          REPORT=live-check-report/live_check.json
+          if [ ! -s "$REPORT" ]; then
+            echo "No live-check report found at $REPORT" | tee -a "$GITHUB_STEP_SUMMARY"
+            exit 0
+          fi
+
+          python3 - "$REPORT" <<'PY' | tee -a "$GITHUB_STEP_SUMMARY"
+          import json, sys, collections
+          d = json.load(open(sys.argv[1]))
+          s = d.get("statistics", {})
+          levels = s.get("advice_level_counts", {}) or {}
+          violations    = levels.get("violation", 0)
+          improvements  = levels.get("improvement", 0)
+          informations  = levels.get("information", 0)
+          status_emoji  = "❌" if violations else "✅"
+
+          print(f"## {status_emoji} Weaver live-check (tower)")
+          print()
+          print(f"- Samples received: **{len(d.get('samples', []))}**")
+          by_type = s.get("total_entities_by_type", {}) or {}
+          if by_type:
+              parts = ", ".join(f"{v} {k}" for k, v in sorted(by_type.items()))
+              print(f"- Entities checked: **{s.get('total_entities', 0)}** ({parts})")
+          print()
+          print("| Level | Count |")
+          print("| --- | ---: |")
+          print(f"| violation | {violations} |")
+          print(f"| improvement | {improvements} |")
+          print(f"| information | {informations} |")
+          print()
+
+          msgs = (s.get("advice_message_counts", {}) or {})
+          if msgs:
+              print("### Top findings")
+              print()
+              print("| Count | Message |")
+              print("| ---: | --- |")
+              for m, c in sorted(msgs.items(), key=lambda x: -x[1])[:15]:
+                  m_clean = m.replace("|", "\\|")
+                  print(f"| {c} | {m_clean} |")
+              print()
+
+          if violations:
+              print("> A violation was reported. See artifact `weaver-live-check-tower` for the full JSON report.")
+          else:
+              print("> No semantic-convention violations. Improvements/informations are advisory.")
+          PY
+
       - name: Upload live-check report
         if: always()
         uses: actions/upload-artifact@v4
