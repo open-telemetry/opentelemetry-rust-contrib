@@ -1,0 +1,159 @@
+name: Weaver Live Check (tower)
+
+# This workflow runs OpenTelemetry Weaver `live-check` against telemetry
+# emitted by the tower instrumentation's axum-http-service example. It is an
+# initial seed for issue #530 and intentionally narrow in scope; expand
+# coverage (more endpoints, more signals, the actix crate, etc.) in follow-ups.
+
+env:
+  CI: true
+  WEAVER_VERSION: v0.23.0
+  # Use the default registry (semantic-conventions main). A pinned ref
+  # via the `@refspec` syntax can be added later once we want stricter
+  # reproducibility; today we prefer to track the latest conventions.
+  SEMCONV_REGISTRY: 'https://github.com/open-telemetry/semantic-conventions.git[model]'
+
+permissions:
+  contents: read
+
+on:
+  pull_request:
+    paths:
+      - 'opentelemetry-instrumentation-tower/**'
+      - '.github/workflows/weaver-live-check-tower.yml'
+  merge_group:
+  push:
+    branches:
+      - main
+    paths:
+      - 'opentelemetry-instrumentation-tower/**'
+      - '.github/workflows/weaver-live-check-tower.yml'
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  live-check:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Harden the runner (Audit all outbound calls)
+        uses: step-security/harden-runner@8d3c67de8e2fe68ef647c8db1e6a09f647780f40 # v2.19.0
+        with:
+          egress-policy: audit
+
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+
+      - name: Install stable Rust
+        run: rustup toolchain install stable --profile minimal --no-self-update
+
+      - name: Cache cargo
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: weaver-live-check-${{ runner.os }}-${{ hashFiles('**/Cargo.lock') }}
+
+      - name: Download weaver
+        run: |
+          set -euo pipefail
+          mkdir -p "$HOME/.weaver/bin"
+          curl -sSL -o /tmp/weaver.tar.xz \
+            "https://github.com/open-telemetry/weaver/releases/download/${WEAVER_VERSION}/weaver-x86_64-unknown-linux-gnu.tar.xz"
+          tar -xf /tmp/weaver.tar.xz -C "$HOME/.weaver/bin" --strip-components=1
+          echo "$HOME/.weaver/bin" >> "$GITHUB_PATH"
+
+      - name: Verify weaver
+        run: weaver --version
+
+      - name: Build axum-http-service example
+        working-directory: opentelemetry-instrumentation-tower/examples/axum-http-service
+        run: cargo build --release
+
+      - name: Run live-check end-to-end
+        working-directory: opentelemetry-instrumentation-tower
+        env:
+          # Speed up metric exports so a short run produces samples.
+          OTEL_METRIC_EXPORT_INTERVAL: '2000'
+          OTEL_BSP_SCHEDULE_DELAY: '1000'
+          OTEL_EXPORTER_OTLP_ENDPOINT: 'http://localhost:4317'
+        run: |
+          set -euo pipefail
+          mkdir -p live-check-report
+
+          echo "::group::Start weaver live-check listener"
+          weaver registry live-check \
+            --registry "${SEMCONV_REGISTRY}" \
+            --input-source otlp \
+            --otlp-grpc-port 4317 \
+            --admin-port 4320 \
+            --inactivity-timeout 60 \
+            --format json \
+            --output live-check-report \
+            --diagnostic-format gh_workflow_command \
+            > live-check-report/weaver.log 2>&1 &
+          WEAVER_PID=$!
+          echo "weaver pid: $WEAVER_PID"
+          echo "::endgroup::"
+
+          # Wait for the listener to come up.
+          for i in $(seq 1 30); do
+            if curl -fsS "http://127.0.0.1:4320/" >/dev/null 2>&1 \
+              || nc -z 127.0.0.1 4317; then
+              break
+            fi
+            sleep 1
+          done
+
+          echo "::group::Start example service"
+          ../target/release/example-axum-http-service > live-check-report/example.log 2>&1 &
+          APP_PID=$!
+          echo "app pid: $APP_PID"
+          echo "::endgroup::"
+
+          # Wait for the app to start serving on :5000
+          for i in $(seq 1 30); do
+            if curl -fsS "http://127.0.0.1:5000/" >/dev/null 2>&1; then
+              break
+            fi
+            sleep 1
+          done
+
+          echo "::group::Drive traffic"
+          for i in $(seq 1 25); do
+            curl -fsS -o /dev/null "http://127.0.0.1:5000/" || true
+            curl -fsS -o /dev/null -X POST --data 'hi' "http://127.0.0.1:5000/" || true
+            curl -fsS -o /dev/null -X PUT  --data 'hi' "http://127.0.0.1:5000/" || true
+          done
+          echo "::endgroup::"
+
+          # Allow batch span / periodic metric exporters to flush at least once.
+          sleep 6
+
+          echo "::group::Stop services"
+          kill "$APP_PID" || true
+          # Tell weaver to stop accepting and finalize the report.
+          curl -fsS -X POST "http://127.0.0.1:4320/stop" || true
+          # Wait for weaver to exit and capture its exit code.
+          set +e
+          wait "$WEAVER_PID"
+          WEAVER_EXIT=$?
+          set -e
+          echo "weaver exit code: $WEAVER_EXIT"
+          echo "::endgroup::"
+
+          echo "::group::Weaver log (tail)"
+          tail -n 200 live-check-report/weaver.log || true
+          echo "::endgroup::"
+
+          exit $WEAVER_EXIT
+
+      - name: Upload live-check report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: weaver-live-check-tower
+          path: opentelemetry-instrumentation-tower/live-check-report
+          if-no-files-found: warn
