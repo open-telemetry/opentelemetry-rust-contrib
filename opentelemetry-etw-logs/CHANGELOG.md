@@ -13,7 +13,16 @@
   looked for the bare field names (`role`, `roleInstance`) in PartA will need
   to be updated.
 
-## v0.10.1
+## vNext
+
+## v0.11.0
+
+- Bump opentelemetry and opentelemetry_sdk versions to 0.32
+- Removed the `spec_unstable_logs_enabled` cargo feature, since the underlying
+  capability is now stable and always-on in upstream `opentelemetry` 0.32 (the
+  `event_enabled` callback is unconditionally available). This only affects
+  users who explicitly opted into the experimental feature flag; no change is
+  needed for users on the default (stable) feature set.
 
 - Added a `with_resource_attributes` method to the processor builder, allowing
   users to specify which resource attribute keys are exported with each log

@@ -11,7 +11,7 @@ license = "Apache-2.0"
 
 [dependencies]
 otap-df-pdata-views = { git = "https://github.com/open-telemetry/otel-arrow", rev = "15371dc7" }
-opentelemetry-proto = {workspace = true, default-features = false, features = ["logs", "trace", "gen-tonic-messages"]}
+opentelemetry-proto = { version = "0.31", default-features = false, features = ["logs", "trace", "gen-tonic-messages"] }
 base64 = "0.22"
 serde = { version = "1.0", features = ["derive"] }
 serde_json = { version = "1.0", features = ["raw_value"] }
