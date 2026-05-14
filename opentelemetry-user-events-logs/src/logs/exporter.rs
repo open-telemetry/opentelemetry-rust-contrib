@@ -451,7 +451,6 @@ where
         }
     }
 
-    #[cfg(feature = "spec_unstable_logs_enabled")]
     fn event_enabled(&self, level: Severity, _target: &str, _name: Option<&str>) -> bool {
         // EventSets are stored in the same order as their int representation,
         // so we can use the level as index to the Vec.

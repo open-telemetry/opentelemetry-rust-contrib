@@ -21,7 +21,7 @@ axum = { features = ["matched-path", "macros"], version = "0.8", default-feature
 http = { version = "1", features = ["std"], default-features = false }
 http-body = { version = "1", default-features = false }
 opentelemetry = { workspace = true, features = ["futures", "metrics", "trace"] }
-opentelemetry-http = "0.31"
+opentelemetry-http = "0.32"
 opentelemetry-semantic-conventions = { workspace = true, features = ["semconv_experimental"] }
 tower-service = { version = "0.3", default-features = false }
 tower-layer = { version = "0.3", default-features = false }

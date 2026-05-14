@@ -2,6 +2,12 @@
 
 ## vNext
 
+## v0.29.0
+
+- Update to opentelemetry v0.32.0, opentelemetry_sdk v0.32.0, opentelemetry-semantic-conventions v0.32.0
+- **Breaking** `StackDriverExporter::shutdown` now takes `&self` instead of `&mut self`,
+  matching the upstream `SpanExporter` trait change in 0.32.
+
 ## v0.28.0
 
 - Update to opentelemetry v0.31.0, opentelemetry_sdk v0.31.0, opentelemetry-semantic-conventions v0.31.0
