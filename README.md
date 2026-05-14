@@ -64,25 +64,28 @@ you're more than welcome to participate!
 
 ### Maintainers
 
-* [Cijo Thomas](https://github.com/cijothomas)
+* [Cijo Thomas](https://github.com/cijothomas), Microsoft
 * [Harold Dost](https://github.com/hdost)
-* [Julian Tescher](https://github.com/jtescher)
-* [Lalit Kumar Bhasin](https://github.com/lalitb)
+* [Lalit Kumar Bhasin](https://github.com/lalitb), Microsoft
+* [Utkarsh Umesan Pillai](https://github.com/utpilla), Microsoft
 * [Zhongyang Wu](https://github.com/TommyCpp)
 
 For more information about the maintainer role, see the [community repository](https://github.com/open-telemetry/community/blob/main/guides/contributor/membership.md#maintainer).
 
 ### Approvers
 
+* [Björn Antonsson](https://github.com/bantonsson), Datadog
+* [Scott Gerring](https://github.com/scottgerring), Datadog
 
 For more information about the approver role, see the [community repository](https://github.com/open-telemetry/community/blob/main/guides/contributor/membership.md#approver).
 
 ### Emeritus
 
-- [Anton Grübel](https://github.com/gruebel), Approver
+* [Anton Grübel](https://github.com/gruebel), Approver
 * [Dirkjan Ochtman](https://github.com/djc), Maintainer
 * [Isobel Redelmeier](https://github.com/iredelmeier), Maintainer
 * [Jan Kühle](https://github.com/frigus02), Approver
+* [Julian Tescher](https://github.com/jtescher), Maintainer
 * [Mike Goldsmith](https://github.com/MikeGoldsmith), Maintainer
 * [Shaun Cox](https://github.com/shaun-cox), Approver
 
