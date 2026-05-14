@@ -2,11 +2,12 @@
 
 ## vNext
 
-- Bump eventheader and eventheader_dynamic versions to 0.5.0
-
 ## v0.5.0
 
+Released 2026-May-13
+
 - Bump opentelemetry and opentelemetry_sdk versions to 0.32
+- Bump eventheader and eventheader_dynamic versions to 0.5.0
 - **Breaking** `UserEventsSpanExporter::shutdown` now takes `&self` instead of
   `&mut self`, matching the upstream `SpanExporter` trait change in 0.32.
 
