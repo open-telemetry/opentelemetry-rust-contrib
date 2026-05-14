@@ -1,3 +1,4 @@
+use super::otel_id_ext::SpanIdExt;
 use crate::exporter::common;
 use opentelemetry::trace::Status;
 use opentelemetry_sdk::trace::SpanData;
@@ -65,7 +66,7 @@ pub(crate) fn populate_part_b(event: &mut tld::EventBuilder, span_data: &SpanDat
     );
     event.add_str8(
         "parentId",
-        span_data.parent_span_id.to_string(),
+        span_data.parent_span_id.to_hex().as_bytes(),
         tld::OutType::Utf8,
         field_tag,
     );

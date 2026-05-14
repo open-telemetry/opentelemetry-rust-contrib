@@ -1,9 +1,11 @@
-use chrono::{DateTime, Utc};
+use chrono::{DateTime, Datelike, Timelike, Utc};
 use opentelemetry::trace::SpanKind;
 use opentelemetry::Key;
 use opentelemetry_sdk::trace::SpanEvents;
 use std::time::SystemTime;
 use tracelogging_dynamic as tld;
+
+use super::otel_id_ext::{SpanIdExt, TraceIdExt};
 
 /// Converts an OpenTelemetry `SpanKind` to a u8 value matching the OTel spec.
 pub(crate) fn span_kind_to_u8(kind: &SpanKind) -> u8 {
@@ -87,8 +89,8 @@ pub(crate) fn links_to_json(links: &[opentelemetry::trace::Link]) -> String {
         .iter()
         .map(|link| {
             serde_json::json!({
-                "toTraceId": link.span_context.trace_id().to_string(),
-                "toSpanId": link.span_context.span_id().to_string(),
+                "toTraceId": link.span_context.trace_id().to_hex().as_str(),
+                "toSpanId": link.span_context.span_id().to_hex().as_str(),
             })
         })
         .collect();
@@ -145,9 +147,57 @@ pub(crate) fn events_to_json(events: &SpanEvents) -> String {
     serde_json::to_string(&json_value).unwrap_or_default()
 }
 
+/// Formats a SystemTime as "YYYY-MM-DD HH:MM:SS.NNNNNNNNN" using a stack buffer.
+///
+/// Uses chrono field accessors instead of `format!()` to avoid chrono's
+/// internal heap allocations.
 pub(crate) fn system_time_to_str(time: &SystemTime) -> String {
+    let (buf, len) = format_timestamp(time);
+    let s = std::str::from_utf8(&buf[..len]).expect("timestamp buffer contains only ASCII");
+    s.to_owned()
+}
+
+/// Writes timestamp into a stack `[u8; 32]` buffer.
+/// Returns the buffer and the number of bytes written.
+/// Maximum length of a formatted timestamp: "YYYY-MM-DD HH:MM:SS.NNNNNNNNN" = 29 chars.
+/// Rounded up to 32 for padding.
+fn format_timestamp(time: &SystemTime) -> ([u8; 32], usize) {
     let datetime: DateTime<Utc> = (*time).into();
-    datetime.format("%Y-%m-%d %H:%M:%S%.f").to_string()
+    let mut buf = [b'0'; 32];
+    let mut pos = 0;
+
+    pos += write_u32_padded(&mut buf, pos, datetime.year() as u32, 4);
+    buf[pos] = b'-';
+    pos += 1;
+    pos += write_u32_padded(&mut buf, pos, datetime.month(), 2);
+    buf[pos] = b'-';
+    pos += 1;
+    pos += write_u32_padded(&mut buf, pos, datetime.day(), 2);
+    buf[pos] = b' ';
+    pos += 1;
+    pos += write_u32_padded(&mut buf, pos, datetime.hour(), 2);
+    buf[pos] = b':';
+    pos += 1;
+    pos += write_u32_padded(&mut buf, pos, datetime.minute(), 2);
+    buf[pos] = b':';
+    pos += 1;
+    pos += write_u32_padded(&mut buf, pos, datetime.second(), 2);
+    buf[pos] = b'.';
+    pos += 1;
+    pos += write_u32_padded(&mut buf, pos, datetime.nanosecond(), 9);
+
+    (buf, pos)
+}
+
+/// Writes `val` zero-padded to exactly `width` digits into `buf` at `pos`.
+#[inline]
+fn write_u32_padded(buf: &mut [u8], pos: usize, val: u32, width: usize) -> usize {
+    let mut v = val;
+    for i in (0..width).rev() {
+        buf[pos + i] = b'0' + (v % 10) as u8;
+        v /= 10;
+    }
+    width
 }
 
 #[cfg(test)]
@@ -283,6 +333,6 @@ mod tests {
     fn test_system_time_to_str() {
         let time = UNIX_EPOCH + Duration::from_secs(1_700_000_000);
         let result = system_time_to_str(&time);
-        assert!(result.starts_with("2023-11-14"));
+        assert_eq!(result, "2023-11-14 22:13:20.000000000");
     }
 }

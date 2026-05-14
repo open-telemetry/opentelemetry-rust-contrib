@@ -5,6 +5,7 @@
 
 pub(crate) mod common;
 pub(crate) mod options;
+pub(crate) mod otel_id_ext;
 mod part_a;
 mod part_b;
 mod part_c;
