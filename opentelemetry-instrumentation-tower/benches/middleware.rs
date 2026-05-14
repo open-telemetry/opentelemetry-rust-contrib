@@ -53,6 +53,23 @@
 //! ```sh
 //! cargo bench --bench middleware -p opentelemetry-instrumentation-tower
 //! ```
+//!
+//! ## Reference Numbers
+//!
+//! Latest measurements (criterion median):
+//!
+//! | Scenario             | Median   | vs baseline |
+//! | -------------------- | -------- | ----------- |
+//! | baseline             |   47 ns  | —           |
+//! | noop                 |  867 ns  | +820 ns     |
+//! | tracing              | 1048 ns  | +1000 ns    |
+//! | tracing-sampled-out  |  913 ns  | +866 ns     |
+//! | metrics              | 1202 ns  | +1155 ns    |
+//! | tracing + metrics    | 1353 ns  | +1306 ns    |
+//!
+//! Captured on: MacBook Pro, Apple M4 Pro (10P + 4E cores), 24 GB RAM,
+//! macOS 26.4.1, rustc 1.95.0, OpenTelemetry 0.32.
+//!
 
 use criterion::{criterion_group, criterion_main, BenchmarkId, Criterion, Throughput};
 use opentelemetry::global;
