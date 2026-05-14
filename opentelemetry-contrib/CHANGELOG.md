@@ -4,6 +4,8 @@
 
 ## v0.24.0
 
+Released 2026-May-13
+
 - Bump opentelemetry and opentelemetry_sdk versions to 0.32
 
 ## v0.23.0

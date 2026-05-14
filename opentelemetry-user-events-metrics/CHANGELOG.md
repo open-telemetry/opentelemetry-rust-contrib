@@ -2,12 +2,13 @@
 
 ## vNext
 
-- Update eventheader version to 0.5.0
-
 ## v0.13.0
+
+Released 2026-May-13
 
 - Bump opentelemetry and opentelemetry_sdk versions to 0.32
 - Bump opentelemetry-proto version to 0.32
+- Update eventheader version to 0.5.0
 
 ## v0.12.0
 
