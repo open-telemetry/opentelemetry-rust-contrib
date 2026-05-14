@@ -31,8 +31,7 @@
 //! the TraceLoggingDynamic format with the following structure:
 //!
 //! - **`__csver__`**: Common Schema version (`u16`, value `1024` / `0x0400`)
-//! - **Part A** (envelope): `time`, `ext_dt { traceId, spanId }`,
-//!   `cloud.role`, `cloud.roleInstance`
+//! - **Part A** (envelope): `time`, `ext_dt { traceId, spanId }`, `ext_cloud { cloud.role, cloud.roleInstance }`
 //! - **Part B** (payload): `_typeName="Span"`, `name`, `kind`, `startTime`,
 //!   `parentId`, `links`, `statusMessage`, `success`
 //! - **Part C** (extensions): promoted resource attributes, span's attributes, `events`

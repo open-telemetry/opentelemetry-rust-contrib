@@ -12,7 +12,7 @@ pub(crate) struct Options {
 
     /// Resource attribute keys that should be exported with each span.
     /// By default, only `service.name` and `service.instance.id` are exported
-    /// as Part A fields (`cloud.role` and `cloud.roleInstance`).
+    /// as Part A fields (`ext_cloud { cloud.role, cloud.roleInstance }`).
     resource_attribute_keys: Vec<Cow<'static, str>>,
 }
 
