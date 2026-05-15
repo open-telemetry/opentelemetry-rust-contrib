@@ -1,0 +1,21 @@
+[package]
+name = "opentelemetry-derive-impl"
+version = "0.1.0"
+description = "Implementation of derive macros for OpenTelemetry"
+homepage = "https://github.com/open-telemetry/opentelemetry-rust-contrib/tree/main/opentelemetry-derive/opentelemetry-derive-impl"
+repository = "https://github.com/open-telemetry/opentelemetry-rust-contrib/tree/main/opentelemetry-derive/opentelemetry-derive-impl"
+readme = "README.md"
+categories = ["development-tools::procedural-macro-helpers"]
+keywords = ["opentelemetry", "derive", "macro", "macros"]
+license = "Apache-2.0"
+edition = "2021"
+rust-version = "1.71.1"
+
+[lib]
+proc-macro = true
+
+[dependencies]
+darling = "0.20"
+proc-macro2 = "1"
+quote = "1"
+syn = "2"
