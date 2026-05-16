@@ -8,10 +8,16 @@ name: Weaver Live Check (tower)
 env:
   CI: true
   WEAVER_VERSION: v0.23.0
-  # Use the default registry (semantic-conventions main). A pinned ref
-  # via the `@refspec` syntax can be added later once we want stricter
-  # reproducibility; today we prefer to track the latest conventions.
-  SEMCONV_REGISTRY: 'https://github.com/open-telemetry/semantic-conventions.git[model]'
+  # Pinned semantic-conventions release for reproducible runs. Bump
+  # deliberately when conventions change; tracking `main` makes the job
+  # flaky against unrelated upstream churn.
+  SEMCONV_REGISTRY: 'https://github.com/open-telemetry/semantic-conventions/archive/refs/tags/v1.41.1.tar.gz[model]'
+  # Ports for the in-job weaver listener. Kept fixed because only one
+  # instance runs per job; switch to free-port allocation if we ever
+  # parallelize multiple live-check runs on the same runner.
+  WEAVER_OTLP_PORT: '4317'
+  WEAVER_ADMIN_PORT: '4320'
+  APP_PORT: '5000'
 
 permissions:
   contents: read
@@ -84,25 +90,32 @@ jobs:
           mkdir -p live-check-report
 
           echo "::group::Start weaver live-check listener"
+          # `--output=http` keeps the report in-memory and returns it as
+          # the body of the admin POST /stop response — no on-disk JSON
+          # file to locate. Inspired by opentelemetry-python#5088.
           weaver registry live-check \
             --registry "${SEMCONV_REGISTRY}" \
             --input-source otlp \
-            --otlp-grpc-port 4317 \
-            --admin-port 4320 \
+            --otlp-grpc-port "${WEAVER_OTLP_PORT}" \
+            --admin-port "${WEAVER_ADMIN_PORT}" \
             --inactivity-timeout 60 \
             --format json \
-            --output live-check-report \
+            --output http \
             --diagnostic-format gh_workflow_command \
             > live-check-report/weaver.log 2>&1 &
           WEAVER_PID=$!
           echo "weaver pid: $WEAVER_PID"
           echo "::endgroup::"
 
-          # Wait for the listener to come up.
+          # Wait for weaver's admin /health endpoint to report ready.
           for i in $(seq 1 30); do
-            if curl -fsS "http://127.0.0.1:4320/" >/dev/null 2>&1 \
-              || nc -z 127.0.0.1 4317; then
+            if curl -fsS "http://127.0.0.1:${WEAVER_ADMIN_PORT}/health" >/dev/null 2>&1; then
               break
+            fi
+            if ! kill -0 "$WEAVER_PID" 2>/dev/null; then
+              echo "weaver process exited before becoming ready" >&2
+              tail -n 200 live-check-report/weaver.log || true
+              exit 1
             fi
             sleep 1
           done
@@ -113,9 +126,9 @@ jobs:
           echo "app pid: $APP_PID"
           echo "::endgroup::"
 
-          # Wait for the app to start serving on :5000
+          # Wait for the app to start serving.
           for i in $(seq 1 30); do
-            if curl -fsS "http://127.0.0.1:5000/" >/dev/null 2>&1; then
+            if curl -fsS "http://127.0.0.1:${APP_PORT}/" >/dev/null 2>&1; then
               break
             fi
             sleep 1
@@ -123,20 +136,21 @@ jobs:
 
           echo "::group::Drive traffic"
           for i in $(seq 1 25); do
-            curl -fsS -o /dev/null "http://127.0.0.1:5000/" || true
-            curl -fsS -o /dev/null -X POST --data 'hi' "http://127.0.0.1:5000/" || true
-            curl -fsS -o /dev/null -X PUT  --data 'hi' "http://127.0.0.1:5000/" || true
+            curl -fsS -o /dev/null "http://127.0.0.1:${APP_PORT}/" || true
+            curl -fsS -o /dev/null -X POST --data 'hi' "http://127.0.0.1:${APP_PORT}/" || true
+            curl -fsS -o /dev/null -X PUT  --data 'hi' "http://127.0.0.1:${APP_PORT}/" || true
           done
           echo "::endgroup::"
 
           # Allow batch span / periodic metric exporters to flush at least once.
           sleep 6
 
-          echo "::group::Stop services"
+          echo "::group::Stop services and capture report"
           kill "$APP_PID" || true
-          # Tell weaver to stop accepting and finalize the report.
-          curl -fsS -X POST "http://127.0.0.1:4320/stop" || true
-          # Wait for weaver to exit and capture its exit code.
+          # POST /stop both terminates weaver and (with --output=http)
+          # returns the live-check report as the response body.
+          curl -fsS -X POST -o live-check-report/live_check.json \
+            "http://127.0.0.1:${WEAVER_ADMIN_PORT}/stop" || true
           set +e
           wait "$WEAVER_PID"
           WEAVER_EXIT=$?
@@ -162,7 +176,9 @@ jobs:
           fi
 
           python3 - "$REPORT" <<'PY' | tee -a "$GITHUB_STEP_SUMMARY"
-          import json, sys, collections
+          import json, sys
+          from collections import defaultdict
+
           d = json.load(open(sys.argv[1]))
           s = d.get("statistics", {})
           levels = s.get("advice_level_counts", {}) or {}
@@ -186,15 +202,49 @@ jobs:
           print(f"| information | {informations} |")
           print()
 
-          msgs = (s.get("advice_message_counts", {}) or {})
-          if msgs:
-              print("### Top findings")
+          # Walk the full report and collect every advice entry of level=violation,
+          # then group by (id, message, signal_type, signal_name) for a useful summary.
+          # Mirrors the dedup approach in opentelemetry-python#5088.
+          def walk(obj):
+              if isinstance(obj, dict):
+                  lcr = obj.get("live_check_result")
+                  if isinstance(lcr, dict):
+                      for a in lcr.get("all_advice", []) or []:
+                          if a.get("level") == "violation":
+                              yield a
+                  for v in obj.values():
+                      yield from walk(v)
+              elif isinstance(obj, list):
+                  for item in obj:
+                      yield from walk(item)
+
+          groups = defaultdict(int)
+          for v in walk(d):
+              key = (
+                  v.get("id"),
+                  v.get("message"),
+                  v.get("signal_type"),
+                  v.get("signal_name"),
+              )
+              groups[key] += 1
+
+          if groups:
+              print("### Violations")
               print()
-              print("| Count | Message |")
-              print("| ---: | --- |")
-              for m, c in sorted(msgs.items(), key=lambda x: -x[1])[:15]:
-                  m_clean = m.replace("|", "\\|")
-                  print(f"| {c} | {m_clean} |")
+              print("| Count | id | signal | message |")
+              print("| ---: | --- | --- | --- |")
+              for (vid, msg, stype, sname), count in sorted(
+                  groups.items(), key=lambda kv: -kv[1]
+              )[:25]:
+                  signal = ""
+                  if stype and sname:
+                      signal = f"{stype} `{sname}`"
+                  elif stype:
+                      signal = stype
+                  elif sname:
+                      signal = f"`{sname}`"
+                  msg_clean = (msg or "").replace("|", "\\|")
+                  print(f"| {count} | `{vid}` | {signal} | {msg_clean} |")
               print()
 
           if violations:
