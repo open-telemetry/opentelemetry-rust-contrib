@@ -1,7 +1,7 @@
 name: Weaver Live Check (tower)
 
 # Validates that telemetry emitted by the tower instrumentation's
-# axum-http-service example complies with the published OpenTelemetry
+# live-check-app example complies with the published OpenTelemetry
 # semantic conventions. Initial seed for issue #530.
 #
 # This workflow uses the reusable `weaver-live-check-start` /
@@ -78,8 +78,8 @@ jobs:
           registry: ${{ env.SEMCONV_REGISTRY }}
 
       # ---- Project-specific: build, run, drive traffic ---------------
-      - name: Build axum-http-service example
-        working-directory: opentelemetry-instrumentation-tower/examples/axum-http-service
+      - name: Build live-check-app example
+        working-directory: opentelemetry-instrumentation-tower/examples/live-check-app
         run: cargo build --release
 
       - name: Run example + drive traffic
@@ -92,25 +92,48 @@ jobs:
           set -euo pipefail
 
           echo "::group::Start example service"
-          ../target/release/example-axum-http-service > "${{ steps.live-check.outputs.state-dir }}/example.log" 2>&1 &
+          ../target/release/example-live-check-app > "${{ steps.live-check.outputs.state-dir }}/example.log" 2>&1 &
           APP_PID=$!
           echo "app pid: $APP_PID"
           echo "::endgroup::"
 
           # Wait for the app to start serving on :$APP_PORT
-          for i in $(seq 1 30); do
+          for _ in $(seq 1 30); do
             if curl -fsS "http://127.0.0.1:${APP_PORT}/" >/dev/null 2>&1; then
               break
             fi
             sleep 1
           done
 
+          # Bounded curl helper so a stuck request never hangs the job.
+          c() { curl --max-time 5 -sS -o /dev/null "$@" || true; }
+
           echo "::group::Drive traffic"
-          for i in $(seq 1 25); do
-            curl -fsS -o /dev/null "http://127.0.0.1:${APP_PORT}/" || true
-            curl -fsS -o /dev/null -X POST --data 'hi' "http://127.0.0.1:${APP_PORT}/" || true
-            curl -fsS -o /dev/null -X PUT  --data 'hi' "http://127.0.0.1:${APP_PORT}/" || true
+          # Exercise the full HTTP method x status-code x route-shape
+          # matrix so weaver validates as many attribute combinations
+          # as possible against the pinned semconv registry.
+          for i in $(seq 1 8); do
+            # 200 OK on literal, templated, and wildcard routes.
+            c "http://127.0.0.1:${APP_PORT}/"
+            c "http://127.0.0.1:${APP_PORT}/users/$i"
+            c "http://127.0.0.1:${APP_PORT}/files/a/b/c/$i.txt"
+            # 201 / 200 / 200 / 204 across POST/PUT/PATCH/DELETE.
+            c -X POST   "http://127.0.0.1:${APP_PORT}/items"
+            c -X PUT    "http://127.0.0.1:${APP_PORT}/items/$i"
+            c -X PATCH  "http://127.0.0.1:${APP_PORT}/items/$i"
+            c -X DELETE "http://127.0.0.1:${APP_PORT}/items/$i"
+            # HEAD on a templated route + OPTIONS.
+            c -X HEAD    "http://127.0.0.1:${APP_PORT}/items/$i/head"
+            c -X OPTIONS "http://127.0.0.1:${APP_PORT}/items"
+            # 4xx
+            c "http://127.0.0.1:${APP_PORT}/bad-request"   # 400
+            c "http://127.0.0.1:${APP_PORT}/unauthorized"  # 401
+            c "http://127.0.0.1:${APP_PORT}/no-such-route" # 404
+            # 5xx via handler + unhandled panic.
+            c "http://127.0.0.1:${APP_PORT}/error"
+            c "http://127.0.0.1:${APP_PORT}/throw"
           done
+          echo "traffic loop complete"
           echo "::endgroup::"
 
           # Allow batch span / periodic metric exporters to flush.
