@@ -1,22 +1,20 @@
 name: Weaver Live Check (tower)
 
-# This workflow runs OpenTelemetry Weaver `live-check` against telemetry
-# emitted by the tower instrumentation's axum-http-service example. It is an
-# initial seed for issue #530 and intentionally narrow in scope; expand
-# coverage (more endpoints, more signals, the actix crate, etc.) in follow-ups.
+# Validates that telemetry emitted by the tower instrumentation's
+# axum-http-service example complies with the published OpenTelemetry
+# semantic conventions. Initial seed for issue #530.
+#
+# This workflow uses the reusable `weaver-live-check-start` /
+# `weaver-live-check-finalize` composite actions; the workflow itself
+# only contains the project-specific glue (build the example, drive
+# traffic, stop the app).
 
 env:
   CI: true
   WEAVER_VERSION: v0.23.0
   # Pinned semantic-conventions release for reproducible runs. Bump
-  # deliberately when conventions change; tracking `main` makes the job
-  # flaky against unrelated upstream churn.
+  # deliberately when conventions change.
   SEMCONV_REGISTRY: 'https://github.com/open-telemetry/semantic-conventions/archive/refs/tags/v1.41.1.tar.gz[model]'
-  # Ports for the in-job weaver listener. Kept fixed because only one
-  # instance runs per job; switch to free-port allocation if we ever
-  # parallelize multiple live-check runs on the same runner.
-  WEAVER_OTLP_PORT: '4317'
-  WEAVER_ADMIN_PORT: '4320'
   APP_PORT: '5000'
 
 permissions:
@@ -42,6 +40,7 @@ concurrency:
 jobs:
   live-check:
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     steps:
       - name: Harden the runner (Audit all outbound calls)
         uses: step-security/harden-runner@8d3c67de8e2fe68ef647c8db1e6a09f647780f40 # v2.19.0
@@ -62,64 +61,42 @@ jobs:
             target
           key: weaver-live-check-${{ runner.os }}-${{ hashFiles('**/Cargo.lock') }}
 
+      # ---- Reusable actions: start the weaver listener ---------------
+      # NOTE: actions sourced from a personal fork while the upstream PR
+      # is in review. Switch to `open-telemetry/weaver/...@<tag>` once
+      # the actions land upstream.
       - name: Setup weaver
-        uses: open-telemetry/weaver/.github/actions/setup-weaver@v0.23.0
+        uses: cijothomas/weaver/.github/actions/setup-weaver@cijothomas/weaver-live-check-actions
         with:
           version: ${{ env.WEAVER_VERSION }}
 
+      - name: Start weaver live-check
+        id: live-check
+        uses: cijothomas/weaver/.github/actions/weaver-live-check-start@cijothomas/weaver-live-check-actions
+        with:
+          registry: ${{ env.SEMCONV_REGISTRY }}
+
+      # ---- Project-specific: build, run, drive traffic ---------------
       - name: Build axum-http-service example
         working-directory: opentelemetry-instrumentation-tower/examples/axum-http-service
         run: cargo build --release
 
-      - name: Run live-check end-to-end
+      - name: Run example + drive traffic
         working-directory: opentelemetry-instrumentation-tower
         env:
-          # Speed up metric exports so a short run produces samples.
           OTEL_METRIC_EXPORT_INTERVAL: '2000'
           OTEL_BSP_SCHEDULE_DELAY: '1000'
-          OTEL_EXPORTER_OTLP_ENDPOINT: 'http://localhost:4317'
+          OTEL_EXPORTER_OTLP_ENDPOINT: ${{ steps.live-check.outputs.otlp-grpc-endpoint }}
         run: |
           set -euo pipefail
-          mkdir -p live-check-report
-
-          echo "::group::Start weaver live-check listener"
-          # `--output=http` keeps the report in-memory and returns it as
-          # the body of the admin POST /stop response — no on-disk JSON
-          # file to locate. Inspired by opentelemetry-python#5088.
-          weaver registry live-check \
-            --registry "${SEMCONV_REGISTRY}" \
-            --input-source otlp \
-            --otlp-grpc-port "${WEAVER_OTLP_PORT}" \
-            --admin-port "${WEAVER_ADMIN_PORT}" \
-            --inactivity-timeout 60 \
-            --format json \
-            --output http \
-            --diagnostic-format gh_workflow_command \
-            > live-check-report/weaver.log 2>&1 &
-          WEAVER_PID=$!
-          echo "weaver pid: $WEAVER_PID"
-          echo "::endgroup::"
-
-          # Wait for weaver's admin /health endpoint to report ready.
-          for i in $(seq 1 30); do
-            if curl -fsS "http://127.0.0.1:${WEAVER_ADMIN_PORT}/health" >/dev/null 2>&1; then
-              break
-            fi
-            if ! kill -0 "$WEAVER_PID" 2>/dev/null; then
-              echo "weaver process exited before becoming ready" >&2
-              tail -n 200 live-check-report/weaver.log || true
-              exit 1
-            fi
-            sleep 1
-          done
 
           echo "::group::Start example service"
-          ../target/release/example-axum-http-service > live-check-report/example.log 2>&1 &
+          ../target/release/example-axum-http-service > "${{ steps.live-check.outputs.state-dir }}/example.log" 2>&1 &
           APP_PID=$!
           echo "app pid: $APP_PID"
           echo "::endgroup::"
 
-          # Wait for the app to start serving.
+          # Wait for the app to start serving on :$APP_PORT
           for i in $(seq 1 30); do
             if curl -fsS "http://127.0.0.1:${APP_PORT}/" >/dev/null 2>&1; then
               break
@@ -135,121 +112,22 @@ jobs:
           done
           echo "::endgroup::"
 
-          # Allow batch span / periodic metric exporters to flush at least once.
+          # Allow batch span / periodic metric exporters to flush.
           sleep 6
 
-          echo "::group::Stop services and capture report"
-          kill "$APP_PID" || true
-          # POST /stop both terminates weaver and (with --output=http)
-          # returns the live-check report as the response body.
-          curl -fsS -X POST -o live-check-report/live_check.json \
-            "http://127.0.0.1:${WEAVER_ADMIN_PORT}/stop" || true
-          set +e
-          wait "$WEAVER_PID"
-          WEAVER_EXIT=$?
-          set -e
-          echo "weaver exit code: $WEAVER_EXIT"
-          echo "::endgroup::"
+          kill "$APP_PID" 2>/dev/null || true
 
-          echo "::group::Weaver log (tail)"
-          tail -n 200 live-check-report/weaver.log || true
-          echo "::endgroup::"
-
-          exit $WEAVER_EXIT
-
-      - name: Summarize live-check findings
+      # ---- Reusable action: finalize, summarize, gate ---------------
+      - name: Finalize weaver live-check
         if: always()
-        working-directory: opentelemetry-instrumentation-tower
-        run: |
-          set -euo pipefail
-          REPORT=live-check-report/live_check.json
-          if [ ! -s "$REPORT" ]; then
-            echo "No live-check report found at $REPORT" | tee -a "$GITHUB_STEP_SUMMARY"
-            exit 0
-          fi
-
-          python3 - "$REPORT" <<'PY' | tee -a "$GITHUB_STEP_SUMMARY"
-          import json, sys
-          from collections import defaultdict
-
-          d = json.load(open(sys.argv[1]))
-          s = d.get("statistics", {})
-          levels = s.get("advice_level_counts", {}) or {}
-          violations    = levels.get("violation", 0)
-          improvements  = levels.get("improvement", 0)
-          informations  = levels.get("information", 0)
-          status_emoji  = "❌" if violations else "✅"
-
-          print(f"## {status_emoji} Weaver live-check (tower)")
-          print()
-          print(f"- Samples received: **{len(d.get('samples', []))}**")
-          by_type = s.get("total_entities_by_type", {}) or {}
-          if by_type:
-              parts = ", ".join(f"{v} {k}" for k, v in sorted(by_type.items()))
-              print(f"- Entities checked: **{s.get('total_entities', 0)}** ({parts})")
-          print()
-          print("| Level | Count |")
-          print("| --- | ---: |")
-          print(f"| violation | {violations} |")
-          print(f"| improvement | {improvements} |")
-          print(f"| information | {informations} |")
-          print()
-
-          # Walk the full report and collect every advice entry of level=violation,
-          # then group by (id, message, signal_type, signal_name) for a useful summary.
-          # Mirrors the dedup approach in opentelemetry-python#5088.
-          def walk(obj):
-              if isinstance(obj, dict):
-                  lcr = obj.get("live_check_result")
-                  if isinstance(lcr, dict):
-                      for a in lcr.get("all_advice", []) or []:
-                          if a.get("level") == "violation":
-                              yield a
-                  for v in obj.values():
-                      yield from walk(v)
-              elif isinstance(obj, list):
-                  for item in obj:
-                      yield from walk(item)
-
-          groups = defaultdict(int)
-          for v in walk(d):
-              key = (
-                  v.get("id"),
-                  v.get("message"),
-                  v.get("signal_type"),
-                  v.get("signal_name"),
-              )
-              groups[key] += 1
-
-          if groups:
-              print("### Violations")
-              print()
-              print("| Count | id | signal | message |")
-              print("| ---: | --- | --- | --- |")
-              for (vid, msg, stype, sname), count in sorted(
-                  groups.items(), key=lambda kv: -kv[1]
-              )[:25]:
-                  signal = ""
-                  if stype and sname:
-                      signal = f"{stype} `{sname}`"
-                  elif stype:
-                      signal = stype
-                  elif sname:
-                      signal = f"`{sname}`"
-                  msg_clean = (msg or "").replace("|", "\\|")
-                  print(f"| {count} | `{vid}` | {signal} | {msg_clean} |")
-              print()
-
-          if violations:
-              print("> A violation was reported. See artifact `weaver-live-check-tower` for the full JSON report.")
-          else:
-              print("> No semantic-convention violations. Improvements/informations are advisory.")
-          PY
+        uses: cijothomas/weaver/.github/actions/weaver-live-check-finalize@cijothomas/weaver-live-check-actions
+        with:
+          fail-on: violation
 
       - name: Upload live-check report
         if: always()
         uses: actions/upload-artifact@v4
         with:
           name: weaver-live-check-tower
-          path: opentelemetry-instrumentation-tower/live-check-report
+          path: ${{ steps.live-check.outputs.state-dir }}
           if-no-files-found: warn
