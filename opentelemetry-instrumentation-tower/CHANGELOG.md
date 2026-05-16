@@ -4,6 +4,11 @@
 
 ### Added
 
+* CI: added a Weaver `live-check` workflow that validates telemetry emitted by
+  the `axum-http-service` example against the OpenTelemetry semantic
+  conventions (pinned registry release). Seed for #530. Fails the build on
+  any semantic-convention violation; full report uploaded as a workflow
+  artifact.
 * Configurable route extraction with built-in extractors:
   - `NoRouteExtractor` - No route, uses only HTTP method (e.g., `GET`), safest for cardinality
   - `PathExtractor` - Uses the URL path without query params (e.g., `/users/123`)
