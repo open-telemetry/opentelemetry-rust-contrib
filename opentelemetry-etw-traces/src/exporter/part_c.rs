@@ -36,7 +36,7 @@ pub(crate) fn populate_part_c(
 
     event.add_str8(
         "events",
-        common::events_to_json(&span_data.events),
+        common::events_to_json(&span_data.events).as_ref(),
         tld::OutType::Utf8,
         field_tag,
     );

@@ -94,6 +94,16 @@ impl ETWExporter {
     ///
     /// Event write order follows Common Schema: reset → __csver__ → PartA → PartC → PartB → write
     pub(crate) fn export_span_data(&self, span_data: &SpanData) {
+        // Skip serialization and writing if no ETW session is listening.
+        if !cfg!(test)
+            && !self
+                .provider
+                .as_ref()
+                .enabled(tld::Level::Verbose, DEFAULT_KEYWORD_UNCATEGORIZED)
+        {
+            return;
+        }
+
         let event_tags: u32 = 0;
         let field_tag: u32 = 0;
 

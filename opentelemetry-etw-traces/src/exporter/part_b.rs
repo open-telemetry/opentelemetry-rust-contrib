@@ -73,7 +73,7 @@ pub(crate) fn populate_part_b(event: &mut tld::EventBuilder, span_data: &SpanDat
 
     if has_links {
         let links_json = common::links_to_json(&span_data.links.links);
-        event.add_str8("links", &links_json, tld::OutType::Utf8, field_tag);
+        event.add_str8("links", links_json.as_ref(), tld::OutType::Utf8, field_tag);
     }
 
     if let Some(msg) = &status_message {

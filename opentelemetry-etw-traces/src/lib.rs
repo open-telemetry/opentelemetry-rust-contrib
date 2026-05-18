@@ -16,7 +16,7 @@
 //!
 //! let processor = Processor::builder("MyAppTracing")
 //!     .with_event_name("MyAppEventName") // If not provided, defaults to "Span"
-//!     .with_resource_attributes(vec!["custom_attribute1", "custom_attribute2"]) // Only specified resource attributes will be promoted as Part C fields, other will be ignored.
+//!     .with_resource_attributes(vec!["custom_attribute1", "custom_attribute2"]) // Only specified resource attributes will be promoted as Part C fields, others will be ignored.
 //!     .build()
 //!     .expect("Failed to create ETW processor");
 //!

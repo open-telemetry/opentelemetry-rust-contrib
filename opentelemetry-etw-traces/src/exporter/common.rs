@@ -2,6 +2,7 @@ use chrono::{DateTime, Datelike, Timelike, Utc};
 use opentelemetry::trace::SpanKind;
 use opentelemetry::Key;
 use opentelemetry_sdk::trace::SpanEvents;
+use std::borrow::Cow;
 use std::time::SystemTime;
 use tracelogging_dynamic as tld;
 
@@ -81,9 +82,9 @@ fn array_to_json(arr: &opentelemetry::Array) -> String {
 }
 
 /// Serializes span links to a JSON string (array of {toTraceId, toSpanId}).
-pub(crate) fn links_to_json(links: &[opentelemetry::trace::Link]) -> String {
+pub(crate) fn links_to_json(links: &[opentelemetry::trace::Link]) -> Cow<'static, str> {
     if links.is_empty() {
-        return "[]".to_string();
+        return Cow::Borrowed("[]");
     }
     let arr: Vec<serde_json::Value> = links
         .iter()
@@ -94,7 +95,7 @@ pub(crate) fn links_to_json(links: &[opentelemetry::trace::Link]) -> String {
             })
         })
         .collect();
-    serde_json::to_string(&arr).unwrap_or_default()
+    Cow::Owned(serde_json::to_string(&arr).unwrap_or_default())
 }
 
 /// Builds a `serde_json::Value::Object` from key-value pairs.
@@ -118,9 +119,9 @@ fn attributes_to_value(attrs: &[opentelemetry::KeyValue]) -> serde_json::Value {
 }
 
 /// Serializes span events to a JSON object string.
-pub(crate) fn events_to_json(events: &SpanEvents) -> String {
+pub(crate) fn events_to_json(events: &SpanEvents) -> Cow<'static, str> {
     if events.events.is_empty() {
-        return "[]".to_string();
+        return Cow::Borrowed("[]");
     }
     let json_value: Vec<serde_json::Value> = events
         .events
@@ -144,10 +145,10 @@ pub(crate) fn events_to_json(events: &SpanEvents) -> String {
             serde_json::Value::Object(map)
         })
         .collect();
-    serde_json::to_string(&json_value).unwrap_or_default()
+    Cow::Owned(serde_json::to_string(&json_value).unwrap_or_default())
 }
 
-/// Formats a SystemTime as "YYYY-MM-DD HH:MM:SS.NNNNNNNNN" using a stack buffer.
+/// Formats a SystemTime as RFC3339 "YYYY-MM-DDTHH:MM:SS.NNNNNNNNNZ" using a stack buffer.
 ///
 /// Uses chrono field accessors instead of `format!()` to avoid chrono's
 /// internal heap allocations.
@@ -159,7 +160,7 @@ pub(crate) fn system_time_to_str(time: &SystemTime) -> String {
 
 /// Writes timestamp into a stack `[u8; 32]` buffer.
 /// Returns the buffer and the number of bytes written.
-/// Maximum length of a formatted timestamp: "YYYY-MM-DD HH:MM:SS.NNNNNNNNN" = 29 chars.
+/// Maximum length of a formatted timestamp: "YYYY-MM-DDTHH:MM:SS.NNNNNNNNNZ" = 30 chars.
 /// Rounded up to 32 for padding.
 fn format_timestamp(time: &SystemTime) -> ([u8; 32], usize) {
     let datetime: DateTime<Utc> = (*time).into();
@@ -173,7 +174,7 @@ fn format_timestamp(time: &SystemTime) -> ([u8; 32], usize) {
     buf[pos] = b'-';
     pos += 1;
     pos += write_u32_padded(&mut buf, pos, datetime.day(), 2);
-    buf[pos] = b' ';
+    buf[pos] = b'T';
     pos += 1;
     pos += write_u32_padded(&mut buf, pos, datetime.hour(), 2);
     buf[pos] = b':';
@@ -185,6 +186,8 @@ fn format_timestamp(time: &SystemTime) -> ([u8; 32], usize) {
     buf[pos] = b'.';
     pos += 1;
     pos += write_u32_padded(&mut buf, pos, datetime.nanosecond(), 9);
+    buf[pos] = b'Z';
+    pos += 1;
 
     (buf, pos)
 }
@@ -333,6 +336,6 @@ mod tests {
     fn test_system_time_to_str() {
         let time = UNIX_EPOCH + Duration::from_secs(1_700_000_000);
         let result = system_time_to_str(&time);
-        assert_eq!(result, "2023-11-14 22:13:20.000000000");
+        assert_eq!(result, "2023-11-14T22:13:20.000000000Z");
     }
 }
