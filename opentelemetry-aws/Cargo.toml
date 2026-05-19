@@ -19,7 +19,7 @@ all-features = true
 rustdoc-args = ["--cfg", "docsrs"]
 
 [features]
-default = ["trace", "internal-logs", "xray-exporter"]
+default = ["trace", "internal-logs"]
 internal-logs = ["dep:tracing"]
 
 trace = ["opentelemetry/trace", "opentelemetry_sdk/trace"]
