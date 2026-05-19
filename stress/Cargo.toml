@@ -29,14 +29,16 @@ tokio = { version = "1", features = ["full", "test-util"] }
 wiremock = "=0.5.22"
 futures = "0.3"
 
-opentelemetry-appender-tracing = { version = "0.31", features= ["spec_unstable_logs_enabled"] }
-opentelemetry_sdk = { version = "0.31", features = ["logs", "spec_unstable_logs_enabled"] }
-opentelemetry-proto = { version = "0.31", default-features = false, features = ["logs", "gen-tonic-messages"] }
-opentelemetry-user-events-logs = { path = "../opentelemetry-user-events-logs", features = ["spec_unstable_logs_enabled"]}
+opentelemetry-appender-tracing = { version = "0.32" }
+opentelemetry_sdk = { version = "0.32", features = ["logs"] }
+opentelemetry-proto = { version = "0.32", default-features = false, features = ["logs", "gen-tonic-messages"] }
+opentelemetry-user-events-logs = { path = "../opentelemetry-user-events-logs" }
 opentelemetry-etw-logs = { path = "../opentelemetry-etw-logs"}
 tracing = { version = "0.1", default-features = false, features = ["std"] }
 tracing-subscriber = { version = "0.3.0", default-features = false, features = ["env-filter","registry", "std"] }
-geneva-uploader = { version = "0.4.0", path = "../opentelemetry-exporter-geneva/geneva-uploader", features = ["mock_auth"]}
+geneva-uploader = { version = "0.5.0", path = "../opentelemetry-exporter-geneva/geneva-uploader", features = ["mock_auth"]}
+otap-df-pdata = { git = "https://github.com/open-telemetry/otel-arrow", rev = "15371dc7" }
+prost = "0.14"
 
 [features]
 stats = ["sysinfo"]

@@ -30,16 +30,16 @@ resolver = "2"
 debug = 1
 
 [workspace.dependencies]
-opentelemetry = "0.31"
-opentelemetry-appender-tracing = "0.31"
-opentelemetry-http = "0.31"
-opentelemetry-proto = { version = "0.31", default-features = false }
-opentelemetry_sdk = { version = "0.31", default-features = false }
-opentelemetry-stdout = { version = "0.31", default-features = false }
-opentelemetry-semantic-conventions = { version = "0.31", features = [
+opentelemetry = "0.32"
+opentelemetry-appender-tracing = "0.32"
+opentelemetry-http = "0.32"
+opentelemetry-proto = { version = "0.32", default-features = false }
+opentelemetry_sdk = { version = "0.32", default-features = false }
+opentelemetry-stdout = { version = "0.32", default-features = false }
+opentelemetry-semantic-conventions = { version = "0.32", features = [
     "semconv_experimental",
 ] }
-criterion = "0.7"
+criterion = "0.8"
 
 [workspace.lints.rust]
 rust_2024_compatibility = { level = "warn", priority = -1 }
@@ -49,3 +49,4 @@ tail_expr_drop_order = "allow"
 
 [workspace.lints.clippy]
 all = { level = "warn", priority = 1 }
+

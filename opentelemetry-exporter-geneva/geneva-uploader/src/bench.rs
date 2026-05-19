@@ -3,8 +3,12 @@ mod benchmarks {
     use crate::payload_encoder::lz4_chunked_compression::lz4_chunked_compression;
     use crate::payload_encoder::otlp_encoder::{MetadataFields, OtlpEncoder};
     use criterion::{BenchmarkId, Criterion, Throughput};
+    use opentelemetry_proto::tonic::collector::logs::v1::ExportLogsServiceRequest;
+    use opentelemetry_proto::tonic::common::v1::any_value::Value;
     use opentelemetry_proto::tonic::common::v1::{AnyValue, KeyValue};
     use opentelemetry_proto::tonic::logs::v1::LogRecord;
+    use otap_df_pdata::views::otlp::bytes::logs::RawLogsData;
+    use prost::Message as _;
     use rand::{rngs::StdRng, Rng, SeedableRng};
     use std::hint::black_box;
 
@@ -25,6 +29,77 @@ mod benchmarks {
             namespace.to_string(),
             "Ver1v0".to_string(),
         )
+    }
+
+    fn create_basic_log_record(timestamp: u64) -> LogRecord {
+        LogRecord {
+            observed_time_unix_nano: timestamp,
+            severity_number: 9,
+            severity_text: "INFO".to_string(),
+            event_name: "BasicEvent".to_string(),
+            body: Some(AnyValue {
+                value: Some(Value::StringValue("Basic log message".to_string())),
+            }),
+            ..Default::default()
+        }
+    }
+
+    fn create_log_with_attributes(
+        timestamp: u64,
+        num_attributes: usize,
+        rng: &mut StdRng,
+    ) -> LogRecord {
+        let mut log = LogRecord {
+            observed_time_unix_nano: timestamp,
+            severity_number: 9,
+            severity_text: "INFO".to_string(),
+            event_name: format!("Event_{num_attributes}Attrs"),
+            body: Some(AnyValue {
+                value: Some(Value::StringValue("Log with attributes".to_string())),
+            }),
+            ..Default::default()
+        };
+
+        for i in 0..num_attributes {
+            let key = format!("attr_{i}");
+            let value = match i % 4 {
+                0 => AnyValue {
+                    value: Some(Value::StringValue(format!(
+                        "string_value_{}",
+                        rng.random::<u32>()
+                    ))),
+                },
+                1 => AnyValue {
+                    value: Some(Value::IntValue(rng.random_range(0..1000))),
+                },
+                2 => AnyValue {
+                    value: Some(Value::DoubleValue(rng.random_range(0.0..100.0))),
+                },
+                _ => AnyValue {
+                    value: Some(Value::BoolValue(rng.random::<f64>() < 0.5)),
+                },
+            };
+
+            log.attributes.push(KeyValue {
+                key,
+                value: Some(value),
+            });
+        }
+
+        log
+    }
+
+    fn encode_logs_request_bytes(logs: Vec<LogRecord>) -> Vec<u8> {
+        ExportLogsServiceRequest {
+            resource_logs: vec![opentelemetry_proto::tonic::logs::v1::ResourceLogs {
+                scope_logs: vec![opentelemetry_proto::tonic::logs::v1::ScopeLogs {
+                    log_records: logs,
+                    ..Default::default()
+                }],
+                ..Default::default()
+            }],
+        }
+        .encode_to_vec()
     }
 
     /*
@@ -59,181 +134,104 @@ mod benchmarks {
         criterion.final_summary();
     }
 
-    // Helper functions for encode_log_batch benchmark
-    fn create_basic_log_record(timestamp: u64) -> LogRecord {
-        LogRecord {
-            observed_time_unix_nano: timestamp,
-            severity_number: 9,
-            severity_text: "INFO".to_string(),
-            event_name: "BasicEvent".to_string(),
-            body: Some(AnyValue {
-                value: Some(
-                    opentelemetry_proto::tonic::common::v1::any_value::Value::StringValue(
-                        "Basic log message".to_string(),
-                    ),
-                ),
-            }),
-            ..Default::default()
-        }
-    }
-
-    fn create_log_with_attributes(
-        timestamp: u64,
-        num_attributes: usize,
-        rng: &mut StdRng,
-    ) -> LogRecord {
-        let mut log = LogRecord {
-            observed_time_unix_nano: timestamp,
-            severity_number: 9,
-            severity_text: "INFO".to_string(),
-            event_name: format!("Event_{num_attributes}Attrs"),
-            body: Some(AnyValue {
-                value: Some(
-                    opentelemetry_proto::tonic::common::v1::any_value::Value::StringValue(
-                        "Log with attributes".to_string(),
-                    ),
-                ),
-            }),
-            ..Default::default()
-        };
-
-        // Add attributes with different types
-        for i in 0..num_attributes {
-            let key = format!("attr_{i}");
-            let value = match i % 4 {
-                0 => AnyValue {
-                    value: Some(
-                        opentelemetry_proto::tonic::common::v1::any_value::Value::StringValue(
-                            format!("string_value_{}", rng.random::<u32>()),
-                        ),
-                    ),
-                },
-                1 => AnyValue {
-                    value: Some(
-                        opentelemetry_proto::tonic::common::v1::any_value::Value::IntValue(
-                            rng.random_range(0..1000),
-                        ),
-                    ),
-                },
-                2 => AnyValue {
-                    value: Some(
-                        opentelemetry_proto::tonic::common::v1::any_value::Value::DoubleValue(
-                            rng.random_range(0.0..100.0),
-                        ),
-                    ),
-                },
-                _ => AnyValue {
-                    value: Some(
-                        opentelemetry_proto::tonic::common::v1::any_value::Value::BoolValue(
-                            rng.random::<f64>() < 0.5,
-                        ),
-                    ),
-                },
-            };
-
-            log.attributes.push(KeyValue {
-                key,
-                value: Some(value),
-            });
-        }
-
-        log
-    }
-
     /*
-    - Criterion benchmarks (encode_log_batch, OtlpEncoder):
-        Results: (WSL2 Linux, 62 GiB RAM, 8-core/16-thread Intel CPU, kernel 6.6.36.3)
-        - Attribute count scaling (10 log records each):
-            - 0 attrs:   ~10.3 µs/op
-            - 4 attrs:   ~15.7 µs/op
-            - 8 attrs:   ~24.3 µs/op
-            - 16 attrs:  ~44.1 µs/op
+        - Criterion benchmark (encode_logs_from_view, RawLogsData-backed):
+            Results: (local run in this workspace)
 
-        - Batch size scaling (each log with 4 attributes, all same schema):
-            - 1 log:     ~1.63 µs/op
-            - 10 logs:   ~16.4 µs/op
-            - 100 logs:  ~161 µs/op
-            - 1000 logs: ~1.59 ms/op
+            - Attribute count scaling (10 log records each):
+                - 0 attrs:   ~8.34 us/op
+                - 4 attrs:   ~11.73 us/op
+                - 8 attrs:   ~15.41 us/op
+                - 16 attrs:  ~21.20 us/op
 
-        - Mixed event names (100 logs, 3 different event names, 4 attributes each):
-            - ~168 µs/op
+            - Batch size scaling (each log with 4 attributes, all same schema):
+                - 1 log:     ~5.15 us/op
+                - 10 logs:   ~11.51 us/op
+                - 100 logs:  ~74.06 us/op
+                - 1000 logs: ~711.90 us/op
+
+            - Mixed event names (100 logs, 3 different event names, 4 attributes each):
+                - ~81.65 us/op
     */
     #[test]
     #[ignore = "benchmark on crate private, ignored by default during normal test runs"]
-    // To run: $cargo test --release encode_log_batch_benchmark -- --nocapture --ignored
-    fn encode_log_batch_benchmark() {
+    /// To run: $cargo test --release encode_logs_from_view_benchmark -- --nocapture --ignored
+    fn encode_logs_from_view_benchmark() {
         let mut criterion = Criterion::default();
         let encoder = OtlpEncoder::new();
         let metadata = make_metadata("benchmark");
 
-        // Benchmark 1: Different numbers of attributes
-        let mut group = criterion.benchmark_group("encode_log_batch_attributes");
-        for num_attrs in [0, 4, 8, 16].iter() {
-            group.throughput(Throughput::Elements(*num_attrs as u64));
-            group.bench_with_input(
-                BenchmarkId::new("attributes", num_attrs),
-                num_attrs,
-                |b, &num_attrs| {
-                    let mut rng = StdRng::seed_from_u64(42);
-                    let logs: Vec<LogRecord> = (0..10)
-                        .map(|i| {
-                            if num_attrs == 0 {
-                                create_basic_log_record(1_700_000_000_000_000_000 + i)
-                            } else {
-                                create_log_with_attributes(
-                                    1_700_000_000_000_000_000 + i,
-                                    num_attrs,
-                                    &mut rng,
-                                )
-                            }
-                        })
-                        .collect();
-
-                    b.iter(|| {
-                        let res = encoder
-                            .encode_log_batch(black_box(logs.iter()), black_box(&metadata))
-                            .unwrap();
-                        black_box(res); // double sure the return value is generated
-                    });
-                },
-            );
-        }
-        group.finish();
-
-        // Benchmark 2: Different batch sizes
-        let mut group = criterion.benchmark_group("encode_log_batch_sizes");
-        for batch_size in [1, 10, 100, 1000].iter() {
-            group.bench_with_input(
-                BenchmarkId::new("batch_size", batch_size),
-                batch_size,
-                |b, &batch_size| {
-                    let mut rng = StdRng::seed_from_u64(42);
-                    let logs: Vec<LogRecord> = (0..batch_size)
-                        .map(|i| {
+        let mut group = criterion.benchmark_group("encode_logs_from_view_attributes");
+        for num_attrs in [0usize, 4, 8, 16] {
+            let request_bytes = {
+                let mut rng = StdRng::seed_from_u64(42);
+                let logs: Vec<LogRecord> = (0..10)
+                    .map(|i| {
+                        if num_attrs == 0 {
+                            create_basic_log_record(1_700_000_000_000_000_000 + i)
+                        } else {
                             create_log_with_attributes(
-                                1_700_000_000_000_000_000 + i as u64,
-                                4,
+                                1_700_000_000_000_000_000 + i,
+                                num_attrs,
                                 &mut rng,
                             )
-                        })
-                        .collect();
+                        }
+                    })
+                    .collect();
+                encode_logs_request_bytes(logs)
+            };
 
+            group.throughput(Throughput::Elements(num_attrs as u64));
+            group.bench_with_input(
+                BenchmarkId::new("attributes", num_attrs),
+                &request_bytes,
+                |b, request_bytes| {
                     b.iter(|| {
-                        let res = black_box(
-                            encoder
-                                .encode_log_batch(black_box(logs.iter()), black_box(&metadata))
-                                .unwrap(),
-                        );
-                        black_box(res); // double sure the return value is generated
+                        let view = RawLogsData::new(black_box(request_bytes.as_slice()));
+                        let res = encoder
+                            .encode_logs_from_view(black_box(&view), black_box(&metadata))
+                            .unwrap();
+                        black_box(res);
                     });
                 },
             );
         }
         group.finish();
 
-        // Benchmark 3: Mixed event names
-        let mut group = criterion.benchmark_group("encode_log_batch_mixed_event_names");
-        group.bench_function("mixed_event_names", |b| {
+        let mut group = criterion.benchmark_group("encode_logs_from_view_sizes");
+        for batch_size in [1usize, 10, 100, 1000] {
+            let request_bytes = {
+                let mut rng = StdRng::seed_from_u64(42);
+                let logs: Vec<LogRecord> = (0..batch_size)
+                    .map(|i| {
+                        create_log_with_attributes(
+                            1_700_000_000_000_000_000 + i as u64,
+                            4,
+                            &mut rng,
+                        )
+                    })
+                    .collect();
+                encode_logs_request_bytes(logs)
+            };
+
+            group.bench_with_input(
+                BenchmarkId::new("batch_size", batch_size),
+                &request_bytes,
+                |b, request_bytes| {
+                    b.iter(|| {
+                        let view = RawLogsData::new(black_box(request_bytes.as_slice()));
+                        let res = encoder
+                            .encode_logs_from_view(black_box(&view), black_box(&metadata))
+                            .unwrap();
+                        black_box(res);
+                    });
+                },
+            );
+        }
+        group.finish();
+
+        let mut group = criterion.benchmark_group("encode_logs_from_view_mixed_event_names");
+        let mixed_request_bytes = {
             let mut rng = StdRng::seed_from_u64(42);
             let event_names = ["EventA", "EventB", "EventC"];
             let logs: Vec<LogRecord> = (0..100)
@@ -244,13 +242,14 @@ mod benchmarks {
                     log
                 })
                 .collect();
-
+            encode_logs_request_bytes(logs)
+        };
+        group.bench_function("mixed_event_names", |b| {
             b.iter(|| {
-                let res = black_box(
-                    encoder
-                        .encode_log_batch(black_box(logs.iter()), black_box(&metadata))
-                        .unwrap(),
-                );
+                let view = RawLogsData::new(black_box(mixed_request_bytes.as_slice()));
+                let res = encoder
+                    .encode_logs_from_view(black_box(&view), black_box(&metadata))
+                    .unwrap();
                 black_box(res);
             });
         });

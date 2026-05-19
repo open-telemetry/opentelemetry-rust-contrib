@@ -33,7 +33,6 @@ cargo_feature opentelemetry-stackdriver "tls-native-roots"
 cargo_feature opentelemetry-stackdriver "tls-webpki-roots"
 
 cargo_feature opentelemetry-user-events-logs "default"
-cargo_feature opentelemetry-user-events-logs "spec_unstable_logs_enabled"
 
 cargo_feature opentelemetry-user-events-metrics ""
 

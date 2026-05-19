@@ -158,15 +158,13 @@ mod tests {
     use tracing::error;
     use tracing_subscriber::{layer::SubscriberExt, EnvFilter, Layer};
 
-    // Ignore as this cannot be run in Github CI due to lack of
-    // required Kernel. Uncomment to run locally in a supported environment
+    // This test requires a Linux kernel with user_events support, perf, and perf-decode.
+    // It is run in CI via the user-events-integration-test job.
+    // To run locally: sudo -E ~/.cargo/bin/cargo test integration_test_basic -- --nocapture --ignored
 
     #[ignore]
     #[test]
     fn integration_test_basic() {
-        // Run using the below command
-        // sudo -E ~/.cargo/bin/cargo test integration_test_basic -- --nocapture --ignored
-
         // Basic check if user_events are available
         check_user_events_available().expect("Kernel does not support user_events. Verify your distribution/kernel supports user_events: https://docs.kernel.org/trace/user_events.html.");
         let user_event_processor = Processor::builder("myprovider")
@@ -178,6 +176,7 @@ mod tests {
             .with_resource(
                 Resource::builder()
                     .with_service_name("myrolename")
+                    .with_attribute(KeyValue::new("service.instance.id", "myinstance123"))
                     .with_attribute(KeyValue::new("resource_attribute1", "v1"))
                     .with_attribute(KeyValue::new("resource_attribute2", "v2"))
                     .with_attribute(KeyValue::new("resource_attribute3", "v3"))
@@ -275,6 +274,11 @@ mod tests {
             .get("ext_cloud_role")
             .expect("PartA.ext_cloud_role is missing");
         assert_eq!(role.as_str().unwrap(), "myrolename");
+
+        let role_instance = part_a
+            .get("ext_cloud_roleInstance")
+            .expect("PartA.ext_cloud_roleInstance is missing");
+        assert_eq!(role_instance.as_str().unwrap(), "myinstance123");
 
         // Validate PartB
         let part_b = &event["PartB"];
@@ -602,14 +606,15 @@ mod tests {
             .get("ext_dt_spanId")
             .expect("PartA.ext_dt_spanId is missing");
 
-        // Validate trace_id and span_id
+        // Validate trace_id and span_id (use to_string() for consistent
+        // zero-padded Display formatting, matching the exporter output)
         assert_eq!(
             part_a_ext_dt_trace_id.as_str().unwrap(),
-            format!("{trace_id_expected:x}")
+            trace_id_expected.to_string()
         );
         assert_eq!(
             part_a_ext_dt_span_id.as_str().unwrap(),
-            format!("{span_id_expected:x}")
+            span_id_expected.to_string()
         );
 
         // Validate PartB
@@ -631,7 +636,11 @@ mod tests {
 
     // Helper function to test direct logging (i.e without tracing or log crate)
     // with different severity levels
-    fn integration_test_direct_helper(severity: opentelemetry::logs::Severity, trace_point: &str) {
+    fn integration_test_direct_helper(
+        severity: opentelemetry::logs::Severity,
+        severity_text: &'static str,
+        trace_point: &str,
+    ) {
         use opentelemetry::logs::AnyValue;
         use opentelemetry::logs::LogRecord;
         use opentelemetry::logs::Logger;
@@ -650,9 +659,11 @@ mod tests {
 
         let mut record = logger.create_log_record();
         record.set_severity_number(severity);
+        record.set_severity_text(severity_text);
         record.set_event_name("my-event-name");
         record.set_target("my-target");
         record.set_body(AnyValue::from("This is a test message"));
+        record.add_attribute("event_id", AnyValue::Int(99));
         // Add attributes for each AnyValue variant
         // String variant
         record.add_attribute("string_attr", "string value");
@@ -759,6 +770,8 @@ mod tests {
         let part_b = &event["PartB"];
         assert_eq!(part_b["_typeName"].as_str().unwrap(), "Log");
         assert_eq!(part_b["severityNumber"].as_i64().unwrap(), severity as i64);
+        assert_eq!(part_b["severityText"].as_str().unwrap(), severity_text);
+        assert_eq!(part_b["eventId"].as_i64().unwrap(), 99);
         assert_eq!(part_b["name"].as_str().unwrap(), "my-event-name");
         assert_eq!(part_b["body"].as_str().unwrap(), "This is a test message");
 
@@ -782,11 +795,103 @@ mod tests {
         use opentelemetry::logs::Severity;
         // Run using the below command
         // sudo -E ~/.cargo/bin/cargo test integration_test_direct -- --nocapture --ignored
-        integration_test_direct_helper(Severity::Debug, "user_events:myprovider_L5K1");
-        integration_test_direct_helper(Severity::Info, "user_events:myprovider_L4K1");
-        integration_test_direct_helper(Severity::Warn, "user_events:myprovider_L3K1");
-        integration_test_direct_helper(Severity::Error, "user_events:myprovider_L2K1");
-        integration_test_direct_helper(Severity::Fatal, "user_events:myprovider_L1K1");
+        integration_test_direct_helper(Severity::Debug, "DEBUG", "user_events:myprovider_L5K1");
+        integration_test_direct_helper(Severity::Info, "INFO", "user_events:myprovider_L4K1");
+        integration_test_direct_helper(Severity::Warn, "WARN", "user_events:myprovider_L3K1");
+        integration_test_direct_helper(Severity::Error, "ERROR", "user_events:myprovider_L2K1");
+        integration_test_direct_helper(Severity::Fatal, "FATAL", "user_events:myprovider_L1K1");
+    }
+
+    /// Test with empty resource — validates no ext_cloud fields in PartA,
+    /// no PartC, and minimal PartB (body + severity only, no eventId/name).
+    #[ignore]
+    #[test]
+    fn integration_test_no_resource() {
+        use opentelemetry::logs::LogRecord;
+        use opentelemetry::logs::Logger;
+        use opentelemetry::logs::LoggerProvider;
+
+        check_user_events_available().expect("Kernel does not support user_events.");
+
+        let user_event_processor = Processor::builder("myprovider_noresource").build().unwrap();
+
+        let logger_provider = LoggerProviderBuilder::default()
+            .with_resource(Resource::builder_empty().build())
+            .with_log_processor(user_event_processor)
+            .build();
+
+        let logger = logger_provider.logger("test");
+        let mut record = logger.create_log_record();
+        record.set_severity_number(opentelemetry::logs::Severity::Warn);
+        record.set_severity_text("WARN");
+        record.set_body("minimal message".into());
+        // No event_name, no event_id, no attributes
+
+        let perf_thread =
+            std::thread::spawn(|| run_perf_and_decode(5, "user_events:myprovider_noresource_L3K1"));
+
+        std::thread::sleep(std::time::Duration::from_millis(1000));
+
+        logger.emit(record);
+
+        let result = perf_thread.join().expect("Perf thread panicked");
+        assert!(result.is_ok());
+        let json_content = result.unwrap();
+        assert!(!json_content.is_empty());
+
+        let formatted_output = json_content.trim().to_string();
+        let json_value: Value = from_str(&formatted_output).expect("Failed to parse JSON");
+        let perf_data_key = json_value
+            .as_object()
+            .expect("JSON is not an object")
+            .keys()
+            .find(|k| k.contains("perf.data"))
+            .expect("No perf.data key found in JSON");
+
+        let events = json_value[perf_data_key]
+            .as_array()
+            .expect("Events for perf.data is not an array");
+
+        let event = events
+            .iter()
+            .find(|e| e.get("n").and_then(|n| n.as_str()) == Some("myprovider_noresource:Log"))
+            .expect("Event 'myprovider_noresource:Log' not found");
+
+        assert_eq!(event["__csver__"].as_i64().unwrap(), 1024);
+
+        // PartA — no ext_cloud_role or ext_cloud_roleInstance
+        let part_a = &event["PartA"];
+        assert!(part_a.get("time").is_some(), "PartA.time is missing");
+        assert!(
+            part_a.get("ext_cloud_role").is_none(),
+            "ext_cloud_role should not be present with empty resource"
+        );
+        assert!(
+            part_a.get("ext_cloud_roleInstance").is_none(),
+            "ext_cloud_roleInstance should not be present with empty resource"
+        );
+
+        // No PartC expected (no attributes)
+        assert!(
+            event.get("PartC").is_none(),
+            "PartC should not be present when there are no attributes"
+        );
+
+        // PartB — minimal fields
+        let part_b = &event["PartB"];
+        assert_eq!(part_b["_typeName"].as_str().unwrap(), "Log");
+        assert_eq!(part_b["body"].as_str().unwrap(), "minimal message");
+        assert_eq!(
+            part_b["severityNumber"].as_i64().unwrap(),
+            opentelemetry::logs::Severity::Warn as i64
+        );
+        assert_eq!(part_b["severityText"].as_str().unwrap(), "WARN");
+        // No eventId or name fields should be present
+        assert!(
+            part_b.get("eventId").is_none(),
+            "eventId should not be present"
+        );
+        assert!(part_b.get("name").is_none(), "name should not be present");
     }
 
     fn check_user_events_available() -> Result<String, String> {
@@ -817,6 +922,8 @@ mod tests {
                 &duration_secs.to_string(),
                 "perf",
                 "record",
+                "-o",
+                "./perf.data",
                 "-e",
                 event,
             ])

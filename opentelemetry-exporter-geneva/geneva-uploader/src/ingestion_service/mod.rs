@@ -65,6 +65,8 @@ mod tests {
                     password: cert_password,
                 },
                 msi_resource: None,
+                #[cfg(test)]
+                test_root_ca_pem: None,
             };
 
             // Build client and uploader

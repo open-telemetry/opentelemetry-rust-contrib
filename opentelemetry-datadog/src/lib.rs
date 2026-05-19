@@ -48,7 +48,7 @@
 //! ```
 //!
 //! ```no_run
-//! # fn main() -> Result<(), opentelemetry_sdk::trace::TraceError> {
+//! # fn main() -> Result<(), opentelemetry_datadog::Error> {
 //! let provider = opentelemetry_datadog::new_pipeline()
 //!     .install_batch()?;
 //! # Ok(())
