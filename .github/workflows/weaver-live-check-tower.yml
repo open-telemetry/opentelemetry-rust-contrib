@@ -5,7 +5,7 @@ name: Weaver Live Check (tower)
 # semantic conventions. Initial seed for issue #530.
 #
 # This workflow uses the reusable `weaver-live-check-start` /
-# `weaver-live-check-finalize` composite actions; the workflow itself
+# `weaver-live-check-stop` composite actions; the workflow itself
 # only contains the project-specific glue (build the example, drive
 # traffic, stop the app).
 
@@ -144,7 +144,7 @@ jobs:
       # ---- Reusable action: finalize, summarize, gate ---------------
       - name: Finalize weaver live-check
         if: always()
-        uses: cijothomas/weaver/.github/actions/weaver-live-check-finalize@cijothomas/weaver-live-check-actions
+        uses: cijothomas/weaver/.github/actions/weaver-live-check-stop@cijothomas/weaver-live-check-actions
         with:
           fail-on: violation
 
@@ -155,3 +155,4 @@ jobs:
           name: weaver-live-check-tower
           path: ${{ steps.live-check.outputs.state-dir }}
           if-no-files-found: warn
+
