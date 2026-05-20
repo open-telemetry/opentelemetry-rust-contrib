@@ -60,6 +60,19 @@ typedef union {
     GenevaUserManagedIdentityByResourceIdAuthConfig user_msi_resid;         /* Valid when auth_method == GENEVA_AUTH_USER_MANAGED_IDENTITY_BY_RESOURCE_ID */
 } GenevaAuthConfig;
 
+/* OBO (On-Behalf-Of) event configuration for a single event name. */
+typedef struct {
+    const char* event_name;   /* Event name (null-terminated UTF-8) */
+    const char* identity;     /* OBO identity (null-terminated UTF-8) */
+    const char* annotations;  /* OBO annotations (null-terminated UTF-8, can be NULL) */
+} GenevaOboEventConfig;
+
+/* Array of OBO event configurations. Pass NULL to GenevaConfig.obo_map to disable OBO. */
+typedef struct {
+    const GenevaOboEventConfig* entries; /* Pointer to array of GenevaOboEventConfig */
+    size_t count;                        /* Number of entries */
+} GenevaOboEventMap;
+
 /* Configuration structure for Geneva client (C-compatible, tagged union)
  *
  * IMPORTANT - Resource/Scope Configuration:
@@ -92,6 +105,7 @@ typedef struct {
     const char* role_instance;
     GenevaAuthConfig auth; /* Active member selected by auth_method */
     const char* msi_resource; /* Azure AD resource URI for MSI auth (auth methods 0, 3, 4, 5). Not used for auth methods 1, 2. Nullable. */
+    const GenevaOboEventMap* obo_map; /* Optional OBO event map (can be NULL for no OBO). */
 } GenevaConfig;
 
 /* Create a new Geneva client.

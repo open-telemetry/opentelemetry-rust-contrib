@@ -130,6 +130,7 @@ async fn init_client() -> Result<(GenevaClient, Option<String>), Box<dyn std::er
             role_name: std::env::var("GENEVA_ROLE").unwrap_or_else(|_| "test".to_string()),
             role_instance: std::env::var("GENEVA_INSTANCE").unwrap_or_else(|_| "test".to_string()),
             msi_resource: None,
+            obo_event_map: None,
         };
 
         let client = GenevaClient::new(config).map_err(std::io::Error::other)?;
@@ -149,6 +150,7 @@ async fn init_client() -> Result<(GenevaClient, Option<String>), Box<dyn std::er
             role_name: "test".to_string(),
             role_instance: "test".to_string(),
             msi_resource: None,
+            obo_event_map: None,
         };
 
         let client = GenevaClient::new(config).map_err(std::io::Error::other)?;
@@ -204,6 +206,7 @@ async fn init_client() -> Result<(GenevaClient, Option<String>), Box<dyn std::er
             role_name: "test".to_string(),
             role_instance: "test".to_string(),
             msi_resource: None,
+            obo_event_map: None,
         };
 
         let client = GenevaClient::new(config).map_err(std::io::Error::other)?;

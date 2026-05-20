@@ -185,6 +185,27 @@ pub struct GenevaConfig {
     pub role_instance: *const c_char,
     pub auth: GenevaAuthConfig, // Active member selected by auth_method
     pub msi_resource: *const c_char, // Azure AD resource URI for MSI auth (auth methods 0, 3, 4, 5). Not used for auth methods 1, 2. Nullable.
+    pub obo_map: *const FfiOboEventMap, // Optional OBO event map. Nullable.
+}
+
+/// FFI-safe OBO event configuration
+#[repr(C)]
+pub struct FfiOboEventConfig {
+    /// Event name (null-terminated UTF-8 string)
+    pub event_name: *const c_char,
+    /// OBO identity (null-terminated UTF-8 string)
+    pub identity: *const c_char,
+    /// OBO annotations (null-terminated UTF-8 string, can be null)
+    pub annotations: *const c_char,
+}
+
+/// FFI-safe OBO event map (array of configs)
+#[repr(C)]
+pub struct FfiOboEventMap {
+    /// Pointer to array of FfiOboEventConfig
+    pub entries: *const FfiOboEventConfig,
+    /// Number of entries
+    pub count: usize,
 }
 
 /// Error codes returned by FFI functions
@@ -263,6 +284,65 @@ unsafe fn write_error_if_provided(
         unsafe {
             *err_msg_out.add(bytes_to_copy) = 0;
         }
+    }
+}
+
+/// Converts an FFI OBO event map to the Rust-side `OboEventMap`.
+///
+/// Returns `None` when the pointer is null, the entries pointer is null,
+/// or the count is zero. Individual entries with null event_name or identity
+/// are silently skipped.
+///
+/// # Safety
+/// - `ffi_map` must be null or point to a valid `FfiOboEventMap`
+/// - All non-null string pointers inside entries must be valid null-terminated UTF-8
+unsafe fn convert_obo_event_map(
+    ffi_map: *const FfiOboEventMap,
+) -> Option<geneva_uploader::client::OboEventMap> {
+    if ffi_map.is_null() {
+        return None;
+    }
+    let map_ref = unsafe { &*ffi_map };
+    if map_ref.entries.is_null() || map_ref.count == 0 {
+        return None;
+    }
+
+    let mut obo_map = std::collections::HashMap::new();
+    let entries = unsafe { std::slice::from_raw_parts(map_ref.entries, map_ref.count) };
+
+    for entry in entries {
+        if entry.event_name.is_null() || entry.identity.is_null() {
+            continue;
+        }
+        let event_name = unsafe { CStr::from_ptr(entry.event_name) }
+            .to_string_lossy()
+            .into_owned();
+        let identity = unsafe { CStr::from_ptr(entry.identity) }
+            .to_string_lossy()
+            .into_owned();
+        let annotations = if entry.annotations.is_null() {
+            None
+        } else {
+            Some(
+                unsafe { CStr::from_ptr(entry.annotations) }
+                    .to_string_lossy()
+                    .into_owned(),
+            )
+        };
+
+        obo_map.insert(
+            event_name,
+            geneva_uploader::client::OboEventConfig {
+                identity,
+                annotations,
+            },
+        );
+    }
+
+    if obo_map.is_empty() {
+        None
+    } else {
+        Some(obo_map)
     }
 }
 
@@ -511,6 +591,7 @@ pub unsafe extern "C" fn geneva_client_new(
         role_name,
         role_instance,
         msi_resource,
+        obo_event_map: unsafe { convert_obo_event_map(config.obo_map) },
     };
 
     // Create client
@@ -1553,6 +1634,7 @@ mod tests {
             role_name: "testrole".to_string(),
             role_instance: "testinstance".to_string(),
             msi_resource: None,
+            obo_event_map: None,
         };
         let client = GenevaClient::new(cfg).expect("failed to create GenevaClient with MockAuth");
         Box::new(GenevaClientHandle {
@@ -1715,6 +1797,7 @@ mod tests {
                 // The union is never accessed for SystemManagedIdentity (auth_method 0).
                 auth: std::mem::zeroed(),
                 msi_resource: ptr::null(),
+                obo_map: ptr::null(),
             };
 
             let mut out: *mut GenevaClientHandle = std::ptr::null_mut();
@@ -1749,6 +1832,7 @@ mod tests {
                 role_instance: role_instance.as_ptr(),
                 auth: std::mem::zeroed(), // Union not accessed for invalid auth method
                 msi_resource: ptr::null(),
+                obo_map: ptr::null(),
             };
 
             let mut out: *mut GenevaClientHandle = std::ptr::null_mut();
@@ -1788,6 +1872,7 @@ mod tests {
                     },
                 },
                 msi_resource: ptr::null(),
+                obo_map: ptr::null(),
             };
 
             let mut out: *mut GenevaClientHandle = std::ptr::null_mut();
@@ -1826,6 +1911,7 @@ mod tests {
                     },
                 },
                 msi_resource: ptr::null(),
+                obo_map: ptr::null(),
             };
 
             let mut out: *mut GenevaClientHandle = std::ptr::null_mut();
@@ -1864,6 +1950,7 @@ mod tests {
                     },
                 },
                 msi_resource: ptr::null(),
+                obo_map: ptr::null(),
             };
 
             let mut out: *mut GenevaClientHandle = std::ptr::null_mut();
@@ -1902,6 +1989,7 @@ mod tests {
                     },
                 },
                 msi_resource: ptr::null(),
+                obo_map: ptr::null(),
             };
 
             let mut out: *mut GenevaClientHandle = std::ptr::null_mut();
@@ -1943,6 +2031,7 @@ mod tests {
                     },
                 },
                 msi_resource: ptr::null(),
+                obo_map: ptr::null(),
             };
 
             let mut out: *mut GenevaClientHandle = std::ptr::null_mut();
@@ -1986,6 +2075,7 @@ mod tests {
                     },
                 },
                 msi_resource: ptr::null(),
+                obo_map: ptr::null(),
             };
 
             let mut out: *mut GenevaClientHandle = std::ptr::null_mut();
@@ -2070,6 +2160,7 @@ mod tests {
             role_name: "testrole".to_string(),
             role_instance: "testinstance".to_string(),
             msi_resource: None,
+            obo_event_map: None,
         };
         let client = GenevaClient::new(cfg).expect("failed to create GenevaClient with MockAuth");
 
@@ -2192,6 +2283,7 @@ mod tests {
             role_name: "testrole".to_string(),
             role_instance: "testinstance".to_string(),
             msi_resource: None,
+            obo_event_map: None,
         };
         let client = GenevaClient::new(cfg).expect("failed to create GenevaClient with MockAuth");
 
@@ -2359,6 +2451,7 @@ mod tests {
             role_name: "testrole".to_string(),
             role_instance: "testinstance".to_string(),
             msi_resource: None,
+            obo_event_map: None,
         };
         let client = GenevaClient::new(cfg).expect("failed to create GenevaClient with MockAuth");
         let mut handle_box = Box::new(GenevaClientHandle {
@@ -2482,6 +2575,7 @@ mod tests {
             role_name: "testrole".to_string(),
             role_instance: "testinstance".to_string(),
             msi_resource: None,
+            obo_event_map: None,
         };
 
         let ffi_client =
@@ -2659,6 +2753,7 @@ mod tests {
             role_name: "testrole".to_string(),
             role_instance: "testinstance".to_string(),
             msi_resource: None,
+            obo_event_map: None,
         };
 
         let ffi_client =
@@ -2740,5 +2835,162 @@ mod tests {
 
         drop(batches);
         drop(handle_box);
+    }
+
+    #[test]
+    fn test_convert_obo_event_map_valid() {
+        let event_name = CString::new("TestEvent").unwrap();
+        let identity = CString::new("Microsoft.TestService").unwrap();
+        let annotations = CString::new("<Config onBehalfFields=\"resourceId\"/>").unwrap();
+
+        let entry = FfiOboEventConfig {
+            event_name: event_name.as_ptr(),
+            identity: identity.as_ptr(),
+            annotations: annotations.as_ptr(),
+        };
+
+        let map = FfiOboEventMap {
+            entries: &entry as *const FfiOboEventConfig,
+            count: 1,
+        };
+
+        let result = unsafe { convert_obo_event_map(&map as *const FfiOboEventMap) };
+        assert!(result.is_some());
+        let obo_map = result.unwrap();
+        assert_eq!(obo_map.len(), 1);
+        let config = obo_map.get("TestEvent").unwrap();
+        assert_eq!(config.identity, "Microsoft.TestService");
+        assert_eq!(
+            config.annotations.as_deref(),
+            Some("<Config onBehalfFields=\"resourceId\"/>")
+        );
+    }
+
+    #[test]
+    fn test_convert_obo_event_map_null_annotations() {
+        let event_name = CString::new("TestEvent").unwrap();
+        let identity = CString::new("Microsoft.TestService").unwrap();
+
+        let entry = FfiOboEventConfig {
+            event_name: event_name.as_ptr(),
+            identity: identity.as_ptr(),
+            annotations: std::ptr::null(),
+        };
+
+        let map = FfiOboEventMap {
+            entries: &entry as *const FfiOboEventConfig,
+            count: 1,
+        };
+
+        let result = unsafe { convert_obo_event_map(&map as *const FfiOboEventMap) };
+        assert!(result.is_some());
+        let obo_map = result.unwrap();
+        let config = obo_map.get("TestEvent").unwrap();
+        assert_eq!(config.identity, "Microsoft.TestService");
+        assert!(config.annotations.is_none());
+    }
+
+    #[test]
+    fn test_convert_obo_event_map_null() {
+        let result = unsafe { convert_obo_event_map(std::ptr::null()) };
+        assert!(result.is_none());
+    }
+
+    #[test]
+    fn test_convert_obo_event_map_multiple_entries() {
+        let event1 = CString::new("Event1").unwrap();
+        let id1 = CString::new("Microsoft.Service1").unwrap();
+        let event2 = CString::new("Event2").unwrap();
+        let id2 = CString::new("Microsoft.Service2").unwrap();
+        let ann2 = CString::new("<Config/>").unwrap();
+
+        let entries = [
+            FfiOboEventConfig {
+                event_name: event1.as_ptr(),
+                identity: id1.as_ptr(),
+                annotations: std::ptr::null(),
+            },
+            FfiOboEventConfig {
+                event_name: event2.as_ptr(),
+                identity: id2.as_ptr(),
+                annotations: ann2.as_ptr(),
+            },
+        ];
+
+        let map = FfiOboEventMap {
+            entries: entries.as_ptr(),
+            count: entries.len(),
+        };
+
+        let result = unsafe { convert_obo_event_map(&map as *const FfiOboEventMap) };
+        assert!(result.is_some());
+        let obo_map = result.unwrap();
+        assert_eq!(obo_map.len(), 2);
+        assert_eq!(
+            obo_map.get("Event1").unwrap().identity,
+            "Microsoft.Service1"
+        );
+        assert_eq!(
+            obo_map.get("Event2").unwrap().identity,
+            "Microsoft.Service2"
+        );
+    }
+
+    #[test]
+    fn test_client_creation_with_obo_map() {
+        unsafe {
+            let endpoint = CString::new("https://test.geneva.com").unwrap();
+            let environment = CString::new("test").unwrap();
+            let account = CString::new("testaccount").unwrap();
+            let namespace = CString::new("testns").unwrap();
+            let region = CString::new("testregion").unwrap();
+            let tenant = CString::new("testtenant").unwrap();
+            let role_name = CString::new("testrole").unwrap();
+            let role_instance = CString::new("testinstance").unwrap();
+
+            let event_name = CString::new("MyEvent").unwrap();
+            let identity = CString::new("Microsoft.TestService").unwrap();
+            let annotations = CString::new("<Config/>").unwrap();
+
+            let entries = [FfiOboEventConfig {
+                event_name: event_name.as_ptr(),
+                identity: identity.as_ptr(),
+                annotations: annotations.as_ptr(),
+            }];
+
+            let obo_map = FfiOboEventMap {
+                entries: entries.as_ptr(),
+                count: entries.len(),
+            };
+
+            let config = GenevaConfig {
+                endpoint: endpoint.as_ptr(),
+                environment: environment.as_ptr(),
+                account: account.as_ptr(),
+                namespace_name: namespace.as_ptr(),
+                region: region.as_ptr(),
+                config_major_version: 1,
+                auth_method: 0, // SystemManagedIdentity - union not used
+                tenant: tenant.as_ptr(),
+                role_name: role_name.as_ptr(),
+                role_instance: role_instance.as_ptr(),
+                // SAFETY: GenevaAuthConfig only contains raw pointers (*const c_char).
+                // Zero-initializing raw pointers creates null pointers, which is valid.
+                // The union is never accessed for SystemManagedIdentity (auth_method 0).
+                auth: std::mem::zeroed(),
+                msi_resource: ptr::null(),
+                obo_map: &obo_map as *const FfiOboEventMap,
+            };
+
+            let mut out: *mut GenevaClientHandle = std::ptr::null_mut();
+            let rc = geneva_client_new(&config, &mut out, ptr::null_mut(), 0);
+            // Client creation may fail (e.g. MSI token acquisition), but the OBO map
+            // conversion path must not crash. We just verify it doesn't panic.
+            // If it somehow succeeds, clean up.
+            if !out.is_null() {
+                geneva_client_free(out);
+            }
+            let _ = rc;
+        }
     }
 }
