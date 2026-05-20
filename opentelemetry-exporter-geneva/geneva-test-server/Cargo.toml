@@ -1,0 +1,22 @@
+[package]
+name = "geneva-test-server"
+version = "0.1.0"
+edition = "2021"
+publish = false
+
+[dependencies]
+anyhow = "1.0"
+axum = "0.8"
+chrono = { version = "0.4", features = ["serde"] }
+hex = "0.4"
+lz4_flex = { version = "0.11", default-features = false }
+rusqlite = { version = "0.34", features = ["bundled"] }
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+tokio = { version = "1", features = ["macros", "rt-multi-thread", "signal"] }
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter", "fmt"] }
+uuid = { version = "1.0", features = ["v4", "serde"] }
+
+[lints]
+workspace = true
