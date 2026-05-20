@@ -1,0 +1,157 @@
+name: Weaver Live Check (tower)
+
+# Validates that telemetry emitted by the tower instrumentation's
+# live-check-app example complies with the published OpenTelemetry
+# semantic conventions. Initial seed for issue #530.
+#
+# This workflow uses the reusable `weaver-live-check-start` /
+# `weaver-live-check-finalize` composite actions; the workflow itself
+# only contains the project-specific glue (build the example, drive
+# traffic, stop the app).
+
+env:
+  CI: true
+  WEAVER_VERSION: v0.23.0
+  # Pinned semantic-conventions release for reproducible runs. Bump
+  # deliberately when conventions change.
+  SEMCONV_REGISTRY: 'https://github.com/open-telemetry/semantic-conventions/archive/refs/tags/v1.41.1.tar.gz[model]'
+  APP_PORT: '5000'
+
+permissions:
+  contents: read
+
+on:
+  workflow_dispatch:
+  pull_request:
+    paths:
+      - 'opentelemetry-instrumentation-tower/**'
+      - '.github/workflows/weaver-live-check-tower.yml'
+  merge_group:
+  push:
+    branches:
+      - main
+    paths:
+      - 'opentelemetry-instrumentation-tower/**'
+      - '.github/workflows/weaver-live-check-tower.yml'
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  live-check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Harden the runner (Audit all outbound calls)
+        uses: step-security/harden-runner@8d3c67de8e2fe68ef647c8db1e6a09f647780f40 # v2.19.0
+        with:
+          egress-policy: audit
+
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+
+      - name: Install stable Rust
+        run: rustup toolchain install stable --profile minimal --no-self-update
+
+      - name: Cache cargo
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: weaver-live-check-${{ runner.os }}-${{ hashFiles('**/Cargo.lock') }}
+
+      # ---- Reusable actions: start the weaver listener ---------------
+      # NOTE: actions sourced from a personal fork while the upstream PR
+      # is in review. Switch to `open-telemetry/weaver/...@<tag>` once
+      # the actions land upstream.
+      - name: Setup weaver
+        uses: cijothomas/weaver/.github/actions/setup-weaver@cijothomas/weaver-live-check-actions
+        with:
+          version: ${{ env.WEAVER_VERSION }}
+
+      - name: Start weaver live-check
+        id: live-check
+        uses: cijothomas/weaver/.github/actions/weaver-live-check-start@cijothomas/weaver-live-check-actions
+        with:
+          registry: ${{ env.SEMCONV_REGISTRY }}
+
+      # ---- Project-specific: build, run, drive traffic ---------------
+      - name: Build live-check-app example
+        working-directory: opentelemetry-instrumentation-tower/examples/live-check-app
+        run: cargo build --release
+
+      - name: Run example + drive traffic
+        working-directory: opentelemetry-instrumentation-tower
+        env:
+          OTEL_METRIC_EXPORT_INTERVAL: '2000'
+          OTEL_BSP_SCHEDULE_DELAY: '1000'
+          OTEL_EXPORTER_OTLP_ENDPOINT: ${{ steps.live-check.outputs.otlp-grpc-endpoint }}
+        run: |
+          set -euo pipefail
+
+          echo "::group::Start example service"
+          ../target/release/example-live-check-app > "${{ steps.live-check.outputs.state-dir }}/example.log" 2>&1 &
+          APP_PID=$!
+          echo "app pid: $APP_PID"
+          echo "::endgroup::"
+
+          # Wait for the app to start serving on :$APP_PORT
+          for _ in $(seq 1 30); do
+            if curl -fsS "http://127.0.0.1:${APP_PORT}/" >/dev/null 2>&1; then
+              break
+            fi
+            sleep 1
+          done
+
+          # Bounded curl helper so a stuck request never hangs the job.
+          c() { curl --max-time 5 -sS -o /dev/null "$@" || true; }
+
+          echo "::group::Drive traffic"
+          # Exercise the full HTTP method x status-code x route-shape
+          # matrix so weaver validates as many attribute combinations
+          # as possible against the pinned semconv registry.
+          for i in $(seq 1 8); do
+            # 200 OK on literal, templated, and wildcard routes.
+            c "http://127.0.0.1:${APP_PORT}/"
+            c "http://127.0.0.1:${APP_PORT}/users/$i"
+            c "http://127.0.0.1:${APP_PORT}/files/a/b/c/$i.txt"
+            # 201 / 200 / 200 / 204 across POST/PUT/PATCH/DELETE.
+            c -X POST   "http://127.0.0.1:${APP_PORT}/items"
+            c -X PUT    "http://127.0.0.1:${APP_PORT}/items/$i"
+            c -X PATCH  "http://127.0.0.1:${APP_PORT}/items/$i"
+            c -X DELETE "http://127.0.0.1:${APP_PORT}/items/$i"
+            # HEAD on a templated route + OPTIONS.
+            c -X HEAD    "http://127.0.0.1:${APP_PORT}/items/$i/head"
+            c -X OPTIONS "http://127.0.0.1:${APP_PORT}/items"
+            # 4xx
+            c "http://127.0.0.1:${APP_PORT}/bad-request"   # 400
+            c "http://127.0.0.1:${APP_PORT}/unauthorized"  # 401
+            c "http://127.0.0.1:${APP_PORT}/no-such-route" # 404
+            # 5xx via handler + unhandled panic.
+            c "http://127.0.0.1:${APP_PORT}/error"
+            c "http://127.0.0.1:${APP_PORT}/throw"
+          done
+          echo "traffic loop complete"
+          echo "::endgroup::"
+
+          # Allow batch span / periodic metric exporters to flush.
+          sleep 6
+
+          kill "$APP_PID" 2>/dev/null || true
+
+      # ---- Reusable action: finalize, summarize, gate ---------------
+      - name: Finalize weaver live-check
+        if: always()
+        uses: cijothomas/weaver/.github/actions/weaver-live-check-finalize@cijothomas/weaver-live-check-actions
+        with:
+          fail-on: violation
+
+      - name: Upload live-check report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: weaver-live-check-tower
+          path: ${{ steps.live-check.outputs.state-dir }}
+          if-no-files-found: warn
