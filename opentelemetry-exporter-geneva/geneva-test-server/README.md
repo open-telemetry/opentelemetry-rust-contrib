@@ -50,18 +50,21 @@ asynchronous decode worker has marked the request as `decoded` or
 Run the happy-path integration test with:
 
 ```sh
-cargo test -p geneva-test-server --features geneva-uploader/mock_auth
+cargo test -p geneva-uploader --features mock_auth --test geneva_test_server_integration
 ```
 
-The test starts the server on an ephemeral local port, sends a real
-`geneva-uploader` batch through the mock GCS and ingest endpoints, waits for
-decode, and asserts the decoded row payload.
+The `geneva-uploader` integration test starts the server on an ephemeral local
+port, sends a real `geneva-uploader` batch through the mock GCS and ingest
+endpoints, waits for decode, and asserts the decoded row payload.
 
 ## Notes
 
-- The server validates the issued bearer token, token namespace, expected monitoring endpoint, moniker, format, and body length.
-- Upload bodies are stored compressed and, on successful decode, also stored as decoded rows in SQLite.
-- The decoder currently targets the Bond schema and row shapes emitted by the current `geneva-uploader` encoder.
+- The server validates the issued bearer token, token namespace, expected
+  monitoring endpoint, moniker, format, and body length.
+- Upload bodies are stored compressed and, on successful decode, also stored as
+  decoded rows in SQLite.
+- The decoder currently targets the Bond schema and row shapes emitted by the
+  current `geneva-uploader` encoder.
 
 ## Future Ideas
 

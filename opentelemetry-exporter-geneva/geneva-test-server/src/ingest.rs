@@ -164,7 +164,15 @@ pub(crate) async fn wait_request_detail(
             Ok(_) | Err((StatusCode::NOT_FOUND, _)) if Instant::now() < deadline => {
                 tokio::time::sleep(Duration::from_millis(25)).await;
             }
-            Ok(detail) => return Ok(Json(detail)),
+            Ok(detail) => {
+                return Err((
+                    StatusCode::REQUEST_TIMEOUT,
+                    format!(
+                        "request not decoded before timeout: request_id={}, decode_status={}",
+                        detail.request_id, detail.decode_status
+                    ),
+                ));
+            }
             Err((StatusCode::NOT_FOUND, _)) => {
                 return Err((
                     StatusCode::REQUEST_TIMEOUT,

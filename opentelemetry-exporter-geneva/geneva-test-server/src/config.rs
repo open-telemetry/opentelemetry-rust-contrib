@@ -3,19 +3,19 @@ use std::net::SocketAddr;
 use std::path::PathBuf;
 
 #[derive(Clone, Debug)]
-pub(crate) struct ServerConfig {
-    pub(crate) listen_addr: SocketAddr,
-    pub(crate) public_base_url: String,
-    pub(crate) db_path: PathBuf,
-    pub(crate) token_ttl_secs: i64,
-    pub(crate) max_body_size: usize,
-    pub(crate) monitoring_endpoint: String,
-    pub(crate) primary_moniker: String,
-    pub(crate) account_group: String,
+pub struct ServerConfig {
+    pub listen_addr: SocketAddr,
+    pub public_base_url: String,
+    pub db_path: PathBuf,
+    pub token_ttl_secs: i64,
+    pub max_body_size: usize,
+    pub monitoring_endpoint: String,
+    pub primary_moniker: String,
+    pub account_group: String,
 }
 
 impl ServerConfig {
-    pub(crate) fn from_env() -> Result<Self> {
+    pub fn from_env() -> Result<Self> {
         let listen_addr = std::env::var("GENEVA_TEST_SERVER_ADDR")
             .unwrap_or_else(|_| "127.0.0.1:18080".to_string())
             .parse::<SocketAddr>()

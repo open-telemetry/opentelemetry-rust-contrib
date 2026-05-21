@@ -6,6 +6,7 @@ const CHUNK_SIZE: usize = 64 * 1024;
 pub(crate) fn decompress_chunked_lz4(compressed: &[u8]) -> Result<Vec<u8>> {
     let mut offset = 0usize;
     let mut output = Vec::new();
+    let mut scratch = vec![0u8; CHUNK_SIZE];
 
     while offset < compressed.len() {
         let header = compressed
@@ -19,7 +20,6 @@ pub(crate) fn decompress_chunked_lz4(compressed: &[u8]) -> Result<Vec<u8>> {
             .ok_or_else(|| anyhow!("truncated chunk payload at offset {offset}"))?;
         offset += chunk_len;
 
-        let mut scratch = vec![0u8; CHUNK_SIZE];
         let written = decompress_into(chunk, &mut scratch)
             .map_err(|err| anyhow!("LZ4 decode failed: {err:?}"))?;
         output.extend_from_slice(&scratch[..written]);

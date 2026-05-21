@@ -7,7 +7,7 @@ use std::sync::{mpsc, Mutex};
 use uuid::Uuid;
 
 #[derive(Debug)]
-pub(crate) struct AppState {
+pub struct AppState {
     pub(crate) public_base_url: String,
     pub(crate) monitoring_endpoint: String,
     pub(crate) primary_moniker: String,
@@ -187,6 +187,6 @@ pub(crate) struct WaitQuery {
 }
 
 #[derive(Debug)]
-pub(crate) struct WorkerHandle {
+pub struct WorkerHandle {
     pub(crate) _join: std::thread::JoinHandle<()>,
 }

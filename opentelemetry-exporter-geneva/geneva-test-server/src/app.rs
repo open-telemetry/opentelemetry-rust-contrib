@@ -5,7 +5,7 @@ use axum::extract::DefaultBodyLimit;
 use axum::{routing::get, routing::post, Router};
 use std::sync::Arc;
 
-pub(crate) fn build_router(state: Arc<AppState>) -> Router {
+pub fn build_router(state: Arc<AppState>) -> Router {
     let max_body_size = state.max_body_size;
     Router::new()
         .route("/healthz", get(healthz))

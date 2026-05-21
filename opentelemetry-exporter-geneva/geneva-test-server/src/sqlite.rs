@@ -8,7 +8,14 @@ use std::path::Path;
 use std::sync::{mpsc, Mutex};
 use tracing::{error, info};
 
-pub(crate) fn spawn_worker(config: ServerConfig) -> Result<(AppState, WorkerHandle)> {
+type DecodeResult = (
+    Vec<u8>,
+    String,
+    Vec<DecodedSchemaRow>,
+    Vec<DecodedRecordRow>,
+);
+
+pub fn spawn_worker(config: ServerConfig) -> Result<(AppState, WorkerHandle)> {
     if let Some(parent) = config.db_path.parent() {
         std::fs::create_dir_all(parent)
             .with_context(|| format!("failed to create {}", parent.display()))?;
@@ -113,7 +120,7 @@ fn persist_request(conn: &mut Connection, request: AcceptedRequest) -> Result<()
     let request_id = request.request_id.to_string();
     let query_json = serde_json::to_string(&request.query)?;
 
-    let decode_result = (|| -> Result<(Vec<u8>, String, Vec<DecodedSchemaRow>, Vec<DecodedRecordRow>)> {
+    let decode_result = (|| -> Result<DecodeResult> {
         let central_blob = decompress_chunked_lz4(&request.body)?;
         let decoded = decode_central_blob(&central_blob)?;
         let schemas = decoded
