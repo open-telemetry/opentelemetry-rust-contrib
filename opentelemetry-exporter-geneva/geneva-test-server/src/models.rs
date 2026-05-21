@@ -13,6 +13,7 @@ pub(crate) struct AppState {
     pub(crate) primary_moniker: String,
     pub(crate) account_group: String,
     pub(crate) token_ttl_secs: i64,
+    pub(crate) max_body_size: usize,
     pub(crate) tokens: Mutex<HashMap<String, TokenRecord>>,
     pub(crate) work_tx: mpsc::Sender<AcceptedRequest>,
     pub(crate) db_path: PathBuf,
@@ -178,6 +179,11 @@ pub(crate) struct DecodedRecordRow {
 pub(crate) struct ListQuery {
     pub(crate) limit: Option<usize>,
     pub(crate) event: Option<String>,
+}
+
+#[derive(Debug, Deserialize)]
+pub(crate) struct WaitQuery {
+    pub(crate) timeout_ms: Option<u64>,
 }
 
 #[derive(Debug)]

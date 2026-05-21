@@ -31,6 +31,7 @@ pub(crate) fn spawn_worker(config: ServerConfig) -> Result<(AppState, WorkerHand
         primary_moniker: config.primary_moniker,
         account_group: config.account_group,
         token_ttl_secs: config.token_ttl_secs,
+        max_body_size: config.max_body_size,
         tokens: Mutex::new(std::collections::HashMap::new()),
         work_tx: tx,
         db_path: config.db_path,

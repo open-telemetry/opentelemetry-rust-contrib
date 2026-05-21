@@ -8,6 +8,7 @@ pub(crate) struct ServerConfig {
     pub(crate) public_base_url: String,
     pub(crate) db_path: PathBuf,
     pub(crate) token_ttl_secs: i64,
+    pub(crate) max_body_size: usize,
     pub(crate) monitoring_endpoint: String,
     pub(crate) primary_moniker: String,
     pub(crate) account_group: String,
@@ -32,6 +33,10 @@ impl ServerConfig {
             .unwrap_or_else(|_| "900".to_string())
             .parse::<i64>()
             .context("invalid GENEVA_TEST_SERVER_TOKEN_TTL_SECS")?;
+        let max_body_size = std::env::var("GENEVA_TEST_SERVER_MAX_BODY_BYTES")
+            .unwrap_or_else(|_| (64 * 1024 * 1024).to_string())
+            .parse::<usize>()
+            .context("invalid GENEVA_TEST_SERVER_MAX_BODY_BYTES")?;
 
         let monitoring_endpoint = std::env::var("GENEVA_TEST_SERVER_MONITORING_ENDPOINT")
             .unwrap_or_else(|_| "https://monitoring.test.internal".to_string());
@@ -45,6 +50,7 @@ impl ServerConfig {
             public_base_url,
             db_path,
             token_ttl_secs,
+            max_body_size,
             monitoring_endpoint,
             primary_moniker,
             account_group,

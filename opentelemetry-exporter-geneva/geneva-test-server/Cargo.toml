@@ -18,5 +18,11 @@ tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter", "fmt"] }
 uuid = { version = "1.0", features = ["v4", "serde"] }
 
+[dev-dependencies]
+geneva-uploader = { path = "../geneva-uploader", features = ["mock_auth"] }
+opentelemetry-proto = { workspace = true, default-features = false, features = ["logs", "gen-tonic-messages"] }
+reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }
+tempfile = "3.5"
+
 [lints]
 workspace = true

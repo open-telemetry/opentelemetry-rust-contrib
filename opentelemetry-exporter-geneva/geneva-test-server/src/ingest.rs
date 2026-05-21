@@ -1,6 +1,6 @@
 use crate::models::{
     AcceptedRequest, AppState, DecodedRecordRow, ListQuery, RecordsResponse, RequestDetail,
-    RequestSummary, RequestsResponse,
+    RequestSummary, RequestsResponse, TokenRecord, WaitQuery,
 };
 use axum::body::Bytes;
 use axum::extract::{Path, Query, State};
@@ -9,6 +9,7 @@ use axum::Json;
 use chrono::Utc;
 use rusqlite::{params, Connection};
 use std::sync::Arc;
+use std::time::{Duration, Instant};
 use uuid::Uuid;
 
 use crate::models::{IngestQuery, IngestResponse};
@@ -19,8 +20,6 @@ pub(crate) async fn ingest(
     Query(query): Query<IngestQuery>,
     body: Bytes,
 ) -> Result<(StatusCode, Json<IngestResponse>), (StatusCode, String)> {
-    validate_bearer_token(&state, &headers)?;
-
     if query.format != "centralbond/lz4hc" {
         return Err((
             StatusCode::BAD_REQUEST,
@@ -58,6 +57,7 @@ pub(crate) async fn ingest(
     if body.is_empty() {
         return Err((StatusCode::BAD_REQUEST, "empty request body".to_string()));
     }
+    validate_bearer_token(&state, &headers, &query)?;
 
     let request_id = Uuid::new_v4();
     let accepted = AcceptedRequest {
@@ -143,7 +143,44 @@ pub(crate) async fn get_request_detail(
     State(state): State<Arc<AppState>>,
     Path(request_id): Path<String>,
 ) -> Result<Json<RequestDetail>, (StatusCode, String)> {
-    let conn = open_db(&state)?;
+    load_request_detail(&state, &request_id).map(Json)
+}
+
+pub(crate) async fn wait_request_detail(
+    State(state): State<Arc<AppState>>,
+    Path(request_id): Path<String>,
+    Query(query): Query<WaitQuery>,
+) -> Result<Json<RequestDetail>, (StatusCode, String)> {
+    let timeout = Duration::from_millis(query.timeout_ms.unwrap_or(5_000).min(60_000));
+    let deadline = Instant::now() + timeout;
+
+    loop {
+        match load_request_detail(&state, &request_id) {
+            Ok(detail)
+                if detail.decode_status == "decoded" || detail.decode_status == "decode_failed" =>
+            {
+                return Ok(Json(detail));
+            }
+            Ok(_) | Err((StatusCode::NOT_FOUND, _)) if Instant::now() < deadline => {
+                tokio::time::sleep(Duration::from_millis(25)).await;
+            }
+            Ok(detail) => return Ok(Json(detail)),
+            Err((StatusCode::NOT_FOUND, _)) => {
+                return Err((
+                    StatusCode::REQUEST_TIMEOUT,
+                    "request not decoded before timeout".to_string(),
+                ));
+            }
+            Err(err) => return Err(err),
+        }
+    }
+}
+
+fn load_request_detail(
+    state: &Arc<AppState>,
+    request_id: &str,
+) -> Result<RequestDetail, (StatusCode, String)> {
+    let conn = open_db(state)?;
 
     let mut stmt = conn
         .prepare(
@@ -232,11 +269,11 @@ pub(crate) async fn get_request_detail(
         collect_rows(rows).map_err(sqlite_error)?
     };
 
-    Ok(Json(RequestDetail {
+    Ok(RequestDetail {
         schemas,
         records,
         ..detail
-    }))
+    })
 }
 
 pub(crate) async fn get_records(
@@ -299,6 +336,7 @@ pub(crate) async fn get_records(
 fn validate_bearer_token(
     state: &Arc<AppState>,
     headers: &HeaderMap,
+    query: &IngestQuery,
 ) -> Result<(), (StatusCode, String)> {
     let auth_token = extract_bearer_token(headers)?;
     let now = Utc::now();
@@ -312,10 +350,26 @@ fn validate_bearer_token(
     tokens.retain(|_, value| value.expires_at > now);
 
     match tokens.get(&auth_token) {
-        Some(record) if record.expires_at > now => Ok(()),
+        Some(record) if record.expires_at > now => validate_token_scope(record, query),
         Some(_) => Err((StatusCode::UNAUTHORIZED, "token expired".to_string())),
         None => Err((StatusCode::UNAUTHORIZED, "unknown token".to_string())),
     }
+}
+
+fn validate_token_scope(
+    record: &TokenRecord,
+    query: &IngestQuery,
+) -> Result<(), (StatusCode, String)> {
+    if record.namespace != query.namespace {
+        return Err((
+            StatusCode::UNAUTHORIZED,
+            format!(
+                "token namespace '{}' does not match upload namespace '{}'",
+                record.namespace, query.namespace
+            ),
+        ));
+    }
+    Ok(())
 }
 
 fn extract_bearer_token(headers: &HeaderMap) -> Result<String, (StatusCode, String)> {

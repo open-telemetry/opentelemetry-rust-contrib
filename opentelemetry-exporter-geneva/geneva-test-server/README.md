@@ -28,6 +28,7 @@ Defaults:
 - `GENEVA_TEST_SERVER_BASE_URL`
 - `GENEVA_TEST_SERVER_DB`
 - `GENEVA_TEST_SERVER_TOKEN_TTL_SECS`
+- `GENEVA_TEST_SERVER_MAX_BODY_BYTES`
 - `GENEVA_TEST_SERVER_MONITORING_ENDPOINT`
 - `GENEVA_TEST_SERVER_PRIMARY_MONIKER`
 - `GENEVA_TEST_SERVER_ACCOUNT_GROUP`
@@ -37,10 +38,38 @@ Defaults:
 - `GET /healthz`
 - `GET /api/v1/debug/requests`
 - `GET /api/v1/debug/requests/{request_id}`
+- `GET /api/v1/debug/requests/{request_id}/wait?timeout_ms=5000`
 - `GET /api/v1/debug/records`
+
+The wait endpoint is intended for automated tests. It returns when the
+asynchronous decode worker has marked the request as `decoded` or
+`decode_failed`, or when the timeout expires.
+
+## Validation
+
+Run the happy-path integration test with:
+
+```sh
+cargo test -p geneva-test-server --features geneva-uploader/mock_auth
+```
+
+The test starts the server on an ephemeral local port, sends a real
+`geneva-uploader` batch through the mock GCS and ingest endpoints, waits for
+decode, and asserts the decoded row payload.
 
 ## Notes
 
-- The server validates the issued bearer token, expected monitoring endpoint, moniker, format, and body length.
+- The server validates the issued bearer token, token namespace, expected monitoring endpoint, moniker, format, and body length.
 - Upload bodies are stored compressed and, on successful decode, also stored as decoded rows in SQLite.
 - The decoder currently targets the Bond schema and row shapes emitted by the current `geneva-uploader` encoder.
+
+## Future Ideas
+
+- Add controlled GCS and ingest failures for retry testing, such as HTTP 429
+  with `Retry-After`, HTTP 503, malformed JSON, and delayed responses.
+- Add debug summaries for batch shape, including schema count, row count, and
+  distinct role or event values per upload.
+- Add replay/download endpoints for compressed bodies and decoded central blobs
+  to simplify bug reproduction.
+- Add negative decode fixtures for truncated LZ4, invalid central blob
+  terminators, and unknown schema IDs.
