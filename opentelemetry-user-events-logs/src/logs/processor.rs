@@ -64,7 +64,6 @@ where
         self.exporter.shutdown()
     }
 
-    #[cfg(feature = "spec_unstable_logs_enabled")]
     fn event_enabled(
         &self,
         level: opentelemetry::logs::Severity,
@@ -339,7 +338,6 @@ mod tests {
     }
 
     #[test]
-    #[cfg(feature = "spec_unstable_logs_enabled")]
     fn test_event_enabled() {
         let processor = Processor::builder("test_provider").build().unwrap();
 

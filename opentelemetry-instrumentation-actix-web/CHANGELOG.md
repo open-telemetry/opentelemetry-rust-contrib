@@ -2,6 +2,10 @@
 
 ## vNext
 
+## v0.24.0
+
+Released 2026-May-14
+
 ### Breaking Changes
 
 * **`metrics` feature is now enabled by default**: The `metrics` feature is now
@@ -29,10 +33,11 @@
 * Added `error.type` attribute for 4xx and 5xx HTTP responses on both spans and
   metrics, as required by stable HTTP semantic conventions.
 
-## v0.24.0
-
 ### Changed
 
+* Update `opentelemetry` and `opentelemetry-semantic-conventions` dependencies
+  to 0.32
+* Bump MSRV to 1.88.0 (required by `actix-http` 3.12)
 * Update `actix-http` dependencies to 3.11
 * Update `actix-web` dependencies to 4.12
 * Update `awc` dependencies to 3.8
