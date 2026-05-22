@@ -2,9 +2,27 @@
 
 ## vNext
 
+## v0.11.0
+
+- Bump opentelemetry and opentelemetry_sdk versions to 0.32
+
+- Removed the `spec_unstable_logs_enabled` cargo feature, since the underlying
+  capability is now stable and always-on in upstream `opentelemetry` 0.32 (the
+  `event_enabled` callback is unconditionally available). This only affects
+  users who explicitly opted into the experimental feature flag; no change is
+  needed for users on the default (stable) feature set.
+
 - Fixed a panic that would trigger if logging from inside a blocked on async block due to nested `block_on()`s.
 
-## v0.10.1
+- **Bug fix**: `service.name` and `service.instance.id` resource attributes
+  were previously emitted as bare fields in PartA (`PartA.role`,
+  `PartA.roleInstance`) without the required `ext_cloud` namespace. They are
+  now emitted inside a nested `ext_cloud` struct (`PartA.ext_cloud.role`,
+  `PartA.ext_cloud.roleInstance`), consistent with how `ext_dt` is already
+  structured in this crate and following the Common Schema TLD mapping spec's
+  preferred nested struct convention. **Note**: downstream consumers that
+  looked for the bare field names (`role`, `roleInstance`) in PartA will need
+  to be updated.
 
 - Added a `with_resource_attributes` method to the processor builder, allowing
   users to specify which resource attribute keys are exported with each log

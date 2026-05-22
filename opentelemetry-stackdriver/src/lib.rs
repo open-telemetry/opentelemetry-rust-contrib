@@ -96,7 +96,7 @@ impl SpanExporter for StackDriverExporter {
         }
     }
 
-    fn shutdown(&mut self) -> OTelSdkResult {
+    fn shutdown(&self) -> OTelSdkResult {
         let start = Instant::now();
         while (Instant::now() - start) < self.maximum_shutdown_duration && self.pending_count() > 0
         {

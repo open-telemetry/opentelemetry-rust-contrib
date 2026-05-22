@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.5.0] - 2026-04-13
+
+### Changed
+
+- `GenevaClient::upload_batch` now returns `Result<(), UploadError>` instead of `Result<(), String>`. The new `UploadError` enum exposes the HTTP status code, parsed `Retry-After` duration, and error category so callers can implement retry strategies without string parsing.
+- Replaced `md5` crate with RustCrypto `md-5` crate
+- Bump version to 0.5.0
+
 ## [0.4.0] - 2025-11-12
 
 ### Changed

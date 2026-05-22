@@ -256,6 +256,203 @@ mod tests {
         assert_eq!(part_c["my-key"].as_str().unwrap(), "my-value");
     }
 
+    /// Test with a child span that has Error status and Client SpanKind.
+    /// Validates parentId serialization, success=false, kind=2, and
+    /// non-string PartC attribute types (bool, f64).
+    #[ignore]
+    #[test]
+    fn integration_test_child_span_with_error() {
+        use opentelemetry::trace::{Span, SpanKind, Status};
+
+        check_user_events_available().expect("Kernel does not support user_events.");
+
+        let provider = SdkTracerProvider::builder()
+            .with_resource(
+                opentelemetry_sdk::Resource::builder()
+                    .with_service_name("child_span_test")
+                    .build(),
+            )
+            .with_user_events_exporter("otel_trace_child")
+            .build();
+
+        let user_event_status = check_user_events_available().unwrap();
+        assert!(user_event_status.contains("otel_trace_child_L4K1"));
+
+        let perf_thread =
+            std::thread::spawn(|| run_perf_and_decode(5, "user_events:otel_trace_child_L4K1"));
+
+        std::thread::sleep(std::time::Duration::from_millis(1000));
+
+        // ACT — create a parent span, then a child span with error status
+        let tracer = provider.tracer("test-tracer");
+
+        let (parent_span_id, child_trace_id, child_span_id) = {
+            let parent = tracer
+                .span_builder("parent-span")
+                .with_kind(SpanKind::Server)
+                .start(&tracer);
+            let parent_cx = opentelemetry::Context::current_with_span(parent);
+            let parent_span_id = parent_cx.span().span_context().span_id();
+
+            let mut child = tracer
+                .span_builder("child-span")
+                .with_kind(SpanKind::Client)
+                .start_with_context(&tracer, &parent_cx);
+            let child_trace_id = child.span_context().trace_id();
+            let child_span_id = child.span_context().span_id();
+
+            child.set_attribute(KeyValue::new("bool_attr", true));
+            child.set_attribute(KeyValue::new("float_attr", 1.5));
+            child.set_status(Status::error("something went wrong"));
+            child.end();
+
+            // Parent ends after child — both get exported, but we look for the child.
+            drop(parent_cx); // ends parent span
+
+            (parent_span_id, child_trace_id, child_span_id)
+        };
+
+        let result = perf_thread.join().expect("Perf thread panicked");
+        assert!(result.is_ok());
+        let formatted_output = result.unwrap().trim().to_string();
+
+        let json_value: Value = from_str(&formatted_output).expect("Failed to parse JSON");
+        let perf_data_key = json_value
+            .as_object()
+            .unwrap()
+            .keys()
+            .find(|k| k.contains("perf.data"))
+            .expect("No perf.data key found");
+
+        let events = json_value[perf_data_key].as_array().unwrap();
+
+        // Find the child span event by matching its spanId
+        let child_span_id_str = child_span_id.to_string();
+        let event = events
+            .iter()
+            .find(|e| {
+                e.get("PartA")
+                    .and_then(|a| a.get("ext_dt_spanId"))
+                    .and_then(|s| s.as_str())
+                    == Some(&child_span_id_str)
+            })
+            .expect("Child span event not found");
+
+        // Validate PartA
+        let part_a = &event["PartA"];
+        assert!(part_a.get("time").is_some());
+        assert_eq!(
+            part_a["ext_dt_traceId"].as_str().unwrap(),
+            child_trace_id.to_string()
+        );
+        assert_eq!(
+            part_a["ext_cloud_role"].as_str().unwrap(),
+            "child_span_test"
+        );
+
+        // Validate PartB
+        let part_b = &event["PartB"];
+        assert_eq!(part_b["_typeName"].as_str().unwrap(), "Span");
+        assert_eq!(part_b["name"].as_str().unwrap(), "child-span");
+        assert!(part_b.get("startTime").is_some());
+
+        // success should be false (Error status)
+        assert!(!part_b["success"].as_bool().unwrap());
+
+        // kind should be 2 (Client)
+        assert_eq!(part_b["kind"].as_i64().unwrap(), 2);
+
+        // parentId should be present and match the parent span
+        let parent_id = part_b
+            .get("parentId")
+            .expect("PartB.parentId should be present for child span");
+        assert_eq!(parent_id.as_str().unwrap(), parent_span_id.to_string());
+
+        // Validate PartC — non-string attribute types
+        let part_c = &event["PartC"];
+        assert!(part_c["bool_attr"].as_bool().unwrap());
+        assert!((part_c["float_attr"].as_f64().unwrap() - 1.5).abs() < 0.001);
+    }
+
+    /// Test with empty resource — validates no ext_cloud fields in PartA.
+    #[ignore]
+    #[test]
+    fn integration_test_no_resource() {
+        check_user_events_available().expect("Kernel does not support user_events.");
+
+        let provider = SdkTracerProvider::builder()
+            .with_resource(opentelemetry_sdk::Resource::builder_empty().build())
+            .with_user_events_exporter("otel_trace_nores")
+            .build();
+
+        let user_event_status = check_user_events_available().unwrap();
+        assert!(user_event_status.contains("otel_trace_nores_L4K1"));
+
+        let perf_thread =
+            std::thread::spawn(|| run_perf_and_decode(5, "user_events:otel_trace_nores_L4K1"));
+
+        std::thread::sleep(std::time::Duration::from_millis(1000));
+
+        let tracer = provider.tracer("test-tracer");
+        let span_id_expected =
+            tracer.in_span("no-resource-span", |cx| cx.span().span_context().span_id());
+
+        let result = perf_thread.join().expect("Perf thread panicked");
+        assert!(result.is_ok());
+        let formatted_output = result.unwrap().trim().to_string();
+
+        let json_value: Value = from_str(&formatted_output).expect("Failed to parse JSON");
+        let perf_data_key = json_value
+            .as_object()
+            .unwrap()
+            .keys()
+            .find(|k| k.contains("perf.data"))
+            .expect("No perf.data key found");
+
+        let events = json_value[perf_data_key].as_array().unwrap();
+
+        let event = events
+            .iter()
+            .find(|e| e.get("n").and_then(|n| n.as_str()) == Some("otel_trace_nores:Span"))
+            .expect("Event 'otel_trace_nores:Span' not found");
+
+        assert_eq!(event["__csver__"].as_i64().unwrap(), 1024);
+
+        // PartA — no ext_cloud_role or ext_cloud_roleInstance
+        let part_a = &event["PartA"];
+        assert!(part_a.get("time").is_some());
+        assert!(part_a.get("ext_dt_traceId").is_some());
+        assert_eq!(
+            part_a["ext_dt_spanId"].as_str().unwrap(),
+            span_id_expected.to_string()
+        );
+        assert!(
+            part_a.get("ext_cloud_role").is_none(),
+            "ext_cloud_role should not be present with empty resource"
+        );
+        assert!(
+            part_a.get("ext_cloud_roleInstance").is_none(),
+            "ext_cloud_roleInstance should not be present with empty resource"
+        );
+
+        // PartB — minimal
+        let part_b = &event["PartB"];
+        assert_eq!(part_b["_typeName"].as_str().unwrap(), "Span");
+        assert_eq!(part_b["name"].as_str().unwrap(), "no-resource-span");
+        assert!(part_b["success"].as_bool().unwrap());
+        assert_eq!(part_b["kind"].as_i64().unwrap(), 0); // Internal
+        assert!(
+            part_b.get("parentId").is_none(),
+            "parentId should not be present for root span"
+        );
+
+        // No PartC expected (no custom attributes)
+        assert!(
+            event.get("PartC").is_none(),
+            "PartC should not be present when there are no attributes"
+        );
+    }
+
     fn check_user_events_available() -> Result<String, String> {
         let output = Command::new("sudo")
             .arg("cat")
