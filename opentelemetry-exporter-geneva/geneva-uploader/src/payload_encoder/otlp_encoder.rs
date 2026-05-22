@@ -126,14 +126,18 @@ impl RoleOverrides {
             };
             match key {
                 "service.name" if overrides.role.is_none() => {
-                    overrides.role = attr
-                        .value()
-                        .and_then(|value| value_as_utf8(&value).map(str::to_owned));
+                    overrides.role = attr.value().and_then(|value| {
+                        value_as_utf8(&value)
+                            .filter(|value| !value.trim().is_empty())
+                            .map(str::to_owned)
+                    });
                 }
                 "service.instance.id" if overrides.role_instance.is_none() => {
-                    overrides.role_instance = attr
-                        .value()
-                        .and_then(|value| value_as_utf8(&value).map(str::to_owned));
+                    overrides.role_instance = attr.value().and_then(|value| {
+                        value_as_utf8(&value)
+                            .filter(|value| !value.trim().is_empty())
+                            .map(str::to_owned)
+                    });
                 }
                 _ => {}
             }
@@ -222,7 +226,8 @@ impl<'a> LogRecordParts<'a> {
             .and_then(|b| std::str::from_utf8(b).ok())
             .filter(|s| !s.is_empty())
             .map(Cow::Borrowed);
-        let body = record.body().and_then(|body| {
+        let body_value = record.body();
+        let body = body_value.as_ref().and_then(|body| {
             (body.value_type() == ValueType::String)
                 .then(|| body.as_string())
                 .flatten()
@@ -247,6 +252,12 @@ impl<'a> LogRecordParts<'a> {
             dynamic_fields: Vec::new(),
             dynamic_values: Vec::new(),
         };
+
+        if let Some(body) = body_value.as_ref() {
+            if parts.body.is_none() {
+                parts.push_dynamic_value(Cow::Borrowed(FIELD_BODY), body);
+            }
+        }
 
         for attr in record.attributes() {
             let Ok(key) = std::str::from_utf8(attr.key()) else {
@@ -331,19 +342,15 @@ impl<'a> LogRecordParts<'a> {
                 }
                 "PartA.ext_dt_traceId" => {
                     if let Some(trace_id) = value.as_ref().and_then(value_as_utf8) {
-                        if let Some(bytes) = parse_hex_bytes::<16>(trace_id) {
+                        if let Some(bytes) = parse_hex_bytes::<16>(trace_id.trim()) {
                             parts.trace_id = Some(bytes);
-                        } else {
-                            parts.push_dynamic_str(Cow::Borrowed("trace.id"), trace_id);
                         }
                     }
                 }
                 "PartA.ext_dt_spanId" => {
                     if let Some(span_id) = value.as_ref().and_then(value_as_utf8) {
-                        if let Some(bytes) = parse_hex_bytes::<8>(span_id) {
+                        if let Some(bytes) = parse_hex_bytes::<8>(span_id.trim()) {
                             parts.span_id = Some(bytes);
-                        } else {
-                            parts.push_dynamic_str(Cow::Borrowed("span.id"), span_id);
                         }
                     }
                 }
@@ -358,7 +365,7 @@ impl<'a> LogRecordParts<'a> {
                     if let Some(value) = value
                         .as_ref()
                         .and_then(value_as_utf8)
-                        .filter(|s| !s.is_empty())
+                        .filter(|s| !s.trim().is_empty())
                     {
                         parts.role = Cow::Owned(value.to_owned());
                     }
@@ -367,7 +374,7 @@ impl<'a> LogRecordParts<'a> {
                     if let Some(value) = value
                         .as_ref()
                         .and_then(value_as_utf8)
-                        .filter(|s| !s.is_empty())
+                        .filter(|s| !s.trim().is_empty())
                     {
                         parts.role_instance = Cow::Owned(value.to_owned());
                     }
@@ -383,7 +390,7 @@ impl<'a> LogRecordParts<'a> {
                 }
                 "PartB.severityNumber" => {
                     if let Some(number) = value.as_ref().and_then(value_as_i64) {
-                        parts.severity_number = number.clamp(0, 24) as i32;
+                        parts.severity_number = number as i32;
                     }
                 }
                 "PartB.severityText" => {
@@ -456,18 +463,6 @@ impl<'a> LogRecordParts<'a> {
             value_len,
         });
         true
-    }
-
-    fn push_dynamic_str(&mut self, name: Cow<'static, str>, value: &str) {
-        let value_start = self.dynamic_values.len();
-        BondWriter::write_string(&mut self.dynamic_values, value);
-        let value_len = self.dynamic_values.len() - value_start;
-        self.dynamic_fields.push(DynamicField {
-            name,
-            type_id: BondDataType::BT_STRING,
-            value_start,
-            value_len,
-        });
     }
 
     fn finish_fields(&mut self) {
@@ -616,9 +611,9 @@ fn value_as_i64<'value, V>(value: &V) -> Option<i64>
 where
     V: AnyValueView<'value>,
 {
-    (value.value_type() == ValueType::Int64)
-        .then(|| value.as_int64())
-        .flatten()
+    // Numeric-only on purpose: string values such as "1024" or "0x400" must not
+    // trigger Common Schema auto-detection by accident.
+    value.as_int64()
 }
 
 fn bond_type_for_value<'value, V>(value: &V) -> Option<BondDataType>
@@ -1837,6 +1832,8 @@ mod tests {
 
         assert_eq!(result.len(), 1);
         assert_eq!(result[0].event_name, "test_event");
+        assert_eq!(result[0].compressed_size(), result[0].data.len());
+        assert!(result[0].compressed_size() > 0);
     }
 
     #[test]
@@ -2043,7 +2040,9 @@ mod tests {
 
         let canonical = LogRecord {
             event_name: "BodyEvent".to_string(),
-            attributes: vec![int_attr(FIELD_BODY, 42)],
+            body: Some(AnyValue {
+                value: Some(Value::IntValue(42)),
+            }),
             ..Default::default()
         };
 
@@ -2064,6 +2063,160 @@ mod tests {
                 .unwrap();
 
         assert_single_batch_equal(&canonical_encoded, &common_schema_encoded);
+    }
+
+    #[test]
+    fn test_common_schema_malformed_trace_context_is_omitted_like_canonical() {
+        let encoder = OtlpEncoder::new();
+        let metadata = make_metadata("cs-malformed-trace-context");
+
+        let canonical = LogRecord {
+            event_name: "MalformedIds".to_string(),
+            body: Some(AnyValue {
+                value: Some(Value::StringValue("body".to_string())),
+            }),
+            ..Default::default()
+        };
+
+        let common_schema = LogRecord {
+            attributes: vec![
+                int_attr(KEY_CSVER, CS_VERSION_4),
+                string_attr(KEY_PARTB_TYPENAME, CS_LOG_TYPENAME),
+                string_attr("PartB.name", "MalformedIds"),
+                string_attr("PartB.body", "body"),
+                string_attr("PartA.ext_dt_traceId", "not-a-trace-id"),
+                string_attr("PartA.ext_dt_spanId", "   "),
+            ],
+            ..Default::default()
+        };
+
+        let canonical_encoded =
+            encode_log_batch_via_proto(&encoder, std::iter::once(&canonical), &metadata).unwrap();
+        let common_schema_encoded =
+            encode_log_batch_via_proto(&encoder, std::iter::once(&common_schema), &metadata)
+                .unwrap();
+
+        assert_single_batch_equal(&canonical_encoded, &common_schema_encoded);
+    }
+
+    #[test]
+    fn test_common_schema_out_of_range_severity_matches_canonical() {
+        let encoder = OtlpEncoder::new();
+        let metadata = make_metadata("cs-severity-parity");
+
+        let canonical = LogRecord {
+            event_name: "SeverityEvent".to_string(),
+            severity_number: 50,
+            body: Some(AnyValue {
+                value: Some(Value::StringValue("body".to_string())),
+            }),
+            ..Default::default()
+        };
+
+        let common_schema = LogRecord {
+            attributes: vec![
+                int_attr(KEY_CSVER, CS_VERSION_4),
+                string_attr(KEY_PARTB_TYPENAME, CS_LOG_TYPENAME),
+                string_attr("PartB.name", "SeverityEvent"),
+                int_attr("PartB.severityNumber", 50),
+                string_attr("PartB.body", "body"),
+            ],
+            ..Default::default()
+        };
+
+        let canonical_encoded =
+            encode_log_batch_via_proto(&encoder, std::iter::once(&canonical), &metadata).unwrap();
+        let common_schema_encoded =
+            encode_log_batch_via_proto(&encoder, std::iter::once(&common_schema), &metadata)
+                .unwrap();
+
+        assert_single_batch_equal(&canonical_encoded, &common_schema_encoded);
+    }
+
+    #[test]
+    fn test_common_schema_blank_role_matches_blank_resource_service_attributes() {
+        let encoder = OtlpEncoder::new();
+        let metadata = make_metadata("cs-blank-role-parity");
+
+        let canonical = LogRecord {
+            event_name: "BlankRole".to_string(),
+            body: Some(AnyValue {
+                value: Some(Value::StringValue("body".to_string())),
+            }),
+            ..Default::default()
+        };
+
+        let common_schema = LogRecord {
+            attributes: vec![
+                int_attr(KEY_CSVER, CS_VERSION_4),
+                string_attr(KEY_PARTB_TYPENAME, CS_LOG_TYPENAME),
+                string_attr("PartA.ext_cloud_role", ""),
+                string_attr("PartA.ext_cloud_roleInstance", "   "),
+                string_attr("PartB.name", "BlankRole"),
+                string_attr("PartB.body", "body"),
+            ],
+            ..Default::default()
+        };
+
+        let canonical_encoded = encode_log_batch_with_resource_attrs(
+            &encoder,
+            std::iter::once(&canonical),
+            vec![
+                string_attr("service.name", ""),
+                string_attr("service.instance.id", "   "),
+            ],
+            &metadata,
+        )
+        .unwrap();
+        let common_schema_encoded =
+            encode_log_batch_via_proto(&encoder, std::iter::once(&common_schema), &metadata)
+                .unwrap();
+
+        assert_single_batch_equal(&canonical_encoded, &common_schema_encoded);
+    }
+
+    #[test]
+    fn test_common_schema_and_canonical_records_share_batch_by_route_and_role() {
+        let encoder = OtlpEncoder::new();
+        let metadata = make_metadata("cs-canonical-co-batch");
+
+        let canonical = LogRecord {
+            event_name: "SharedEvent".to_string(),
+            body: Some(AnyValue {
+                value: Some(Value::StringValue("canonical".to_string())),
+            }),
+            attributes: vec![int_attr("result", 1)],
+            ..Default::default()
+        };
+
+        let common_schema = LogRecord {
+            attributes: vec![
+                int_attr(KEY_CSVER, CS_VERSION_4),
+                string_attr(KEY_PARTB_TYPENAME, CS_LOG_TYPENAME),
+                string_attr("PartA.ext_cloud_role", "checkout"),
+                string_attr("PartA.ext_cloud_roleInstance", "instance-1"),
+                string_attr("PartB.name", "SharedEvent"),
+                string_attr("PartB.body", "common-schema"),
+                int_attr("PartC.result", 2),
+            ],
+            ..Default::default()
+        };
+
+        let encoded = encode_log_batch_with_resource_attrs(
+            &encoder,
+            [&canonical, &common_schema],
+            vec![
+                string_attr("service.name", "checkout"),
+                string_attr("service.instance.id", "instance-1"),
+            ],
+            &metadata,
+        )
+        .unwrap();
+
+        assert_eq!(encoded.len(), 1);
+        assert_eq!(encoded[0].event_name, "SharedEvent");
+        assert_eq!(encoded[0].row_count, 2);
+        assert!(!encoded[0].metadata.schema_ids.is_empty());
     }
 
     #[test]
