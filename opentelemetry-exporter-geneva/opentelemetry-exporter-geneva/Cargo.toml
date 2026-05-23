@@ -14,7 +14,7 @@ opentelemetry_sdk = { version = "0.31", default-features = false, features = ["l
 opentelemetry-proto = { version = "0.31", default-features = false, features = ["logs", "trace"] }
 geneva-uploader = { path = "../geneva-uploader", version = "0.5.0" }
 futures = "0.3"
-otap-df-pdata-views = { git = "https://github.com/open-telemetry/otel-arrow", rev = "15371dc7" }
+otap-df-pdata-views = { git = "https://github.com/open-telemetry/otel-arrow", rev = "fabbe70" }
 
 [dev-dependencies]
 opentelemetry-appender-tracing = { version = "0.31" }
