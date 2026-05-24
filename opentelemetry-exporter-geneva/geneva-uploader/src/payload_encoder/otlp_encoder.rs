@@ -146,6 +146,7 @@ impl RoleOverrides {
     }
 }
 
+#[derive(Clone)]
 struct DynamicField {
     name: Cow<'static, str>,
     type_id: BondDataType,
@@ -189,7 +190,6 @@ impl<'a> LogRecordParts<'a> {
         resource_role: &'a RoleOverrides,
         obo_event_map: Option<&'a OboEventMap>,
     ) -> Self {
-        let cs = CommonSchemaRecord::detect(record);
         let role = resource_role
             .role
             .as_deref()
@@ -201,17 +201,13 @@ impl<'a> LogRecordParts<'a> {
             .map(Cow::Borrowed)
             .unwrap_or_else(|| Cow::Borrowed(&metadata_fields.role_instance));
 
-        let mut parts = if cs.is_common_schema {
-            Self::from_common_schema(record, role, role_instance)
-        } else {
-            Self::from_canonical(record, role, role_instance)
-        };
+        let mut parts = LogRecordPartsParser::new(record, role, role_instance).parse(record);
         parts.obo_config = lookup_obo_config(obo_event_map, parts.routing_event_name.as_ref());
         parts.finish_fields();
         parts
     }
 
-    fn from_canonical<R: LogRecordView>(
+    fn canonical_base<R: LogRecordView>(
         record: &'a R,
         role: Cow<'a, str>,
         role_instance: Cow<'a, str>,
@@ -259,25 +255,15 @@ impl<'a> LogRecordParts<'a> {
             }
         }
 
-        for attr in record.attributes() {
-            let Ok(key) = std::str::from_utf8(attr.key()) else {
-                continue;
-            };
-            let Some(value) = attr.value() else {
-                continue;
-            };
-            parts.push_dynamic_value(Cow::Owned(key.to_owned()), &value);
-        }
-
         parts
     }
 
-    fn from_common_schema<R: LogRecordView>(
+    fn common_schema_base<R: LogRecordView>(
         record: &'a R,
         role: Cow<'a, str>,
         role_instance: Cow<'a, str>,
     ) -> Self {
-        let mut parts = Self {
+        Self {
             timestamp: record_timestamp(record),
             routing_event_name: Cow::Borrowed(CS_LOG_TYPENAME),
             name: None,
@@ -304,146 +290,7 @@ impl<'a> LogRecordParts<'a> {
             dynamic_fields_start: 0,
             dynamic_fields: Vec::new(),
             dynamic_values: Vec::new(),
-        };
-
-        let mut part_a_name = None;
-        let mut part_b_name = None;
-        for attr in record.attributes() {
-            let Ok(key) = std::str::from_utf8(attr.key()) else {
-                continue;
-            };
-            let value = attr.value();
-            match key {
-                KEY_CSVER | KEY_PARTB_TYPENAME => {}
-                "PartA.time" => {
-                    if let Some(time) = value.as_ref().and_then(value_as_utf8) {
-                        if let Some(nanos) = parse_rfc3339_nanos(time) {
-                            parts.timestamp = nanos;
-                        }
-                    }
-                }
-                "PartA.name" => {
-                    if let Some(name) = value
-                        .as_ref()
-                        .and_then(value_as_utf8)
-                        .filter(|s| !s.is_empty())
-                    {
-                        part_a_name = Some(Cow::Owned(name.to_owned()));
-                    }
-                }
-                "PartB.name" => {
-                    if let Some(name) = value
-                        .as_ref()
-                        .and_then(value_as_utf8)
-                        .filter(|s| !s.is_empty())
-                    {
-                        part_b_name = Some(Cow::Owned(name.to_owned()));
-                    }
-                }
-                "PartA.ext_dt_traceId" => {
-                    if let Some(trace_id) = value.as_ref().and_then(value_as_utf8) {
-                        if let Some(bytes) = parse_hex_bytes::<16>(trace_id.trim()) {
-                            parts.trace_id = Some(bytes);
-                        }
-                    }
-                }
-                "PartA.ext_dt_spanId" => {
-                    if let Some(span_id) = value.as_ref().and_then(value_as_utf8) {
-                        if let Some(bytes) = parse_hex_bytes::<8>(span_id.trim()) {
-                            parts.span_id = Some(bytes);
-                        }
-                    }
-                }
-                "PartA.ext_dt_traceFlags" => {
-                    if let Some(flags) = value.as_ref().and_then(value_as_i64) {
-                        if let Ok(flags) = u32::try_from(flags) {
-                            parts.trace_flags = Some(flags);
-                        }
-                    }
-                }
-                "PartA.ext_cloud_role" => {
-                    if let Some(value) = value
-                        .as_ref()
-                        .and_then(value_as_utf8)
-                        .filter(|s| !s.trim().is_empty())
-                    {
-                        parts.role = Cow::Owned(value.to_owned());
-                    }
-                }
-                "PartA.ext_cloud_roleInstance" => {
-                    if let Some(value) = value
-                        .as_ref()
-                        .and_then(value_as_utf8)
-                        .filter(|s| !s.trim().is_empty())
-                    {
-                        parts.role_instance = Cow::Owned(value.to_owned());
-                    }
-                }
-                "PartB.body" => {
-                    if let Some(value) = value.as_ref() {
-                        if let Some(body) = value_as_utf8(value) {
-                            parts.body = Some(Cow::Owned(body.to_owned()));
-                        } else {
-                            parts.push_dynamic_value(Cow::Borrowed(FIELD_BODY), value);
-                        }
-                    }
-                }
-                "PartB.severityNumber" => {
-                    if let Some(number) = value.as_ref().and_then(value_as_i64) {
-                        parts.severity_number = number as i32;
-                    }
-                }
-                "PartB.severityText" => {
-                    if let Some(text) = value
-                        .as_ref()
-                        .and_then(value_as_utf8)
-                        .filter(|s| !s.is_empty())
-                    {
-                        parts.severity_text = Some(Cow::Owned(text.to_owned()));
-                    }
-                }
-                "PartB.eventId" => {
-                    if let Some(value) = value.as_ref() {
-                        parts.push_dynamic_value(Cow::Borrowed("eventId"), value);
-                    }
-                }
-                key if key.starts_with("PartC.") => {
-                    if let Some(value) = value.as_ref() {
-                        parts.push_dynamic_value(
-                            Cow::Owned(key["PartC.".len()..].to_owned()),
-                            value,
-                        );
-                    }
-                }
-                key if key.starts_with("PartA.") => {
-                    if let Some(value) = value.as_ref() {
-                        parts.push_dynamic_value(
-                            Cow::Owned(key["PartA.".len()..].to_owned()),
-                            value,
-                        );
-                    }
-                }
-                key if key.starts_with("PartB.") => {
-                    if let Some(value) = value.as_ref() {
-                        parts.push_dynamic_value(
-                            Cow::Owned(key["PartB.".len()..].to_owned()),
-                            value,
-                        );
-                    }
-                }
-                _ => {
-                    if let Some(value) = value.as_ref() {
-                        parts.push_dynamic_value(Cow::Owned(key.to_owned()), value);
-                    }
-                }
-            }
         }
-
-        parts.name = part_b_name.or(part_a_name);
-        if let Some(name) = &parts.name {
-            parts.routing_event_name = Cow::Owned(name.to_string());
-        }
-        parts
     }
 
     fn push_dynamic_value<'value, V>(&mut self, name: Cow<'static, str>, value: &V) -> bool
@@ -463,6 +310,33 @@ impl<'a> LogRecordParts<'a> {
             value_len,
         });
         true
+    }
+
+    fn append_dynamic_prefix_from(&mut self, source: &Self, field_count: usize) {
+        if field_count == 0 {
+            return;
+        }
+
+        let Some(byte_end) = source.dynamic_fields[..field_count]
+            .last()
+            .map(|field| field.value_start + field.value_len)
+        else {
+            return;
+        };
+
+        let value_offset = self.dynamic_values.len();
+        self.dynamic_values
+            .extend_from_slice(&source.dynamic_values[..byte_end]);
+        self.dynamic_fields
+            .extend(
+                source.dynamic_fields[..field_count]
+                    .iter()
+                    .cloned()
+                    .map(|mut field| {
+                        field.value_start += value_offset;
+                        field
+                    }),
+            );
     }
 
     fn finish_fields(&mut self) {
@@ -550,41 +424,259 @@ impl<'a> LogRecordParts<'a> {
     }
 }
 
-#[derive(Default)]
-struct CommonSchemaRecord {
-    is_common_schema: bool,
+struct LogRecordPartsParser<'a> {
+    canonical: Option<LogRecordParts<'a>>,
+    common_schema: Option<CommonSchemaParts<'a>>,
+    role: Cow<'a, str>,
+    role_instance: Cow<'a, str>,
+    has_cs_version: bool,
+    has_cs_log_type: bool,
 }
 
-impl CommonSchemaRecord {
-    fn detect(record: &impl LogRecordView) -> Self {
-        let mut has_version = false;
-        let mut has_log_type = false;
+impl<'a> LogRecordPartsParser<'a> {
+    fn new<R: LogRecordView>(
+        record: &'a R,
+        role: Cow<'a, str>,
+        role_instance: Cow<'a, str>,
+    ) -> Self {
+        Self {
+            canonical: Some(LogRecordParts::canonical_base(
+                record,
+                role.clone(),
+                role_instance.clone(),
+            )),
+            common_schema: None,
+            role,
+            role_instance,
+            has_cs_version: false,
+            has_cs_log_type: false,
+        }
+    }
+
+    fn parse<R: LogRecordView>(mut self, record: &'a R) -> LogRecordParts<'a> {
         for attr in record.attributes() {
             let Ok(key) = std::str::from_utf8(attr.key()) else {
                 continue;
             };
-            match key {
-                KEY_CSVER => {
-                    has_version = attr
-                        .value()
-                        .and_then(|value| value_as_i64(&value))
-                        .is_some_and(|value| value == CS_VERSION_4);
+
+            let value = attr.value();
+            if self.common_schema.is_some() || is_common_schema_key(key) {
+                self.ensure_common_schema(record);
+                if let Some(common_schema) = &mut self.common_schema {
+                    common_schema.apply_attr(key, value.as_ref());
                 }
-                KEY_PARTB_TYPENAME => {
-                    has_log_type = attr.value().is_some_and(|value| {
-                        value_as_utf8(&value).is_some_and(|value| value == CS_LOG_TYPENAME)
-                    });
-                }
-                _ => {}
+                self.update_common_schema_markers(key, value.as_ref());
             }
-            if has_version && has_log_type {
-                return Self {
-                    is_common_schema: true,
-                };
+
+            if let Some(canonical) = &mut self.canonical {
+                if let Some(value) = value.as_ref() {
+                    canonical.push_dynamic_value(Cow::Owned(key.to_owned()), value);
+                }
+            }
+
+            if self.is_common_schema() {
+                self.confirm_common_schema();
             }
         }
-        Self::default()
+
+        match self.canonical {
+            Some(canonical) => canonical,
+            None => self
+                .common_schema
+                .expect("Common Schema state is retained once confirmed")
+                .finish(),
+        }
     }
+
+    fn ensure_common_schema<R: LogRecordView>(&mut self, record: &'a R) {
+        if self.common_schema.is_some() {
+            return;
+        }
+
+        let mut common_schema =
+            CommonSchemaParts::new(record, self.role.clone(), self.role_instance.clone());
+        if let Some(canonical) = &self.canonical {
+            common_schema
+                .parts
+                .append_dynamic_prefix_from(canonical, canonical.dynamic_fields.len());
+        }
+        self.common_schema = Some(common_schema);
+    }
+
+    fn update_common_schema_markers<'value, V>(&mut self, key: &str, value: Option<&V>)
+    where
+        V: AnyValueView<'value>,
+    {
+        match key {
+            KEY_CSVER => {
+                self.has_cs_version = value
+                    .and_then(value_as_i64)
+                    .is_some_and(|value| value == CS_VERSION_4);
+            }
+            KEY_PARTB_TYPENAME => {
+                self.has_cs_log_type = value
+                    .and_then(value_as_utf8)
+                    .is_some_and(|value| value == CS_LOG_TYPENAME);
+            }
+            _ => {}
+        }
+    }
+
+    fn is_common_schema(&self) -> bool {
+        self.has_cs_version && self.has_cs_log_type
+    }
+
+    fn confirm_common_schema(&mut self) {
+        self.canonical.take();
+    }
+}
+
+struct CommonSchemaParts<'a> {
+    parts: LogRecordParts<'a>,
+    part_a_name: Option<Cow<'a, str>>,
+    part_b_name: Option<Cow<'a, str>>,
+}
+
+impl<'a> CommonSchemaParts<'a> {
+    fn new<R: LogRecordView>(
+        record: &'a R,
+        role: Cow<'a, str>,
+        role_instance: Cow<'a, str>,
+    ) -> Self {
+        Self {
+            parts: LogRecordParts::common_schema_base(record, role, role_instance),
+            part_a_name: None,
+            part_b_name: None,
+        }
+    }
+
+    fn apply_attr<'value, V>(&mut self, key: &str, value: Option<&V>)
+    where
+        V: AnyValueView<'value>,
+    {
+        match key {
+            KEY_CSVER | KEY_PARTB_TYPENAME => {}
+            "PartA.time" => {
+                if let Some(time) = value.and_then(value_as_utf8) {
+                    if let Some(nanos) = parse_rfc3339_nanos(time) {
+                        self.parts.timestamp = nanos;
+                    }
+                }
+            }
+            "PartA.name" => {
+                if let Some(name) = value.and_then(value_as_utf8).filter(|s| !s.is_empty()) {
+                    self.part_a_name = Some(Cow::Owned(name.to_owned()));
+                }
+            }
+            "PartB.name" => {
+                if let Some(name) = value.and_then(value_as_utf8).filter(|s| !s.is_empty()) {
+                    self.part_b_name = Some(Cow::Owned(name.to_owned()));
+                }
+            }
+            "PartA.ext_dt_traceId" => {
+                if let Some(trace_id) = value.and_then(value_as_utf8) {
+                    if let Some(bytes) = parse_hex_bytes::<16>(trace_id.trim()) {
+                        self.parts.trace_id = Some(bytes);
+                    }
+                }
+            }
+            "PartA.ext_dt_spanId" => {
+                if let Some(span_id) = value.and_then(value_as_utf8) {
+                    if let Some(bytes) = parse_hex_bytes::<8>(span_id.trim()) {
+                        self.parts.span_id = Some(bytes);
+                    }
+                }
+            }
+            "PartA.ext_dt_traceFlags" => {
+                if let Some(flags) = value.and_then(value_as_i64) {
+                    if let Ok(flags) = u32::try_from(flags) {
+                        self.parts.trace_flags = Some(flags);
+                    }
+                }
+            }
+            "PartA.ext_cloud_role" => {
+                if let Some(value) = value
+                    .and_then(value_as_utf8)
+                    .filter(|s| !s.trim().is_empty())
+                {
+                    self.parts.role = Cow::Owned(value.to_owned());
+                }
+            }
+            "PartA.ext_cloud_roleInstance" => {
+                if let Some(value) = value
+                    .and_then(value_as_utf8)
+                    .filter(|s| !s.trim().is_empty())
+                {
+                    self.parts.role_instance = Cow::Owned(value.to_owned());
+                }
+            }
+            "PartB.body" => {
+                if let Some(value) = value {
+                    if let Some(body) = value_as_utf8(value) {
+                        self.parts.body = Some(Cow::Owned(body.to_owned()));
+                    } else {
+                        self.parts
+                            .push_dynamic_value(Cow::Borrowed(FIELD_BODY), value);
+                    }
+                }
+            }
+            "PartB.severityNumber" => {
+                if let Some(number) = value.and_then(value_as_i64) {
+                    self.parts.severity_number = number as i32;
+                }
+            }
+            "PartB.severityText" => {
+                if let Some(text) = value.and_then(value_as_utf8).filter(|s| !s.is_empty()) {
+                    self.parts.severity_text = Some(Cow::Owned(text.to_owned()));
+                }
+            }
+            "PartB.eventId" => {
+                if let Some(value) = value {
+                    self.parts
+                        .push_dynamic_value(Cow::Borrowed("eventId"), value);
+                }
+            }
+            key if key.starts_with("PartC.") => {
+                if let Some(value) = value {
+                    self.parts
+                        .push_dynamic_value(Cow::Owned(key["PartC.".len()..].to_owned()), value);
+                }
+            }
+            key if key.starts_with("PartA.") => {
+                if let Some(value) = value {
+                    self.parts
+                        .push_dynamic_value(Cow::Owned(key["PartA.".len()..].to_owned()), value);
+                }
+            }
+            key if key.starts_with("PartB.") => {
+                if let Some(value) = value {
+                    self.parts
+                        .push_dynamic_value(Cow::Owned(key["PartB.".len()..].to_owned()), value);
+                }
+            }
+            _ => {
+                if let Some(value) = value {
+                    self.parts
+                        .push_dynamic_value(Cow::Owned(key.to_owned()), value);
+                }
+            }
+        }
+    }
+
+    fn finish(mut self) -> LogRecordParts<'a> {
+        self.parts.name = self.part_b_name.or(self.part_a_name);
+        if let Some(name) = &self.parts.name {
+            self.parts.routing_event_name = Cow::Owned(name.to_string());
+        }
+        self.parts
+    }
+}
+
+fn is_common_schema_key(key: &str) -> bool {
+    matches!(key, KEY_CSVER | KEY_PARTB_TYPENAME)
+        || key.starts_with("PartA.")
+        || key.starts_with("PartB.")
+        || key.starts_with("PartC.")
 }
 
 fn record_timestamp(record: &impl LogRecordView) -> u64 {
@@ -2217,6 +2309,77 @@ mod tests {
         assert_eq!(encoded[0].event_name, "SharedEvent");
         assert_eq!(encoded[0].row_count, 2);
         assert!(!encoded[0].metadata.schema_ids.is_empty());
+    }
+
+    #[test]
+    fn test_common_schema_late_confirmation_keeps_prior_plain_attributes() {
+        let encoder = OtlpEncoder::new();
+        let metadata = make_metadata("cs-late-confirm");
+
+        let canonical = LogRecord {
+            event_name: "LateConfirm".to_string(),
+            attributes: vec![string_attr("prelude", "kept"), int_attr("result", 7)],
+            ..Default::default()
+        };
+
+        let common_schema = LogRecord {
+            attributes: vec![
+                string_attr("prelude", "kept"),
+                int_attr("PartC.result", 7),
+                int_attr(KEY_CSVER, CS_VERSION_4),
+                string_attr("PartB.name", "LateConfirm"),
+                string_attr(KEY_PARTB_TYPENAME, CS_LOG_TYPENAME),
+            ],
+            ..Default::default()
+        };
+
+        let canonical_encoded =
+            encode_log_batch_via_proto(&encoder, std::iter::once(&canonical), &metadata).unwrap();
+        let common_schema_encoded =
+            encode_log_batch_via_proto(&encoder, std::iter::once(&common_schema), &metadata)
+                .unwrap();
+
+        assert_single_batch_equal(&canonical_encoded, &common_schema_encoded);
+    }
+
+    #[test]
+    fn test_common_schema_requires_version_and_log_typename_markers() {
+        let encoder = OtlpEncoder::new();
+        let metadata = make_metadata("cs-marker-strictness");
+
+        let missing_typename = LogRecord {
+            attributes: vec![
+                int_attr(KEY_CSVER, CS_VERSION_4),
+                string_attr("PartB.name", "ShouldStayCanonical"),
+            ],
+            ..Default::default()
+        };
+        let wrong_typename = LogRecord {
+            attributes: vec![
+                int_attr(KEY_CSVER, CS_VERSION_4),
+                string_attr(KEY_PARTB_TYPENAME, "Metric"),
+                string_attr("PartB.name", "ShouldStayCanonical"),
+            ],
+            ..Default::default()
+        };
+        let missing_version = LogRecord {
+            attributes: vec![
+                string_attr(KEY_PARTB_TYPENAME, CS_LOG_TYPENAME),
+                string_attr("PartB.name", "ShouldStayCanonical"),
+            ],
+            ..Default::default()
+        };
+
+        let encoded = encode_log_batch_via_proto(
+            &encoder,
+            [&missing_typename, &wrong_typename, &missing_version],
+            &metadata,
+        )
+        .unwrap();
+
+        assert_eq!(encoded.len(), 1);
+        assert_eq!(encoded[0].event_name, CS_LOG_TYPENAME);
+        assert_eq!(encoded[0].row_count, 3);
     }
 
     #[test]
