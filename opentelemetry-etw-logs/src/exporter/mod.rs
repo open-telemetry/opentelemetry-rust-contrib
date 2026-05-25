@@ -143,7 +143,6 @@ impl ETWExporter {
         Ok(())
     }
 
-    #[cfg(feature = "spec_unstable_logs_enabled")]
     pub(crate) fn event_enabled(
         &self,
         level: Severity,

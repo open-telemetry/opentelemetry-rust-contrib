@@ -6,6 +6,14 @@
 
 - Read `cloud.account.id` from symlink created by the OTel Lambda Extension in the Lambda resource detector
 
+## v0.20.0
+
+Released 2026-May-13
+
+### Changed
+
+- Bump opentelemetry and opentelemetry_sdk versions to 0.32.0
+
 ## v0.19.0
 
 ### Changed

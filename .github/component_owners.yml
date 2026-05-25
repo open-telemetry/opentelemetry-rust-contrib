@@ -46,6 +46,7 @@ components:
 
   opentelemetry-instrumentation-tower/:
     - francoposa
+    - jan-xyz
 
   opentelemetry-resource-detectors/:
     - gruebel

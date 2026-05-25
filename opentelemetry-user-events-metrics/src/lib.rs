@@ -137,6 +137,8 @@ mod tests {
                     &duration_secs.to_string(),
                     "perf",
                     "record",
+                    "-o",
+                    "./perf.data",
                     "-e",
                     event,
                 ])
