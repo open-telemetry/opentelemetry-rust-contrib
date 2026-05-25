@@ -39,8 +39,7 @@ impl LambdaResourceDetector {
             if let Some(account_id_str) = account_id.to_str() {
                 // Validate that the symlink target looks like a real AWS account ID:
                 // exactly 12 ASCII decimal digits. Reject corrupted/garbage targets.
-                if account_id_str.len() == 12
-                    && account_id_str.chars().all(|c| c.is_ascii_digit())
+                if account_id_str.len() == 12 && account_id_str.chars().all(|c| c.is_ascii_digit())
                 {
                     extra.push(KeyValue::new(
                         semconv::resource::CLOUD_ACCOUNT_ID,
