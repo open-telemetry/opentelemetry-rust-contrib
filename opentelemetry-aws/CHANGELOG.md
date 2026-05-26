@@ -2,6 +2,10 @@
 
 ## vNext
 
+### Added
+
+- Read `cloud.account.id` from symlink created by the OTel Lambda Extension in the Lambda resource detector
+
 ## v0.20.0
 
 Released 2026-May-13
