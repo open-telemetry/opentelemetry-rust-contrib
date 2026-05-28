@@ -16,7 +16,6 @@ eventheader_dynamic = "0.5.0"
 opentelemetry = { workspace = true, features = ["logs"] }
 opentelemetry_sdk = { workspace = true, features = ["logs"] }
 chrono = { version = "0.4", default-features = false, features = ["std"] }
-futures-executor = "0.3"
 
 [dev-dependencies]
 opentelemetry-appender-tracing = { workspace = true }
