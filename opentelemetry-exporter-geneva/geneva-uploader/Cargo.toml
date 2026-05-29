@@ -39,6 +39,7 @@ mock_auth = [] # Disabled by default. Not to be enabled in the prod release.
 default = []
 
 [dev-dependencies]
+geneva-test-server = { path = "../geneva-test-server", features = ["testing"] }
 otap-df-pdata = { git = "https://github.com/open-telemetry/otel-arrow", rev = "15371dc7" }
 prost = "0.14"
 tokio = { version = "1", features = ["full"] }

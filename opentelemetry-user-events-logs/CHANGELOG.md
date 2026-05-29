@@ -2,6 +2,11 @@
 
 ## vNext
 
+- Removed `futures-executor` dependency and `LogExporter` trait implementation.
+  The processor now calls the exporter synchronously, avoiding potential panics
+  from nested `block_on()` calls (e.g. when logging from inside an async
+  runtime).
+
 ## v0.16.0
 
 Released 2026-May-13
