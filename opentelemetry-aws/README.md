@@ -70,7 +70,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 | Feature | Default | Description |
 |---------|---------|-------------|
 | `trace` | Yes | X-Ray propagator and ID generator |
-| `xray-exporter` | Yes | X-Ray span exporter with `SegmentTranslator` and `SegmentDocumentExporter` trait |
+| `xray-exporter` | No | X-Ray span exporter with `SegmentTranslator` and `SegmentDocumentExporter` trait |
 | `xray-daemon-client` | No | `XrayDaemonClient` — UDP client for the [X-Ray daemon] |
 | `xray-stdout-client` | No | `StdoutClient` — writes segment documents to stdout (useful for debugging) |
 | `subsegment-nesting` | No | Enables subsegment nesting within parent segments during translation |
