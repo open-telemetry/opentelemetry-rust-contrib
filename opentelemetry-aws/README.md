@@ -48,7 +48,8 @@ use opentelemetry::global;
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Create a client that sends to the X-Ray daemon on localhost:2000 (UDP)
-    let client = XrayDaemonClient::default();
+    let daemon_addr = SocketAddr::new(IpAddr::V4(Ipv4Addr::LOCALHOST), 2000);
+    let client = XrayDaemonClient::new(daemon_addr)?;
 
     // Create the exporter
     let exporter = XrayExporter::new(client);

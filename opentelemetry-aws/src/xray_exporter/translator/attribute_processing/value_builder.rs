@@ -18,7 +18,7 @@ mod beanstalk_deployment_id_builder;
 mod cause_builder;
 mod cloudwatch_log_group_builder;
 mod http_request_url_builder;
-mod http_response_content_lenght_builder;
+mod http_response_content_length_builder;
 mod segment_name_builder;
 mod segment_origin_builder;
 mod sql_url_builder;
@@ -30,7 +30,7 @@ pub(in crate::xray_exporter::translator) use beanstalk_deployment_id_builder::Be
 pub(in crate::xray_exporter::translator) use cause_builder::CauseBuilder;
 pub(in crate::xray_exporter::translator) use cloudwatch_log_group_builder::CloudwatchLogGroupBuilder;
 pub(in crate::xray_exporter::translator) use http_request_url_builder::HttpRequestUrlBuilder;
-pub(in crate::xray_exporter::translator) use http_response_content_lenght_builder::HttpResponseContentLengthBuilder;
+pub(in crate::xray_exporter::translator) use http_response_content_length_builder::HttpResponseContentLengthBuilder;
 pub(in crate::xray_exporter::translator) use segment_name_builder::SegmentNameBuilder;
 pub(in crate::xray_exporter::translator) use segment_origin_builder::SegmentOriginBuilder;
 pub(in crate::xray_exporter::translator) use sql_url_builder::SqlUrlBuilder;
@@ -140,7 +140,7 @@ any_builder_enum!(
     cause_builder::CauseBuilder::<'v>,
     cloudwatch_log_group_builder::CloudwatchLogGroupBuilder::<'v>,
     http_request_url_builder::HttpRequestUrlBuilder::<'v>,
-    http_response_content_lenght_builder::HttpResponseContentLengthBuilder,
+    http_response_content_length_builder::HttpResponseContentLengthBuilder,
     segment_name_builder::SegmentNameBuilder::<'v>,
     segment_origin_builder::SegmentOriginBuilder::<'v>,
     sql_url_builder::SqlUrlBuilder::<'v>,

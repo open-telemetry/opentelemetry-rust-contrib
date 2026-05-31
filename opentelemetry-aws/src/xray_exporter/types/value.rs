@@ -223,6 +223,9 @@ impl<K: Serialize, V: Serialize> Serialize for VectorMap<K, V> {
     where
         S: serde::Serializer,
     {
+        // Map is actually converting `&(k, v)` into `(&k, &v)`
+        // but clippy believes it is a useless identity.
+        #[allow(clippy::map_identity)]
         serializer.collect_map(self.0.iter().map(|(k, v)| (k, v)))
     }
 }

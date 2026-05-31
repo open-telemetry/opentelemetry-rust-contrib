@@ -99,9 +99,9 @@ pub struct XrayDaemonClient {
 }
 
 impl XrayDaemonClient {
-    const DAEMON_HEADER: &[u8] = "{\"format\": \"json\", \"version\": 1}\n".as_bytes();
+    const DAEMON_HEADER: &'static [u8] = "{\"format\": \"json\", \"version\": 1}\n".as_bytes();
     const DEFAULT_DAEMON_PORT: u16 = 2000;
-    const AWS_XRAY_DAEMON_ADDRESS_ENV_VAR: &str = "AWS_XRAY_DAEMON_ADDRESS";
+    const AWS_XRAY_DAEMON_ADDRESS_ENV_VAR: &'static str = "AWS_XRAY_DAEMON_ADDRESS";
 
     /// Creates a new X-Ray daemon client that sends to the specified address.
     ///
@@ -176,7 +176,7 @@ impl XrayDaemonClient {
         segment_document.to_writer(&mut guard.buf);
 
         // Send
-        self.socket.send(&guard.buf)?;
+        self.socket.send(guard.buf)?;
 
         Ok(())
     }

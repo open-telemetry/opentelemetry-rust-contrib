@@ -23,10 +23,12 @@
 //! use opentelemetry_aws::{xray_exporter::{XrayExporter, daemon_client::XrayDaemonClient}, trace::XrayIdGenerator};
 //! use opentelemetry_sdk::trace::SdkTracerProvider;
 //! use opentelemetry::global;
+//! # use std::net::{IpAddr, Ipv4Addr, SocketAddr, UdpSocket};
 //!
 //! # fn main() -> Result<(), Box<dyn std::error::Error>> {
 //! // Create a client that sends to the X-Ray daemon on localhost:2000(udp)
-//! let client = XrayDaemonClient::default();
+//! let daemon_addr = SocketAddr::new(IpAddr::V4(Ipv4Addr::LOCALHOST), 2000);
+//! let client = XrayDaemonClient::new(daemon_addr)?;
 //!
 //! // Create the exporter
 //! let exporter = XrayExporter::new(client);
@@ -86,7 +88,9 @@
 //! [`StdoutClient`]: stdout_client::StdoutClient
 //! [`SpanExporter`]: opentelemetry_sdk::trace::SpanExporter
 
-use core::{error::Error, fmt, future::Future};
+use core::{fmt, future::Future};
+use std::error::Error;
+
 use opentelemetry_sdk::{
     error::{OTelSdkError, OTelSdkResult},
     trace::SpanExporter,
@@ -160,10 +164,10 @@ pub mod error {
 ///
 /// #[derive(Debug)]
 /// struct CustomExporter;
-/// # use core::{error, fmt};
+/// # use core::fmt;
 /// # #[derive(Debug)]
 /// # struct CustomError;
-/// # impl error::Error for CustomError {}
+/// # impl  std::error::Error for CustomError {}
 /// # impl fmt::Display for CustomError {
 /// #     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
 /// #         write!(f, "Oh no, something bad went down")

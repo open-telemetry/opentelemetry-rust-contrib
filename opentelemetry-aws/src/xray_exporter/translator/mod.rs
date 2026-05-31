@@ -627,7 +627,7 @@ impl SegmentTranslator {
         }
 
         let mut last_seen_parent_id = None;
-        let mut last_seens_endtime = None;
+        let mut last_seen_endtime = None;
         let mut precursors = Vec::new();
         // Process every subsegment with two goals:
         // 1. Add the precursor Ids to the subsegment, if any
@@ -662,14 +662,15 @@ impl SegmentTranslator {
                 last_seen_parent_id = Some(parent_id);
                 // We changed parent, clear precursors
                 precursors.clear();
+                last_seen_endtime = None;
             }
 
             // I don't know if this is really necessary or usefull,
             // the goal is to ensure that the precedent segment (if any)
             // indeed ended before this subsegment started.
             // Else we ignore the segment for the purpose of precursors?
-            if last_seens_endtime.is_none()
-                || last_seens_endtime
+            if last_seen_endtime.is_none()
+                || last_seen_endtime
                     .is_some_and(|last_seens_endtime| last_seens_endtime <= start_time)
             {
                 // If there are precursors to set, do it
@@ -681,7 +682,7 @@ impl SegmentTranslator {
                 // - Update the last_seens_endtime
                 // - Add the id of the present segment to the precursor list
                 if let Some(end_time) = end_time {
-                    last_seens_endtime = Some(end_time);
+                    last_seen_endtime = Some(end_time);
                     // MARKER ALLOC
                     precursors.push(id);
                 }
@@ -690,6 +691,15 @@ impl SegmentTranslator {
             let document_builders_parent_index = &(trace_id, parent_id);
             // Now, verify if we got the parent_id, if so add this builder as a subsegment of the parent
             if document_builders.contains_key(document_builders_parent_index) {
+                if document_builders_index == document_builders_parent_index {
+                    #[cfg(feature = "internal-logs")]
+                    tracing::warn!(
+                        message =
+                            "Subsegment cannot be nested because it references itself as its parent",
+                        ?document_builders_index
+                    );
+                    continue;
+                }
                 if let AnyDocumentBuilder::Subsegment(subsegment) = document_builders
                     .remove(document_builders_index)
                     .expect("builders in subsegments are always also in document_builders")
