@@ -72,7 +72,7 @@ impl SpanExporter for UserEventsSpanExporter {
         }
     }
 
-    fn shutdown(&mut self) -> OTelSdkResult {
+    fn shutdown(&self) -> OTelSdkResult {
         // The explicit unregister() is done in shutdown()
         // as it may not be possible to unregister during Drop
         // as `Tracers` are typically *not* dropped.

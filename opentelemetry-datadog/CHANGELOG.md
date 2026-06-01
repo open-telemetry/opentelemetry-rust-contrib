@@ -2,6 +2,17 @@
 
 ## vNext
 
+## v0.20.0
+
+Released 2026-May-13
+
+- Bump opentelemetry and opentelemetry_sdk versions to 0.32
+- Bump opentelemetry-http and opentelemetry-semantic-conventions versions to 0.32
+- Bump `reqwest` from 0.12 to 0.13 (required by `opentelemetry-http` 0.32).
+- **Breaking** `DatadogPipelineBuilder::build_exporter`, `install_simple`, and
+  `install_batch` now return `Result<_, opentelemetry_datadog::Error>` (previously
+  `opentelemetry_sdk::trace::TraceError`, which was removed upstream in 0.32).
+
 ## v0.19.0
 
 - Bump opentelemetry and opentelemetry_sdk versions to 0.31

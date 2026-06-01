@@ -240,12 +240,19 @@ int main(void) {
 
     GenevaError first_err = GENEVA_SUCCESS;
     for (size_t i = 0; i < n; i++) {
+        uint16_t http_status = 0;
+        int64_t retry_after_secs = -1;
         GenevaError up_rc = geneva_upload_batch_sync(
-            client, batches, i, err_buf, sizeof(err_buf));
+            client, batches, i, err_buf, sizeof(err_buf),
+            &http_status, &retry_after_secs);
         if (up_rc != GENEVA_SUCCESS) {
             first_err = up_rc;
-            fprintf(stderr, "Batch %zu upload failed (code=%d): %s\n",
-                    i, up_rc, err_buf);
+            fprintf(stderr, "Batch %zu upload failed (code=%d, http_status=%u): %s\n",
+                    i, up_rc, (unsigned)http_status, err_buf);
+            if (retry_after_secs >= 0) {
+                fprintf(stderr, "  Server requested retry after %lld seconds\n",
+                        (long long)retry_after_secs);
+            }
             break;
         }
         printf("  batch %zu uploaded.\n", i);

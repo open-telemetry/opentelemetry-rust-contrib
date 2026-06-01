@@ -9,7 +9,7 @@ exclude_packages="${MSRV_EXCLUDE_PACKAGES:-}"
 # MSRV_ONLY_PACKAGES="geneva-uploader,geneva-uploader-ffi,opentelemetry-exporter-geneva"
 only_packages="${MSRV_ONLY_PACKAGES:-}"
 
-members=$(cargo metadata -q --no-deps --format-version 1 | jq -r '.packages[] | [.name, .manifest_path] | @tsv')
+members=$(cargo metadata -q --no-deps --format-version 1 | jq -r '.packages[] | select(.publish != []) | [.name, .manifest_path] | @tsv')
 
 while IFS=$'\t' read -r package_name manifest_path; do
   package_name=$(printf '%s' "$package_name" | tr -d '\r')

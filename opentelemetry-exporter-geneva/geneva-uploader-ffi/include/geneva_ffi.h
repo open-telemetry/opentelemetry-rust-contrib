@@ -178,12 +178,18 @@ size_t geneva_batches_len(const EncodedBatchesHandle* batches);
       - err_msg_out: Optional buffer to receive error message (can be NULL).
                      Message will be NUL-terminated and truncated if buffer too small.
                      Recommended size: >= 256 bytes.
-      - err_msg_len: Size of err_msg_out buffer in bytes (ignored if err_msg_out is NULL) */
+      - err_msg_len: Size of err_msg_out buffer in bytes (ignored if err_msg_out is NULL)
+      - out_http_status: Optional pointer to receive the HTTP status code on failure (can be NULL).
+                         Set to 0 if the failure was not an HTTP status error.
+      - out_retry_after_secs: Optional pointer to receive the Retry-After delay in seconds (can be NULL).
+                              Set to -1 if the server did not send a Retry-After header. */
 GenevaError geneva_upload_batch_sync(GenevaClientHandle* handle,
                                      const EncodedBatchesHandle* batches,
                                      size_t index,
                                      char* err_msg_out,
-                                     size_t err_msg_len);
+                                     size_t err_msg_len,
+                                     uint16_t* out_http_status,
+                                     int64_t* out_retry_after_secs);
 
 
 /* 5) Free the batches handle. */

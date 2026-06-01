@@ -2,7 +2,22 @@
 
 ## vNext
 
+- Removed `futures-executor` dependency and `LogExporter` trait implementation.
+  The processor now calls the exporter synchronously, avoiding potential panics
+  from nested `block_on()` calls (e.g. when logging from inside an async
+  runtime).
+
+## v0.16.0
+
+Released 2026-May-13
+
+- Bump opentelemetry and opentelemetry_sdk versions to 0.32
 - Bump eventheader and eventheader_dynamic versions to 0.5.0
+- Removed the `spec_unstable_logs_enabled` cargo feature, since the underlying
+  capability is now stable and always-on in upstream `opentelemetry` 0.32 (the
+  `event_enabled` callback is unconditionally available). This only affects
+  users who explicitly opted into the experimental feature flag; no change is
+  needed for users on the default (stable) feature set.
 
 ## v0.15.0
 

@@ -49,14 +49,18 @@ See `examples/log_records_example.c` for a complete working example.
 
 ```
 geneva_client_new()
-  └─ geneva_encode_and_compress_logs()        ← OTLP path
+  └─ geneva_encode_and_compress_logs()        ← OTLP logs path
      or
-     geneva_encode_and_compress_log_records() ← direct path
+     geneva_encode_and_compress_log_records() ← direct log records path
+     or
+     geneva_encode_and_compress_spans()       ← OTLP spans path
         └─ geneva_batches_len()
         └─ geneva_upload_batch_sync() × N
         └─ geneva_batches_free()
 geneva_client_free()
 ```
+
+See `examples/spans_example.c` for a complete spans example.
 
 ## C header
 
