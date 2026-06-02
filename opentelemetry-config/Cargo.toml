@@ -20,7 +20,7 @@ rustdoc-args = ["--cfg", "docsrs"]
 
 [dependencies]
 opentelemetry = { version = "0.31.0" }
-opentelemetry_sdk = { version = "0.31.0", features = ["experimental_metrics_custom_reader"] }
+opentelemetry_sdk = { version = "0.32.1", features = ["experimental_metrics_custom_reader"] }
 serde = { version = "1.0", features = ["derive"] }
 serde_yaml = { version = "0.9.34" }
 
