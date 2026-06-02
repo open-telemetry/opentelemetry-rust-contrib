@@ -71,12 +71,14 @@ fn create_test_logs(base_timestamp: u64) -> Vec<ResourceLogs> {
                     value: Some(AnyValue {
                         value: Some(Value::StringValue("stress".to_string())),
                     }),
+                    ..Default::default()
                 },
                 KeyValue {
                     key: "index".to_string(),
                     value: Some(AnyValue {
                         value: Some(Value::IntValue(i as i64)),
                     }),
+                    ..Default::default()
                 },
             ],
             ..Default::default()
