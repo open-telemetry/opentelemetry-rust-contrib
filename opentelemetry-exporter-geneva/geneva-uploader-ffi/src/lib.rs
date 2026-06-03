@@ -289,22 +289,26 @@ unsafe fn write_error_if_provided(
 
 /// Converts an FFI OBO event map to the Rust-side `OboEventMap`.
 ///
-/// Returns `None` when the pointer is null, the entries pointer is null,
-/// or the count is zero. Individual entries with null event_name or identity
-/// are silently skipped.
+/// Returns `Ok(None)` when the pointer is null, the entries pointer is null,
+/// or the count is zero. Individual entries with null `event_name` or
+/// `identity` are silently skipped.
+///
+/// Returns `Err` if any non-null string pointer contains invalid UTF-8,
+/// matching the validation behavior used for the other config fields in
+/// `geneva_client_new`.
 ///
 /// # Safety
 /// - `ffi_map` must be null or point to a valid `FfiOboEventMap`
-/// - All non-null string pointers inside entries must be valid null-terminated UTF-8
+/// - All non-null string pointers inside entries must be valid null-terminated C strings
 unsafe fn convert_obo_event_map(
     ffi_map: *const FfiOboEventMap,
-) -> Option<geneva_uploader::client::OboEventMap> {
+) -> Result<Option<geneva_uploader::client::OboEventMap>, String> {
     if ffi_map.is_null() {
-        return None;
+        return Ok(None);
     }
     let map_ref = unsafe { &*ffi_map };
     if map_ref.entries.is_null() || map_ref.count == 0 {
-        return None;
+        return Ok(None);
     }
 
     let mut obo_map = std::collections::HashMap::new();
@@ -314,20 +318,12 @@ unsafe fn convert_obo_event_map(
         if entry.event_name.is_null() || entry.identity.is_null() {
             continue;
         }
-        let event_name = unsafe { CStr::from_ptr(entry.event_name) }
-            .to_string_lossy()
-            .into_owned();
-        let identity = unsafe { CStr::from_ptr(entry.identity) }
-            .to_string_lossy()
-            .into_owned();
+        let event_name = unsafe { c_str_to_string(entry.event_name, "obo_event_map.event_name") }?;
+        let identity = unsafe { c_str_to_string(entry.identity, "obo_event_map.identity") }?;
         let annotations = if entry.annotations.is_null() {
             None
         } else {
-            Some(
-                unsafe { CStr::from_ptr(entry.annotations) }
-                    .to_string_lossy()
-                    .into_owned(),
-            )
+            Some(unsafe { c_str_to_string(entry.annotations, "obo_event_map.annotations") }?)
         };
 
         obo_map.insert(
@@ -340,9 +336,9 @@ unsafe fn convert_obo_event_map(
     }
 
     if obo_map.is_empty() {
-        None
+        Ok(None)
     } else {
-        Some(obo_map)
+        Ok(Some(obo_map))
     }
 }
 
@@ -578,6 +574,15 @@ pub unsafe extern "C" fn geneva_client_new(
         None
     };
 
+    // Validate and convert the optional OBO event map (UTF-8 checked per-field).
+    let obo_event_map = match unsafe { convert_obo_event_map(config.obo_map) } {
+        Ok(map) => map,
+        Err(e) => {
+            unsafe { write_error_if_provided(err_msg_out, err_msg_len, &e) };
+            return GenevaError::InvalidConfig;
+        }
+    };
+
     // Build client config
     let geneva_config = GenevaClientConfig {
         endpoint,
@@ -591,7 +596,7 @@ pub unsafe extern "C" fn geneva_client_new(
         role_name,
         role_instance,
         msi_resource,
-        obo_event_map: unsafe { convert_obo_event_map(config.obo_map) },
+        obo_event_map,
     };
 
     // Create client
@@ -2855,6 +2860,8 @@ mod tests {
         };
 
         let result = unsafe { convert_obo_event_map(&map as *const FfiOboEventMap) };
+        assert!(result.is_ok());
+        let result = result.unwrap();
         assert!(result.is_some());
         let obo_map = result.unwrap();
         assert_eq!(obo_map.len(), 1);
@@ -2883,6 +2890,8 @@ mod tests {
         };
 
         let result = unsafe { convert_obo_event_map(&map as *const FfiOboEventMap) };
+        assert!(result.is_ok());
+        let result = result.unwrap();
         assert!(result.is_some());
         let obo_map = result.unwrap();
         let config = obo_map.get("TestEvent").unwrap();
@@ -2893,7 +2902,8 @@ mod tests {
     #[test]
     fn test_convert_obo_event_map_null() {
         let result = unsafe { convert_obo_event_map(std::ptr::null()) };
-        assert!(result.is_none());
+        assert!(result.is_ok());
+        assert!(result.unwrap().is_none());
     }
 
     #[test]
@@ -2923,6 +2933,8 @@ mod tests {
         };
 
         let result = unsafe { convert_obo_event_map(&map as *const FfiOboEventMap) };
+        assert!(result.is_ok());
+        let result = result.unwrap();
         assert!(result.is_some());
         let obo_map = result.unwrap();
         assert_eq!(obo_map.len(), 2);
@@ -2933,6 +2945,84 @@ mod tests {
         assert_eq!(
             obo_map.get("Event2").unwrap().identity,
             "Microsoft.Service2"
+        );
+    }
+
+    #[test]
+    fn test_convert_obo_event_map_invalid_utf8_event_name() {
+        // Build a CString-like buffer with invalid UTF-8 (0xFF) followed by a NUL byte.
+        // CString::new rejects interior NULs but allows non-UTF-8 bytes, so we use it directly.
+        let bad_event_name = CString::new([0xFFu8, 0x65, 0x76, 0x65, 0x6E, 0x74]).unwrap();
+        let identity = CString::new("Microsoft.TestService").unwrap();
+
+        let entry = FfiOboEventConfig {
+            event_name: bad_event_name.as_ptr(),
+            identity: identity.as_ptr(),
+            annotations: std::ptr::null(),
+        };
+
+        let map = FfiOboEventMap {
+            entries: &entry as *const FfiOboEventConfig,
+            count: 1,
+        };
+
+        let result = unsafe { convert_obo_event_map(&map as *const FfiOboEventMap) };
+        assert!(result.is_err());
+        let err = result.unwrap_err();
+        assert!(
+            err.contains("obo_event_map.event_name"),
+            "expected error to mention field name, got: {err}"
+        );
+    }
+
+    #[test]
+    fn test_convert_obo_event_map_invalid_utf8_identity() {
+        let event_name = CString::new("TestEvent").unwrap();
+        let bad_identity = CString::new([0xFFu8, 0x69, 0x64]).unwrap();
+
+        let entry = FfiOboEventConfig {
+            event_name: event_name.as_ptr(),
+            identity: bad_identity.as_ptr(),
+            annotations: std::ptr::null(),
+        };
+
+        let map = FfiOboEventMap {
+            entries: &entry as *const FfiOboEventConfig,
+            count: 1,
+        };
+
+        let result = unsafe { convert_obo_event_map(&map as *const FfiOboEventMap) };
+        assert!(result.is_err());
+        let err = result.unwrap_err();
+        assert!(
+            err.contains("obo_event_map.identity"),
+            "expected error to mention field name, got: {err}"
+        );
+    }
+
+    #[test]
+    fn test_convert_obo_event_map_invalid_utf8_annotations() {
+        let event_name = CString::new("TestEvent").unwrap();
+        let identity = CString::new("Microsoft.TestService").unwrap();
+        let bad_annotations = CString::new([0xFFu8, 0x61, 0x6E, 0x6E]).unwrap();
+
+        let entry = FfiOboEventConfig {
+            event_name: event_name.as_ptr(),
+            identity: identity.as_ptr(),
+            annotations: bad_annotations.as_ptr(),
+        };
+
+        let map = FfiOboEventMap {
+            entries: &entry as *const FfiOboEventConfig,
+            count: 1,
+        };
+
+        let result = unsafe { convert_obo_event_map(&map as *const FfiOboEventMap) };
+        assert!(result.is_err());
+        let err = result.unwrap_err();
+        assert!(
+            err.contains("obo_event_map.annotations"),
+            "expected error to mention field name, got: {err}"
         );
     }
 
