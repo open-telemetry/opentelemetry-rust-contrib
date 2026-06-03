@@ -63,17 +63,17 @@ jobs:
           key: weaver-live-check-${{ runner.os }}-${{ hashFiles('**/Cargo.lock') }}
 
       # ---- Reusable actions: start the weaver listener ---------------
-      # NOTE: actions sourced from a personal fork while the upstream PR
-      # is in review. Switch to `open-telemetry/weaver/...@<tag>` once
-      # the actions land upstream.
+      # Pinned to the merge commit of open-telemetry/weaver#1448 since
+      # there is no release tag yet that includes these actions. Move to
+      # a released tag (e.g. `@v0.18.0`) once one ships.
       - name: Setup weaver
-        uses: cijothomas/weaver/.github/actions/setup-weaver@cijothomas/weaver-live-check-actions
+        uses: open-telemetry/weaver/.github/actions/setup-weaver@3e9b722324783f871d2828f62c8cf706e046c83a
         with:
           version: ${{ env.WEAVER_VERSION }}
 
       - name: Start weaver live-check
         id: live-check
-        uses: cijothomas/weaver/.github/actions/weaver-live-check-start@cijothomas/weaver-live-check-actions
+        uses: open-telemetry/weaver/.github/actions/weaver-live-check-start@3e9b722324783f871d2828f62c8cf706e046c83a
         with:
           registry: ${{ env.SEMCONV_REGISTRY }}
 
@@ -141,10 +141,10 @@ jobs:
 
           kill "$APP_PID" 2>/dev/null || true
 
-      # ---- Reusable action: finalize, summarize, gate ---------------
-      - name: Finalize weaver live-check
+      # ---- Reusable action: stop, summarize, gate ---------------
+      - name: Stop weaver live-check
         if: always()
-        uses: cijothomas/weaver/.github/actions/weaver-live-check-stop@cijothomas/weaver-live-check-actions
+        uses: open-telemetry/weaver/.github/actions/weaver-live-check-stop@3e9b722324783f871d2828f62c8cf706e046c83a
         with:
           fail-on: violation
 
