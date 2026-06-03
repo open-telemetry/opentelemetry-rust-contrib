@@ -22,6 +22,7 @@ async fn uploader_batch_is_accepted_and_decoded_by_test_server() {
         role_name: "checkout".to_string(),
         role_instance: "instance-1".to_string(),
         msi_resource: None,
+        obo_event_map: None,
     })
     .expect("client should initialize");
 

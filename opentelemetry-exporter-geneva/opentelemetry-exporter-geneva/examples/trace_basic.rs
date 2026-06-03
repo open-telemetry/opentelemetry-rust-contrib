@@ -57,6 +57,7 @@ async fn main() {
         role_name,
         role_instance,
         msi_resource: None,
+        obo_event_map: None,
     };
 
     let geneva_client = GenevaClient::new(config).expect("Failed to create GenevaClient");
