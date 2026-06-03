@@ -15,7 +15,7 @@ opentelemetry_instrumentation_tower = { path = "../../", package = "opentelemetr
 axum = { features = ["http1", "tokio"], version = "0.8", default-features = false }
 opentelemetry = { workspace = true }
 opentelemetry_sdk = { workspace = true, default-features = false }
-opentelemetry-otlp = { version = "0.32.0", features = ["grpc-tonic", "metrics", "trace"], default-features = false }
+opentelemetry-otlp = { workspace = true, features = ["grpc-tonic", "metrics", "trace"] }
 tokio = { version = "1", features = ["rt-multi-thread", "macros"], default-features = false }
 
 [lints]

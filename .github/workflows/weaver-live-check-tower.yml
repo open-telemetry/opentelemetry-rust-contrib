@@ -63,9 +63,10 @@ jobs:
           key: weaver-live-check-${{ runner.os }}-${{ hashFiles('**/Cargo.lock') }}
 
       # ---- Reusable actions: start the weaver listener ---------------
-      # Pinned to the merge commit of open-telemetry/weaver#1448 since
-      # there is no release tag yet that includes these actions. Move to
-      # a released tag (e.g. `@v0.18.0`) once one ships.
+      # TODO: temporarily pinned to the merge commit of
+      # open-telemetry/weaver#1448 because the composite actions are not
+      # yet part of a tagged weaver release. Move to a released tag
+      # (e.g. `@v0.18.0`) once one ships that includes them.
       - name: Setup weaver
         uses: open-telemetry/weaver/.github/actions/setup-weaver@3e9b722324783f871d2828f62c8cf706e046c83a
         with:
