@@ -183,8 +183,11 @@ mod tests {
 
         // Validate PartA
         let part_a = &event["PartA"];
-        // Only check if the time field exists, not the actual value
-        assert!(part_a.get("time").is_some(), "PartA.time is missing");
+        let time_str = part_a["time"].as_str().expect("PartA.time is missing");
+        assert!(
+            time_str.ends_with('Z'),
+            "PartA.time should end with 'Z', got: {time_str}"
+        );
 
         let part_a_ext_dt_trace_id = part_a
             .get("ext_dt_traceId")
@@ -222,10 +225,12 @@ mod tests {
             part_b.get("parentId").is_none(),
             "parentId should not be present for root span"
         );
-        // Check if startTime exists, not the actual value
+        let start_time_str = part_b["startTime"]
+            .as_str()
+            .expect("PartB.startTime is missing");
         assert!(
-            part_b.get("startTime").is_some(),
-            "PartB.startTime is missing"
+            start_time_str.ends_with('Z'),
+            "PartB.startTime should end with 'Z', got: {start_time_str}"
         );
         assert!(part_b["success"].as_bool().unwrap());
         assert_eq!(part_b["kind"].as_i64().unwrap(), 0);
@@ -342,7 +347,7 @@ mod tests {
 
         // Validate PartA
         let part_a = &event["PartA"];
-        assert!(part_a.get("time").is_some());
+        assert!(part_a["time"].as_str().unwrap().ends_with('Z'));
         assert_eq!(
             part_a["ext_dt_traceId"].as_str().unwrap(),
             child_trace_id.to_string()
@@ -356,7 +361,7 @@ mod tests {
         let part_b = &event["PartB"];
         assert_eq!(part_b["_typeName"].as_str().unwrap(), "Span");
         assert_eq!(part_b["name"].as_str().unwrap(), "child-span");
-        assert!(part_b.get("startTime").is_some());
+        assert!(part_b["startTime"].as_str().unwrap().ends_with('Z'));
 
         // success should be false (Error status)
         assert!(!part_b["success"].as_bool().unwrap());
@@ -422,7 +427,7 @@ mod tests {
 
         // PartA — no ext_cloud_role or ext_cloud_roleInstance
         let part_a = &event["PartA"];
-        assert!(part_a.get("time").is_some());
+        assert!(part_a["time"].as_str().unwrap().ends_with('Z'));
         assert!(part_a.get("ext_dt_traceId").is_some());
         assert_eq!(
             part_a["ext_dt_spanId"].as_str().unwrap(),
