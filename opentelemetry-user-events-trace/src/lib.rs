@@ -486,8 +486,7 @@ mod tests {
         let tracer = provider.tracer("test-tracer");
 
         // Create a linked span context (simulating a link to another trace)
-        let linked_trace_id =
-            TraceId::from_hex("0af7651916cd43dd8448eb211c80319c").unwrap();
+        let linked_trace_id = TraceId::from_hex("0af7651916cd43dd8448eb211c80319c").unwrap();
         let linked_span_id = SpanId::from_hex("00f067aa0ba902b7").unwrap();
         let linked_context = SpanContext::new(
             linked_trace_id,
@@ -558,10 +557,7 @@ mod tests {
             links[0]["toTraceId"].as_str().unwrap(),
             "0af7651916cd43dd8448eb211c80319c"
         );
-        assert_eq!(
-            links[0]["toSpanId"].as_str().unwrap(),
-            "00f067aa0ba902b7"
-        );
+        assert_eq!(links[0]["toSpanId"].as_str().unwrap(), "00f067aa0ba902b7");
 
         // Validate time fields have Z suffix (UTC ISO 8601)
         let time_str = event["PartA"]["time"].as_str().unwrap();

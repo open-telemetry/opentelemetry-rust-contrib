@@ -270,7 +270,9 @@ impl UserEventsSpanExporter {
                 .iter()
                 .any(|kv| kv.key.as_str() == "http.response.status_code");
             let status_message = match &span.status {
-                Status::Error { description } if !description.is_empty() && !has_http_status_code => {
+                Status::Error { description }
+                    if !description.is_empty() && !has_http_status_code =>
+                {
                     Some(description.to_string())
                 }
                 _ => None,
