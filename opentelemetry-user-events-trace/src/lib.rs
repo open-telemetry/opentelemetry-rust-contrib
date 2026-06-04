@@ -460,13 +460,13 @@ mod tests {
         );
     }
 
-    /// Test span links and statusMessage serialization.
-    /// Creates a span with links to another span context and an error status with description.
+    /// Test span links serialization.
+    /// Creates a span with links to another span context.
     #[ignore]
     #[test]
-    fn integration_test_links_and_status_message() {
+    fn integration_test_links() {
         use opentelemetry::trace::{
-            Link, Span, SpanContext, SpanId, SpanKind, Status, TraceFlags, TraceId, TraceState,
+            Link, Span, SpanContext, SpanId, SpanKind, TraceFlags, TraceId, TraceState,
         };
 
         check_user_events_available().expect("Kernel does not support user_events.");
@@ -508,7 +508,6 @@ mod tests {
                 .with_links(vec![Link::new(linked_context, vec![], 0)])
                 .start(&tracer);
             let sid = span.span_context().span_id();
-            span.set_status(Status::error("something went wrong"));
             span.end();
             sid
         };
@@ -541,13 +540,7 @@ mod tests {
         // Validate PartB
         let part_b = &event["PartB"];
         assert_eq!(part_b["name"].as_str().unwrap(), "span-with-links");
-        assert!(!part_b["success"].as_bool().unwrap());
-
-        // statusMessage should be present for Error status with description
-        let status_msg = part_b
-            .get("statusMessage")
-            .expect("PartB.statusMessage should be present for error span");
-        assert_eq!(status_msg.as_str().unwrap(), "something went wrong");
+        assert!(part_b["success"].as_bool().unwrap());
 
         // links should be present as JSON string
         let links_str = part_b
@@ -564,16 +557,90 @@ mod tests {
         );
         assert_eq!(links[0]["toSpanId"].as_str().unwrap(), "00f067aa0ba902b7");
 
-        // Validate time fields have Z suffix (UTC ISO 8601)
-        let time_str = event["PartA"]["time"].as_str().unwrap();
+        // statusMessage should not be present (no error)
         assert!(
-            time_str.ends_with('Z'),
-            "PartA.time should end with 'Z', got: {time_str}"
+            part_b.get("statusMessage").is_none(),
+            "statusMessage should not be present for successful span"
         );
-        let start_time_str = part_b["startTime"].as_str().unwrap();
+    }
+
+    /// Test statusMessage serialization for error spans.
+    #[ignore]
+    #[test]
+    fn integration_test_status_message() {
+        use opentelemetry::trace::{Span, SpanKind, Status};
+
+        check_user_events_available().expect("Kernel does not support user_events.");
+
+        let provider = SdkTracerProvider::builder()
+            .with_resource(
+                opentelemetry_sdk::Resource::builder()
+                    .with_service_name("statusmsg_test")
+                    .build(),
+            )
+            .with_user_events_exporter("otel_trace_stmsg")
+            .build();
+
+        let user_event_status = check_user_events_available().unwrap();
+        assert!(user_event_status.contains("otel_trace_stmsg_L4K1"));
+
+        let perf_thread =
+            std::thread::spawn(|| run_perf_and_decode(5, "user_events:otel_trace_stmsg_L4K1"));
+
+        std::thread::sleep(std::time::Duration::from_millis(1000));
+
+        let tracer = provider.tracer("test-tracer");
+
+        let span_id_expected = {
+            let mut span = tracer
+                .span_builder("error-span")
+                .with_kind(SpanKind::Client)
+                .start(&tracer);
+            let sid = span.span_context().span_id();
+            span.set_status(Status::error("something went wrong"));
+            span.end();
+            sid
+        };
+
+        let result = perf_thread.join().expect("Perf thread panicked");
+        assert!(result.is_ok());
+        let formatted_output = result.unwrap().trim().to_string();
+
+        let json_value: Value = from_str(&formatted_output).expect("Failed to parse JSON");
+        let perf_data_key = json_value
+            .as_object()
+            .unwrap()
+            .keys()
+            .find(|k| k.contains("perf.data"))
+            .expect("No perf.data key found");
+
+        let events = json_value[perf_data_key].as_array().unwrap();
+
+        let span_id_str = span_id_expected.to_string();
+        let event = events
+            .iter()
+            .find(|e| {
+                e.get("PartA")
+                    .and_then(|a| a.get("ext_dt_spanId"))
+                    .and_then(|s| s.as_str())
+                    == Some(&span_id_str)
+            })
+            .expect("Span event not found");
+
+        let part_b = &event["PartB"];
+        assert_eq!(part_b["name"].as_str().unwrap(), "error-span");
+        assert!(!part_b["success"].as_bool().unwrap());
+
+        // statusMessage should be present for Error status with description
+        let status_msg = part_b
+            .get("statusMessage")
+            .expect("PartB.statusMessage should be present for error span");
+        assert_eq!(status_msg.as_str().unwrap(), "something went wrong");
+
+        // links should not be present (no links)
         assert!(
-            start_time_str.ends_with('Z'),
-            "PartB.startTime should end with 'Z', got: {start_time_str}"
+            part_b.get("links").is_none(),
+            "links should not be present when span has no links"
         );
     }
 
