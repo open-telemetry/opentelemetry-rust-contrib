@@ -40,8 +40,29 @@ fn get_well_known_attributes() -> &'static HashMap<&'static str, &'static str> {
         map.insert("messaging.destination", "messagingDestination");
         map.insert("messaging.url", "messagingUrl");
 
+        // RPC attributes
+        map.insert("rpc.system", "rpcSystem");
+        map.insert("rpc.grpc.status_code", "rpcGrpcStatusCode");
+
         map
     })
+}
+
+/// Serializes span links to a JSON string: `[{"toTraceId":"...","toSpanId":"..."},...]`
+fn links_to_json(links: &[opentelemetry::trace::Link]) -> String {
+    let mut json = String::from("[");
+    for (i, link) in links.iter().enumerate() {
+        if i > 0 {
+            json.push(',');
+        }
+        json.push_str("{\"toTraceId\":\"");
+        json.push_str(&link.span_context.trace_id().to_string());
+        json.push_str("\",\"toSpanId\":\"");
+        json.push_str(&link.span_context.span_id().to_string());
+        json.push_str("\"}");
+    }
+    json.push(']');
+    json
 }
 
 /// UserEventsSpanExporter exports spans in EventHeader format to user_events tracepoint.
@@ -161,7 +182,12 @@ impl UserEventsSpanExporter {
             let mut cs_a_bookmark: usize = 0;
             eb.add_struct_with_bookmark("PartA", 3, 0, &mut cs_a_bookmark);
             let datetime: DateTime<Utc> = span.end_time.into();
-            eb.add_str("time", datetime.to_rfc3339(), FieldFormat::Default, 0);
+            eb.add_str(
+                "time",
+                datetime.to_rfc3339_opts(chrono::SecondsFormat::AutoSi, true),
+                FieldFormat::Default,
+                0,
+            );
 
             eb.add_str(
                 "ext_dt_traceId",
@@ -201,7 +227,12 @@ impl UserEventsSpanExporter {
             eb.add_str("_typeName", "Span", FieldFormat::Default, 0);
             eb.add_str("name", span.name.as_ref(), FieldFormat::Default, 0);
             let datetime: DateTime<Utc> = span.start_time.into();
-            eb.add_str("startTime", datetime.to_rfc3339(), FieldFormat::Default, 0);
+            eb.add_str(
+                "startTime",
+                datetime.to_rfc3339_opts(chrono::SecondsFormat::AutoSi, true),
+                FieldFormat::Default,
+                0,
+            );
             eb.add_value(
                 "success",
                 matches!(span.status, Status::Ok | Status::Unset), // Check for Ok or Unset
@@ -231,6 +262,34 @@ impl UserEventsSpanExporter {
                 );
             }
 
+            // statusMessage: emit error description if present.
+            // Per Common Schema spec: "If you report httpStatusCode,
+            // statusMessage should not be reported."
+            let has_http_status_code = span
+                .attributes
+                .iter()
+                .any(|kv| kv.key.as_str() == "http.response.status_code");
+            let status_message = match &span.status {
+                Status::Error { description } if !description.is_empty() && !has_http_status_code => {
+                    Some(description.to_string())
+                }
+                _ => None,
+            };
+            if let Some(ref msg) = status_message {
+                eb.add_str("statusMessage", msg, FieldFormat::Default, 0);
+            }
+
+            // links: serialize span links as JSON array of {toTraceId, toSpanId}.
+            let has_links = !span.links.links.is_empty();
+            let links_json = if has_links {
+                Some(links_to_json(&span.links.links))
+            } else {
+                None
+            };
+            if let Some(ref json) = links_json {
+                eb.add_str("links", json, FieldFormat::Default, 0);
+            }
+
             // Well-known attributes go into PartB.
             // Regular attributes are collected for PartC.
             // This does dual iteration (+lookup) over attributes,
@@ -252,7 +311,11 @@ impl UserEventsSpanExporter {
             // Update PartB field count with the number of well-known attributes found.
             eb.set_struct_field_count(
                 part_b_bookmark,
-                BASE_PARTB_FIELD_COUNT + partb_count_from_attributes + u8::from(has_parent_id),
+                BASE_PARTB_FIELD_COUNT
+                    + partb_count_from_attributes
+                    + u8::from(has_parent_id)
+                    + u8::from(status_message.is_some())
+                    + u8::from(has_links),
             );
 
             // Add regular attributes to PartC if any.

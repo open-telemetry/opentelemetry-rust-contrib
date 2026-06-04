@@ -2,6 +2,12 @@
 
 ## vNext
 
+- Add `links` field to Part B (serialized as JSON array of `{toTraceId, toSpanId}`)
+- Add `statusMessage` field to Part B for error spans with descriptions
+- Add `rpcSystem` and `rpcGrpcStatusCode` to well-known attribute mappings
+- Fix `PartA.time` and `PartB.startTime` to use UTC ISO 8601 with trailing `Z`
+  instead of `+00:00`
+
 ## v0.5.0
 
 Released 2026-May-13
