@@ -7,7 +7,7 @@
 | Status        |           |
 | ------------- |-----------|
 | Stability     | beta      |
-| Owners        |           |
+| Owners        | [Jelena Vidakovic](https://github.com/jevidako), [Uros Jovanovic](https://github.com/urosjovanovic) |
 
 This crate contains an OpenTelemetry Trace exporter to
 [ETW (Event Tracing for Windows)](https://learn.microsoft.com/en-us/windows-hardware/drivers/devtest/event-tracing-for-windows--etw-), a Windows solution
