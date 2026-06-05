@@ -575,6 +575,7 @@ mod tests {
     #[test]
     fn integration_test_status_message() {
         use opentelemetry::trace::{Span, SpanKind, Status};
+        use std::time::{Duration, UNIX_EPOCH};
 
         check_user_events_available().expect("Kernel does not support user_events.");
 
@@ -597,10 +598,15 @@ mod tests {
 
         let tracer = provider.tracer("test-tracer");
 
+        // Use a well-known start time so we can assert the exact formatted value.
+        // 1_700_000_000 seconds since UNIX epoch = 2023-11-14T22:13:20Z
+        let known_start_time = UNIX_EPOCH + Duration::from_secs(1_700_000_000);
+
         let span_id_expected = {
             let mut span = tracer
                 .span_builder("error-span")
                 .with_kind(SpanKind::Client)
+                .with_start_time(known_start_time)
                 .start(&tracer);
             let sid = span.span_context().span_id();
             span.set_status(Status::error("something went wrong"));
@@ -636,6 +642,17 @@ mod tests {
         let part_b = &event["PartB"];
         assert_eq!(part_b["name"].as_str().unwrap(), "error-span");
         assert!(!part_b["success"].as_bool().unwrap());
+
+        // startTime should match the known start time we provided
+        let start_time_str = part_b["startTime"].as_str().unwrap();
+        assert!(
+            start_time_str.starts_with("2023-11-14T22:13:20"),
+            "startTime should match known epoch 1_700_000_000, got: {start_time_str}"
+        );
+        assert!(
+            start_time_str.ends_with('Z'),
+            "startTime should end with 'Z', got: {start_time_str}"
+        );
 
         // statusMessage should be present for Error status with description
         let status_msg = part_b
