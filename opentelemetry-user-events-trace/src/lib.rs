@@ -667,6 +667,264 @@ mod tests {
         );
     }
 
+    /// Test that statusMessage is suppressed when httpStatusCode is present.
+    /// Per Common Schema spec: "If you report httpStatusCode, statusMessage
+    /// should not be reported and will be ignored."
+    #[ignore]
+    #[test]
+    fn integration_test_status_message_suppressed_with_http_status_code() {
+        use opentelemetry::trace::{Span, SpanKind, Status};
+
+        check_user_events_available().expect("Kernel does not support user_events.");
+
+        let provider = SdkTracerProvider::builder()
+            .with_resource(
+                opentelemetry_sdk::Resource::builder()
+                    .with_service_name("suppress_test")
+                    .build(),
+            )
+            .with_user_events_exporter("otel_trace_suppr")
+            .build();
+
+        let user_event_status = check_user_events_available().unwrap();
+        assert!(user_event_status.contains("otel_trace_suppr_L4K1"));
+
+        let perf_thread =
+            std::thread::spawn(|| run_perf_and_decode(5, "user_events:otel_trace_suppr_L4K1"));
+
+        std::thread::sleep(std::time::Duration::from_millis(1000));
+
+        let tracer = provider.tracer("test-tracer");
+
+        let span_id_expected = {
+            let mut span = tracer
+                .span_builder("http-error-span")
+                .with_kind(SpanKind::Client)
+                .start(&tracer);
+            let sid = span.span_context().span_id();
+            span.set_attribute(KeyValue::new("http.response.status_code", 500));
+            span.set_status(Status::error("Internal Server Error"));
+            span.end();
+            sid
+        };
+
+        let result = perf_thread.join().expect("Perf thread panicked");
+        assert!(result.is_ok());
+        let formatted_output = result.unwrap().trim().to_string();
+
+        let json_value: Value = from_str(&formatted_output).expect("Failed to parse JSON");
+        let perf_data_key = json_value
+            .as_object()
+            .unwrap()
+            .keys()
+            .find(|k| k.contains("perf.data"))
+            .expect("No perf.data key found");
+
+        let events = json_value[perf_data_key].as_array().unwrap();
+
+        let span_id_str = span_id_expected.to_string();
+        let event = events
+            .iter()
+            .find(|e| {
+                e.get("PartA")
+                    .and_then(|a| a.get("ext_dt_spanId"))
+                    .and_then(|s| s.as_str())
+                    == Some(&span_id_str)
+            })
+            .expect("Span event not found");
+
+        let part_b = &event["PartB"];
+        assert!(!part_b["success"].as_bool().unwrap());
+
+        // httpStatusCode should be in PartB as a well-known attribute
+        assert_eq!(part_b["httpStatusCode"].as_i64().unwrap(), 500);
+
+        // statusMessage should NOT be present when httpStatusCode is reported
+        assert!(
+            part_b.get("statusMessage").is_none(),
+            "statusMessage should be suppressed when httpStatusCode is present"
+        );
+    }
+
+    /// Test all SpanKind values and RPC well-known attributes.
+    /// Emits 5 spans (one per SpanKind) in a single perf capture.
+    #[ignore]
+    #[test]
+    fn integration_test_all_span_kinds_and_rpc_attrs() {
+        use opentelemetry::trace::{Span, SpanKind};
+
+        check_user_events_available().expect("Kernel does not support user_events.");
+
+        let provider = SdkTracerProvider::builder()
+            .with_resource(
+                opentelemetry_sdk::Resource::builder()
+                    .with_service_name("kinds_test")
+                    .build(),
+            )
+            .with_user_events_exporter("otel_trace_kinds")
+            .build();
+
+        let user_event_status = check_user_events_available().unwrap();
+        assert!(user_event_status.contains("otel_trace_kinds_L4K1"));
+
+        let perf_thread =
+            std::thread::spawn(|| run_perf_and_decode(5, "user_events:otel_trace_kinds_L4K1"));
+
+        std::thread::sleep(std::time::Duration::from_millis(1000));
+
+        let tracer = provider.tracer("test-tracer");
+
+        // Emit one span per SpanKind
+        let kinds: Vec<(SpanKind, &str, i64)> = vec![
+            (SpanKind::Internal, "internal-span", 0),
+            (SpanKind::Server, "server-span", 1),
+            (SpanKind::Client, "client-span", 2),
+            (SpanKind::Producer, "producer-span", 3),
+            (SpanKind::Consumer, "consumer-span", 4),
+        ];
+
+        let mut span_ids: Vec<(String, &str, i64)> = Vec::new();
+        for (kind, name, expected_kind) in &kinds {
+            let mut span = tracer
+                .span_builder(*name)
+                .with_kind(kind.clone())
+                .start(&tracer);
+
+            // Add RPC attributes to the client span to test rpcSystem/rpcGrpcStatusCode
+            if *name == "client-span" {
+                span.set_attribute(KeyValue::new("rpc.system", "grpc"));
+                span.set_attribute(KeyValue::new("rpc.grpc.status_code", 0_i64));
+            }
+
+            let sid = span.span_context().span_id().to_string();
+            span.end();
+            span_ids.push((sid, name, *expected_kind));
+        }
+
+        let result = perf_thread.join().expect("Perf thread panicked");
+        assert!(result.is_ok());
+        let formatted_output = result.unwrap().trim().to_string();
+
+        let json_value: Value = from_str(&formatted_output).expect("Failed to parse JSON");
+        let perf_data_key = json_value
+            .as_object()
+            .unwrap()
+            .keys()
+            .find(|k| k.contains("perf.data"))
+            .expect("No perf.data key found");
+
+        let events = json_value[perf_data_key].as_array().unwrap();
+
+        for (span_id, name, expected_kind) in &span_ids {
+            let event = events
+                .iter()
+                .find(|e| {
+                    e.get("PartA")
+                        .and_then(|a| a.get("ext_dt_spanId"))
+                        .and_then(|s| s.as_str())
+                        == Some(span_id.as_str())
+                })
+                .unwrap_or_else(|| panic!("Span '{name}' not found"));
+
+            let part_b = &event["PartB"];
+            assert_eq!(part_b["name"].as_str().unwrap(), *name);
+            assert_eq!(
+                part_b["kind"].as_i64().unwrap(),
+                *expected_kind,
+                "Wrong kind for span '{name}'"
+            );
+
+            // Validate RPC well-known attributes on the client span
+            if *name == "client-span" {
+                assert_eq!(part_b["rpcSystem"].as_str().unwrap(), "grpc");
+                assert_eq!(part_b["rpcGrpcStatusCode"].as_i64().unwrap(), 0);
+            }
+        }
+    }
+
+    /// Test that only service.name is set (no service.instance.id).
+    /// Validates ext_cloud_role is present but ext_cloud_roleInstance is absent.
+    #[ignore]
+    #[test]
+    fn integration_test_partial_resource() {
+        use opentelemetry::trace::Span;
+
+        check_user_events_available().expect("Kernel does not support user_events.");
+
+        let provider = SdkTracerProvider::builder()
+            .with_resource(
+                opentelemetry_sdk::Resource::builder()
+                    .with_service_name("partial_resource_test")
+                    .build(),
+            )
+            .with_user_events_exporter("otel_trace_pres")
+            .build();
+
+        let user_event_status = check_user_events_available().unwrap();
+        assert!(user_event_status.contains("otel_trace_pres_L4K1"));
+
+        let perf_thread =
+            std::thread::spawn(|| run_perf_and_decode(5, "user_events:otel_trace_pres_L4K1"));
+
+        std::thread::sleep(std::time::Duration::from_millis(1000));
+
+        let tracer = provider.tracer("test-tracer");
+
+        let span_id_expected = {
+            let mut span = tracer.span_builder("partial-resource-span").start(&tracer);
+            let sid = span.span_context().span_id();
+            // Add only non-well-known attributes to ensure PartC works without PartB well-known attrs
+            span.set_attribute(KeyValue::new("custom_i64", 42_i64));
+            span.set_attribute(KeyValue::new("custom_string", "hello"));
+            span.end();
+            sid
+        };
+
+        let result = perf_thread.join().expect("Perf thread panicked");
+        assert!(result.is_ok());
+        let formatted_output = result.unwrap().trim().to_string();
+
+        let json_value: Value = from_str(&formatted_output).expect("Failed to parse JSON");
+        let perf_data_key = json_value
+            .as_object()
+            .unwrap()
+            .keys()
+            .find(|k| k.contains("perf.data"))
+            .expect("No perf.data key found");
+
+        let events = json_value[perf_data_key].as_array().unwrap();
+
+        let span_id_str = span_id_expected.to_string();
+        let event = events
+            .iter()
+            .find(|e| {
+                e.get("PartA")
+                    .and_then(|a| a.get("ext_dt_spanId"))
+                    .and_then(|s| s.as_str())
+                    == Some(&span_id_str)
+            })
+            .expect("Span event not found");
+
+        let part_a = &event["PartA"];
+        // service.name is set so ext_cloud_role should be present
+        assert_eq!(
+            part_a["ext_cloud_role"].as_str().unwrap(),
+            "partial_resource_test"
+        );
+        // service.instance.id not set, so ext_cloud_roleInstance should be absent
+        assert!(
+            part_a.get("ext_cloud_roleInstance").is_none(),
+            "ext_cloud_roleInstance should not be present when service.instance.id is not set"
+        );
+
+        // Validate PartC has the custom attributes with correct types
+        let part_c = event
+            .get("PartC")
+            .expect("PartC should be present with custom attributes");
+        assert_eq!(part_c["custom_i64"].as_i64().unwrap(), 42);
+        assert_eq!(part_c["custom_string"].as_str().unwrap(), "hello");
+    }
+
     fn check_user_events_available() -> Result<String, String> {
         let output = Command::new("sudo")
             .arg("cat")
