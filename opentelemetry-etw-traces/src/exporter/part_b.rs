@@ -21,7 +21,7 @@ use tracelogging_dynamic as tld;
 ///     [<well-known attributes>: typed]      // span attributes whose keys match
 ///                                           // `common::WELL_KNOWN_PART_B_ATTRIBUTES`,
 ///                                           // emitted in slice order
-///     success: bool32
+///     success: bool (u8 with OutType::Boolean)
 /// }
 /// ```
 pub(crate) fn populate_part_b(event: &mut tld::EventBuilder, span_data: &SpanData, field_tag: u32) {

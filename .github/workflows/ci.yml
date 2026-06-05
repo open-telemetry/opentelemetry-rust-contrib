@@ -152,6 +152,8 @@ jobs:
         toolchain: stable
     - name: Run ETW integration tests (logs)
       run: cargo test --manifest-path opentelemetry-etw-logs/Cargo.toml --all-features -- --ignored --nocapture --test-threads=1
+    - name: Run ETW integration tests (traces)
+      run: cargo test --manifest-path opentelemetry-etw-traces/Cargo.toml --all-features -- --ignored --nocapture --test-threads=1
   lint:
     strategy:
       matrix:
