@@ -375,6 +375,12 @@ mod tests {
             .expect("PartB.parentId should be present for child span");
         assert_eq!(parent_id.as_str().unwrap(), parent_span_id.to_string());
 
+        // statusMessage should be present for error span with description
+        assert_eq!(
+            part_b["statusMessage"].as_str().unwrap(),
+            "something went wrong"
+        );
+
         // Validate PartC — non-string attribute types
         let part_c = &event["PartC"];
         assert!(part_c["bool_attr"].as_bool().unwrap());
