@@ -350,3 +350,132 @@ impl UserEventsSpanExporter {
         Ok(())
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use opentelemetry::trace::{Link, SpanContext, SpanId, TraceFlags, TraceId, TraceState};
+
+    #[test]
+    fn links_to_json_empty() {
+        assert_eq!(links_to_json(&[]), "[]");
+    }
+
+    #[test]
+    fn links_to_json_single_link() {
+        let link = Link::new(
+            SpanContext::new(
+                TraceId::from_hex("0af7651916cd43dd8448eb211c80319c").unwrap(),
+                SpanId::from_hex("00f067aa0ba902b7").unwrap(),
+                TraceFlags::SAMPLED,
+                false,
+                TraceState::default(),
+            ),
+            vec![],
+            0,
+        );
+        let json = links_to_json(&[link]);
+        assert_eq!(
+            json,
+            r#"[{"toTraceId":"0af7651916cd43dd8448eb211c80319c","toSpanId":"00f067aa0ba902b7"}]"#
+        );
+    }
+
+    #[test]
+    fn links_to_json_multiple_links() {
+        let links = vec![
+            Link::new(
+                SpanContext::new(
+                    TraceId::from_hex("0af7651916cd43dd8448eb211c80319c").unwrap(),
+                    SpanId::from_hex("00f067aa0ba902b7").unwrap(),
+                    TraceFlags::SAMPLED,
+                    false,
+                    TraceState::default(),
+                ),
+                vec![],
+                0,
+            ),
+            Link::new(
+                SpanContext::new(
+                    TraceId::from_hex("ffffffffffffffffffffffffffffffff").unwrap(),
+                    SpanId::from_hex("ffffffffffffffff").unwrap(),
+                    TraceFlags::SAMPLED,
+                    false,
+                    TraceState::default(),
+                ),
+                vec![],
+                0,
+            ),
+        ];
+        let json = links_to_json(&links);
+        // Verify it's valid JSON with two entries
+        let parsed: Vec<serde_json::Value> = serde_json::from_str(&json).unwrap();
+        assert_eq!(parsed.len(), 2);
+        assert_eq!(
+            parsed[0]["toTraceId"].as_str().unwrap(),
+            "0af7651916cd43dd8448eb211c80319c"
+        );
+        assert_eq!(parsed[1]["toSpanId"].as_str().unwrap(), "ffffffffffffffff");
+    }
+
+    #[test]
+    fn well_known_attributes_contains_all_cs_span_fields() {
+        let attrs = get_well_known_attributes();
+
+        // HTTP (Common Schema Span spec)
+        assert_eq!(attrs.get("http.request.method"), Some(&"httpMethod"));
+        assert_eq!(attrs.get("url.full"), Some(&"httpUrl"));
+        assert_eq!(
+            attrs.get("http.response.status_code"),
+            Some(&"httpStatusCode")
+        );
+
+        // Database (Common Schema Span spec)
+        assert_eq!(attrs.get("db.system"), Some(&"dbSystem"));
+        assert_eq!(attrs.get("db.name"), Some(&"dbName"));
+        assert_eq!(attrs.get("db.statement"), Some(&"dbStatement"));
+
+        // Messaging (Common Schema Span spec)
+        assert_eq!(attrs.get("messaging.system"), Some(&"messagingSystem"));
+        assert_eq!(
+            attrs.get("messaging.destination"),
+            Some(&"messagingDestination")
+        );
+        assert_eq!(attrs.get("messaging.url"), Some(&"messagingUrl"));
+
+        // RPC (Common Schema Span spec)
+        assert_eq!(attrs.get("rpc.system"), Some(&"rpcSystem"));
+        assert_eq!(
+            attrs.get("rpc.grpc.status_code"),
+            Some(&"rpcGrpcStatusCode")
+        );
+    }
+
+    #[test]
+    fn well_known_attributes_does_not_contain_unknown() {
+        let attrs = get_well_known_attributes();
+        assert!(attrs.get("unknown.attribute").is_none());
+        assert!(attrs.get("service.name").is_none());
+    }
+
+    #[test]
+    fn provider_name_validation_rejects_too_long() {
+        let long_name = "a".repeat(234);
+        assert!(UserEventsSpanExporter::new(&long_name).is_err());
+    }
+
+    #[test]
+    fn provider_name_validation_rejects_special_chars() {
+        assert!(UserEventsSpanExporter::new("has-hyphen").is_err());
+        assert!(UserEventsSpanExporter::new("has space").is_err());
+        assert!(UserEventsSpanExporter::new("has.dot").is_err());
+    }
+
+    #[test]
+    fn provider_name_validation_accepts_valid() {
+        // Can't fully construct on non-Linux, but validation should pass
+        assert!(
+            UserEventsSpanExporter::new("valid_name_123").is_ok() || cfg!(not(target_os = "linux"))
+        );
+    }
+}
