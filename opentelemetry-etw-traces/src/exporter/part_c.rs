@@ -4,7 +4,9 @@ use tracelogging_dynamic as tld;
 
 /// Populates Part C of the Common Schema on the EventBuilder.
 ///
-/// Span attributes are added as typed fields.
+/// Span attributes are added as typed fields, except for well-known
+/// attributes (see [`common::WELL_KNOWN_PART_B_ATTRIBUTES`]) which are
+/// emitted as Part B fields instead.
 /// Resource attributes specified via `with_resource_attributes()` are also
 /// added as typed fields.
 pub(crate) fn populate_part_c(
@@ -14,9 +16,12 @@ pub(crate) fn populate_part_c(
     field_tag: u32,
 ) {
     let resource_attr_count = resource.attributes_from_resource.len();
-    let span_attr_count = span_data.attributes.len();
-    let additional_span_data = 1u8; // 'events'
-    let part_c_count = resource_attr_count + span_attr_count + additional_span_data as usize;
+    let span_partc_attr_count = span_data
+        .attributes
+        .iter()
+        .filter(|kv| common::well_known_part_b_field(kv.key.as_str()).is_none())
+        .count();
+    let part_c_count = resource_attr_count + span_partc_attr_count;
 
     event.add_struct(
         "PartC",
@@ -26,20 +31,16 @@ pub(crate) fn populate_part_c(
 
     // Resource attributes first
     for (key, value) in &resource.attributes_from_resource {
-        common::add_attribute_to_event(event, key, value);
+        common::add_attribute_to_event(event, key.as_str(), value);
     }
 
-    // Span attributes
+    // Span attributes (excluding well-known Part B attributes)
     for kv in span_data.attributes.iter() {
-        common::add_attribute_to_event(event, &kv.key, &kv.value);
+        if common::well_known_part_b_field(kv.key.as_str()).is_some() {
+            continue;
+        }
+        common::add_attribute_to_event(event, kv.key.as_str(), &kv.value);
     }
-
-    event.add_str8(
-        "events",
-        common::events_to_json(&span_data.events).as_ref(),
-        tld::OutType::Utf8,
-        field_tag,
-    );
 }
 
 #[cfg(test)]

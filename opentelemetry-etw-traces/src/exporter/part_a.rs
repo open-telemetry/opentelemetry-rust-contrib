@@ -1,4 +1,5 @@
 use super::otel_id_ext::{SpanIdExt, TraceIdExt};
+use chrono::{DateTime, Utc};
 use opentelemetry_sdk::trace::SpanData;
 use tracelogging_dynamic as tld;
 
@@ -7,7 +8,7 @@ use tracelogging_dynamic as tld;
 /// Layout (TLD struct):
 /// ```text
 /// PartA {
-///     time: filetime
+///     time: str8 (RFC3339)
 ///     ext_dt {
 ///         traceId: str8
 ///         spanId: str8
@@ -30,9 +31,12 @@ pub(crate) fn populate_part_a(
     event.add_struct("PartA", field_count, field_tag);
 
     // time: use end_time as the event timestamp.
-    event.add_filetime(
+    let end_time: DateTime<Utc> = span_data.end_time.into();
+    event.add_str8(
         "time",
-        tld::win_filetime_from_systemtime!(span_data.end_time),
+        end_time
+            .to_rfc3339_opts(chrono::SecondsFormat::AutoSi, true)
+            .as_str(),
         tld::OutType::Default,
         field_tag,
     );

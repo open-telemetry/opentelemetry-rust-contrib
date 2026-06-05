@@ -1,49 +1,76 @@
-use chrono::{DateTime, Datelike, Timelike, Utc};
 use opentelemetry::trace::SpanKind;
-use opentelemetry::Key;
-use opentelemetry_sdk::trace::SpanEvents;
 use std::borrow::Cow;
-use std::time::SystemTime;
 use tracelogging_dynamic as tld;
 
 use super::otel_id_ext::{SpanIdExt, TraceIdExt};
 
+/// Well-known OpenTelemetry semantic-convention attributes that map to
+/// Common Schema Part B field names. Attributes whose key matches one of
+/// these entries are emitted as Part B fields (using the mapped name)
+/// instead of Part C.
+///
+/// Stored as a static slice (rather than a `HashMap`) to guarantee a
+/// stable, deterministic ordering of fields in the emitted ETW event.
+pub(crate) const WELL_KNOWN_PART_B_ATTRIBUTES: &[(&str, &str)] = &[
+    // Database
+    ("db.system", "dbSystem"),
+    ("db.name", "dbName"),
+    ("db.statement", "dbStatement"),
+    // HTTP
+    ("http.request.method", "httpMethod"),
+    ("url.full", "httpUrl"),
+    ("http.response.status_code", "httpStatusCode"),
+    // Messaging
+    ("messaging.system", "messagingSystem"),
+    ("messaging.destination", "messagingDestination"),
+    ("messaging.url", "messagingUrl"),
+];
+
+/// Returns the mapped Part B field name if `key` is a well-known attribute,
+/// otherwise `None`.
+#[inline]
+pub(crate) fn well_known_part_b_field(key: &str) -> Option<&'static str> {
+    WELL_KNOWN_PART_B_ATTRIBUTES
+        .iter()
+        .find_map(|(otel_key, partb_name)| (*otel_key == key).then_some(*partb_name))
+}
+
 /// Converts an OpenTelemetry `SpanKind` to a u8 value matching the OTel spec.
 pub(crate) fn span_kind_to_u8(kind: &SpanKind) -> u8 {
     match kind {
-        SpanKind::Internal => 1,
-        SpanKind::Server => 2,
-        SpanKind::Client => 3,
-        SpanKind::Producer => 4,
-        SpanKind::Consumer => 5,
+        SpanKind::Internal => 0,
+        SpanKind::Server => 1,
+        SpanKind::Client => 2,
+        SpanKind::Producer => 3,
+        SpanKind::Consumer => 4,
     }
 }
 
 /// Adds an OpenTelemetry attribute value to a TLD EventBuilder as a typed field.
 pub(crate) fn add_attribute_to_event(
     event: &mut tld::EventBuilder,
-    key: &Key,
+    field_name: &str,
     value: &opentelemetry::Value,
 ) {
     match value {
         opentelemetry::Value::Bool(b) => {
-            event.add_bool32(key.as_str(), *b as i32, tld::OutType::Default, 0);
+            event.add_bool32(field_name, *b as i32, tld::OutType::Default, 0);
         }
         opentelemetry::Value::I64(i) => {
-            event.add_i64(key.as_str(), *i, tld::OutType::Default, 0);
+            event.add_i64(field_name, *i, tld::OutType::Default, 0);
         }
         opentelemetry::Value::F64(f) => {
-            event.add_f64(key.as_str(), *f, tld::OutType::Default, 0);
+            event.add_f64(field_name, *f, tld::OutType::Default, 0);
         }
         opentelemetry::Value::String(s) => {
-            event.add_str8(key.as_str(), s.as_str(), tld::OutType::Default, 0);
+            event.add_str8(field_name, s.as_str(), tld::OutType::Default, 0);
         }
         opentelemetry::Value::Array(arr) => {
             let json = array_to_json(arr);
-            event.add_str8(key.as_str(), &json, tld::OutType::Json, 0);
+            event.add_str8(field_name, &json, tld::OutType::Json, 0);
         }
         _ => {
-            event.add_str8(key.as_str(), "", tld::OutType::Default, 0);
+            event.add_str8(field_name, "", tld::OutType::Default, 0);
         }
     }
 }
@@ -98,111 +125,6 @@ pub(crate) fn links_to_json(links: &[opentelemetry::trace::Link]) -> Cow<'static
     Cow::Owned(serde_json::to_string(&arr).unwrap_or_default())
 }
 
-/// Builds a `serde_json::Value::Object` from key-value pairs.
-fn attributes_to_value(attrs: &[opentelemetry::KeyValue]) -> serde_json::Value {
-    let mut map = serde_json::Map::new();
-    for kv in attrs {
-        let (key, value) = (kv.key.as_str(), &kv.value);
-        let json_val = match value {
-            opentelemetry::Value::Bool(b) => serde_json::Value::Bool(*b),
-            opentelemetry::Value::I64(i) => serde_json::Value::Number((*i).into()),
-            opentelemetry::Value::F64(f) => serde_json::Number::from_f64(*f)
-                .map(serde_json::Value::Number)
-                .unwrap_or(serde_json::Value::Null),
-            opentelemetry::Value::String(s) => serde_json::Value::String(s.to_string()),
-            opentelemetry::Value::Array(arr) => array_to_value(arr),
-            _ => serde_json::Value::Null,
-        };
-        map.insert(key.to_owned(), json_val);
-    }
-    serde_json::Value::Object(map)
-}
-
-/// Serializes span events to a JSON object string.
-pub(crate) fn events_to_json(events: &SpanEvents) -> Cow<'static, str> {
-    if events.events.is_empty() {
-        return Cow::Borrowed("[]");
-    }
-    let json_value: Vec<serde_json::Value> = events
-        .events
-        .iter()
-        .map(|event| {
-            let mut map = serde_json::Map::new();
-            map.insert(
-                "name".to_owned(),
-                serde_json::Value::String(event.name.to_string()),
-            );
-            map.insert(
-                "timestamp".to_owned(),
-                serde_json::Value::String(system_time_to_str(&event.timestamp)),
-            );
-            if !event.attributes.is_empty() {
-                map.insert(
-                    "attributes".to_owned(),
-                    attributes_to_value(&event.attributes),
-                );
-            }
-            serde_json::Value::Object(map)
-        })
-        .collect();
-    Cow::Owned(serde_json::to_string(&json_value).unwrap_or_default())
-}
-
-/// Formats a SystemTime as RFC3339 "YYYY-MM-DDTHH:MM:SS.NNNNNNNNNZ" using a stack buffer.
-///
-/// Uses chrono field accessors instead of `format!()` to avoid chrono's
-/// internal heap allocations.
-pub(crate) fn system_time_to_str(time: &SystemTime) -> String {
-    let (buf, len) = format_timestamp(time);
-    let s = std::str::from_utf8(&buf[..len]).expect("timestamp buffer contains only ASCII");
-    s.to_owned()
-}
-
-/// Writes timestamp into a stack `[u8; 32]` buffer.
-/// Returns the buffer and the number of bytes written.
-/// Maximum length of a formatted timestamp: "YYYY-MM-DDTHH:MM:SS.NNNNNNNNNZ" = 30 chars.
-/// Rounded up to 32 for padding.
-fn format_timestamp(time: &SystemTime) -> ([u8; 32], usize) {
-    let datetime: DateTime<Utc> = (*time).into();
-    let mut buf = [b'0'; 32];
-    let mut pos = 0;
-
-    pos += write_u32_padded(&mut buf, pos, datetime.year() as u32, 4);
-    buf[pos] = b'-';
-    pos += 1;
-    pos += write_u32_padded(&mut buf, pos, datetime.month(), 2);
-    buf[pos] = b'-';
-    pos += 1;
-    pos += write_u32_padded(&mut buf, pos, datetime.day(), 2);
-    buf[pos] = b'T';
-    pos += 1;
-    pos += write_u32_padded(&mut buf, pos, datetime.hour(), 2);
-    buf[pos] = b':';
-    pos += 1;
-    pos += write_u32_padded(&mut buf, pos, datetime.minute(), 2);
-    buf[pos] = b':';
-    pos += 1;
-    pos += write_u32_padded(&mut buf, pos, datetime.second(), 2);
-    buf[pos] = b'.';
-    pos += 1;
-    pos += write_u32_padded(&mut buf, pos, datetime.nanosecond(), 9);
-    buf[pos] = b'Z';
-    pos += 1;
-
-    (buf, pos)
-}
-
-/// Writes `val` zero-padded to exactly `width` digits into `buf` at `pos`.
-#[inline]
-fn write_u32_padded(buf: &mut [u8], pos: usize, val: u32, width: usize) -> usize {
-    let mut v = val;
-    for i in (0..width).rev() {
-        buf[pos + i] = b'0' + (v % 10) as u8;
-        v /= 10;
-    }
-    width
-}
-
 #[cfg(test)]
 pub(crate) mod test_utils {
     use super::super::options::Options;
@@ -250,17 +172,14 @@ pub(crate) mod test_utils {
 mod tests {
     use super::*;
     use opentelemetry::trace::{Link, SpanContext, SpanId, TraceFlags, TraceId, TraceState};
-    use opentelemetry::KeyValue;
-    use opentelemetry_sdk::trace::SpanEvents;
-    use std::time::{Duration, UNIX_EPOCH};
 
     #[test]
     fn test_span_kind_to_u8() {
-        assert_eq!(span_kind_to_u8(&SpanKind::Internal), 1);
-        assert_eq!(span_kind_to_u8(&SpanKind::Server), 2);
-        assert_eq!(span_kind_to_u8(&SpanKind::Client), 3);
-        assert_eq!(span_kind_to_u8(&SpanKind::Producer), 4);
-        assert_eq!(span_kind_to_u8(&SpanKind::Consumer), 5);
+        assert_eq!(span_kind_to_u8(&SpanKind::Internal), 0);
+        assert_eq!(span_kind_to_u8(&SpanKind::Server), 1);
+        assert_eq!(span_kind_to_u8(&SpanKind::Client), 2);
+        assert_eq!(span_kind_to_u8(&SpanKind::Producer), 3);
+        assert_eq!(span_kind_to_u8(&SpanKind::Consumer), 4);
     }
 
     #[test]
@@ -287,55 +206,5 @@ mod tests {
     fn test_links_to_json_empty() {
         let json = links_to_json(&[]);
         assert_eq!(json, "[]");
-    }
-
-    #[test]
-    fn test_events_to_json_with_event() {
-        use opentelemetry::trace::Event;
-
-        let timestamp = UNIX_EPOCH + Duration::from_secs(1_700_000_000);
-        let mut events = SpanEvents::default();
-        events.events.push(Event::new(
-            "test-event",
-            timestamp,
-            vec![KeyValue::new("key1", "value1")],
-            0,
-        ));
-        let json = events_to_json(&events);
-        let parsed: Vec<serde_json::Value> = serde_json::from_str(&json).unwrap();
-        assert_eq!(parsed.len(), 1);
-        assert_eq!(parsed[0]["name"], "test-event");
-        assert!(parsed[0]["timestamp"].as_str().unwrap().contains("2023"));
-        assert_eq!(parsed[0]["attributes"]["key1"], "value1");
-    }
-
-    #[test]
-    fn test_events_to_json_empty() {
-        let events = SpanEvents::default();
-        let json = events_to_json(&events);
-        assert_eq!(json, "[]");
-    }
-
-    #[test]
-    fn test_events_to_json_no_attributes() {
-        use opentelemetry::trace::Event;
-
-        let timestamp = UNIX_EPOCH + Duration::from_secs(1_700_000_000);
-        let mut events = SpanEvents::default();
-        events
-            .events
-            .push(Event::new("simple-event", timestamp, vec![], 0));
-        let json = events_to_json(&events);
-        let parsed: Vec<serde_json::Value> = serde_json::from_str(&json).unwrap();
-        assert_eq!(parsed.len(), 1);
-        assert_eq!(parsed[0]["name"], "simple-event");
-        assert!(parsed[0].get("attributes").is_none());
-    }
-
-    #[test]
-    fn test_system_time_to_str() {
-        let time = UNIX_EPOCH + Duration::from_secs(1_700_000_000);
-        let result = system_time_to_str(&time);
-        assert_eq!(result, "2023-11-14T22:13:20.000000000Z");
     }
 }
