@@ -644,14 +644,9 @@ mod tests {
         assert!(!part_b["success"].as_bool().unwrap());
 
         // startTime should match the known start time we provided
-        let start_time_str = part_b["startTime"].as_str().unwrap();
-        assert!(
-            start_time_str.starts_with("2023-11-14T22:13:20"),
-            "startTime should match known epoch 1_700_000_000, got: {start_time_str}"
-        );
-        assert!(
-            start_time_str.ends_with('Z'),
-            "startTime should end with 'Z', got: {start_time_str}"
+        assert_eq!(
+            part_b["startTime"].as_str().unwrap(),
+            "2023-11-14T22:13:20Z"
         );
 
         // statusMessage should be present for Error status with description
