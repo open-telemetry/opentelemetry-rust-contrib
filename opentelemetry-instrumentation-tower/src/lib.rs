@@ -832,7 +832,7 @@ fn finalize_request<ResBody, E, ResExt>(
     );
 }
 
-fn split_and_format_protocol_version(http_version: http::Version) -> (String, String) {
+fn split_and_format_protocol_version(http_version: http::Version) -> (&'static str, &'static str) {
     let version_str = match http_version {
         http::Version::HTTP_09 => "0.9",
         http::Version::HTTP_10 => "1.0",
@@ -841,7 +841,7 @@ fn split_and_format_protocol_version(http_version: http::Version) -> (String, St
         http::Version::HTTP_3 => "3.0",
         _ => "",
     };
-    (String::from("http"), String::from(version_str))
+    ("http", version_str)
 }
 
 #[cfg(test)]

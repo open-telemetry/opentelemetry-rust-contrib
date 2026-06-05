@@ -71,6 +71,7 @@
 //! macOS 26.4.1, rustc 1.95.0, OpenTelemetry 0.32.
 //!
 
+use alloc_tracker::{Allocator, Session};
 use criterion::{criterion_group, criterion_main, BenchmarkId, Criterion, Throughput};
 use opentelemetry::global;
 use opentelemetry::trace::noop::NoopTracerProvider;
@@ -83,6 +84,9 @@ use std::convert::Infallible;
 use std::hint::black_box;
 use std::time::Duration;
 use tower::{Service, ServiceBuilder, ServiceExt};
+
+#[global_allocator]
+static ALLOCATOR: Allocator<std::alloc::System> = Allocator::system();
 
 /// Minimal handler — returns an empty body to keep baseline noise as low as possible.
 async fn handler(_req: http::Request<String>) -> Result<http::Response<String>, Infallible> {
@@ -142,6 +146,7 @@ fn setup_meter() -> (SdkMeterProvider, InMemoryMetricExporter) {
 fn benchmark_middleware(c: &mut Criterion) {
     // Use tokio runtime since Criterion's AsyncExecutor is implemented for tokio
     let rt = tokio::runtime::Runtime::new().unwrap();
+    let session = &Session::new();
 
     let mut group = c.benchmark_group("tower-instrumentation");
     group.throughput(Throughput::Elements(1));
@@ -151,6 +156,9 @@ fn benchmark_middleware(c: &mut Criterion) {
         b.to_async(&rt).iter_custom(|iters| async move {
             let mut service = tower::service_fn(handler);
             let requests = build_requests(iters);
+
+            let op = session.operation("baseline");
+            let _span = op.measure_thread().iterations(iters);
 
             let start = std::time::Instant::now();
             for req in requests {
@@ -176,6 +184,9 @@ fn benchmark_middleware(c: &mut Criterion) {
                     .service(tower::service_fn(handler));
                 let requests = build_requests(iters);
 
+                let op = session.operation("noop");
+                let _span = op.measure_thread().iterations(iters);
+
                 let start = std::time::Instant::now();
                 for req in requests {
                     let resp = service.ready().await.unwrap().call(req).await.unwrap();
@@ -198,6 +209,9 @@ fn benchmark_middleware(c: &mut Criterion) {
                     .service(tower::service_fn(handler));
                 let requests = build_requests(iters);
 
+                let op = session.operation("tracing");
+                let _span = op.measure_thread().iterations(iters);
+
                 let start = std::time::Instant::now();
                 for req in requests {
                     let resp = service.ready().await.unwrap().call(req).await.unwrap();
@@ -219,6 +233,9 @@ fn benchmark_middleware(c: &mut Criterion) {
                     .layer(layer)
                     .service(tower::service_fn(handler));
                 let requests = build_requests(iters);
+
+                let op = session.operation("tracing-sampled-out");
+                let _span = op.measure_thread().iterations(iters);
 
                 let start = std::time::Instant::now();
                 for req in requests {
@@ -243,6 +260,9 @@ fn benchmark_middleware(c: &mut Criterion) {
                     .service(tower::service_fn(handler));
                 let requests = build_requests(iters);
 
+                let op = session.operation("metrics");
+                let _span = op.measure_thread().iterations(iters);
+
                 let start = std::time::Instant::now();
                 for req in requests {
                     let resp = service.ready().await.unwrap().call(req).await.unwrap();
@@ -266,6 +286,9 @@ fn benchmark_middleware(c: &mut Criterion) {
                     .service(tower::service_fn(handler));
                 let requests = build_requests(iters);
 
+                let op = session.operation("tracing+metrics");
+                let _span = op.measure_thread().iterations(iters);
+
                 let start = std::time::Instant::now();
                 for req in requests {
                     let resp = service.ready().await.unwrap().call(req).await.unwrap();
@@ -277,6 +300,7 @@ fn benchmark_middleware(c: &mut Criterion) {
     });
 
     group.finish();
+    session.print_to_stdout();
 }
 
 criterion_group!(benches, benchmark_middleware);
