@@ -218,15 +218,19 @@ where
 
         if let Some(trace_context) = log_record.trace_context() {
             cs_a_count += 2; // for ext_dt_traceId and ext_dt_spanId
+            let trace_id_hex =
+                super::hex_buf::HexBuf::<32>::from_bytes(&trace_context.trace_id.to_bytes());
             eb.add_str(
                 "ext_dt_traceId",
-                trace_context.trace_id.to_string(),
+                trace_id_hex.as_bytes(),
                 FieldFormat::Default,
                 0,
             );
+            let span_id_hex =
+                super::hex_buf::HexBuf::<16>::from_bytes(&trace_context.span_id.to_bytes());
             eb.add_str(
                 "ext_dt_spanId",
-                trace_context.span_id.to_string(),
+                span_id_hex.as_bytes(),
                 FieldFormat::Default,
                 0,
             );

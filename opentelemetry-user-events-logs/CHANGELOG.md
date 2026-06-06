@@ -2,6 +2,11 @@
 
 ## vNext
 
+- Avoided two small heap allocations per log record with a trace context by
+  encoding `traceId` / `spanId` directly into stack-allocated fixed-size hex
+  buffers instead of going through `TraceId::to_string()` /
+  `SpanId::to_string()`.
+
 - Removed `futures-executor` dependency and `LogExporter` trait implementation.
   The processor now calls the exporter synchronously, avoiding potential panics
   from nested `block_on()` calls (e.g. when logging from inside an async
