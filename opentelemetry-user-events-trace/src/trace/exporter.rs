@@ -11,7 +11,7 @@ use opentelemetry_sdk::trace::SpanData;
 use opentelemetry_sdk::Resource;
 use std::{
     collections::HashMap,
-    fmt::Debug,
+    fmt::{self, Debug, Write},
     sync::{Arc, Mutex, OnceLock},
 };
 
@@ -25,19 +25,23 @@ fn get_well_known_attributes() -> &'static HashMap<&'static str, &'static str> {
     WELL_KNOWN_ATTRIBUTES.get_or_init(|| {
         let mut map = HashMap::new();
 
-        // Database attributes
+        // Database attributes (old and stable semconv keys)
         map.insert("db.system", "dbSystem");
+        map.insert("db.system.name", "dbSystem");
         map.insert("db.name", "dbName");
+        map.insert("db.namespace", "dbName");
         map.insert("db.statement", "dbStatement");
+        map.insert("db.query.text", "dbStatement");
 
         // HTTP attributes
         map.insert("http.request.method", "httpMethod");
         map.insert("url.full", "httpUrl");
         map.insert("http.response.status_code", "httpStatusCode");
 
-        // Messaging attributes
+        // Messaging attributes (old and stable semconv keys)
         map.insert("messaging.system", "messagingSystem");
         map.insert("messaging.destination", "messagingDestination");
+        map.insert("messaging.destination.name", "messagingDestination");
         map.insert("messaging.url", "messagingUrl");
 
         // RPC attributes
@@ -49,16 +53,21 @@ fn get_well_known_attributes() -> &'static HashMap<&'static str, &'static str> {
 }
 
 /// Serializes span links to a JSON string: `[{"toTraceId":"...","toSpanId":"..."},...]`
+///
+/// Writes TraceId/SpanId hex directly into the buffer via `Display`,
+/// avoiding intermediate `String` allocations.
 fn links_to_json(links: &[opentelemetry::trace::Link]) -> String {
-    let mut json = String::from("[");
+    // Pre-allocate: each link is ~80 chars: {"toTraceId":"<32>","toSpanId":"<16>"}
+    let mut json = String::with_capacity(2 + links.len() * 80);
+    json.push('[');
     for (i, link) in links.iter().enumerate() {
         if i > 0 {
             json.push(',');
         }
         json.push_str("{\"toTraceId\":\"");
-        json.push_str(&link.span_context.trace_id().to_string());
+        let _ = write!(json, "{}", link.span_context.trace_id());
         json.push_str("\",\"toSpanId\":\"");
-        json.push_str(&link.span_context.span_id().to_string());
+        let _ = write!(json, "{}", link.span_context.span_id());
         json.push_str("\"}");
     }
     json.push(']');
@@ -430,18 +439,29 @@ mod tests {
             Some(&"httpStatusCode")
         );
 
-        // Database (Common Schema Span spec)
+        // Database — old semconv keys
         assert_eq!(attrs.get("db.system"), Some(&"dbSystem"));
         assert_eq!(attrs.get("db.name"), Some(&"dbName"));
         assert_eq!(attrs.get("db.statement"), Some(&"dbStatement"));
 
-        // Messaging (Common Schema Span spec)
+        // Database — stable semconv keys (map to same CS fields)
+        assert_eq!(attrs.get("db.system.name"), Some(&"dbSystem"));
+        assert_eq!(attrs.get("db.namespace"), Some(&"dbName"));
+        assert_eq!(attrs.get("db.query.text"), Some(&"dbStatement"));
+
+        // Messaging — old semconv keys
         assert_eq!(attrs.get("messaging.system"), Some(&"messagingSystem"));
         assert_eq!(
             attrs.get("messaging.destination"),
             Some(&"messagingDestination")
         );
         assert_eq!(attrs.get("messaging.url"), Some(&"messagingUrl"));
+
+        // Messaging — stable semconv key
+        assert_eq!(
+            attrs.get("messaging.destination.name"),
+            Some(&"messagingDestination")
+        );
 
         // RPC (Common Schema Span spec)
         assert_eq!(attrs.get("rpc.system"), Some(&"rpcSystem"));

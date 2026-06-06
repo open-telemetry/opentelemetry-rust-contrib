@@ -38,13 +38,17 @@
 //! | Span Attribute              | Exported Field         |
 //! |-----------------------------|------------------------|
 //! | `db.system`                 | `dbSystem`             |
+//! | `db.system.name`            | `dbSystem`             |
 //! | `db.name`                   | `dbName`               |
+//! | `db.namespace`              | `dbName`               |
 //! | `db.statement`              | `dbStatement`          |
+//! | `db.query.text`             | `dbStatement`          |
 //! | `http.request.method`       | `httpMethod`           |
 //! | `url.full`                  | `httpUrl`              |
 //! | `http.response.status_code` | `httpStatusCode`       |
 //! | `messaging.system`          | `messagingSystem`      |
 //! | `messaging.destination`     | `messagingDestination` |
+//! | `messaging.destination.name`| `messagingDestination` |
 //! | `messaging.url`             | `messagingUrl`         |
 //! | `rpc.system`                | `rpcSystem`            |
 //! | `rpc.grpc.status_code`      | `rpcGrpcStatusCode`    |
