@@ -37,17 +37,13 @@
 //!
 //! | Span Attribute              | Exported Field         |
 //! |-----------------------------|------------------------|
-//! | `db.system`                 | `dbSystem`             |
 //! | `db.system.name`            | `dbSystem`             |
-//! | `db.name`                   | `dbName`               |
 //! | `db.namespace`              | `dbName`               |
-//! | `db.statement`              | `dbStatement`          |
 //! | `db.query.text`             | `dbStatement`          |
 //! | `http.request.method`       | `httpMethod`           |
 //! | `url.full`                  | `httpUrl`              |
 //! | `http.response.status_code` | `httpStatusCode`       |
 //! | `messaging.system`          | `messagingSystem`      |
-//! | `messaging.destination`     | `messagingDestination` |
 //! | `messaging.destination.name`| `messagingDestination` |
 //! | `messaging.url`             | `messagingUrl`         |
 //! | `rpc.system`                | `rpcSystem`            |
@@ -113,11 +109,11 @@ mod tests {
             let span_id = span.span_context().span_id();
 
             // Set PartB attributes
-            // Database attributes
-            span.set_attribute(KeyValue::new("db.system", "postgresql"));
-            span.set_attribute(KeyValue::new("db.name", "inventory"));
+            // Database attributes (stable semconv keys)
+            span.set_attribute(KeyValue::new("db.system.name", "postgresql"));
+            span.set_attribute(KeyValue::new("db.namespace", "inventory"));
             span.set_attribute(KeyValue::new(
-                "db.statement",
+                "db.query.text",
                 "SELECT * FROM products WHERE price > 100",
             ));
             // HTTP attributes
@@ -127,9 +123,12 @@ mod tests {
                 "https://api.example.com/products?min_price=100",
             ));
             span.set_attribute(KeyValue::new("http.response.status_code", 200));
-            // Messaging attributes
+            // Messaging attributes (stable semconv keys)
             span.set_attribute(KeyValue::new("messaging.system", "kafka"));
-            span.set_attribute(KeyValue::new("messaging.destination", "product-updates"));
+            span.set_attribute(KeyValue::new(
+                "messaging.destination.name",
+                "product-updates",
+            ));
             span.set_attribute(KeyValue::new(
                 "messaging.url",
                 "kafka://broker1.example.com:9092",

@@ -25,12 +25,9 @@ fn get_well_known_attributes() -> &'static HashMap<&'static str, &'static str> {
     WELL_KNOWN_ATTRIBUTES.get_or_init(|| {
         let mut map = HashMap::new();
 
-        // Database attributes (old and stable semconv keys)
-        map.insert("db.system", "dbSystem");
+        // Database attributes
         map.insert("db.system.name", "dbSystem");
-        map.insert("db.name", "dbName");
         map.insert("db.namespace", "dbName");
-        map.insert("db.statement", "dbStatement");
         map.insert("db.query.text", "dbStatement");
 
         // HTTP attributes
@@ -38,9 +35,8 @@ fn get_well_known_attributes() -> &'static HashMap<&'static str, &'static str> {
         map.insert("url.full", "httpUrl");
         map.insert("http.response.status_code", "httpStatusCode");
 
-        // Messaging attributes (old and stable semconv keys)
+        // Messaging attributes
         map.insert("messaging.system", "messagingSystem");
-        map.insert("messaging.destination", "messagingDestination");
         map.insert("messaging.destination.name", "messagingDestination");
         map.insert("messaging.url", "messagingUrl");
 
@@ -439,29 +435,18 @@ mod tests {
             Some(&"httpStatusCode")
         );
 
-        // Database — old semconv keys
-        assert_eq!(attrs.get("db.system"), Some(&"dbSystem"));
-        assert_eq!(attrs.get("db.name"), Some(&"dbName"));
-        assert_eq!(attrs.get("db.statement"), Some(&"dbStatement"));
-
-        // Database — stable semconv keys (map to same CS fields)
+        // Database (stable semconv keys)
         assert_eq!(attrs.get("db.system.name"), Some(&"dbSystem"));
         assert_eq!(attrs.get("db.namespace"), Some(&"dbName"));
         assert_eq!(attrs.get("db.query.text"), Some(&"dbStatement"));
 
-        // Messaging — old semconv keys
+        // Messaging (stable semconv keys)
         assert_eq!(attrs.get("messaging.system"), Some(&"messagingSystem"));
-        assert_eq!(
-            attrs.get("messaging.destination"),
-            Some(&"messagingDestination")
-        );
-        assert_eq!(attrs.get("messaging.url"), Some(&"messagingUrl"));
-
-        // Messaging — stable semconv key
         assert_eq!(
             attrs.get("messaging.destination.name"),
             Some(&"messagingDestination")
         );
+        assert_eq!(attrs.get("messaging.url"), Some(&"messagingUrl"));
 
         // RPC (Common Schema Span spec)
         assert_eq!(attrs.get("rpc.system"), Some(&"rpcSystem"));

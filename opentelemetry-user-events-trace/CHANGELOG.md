@@ -5,8 +5,8 @@
 - Add `links` field to Part B (serialized as JSON array of `{toTraceId, toSpanId}`)
 - Add `statusMessage` field to Part B for error spans with descriptions
 - Add `rpcSystem` and `rpcGrpcStatusCode` to well-known attribute mappings
-- Add stable semconv keys (`db.system.name`, `db.namespace`, `db.query.text`,
-  `messaging.destination.name`) as additional mappings to existing CS fields
+- Update well-known attribute keys to stable semantic conventions
+  (`db.system.name`, `db.namespace`, `db.query.text`, `messaging.destination.name`)
 - Fix `PartA.time` and `PartB.startTime` to use UTC ISO 8601 with trailing `Z`
   instead of `+00:00`
 
