@@ -218,22 +218,10 @@ where
 
         if let Some(trace_context) = log_record.trace_context() {
             cs_a_count += 2; // for ext_dt_traceId and ext_dt_spanId
-            let trace_id_hex =
-                super::hex_buf::HexBuf::<32>::from_bytes(&trace_context.trace_id.to_bytes());
-            eb.add_str(
-                "ext_dt_traceId",
-                trace_id_hex.as_bytes(),
-                FieldFormat::Default,
-                0,
-            );
-            let span_id_hex =
-                super::hex_buf::HexBuf::<16>::from_bytes(&trace_context.span_id.to_bytes());
-            eb.add_str(
-                "ext_dt_spanId",
-                span_id_hex.as_bytes(),
-                FieldFormat::Default,
-                0,
-            );
+            let trace_id_hex = super::hex_buf::trace_id_hex(trace_context.trace_id);
+            eb.add_str("ext_dt_traceId", trace_id_hex, FieldFormat::Default, 0);
+            let span_id_hex = super::hex_buf::span_id_hex(trace_context.span_id);
+            eb.add_str("ext_dt_spanId", span_id_hex, FieldFormat::Default, 0);
         }
 
         if let Some(cloud_role) = &self.cloud_role {
