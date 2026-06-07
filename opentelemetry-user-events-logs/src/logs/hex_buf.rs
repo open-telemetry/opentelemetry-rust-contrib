@@ -17,7 +17,11 @@ pub(crate) struct HexBuf<const N: usize>([u8; N]);
 impl<const N: usize> HexBuf<N> {
     /// Encodes `bytes` as lowercase hex into a stack buffer of length `N`.
     pub(crate) fn from_bytes(bytes: &[u8]) -> Self {
-        debug_assert_eq!(N, bytes.len() * 2, "HexBuf<N> requires N == 2 * bytes.len()");
+        debug_assert_eq!(
+            N,
+            bytes.len() * 2,
+            "HexBuf<N> requires N == 2 * bytes.len()"
+        );
         let mut out = [0u8; N];
         for (i, &b) in bytes.iter().enumerate() {
             out[i * 2] = HEX_CHARS[(b >> 4) as usize];
@@ -45,28 +49,40 @@ mod tests {
     fn trace_id_matches_to_string() {
         let trace_id = TraceId::from_hex("4bf92f3577b34da6a3ce929d0e0e4736").unwrap();
         let buf = HexBuf::<32>::from_bytes(&trace_id.to_bytes());
-        assert_eq!(std::str::from_utf8(buf.as_bytes()).unwrap(), trace_id.to_string());
+        assert_eq!(
+            std::str::from_utf8(buf.as_bytes()).unwrap(),
+            trace_id.to_string()
+        );
     }
 
     #[test]
     fn span_id_matches_to_string() {
         let span_id = SpanId::from_hex("00f067aa0ba902b7").unwrap();
         let buf = HexBuf::<16>::from_bytes(&span_id.to_bytes());
-        assert_eq!(std::str::from_utf8(buf.as_bytes()).unwrap(), span_id.to_string());
+        assert_eq!(
+            std::str::from_utf8(buf.as_bytes()).unwrap(),
+            span_id.to_string()
+        );
     }
 
     #[test]
     fn trace_id_all_zeros() {
         let trace_id = TraceId::from_hex("00000000000000000000000000000000").unwrap();
         let buf = HexBuf::<32>::from_bytes(&trace_id.to_bytes());
-        assert_eq!(std::str::from_utf8(buf.as_bytes()).unwrap(), "00000000000000000000000000000000");
+        assert_eq!(
+            std::str::from_utf8(buf.as_bytes()).unwrap(),
+            "00000000000000000000000000000000"
+        );
     }
 
     #[test]
     fn trace_id_all_ff_preserves_leading_chars() {
         let trace_id = TraceId::from_hex("ffffffffffffffffffffffffffffffff").unwrap();
         let buf = HexBuf::<32>::from_bytes(&trace_id.to_bytes());
-        assert_eq!(std::str::from_utf8(buf.as_bytes()).unwrap(), "ffffffffffffffffffffffffffffffff");
+        assert_eq!(
+            std::str::from_utf8(buf.as_bytes()).unwrap(),
+            "ffffffffffffffffffffffffffffffff"
+        );
     }
 
     #[test]
@@ -75,7 +91,10 @@ mod tests {
         // (the original to_string() bug fixed by user-events-logs #612).
         let span_id = SpanId::from_hex("0001020304050607").unwrap();
         let buf = HexBuf::<16>::from_bytes(&span_id.to_bytes());
-        assert_eq!(std::str::from_utf8(buf.as_bytes()).unwrap(), "0001020304050607");
+        assert_eq!(
+            std::str::from_utf8(buf.as_bytes()).unwrap(),
+            "0001020304050607"
+        );
         assert_eq!(std::str::from_utf8(buf.as_bytes()).unwrap().len(), 16);
     }
 }
