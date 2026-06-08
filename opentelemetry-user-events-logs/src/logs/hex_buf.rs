@@ -14,6 +14,7 @@ fn encode<const N: usize>(bytes: &[u8]) -> [u8; N] {
     debug_assert_eq!(N, bytes.len() * 2);
     let mut out = [0u8; N];
     for (i, &b) in bytes.iter().enumerate() {
+        // Split byte into two 4-bit nibbles; each nibble (0..=15) indexes HEX_CHARS.
         out[i * 2] = HEX_CHARS[(b >> 4) as usize];
         out[i * 2 + 1] = HEX_CHARS[(b & 0x0f) as usize];
     }
