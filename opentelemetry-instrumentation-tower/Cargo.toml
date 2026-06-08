@@ -28,7 +28,6 @@ tower-service = { version = "0.3", default-features = false }
 tower-layer = { version = "0.3", default-features = false }
 
 [dev-dependencies]
-alloc_tracker = { workspace = true, default-features = false }
 criterion = { workspace = true, features = ["async_tokio"] }
 opentelemetry_sdk = { workspace = true, features = ["metrics", "trace", "testing"] }
 tokio = { version = "1.0", features = ["macros", "rt", "rt-multi-thread"] }

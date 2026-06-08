@@ -40,7 +40,6 @@ opentelemetry-stdout = { version = "0.32", default-features = false }
 opentelemetry-semantic-conventions = { version = "0.32", features = [
     "semconv_experimental",
 ] }
-alloc_tracker = { version = "0.5", default-features = false }
 criterion = "0.8"
 
 [workspace.lints.rust]
