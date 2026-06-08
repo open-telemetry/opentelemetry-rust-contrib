@@ -46,8 +46,8 @@
 //! | `messaging.system`          | `messagingSystem`      |
 //! | `messaging.destination.name`| `messagingDestination` |
 //! | `messaging.url`             | `messagingUrl`         |
-//! | `rpc.system`                | `rpcSystem`            |
-//! | `rpc.grpc.status_code`      | `rpcGrpcStatusCode`    |
+//! | `rpc.system.name`           | `rpcSystem`            |
+//! | `rpc.response.status_code`  | `rpcGrpcStatusCode`    |
 //!
 //! All other span attributes are exported with their original keys.
 
@@ -790,8 +790,8 @@ mod tests {
 
             // Add RPC attributes to the client span to test rpcSystem/rpcGrpcStatusCode
             if *name == "client-span" {
-                span.set_attribute(KeyValue::new("rpc.system", "grpc"));
-                span.set_attribute(KeyValue::new("rpc.grpc.status_code", 0_i64));
+                span.set_attribute(KeyValue::new("rpc.system.name", "grpc"));
+                span.set_attribute(KeyValue::new("rpc.response.status_code", 0_i64));
             }
 
             let sid = span.span_context().span_id().to_string();

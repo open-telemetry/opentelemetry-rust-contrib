@@ -9,7 +9,7 @@
   attribute keys that trigger the mapping have been updated:
   - `db.system` → `db.system.name`, `db.name` → `db.namespace`,
     `db.statement` → `db.query.text`, `messaging.destination` → `messaging.destination.name`
-  - Added `rpc.system` → `rpcSystem`, `rpc.grpc.status_code` → `rpcGrpcStatusCode`
+  - Added `rpc.system.name` → `rpcSystem`, `rpc.response.status_code` → `rpcGrpcStatusCode`
 - Fix `PartA.time` and `PartB.startTime` to use UTC ISO 8601 with trailing `Z`
   instead of `+00:00`
 

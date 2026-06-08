@@ -11,7 +11,7 @@ use opentelemetry_sdk::trace::SpanData;
 use opentelemetry_sdk::Resource;
 use std::{
     collections::HashMap,
-    fmt::{self, Debug, Write},
+    fmt::{Debug, Write},
     sync::{Arc, Mutex, OnceLock},
 };
 
@@ -41,8 +41,8 @@ fn get_well_known_attributes() -> &'static HashMap<&'static str, &'static str> {
         map.insert("messaging.url", "messagingUrl");
 
         // RPC attributes
-        map.insert("rpc.system", "rpcSystem");
-        map.insert("rpc.grpc.status_code", "rpcGrpcStatusCode");
+        map.insert("rpc.system.name", "rpcSystem");
+        map.insert("rpc.response.status_code", "rpcGrpcStatusCode");
 
         map
     })
@@ -50,8 +50,10 @@ fn get_well_known_attributes() -> &'static HashMap<&'static str, &'static str> {
 
 /// Serializes span links to a JSON string: `[{"toTraceId":"...","toSpanId":"..."},...]`
 ///
-/// Writes TraceId/SpanId hex directly into the buffer via `Display`,
-/// avoiding intermediate `String` allocations.
+/// Writes TraceId/SpanId via Display directly into the output buffer,
+/// avoiding temporary string allocations.
+/// TODO(perf): Revisit link encoding to reduce allocations further and avoid
+/// JSON-text serialization overhead where possible.
 fn links_to_json(links: &[opentelemetry::trace::Link]) -> String {
     // Pre-allocate: each link is ~80 chars: {"toTraceId":"<32>","toSpanId":"<16>"}
     let mut json = String::with_capacity(2 + links.len() * 80);
@@ -267,25 +269,6 @@ impl UserEventsSpanExporter {
                 );
             }
 
-            // statusMessage: emit error description if present.
-            // Per Common Schema spec: "If you report httpStatusCode,
-            // statusMessage should not be reported."
-            let has_http_status_code = span
-                .attributes
-                .iter()
-                .any(|kv| kv.key.as_str() == "http.response.status_code");
-            let status_message = match &span.status {
-                Status::Error { description }
-                    if !description.is_empty() && !has_http_status_code =>
-                {
-                    Some(description.to_string())
-                }
-                _ => None,
-            };
-            if let Some(ref msg) = status_message {
-                eb.add_str("statusMessage", msg, FieldFormat::Default, 0);
-            }
-
             // links: serialize span links as JSON array of {toTraceId, toSpanId}.
             let has_links = !span.links.links.is_empty();
             let links_json = if has_links {
@@ -303,15 +286,38 @@ impl UserEventsSpanExporter {
             // but it is better than alternatives like allocating
             // a new vector to hold PartC attributes.
             // This could be revisited in future if performance is a concern.
+
             let mut partb_count_from_attributes = 0;
             let mut partc_attribute_count = 0;
+            let mut has_http_status_code = false;
 
             for kv in span.attributes.iter() {
                 if let Some(well_known_key) = well_known_attrs.get(kv.key.as_str()) {
+                    if *well_known_key == "httpStatusCode" {
+                        has_http_status_code = true;
+                    }
                     self.add_attribute_to_event(&mut eb, well_known_key, &kv.value);
                     partb_count_from_attributes += 1;
                 } else {
                     partc_attribute_count += 1;
+                }
+            }
+
+            // statusMessage: emit error description if present.
+            // Per Common Schema spec: "If you report httpStatusCode,
+            // statusMessage should not be reported."
+            let has_status_message = match &span.status {
+                Status::Error { description } => !description.is_empty() && !has_http_status_code,
+                _ => false,
+            };
+            if has_status_message {
+                if let Status::Error { description } = &span.status {
+                    eb.add_str(
+                        "statusMessage",
+                        description.as_ref(),
+                        FieldFormat::Default,
+                        0,
+                    );
                 }
             }
 
@@ -321,7 +327,7 @@ impl UserEventsSpanExporter {
                 BASE_PARTB_FIELD_COUNT
                     + partb_count_from_attributes
                     + u8::from(has_parent_id)
-                    + u8::from(status_message.is_some())
+                    + u8::from(has_status_message)
                     + u8::from(has_links),
             );
 
@@ -449,9 +455,9 @@ mod tests {
         assert_eq!(attrs.get("messaging.url"), Some(&"messagingUrl"));
 
         // RPC (Common Schema Span spec)
-        assert_eq!(attrs.get("rpc.system"), Some(&"rpcSystem"));
+        assert_eq!(attrs.get("rpc.system.name"), Some(&"rpcSystem"));
         assert_eq!(
-            attrs.get("rpc.grpc.status_code"),
+            attrs.get("rpc.response.status_code"),
             Some(&"rpcGrpcStatusCode")
         );
     }
