@@ -2368,7 +2368,7 @@ mod tests {
                 let reqs = mock_server.received_requests().await.unwrap();
                 let posts: Vec<String> = reqs
                     .iter()
-                    .filter(|r| r.method == Method::Post)
+                    .filter(|r| r.method == Method::POST)
                     .map(|r| r.url.to_string())
                     .collect();
 
