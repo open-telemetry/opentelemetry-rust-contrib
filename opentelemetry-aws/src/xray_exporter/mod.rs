@@ -73,12 +73,12 @@
 //!
 //! # Feature Flags
 //!
-//! This module requires the `xray-exporter` feature, which is enabled by default.
+//! This module requires the `xray-exporter` feature.
 //! Several sub-modules and capabilities are gated behind additional feature flags:
 //!
 //! | Feature | Description |
 //! |---------|-------------|
-//! | `xray-exporter` | Enables this module (enabled by default) |
+//! | `xray-exporter` | Enables this module |
 //! | `xray-daemon-client` | Enables the [`daemon_client`] sub-module with [`XrayDaemonClient`] for sending segments to the X-Ray daemon over UDP |
 //! | `xray-stdout-client` | Enables the [`stdout_client`] sub-module with [`StdoutClient`] for writing segments to stdout (useful for debugging) |
 //! | `subsegment-nesting` | Enables the use of subsegment nesting via [`SegmentTranslator::always_nest_subsegments`] |
