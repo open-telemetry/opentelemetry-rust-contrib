@@ -1,3 +1,5 @@
+#![allow(deprecated)]
+
 use opentelemetry::{
     global,
     trace::{Span, TraceContextExt, Tracer, TracerProvider},
