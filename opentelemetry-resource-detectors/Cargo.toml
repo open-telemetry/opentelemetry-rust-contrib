@@ -16,6 +16,7 @@ rust-version = "1.75.0"
 opentelemetry = { workspace = true }
 opentelemetry_sdk = { workspace = true }
 opentelemetry-semantic-conventions = { workspace = true }
+hostname = "0.4"
 
 [dev-dependencies]
 temp-env = "0.3.6"

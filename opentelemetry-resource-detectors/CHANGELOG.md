@@ -5,6 +5,7 @@
 ### Added
 
 - Add `ContainerResourceDetector` to detect `container.id` from `/proc/self/cgroup`, with fallback to `/proc/self/mountinfo`.
+- Add host.name attribute to `HostResourceDetector`
 
 ## v0.11.0
 
