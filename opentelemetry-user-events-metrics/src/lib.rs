@@ -502,4 +502,275 @@ mod tests {
 
         println!("Success!");
     }
+
+    #[ignore]
+    #[test]
+    fn integration_test_sync_gauge() {
+        // sudo -E ~/.cargo/bin/cargo test integration_test_sync_gauge -- --nocapture --ignored
+
+        test_utils::check_user_events_available().expect("Kernel does not support user_events.");
+
+        let exporter = MetricsExporter::new();
+        let provider = SdkMeterProvider::builder()
+            .with_resource(
+                Resource::builder_empty()
+                    .with_attributes(vec![KeyValue::new("service.name", "metric-demo")])
+                    .build(),
+            )
+            .with_periodic_exporter(exporter)
+            .build();
+
+        let meter = provider.meter("user-event-test");
+        let gauge = meter
+            .u64_gauge("gauge_u64_test")
+            .with_description("sync gauge test")
+            .with_unit("test_unit")
+            .build();
+
+        gauge.record(42, &[KeyValue::new("mykey1", "myvalue1")]);
+        gauge.record(43, &[KeyValue::new("mykey1", "myvalueA")]);
+
+        let perf_thread = std::thread::spawn(move || {
+            test_utils::run_perf_and_decode(5, "user_events:otlp_metrics")
+        });
+        std::thread::sleep(std::time::Duration::from_millis(1000));
+        provider
+            .shutdown()
+            .expect("Failed to shutdown meter provider");
+
+        let json_content = perf_thread
+            .join()
+            .expect("Perf thread panicked")
+            .expect("perf-decode failed");
+        let decoded = test_utils::extract_and_decode_otlp_metrics(json_content.trim())
+            .expect("Failed to decode OTLP metrics");
+
+        assert_eq!(
+            decoded.len(),
+            2,
+            "Expected one event per data point (2 attribute sets)"
+        );
+
+        let mut values: Vec<(u64, Vec<KeyValue>)> = Vec::new();
+        for req in &decoded {
+            for rm in &req.resource_metrics {
+                for sm in &rm.scope_metrics {
+                    for m in &sm.metrics {
+                        assert_eq!(m.name, "gauge_u64_test");
+                        let data = m.data.as_ref().expect("metric data missing");
+                        let dps = test_utils::extract_metric_data(data, 0);
+                        assert_eq!(dps.len(), 1, "expected 1 data point per event");
+                        let dp = &dps[0];
+                        let value = match dp.value.as_ref().expect("value missing") {
+                            opentelemetry_proto::tonic::metrics::v1::number_data_point::Value::AsInt(v) => *v as u64,
+                            _ => panic!("expected integer value for u64 gauge"),
+                        };
+                        let mut attrs: Vec<KeyValue> = dp
+                            .attributes
+                            .iter()
+                            .map(|a| {
+                                let v = match a.value.as_ref().and_then(|v| v.value.as_ref()) {
+                                    Some(opentelemetry_proto::tonic::common::v1::any_value::Value::StringValue(s)) => s.clone(),
+                                    _ => panic!("unexpected attribute value type"),
+                                };
+                                KeyValue::new(a.key.clone(), v)
+                            })
+                            .collect();
+                        attrs.sort_by(|a, b| a.key.as_str().cmp(b.key.as_str()));
+                        values.push((value, attrs));
+                    }
+                }
+            }
+        }
+
+        values.sort_by_key(|(v, _)| *v);
+        assert_eq!(
+            values,
+            vec![
+                (42, vec![KeyValue::new("mykey1", "myvalue1")]),
+                (43, vec![KeyValue::new("mykey1", "myvalueA")]),
+            ]
+        );
+    }
+
+    #[ignore]
+    #[test]
+    fn integration_test_updowncounter() {
+        // sudo -E ~/.cargo/bin/cargo test integration_test_updowncounter -- --nocapture --ignored
+
+        test_utils::check_user_events_available().expect("Kernel does not support user_events.");
+
+        let exporter = MetricsExporter::new();
+        let provider = SdkMeterProvider::builder()
+            .with_resource(
+                Resource::builder_empty()
+                    .with_attributes(vec![KeyValue::new("service.name", "metric-demo")])
+                    .build(),
+            )
+            .with_periodic_exporter(exporter)
+            .build();
+
+        let meter = provider.meter("user-event-test");
+        let udc = meter
+            .i64_up_down_counter("updown_i64_test")
+            .with_description("updowncounter test")
+            .with_unit("test_unit")
+            .build();
+
+        // Net values per attribute set: set1 = 5, set2 = -3
+        udc.add(10, &[KeyValue::new("mykey1", "myvalue1")]);
+        udc.add(-5, &[KeyValue::new("mykey1", "myvalue1")]);
+        udc.add(-3, &[KeyValue::new("mykey1", "myvalueA")]);
+
+        let perf_thread = std::thread::spawn(move || {
+            test_utils::run_perf_and_decode(5, "user_events:otlp_metrics")
+        });
+        std::thread::sleep(std::time::Duration::from_millis(1000));
+        provider
+            .shutdown()
+            .expect("Failed to shutdown meter provider");
+
+        let json_content = perf_thread
+            .join()
+            .expect("Perf thread panicked")
+            .expect("perf-decode failed");
+        let decoded = test_utils::extract_and_decode_otlp_metrics(json_content.trim())
+            .expect("Failed to decode OTLP metrics");
+
+        assert_eq!(decoded.len(), 2, "Expected one event per attribute set");
+
+        let mut results: Vec<(i64, Vec<KeyValue>, bool)> = Vec::new();
+        for req in &decoded {
+            for rm in &req.resource_metrics {
+                for sm in &rm.scope_metrics {
+                    for m in &sm.metrics {
+                        assert_eq!(m.name, "updown_i64_test");
+                        let data = m.data.as_ref().expect("metric data missing");
+                        let sum = match data {
+                            opentelemetry_proto::tonic::metrics::v1::metric::Data::Sum(s) => s,
+                            _ => panic!("expected Sum data for updowncounter"),
+                        };
+                        assert!(!sum.is_monotonic, "updowncounter sum must be non-monotonic");
+                        assert_eq!(sum.data_points.len(), 1);
+                        let dp = &sum.data_points[0];
+                        let value = match dp.value.as_ref().expect("value missing") {
+                            opentelemetry_proto::tonic::metrics::v1::number_data_point::Value::AsInt(v) => *v,
+                            _ => panic!("expected integer value for i64 updowncounter"),
+                        };
+                        let mut attrs: Vec<KeyValue> = dp
+                            .attributes
+                            .iter()
+                            .map(|a| {
+                                let v = match a.value.as_ref().and_then(|v| v.value.as_ref()) {
+                                    Some(opentelemetry_proto::tonic::common::v1::any_value::Value::StringValue(s)) => s.clone(),
+                                    _ => panic!("unexpected attribute value type"),
+                                };
+                                KeyValue::new(a.key.clone(), v)
+                            })
+                            .collect();
+                        attrs.sort_by(|a, b| a.key.as_str().cmp(b.key.as_str()));
+                        results.push((value, attrs, sum.is_monotonic));
+                    }
+                }
+            }
+        }
+
+        results.sort_by_key(|(v, _, _)| *v);
+        assert_eq!(
+            results,
+            vec![
+                (-3, vec![KeyValue::new("mykey1", "myvalueA")], false),
+                (5, vec![KeyValue::new("mykey1", "myvalue1")], false),
+            ]
+        );
+    }
+
+    #[ignore]
+    #[test]
+    fn integration_test_histogram() {
+        // sudo -E ~/.cargo/bin/cargo test integration_test_histogram -- --nocapture --ignored
+
+        test_utils::check_user_events_available().expect("Kernel does not support user_events.");
+
+        let exporter = MetricsExporter::new();
+        let provider = SdkMeterProvider::builder()
+            .with_resource(
+                Resource::builder_empty()
+                    .with_attributes(vec![KeyValue::new("service.name", "metric-demo")])
+                    .build(),
+            )
+            .with_periodic_exporter(exporter)
+            .build();
+
+        let meter = provider.meter("user-event-test");
+        let hist = meter
+            .f64_histogram("histogram_f64_test")
+            .with_description("histogram test")
+            .with_unit("test_unit")
+            .build();
+
+        let attrs = [KeyValue::new("mykey1", "myvalue1")];
+        // Three observations: 1.0, 5.0, 10.0 → count=3, sum=16.0, min=1.0, max=10.0
+        hist.record(1.0, &attrs);
+        hist.record(5.0, &attrs);
+        hist.record(10.0, &attrs);
+
+        let perf_thread = std::thread::spawn(move || {
+            test_utils::run_perf_and_decode(5, "user_events:otlp_metrics")
+        });
+        std::thread::sleep(std::time::Duration::from_millis(1000));
+        provider
+            .shutdown()
+            .expect("Failed to shutdown meter provider");
+
+        let json_content = perf_thread
+            .join()
+            .expect("Perf thread panicked")
+            .expect("perf-decode failed");
+        let decoded = test_utils::extract_and_decode_otlp_metrics(json_content.trim())
+            .expect("Failed to decode OTLP metrics");
+
+        assert_eq!(
+            decoded.len(),
+            1,
+            "Expected one event for the single attribute set"
+        );
+
+        let req = &decoded[0];
+        let metric = &req.resource_metrics[0].scope_metrics[0].metrics[0];
+        assert_eq!(metric.name, "histogram_f64_test");
+        assert_eq!(metric.description, "histogram test");
+        assert_eq!(metric.unit, "test_unit");
+
+        let hist_data = match metric.data.as_ref().expect("metric data missing") {
+            opentelemetry_proto::tonic::metrics::v1::metric::Data::Histogram(h) => h,
+            _ => panic!("expected Histogram data"),
+        };
+        assert_eq!(hist_data.data_points.len(), 1);
+        let dp = &hist_data.data_points[0];
+        assert_eq!(dp.count, 3);
+        assert_eq!(dp.sum, Some(16.0));
+        assert_eq!(dp.min, Some(1.0));
+        assert_eq!(dp.max, Some(10.0));
+        // bucket_counts has one more entry than explicit_bounds
+        assert_eq!(dp.bucket_counts.len(), dp.explicit_bounds.len() + 1);
+        // Total of bucket counts must equal the data point count
+        assert_eq!(dp.bucket_counts.iter().sum::<u64>(), dp.count);
+
+        let mut actual_attrs: Vec<KeyValue> = dp
+            .attributes
+            .iter()
+            .map(|a| {
+                let v = match a.value.as_ref().and_then(|v| v.value.as_ref()) {
+                    Some(
+                        opentelemetry_proto::tonic::common::v1::any_value::Value::StringValue(s),
+                    ) => s.clone(),
+                    _ => panic!("unexpected attribute value type"),
+                };
+                KeyValue::new(a.key.clone(), v)
+            })
+            .collect();
+        actual_attrs.sort_by(|a, b| a.key.as_str().cmp(b.key.as_str()));
+        assert_eq!(actual_attrs, vec![KeyValue::new("mykey1", "myvalue1")]);
+    }
 }
