@@ -873,9 +873,8 @@ fn generate_spans(count: usize) -> Vec<SpanData> {
             span_timings,
             &mut rng,
         ));
-        for (child_timing, grand_children_timings) in children_timings
-            .into_iter()
-            .zip(grand_children_timings.into_iter())
+        for (child_timing, grand_children_timings) in
+            children_timings.into_iter().zip(grand_children_timings)
         {
             let span_id = SpanId::from_bytes(rng.random());
             let child_type = ChildSpanType::random(&mut rng);
