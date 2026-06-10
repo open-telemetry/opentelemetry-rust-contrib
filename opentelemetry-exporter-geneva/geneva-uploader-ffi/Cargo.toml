@@ -15,8 +15,8 @@ crate-type = ["cdylib", "staticlib", "rlib"]
 [dependencies]
 geneva-uploader = { path = "../geneva-uploader", version = "0.5.0" }
 opentelemetry-proto = { version = "0.31", default-features = false, features = ["logs", "trace", "gen-tonic-messages"] }
-otap-df-pdata-views = { git = "https://github.com/sjmsft/otel-arrow", rev = "ad75eb24835758f3a396a001bae94ee12bcdce57" }
-otap-df-pdata = { git = "https://github.com/sjmsft/otel-arrow", rev = "ad75eb24835758f3a396a001bae94ee12bcdce57", optional = true }
+otap-df-pdata-views = { git = "https://github.com/sjmsft/otel-arrow", rev = "4573a39c239a479b3a22292e9f107c3285afcd82" }
+otap-df-pdata = { git = "https://github.com/sjmsft/otel-arrow", rev = "4573a39c239a479b3a22292e9f107c3285afcd82", optional = true }
 tokio = { version = "1.0", features = ["rt-multi-thread"] }
 prost = "0.14"
 
