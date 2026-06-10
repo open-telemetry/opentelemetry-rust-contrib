@@ -521,7 +521,7 @@ impl SegmentTranslator {
     /// span data slice.
     ///
     /// **Note**: The returned documents are in arbitrary order and may not match the input
-    /// span order. The translation process uses a [`HashMap`] to establish parent-child
+    /// span order. The translation process uses a [`HashMap`](std::collections::HashMap) to establish parent-child
     /// relationships, which does not preserve ordering.
     ///
     /// # Examples
