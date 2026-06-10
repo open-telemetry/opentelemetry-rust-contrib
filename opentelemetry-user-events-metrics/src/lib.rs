@@ -534,7 +534,9 @@ mod tests {
             test_utils::run_perf_and_decode(5, "user_events:otlp_metrics")
         });
         std::thread::sleep(std::time::Duration::from_millis(1000));
-        provider.shutdown().expect("Failed to shutdown meter provider");
+        provider
+            .shutdown()
+            .expect("Failed to shutdown meter provider");
 
         let json_content = perf_thread
             .join()
@@ -624,7 +626,9 @@ mod tests {
             test_utils::run_perf_and_decode(5, "user_events:otlp_metrics")
         });
         std::thread::sleep(std::time::Duration::from_millis(1000));
-        provider.shutdown().expect("Failed to shutdown meter provider");
+        provider
+            .shutdown()
+            .expect("Failed to shutdown meter provider");
 
         let json_content = perf_thread
             .join()
@@ -646,10 +650,7 @@ mod tests {
                             opentelemetry_proto::tonic::metrics::v1::metric::Data::Sum(s) => s,
                             _ => panic!("expected Sum data for updowncounter"),
                         };
-                        assert!(
-                            !sum.is_monotonic,
-                            "updowncounter sum must be non-monotonic"
-                        );
+                        assert!(!sum.is_monotonic, "updowncounter sum must be non-monotonic");
                         assert_eq!(sum.data_points.len(), 1);
                         let dp = &sum.data_points[0];
                         let value = match dp.value.as_ref().expect("value missing") {
@@ -718,7 +719,9 @@ mod tests {
             test_utils::run_perf_and_decode(5, "user_events:otlp_metrics")
         });
         std::thread::sleep(std::time::Duration::from_millis(1000));
-        provider.shutdown().expect("Failed to shutdown meter provider");
+        provider
+            .shutdown()
+            .expect("Failed to shutdown meter provider");
 
         let json_content = perf_thread
             .join()
@@ -727,7 +730,11 @@ mod tests {
         let decoded = test_utils::extract_and_decode_otlp_metrics(json_content.trim())
             .expect("Failed to decode OTLP metrics");
 
-        assert_eq!(decoded.len(), 1, "Expected one event for the single attribute set");
+        assert_eq!(
+            decoded.len(),
+            1,
+            "Expected one event for the single attribute set"
+        );
 
         let req = &decoded[0];
         let metric = &req.resource_metrics[0].scope_metrics[0].metrics[0];
@@ -755,7 +762,9 @@ mod tests {
             .iter()
             .map(|a| {
                 let v = match a.value.as_ref().and_then(|v| v.value.as_ref()) {
-                    Some(opentelemetry_proto::tonic::common::v1::any_value::Value::StringValue(s)) => s.clone(),
+                    Some(
+                        opentelemetry_proto::tonic::common::v1::any_value::Value::StringValue(s),
+                    ) => s.clone(),
                     _ => panic!("unexpected attribute value type"),
                 };
                 KeyValue::new(a.key.clone(), v)
