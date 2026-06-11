@@ -1,18 +1,15 @@
 use std::{
-    fs::File,
     hint::black_box,
     net::{SocketAddr, UdpSocket},
-    path::Path,
     sync::mpsc::{sync_channel, Receiver, RecvError, RecvTimeoutError, SyncSender},
     thread,
     time::{Duration, SystemTime, UNIX_EPOCH},
 };
 
 use criterion::{
-    criterion_group, criterion_main, measurement::WallTime, profiler::Profiler, BatchSize,
-    BenchmarkGroup, BenchmarkId, Criterion,
+    criterion_group, criterion_main, measurement::WallTime, BatchSize, BenchmarkGroup, BenchmarkId,
+    Criterion,
 };
-use pprof::{flamegraph::Options, ProfilerGuard};
 
 use opentelemetry::{
     trace::{SpanContext, SpanId, SpanKind, Status, TraceFlags, TraceId, TraceState},
@@ -1053,7 +1050,12 @@ fn benchmark_export_only(c: &mut Criterion) {
 
 criterion_group!(
     name = benches;
-    config = Criterion::default().sample_size(500).measurement_time(Duration::from_secs(10)).with_profiler(PProfProfiler::default());
+    config = {
+        let criterion_config = Criterion::default().sample_size(500).measurement_time(Duration::from_secs(10));
+        #[cfg(not(target_os = "windows"))]
+        let criterion_config = criterion_config .with_profiler(profiling::PProfProfiler::default());
+        criterion_config
+    };
     targets =
         benchmark_translation_and_export,
         benchmark_translation_only,
@@ -1062,56 +1064,66 @@ criterion_group!(
 
 criterion_main!(benches);
 
-use std::fs::OpenOptions;
-struct PProfProfiler<'a> {
-    frequency: i32,
-    active_profiler: Option<ProfilerGuard<'a>>,
-}
-impl Default for PProfProfiler<'_> {
-    fn default() -> Self {
-        Self {
-            frequency: 10000,
-            active_profiler: None,
+#[cfg(not(target_os = "windows"))]
+mod profiling {
+    use std::{
+        fs::{File, OpenOptions},
+        path::Path,
+    };
+
+    use criterion::profiler::Profiler;
+    use pprof::{flamegraph::Options, ProfilerGuard};
+
+    pub struct PProfProfiler<'a> {
+        frequency: i32,
+        active_profiler: Option<ProfilerGuard<'a>>,
+    }
+    impl Default for PProfProfiler<'_> {
+        fn default() -> Self {
+            Self {
+                frequency: 10000,
+                active_profiler: None,
+            }
         }
     }
-}
-impl Profiler for PProfProfiler<'_> {
-    fn start_profiling(&mut self, _benchmark_id: &str, _benchmark_dir: &Path) {
-        println!("Profiling started");
-        self.active_profiler = Some(ProfilerGuard::new(self.frequency).unwrap());
-    }
+    impl Profiler for PProfProfiler<'_> {
+        fn start_profiling(&mut self, _benchmark_id: &str, _benchmark_dir: &Path) {
+            println!("Profiling started");
+            self.active_profiler = Some(ProfilerGuard::new(self.frequency).unwrap());
+        }
 
-    fn stop_profiling(&mut self, _benchmark_id: &str, benchmark_dir: &Path) {
-        std::fs::create_dir_all(benchmark_dir).unwrap();
+        fn stop_profiling(&mut self, _benchmark_id: &str, benchmark_dir: &Path) {
+            std::fs::create_dir_all(benchmark_dir).unwrap();
 
-        let output_path = benchmark_dir.join("flamegraph.svg");
-        let output_file = match OpenOptions::new()
-            .read(true)
-            .write(true)
-            .create_new(true)
-            .open(&output_path)
-        {
-            Ok(f) => f,
-            Err(_) => {
-                let mv_output_path = benchmark_dir.join("flamegraph.old.svg");
-                std::fs::rename(&output_path, mv_output_path).unwrap_or_else(|_| {
-                    panic!("File system error while creating {}", output_path.display())
-                });
-                File::create(&output_path).unwrap_or_else(|_| {
-                    panic!("File system error while creating {}", output_path.display())
-                })
+            let output_path = benchmark_dir.join("flamegraph.svg");
+            let output_file = match OpenOptions::new()
+                .read(true)
+                .write(true)
+                .create_new(true)
+                .open(&output_path)
+            {
+                Ok(f) => f,
+                Err(_) => {
+                    let mv_output_path = benchmark_dir.join("flamegraph.old.svg");
+                    std::fs::rename(&output_path, mv_output_path).unwrap_or_else(|_| {
+                        panic!("File system error while creating {}", output_path.display())
+                    });
+                    File::create(&output_path).unwrap_or_else(|_| {
+                        panic!("File system error while creating {}", output_path.display())
+                    })
+                }
+            };
+
+            if let Some(profiler) = self.active_profiler.take() {
+                let default_options = &mut Options::default();
+
+                profiler
+                    .report()
+                    .build()
+                    .unwrap()
+                    .flamegraph_with_options(output_file, default_options)
+                    .expect("Error while writing flamegraph");
             }
-        };
-
-        if let Some(profiler) = self.active_profiler.take() {
-            let default_options = &mut Options::default();
-
-            profiler
-                .report()
-                .build()
-                .unwrap()
-                .flamegraph_with_options(output_file, default_options)
-                .expect("Error while writing flamegraph");
         }
     }
 }
