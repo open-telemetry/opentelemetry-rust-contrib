@@ -7,7 +7,7 @@
 | Status        |           |
 | ------------- |-----------|
 | Stability     | beta      |
-| Owners        | [Jonathan Lee](https://github.com/jj22ee) |
+| Owners        | [Jonathan Lee](https://github.com/jj22ee), [Chinmay Chahar](https://github.com/chinmaychahar) |
 
 Additional types for exporting [`OpenTelemetry`] data to AWS.
 
