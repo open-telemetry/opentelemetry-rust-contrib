@@ -1051,9 +1051,11 @@ fn benchmark_export_only(c: &mut Criterion) {
 criterion_group!(
     name = benches;
     config = {
-        let criterion_config = Criterion::default().sample_size(500).measurement_time(Duration::from_secs(10));
+        let criterion_config = Criterion::default()
+            .sample_size(500)
+            .measurement_time(Duration::from_secs(10));
         #[cfg(not(target_os = "windows"))]
-        let criterion_config = criterion_config .with_profiler(profiling::PProfProfiler::default());
+        let criterion_config = criterion_config.with_profiler(profiling::PProfProfiler::default());
         criterion_config
     };
     targets =
