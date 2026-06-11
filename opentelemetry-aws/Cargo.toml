@@ -33,7 +33,6 @@ xray-exporter = [
     "dep:serde_json",
     "dep:thiserror",
     "dep:regex",
-    "dep:url",
     "dep:rand"
 ]
 xray-daemon-client = ["xray-exporter"]
@@ -51,7 +50,6 @@ serde = { version = "1.0", features = ["derive"], optional = true }
 serde_json = {version = "1.0", optional = true}
 thiserror = {version = "1.0", optional = true}
 regex = {version = "1.0", optional = true}
-url = {version = "2.0", optional = true}
 rand = {version = "0.9", optional = true}
 
 [dev-dependencies]
