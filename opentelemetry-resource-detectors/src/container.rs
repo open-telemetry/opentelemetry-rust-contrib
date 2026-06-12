@@ -1,6 +1,6 @@
 //! Container resource detector
 //!
-//! Detects the container ID from the cgroup files under `/proc`
+//! Detects the container ID using files under `proc`
 
 use opentelemetry::KeyValue;
 use opentelemetry_sdk::resource::{Resource, ResourceDetector};
