@@ -23,6 +23,10 @@ criterion = { workspace = true, features = ["html_reports"] }
 tracing-subscriber = { version = "0.3", features = ["env-filter","registry", "std", "fmt"] }
 opentelemetry-proto = { workspace = true, features = ["gen-tonic", "metrics", "gen-tonic-messages"] }
 
+[target.'cfg(windows)'.dev-dependencies]
+ferrisetw = "1.2"
+windows = { version = "0.62", features = ["Win32_System_Diagnostics_Etw"] }
+
 [features]
 internal-logs = ["tracing", "opentelemetry/internal-logs", "opentelemetry_sdk/internal-logs", "opentelemetry-proto/internal-logs"]
 default = ["internal-logs"]

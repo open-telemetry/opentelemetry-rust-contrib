@@ -30,9 +30,10 @@ lz4_flex = { version = "0.11", features = ["safe-encode"], default-features = fa
 azure_identity = "0.29"
 azure_core = "0.29"
 tracing = "0.1"
-# Pinned to >=0.3.47 to pick up the RUSTSEC-2026-0009 fix; pulled in transitively
-# via azure_identity / rcgen / yasna. Not used directly by this crate.
-time = ">=0.3.47"
+# Pinned to >=0.3.47 to pick up the RUSTSEC-2026-0009 fix; upper bound excludes
+# 0.3.48 which introduces a trait impl that conflicts with typespec_client_core
+# (transitive via azure_core) and breaks the build (E0119). Not used directly.
+time = ">=0.3.47, <0.3.48"
 
 [features]
 mock_auth = [] # Disabled by default. Not to be enabled in the prod release. 
@@ -46,7 +47,7 @@ tokio = { version = "1", features = ["full"] }
 rcgen = "0.14"
 openssl = { version = "0.10", features = ["vendored"] }
 tempfile = "3.5"
-wiremock = "=0.5.22"
+wiremock = "0.6"
 futures = "0.3"
 num_cpus = "1.16"
 lz4_flex = { version = "0.11" }

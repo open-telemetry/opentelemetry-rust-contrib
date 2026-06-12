@@ -24,3 +24,11 @@ license-files = [
 [advisories]
 unmaintained = "none"
 yanked = "allow"
+ignore = [
+    # http-types is unmaintained; no patched version available.
+    # Reaches the graph transitively only via opentelemetry-datadog's optional
+    # `surf-client` feature (surf -> http-client -> http-types). The datadog
+    # exporter is planned for removal (see #609), at which point this entry
+    # can be dropped.
+    "RUSTSEC-2026-0174",
+]
