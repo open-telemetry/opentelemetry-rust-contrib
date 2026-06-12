@@ -89,15 +89,19 @@ fn extract_container_id_from_mountinfo(content: &str) -> Option<&str> {
 }
 
 /// Extracts a container ID from a single `/proc/self/mountinfo` line. The ID is the
-/// segment after `containers` or `overlay-containers` on the `hostname` line.
+/// segment after `containers` or `overlay-containers` on the `/etc/hostname` mount point line.
 #[cfg(any(target_os = "linux", test))]
 fn extract_container_id_from_mountinfo_line(line: &str) -> Option<&str> {
-    if !line.contains("hostname") {
+    // Root and mount point precede the " - " separator and are indexed 3 and 4 when split by whitespace.
+    let mut fields = line.split(" - ").next()?.split_whitespace();
+    let root = fields.nth(3)?;
+    let mount_point = fields.next()?;
+    if mount_point != "/etc/hostname" {
         return None;
     }
 
     let mut prev = "";
-    for segment in line.split('/') {
+    for segment in root.split('/') {
         if matches!(prev, "containers" | "overlay-containers") && is_valid_container_id(segment) {
             return Some(segment);
         }
