@@ -93,7 +93,7 @@ fn extract_container_id_from_mountinfo(content: &str) -> Option<&str> {
 #[cfg(any(target_os = "linux", test))]
 fn extract_container_id_from_mountinfo_line(line: &str) -> Option<&str> {
     // Root and mount point precede the " - " separator and are indexed 3 and 4 when split by whitespace.
-    let mut fields = line.split(" - ").next()?.split_whitespace();
+    let mut fields = line.split_once(" - ")?.0.split_whitespace();
     let root = fields.nth(3)?;
     let mount_point = fields.next()?;
     if mount_point != "/etc/hostname" {
