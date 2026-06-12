@@ -31,3 +31,4 @@ Community supported Resource detectors implementations for applications instrume
 | HostResourceDetector    | HOST_ARCH                         | all          | https://github.com/open-telemetry/semantic-conventions/blob/main/docs/resource/host.md    |
 | K8sResourceDetector     | K8S_NAMESPACE_NAME                | all          | https://github.com/open-telemetry/semantic-conventions/blob/main/docs/resource/k8s.md     |
 | K8sResourceDetector     | K8S_POD_NAME                      | all          | https://github.com/open-telemetry/semantic-conventions/blob/main/docs/resource/k8s.md     |
+| ContainerResourceDetector | CONTAINER_ID                    | linux        | https://github.com/open-telemetry/semantic-conventions/blob/main/docs/resource/container.md |
