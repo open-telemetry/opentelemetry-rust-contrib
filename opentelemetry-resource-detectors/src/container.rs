@@ -18,8 +18,12 @@ const MIN_CONTAINER_ID_LENGTH: usize = 32;
 #[cfg(any(target_os = "linux", test))]
 const MAX_CONTAINER_ID_LENGTH: usize = 64;
 
-/// Detects `container.id` from `/proc/self/cgroup` (cgroup v1), falling back to
-/// `/proc/self/mountinfo` (cgroup v2). Returns an empty [`Resource`] when no ID is found.
+/// Detects `container.id` from `/proc/self/cgroup`, falling back to `/proc/self/mountinfo`.
+///
+/// Returns an empty [`Resource`] when no ID is found.
+///
+/// This detector is meant for use on Linux only. It will no-op and return an empty
+/// [`Resource`] on all other platforms.
 pub struct ContainerResourceDetector;
 
 impl ResourceDetector for ContainerResourceDetector {
