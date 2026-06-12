@@ -8,9 +8,9 @@ use opentelemetry_sdk::resource::{Resource, ResourceDetector};
 use std::fs::read_to_string;
 
 #[cfg(target_os = "linux")]
-const CGROUP_V1_PATH: &str = "/proc/self/cgroup";
+const CGROUP_PATH: &str = "/proc/self/cgroup";
 #[cfg(target_os = "linux")]
-const CGROUP_V2_PATH: &str = "/proc/self/mountinfo";
+const MOUNTINFO_PATH: &str = "/proc/self/mountinfo";
 
 /// Min and max container ID lengths.
 #[cfg(any(target_os = "linux", test))]
@@ -37,13 +37,13 @@ impl ResourceDetector for ContainerResourceDetector {
 
 #[cfg(target_os = "linux")]
 fn detect_container_id() -> Option<String> {
-    if let Ok(content) = read_to_string(CGROUP_V1_PATH) {
+    if let Ok(content) = read_to_string(CGROUP_PATH) {
         if let Some(id) = content.lines().find_map(extract_container_id_from_cgroup) {
             return Some(id.to_string());
         }
     }
 
-    if let Ok(content) = read_to_string(CGROUP_V2_PATH) {
+    if let Ok(content) = read_to_string(MOUNTINFO_PATH) {
         if let Some(id) = extract_container_id_from_mountinfo(&content) {
             return Some(id.to_string());
         }
