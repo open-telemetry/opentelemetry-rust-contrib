@@ -12,8 +12,11 @@ const CGROUP_V1_PATH: &str = "/proc/self/cgroup";
 #[cfg(target_os = "linux")]
 const CGROUP_V2_PATH: &str = "/proc/self/mountinfo";
 
-/// Length of a container ID in the cgroup v2 mount path.
-const CONTAINER_ID_LENGTH: usize = 64;
+/// Min and max container ID lengths.
+#[cfg(any(target_os = "linux", test))]
+const MIN_CONTAINER_ID_LENGTH: usize = 32;
+#[cfg(any(target_os = "linux", test))]
+const MAX_CONTAINER_ID_LENGTH: usize = 64;
 
 /// Detects `container.id` from `/proc/self/cgroup` (cgroup v1), falling back to
 /// `/proc/self/mountinfo` (cgroup v2). Returns an empty [`Resource`] when no ID is found.
@@ -67,7 +70,9 @@ fn extract_container_id_from_cgroup(line: &str) -> Option<&str> {
 
     let candidate = candidate.split('.').next().unwrap_or(candidate);
 
-    if !candidate.is_empty() && candidate.bytes().all(|b| b.is_ascii_hexdigit()) {
+    if (MIN_CONTAINER_ID_LENGTH..=MAX_CONTAINER_ID_LENGTH).contains(&candidate.len())
+        && candidate.bytes().all(|b| b.is_ascii_hexdigit())
+    {
         Some(candidate)
     } else {
         None
@@ -86,7 +91,7 @@ fn extract_container_id_from_mountinfo(content: &str) -> Option<&str> {
         .find_map(|pair| match pair {
             [marker, id]
                 if matches!(*marker, "containers" | "overlay-containers")
-                    && id.len() == CONTAINER_ID_LENGTH =>
+                    && id.len() == MAX_CONTAINER_ID_LENGTH =>
             {
                 Some(*id)
             }
@@ -139,6 +144,21 @@ mod tests {
         assert_eq!(extract_container_id_from_cgroup("2:cpu:nopath"), None);
         assert_eq!(
             extract_container_id_from_cgroup("3:cpuset:/system.slice/sshd.service"),
+            None
+        );
+    }
+
+    #[test]
+    fn rejects_out_of_range_hex_segments() {
+        // Too short.
+        assert_eq!(
+            extract_container_id_from_cgroup("5:pids:/user.slice/user-1000.slice/session-2.scope"),
+            None
+        );
+        // Too long.
+        let too_long = "a".repeat(MAX_CONTAINER_ID_LENGTH + 1);
+        assert_eq!(
+            extract_container_id_from_cgroup(&format!("0::/docker/{too_long}")),
             None
         );
     }
