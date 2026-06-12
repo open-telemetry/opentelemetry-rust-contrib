@@ -219,7 +219,7 @@ mod tests {
 
     #[test]
     fn extracts_shorter_hex_id_from_mountinfo() {
-        // Valid hex ID shorter shorter than 64 chars.
+        // Valid hex ID shorter than 64 chars.
         let content = "\
 2304 1573 254:1 /docker/containers/abcdef1234567890abcdef1234567890/hostname /etc/hostname rw - ext4 /dev/vda1 rw
 ";
