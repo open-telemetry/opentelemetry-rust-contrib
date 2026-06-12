@@ -78,6 +78,11 @@ jobs:
     - uses: dtolnay/rust-toolchain@3c5f7ea28cd621ae0bf5283f0e981fb97b8a7af9
       with:
         toolchain: stable
+        components: llvm-tools-preview
+    - name: cargo install cargo-llvm-cov
+      uses: taiki-e/install-action@e49978b799e49ff429d162b7a30601a569ab6538 # v2.81.1
+      with:
+        tool: cargo-llvm-cov
     - name: Check user_events kernel support
       run: |
         sudo cat /sys/kernel/tracing/user_events_status || { echo "user_events not supported on this runner"; exit 1; }
@@ -114,11 +119,21 @@ jobs:
         make -j$(nproc)
         sudo cp bin/perf-decode /usr/local/bin/
     - name: Run user_events integration tests (trace)
-      run: sudo -E $HOME/.cargo/bin/cargo test --manifest-path opentelemetry-user-events-trace/Cargo.toml --all-features -- --ignored --nocapture --test-threads=1
+      run: sudo -E $HOME/.cargo/bin/cargo llvm-cov --no-report --manifest-path opentelemetry-user-events-trace/Cargo.toml --all-features -- --ignored --nocapture --test-threads=1
     - name: Run user_events integration tests (logs)
-      run: sudo -E $HOME/.cargo/bin/cargo test --manifest-path opentelemetry-user-events-logs/Cargo.toml --all-features -- --ignored --nocapture --test-threads=1
+      run: sudo -E $HOME/.cargo/bin/cargo llvm-cov --no-report --manifest-path opentelemetry-user-events-logs/Cargo.toml --all-features -- --ignored --nocapture --test-threads=1
     - name: Run user_events integration tests (metrics)
-      run: sudo -E $HOME/.cargo/bin/cargo test --manifest-path opentelemetry-user-events-metrics/Cargo.toml --all-features -- --ignored --nocapture --test-threads=1
+      run: sudo -E $HOME/.cargo/bin/cargo llvm-cov --no-report --manifest-path opentelemetry-user-events-metrics/Cargo.toml --all-features -- --ignored --nocapture --test-threads=1
+    - name: Generate lcov report
+      run: sudo -E $HOME/.cargo/bin/cargo llvm-cov report --lcov --output-path lcov.info
+    - name: Make lcov.info readable for codecov upload
+      run: sudo chmod a+r lcov.info
+    - name: Upload to codecov.io
+      uses: codecov/codecov-action@fb8b3582c8e4def4969c97caa2f19720cb33a72f # v6.0.2
+      with:
+        files: lcov.info
+        flags: user-events-integration
+        fail_ci_if_error: false
   geneva-uploader-test-server-integration-test:
     runs-on: ubuntu-latest
     steps:
@@ -150,10 +165,23 @@ jobs:
     - uses: dtolnay/rust-toolchain@3c5f7ea28cd621ae0bf5283f0e981fb97b8a7af9
       with:
         toolchain: stable
+        components: llvm-tools-preview
+    - name: cargo install cargo-llvm-cov
+      uses: taiki-e/install-action@e49978b799e49ff429d162b7a30601a569ab6538 # v2.81.1
+      with:
+        tool: cargo-llvm-cov
     - name: Run ETW integration tests (logs)
-      run: cargo test --manifest-path opentelemetry-etw-logs/Cargo.toml --all-features -- --ignored --nocapture --test-threads=1
+      run: cargo llvm-cov --no-report --manifest-path opentelemetry-etw-logs/Cargo.toml --all-features -- --ignored --nocapture --test-threads=1
     - name: Run ETW integration tests (metrics)
-      run: cargo test --manifest-path opentelemetry-etw-metrics/Cargo.toml --all-features -- --ignored --nocapture --test-threads=1
+      run: cargo llvm-cov --no-report --manifest-path opentelemetry-etw-metrics/Cargo.toml --all-features -- --ignored --nocapture --test-threads=1
+    - name: Generate lcov report
+      run: cargo llvm-cov report --lcov --output-path lcov.info
+    - name: Upload to codecov.io
+      uses: codecov/codecov-action@fb8b3582c8e4def4969c97caa2f19720cb33a72f # v6.0.2
+      with:
+        files: lcov.info
+        flags: etw-integration
+        fail_ci_if_error: false
   lint:
     strategy:
       matrix:
