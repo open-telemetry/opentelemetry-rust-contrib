@@ -79,11 +79,21 @@ fn extract_container_id_from_cgroup(line: &str) -> Option<&str> {
     }
 }
 
-/// Extracts a container ID from a `/proc/self/mountinfo` `hostname` line. The ID is
-/// the segment after `containers` or `overlay-containers`.
+/// Extracts a container ID from `/proc/self/mountinfo`
 #[cfg(any(target_os = "linux", test))]
 fn extract_container_id_from_mountinfo(content: &str) -> Option<&str> {
-    let line = content.lines().find(|line| line.contains("hostname"))?;
+    content
+        .lines()
+        .find_map(extract_container_id_from_mountinfo_line)
+}
+
+/// Extracts a container ID from a single `/proc/self/mountinfo` line. The ID is the
+/// segment after `containers` or `overlay-containers` on the `hostname` line.
+#[cfg(any(target_os = "linux", test))]
+fn extract_container_id_from_mountinfo_line(line: &str) -> Option<&str> {
+    if !line.contains("hostname") {
+        return None;
+    }
 
     line.split('/')
         .collect::<Vec<_>>()
@@ -196,6 +206,18 @@ mod tests {
 1579 1573 0:290 / /dev rw,nosuid - tmpfs tmpfs rw
 ";
         assert_eq!(extract_container_id_from_mountinfo(content), None);
+    }
+
+    #[test]
+    fn extracts_id_from_later_mountinfo_line() {
+        let content = "\
+1234 1111 0:50 /etc/hostname /etc/hostname rw,relatime - tmpfs tmpfs rw
+2304 1573 254:1 /docker/containers/1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef/hostname /etc/hostname rw - ext4 /dev/vda1 rw
+";
+        assert_eq!(
+            extract_container_id_from_mountinfo(content),
+            Some("1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef")
+        );
     }
 
     #[test]
