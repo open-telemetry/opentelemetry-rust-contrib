@@ -40,15 +40,22 @@ body:
       multiple: true
       options:
         - opentelemetry-aws
+        - opentelemetry-config
         - opentelemetry-contrib
         - opentelemetry-datadog
-        - opentelemetry-dynatrace
         - opentelemetry-etw-logs
+        - opentelemetry-etw-metrics
+        - opentelemetry-exporter-geneva
+        - opentelemetry-instrumentation-actix-web
+        - opentelemetry-instrumentation-tower
+        - opentelemetry-resource-detectors
         - opentelemetry-stackdriver
         - opentelemetry-user-events-logs
         - opentelemetry-user-events-metrics
-        - opentelemetry-resource-detectors
+        - opentelemetry-user-events-trace
         - N/A
+    validations:
+      required: true
   - type: textarea
     id: logs
     attributes:
