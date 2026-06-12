@@ -91,7 +91,8 @@ fn extract_container_id_from_mountinfo(content: &str) -> Option<&str> {
         .find_map(|pair| match pair {
             [marker, id]
                 if matches!(*marker, "containers" | "overlay-containers")
-                    && id.len() == MAX_CONTAINER_ID_LENGTH =>
+                    && id.len() == MAX_CONTAINER_ID_LENGTH
+                    && id.bytes().all(|b| b.is_ascii_hexdigit()) =>
             {
                 Some(*id)
             }
@@ -193,6 +194,14 @@ mod tests {
         let content = "\
 1573 1471 0:286 / / rw,relatime - overlay overlay rw
 1579 1573 0:290 / /dev rw,nosuid - tmpfs tmpfs rw
+";
+        assert_eq!(extract_container_id_from_mountinfo(content), None);
+    }
+
+    #[test]
+    fn ignores_non_hex_mountinfo_segment() {
+        let content = "\
+2304 1573 254:1 /docker/containers/zzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzz/hostname /etc/hostname rw - ext4 /dev/vda1 rw
 ";
         assert_eq!(extract_container_id_from_mountinfo(content), None);
     }
