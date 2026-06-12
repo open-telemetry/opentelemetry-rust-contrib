@@ -75,7 +75,9 @@ fn extract_container_id_from_cgroup(line: &str) -> Option<&str> {
         None => last_segment,
     };
 
-    let candidate = candidate.split('.').next().unwrap_or(candidate);
+    let candidate = candidate
+        .split_once('.')
+        .map_or(candidate, |(before, _)| before);
 
     is_valid_container_id(candidate).then_some(candidate)
 }
