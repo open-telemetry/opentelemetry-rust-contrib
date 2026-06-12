@@ -2,8 +2,6 @@ use opentelemetry::trace::SpanKind;
 use std::borrow::Cow;
 use tracelogging_dynamic as tld;
 
-use super::otel_id_ext::{SpanIdExt, TraceIdExt};
-
 /// Well-known OpenTelemetry semantic-convention attributes that map to
 /// Common Schema Part B field names. Attributes whose key matches one of
 /// these entries are emitted as Part B fields (using the mapped name)
@@ -65,6 +63,7 @@ pub(crate) fn add_attribute_to_event(
         opentelemetry::Value::String(s) => {
             event.add_str8(field_name, s.as_str(), tld::OutType::Default, 0);
         }
+        #[cfg(feature = "serde_json")]
         opentelemetry::Value::Array(arr) => {
             let json = array_to_json(arr);
             event.add_str8(field_name, &json, tld::OutType::Json, 0);
@@ -75,6 +74,7 @@ pub(crate) fn add_attribute_to_event(
     }
 }
 
+#[cfg(feature = "serde_json")]
 fn array_to_value(arr: &opentelemetry::Array) -> serde_json::Value {
     use opentelemetry::Array;
     match arr {
@@ -104,25 +104,35 @@ fn array_to_value(arr: &opentelemetry::Array) -> serde_json::Value {
     }
 }
 
+#[cfg(feature = "serde_json")]
 fn array_to_json(arr: &opentelemetry::Array) -> String {
     serde_json::to_string(&array_to_value(arr)).unwrap_or_default()
 }
 
 /// Serializes span links to a JSON string (array of {toTraceId, toSpanId}).
+/// Without the `serde_json` feature, always returns `"[]"`.
 pub(crate) fn links_to_json(links: &[opentelemetry::trace::Link]) -> Cow<'static, str> {
-    if links.is_empty() {
-        return Cow::Borrowed("[]");
-    }
-    let arr: Vec<serde_json::Value> = links
-        .iter()
-        .map(|link| {
-            serde_json::json!({
-                "toTraceId": link.span_context.trace_id().to_hex().as_str(),
-                "toSpanId": link.span_context.span_id().to_hex().as_str(),
+    #[cfg(feature = "serde_json")]
+    {
+        if links.is_empty() {
+            return Cow::Borrowed("[]");
+        }
+        let arr: Vec<serde_json::Value> = links
+            .iter()
+            .map(|link| {
+                serde_json::json!({
+                    "toTraceId": link.span_context.trace_id().to_string(),
+                    "toSpanId": link.span_context.span_id().to_string(),
+                })
             })
-        })
-        .collect();
-    Cow::Owned(serde_json::to_string(&arr).unwrap_or_default())
+            .collect();
+        Cow::Owned(serde_json::to_string(&arr).unwrap_or_default())
+    }
+    #[cfg(not(feature = "serde_json"))]
+    {
+        let _ = links;
+        Cow::Borrowed("[]")
+    }
 }
 
 #[cfg(test)]
@@ -171,6 +181,7 @@ pub(crate) mod test_utils {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[cfg(feature = "serde_json")]
     use opentelemetry::trace::{Link, SpanContext, SpanId, TraceFlags, TraceId, TraceState};
 
     #[test]
@@ -182,6 +193,7 @@ mod tests {
         assert_eq!(span_kind_to_u8(&SpanKind::Consumer), 4);
     }
 
+    #[cfg(feature = "serde_json")]
     #[test]
     fn test_links_to_json_with_links() {
         let links = vec![Link::new(

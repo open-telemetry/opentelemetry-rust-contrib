@@ -19,8 +19,7 @@ chrono = { version = "0.4.40", default-features = false, features = ["alloc", "s
 opentelemetry = { workspace = true, features = ["trace"] }
 opentelemetry_sdk = { workspace = true, features = ["trace"] }
 tracelogging_dynamic = "1.2.4"
-tracing = { version = "0.1", optional = true }
-serde_json = "1.0"
+serde_json = { version = "1.0.113", optional = true }
 
 [dev-dependencies]
 opentelemetry_sdk = { workspace = true, features = ["trace", "testing"] }
@@ -31,10 +30,10 @@ windows = { version = "0.57", features = ["Win32_System_Diagnostics_Etw"] }
 
 [features]
 internal-logs = [
-    "tracing",
     "opentelemetry/internal-logs",
     "opentelemetry_sdk/internal-logs",
 ]
+serde_json = ["dep:serde_json"]
 default = ["internal-logs"]
 
 [[example]]

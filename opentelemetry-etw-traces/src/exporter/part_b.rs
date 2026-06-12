@@ -1,4 +1,3 @@
-use super::otel_id_ext::SpanIdExt;
 use crate::exporter::common;
 use chrono::{DateTime, Utc};
 use opentelemetry::trace::Status;
@@ -17,6 +16,7 @@ use tracelogging_dynamic as tld;
 ///     startTime: str8 (RFC3339)
 ///     [parentId: str8]                      // only for non-root spans
 ///     [links: str8 (JSON)]                  // only if present
+///     TODO - statusMessage is only conditional based on whether httpStatusCode is in or not, should be addressed.
 ///     [statusMessage: str8]                 // only if status has description
 ///     [<well-known attributes>: typed]      // span attributes whose keys match
 ///                                           // `common::WELL_KNOWN_PART_B_ATTRIBUTES`,
@@ -94,7 +94,7 @@ pub(crate) fn populate_part_b(event: &mut tld::EventBuilder, span_data: &SpanDat
     if has_parent_id {
         event.add_str8(
             "parentId",
-            span_data.parent_span_id.to_hex().as_bytes(),
+            span_data.parent_span_id.to_string(),
             tld::OutType::Utf8,
             field_tag,
         );

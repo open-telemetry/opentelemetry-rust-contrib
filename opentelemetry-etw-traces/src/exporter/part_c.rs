@@ -23,23 +23,25 @@ pub(crate) fn populate_part_c(
         .count();
     let part_c_count = resource_attr_count + span_partc_attr_count;
 
-    event.add_struct(
-        "PartC",
-        part_c_count.try_into().unwrap_or(u8::MAX),
-        field_tag,
-    );
+    if part_c_count > 0 {
+        event.add_struct(
+            "PartC",
+            part_c_count.try_into().unwrap_or(u8::MAX),
+            field_tag,
+        );
 
-    // Resource attributes first
-    for (key, value) in &resource.attributes_from_resource {
-        common::add_attribute_to_event(event, key.as_str(), value);
-    }
-
-    // Span attributes (excluding well-known Part B attributes)
-    for kv in span_data.attributes.iter() {
-        if common::well_known_part_b_field(kv.key.as_str()).is_some() {
-            continue;
+        // Resource attributes first
+        for (key, value) in &resource.attributes_from_resource {
+            common::add_attribute_to_event(event, key.as_str(), value);
         }
-        common::add_attribute_to_event(event, kv.key.as_str(), &kv.value);
+
+        // Span attributes (excluding well-known Part B attributes)
+        for kv in span_data.attributes.iter() {
+            if common::well_known_part_b_field(kv.key.as_str()).is_some() {
+                continue;
+            }
+            common::add_attribute_to_event(event, kv.key.as_str(), &kv.value);
+        }
     }
 }
 
