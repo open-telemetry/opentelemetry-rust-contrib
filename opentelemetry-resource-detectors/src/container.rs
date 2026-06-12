@@ -57,6 +57,13 @@ fn detect_container_id() -> Option<String> {
     None
 }
 
+/// Checks if `candidate` is a hex string between 32 and 64 chars.
+#[cfg(any(target_os = "linux", test))]
+fn is_valid_container_id(candidate: &str) -> bool {
+    (MIN_CONTAINER_ID_LENGTH..=MAX_CONTAINER_ID_LENGTH).contains(&candidate.len())
+        && candidate.bytes().all(|b| b.is_ascii_hexdigit())
+}
+
 /// Extracts a container ID from a `/proc/self/cgroup` line. The ID is the final path
 /// segment, with runtime prefixes and dot-separated suffixes removed.
 #[cfg(any(target_os = "linux", test))]
@@ -70,13 +77,7 @@ fn extract_container_id_from_cgroup(line: &str) -> Option<&str> {
 
     let candidate = candidate.split('.').next().unwrap_or(candidate);
 
-    if (MIN_CONTAINER_ID_LENGTH..=MAX_CONTAINER_ID_LENGTH).contains(&candidate.len())
-        && candidate.bytes().all(|b| b.is_ascii_hexdigit())
-    {
-        Some(candidate)
-    } else {
-        None
-    }
+    is_valid_container_id(candidate).then_some(candidate)
 }
 
 /// Extracts a container ID from `/proc/self/mountinfo`
@@ -101,8 +102,7 @@ fn extract_container_id_from_mountinfo_line(line: &str) -> Option<&str> {
         .find_map(|pair| match pair {
             [marker, id]
                 if matches!(*marker, "containers" | "overlay-containers")
-                    && id.len() == MAX_CONTAINER_ID_LENGTH
-                    && id.bytes().all(|b| b.is_ascii_hexdigit()) =>
+                    && is_valid_container_id(id) =>
             {
                 Some(*id)
             }
@@ -217,6 +217,18 @@ mod tests {
         assert_eq!(
             extract_container_id_from_mountinfo(content),
             Some("1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef")
+        );
+    }
+
+    #[test]
+    fn extracts_shorter_hex_id_from_mountinfo() {
+        // Valid hex ID shorter shorter than 64 chars.
+        let content = "\
+2304 1573 254:1 /docker/containers/abcdef1234567890abcdef1234567890/hostname /etc/hostname rw - ext4 /dev/vda1 rw
+";
+        assert_eq!(
+            extract_container_id_from_mountinfo(content),
+            Some("abcdef1234567890abcdef1234567890")
         );
     }
 
