@@ -1,6 +1,6 @@
 //! Container resource detector
 //!
-//! Detects the container ID using files under `proc`
+//! Detects `container.id` using `/proc/self/cgroup`, falling back to `/proc/self/mountinfo`.
 
 use opentelemetry::KeyValue;
 use opentelemetry_sdk::resource::{Resource, ResourceDetector};
