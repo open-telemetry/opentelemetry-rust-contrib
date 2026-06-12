@@ -4,9 +4,12 @@
 
 use opentelemetry::KeyValue;
 use opentelemetry_sdk::resource::{Resource, ResourceDetector};
+#[cfg(target_os = "linux")]
 use std::fs::read_to_string;
 
+#[cfg(target_os = "linux")]
 const CGROUP_V1_PATH: &str = "/proc/self/cgroup";
+#[cfg(target_os = "linux")]
 const CGROUP_V2_PATH: &str = "/proc/self/mountinfo";
 
 /// Length of a container ID in the cgroup v2 mount path.
@@ -29,6 +32,7 @@ impl ResourceDetector for ContainerResourceDetector {
     }
 }
 
+#[cfg(target_os = "linux")]
 fn detect_container_id() -> Option<String> {
     if let Ok(content) = read_to_string(CGROUP_V1_PATH) {
         if let Some(id) = content.lines().find_map(extract_container_id_from_cgroup) {
@@ -45,8 +49,14 @@ fn detect_container_id() -> Option<String> {
     None
 }
 
+#[cfg(not(target_os = "linux"))]
+fn detect_container_id() -> Option<String> {
+    None
+}
+
 /// Extracts a container ID from a `/proc/self/cgroup` line. The ID is the final path
 /// segment, with runtime prefixes and dot-separated suffixes removed.
+#[cfg(any(target_os = "linux", test))]
 fn extract_container_id_from_cgroup(line: &str) -> Option<&str> {
     let last_segment = line[line.rfind('/')? + 1..].trim();
 
@@ -66,6 +76,7 @@ fn extract_container_id_from_cgroup(line: &str) -> Option<&str> {
 
 /// Extracts a container ID from a `/proc/self/mountinfo` `hostname` line. The ID is
 /// the segment after `containers` or `overlay-containers`.
+#[cfg(any(target_os = "linux", test))]
 fn extract_container_id_from_mountinfo(content: &str) -> Option<&str> {
     let line = content.lines().find(|line| line.contains("hostname"))?;
 
