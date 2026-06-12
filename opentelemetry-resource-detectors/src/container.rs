@@ -96,18 +96,15 @@ fn extract_container_id_from_mountinfo_line(line: &str) -> Option<&str> {
         return None;
     }
 
-    line.split('/')
-        .collect::<Vec<_>>()
-        .windows(2)
-        .find_map(|pair| match pair {
-            [marker, id]
-                if matches!(*marker, "containers" | "overlay-containers")
-                    && is_valid_container_id(id) =>
-            {
-                Some(*id)
-            }
-            _ => None,
-        })
+    let mut prev = "";
+    for segment in line.split('/') {
+        if matches!(prev, "containers" | "overlay-containers") && is_valid_container_id(segment) {
+            return Some(segment);
+        }
+        prev = segment;
+    }
+
+    None
 }
 
 #[cfg(test)]
