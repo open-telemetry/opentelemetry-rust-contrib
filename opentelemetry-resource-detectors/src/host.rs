@@ -9,7 +9,6 @@ use std::env::consts::ARCH;
 use std::fs::read_to_string;
 #[cfg(target_os = "linux")]
 use std::path::Path;
-#[cfg(target_os = "macos")]
 use std::process::Command;
 
 /// Detect host information.
@@ -91,11 +90,9 @@ fn host_id_detect() -> Option<String> {
 }
 
 fn host_name_detect() -> Option<String> {
-    hostname::get()
-        .ok()?
-        .into_string()
-        .ok()
-        .filter(|name| !name.is_empty())
+    let output = Command::new("hostname").output().ok()?.stdout;
+    let name = String::from_utf8(output).ok()?.trim().to_string();
+    (!name.is_empty()).then_some(name)
 }
 
 impl Default for HostResourceDetector {
