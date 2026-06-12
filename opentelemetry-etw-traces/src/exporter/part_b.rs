@@ -16,7 +16,7 @@ use tracelogging_dynamic as tld;
 ///     startTime: str8 (RFC3339)
 ///     [parentId: str8]                      // only for non-root spans
 ///     [links: str8 (JSON)]                  // only if present
-///     TODO - statusMessage is only conditional based on whether httpStatusCode is in or not, should be addressed.
+///     TODO - statusMessage should be only conditional based on whether httpStatusCode is in or not.
 ///     [statusMessage: str8]                 // only if status has description
 ///     [<well-known attributes>: typed]      // span attributes whose keys match
 ///                                           // `common::WELL_KNOWN_PART_B_ATTRIBUTES`,

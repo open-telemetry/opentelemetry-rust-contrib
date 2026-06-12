@@ -11,17 +11,20 @@ use tracelogging_dynamic as tld;
 /// stable, deterministic ordering of fields in the emitted ETW event.
 pub(crate) const WELL_KNOWN_PART_B_ATTRIBUTES: &[(&str, &str)] = &[
     // Database
-    ("db.system", "dbSystem"),
-    ("db.name", "dbName"),
-    ("db.statement", "dbStatement"),
+    ("db.system.name", "dbSystem"),
+    ("db.namespace", "dbName"),
+    ("db.query.text", "dbStatement"),
     // HTTP
     ("http.request.method", "httpMethod"),
     ("url.full", "httpUrl"),
     ("http.response.status_code", "httpStatusCode"),
     // Messaging
     ("messaging.system", "messagingSystem"),
-    ("messaging.destination", "messagingDestination"),
+    ("messaging.destination.name", "messagingDestination"),
     ("messaging.url", "messagingUrl"),
+    // RPC attributes
+    ("rpc.system.name", "rpcSystem"),
+    ("rpc.response.status_code", "rpcGrpcStatusCode"),
 ];
 
 /// Returns the mapped Part B field name if `key` is a well-known attribute,

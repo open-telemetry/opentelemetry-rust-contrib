@@ -13,4 +13,4 @@ Released 2026-Mar-11
 - Configurable event name (defaults to `"Span"`).
 - Optional resource attribute promotion to Part C via `with_resource_attributes()`.
 - Span attributes exported as individually typed ETW fields.
-- Span events and links serialized as JSON.
+- Span links serialized as JSON when the optional `serde_json` feature is enabled.

@@ -48,7 +48,7 @@ use opentelemetry_sdk::Resource;
 fn init_tracer_provider() -> SdkTracerProvider {
     let processor = Processor::builder("provider_name")
         .with_event_name("MyAppEventName") // If not provided, defaults to "Span"
-        .with_resource_attributes(vec!["custom_attribute1", "custom_attribute2"]) // If provided, only specified resource attributes will be promoted as Part C fields, other will be ignored.
+        .with_resource_attributes(vec!["custom_attribute1", "custom_attribute2"]) // If provided, only specified resource attributes will be promoted as Part C fields, others will be ignored.
         .build()
         .expect("Valid provider name is required to build an ETW Processor.");
 

@@ -12,8 +12,10 @@ use tracelogging_dynamic as tld;
 ///         traceId: str8
 ///         spanId: str8
 ///     }
-///     [role: str8]           // from service.name
-///     [roleInstance: str8]   // from service.instance.id
+///     ext_cloud {
+///         role: str8         // from service.name
+///         roleInstance: str8 // from service.instance.id
+///     }
 /// }
 /// ```
 pub(crate) fn populate_part_a(
