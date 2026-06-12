@@ -174,6 +174,8 @@ jobs:
       run: cargo llvm-cov --no-report --manifest-path opentelemetry-etw-logs/Cargo.toml --all-features -- --ignored --nocapture --test-threads=1
     - name: Run ETW integration tests (metrics)
       run: cargo llvm-cov --no-report --manifest-path opentelemetry-etw-metrics/Cargo.toml --all-features -- --ignored --nocapture --test-threads=1
+    - name: Run ETW integration tests (traces)
+      run: cargo llvm-cov --no-report --manifest-path opentelemetry-etw-traces/Cargo.toml --all-features -- --ignored --nocapture --test-threads=1
     - name: Generate lcov report
       run: cargo llvm-cov report --lcov --output-path lcov.info
     - name: Upload to codecov.io
