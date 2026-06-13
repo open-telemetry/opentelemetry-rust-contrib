@@ -89,6 +89,139 @@ maintainers may decide to wait for more than one approval for certain PRs,
 particularly ones that are affecting multiple areas, or topics that may warrant
 more discussion.
 
+## Component Ownership
+
+Each crate in this repo is expected to have one or more **component owners**
+listed in [`.github/component_owners.yml`](.github/component_owners.yml).
+Owners are responsible for the long-term health of a single component; repo
+maintainers and approvers cover the repo as a whole.
+
+### Responsibilities
+
+Owners are expected to:
+
+- Respond to issues and PRs filed against the component in a reasonable
+  timeframe.
+- Keep the crate working as the upstream `opentelemetry` SDK and broader
+  ecosystem evolve.
+- Help triage new contributions and reviews against the crate.
+
+In practice, owners are automatically requested as reviewers on PRs that
+touch their crate and pinged on issues that select the crate in the issue
+template, so the main operational duty is watching GitHub notifications and
+responding. During regular upstream `opentelemetry` releases, the maintainer
+cutting the release usually handles trivial crate updates (for example,
+bumping the `opentelemetry` dependency); owners are looped in for
+non-trivial cases such as API breaks. Broader changes that affect components
+are discussed at the OTel Rust SIG meeting and on the `#otel-rust` Slack
+channel.
+
+### Eligibility
+
+Component owners must be
+[OpenTelemetry Members](https://github.com/open-telemetry/community/blob/main/guides/contributor/membership.md#member).
+If you aren't one yet, the linked guide explains how to apply, and existing
+repo maintainers are happy to sponsor active contributors.
+
+Repo maintainers and approvers may also be listed as component owners.
+
+### Becoming or stepping down as an owner
+
+To volunteer as an owner for an existing crate, open a PR adding your
+GitHub username to that crate's entry in
+[`.github/component_owners.yml`](.github/component_owners.yml). Two or
+more owners per crate is preferred so coverage doesn't depend on a single
+person.
+
+If you can no longer maintain a component, open a PR removing yourself.
+There is no formal inactivity policy today; if a crate's listed owners stop
+responding for an extended period, maintainers may seek replacements or, as
+a last resort, mark the crate for removal (see issue
+[#609](https://github.com/open-telemetry/opentelemetry-rust-contrib/issues/609)
+for a recent example).
+
+## Adding a New Component
+
+This repo hosts community-contributed exporters, instrumentation libraries,
+resource detectors, propagators, and other extensions that don't belong in the
+core [opentelemetry-rust](https://github.com/open-telemetry/opentelemetry-rust)
+SDK.
+
+**Before writing a PR, open an issue** describing what you want to add and
+why it belongs here. This lets maintainers and the community weigh in on
+fit, naming, and ownership before you invest time in the implementation.
+The [#otel-rust](https://cloud-native.slack.com/archives/C03GDP0H023)
+channel on CNCF Slack is also a good place for open-ended questions; if
+you are new to the CNCF Slack community, you can
+[create an account](https://slack.cncf.io/).
+
+Once maintainers agree the component belongs here, the sections below
+describe the extra requirements that apply on top of the regular PR process
+(see [Pull Requests](#pull-requests)). For a worked example, look at the
+[opentelemetry-etw-traces](https://github.com/open-telemetry/opentelemetry-rust-contrib/tree/main/opentelemetry-etw-traces)
+crate and the PR that added it ([#562](https://github.com/open-telemetry/opentelemetry-rust-contrib/pull/562)).
+
+### 1. Pick a name
+
+Crate names follow the pattern `opentelemetry-<kind>-<name>` (for example
+`opentelemetry-exporter-geneva`, `opentelemetry-instrumentation-tower`,
+`opentelemetry-resource-detectors`). For new crates, the folder at the repo
+root is the same as the crate name. See existing top-level folders for
+established kinds and naming.
+
+### 2. Find a component owner
+
+Every component must have at least one owner; see
+[Component Ownership](#component-ownership) above for what owners are
+expected to do and who qualifies. You can own a component you contribute
+yourself, or recruit someone from the community.
+
+### 3. Add the crate files
+
+A new component crate needs, at minimum:
+
+- `Cargo.toml`. Copy the `[package]` block from an existing crate (for
+  example, [opentelemetry-etw-logs/Cargo.toml](opentelemetry-etw-logs/Cargo.toml))
+  and adjust the metadata. Start the version at `0.1.0`, use
+  `license = "Apache-2.0"`, and inherit lints via `[lints] workspace = true`.
+- `README.md` describing what the component does, how to install it, and a
+  minimal usage example. Include a status table near the top with `Stability`
+  and `Owners` rows — see
+  [opentelemetry-etw-logs/README.md](opentelemetry-etw-logs/README.md) for
+  the format. Stability is one of: `alpha` (early, breaking changes likely),
+  `beta` (usable, API may still change), or `stable` (committed API).
+- `CHANGELOG.md` with a `vNext` heading at the top for future entries.
+- `src/lib.rs` with the implementation. The crate must build on every
+  platform CI runs on, even if its functionality is OS-specific — gate
+  platform-specific code with `#[cfg(...)]` so the crate compiles cleanly
+  elsewhere.
+
+### 4. Add to workspace and automation
+
+Three places need updating in the same PR so the crate is picked up by
+tooling and automation:
+
+- Root [`Cargo.toml`](Cargo.toml): add the crate folder to `members`.
+- [`.github/component_owners.yml`](.github/component_owners.yml): add an
+  entry mapping the crate folder to a list of GitHub usernames. This file
+  is the single source of truth for both
+  [PR-reviewer assignment](.github/workflows/assign-reviewers.yml) and
+  [issue owner pings](.github/workflows/ping-component-owners.yml).
+- Issue templates: add the crate to the component dropdown in both
+  [`.github/ISSUE_TEMPLATE/BUG-REPORT.yml`](.github/ISSUE_TEMPLATE/BUG-REPORT.yml)
+  and
+  [`.github/ISSUE_TEMPLATE/FEATURE-REQUEST.yml`](.github/ISSUE_TEMPLATE/FEATURE-REQUEST.yml).
+
+If the component needs platform-specific integration tests or a separate
+toolchain that the default CI job doesn't cover, also add a job (or extend
+an existing one) in
+[`.github/workflows/ci.yml`](.github/workflows/ci.yml).
+
+After the PR is merged, the first release of the crate is cut by a
+maintainer. To request a release, open an issue or ping in the
+[#otel-rust](https://cloud-native.slack.com/archives/C03GDP0H023) channel
+on CNCF Slack.
+
 ## Design Choices
 
 As with other OpenTelemetry clients, opentelemetry-rust follows the
@@ -140,14 +273,3 @@ projects in this workspace.
 - Run `cargo bench` - this will run benchmarks to show performance
 - Run `cargo bench` - this will run benchmarks to show performance
 regressions
-
-## FAQ
-
-### Where should I put third party propagators/exporters, contrib or standalone crates?
-
-As of now, the specification classify the propagators into three categories:
-Fully opened standards, platform-specific standards, proprietary headers. The
-conclusion is only the fully opened standards should live in SDK packages/repos.
-So here, only fully opened standards should live as independent crate. For more
-detail and discussion, see [this
-pr](https://github.com/open-telemetry/opentelemetry-specification/pull/1144).
