@@ -37,7 +37,7 @@ opentelemetry-etw-logs = { path = "../opentelemetry-etw-logs"}
 tracing = { version = "0.1", default-features = false, features = ["std"] }
 tracing-subscriber = { version = "0.3.0", default-features = false, features = ["env-filter","registry", "std"] }
 geneva-uploader = { version = "0.5.0", path = "../opentelemetry-exporter-geneva/geneva-uploader", features = ["mock_auth"]}
-otap-df-pdata = { git = "https://github.com/sjmsft/otel-arrow", rev = "4573a39c239a479b3a22292e9f107c3285afcd82" }
+otap-df-pdata = { git = "https://github.com/open-telemetry/otel-arrow", rev = "591a9c12c0b36025f9f7a899eb840d4fee913ffd" }
 prost = "0.14"
 
 [features]
