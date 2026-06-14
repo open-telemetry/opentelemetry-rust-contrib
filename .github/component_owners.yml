@@ -38,8 +38,13 @@ components:
     - mattbodd
     - psandana
 
-  # opentelemetry-exporter-geneva/:
-  #   # TBD - seeking owners
+  opentelemetry-etw-traces/:
+    - jevidako
+    - urosjovanovic
+
+  opentelemetry-exporter-geneva/:
+    - lalitb
+    - utpilla
 
   # opentelemetry-instrumentation-actix-web/:
   #   # TBD - seeking owners

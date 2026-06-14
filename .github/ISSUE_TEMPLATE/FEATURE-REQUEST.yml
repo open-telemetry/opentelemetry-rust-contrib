@@ -34,6 +34,7 @@ body:
         - opentelemetry-datadog
         - opentelemetry-etw-logs
         - opentelemetry-etw-metrics
+        - opentelemetry-etw-traces
         - opentelemetry-exporter-geneva
         - opentelemetry-instrumentation-actix-web
         - opentelemetry-instrumentation-tower
