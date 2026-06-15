@@ -67,8 +67,7 @@ See `../geneva-uploader-ffi/README.md` for details.
 
 ## TLS backends
 
-`geneva-uploader` supports two mutually-exclusive TLS backends, selected at
-compile time via Cargo features:
+`geneva-uploader` supports two TLS backends, selected at compile time via Cargo features (the flags are additive; if both are enabled, `tls-rustls` is used):
 
 - **`tls-native`** *(default)* — uses [`native-tls`] (which links against the
   system OpenSSL/SChannel/Secure Transport). This is the historical behavior

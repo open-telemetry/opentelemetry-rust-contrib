@@ -1150,9 +1150,22 @@ fn build_rustls_client_config(
             "Failed to load a native root certificate"
         );
     }
+    let mut added_roots = 0usize;
     for cert in native.certs {
-        // Ignore individual cert add errors - rustls is strict about parsing.
-        let _ = roots.add(cert);
+        match roots.add(cert) {
+            Ok(()) => added_roots += 1,
+            Err(e) => debug!(
+                name: "config_client.new.native_root_add_error",
+                target: "geneva-uploader",
+                error = %e,
+                "Failed to add a native root certificate"
+            ),
+        }
+    }
+    if added_roots == 0 {
+        return Err(GenevaConfigClientError::Certificate(
+            "No usable native root certificates were loaded".to_string(),
+        ));
     }
 
     #[cfg(test)]
