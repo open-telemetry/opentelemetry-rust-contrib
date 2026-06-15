@@ -20,9 +20,24 @@ rustdoc-args = ["--cfg", "docsrs"]
 
 [features]
 default = ["trace", "internal-logs"]
+internal-logs = ["dep:tracing"]
+
 trace = ["opentelemetry/trace", "opentelemetry_sdk/trace"]
 detector-aws-lambda = ["dep:opentelemetry-semantic-conventions"]
-internal-logs = ["tracing"]
+
+xray-exporter = [
+    "opentelemetry/trace",
+    "opentelemetry_sdk/trace",
+    "dep:opentelemetry-semantic-conventions",
+    "dep:serde",
+    "dep:serde_json",
+    "dep:thiserror",
+    "dep:regex",
+    "dep:rand"
+]
+xray-daemon-client = ["xray-exporter"]
+xray-stdout-client = ["xray-exporter"]
+subsegment-nesting = []
 
 [dependencies]
 opentelemetry = { workspace = true }
@@ -31,15 +46,30 @@ opentelemetry-semantic-conventions = { workspace = true, optional = true, featur
     "semconv_experimental",
 ] }
 tracing = {version = "0.1", optional = true}
+serde = { version = "1.0", features = ["derive"], optional = true }
+serde_json = {version = "1.0", optional = true}
+thiserror = {version = "1.0", optional = true}
+regex = {version = "1.0", optional = true}
+rand = {version = "0.9", optional = true}
 
 [dev-dependencies]
+opentelemetry-aws = {path = ".", features = ["xray-exporter", "subsegment-nesting", "xray-daemon-client"] }
 opentelemetry_sdk = { workspace = true, features = ["testing"] }
 opentelemetry-http = { workspace = true }
 opentelemetry-stdout = { workspace = true, features = ["trace"] }
 hyper = { version = "1.4.1" }
-tokio = { version = "1.0", features = ["macros", "rt"] }
+tokio = { version = "1.0", features = ["macros", "rt", "rt-multi-thread"] }
 sealed_test = "1.1"
 temp-env = "0.3"
+criterion = { workspace = true, features = ["html_reports", "async_tokio"] }
+rand = "0.9"
+
+[target.'cfg(not(target_os = "windows"))'.dev-dependencies]
+pprof = { version = "0.14.1", features = ["flamegraph", "criterion"]}
+
+[[bench]]
+name = "xray_exporter"
+harness = false
 
 [package.metadata.cargo-machete]
 ignored = ["tracing"]
