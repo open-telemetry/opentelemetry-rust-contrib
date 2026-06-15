@@ -26,6 +26,8 @@ import yaml
 OWNERS_FILE = Path(".github/component_owners.yml")
 COMPONENT_HEADING = "What component are you working with?"
 COMP_LABEL_COLOR = "0e8a16"
+NO_OWNER_LABEL = "triage:no-owner"
+NO_OWNER_LABEL_COLOR = "d93f0b"
 DEFAULT_OWNER = "open-telemetry/rust-approvers"
 
 
@@ -73,12 +75,13 @@ def ensure_label(repo: str, name: str, color: str) -> None:
     # `gh label create` returns non-zero if the label already exists; that
     # is the desired behaviour — we never want to clobber an existing color
     # or description, just guarantee the label is present.
+    # Let stderr through: "already exists" is harmless noise,
+    # but other failures should be visible in workflow logs.
     subprocess.run(
         ["gh", "label", "create", name, "-R", repo, "--color", color],
         check=False,
         text=True,
         stdout=subprocess.DEVNULL,
-        stderr=subprocess.DEVNULL,
     )
 
 
@@ -101,9 +104,15 @@ def main() -> int:
         print("No known components selected; nothing to do.")
         return 0
 
-    labels = [f"comp:{c}" for c in known]
-    for label in labels:
+    comp_labels = [f"comp:{c}" for c in known]
+    for label in comp_labels:
         ensure_label(repo, label, COMP_LABEL_COLOR)
+
+    labels = list(comp_labels)
+    no_owner = [c for c in known if not owners[c]]
+    if no_owner:
+        ensure_label(repo, NO_OWNER_LABEL, NO_OWNER_LABEL_COLOR)
+        labels.append(NO_OWNER_LABEL)
     gh("issue", "edit", issue, "-R", repo, "--add-label", ",".join(labels))
 
     lines = []
