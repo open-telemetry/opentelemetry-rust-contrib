@@ -7,11 +7,14 @@
 //! - [`ProcessResourceDetector`] - detect process information.
 //! - [`HostResourceDetector`] - detect unique host ID.
 //! - [`K8sResourceDetector`] - detect Kubernetes information.
+//! - [`ContainerResourceDetector`] - detect container ID.
+mod container;
 mod host;
 mod k8s;
 mod os;
 mod process;
 
+pub use container::ContainerResourceDetector;
 pub use host::HostResourceDetector;
 pub use k8s::K8sResourceDetector;
 pub use os::OsResourceDetector;
