@@ -1,0 +1,44 @@
+[package]
+name = "opentelemetry-etw-traces"
+version = "0.1.0"
+description = "OpenTelemetry exporter for ETW (Event Tracing for Windows) traces using TraceLogging Dynamic"
+homepage = "https://github.com/open-telemetry/opentelemetry-rust-contrib/tree/main/opentelemetry-etw-traces"
+repository = "https://github.com/open-telemetry/opentelemetry-rust-contrib/tree/main/opentelemetry-etw-traces"
+readme = "README.md"
+categories = [
+    "development-tools::debugging",
+    "development-tools::profiling",
+]
+keywords = ["opentelemetry", "tracing", "etw", "windows"]
+license = "Apache-2.0"
+edition = "2021"
+rust-version = "1.75.0"
+
+[dependencies]
+chrono = { version = "0.4.40", default-features = false, features = ["alloc", "std"] }
+opentelemetry = { workspace = true, features = ["trace"] }
+opentelemetry_sdk = { workspace = true, features = ["trace"] }
+tracelogging_dynamic = "1.2.4"
+serde_json = { version = "1.0.113", optional = true }
+
+[dev-dependencies]
+opentelemetry_sdk = { workspace = true, features = ["trace", "testing"] }
+
+[target.'cfg(windows)'.dev-dependencies]
+ferrisetw = "1.2"
+windows = { version = "0.57", features = ["Win32_System_Diagnostics_Etw"] }
+
+[features]
+internal-logs = [
+    "opentelemetry/internal-logs",
+    "opentelemetry_sdk/internal-logs",
+]
+serde_json = ["dep:serde_json"]
+default = ["internal-logs"]
+
+[[example]]
+name = "basic"
+path = "examples/basic.rs"
+
+[lints]
+workspace = true
