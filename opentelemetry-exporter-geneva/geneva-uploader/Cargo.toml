@@ -74,6 +74,7 @@ otap-df-pdata = { git = "https://github.com/open-telemetry/otel-arrow", rev = "1
 prost = "0.14"
 tokio = { version = "1", features = ["full"] }
 rcgen = "0.14"
+rustls = { version = "0.23", features = ["ring"] }
 openssl = { version = "0.10", features = ["vendored"] }
 tempfile = "3.5"
 wiremock = "0.6"
