@@ -1,5 +1,15 @@
 //! # OpenTelemetry Datadog Exporter
 //!
+//! > **⚠️ DEPRECATED** — This crate is deprecated and will be removed from the
+//! > `opentelemetry-rust-contrib` repository. Datadog now ships
+//! > [`dd-trace-rs`](https://github.com/DataDog/dd-trace-rs), a first-party
+//! > integration built on top of `opentelemetry_sdk`. New users should adopt
+//! > `dd-trace-rs`, and existing users are encouraged to migrate. The last
+//! > release of this crate on crates.io will remain available, but no further
+//! > releases are planned. See
+//! > [issue #609](https://github.com/open-telemetry/opentelemetry-rust-contrib/issues/609)
+//! > for context.
+//!
 //! An OpenTelemetry datadog exporter implementation
 //!
 //! See the [Datadog Docs](https://docs.datadoghq.com/agent/) for information on how to run the datadog-agent
@@ -48,7 +58,7 @@
 //! ```
 //!
 //! ```no_run
-//! # fn main() -> Result<(), opentelemetry_sdk::trace::TraceError> {
+//! # fn main() -> Result<(), opentelemetry_datadog::Error> {
 //! let provider = opentelemetry_datadog::new_pipeline()
 //!     .install_batch()?;
 //! # Ok(())
@@ -153,6 +163,11 @@
 //!     let _ = provider.shutdown(); // sending remaining spans before exit
 //!
 //! ```
+#![deprecated(
+    since = "0.21.0",
+    note = "The `opentelemetry-datadog` crate is deprecated and will be removed from `opentelemetry-rust-contrib`. Use https://github.com/DataDog/dd-trace-rs instead. See https://github.com/open-telemetry/opentelemetry-rust-contrib/issues/609 for context."
+)]
+#![allow(deprecated)]
 
 mod exporter;
 

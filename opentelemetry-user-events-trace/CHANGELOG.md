@@ -2,7 +2,25 @@
 
 ## vNext
 
+- Add `links` field to Part B (serialized as JSON array of `{toTraceId, toSpanId}`)
+- Add `statusMessage` field to Part B for error spans with descriptions
+- **Breaking**: Update well-known attribute mappings to use stable OTel semantic
+  conventions. The Common Schema output field names are unchanged, but the OTel
+  attribute keys that trigger the mapping have been updated:
+  - `db.system` → `db.system.name`, `db.name` → `db.namespace`,
+    `db.statement` → `db.query.text`, `messaging.destination` → `messaging.destination.name`
+  - Added `rpc.system.name` → `rpcSystem`, `rpc.response.status_code` → `rpcGrpcStatusCode`
+- Fix `PartA.time` and `PartB.startTime` to use UTC ISO 8601 with trailing `Z`
+  instead of `+00:00`
+
+## v0.5.0
+
+Released 2026-May-13
+
+- Bump opentelemetry and opentelemetry_sdk versions to 0.32
 - Bump eventheader and eventheader_dynamic versions to 0.5.0
+- **Breaking** `UserEventsSpanExporter::shutdown` now takes `&self` instead of
+  `&mut self`, matching the upstream `SpanExporter` trait change in 0.32.
 
 ## v0.4.0
 

@@ -34,6 +34,9 @@ opentelemetry-semantic-conventions = { workspace = true, features = [
   "semconv_experimental",
 ] }
 serde = "1.0"
+# Pinned to >=0.3.47 to pick up the RUSTSEC-2026-0009 fix; pulled in transitively
+# via actix-web / cookie. Not used directly by this crate.
+time = ">=0.3.47"
 
 [dev-dependencies]
 actix-rt = "2"
@@ -61,6 +64,9 @@ required-features = ["metrics"]
 [package.metadata.docs.rs]
 all-features = true
 rustdoc-args = ["--cfg", "docsrs"]
+
+[package.metadata.cargo-machete]
+ignored = ["time"] # Pinned to pull in the RUSTSEC-2026-0009 fix transitively via actix-web.
 
 [lints]
 workspace = true

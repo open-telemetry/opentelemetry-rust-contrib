@@ -22,8 +22,8 @@ components:
   opentelemetry-config/:
     - andborja
 
-  # opentelemetry-contrib/:
-  #   # TBD - seeking owners
+  # TBD - seeking owners. Issues fall back to @open-telemetry/rust-approvers.
+  opentelemetry-contrib/: []
 
   opentelemetry-datadog/:
     - gruebel
@@ -38,20 +38,26 @@ components:
     - mattbodd
     - psandana
 
-  # opentelemetry-exporter-geneva/:
-  #   # TBD - seeking owners
+  opentelemetry-etw-traces/:
+    - jevidako
+    - urosjovanovic
 
-  # opentelemetry-instrumentation-actix-web/:
-  #   # TBD - seeking owners
+  opentelemetry-exporter-geneva/:
+    - lalitb
+    - utpilla
+
+  # TBD - seeking owners. Issues fall back to @open-telemetry/rust-approvers.
+  opentelemetry-instrumentation-actix-web/: []
 
   opentelemetry-instrumentation-tower/:
     - francoposa
+    - jan-xyz
 
   opentelemetry-resource-detectors/:
     - gruebel
 
-  # opentelemetry-stackdriver/:
-  #   # TBD - seeking owners
+  # TBD - seeking owners. Issues fall back to @open-telemetry/rust-approvers.
+  opentelemetry-stackdriver/: []
 
   opentelemetry-user-events-logs/:
     - cijothomas

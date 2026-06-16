@@ -1,10 +1,12 @@
+#![allow(deprecated)]
+
 use opentelemetry::{
     global,
-    trace::{SamplingResult, Span, TraceContextExt, Tracer, TracerProvider},
+    trace::{Span, TraceContextExt, Tracer, TracerProvider},
     InstrumentationScope, Key, KeyValue, Value,
 };
 use opentelemetry_datadog::{new_pipeline, ApiVersion, DatadogTraceStateBuilder};
-use opentelemetry_sdk::trace::{self, RandomIdGenerator, ShouldSample};
+use opentelemetry_sdk::trace::{self, RandomIdGenerator, SamplingResult, ShouldSample};
 use opentelemetry_semantic_conventions as semcov;
 use std::thread;
 use std::time::Duration;
@@ -36,7 +38,7 @@ impl ShouldSample for AgentBasedSampler {
         _span_kind: &opentelemetry::trace::SpanKind,
         _attributes: &[opentelemetry::KeyValue],
         _links: &[opentelemetry::trace::Link],
-    ) -> opentelemetry::trace::SamplingResult {
+    ) -> opentelemetry_sdk::trace::SamplingResult {
         let trace_state = parent_context
             .map(
                 |parent_context| parent_context.span().span_context().trace_state().clone(), // inherit sample decision from parent span
@@ -49,7 +51,7 @@ impl ShouldSample for AgentBasedSampler {
             });
 
         SamplingResult {
-            decision: opentelemetry::trace::SamplingDecision::RecordAndSample, // send all spans to datadog-agent
+            decision: opentelemetry_sdk::trace::SamplingDecision::RecordAndSample, // send all spans to datadog-agent
             attributes: vec![],
             trace_state,
         }

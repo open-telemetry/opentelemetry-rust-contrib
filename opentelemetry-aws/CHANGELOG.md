@@ -4,7 +4,20 @@
 
 ### Added
 
+- Read `cloud.account.id` from symlink created by the OTel Lambda Extension in the Lambda resource detector
 - `XrayExtractor` has been added to extract the X-Ray Trace ID from the `x-amzn-trace-id` HTTP header or the `_X_AMZN_TRACE_ID` environment variable as a fallback.
+
+### Changed
+
+- AWS X-Ray span exporter (`xray-exporter` feature) for converting OpenTelemetry spans into X-Ray segment documents. Includes `XrayExporter`, `SegmentTranslator`, `SegmentDocumentExporter` trait, `XrayDaemonClient` (`xray-daemon-client` feature), `StdoutClient` (`xray-stdout-client` feature), and optional subsegment nesting (`subsegment-nesting` feature).
+
+## v0.20.0
+
+Released 2026-May-13
+
+### Changed
+
+- Bump opentelemetry and opentelemetry_sdk versions to 0.32.0
 
 ## v0.19.0
 

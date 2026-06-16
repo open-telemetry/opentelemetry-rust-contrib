@@ -2,6 +2,21 @@
 
 ## vNext
 
+- **DEPRECATED**: This crate is now deprecated and will be removed from this
+  repository in a future release. The crate has been unmaintained, and no
+  committed maintainer stepped up in response to
+  [issue #609](https://github.com/open-telemetry/opentelemetry-rust-contrib/issues/609).
+  Users should migrate to OTLP — Google Cloud supports OTLP ingestion directly,
+  and the OpenTelemetry Collector ships a `googlecloud` exporter.
+
+## v0.29.0
+
+Released 2026-May-13
+
+- Update to opentelemetry v0.32.0, opentelemetry_sdk v0.32.0, opentelemetry-semantic-conventions v0.32.0
+- **Breaking** `StackDriverExporter::shutdown` now takes `&self` instead of `&mut self`,
+  matching the upstream `SpanExporter` trait change in 0.32.
+
 ## v0.28.0
 
 - Update to opentelemetry v0.31.0, opentelemetry_sdk v0.31.0, opentelemetry-semantic-conventions v0.31.0

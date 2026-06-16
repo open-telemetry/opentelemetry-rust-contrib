@@ -52,8 +52,10 @@ meeting for this group.
 
 Meeting notes are available as a public [Google
 doc](https://docs.google.com/document/d/12upOzNk8c3SFTjsL6IRohCWMgzLKoknSCOOdMakbWo4/edit).
-If you have trouble accessing the doc, please get in touch on
-[Slack](https://cloud-native.slack.com/archives/C03GDP0H023).
+If you have trouble accessing the doc, please get in touch on the
+[#otel-rust](https://cloud-native.slack.com/archives/C03GDP0H023)
+channel on CNCF Slack. If you are new to the CNCF Slack community,
+you can [create an account](https://slack.cncf.io/).
 
 The meeting is open for all to join. We invite everyone to join our meeting,
 regardless of your experience level. Whether you're a seasoned OpenTelemetry
@@ -64,25 +66,28 @@ you're more than welcome to participate!
 
 ### Maintainers
 
-* [Cijo Thomas](https://github.com/cijothomas)
+* [Cijo Thomas](https://github.com/cijothomas), Microsoft
 * [Harold Dost](https://github.com/hdost)
-* [Julian Tescher](https://github.com/jtescher)
-* [Lalit Kumar Bhasin](https://github.com/lalitb)
+* [Lalit Kumar Bhasin](https://github.com/lalitb), Microsoft
+* [Utkarsh Umesan Pillai](https://github.com/utpilla), Microsoft
 * [Zhongyang Wu](https://github.com/TommyCpp)
 
 For more information about the maintainer role, see the [community repository](https://github.com/open-telemetry/community/blob/main/guides/contributor/membership.md#maintainer).
 
 ### Approvers
 
+* [Björn Antonsson](https://github.com/bantonsson), Datadog
+* [Scott Gerring](https://github.com/scottgerring), Datadog
 
 For more information about the approver role, see the [community repository](https://github.com/open-telemetry/community/blob/main/guides/contributor/membership.md#approver).
 
 ### Emeritus
 
-- [Anton Grübel](https://github.com/gruebel), Approver
+* [Anton Grübel](https://github.com/gruebel), Approver
 * [Dirkjan Ochtman](https://github.com/djc), Maintainer
 * [Isobel Redelmeier](https://github.com/iredelmeier), Maintainer
 * [Jan Kühle](https://github.com/frigus02), Approver
+* [Julian Tescher](https://github.com/jtescher), Maintainer
 * [Mike Goldsmith](https://github.com/MikeGoldsmith), Maintainer
 * [Shaun Cox](https://github.com/shaun-cox), Approver
 

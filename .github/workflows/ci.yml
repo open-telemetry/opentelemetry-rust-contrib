@@ -35,7 +35,7 @@ jobs:
     continue-on-error: ${{ matrix.rust == 'beta' }}
     steps:
     - name: Harden the runner (Audit all outbound calls)
-      uses: step-security/harden-runner@8d3c67de8e2fe68ef647c8db1e6a09f647780f40 # v2.19.0
+      uses: step-security/harden-runner@9af89fc71515a100421586dfdb3dc9c984fbf411 # v2.19.4
       with:
         egress-policy: audit
 
@@ -69,7 +69,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
     - name: Harden the runner (Audit all outbound calls)
-      uses: step-security/harden-runner@8d3c67de8e2fe68ef647c8db1e6a09f647780f40 # v2.19.0
+      uses: step-security/harden-runner@9af89fc71515a100421586dfdb3dc9c984fbf411 # v2.19.4
       with:
         egress-policy: audit
     - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
@@ -78,6 +78,11 @@ jobs:
     - uses: dtolnay/rust-toolchain@3c5f7ea28cd621ae0bf5283f0e981fb97b8a7af9
       with:
         toolchain: stable
+        components: llvm-tools-preview
+    - name: cargo install cargo-llvm-cov
+      uses: taiki-e/install-action@e49978b799e49ff429d162b7a30601a569ab6538 # v2.81.1
+      with:
+        tool: cargo-llvm-cov
     - name: Check user_events kernel support
       run: |
         sudo cat /sys/kernel/tracing/user_events_status || { echo "user_events not supported on this runner"; exit 1; }
@@ -114,16 +119,26 @@ jobs:
         make -j$(nproc)
         sudo cp bin/perf-decode /usr/local/bin/
     - name: Run user_events integration tests (trace)
-      run: sudo -E $HOME/.cargo/bin/cargo test --manifest-path opentelemetry-user-events-trace/Cargo.toml --all-features -- --ignored --nocapture --test-threads=1
+      run: sudo -E $HOME/.cargo/bin/cargo llvm-cov --no-report --manifest-path opentelemetry-user-events-trace/Cargo.toml --all-features -- --ignored --nocapture --test-threads=1
     - name: Run user_events integration tests (logs)
-      run: sudo -E $HOME/.cargo/bin/cargo test --manifest-path opentelemetry-user-events-logs/Cargo.toml --all-features -- --ignored --nocapture --test-threads=1
+      run: sudo -E $HOME/.cargo/bin/cargo llvm-cov --no-report --manifest-path opentelemetry-user-events-logs/Cargo.toml --all-features -- --ignored --nocapture --test-threads=1
     - name: Run user_events integration tests (metrics)
-      run: sudo -E $HOME/.cargo/bin/cargo test --manifest-path opentelemetry-user-events-metrics/Cargo.toml --all-features -- --ignored --nocapture --test-threads=1
-  etw-integration-test:
-    runs-on: windows-latest
+      run: sudo -E $HOME/.cargo/bin/cargo llvm-cov --no-report --manifest-path opentelemetry-user-events-metrics/Cargo.toml --all-features -- --ignored --nocapture --test-threads=1
+    - name: Generate lcov report
+      run: sudo -E $HOME/.cargo/bin/cargo llvm-cov report --lcov --output-path lcov.info
+    - name: Make lcov.info readable for codecov upload
+      run: sudo chmod a+r lcov.info
+    - name: Upload to codecov.io
+      uses: codecov/codecov-action@fb8b3582c8e4def4969c97caa2f19720cb33a72f # v6.0.2
+      with:
+        files: lcov.info
+        flags: user-events-integration
+        fail_ci_if_error: false
+  geneva-uploader-test-server-integration-test:
+    runs-on: ubuntu-latest
     steps:
     - name: Harden the runner (Audit all outbound calls)
-      uses: step-security/harden-runner@8d3c67de8e2fe68ef647c8db1e6a09f647780f40 # v2.19.0
+      uses: step-security/harden-runner@9af89fc71515a100421586dfdb3dc9c984fbf411 # v2.19.4
       with:
         egress-policy: audit
     - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
@@ -132,8 +147,43 @@ jobs:
     - uses: dtolnay/rust-toolchain@3c5f7ea28cd621ae0bf5283f0e981fb97b8a7af9
       with:
         toolchain: stable
+    - uses: arduino/setup-protoc@c65c819552d16ad3c9b72d9dfd5ba5237b9c906b # v3.0.0
+      with:
+        repo-token: ${{ secrets.GITHUB_TOKEN }}
+    - name: Test geneva-uploader with geneva-test-server
+      run: cargo test -p geneva-uploader --features mock_auth --test geneva_test_server_integration -- --ignored
+  etw-integration-test:
+    runs-on: windows-latest
+    steps:
+    - name: Harden the runner (Audit all outbound calls)
+      uses: step-security/harden-runner@9af89fc71515a100421586dfdb3dc9c984fbf411 # v2.19.4
+      with:
+        egress-policy: audit
+    - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+      with:
+        submodules: true
+    - uses: dtolnay/rust-toolchain@3c5f7ea28cd621ae0bf5283f0e981fb97b8a7af9
+      with:
+        toolchain: stable
+        components: llvm-tools-preview
+    - name: cargo install cargo-llvm-cov
+      uses: taiki-e/install-action@e49978b799e49ff429d162b7a30601a569ab6538 # v2.81.1
+      with:
+        tool: cargo-llvm-cov
     - name: Run ETW integration tests (logs)
-      run: cargo test --manifest-path opentelemetry-etw-logs/Cargo.toml --all-features -- --ignored --nocapture --test-threads=1
+      run: cargo llvm-cov --no-report --manifest-path opentelemetry-etw-logs/Cargo.toml --all-features -- --ignored --nocapture --test-threads=1
+    - name: Run ETW integration tests (metrics)
+      run: cargo llvm-cov --no-report --manifest-path opentelemetry-etw-metrics/Cargo.toml --all-features -- --ignored --nocapture --test-threads=1
+    - name: Run ETW integration tests (traces)
+      run: cargo llvm-cov --no-report --manifest-path opentelemetry-etw-traces/Cargo.toml --all-features -- --ignored --nocapture --test-threads=1
+    - name: Generate lcov report
+      run: cargo llvm-cov report --lcov --output-path lcov.info
+    - name: Upload to codecov.io
+      uses: codecov/codecov-action@fb8b3582c8e4def4969c97caa2f19720cb33a72f # v6.0.2
+      with:
+        files: lcov.info
+        flags: etw-integration
+        fail_ci_if_error: false
   lint:
     strategy:
       matrix:
@@ -142,7 +192,7 @@ jobs:
     runs-on: ${{ matrix.os }}
     steps:
     - name: Harden the runner (Audit all outbound calls)
-      uses: step-security/harden-runner@8d3c67de8e2fe68ef647c8db1e6a09f647780f40 # v2.19.0
+      uses: step-security/harden-runner@9af89fc71515a100421586dfdb3dc9c984fbf411 # v2.19.4
       with:
         egress-policy: audit
 
@@ -173,7 +223,7 @@ jobs:
     continue-on-error: true
     steps:
       - name: Harden the runner (Audit all outbound calls)
-        uses: step-security/harden-runner@8d3c67de8e2fe68ef647c8db1e6a09f647780f40 # v2.19.0
+        uses: step-security/harden-runner@9af89fc71515a100421586dfdb3dc9c984fbf411 # v2.19.4
         with:
           egress-policy: audit
 
@@ -183,7 +233,7 @@ jobs:
       - uses: dtolnay/rust-toolchain@3c5f7ea28cd621ae0bf5283f0e981fb97b8a7af9
         with:
           toolchain: stable
-      - uses: taiki-e/install-action@7769b73c2ec98c38dfcf2e18c83cfd4880c038c1 # v2.75.27
+      - uses: taiki-e/install-action@e49978b799e49ff429d162b7a30601a569ab6538 # v2.81.1
         with:
           tool: cargo-msrv
       # cargo-msrv verify runs `cargo check` in workspace context for each crate.
@@ -217,7 +267,7 @@ jobs:
     continue-on-error: true
     steps:
       - name: Harden the runner (Audit all outbound calls)
-        uses: step-security/harden-runner@8d3c67de8e2fe68ef647c8db1e6a09f647780f40 # v2.19.0
+        uses: step-security/harden-runner@9af89fc71515a100421586dfdb3dc9c984fbf411 # v2.19.4
         with:
           egress-policy: audit
 
@@ -227,7 +277,7 @@ jobs:
       - uses: dtolnay/rust-toolchain@3c5f7ea28cd621ae0bf5283f0e981fb97b8a7af9
         with:
           toolchain: 1.88.0
-      - uses: taiki-e/install-action@7769b73c2ec98c38dfcf2e18c83cfd4880c038c1 # v2.75.27
+      - uses: taiki-e/install-action@e49978b799e49ff429d162b7a30601a569ab6538 # v2.81.1
         with:
           tool: cargo-msrv
       - name: Check MSRV for Geneva crates
@@ -239,12 +289,12 @@ jobs:
     continue-on-error: true # Prevent sudden announcement of a new advisory from failing ci
     steps:
       - name: Harden the runner (Audit all outbound calls)
-        uses: step-security/harden-runner@8d3c67de8e2fe68ef647c8db1e6a09f647780f40 # v2.19.0
+        uses: step-security/harden-runner@9af89fc71515a100421586dfdb3dc9c984fbf411 # v2.19.4
         with:
           egress-policy: audit
 
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
-      - uses: EmbarkStudios/cargo-deny-action@91bf2b620e09e18d6eb78b92e7861937469acedb # v2.0.17
+      - uses: EmbarkStudios/cargo-deny-action@bb137d7af7e4fb67e5f82a49c4fce4fad40782fe # v2.0.20
         with:
           command: check advisories
   docs:
@@ -252,7 +302,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Harden the runner (Audit all outbound calls)
-        uses: step-security/harden-runner@8d3c67de8e2fe68ef647c8db1e6a09f647780f40 # v2.19.0
+        uses: step-security/harden-runner@9af89fc71515a100421586dfdb3dc9c984fbf411 # v2.19.4
         with:
           egress-policy: audit
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
@@ -272,7 +322,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Harden the runner (Audit all outbound calls)
-        uses: step-security/harden-runner@8d3c67de8e2fe68ef647c8db1e6a09f647780f40 # v2.19.0
+        uses: step-security/harden-runner@9af89fc71515a100421586dfdb3dc9c984fbf411 # v2.19.4
         with:
           egress-policy: audit
 
@@ -287,7 +337,7 @@ jobs:
         with:
             repo-token: ${{ secrets.GITHUB_TOKEN }}
       - name: cargo install cargo-llvm-cov
-        uses: taiki-e/install-action@7769b73c2ec98c38dfcf2e18c83cfd4880c038c1 # v2.75.27
+        uses: taiki-e/install-action@e49978b799e49ff429d162b7a30601a569ab6538 # v2.81.1
         with:
           tool: cargo-llvm-cov
       - name: cargo generate-lockfile
@@ -296,7 +346,7 @@ jobs:
       - name: cargo llvm-cov
         run: cargo llvm-cov --locked --all-features --workspace --lcov --output-path lcov.info
       - name: Upload to codecov.io
-        uses: codecov/codecov-action@57e3a136b779b570ffcdbf80b3bdc90e7fab3de2 # v6.0.0
+        uses: codecov/codecov-action@fb8b3582c8e4def4969c97caa2f19720cb33a72f # v6.0.2
         with:
           fail_ci_if_error: true
   cargo-machete:
@@ -304,7 +354,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Harden the runner (Audit all outbound calls)
-        uses: step-security/harden-runner@8d3c67de8e2fe68ef647c8db1e6a09f647780f40 # v2.19.0
+        uses: step-security/harden-runner@9af89fc71515a100421586dfdb3dc9c984fbf411 # v2.19.4
         with:
           egress-policy: audit
 
@@ -314,7 +364,7 @@ jobs:
       - uses: dtolnay/rust-toolchain@3c5f7ea28cd621ae0bf5283f0e981fb97b8a7af9
         with:
           toolchain: stable
-      - uses: taiki-e/install-action@7769b73c2ec98c38dfcf2e18c83cfd4880c038c1 # v2.75.27
+      - uses: taiki-e/install-action@e49978b799e49ff429d162b7a30601a569ab6538 # v2.81.1
         with:
           tool: cargo-machete
       - name: cargo machete
@@ -324,7 +374,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Harden the runner (Audit all outbound calls)
-        uses: step-security/harden-runner@8d3c67de8e2fe68ef647c8db1e6a09f647780f40 # v2.19.0
+        uses: step-security/harden-runner@9af89fc71515a100421586dfdb3dc9c984fbf411 # v2.19.4
         with:
           egress-policy: audit
 
@@ -334,7 +384,7 @@ jobs:
       - uses: dtolnay/rust-toolchain@3c5f7ea28cd621ae0bf5283f0e981fb97b8a7af9
         with:
           toolchain: stable
-      - uses: taiki-e/install-action@7769b73c2ec98c38dfcf2e18c83cfd4880c038c1 # v2.75.27
+      - uses: taiki-e/install-action@e49978b799e49ff429d162b7a30601a569ab6538 # v2.81.1
         with:
           tool: cargo-workspace-lints
       - name: cargo workspace-lints

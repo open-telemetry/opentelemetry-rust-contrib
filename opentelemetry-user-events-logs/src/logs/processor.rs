@@ -1,10 +1,6 @@
 use opentelemetry::InstrumentationScope;
-use opentelemetry_sdk::logs::LogExporter;
 use opentelemetry_sdk::Resource;
-use opentelemetry_sdk::{
-    error::OTelSdkResult,
-    logs::{LogBatch, SdkLogRecord},
-};
+use opentelemetry_sdk::{error::OTelSdkResult, logs::SdkLogRecord};
 use std::borrow::Cow;
 use std::collections::HashSet;
 use std::error::Error;
@@ -46,13 +42,7 @@ where
     C: EventNameCallback,
 {
     fn emit(&self, record: &mut SdkLogRecord, scope: &InstrumentationScope) {
-        let log_tuple = &[(record as &SdkLogRecord, scope)];
-        // TODO: Using futures_executor::block_on can make the code non reentrant safe
-        // if that crate starts emitting logs that are bridged to OTel.
-        // TODO: How to log if export() returns Err? Maybe a metric?
-        // Alternately, we can enter a SuppressionContext and log the error
-        // if the result is an error (once upstream ships SuppressionContext).
-        let _ = futures_executor::block_on(self.exporter.export(LogBatch::new(log_tuple)));
+        let _ = self.exporter.export_log_data(record, scope);
     }
 
     // Nothing to flush as this processor does not buffer
@@ -64,7 +54,6 @@ where
         self.exporter.shutdown()
     }
 
-    #[cfg(feature = "spec_unstable_logs_enabled")]
     fn event_enabled(
         &self,
         level: opentelemetry::logs::Severity,
@@ -339,7 +328,6 @@ mod tests {
     }
 
     #[test]
-    #[cfg(feature = "spec_unstable_logs_enabled")]
     fn test_event_enabled() {
         let processor = Processor::builder("test_provider").build().unwrap();
 

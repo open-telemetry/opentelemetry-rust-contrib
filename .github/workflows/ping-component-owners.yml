@@ -1,0 +1,40 @@
+name: 'Ping component owners on new issue'
+
+# When a user opens a new issue and selects one or more components in the
+# issue template's component dropdown, this workflow looks up the owners in
+# .github/component_owners.yml and posts a single comment pinging them.
+# It also applies comp:<crate> labels (and triage:no-owner for components
+# without listed owners) so the issue is easy to filter and triage.
+#
+# This is the issues-side counterpart to .github/workflows/assign-reviewers.yml,
+# which does the analogous routing for pull requests.
+
+on:
+  issues:
+    types: [opened]
+
+permissions:
+  contents: read
+
+jobs:
+  ping-owners:
+    name: Ping component owners
+    permissions:
+      issues: write
+    runs-on: ubuntu-24.04
+    if: ${{ github.repository_owner == 'open-telemetry' }}
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          persist-credentials: false
+
+      - name: Install PyYAML
+        run: python3 -m pip install --user pyyaml
+
+      - name: Ping component owners
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GITHUB_REPOSITORY: ${{ github.repository }}
+          ISSUE_NUMBER: ${{ github.event.issue.number }}
+          ISSUE_BODY: ${{ github.event.issue.body }}
+        run: python3 .github/workflows/scripts/ping-component-owners.py

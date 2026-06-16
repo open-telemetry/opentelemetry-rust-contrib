@@ -1,3 +1,13 @@
+//! # OpenTelemetry Stackdriver Exporter
+//!
+//! > **⚠️ DEPRECATED** — This crate is deprecated and will be removed from the
+//! > `opentelemetry-rust-contrib` repository. The crate has been unmaintained
+//! > and no committed maintainer stepped up in response to
+//! > [issue #609](https://github.com/open-telemetry/opentelemetry-rust-contrib/issues/609).
+//! > Users should migrate to OTLP — Google Cloud supports OTLP ingestion
+//! > directly, and the OpenTelemetry Collector ships a `googlecloud` exporter.
+//! > The last release of this crate on crates.io will remain available, but no
+//! > further releases are planned.
 #![cfg(not(doctest))]
 // unfortunately the proto code includes comments from the google proto files
 // that are interpreted as "doc tests" and will fail to build.
@@ -9,6 +19,10 @@
     rustdoc::bare_urls,
     rustdoc::broken_intra_doc_links,
     rustdoc::invalid_rust_codeblocks
+)]
+#![deprecated(
+    since = "0.30.0",
+    note = "The `opentelemetry-stackdriver` crate is deprecated and will be removed from `opentelemetry-rust-contrib`. Migrate to OTLP (Google Cloud supports OTLP ingestion, and the OpenTelemetry Collector ships a `googlecloud` exporter). See https://github.com/open-telemetry/opentelemetry-rust-contrib/issues/609 for context."
 )]
 
 use std::{
@@ -96,7 +110,7 @@ impl SpanExporter for StackDriverExporter {
         }
     }
 
-    fn shutdown(&mut self) -> OTelSdkResult {
+    fn shutdown(&self) -> OTelSdkResult {
         let start = Instant::now();
         while (Instant::now() - start) < self.maximum_shutdown_duration && self.pending_count() > 0
         {

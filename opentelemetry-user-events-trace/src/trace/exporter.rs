@@ -11,7 +11,7 @@ use opentelemetry_sdk::trace::SpanData;
 use opentelemetry_sdk::Resource;
 use std::{
     collections::HashMap,
-    fmt::Debug,
+    fmt::{Debug, Write},
     sync::{Arc, Mutex, OnceLock},
 };
 
@@ -26,9 +26,9 @@ fn get_well_known_attributes() -> &'static HashMap<&'static str, &'static str> {
         let mut map = HashMap::new();
 
         // Database attributes
-        map.insert("db.system", "dbSystem");
-        map.insert("db.name", "dbName");
-        map.insert("db.statement", "dbStatement");
+        map.insert("db.system.name", "dbSystem");
+        map.insert("db.namespace", "dbName");
+        map.insert("db.query.text", "dbStatement");
 
         // HTTP attributes
         map.insert("http.request.method", "httpMethod");
@@ -37,11 +37,39 @@ fn get_well_known_attributes() -> &'static HashMap<&'static str, &'static str> {
 
         // Messaging attributes
         map.insert("messaging.system", "messagingSystem");
-        map.insert("messaging.destination", "messagingDestination");
+        map.insert("messaging.destination.name", "messagingDestination");
         map.insert("messaging.url", "messagingUrl");
+
+        // RPC attributes
+        map.insert("rpc.system.name", "rpcSystem");
+        map.insert("rpc.response.status_code", "rpcGrpcStatusCode");
 
         map
     })
+}
+
+/// Serializes span links to a JSON string: `[{"toTraceId":"...","toSpanId":"..."},...]`
+///
+/// Writes TraceId/SpanId via Display directly into the output buffer,
+/// avoiding temporary string allocations.
+/// TODO(perf): Revisit link encoding to reduce allocations further and avoid
+/// JSON-text serialization overhead where possible.
+fn links_to_json(links: &[opentelemetry::trace::Link]) -> String {
+    // Pre-allocate: each link is ~80 chars: {"toTraceId":"<32>","toSpanId":"<16>"}
+    let mut json = String::with_capacity(2 + links.len() * 80);
+    json.push('[');
+    for (i, link) in links.iter().enumerate() {
+        if i > 0 {
+            json.push(',');
+        }
+        json.push_str("{\"toTraceId\":\"");
+        let _ = write!(json, "{}", link.span_context.trace_id());
+        json.push_str("\",\"toSpanId\":\"");
+        let _ = write!(json, "{}", link.span_context.span_id());
+        json.push_str("\"}");
+    }
+    json.push(']');
+    json
 }
 
 /// UserEventsSpanExporter exports spans in EventHeader format to user_events tracepoint.
@@ -72,7 +100,7 @@ impl SpanExporter for UserEventsSpanExporter {
         }
     }
 
-    fn shutdown(&mut self) -> OTelSdkResult {
+    fn shutdown(&self) -> OTelSdkResult {
         // The explicit unregister() is done in shutdown()
         // as it may not be possible to unregister during Drop
         // as `Tracers` are typically *not* dropped.
@@ -161,7 +189,12 @@ impl UserEventsSpanExporter {
             let mut cs_a_bookmark: usize = 0;
             eb.add_struct_with_bookmark("PartA", 3, 0, &mut cs_a_bookmark);
             let datetime: DateTime<Utc> = span.end_time.into();
-            eb.add_str("time", datetime.to_rfc3339(), FieldFormat::Default, 0);
+            eb.add_str(
+                "time",
+                datetime.to_rfc3339_opts(chrono::SecondsFormat::AutoSi, true),
+                FieldFormat::Default,
+                0,
+            );
 
             eb.add_str(
                 "ext_dt_traceId",
@@ -201,7 +234,12 @@ impl UserEventsSpanExporter {
             eb.add_str("_typeName", "Span", FieldFormat::Default, 0);
             eb.add_str("name", span.name.as_ref(), FieldFormat::Default, 0);
             let datetime: DateTime<Utc> = span.start_time.into();
-            eb.add_str("startTime", datetime.to_rfc3339(), FieldFormat::Default, 0);
+            eb.add_str(
+                "startTime",
+                datetime.to_rfc3339_opts(chrono::SecondsFormat::AutoSi, true),
+                FieldFormat::Default,
+                0,
+            );
             eb.add_value(
                 "success",
                 matches!(span.status, Status::Ok | Status::Unset), // Check for Ok or Unset
@@ -231,17 +269,33 @@ impl UserEventsSpanExporter {
                 );
             }
 
+            // links: serialize span links as JSON array of {toTraceId, toSpanId}.
+            let has_links = !span.links.links.is_empty();
+            let links_json = if has_links {
+                Some(links_to_json(&span.links.links))
+            } else {
+                None
+            };
+            if let Some(ref json) = links_json {
+                eb.add_str("links", json, FieldFormat::Default, 0);
+            }
+
             // Well-known attributes go into PartB.
             // Regular attributes are collected for PartC.
             // This does dual iteration (+lookup) over attributes,
             // but it is better than alternatives like allocating
             // a new vector to hold PartC attributes.
             // This could be revisited in future if performance is a concern.
+
             let mut partb_count_from_attributes = 0;
             let mut partc_attribute_count = 0;
+            let mut has_http_status_code = false;
 
             for kv in span.attributes.iter() {
                 if let Some(well_known_key) = well_known_attrs.get(kv.key.as_str()) {
+                    if *well_known_key == "httpStatusCode" {
+                        has_http_status_code = true;
+                    }
                     self.add_attribute_to_event(&mut eb, well_known_key, &kv.value);
                     partb_count_from_attributes += 1;
                 } else {
@@ -249,10 +303,32 @@ impl UserEventsSpanExporter {
                 }
             }
 
+            // statusMessage: emit error description if present.
+            // Per Common Schema spec: "If you report httpStatusCode,
+            // statusMessage should not be reported."
+            let has_status_message = match &span.status {
+                Status::Error { description } => !description.is_empty() && !has_http_status_code,
+                _ => false,
+            };
+            if has_status_message {
+                if let Status::Error { description } = &span.status {
+                    eb.add_str(
+                        "statusMessage",
+                        description.as_ref(),
+                        FieldFormat::Default,
+                        0,
+                    );
+                }
+            }
+
             // Update PartB field count with the number of well-known attributes found.
             eb.set_struct_field_count(
                 part_b_bookmark,
-                BASE_PARTB_FIELD_COUNT + partb_count_from_attributes + u8::from(has_parent_id),
+                BASE_PARTB_FIELD_COUNT
+                    + partb_count_from_attributes
+                    + u8::from(has_parent_id)
+                    + u8::from(has_status_message)
+                    + u8::from(has_links),
             );
 
             // Add regular attributes to PartC if any.
@@ -283,5 +359,134 @@ impl UserEventsSpanExporter {
             }
         }
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use opentelemetry::trace::{Link, SpanContext, SpanId, TraceFlags, TraceId, TraceState};
+
+    #[test]
+    fn links_to_json_empty() {
+        assert_eq!(links_to_json(&[]), "[]");
+    }
+
+    #[test]
+    fn links_to_json_single_link() {
+        let link = Link::new(
+            SpanContext::new(
+                TraceId::from_hex("0af7651916cd43dd8448eb211c80319c").unwrap(),
+                SpanId::from_hex("00f067aa0ba902b7").unwrap(),
+                TraceFlags::SAMPLED,
+                false,
+                TraceState::default(),
+            ),
+            vec![],
+            0,
+        );
+        let json = links_to_json(&[link]);
+        assert_eq!(
+            json,
+            r#"[{"toTraceId":"0af7651916cd43dd8448eb211c80319c","toSpanId":"00f067aa0ba902b7"}]"#
+        );
+    }
+
+    #[test]
+    fn links_to_json_multiple_links() {
+        let links = vec![
+            Link::new(
+                SpanContext::new(
+                    TraceId::from_hex("0af7651916cd43dd8448eb211c80319c").unwrap(),
+                    SpanId::from_hex("00f067aa0ba902b7").unwrap(),
+                    TraceFlags::SAMPLED,
+                    false,
+                    TraceState::default(),
+                ),
+                vec![],
+                0,
+            ),
+            Link::new(
+                SpanContext::new(
+                    TraceId::from_hex("ffffffffffffffffffffffffffffffff").unwrap(),
+                    SpanId::from_hex("ffffffffffffffff").unwrap(),
+                    TraceFlags::SAMPLED,
+                    false,
+                    TraceState::default(),
+                ),
+                vec![],
+                0,
+            ),
+        ];
+        let json = links_to_json(&links);
+        // Verify it's valid JSON with two entries
+        let parsed: Vec<serde_json::Value> = serde_json::from_str(&json).unwrap();
+        assert_eq!(parsed.len(), 2);
+        assert_eq!(
+            parsed[0]["toTraceId"].as_str().unwrap(),
+            "0af7651916cd43dd8448eb211c80319c"
+        );
+        assert_eq!(parsed[1]["toSpanId"].as_str().unwrap(), "ffffffffffffffff");
+    }
+
+    #[test]
+    fn well_known_attributes_contains_all_cs_span_fields() {
+        let attrs = get_well_known_attributes();
+
+        // HTTP (Common Schema Span spec)
+        assert_eq!(attrs.get("http.request.method"), Some(&"httpMethod"));
+        assert_eq!(attrs.get("url.full"), Some(&"httpUrl"));
+        assert_eq!(
+            attrs.get("http.response.status_code"),
+            Some(&"httpStatusCode")
+        );
+
+        // Database (stable semconv keys)
+        assert_eq!(attrs.get("db.system.name"), Some(&"dbSystem"));
+        assert_eq!(attrs.get("db.namespace"), Some(&"dbName"));
+        assert_eq!(attrs.get("db.query.text"), Some(&"dbStatement"));
+
+        // Messaging (stable semconv keys)
+        assert_eq!(attrs.get("messaging.system"), Some(&"messagingSystem"));
+        assert_eq!(
+            attrs.get("messaging.destination.name"),
+            Some(&"messagingDestination")
+        );
+        assert_eq!(attrs.get("messaging.url"), Some(&"messagingUrl"));
+
+        // RPC (Common Schema Span spec)
+        assert_eq!(attrs.get("rpc.system.name"), Some(&"rpcSystem"));
+        assert_eq!(
+            attrs.get("rpc.response.status_code"),
+            Some(&"rpcGrpcStatusCode")
+        );
+    }
+
+    #[test]
+    fn well_known_attributes_does_not_contain_unknown() {
+        let attrs = get_well_known_attributes();
+        assert!(attrs.get("unknown.attribute").is_none());
+        assert!(attrs.get("service.name").is_none());
+    }
+
+    #[test]
+    fn provider_name_validation_rejects_too_long() {
+        let long_name = "a".repeat(234);
+        assert!(UserEventsSpanExporter::new(&long_name).is_err());
+    }
+
+    #[test]
+    fn provider_name_validation_rejects_special_chars() {
+        assert!(UserEventsSpanExporter::new("has-hyphen").is_err());
+        assert!(UserEventsSpanExporter::new("has space").is_err());
+        assert!(UserEventsSpanExporter::new("has.dot").is_err());
+    }
+
+    #[test]
+    fn provider_name_validation_accepts_valid() {
+        // Can't fully construct on non-Linux, but validation should pass
+        assert!(
+            UserEventsSpanExporter::new("valid_name_123").is_ok() || cfg!(not(target_os = "linux"))
+        );
     }
 }
