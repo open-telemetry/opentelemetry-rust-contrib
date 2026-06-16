@@ -10,7 +10,7 @@ keywords = ["opentelemetry", "geneva", "logs", "uploader"]
 license = "Apache-2.0"
 
 [dependencies]
-otap-df-pdata-views = { git = "https://github.com/open-telemetry/otel-arrow", rev = "15371dc7" }
+otap-df-pdata-views = { git = "https://github.com/open-telemetry/otel-arrow", rev = "4f522d2e" }
 opentelemetry-proto = { version = "0.31", default-features = false, features = ["logs", "trace", "gen-tonic-messages"] }
 base64 = "0.22"
 serde = { version = "1.0", features = ["derive"] }
@@ -70,7 +70,7 @@ default = ["tls-native"]
 
 [dev-dependencies]
 geneva-test-server = { path = "../geneva-test-server", features = ["testing"] }
-otap-df-pdata = { git = "https://github.com/open-telemetry/otel-arrow", rev = "15371dc7" }
+otap-df-pdata = { git = "https://github.com/open-telemetry/otel-arrow", rev = "4f522d2e" }
 prost = "0.14"
 tokio = { version = "1", features = ["full"] }
 rcgen = "0.14"
