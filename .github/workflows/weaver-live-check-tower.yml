@@ -63,18 +63,18 @@ jobs:
           key: weaver-live-check-${{ runner.os }}-${{ hashFiles('**/Cargo.lock') }}
 
       # ---- Reusable actions: start the weaver listener ---------------
-      # TODO: temporarily pinned to the merge commit of
-      # open-telemetry/weaver#1448 because the composite actions are not
-      # yet part of a tagged weaver release. Move to a released tag
-      # (e.g. `@v0.18.0`) once one ships that includes them.
+      # TODO: temporarily pinned to a weaver `main` commit because the
+      # composite actions are not yet part of a tagged weaver release.
+      # Move to a released tag (e.g. `@v0.24.0`) once one ships that
+      # includes them.
       - name: Setup weaver
-        uses: open-telemetry/weaver/.github/actions/setup-weaver@3e9b722324783f871d2828f62c8cf706e046c83a
+        uses: open-telemetry/weaver/.github/actions/setup-weaver@8b664235920c6ebdfa9bdfc27d5c5e801b403c0e
         with:
           version: ${{ env.WEAVER_VERSION }}
 
       - name: Start weaver live-check
         id: live-check
-        uses: open-telemetry/weaver/.github/actions/weaver-live-check-start@3e9b722324783f871d2828f62c8cf706e046c83a
+        uses: open-telemetry/weaver/.github/actions/weaver-live-check-start@8b664235920c6ebdfa9bdfc27d5c5e801b403c0e
         with:
           registry: ${{ env.SEMCONV_REGISTRY }}
 
@@ -145,7 +145,7 @@ jobs:
       # ---- Reusable action: stop, summarize, gate ---------------
       - name: Stop weaver live-check
         if: always()
-        uses: open-telemetry/weaver/.github/actions/weaver-live-check-stop@3e9b722324783f871d2828f62c8cf706e046c83a
+        uses: open-telemetry/weaver/.github/actions/weaver-live-check-stop@8b664235920c6ebdfa9bdfc27d5c5e801b403c0e
         with:
           fail-on: violation
 
