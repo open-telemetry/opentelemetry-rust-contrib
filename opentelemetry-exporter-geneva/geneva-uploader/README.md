@@ -76,17 +76,17 @@ See `../geneva-uploader-ffi/README.md` for details.
   for parsing the PKCS#12 client certificate. Pick this when you need to ship
   a binary without an OpenSSL runtime dependency, or when you want to plug in a
   FIPS-validated `CryptoProvider` such as
-  [`rustls-symcrypt`](https://crates.io/crates/rustls-symcrypt). Install your
-  provider once at process startup:
+  [`rustls-symcrypt`](https://crates.io/crates/rustls-symcrypt).
+
+  **A `CryptoProvider` must be installed at process startup** — no built-in
+  provider is compiled in, so the uploader will return an error if none is
+  found. Install your provider once before creating a `GenevaClient`:
 
   ```rust,ignore
   rustls_symcrypt::default_symcrypt_provider()
       .install_default()
       .expect("failed to install SymCrypt CryptoProvider");
   ```
-
-  If no provider is installed, the rustls bundled provider (selected via
-  reqwest's `rustls-tls-native-roots` feature) is used as a fallback.
 
 To switch backends, disable defaults and select the desired feature:
 

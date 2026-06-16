@@ -1179,10 +1179,21 @@ fn build_rustls_client_config(
         }
     }
 
-    // Pin to TLS 1.2 (matches the native-tls path). The CryptoProvider is selected from the
-    // process-wide default if one was installed (e.g. rustls-symcrypt::default_symcrypt_provider),
-    // otherwise from the provider compiled into rustls via reqwest's `rustls-tls-native-roots`.
-    let config = rustls::ClientConfig::builder_with_protocol_versions(&[&rustls::version::TLS12])
+    // Require an explicitly installed CryptoProvider (e.g. rustls-symcrypt for FIPS).
+    // No built-in fallback provider is compiled in (`reqwest/rustls-tls-native-roots-no-provider`),
+    // so callers must install one at process startup via `CryptoProvider::install_default()`.
+    let provider = rustls::crypto::CryptoProvider::get_default().cloned().ok_or_else(|| {
+        GenevaConfigClientError::Certificate(
+            "No rustls CryptoProvider installed. Call CryptoProvider::install_default() \
+             at process startup (e.g. rustls_symcrypt::default_symcrypt_provider()\
+             .install_default())."
+                .to_string(),
+        )
+    })?;
+
+    let config = rustls::ClientConfig::builder_with_provider(provider)
+        .with_protocol_versions(&[&rustls::version::TLS12])
+        .map_err(|e| GenevaConfigClientError::Certificate(e.to_string()))?
         .with_root_certificates(roots)
         .with_client_auth_cert(client_chain, client_key)
         .map_err(|e| GenevaConfigClientError::Certificate(e.to_string()))?;

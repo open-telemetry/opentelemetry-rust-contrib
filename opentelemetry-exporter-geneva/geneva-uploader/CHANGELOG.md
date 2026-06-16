@@ -4,7 +4,7 @@
 
 ### Added
 
-- New `tls-rustls` feature flag enables a pure-Rust TLS backend (rustls + p12-keystore) as an alternative to the default `tls-native` (native-tls / OpenSSL) backend. The two flags are additive (so `--all-features` builds compile cleanly); if both are enabled simultaneously, `tls-rustls` takes precedence at runtime. Consumers that need FIPS-validated cryptography can install a custom `rustls::crypto::CryptoProvider` (e.g. `rustls-symcrypt`) at process start, and the rustls backend will use it automatically.
+- New `tls-rustls` feature flag enables a pure-Rust TLS backend (rustls + p12-keystore) as an alternative to the default `tls-native` (native-tls / OpenSSL) backend. The two flags are additive (so `--all-features` builds compile cleanly); if both are enabled simultaneously, `tls-rustls` takes precedence at runtime. No built-in crypto provider (e.g. ring) is compiled in; consumers **must** install a `rustls::crypto::CryptoProvider` (e.g. `rustls-symcrypt`) at process start. The uploader returns a clear error if no provider is found.
 
 ## [0.5.0] - 2026-04-13
 

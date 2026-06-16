@@ -47,10 +47,11 @@ time = ">=0.3.47"
 [features]
 mock_auth = [] # Disabled by default. Not to be enabled in the prod release.
 # TLS backends. At least one must be enabled. `tls-native` is the default and matches the
-# pre-existing behavior. `tls-rustls` swaps to a pure-Rust TLS stack, which lets consumers
-# install a `rustls::crypto::CryptoProvider` (e.g. SymCrypt) at process start to satisfy
-# FIPS / OpenSSL-free deployments. The features are additive: enabling both (e.g. via
-# `--all-features`) compiles successfully and `tls-rustls` is used at runtime.
+# pre-existing behavior. `tls-rustls` swaps to a pure-Rust TLS stack without compiling in a
+# default crypto provider (ring); consumers must install a `rustls::crypto::CryptoProvider`
+# (e.g. SymCrypt) at process start to satisfy FIPS / OpenSSL-free deployments. The features
+# are additive: enabling both (e.g. via `--all-features`) compiles successfully and
+# `tls-rustls` is used at runtime.
 tls-native = [
     "dep:native-tls",
     "reqwest/native-tls",
@@ -62,7 +63,7 @@ tls-rustls = [
     "dep:rustls-pemfile",
     "dep:rustls-native-certs",
     "dep:p12-keystore",
-    "reqwest/rustls-tls-native-roots",
+    "reqwest/rustls-tls-native-roots-no-provider",
 ]
 default = ["tls-native"]
 
