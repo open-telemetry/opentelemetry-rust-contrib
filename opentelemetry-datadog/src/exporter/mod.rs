@@ -530,6 +530,7 @@ mod tests {
     }
 
     #[test]
+    #[ignore = "deprecated crate; panics under workspace --all-features when rustls is pulled into the shared reqwest by an unrelated crate"]
     fn test_custom_http_client() {
         new_pipeline()
             .with_http_client(DummyClient)
@@ -538,6 +539,7 @@ mod tests {
     }
 
     #[test]
+    #[ignore = "deprecated crate; panics under workspace --all-features when rustls is pulled into the shared reqwest by an unrelated crate"]
     fn test_install_simple() {
         new_pipeline()
             .with_service_name("test_service")
@@ -547,6 +549,7 @@ mod tests {
     }
 
     #[test]
+    #[ignore = "deprecated crate; panics under workspace --all-features when rustls is pulled into the shared reqwest by an unrelated crate"]
     fn test_install_batch() {
         new_pipeline()
             .with_service_name("test_service")
