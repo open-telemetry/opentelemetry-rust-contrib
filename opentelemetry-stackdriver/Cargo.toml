@@ -1,13 +1,16 @@
 [package]
 name = "opentelemetry-stackdriver"
 version = "0.29.0"
-description = "A Rust opentelemetry exporter that uploads traces to Google Stackdriver trace."
+description = "[DEPRECATED] A Rust opentelemetry exporter that uploads traces to Google Stackdriver trace. Use OTLP with Google Cloud's OTLP-compatible ingestion or the OpenTelemetry Collector's `googlecloud` exporter instead."
 documentation = "https://docs.rs/opentelemetry-stackdriver/"
 repository = "https://github.com/open-telemetry/opentelemetry-rust-contrib"
 license = "Apache-2.0"
 edition = "2021"
 exclude = ["/proto"]
 rust-version = "1.75.0"
+
+[badges]
+maintenance = { status = "deprecated" }
 
 [dependencies]
 gcp_auth = { version = "0.12", optional = true }
