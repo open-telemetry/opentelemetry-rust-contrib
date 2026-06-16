@@ -1182,14 +1182,16 @@ fn build_rustls_client_config(
     // Require an explicitly installed CryptoProvider (e.g. rustls-symcrypt for FIPS).
     // No built-in fallback provider is compiled in (`reqwest/rustls-tls-native-roots-no-provider`),
     // so callers must install one at process startup via `CryptoProvider::install_default()`.
-    let provider = rustls::crypto::CryptoProvider::get_default().cloned().ok_or_else(|| {
-        GenevaConfigClientError::Certificate(
-            "No rustls CryptoProvider installed. Call CryptoProvider::install_default() \
+    let provider = rustls::crypto::CryptoProvider::get_default()
+        .cloned()
+        .ok_or_else(|| {
+            GenevaConfigClientError::Certificate(
+                "No rustls CryptoProvider installed. Call CryptoProvider::install_default() \
              at process startup (e.g. rustls_symcrypt::default_symcrypt_provider()\
              .install_default())."
-                .to_string(),
-        )
-    })?;
+                    .to_string(),
+            )
+        })?;
 
     let config = rustls::ClientConfig::builder_with_provider(provider)
         .with_protocol_versions(&[&rustls::version::TLS12])
