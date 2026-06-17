@@ -64,3 +64,42 @@ a stable C ABI.  It provides two encoding paths that mirror the Rust paths above
   no intermediate copy.
 
 See `../geneva-uploader-ffi/README.md` for details.
+
+## TLS backends
+
+`geneva-uploader` supports two TLS backends, selected at compile time via Cargo features (the flags are additive; if both are enabled, `tls-rustls` is used):
+
+- **`tls-native`** *(default)* — uses [`native-tls`] (which links against the
+  system OpenSSL/SChannel/Secure Transport). This is the historical behavior
+  and requires no additional setup.
+- **`tls-rustls`** — uses pure-Rust [`rustls`] together with [`p12-keystore`]
+  for parsing the PKCS#12 client certificate. Pick this when you need to ship
+  a binary without an OpenSSL runtime dependency, or when you want to plug in a
+  FIPS-validated `CryptoProvider` such as
+  [`rustls-symcrypt`](https://crates.io/crates/rustls-symcrypt).
+
+  **A `CryptoProvider` must be installed at process startup** — no built-in
+  provider is compiled in, so the uploader will return an error if none is
+  found. Install your provider once before creating a `GenevaClient`:
+
+  ```rust,ignore
+  rustls_symcrypt::default_symcrypt_provider()
+      .install_default()
+      .expect("failed to install SymCrypt CryptoProvider");
+  ```
+
+To switch backends, disable defaults and select the desired feature:
+
+```toml
+[dependencies]
+geneva-uploader = { version = "*", default-features = false, features = ["tls-rustls"] }
+```
+
+Both backends use the system trust store for server verification and pin the
+TLS version to 1.2 (matching Geneva's required protocol). The two feature flags
+are additive — if both are enabled simultaneously (e.g. via `--all-features`),
+`tls-rustls` takes precedence at runtime.
+
+[`native-tls`]: https://crates.io/crates/native-tls
+[`rustls`]: https://crates.io/crates/rustls
+[`p12-keystore`]: https://crates.io/crates/p12-keystore

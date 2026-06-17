@@ -13,7 +13,7 @@ license = "Apache-2.0"
 crate-type = ["cdylib", "staticlib", "rlib"]
 
 [dependencies]
-geneva-uploader = { path = "../geneva-uploader", version = "0.5.0" }
+geneva-uploader = { path = "../geneva-uploader", version = "0.5.0", default-features = false }
 opentelemetry-proto = { version = "0.31", default-features = false, features = ["logs", "trace", "gen-tonic-messages"] }
 otap-df-pdata-views = { git = "https://github.com/open-telemetry/otel-arrow", rev = "4f522d2e" }
 otap-df-pdata = { git = "https://github.com/open-telemetry/otel-arrow", rev = "4f522d2e", optional = true }
@@ -21,6 +21,14 @@ tokio = { version = "1.0", features = ["rt-multi-thread"] }
 prost = "0.14"
 
 [features]
+# TLS backend selection is forwarded to geneva-uploader. `tls-native` (default)
+# matches the pre-existing behavior; enable `tls-rustls` for an OpenSSL-free build
+# (e.g. when pairing with a `rustls::crypto::CryptoProvider` such as rustls-symcrypt).
+# The features are additive, mirroring the inner crate; if both are enabled,
+# `tls-rustls` takes precedence at runtime.
+default = ["tls-native"]
+tls-native = ["geneva-uploader/tls-native"]
+tls-rustls = ["geneva-uploader/tls-rustls"]
 mock_auth = ["geneva-uploader/mock_auth"]
 otlp_bytes = ["dep:otap-df-pdata"]
 
