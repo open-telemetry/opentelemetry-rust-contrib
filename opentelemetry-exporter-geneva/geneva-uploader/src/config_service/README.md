@@ -6,12 +6,12 @@ The diagram below illustrates how the `GenevaConfigClient` is initialized with a
 sequenceDiagram
     participant App as User
     participant Client as GenevaConfigClient
-    participant TLS as native_tls
+    participant TLS as TLS backend<br/>(native-tls or rustls)
     participant GCS as Geneva Config Service
 
     App->>Client: new(GenevaConfigClientConfig)
     Client->>TLS: Load PKCS#12 cert
-    TLS-->>Client: native_tls::TlsConnector
+    TLS-->>Client: configured TLS connector / ClientConfig
     Client->>Client: Build reqwest::Client with mTLS
 
     App->>Client: get_ingestion_info()
