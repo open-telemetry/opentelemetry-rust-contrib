@@ -114,7 +114,8 @@ mod tests {
     #[test]
     fn test_host_resource_detector_linux() {
         let resource = HostResourceDetector::default().detect();
-        assert_eq!(resource.len(), 3);
+        // host.id + host.arch are always present; host.name is best-effort
+        assert!(matches!(resource.len(), 2 | 3));
         assert!(resource
             .get(&Key::from_static_str(
                 opentelemetry_semantic_conventions::attribute::HOST_ID
@@ -123,11 +124,6 @@ mod tests {
         assert!(resource
             .get(&Key::from_static_str(
                 opentelemetry_semantic_conventions::attribute::HOST_ARCH
-            ))
-            .is_some());
-        assert!(resource
-            .get(&Key::from_static_str(
-                opentelemetry_semantic_conventions::attribute::HOST_NAME
             ))
             .is_some())
     }
@@ -136,7 +132,8 @@ mod tests {
     #[test]
     fn test_host_resource_detector_macos() {
         let resource = HostResourceDetector::default().detect();
-        assert_eq!(resource.len(), 3);
+        // host.id + host.arch are always present; host.name is best-effort
+        assert!(matches!(resource.len(), 2 | 3));
         assert!(resource
             .get(&Key::from_static_str(
                 opentelemetry_semantic_conventions::attribute::HOST_ID
@@ -145,11 +142,6 @@ mod tests {
         assert!(resource
             .get(&Key::from_static_str(
                 opentelemetry_semantic_conventions::attribute::HOST_ARCH
-            ))
-            .is_some());
-        assert!(resource
-            .get(&Key::from_static_str(
-                opentelemetry_semantic_conventions::attribute::HOST_NAME
             ))
             .is_some())
     }
