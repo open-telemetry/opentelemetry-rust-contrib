@@ -833,8 +833,9 @@ mod tests {
         record.set_body("minimal message".into());
         // No event_name, no event_id, no attributes
 
-        let perf_thread =
-            std::thread::spawn(|| capture_and_decode_events(5, "user_events:myprovider_noresource_L3K1"));
+        let perf_thread = std::thread::spawn(|| {
+            capture_and_decode_events(5, "user_events:myprovider_noresource_L3K1")
+        });
 
         std::thread::sleep(std::time::Duration::from_millis(1000));
 
@@ -986,8 +987,9 @@ mod tests {
             ) {
                 Ok(enumerator) => enumerator,
                 Err(e) => {
-                    err_sink
-                        .write(|errs| errs.push(format!("failed to start EventHeader decode: {e}")));
+                    err_sink.write(|errs| {
+                        errs.push(format!("failed to start EventHeader decode: {e}"))
+                    });
                     return Ok(());
                 }
             };

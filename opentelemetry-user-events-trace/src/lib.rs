@@ -101,8 +101,9 @@ mod tests {
         assert!(user_event_status.contains("opentelemetry_traces_L4K1"));
 
         // Start perf recording in a separate thread and emit logs in parallel.
-        let perf_thread =
-            std::thread::spawn(|| capture_and_decode_events(5, "user_events:opentelemetry_traces_L4K1"));
+        let perf_thread = std::thread::spawn(|| {
+            capture_and_decode_events(5, "user_events:opentelemetry_traces_L4K1")
+        });
 
         // Give a little time for perf to start recording
         std::thread::sleep(std::time::Duration::from_millis(1000));
@@ -294,8 +295,9 @@ mod tests {
         let user_event_status = check_user_events_available().unwrap();
         assert!(user_event_status.contains("otel_trace_child_L4K1"));
 
-        let perf_thread =
-            std::thread::spawn(|| capture_and_decode_events(5, "user_events:otel_trace_child_L4K1"));
+        let perf_thread = std::thread::spawn(|| {
+            capture_and_decode_events(5, "user_events:otel_trace_child_L4K1")
+        });
 
         std::thread::sleep(std::time::Duration::from_millis(1000));
 
@@ -410,8 +412,9 @@ mod tests {
         let user_event_status = check_user_events_available().unwrap();
         assert!(user_event_status.contains("otel_trace_nores_L4K1"));
 
-        let perf_thread =
-            std::thread::spawn(|| capture_and_decode_events(5, "user_events:otel_trace_nores_L4K1"));
+        let perf_thread = std::thread::spawn(|| {
+            capture_and_decode_events(5, "user_events:otel_trace_nores_L4K1")
+        });
 
         std::thread::sleep(std::time::Duration::from_millis(1000));
 
@@ -498,8 +501,9 @@ mod tests {
         let user_event_status = check_user_events_available().unwrap();
         assert!(user_event_status.contains("otel_trace_links_L4K1"));
 
-        let perf_thread =
-            std::thread::spawn(|| capture_and_decode_events(5, "user_events:otel_trace_links_L4K1"));
+        let perf_thread = std::thread::spawn(|| {
+            capture_and_decode_events(5, "user_events:otel_trace_links_L4K1")
+        });
 
         std::thread::sleep(std::time::Duration::from_millis(1000));
 
@@ -600,8 +604,9 @@ mod tests {
         let user_event_status = check_user_events_available().unwrap();
         assert!(user_event_status.contains("otel_trace_stmsg_L4K1"));
 
-        let perf_thread =
-            std::thread::spawn(|| capture_and_decode_events(5, "user_events:otel_trace_stmsg_L4K1"));
+        let perf_thread = std::thread::spawn(|| {
+            capture_and_decode_events(5, "user_events:otel_trace_stmsg_L4K1")
+        });
 
         std::thread::sleep(std::time::Duration::from_millis(1000));
 
@@ -693,8 +698,9 @@ mod tests {
         let user_event_status = check_user_events_available().unwrap();
         assert!(user_event_status.contains("otel_trace_suppr_L4K1"));
 
-        let perf_thread =
-            std::thread::spawn(|| capture_and_decode_events(5, "user_events:otel_trace_suppr_L4K1"));
+        let perf_thread = std::thread::spawn(|| {
+            capture_and_decode_events(5, "user_events:otel_trace_suppr_L4K1")
+        });
 
         std::thread::sleep(std::time::Duration::from_millis(1000));
 
@@ -771,8 +777,9 @@ mod tests {
         let user_event_status = check_user_events_available().unwrap();
         assert!(user_event_status.contains("otel_trace_kinds_L4K1"));
 
-        let perf_thread =
-            std::thread::spawn(|| capture_and_decode_events(5, "user_events:otel_trace_kinds_L4K1"));
+        let perf_thread = std::thread::spawn(|| {
+            capture_and_decode_events(5, "user_events:otel_trace_kinds_L4K1")
+        });
 
         std::thread::sleep(std::time::Duration::from_millis(1000));
 
@@ -1015,8 +1022,9 @@ mod tests {
             ) {
                 Ok(enumerator) => enumerator,
                 Err(e) => {
-                    err_sink
-                        .write(|errs| errs.push(format!("failed to start EventHeader decode: {e}")));
+                    err_sink.write(|errs| {
+                        errs.push(format!("failed to start EventHeader decode: {e}"))
+                    });
                     return Ok(());
                 }
             };
