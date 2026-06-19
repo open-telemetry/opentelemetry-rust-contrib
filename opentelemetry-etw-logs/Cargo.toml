@@ -35,8 +35,7 @@ tracing-subscriber = { version = "0.3.0", default-features = false, features = [
 criterion = "0.8"
 
 [target.'cfg(windows)'.dev-dependencies]
-ferrisetw = "1.2"
-windows = { version = "0.62", features = ["Win32_System_Diagnostics_Etw"] }
+one_collect = "0.1.34532"
 
 [features]
 internal-logs = [
