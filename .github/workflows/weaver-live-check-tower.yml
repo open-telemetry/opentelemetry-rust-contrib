@@ -15,7 +15,6 @@ env:
   # Pinned semantic-conventions release for reproducible runs. Bump
   # deliberately when conventions change.
   SEMCONV_REGISTRY: 'https://github.com/open-telemetry/semantic-conventions/archive/refs/tags/v1.41.1.tar.gz[model]'
-  APP_PORT: '5000'
 
 permissions:
   contents: read
@@ -98,9 +97,9 @@ jobs:
           echo "app pid: $APP_PID"
           echo "::endgroup::"
 
-          # Wait for the app to start serving on :$APP_PORT
+          # Wait for the app to start serving on :5000
           for _ in $(seq 1 30); do
-            if curl -fsS "http://127.0.0.1:${APP_PORT}/" >/dev/null 2>&1; then
+            if curl -fsS "http://127.0.0.1:5000/" >/dev/null 2>&1; then
               break
             fi
             sleep 1
@@ -115,24 +114,24 @@ jobs:
           # as possible against the pinned semconv registry.
           for i in $(seq 1 8); do
             # 200 OK on literal, templated, and wildcard routes.
-            c "http://127.0.0.1:${APP_PORT}/"
-            c "http://127.0.0.1:${APP_PORT}/users/$i"
-            c "http://127.0.0.1:${APP_PORT}/files/a/b/c/$i.txt"
+            c "http://127.0.0.1:5000/"
+            c "http://127.0.0.1:5000/users/$i"
+            c "http://127.0.0.1:5000/files/a/b/c/$i.txt"
             # 201 / 200 / 200 / 204 across POST/PUT/PATCH/DELETE.
-            c -X POST   "http://127.0.0.1:${APP_PORT}/items"
-            c -X PUT    "http://127.0.0.1:${APP_PORT}/items/$i"
-            c -X PATCH  "http://127.0.0.1:${APP_PORT}/items/$i"
-            c -X DELETE "http://127.0.0.1:${APP_PORT}/items/$i"
+            c -X POST   "http://127.0.0.1:5000/items"
+            c -X PUT    "http://127.0.0.1:5000/items/$i"
+            c -X PATCH  "http://127.0.0.1:5000/items/$i"
+            c -X DELETE "http://127.0.0.1:5000/items/$i"
             # HEAD on a templated route + OPTIONS.
-            c -X HEAD    "http://127.0.0.1:${APP_PORT}/items/$i/head"
-            c -X OPTIONS "http://127.0.0.1:${APP_PORT}/items"
+            c -X HEAD    "http://127.0.0.1:5000/items/$i/head"
+            c -X OPTIONS "http://127.0.0.1:5000/items"
             # 4xx
-            c "http://127.0.0.1:${APP_PORT}/bad-request"   # 400
-            c "http://127.0.0.1:${APP_PORT}/unauthorized"  # 401
-            c "http://127.0.0.1:${APP_PORT}/no-such-route" # 404
+            c "http://127.0.0.1:5000/bad-request"   # 400
+            c "http://127.0.0.1:5000/unauthorized"  # 401
+            c "http://127.0.0.1:5000/no-such-route" # 404
             # 5xx via handler + unhandled panic.
-            c "http://127.0.0.1:${APP_PORT}/error"
-            c "http://127.0.0.1:${APP_PORT}/throw"
+            c "http://127.0.0.1:5000/error"
+            c "http://127.0.0.1:5000/throw"
           done
           echo "traffic loop complete"
           echo "::endgroup::"
