@@ -162,7 +162,9 @@ mod tests {
     use tracing::error;
     use tracing_subscriber::{layer::SubscriberExt, EnvFilter, Layer};
 
-    // This test requires a Linux kernel with user_events support, perf, and perf-decode.
+    // This test requires a Linux kernel with user_events support. Events are
+    // captured and decoded in-process via `one_collect` + `tracepoint_decode`,
+    // so no external `perf`/`perf-decode` tooling is needed.
     // It is run in CI via the user-events-integration-test job.
     // To run locally: sudo -E ~/.cargo/bin/cargo test integration_test_basic -- --nocapture --ignored
 
@@ -208,7 +210,7 @@ mod tests {
 
         // Start perf recording in a separate thread and emit logs in parallel.
         let perf_thread =
-            std::thread::spawn(|| run_perf_and_decode(5, "user_events:myprovider_L2K1"));
+            std::thread::spawn(|| capture_and_decode_events(5, "user_events:myprovider_L2K1"));
 
         // Give a little time for perf to start recording
         std::thread::sleep(std::time::Duration::from_millis(1000));
@@ -399,7 +401,7 @@ mod tests {
 
         // Start perf recording in a separate thread and emit logs in parallel.
         let perf_thread =
-            std::thread::spawn(|| run_perf_and_decode(5, "user_events:myprovider_L2K1"));
+            std::thread::spawn(|| capture_and_decode_events(5, "user_events:myprovider_L2K1"));
 
         // Give a little time for perf to start recording
         std::thread::sleep(std::time::Duration::from_millis(1000));
@@ -533,7 +535,7 @@ mod tests {
 
         // Start perf recording in a separate thread and emit logs in parallel.
         let perf_thread =
-            std::thread::spawn(|| run_perf_and_decode(5, "user_events:myprovider_L2K1"));
+            std::thread::spawn(|| capture_and_decode_events(5, "user_events:myprovider_L2K1"));
 
         // Give a little time for perf to start recording
         std::thread::sleep(std::time::Duration::from_millis(1000));
@@ -708,7 +710,7 @@ mod tests {
         // Start perf recording in a separate thread and emit logs in parallel.
         let trace_point_clone = trace_point.to_string();
         let perf_thread =
-            std::thread::spawn(move || run_perf_and_decode(5, trace_point_clone.as_ref()));
+            std::thread::spawn(move || capture_and_decode_events(5, trace_point_clone.as_ref()));
 
         // Give a little time for perf to start recording
         std::thread::sleep(std::time::Duration::from_millis(1000));
@@ -831,8 +833,9 @@ mod tests {
         record.set_body("minimal message".into());
         // No event_name, no event_id, no attributes
 
-        let perf_thread =
-            std::thread::spawn(|| run_perf_and_decode(5, "user_events:myprovider_noresource_L3K1"));
+        let perf_thread = std::thread::spawn(|| {
+            capture_and_decode_events(5, "user_events:myprovider_noresource_L3K1")
+        });
 
         std::thread::sleep(std::time::Duration::from_millis(1000));
 
@@ -923,6 +926,9 @@ mod tests {
     /// in the same `{ "./perf.data": [ {event}, ... ] }` shape the old
     /// `perf-decode` pipeline produced, so the test assertions are unchanged.
     ///
+    /// Returns an error if any captured record fails to decode, so decode
+    /// failures surface as a test failure rather than being silently dropped.
+    ///
     /// `event` is the full tracepoint spec, e.g. "user_events:myprovider_L2K1".
     /// Capture runs for `duration_secs`; the caller emits events on another thread
     /// during this window, mirroring the old `perf record` duration.
@@ -930,7 +936,7 @@ mod tests {
     /// This replaces the previous `perf record` + `perf-decode` external-tool
     /// pipeline with a self-contained, in-process consumer (no external tools, no
     /// temp files, no `sudo` shell-outs).
-    fn run_perf_and_decode(duration_secs: u64, event: &str) -> std::io::Result<String> {
+    fn capture_and_decode_events(duration_secs: u64, event: &str) -> std::io::Result<String> {
         let need_permission = "Need permission to access tracefs/perf_events (run via sudo?)";
 
         // Strip the "user_events:" system prefix to get the tracepoint name,
@@ -959,7 +965,9 @@ mod tests {
 
         let tp_name = tracepoint.clone();
         let collected = Writable::<Vec<String>>::new(Vec::new());
+        let errors = Writable::<Vec<String>>::new(Vec::new());
         let sink = collected.clone();
+        let err_sink = errors.clone();
         let mut ctx = EventHeaderEnumeratorContext::new();
 
         tp_event.add_callback(move |data| {
@@ -969,28 +977,39 @@ mod tests {
             }
             let payload = &full[flags_offset..];
 
-            if let Ok(mut enumerator) = ctx.enumerate_with_name_and_data(
+            // Capture decode failures (rather than silently dropping the event)
+            // so the helper can surface them and the test fails with a
+            // diagnosable error instead of a missing/empty result.
+            let mut enumerator = match ctx.enumerate_with_name_and_data(
                 &tp_name,
                 payload,
                 EventHeaderEnumeratorContext::MOVE_NEXT_LIMIT_DEFAULT,
             ) {
-                // Event identity, e.g. "myprovider:Log".
-                let identity = enumerator.event_info().identity_display().to_string();
-
-                // From the initial BeforeFirstItem state, this appends every
-                // top-level field as a comma-separated list of `"Name": value`
-                // pairs, with PartA/PartB/PartC rendered as nested JSON objects.
-                let mut body = String::new();
-                if enumerator
-                    .write_json_item_and_move_next_sibling(
-                        &mut body,
-                        false,
-                        PerfConvertOptions::Default,
-                    )
-                    .is_ok()
-                {
-                    sink.write(|out| out.push(format!("{{\"n\":\"{identity}\",{body}}}")));
+                Ok(enumerator) => enumerator,
+                Err(e) => {
+                    err_sink.write(|errs| {
+                        errs.push(format!("failed to start EventHeader decode: {e}"))
+                    });
+                    return Ok(());
                 }
+            };
+
+            // Event identity, e.g. "myprovider:Log".
+            let identity = enumerator.event_info().identity_display().to_string();
+
+            // From the initial BeforeFirstItem state, this appends every
+            // top-level field as a comma-separated list of `"Name": value`
+            // pairs, with PartA/PartB/PartC rendered as nested JSON objects.
+            let mut body = String::new();
+            match enumerator.write_json_item_and_move_next_sibling(
+                &mut body,
+                false,
+                PerfConvertOptions::Default,
+            ) {
+                Ok(_) => sink.write(|out| out.push(format!("{{\"n\":\"{identity}\",{body}}}"))),
+                Err(e) => err_sink.write(|errs| {
+                    errs.push(format!("failed to write JSON for event {identity}: {e}"))
+                }),
             }
             Ok(())
         });
@@ -1014,6 +1033,22 @@ mod tests {
             .parse_for_duration(Duration::from_secs(duration_secs))
             .expect("Failed to parse perf ring buffer");
         session.disable().expect(need_permission);
+
+        // Surface any decode failures instead of silently dropping them, so a
+        // malformed event makes the test fail with a diagnosable error rather
+        // than a missing/short result.
+        let mut decode_errors = Vec::new();
+        errors.read(|v| decode_errors = v.clone());
+        if !decode_errors.is_empty() {
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::InvalidData,
+                format!(
+                    "Failed to decode {} user_events record(s): {}",
+                    decode_errors.len(),
+                    decode_errors.join("; ")
+                ),
+            ));
+        }
 
         let mut events = Vec::new();
         collected.read(|v| events = v.clone());

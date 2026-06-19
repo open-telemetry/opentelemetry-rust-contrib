@@ -18,11 +18,9 @@ mod tests {
         use one_collect::perf_event::{RingBufBuilder, RingBufSessionBuilder};
         use one_collect::tracefs::TraceFS;
         use one_collect::Writable;
-        use std::time::Duration;
 
         /// Verifies that tracefs (and therefore user_events) is reachable. Returns
-        /// a descriptive error if it is not, mirroring the previous
-        /// `/sys/kernel/tracing/user_events_status` check but without shelling out.
+        /// a descriptive error if it is not.
         pub fn check_user_events_available() -> Result<(), String> {
             TraceFS::open().map(|_| ()).map_err(|e| {
                 format!(
@@ -87,11 +85,17 @@ mod tests {
             // events while the ring buffer is enabled and capturing.
             emit();
 
-            // Drain whatever the exporter wrote into the ring buffer.
-            session
-                .parse_for_duration(Duration::from_secs(2))
-                .expect("Failed to parse perf ring buffer");
+            // emit() shut the provider down synchronously, so every event is
+            // already in the kernel ring buffer by the time we get here.
+            // Disable the session first: this stops new collection but retains
+            // the already-buffered records. Once disabled, `parse_all` drains
+            // what's buffered and returns immediately (while a session is still
+            // enabled, `parse_all` would keep polling and never return), so
+            // there is no need for a timed wait.
             session.disable().expect(need_permission);
+            session
+                .parse_all()
+                .expect("Failed to parse perf ring buffer");
 
             let mut decoded_metrics = Vec::new();
             collected.read(|v| decoded_metrics = v.clone());
