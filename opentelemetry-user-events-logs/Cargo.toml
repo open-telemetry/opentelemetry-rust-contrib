@@ -27,6 +27,14 @@ ctrlc = "3.4"
 criterion = "0.8"
 serde_json = "1.0.140"
 
+# Linux-only: in-process user_events consumer/decoder used by the integration
+# tests to read EventHeader events directly from the perf ring buffer
+# (`one_collect`) and decode them (`tracepoint_decode`), instead of shelling out
+# to `perf record` + `perf-decode`.
+[target.'cfg(target_os = "linux")'.dev-dependencies]
+one_collect = "0.1.34532"
+tracepoint_decode = "0.5.0"
+
 [features]
 internal-logs = ["opentelemetry/internal-logs", "opentelemetry_sdk/internal-logs"]
 experimental_eventname_callback = []
