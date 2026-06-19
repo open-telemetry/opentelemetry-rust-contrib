@@ -103,8 +103,9 @@ fn start_etw_trace() -> (EtwTrace, mpsc::Receiver<ExportMetricsServiceRequest>) 
 
         session.add_event(event, None);
 
-        let _ = session
-            .parse_until("etw-metrics-int-test", move || stop_worker.load(Ordering::Relaxed));
+        let _ = session.parse_until("etw-metrics-int-test", move || {
+            stop_worker.load(Ordering::Relaxed)
+        });
     });
 
     (

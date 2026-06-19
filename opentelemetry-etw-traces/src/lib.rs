@@ -203,8 +203,7 @@ mod integration_tests {
 
             // Wide event: capture every event from the provider (any ID), at
             // verbose level with all keywords enabled.
-            let mut event =
-                Event::for_etw(0, "Event".to_string(), guid, LEVEL_VERBOSE, u64::MAX);
+            let mut event = Event::for_etw(0, "Event".to_string(), guid, LEVEL_VERBOSE, u64::MAX);
             event.set_id_wild_card_flag();
 
             event.add_callback(move |_data| {
@@ -230,8 +229,7 @@ mod integration_tests {
 
             session.add_event(event, None);
 
-            let _ = session
-                .parse_until(&session_name, move || stop_worker.load(Ordering::Relaxed));
+            let _ = session.parse_until(&session_name, move || stop_worker.load(Ordering::Relaxed));
         });
 
         (
