@@ -20,6 +20,7 @@ use opentelemetry_sdk::{
     Resource,
 };
 use std::sync::OnceLock;
+use tower_http::catch_panic::CatchPanicLayer;
 
 const SERVICE_NAME: &str = "example-live-check-app";
 
@@ -133,6 +134,10 @@ async fn main() {
         .route("/unauthorized", get(unauthorized))
         .route("/error", get(server_error))
         .route("/throw", get(panic_path))
+        // CatchPanicLayer must sit between the OTel layer and the handlers so
+        // that a panicked handler is converted to a real 500 response, which
+        // the outer OTel layer then records as a normal span/metric.
+        .layer(CatchPanicLayer::new())
         .layer(otel_layer);
 
     let listener = tokio::net::TcpListener::bind("0.0.0.0:5000")
