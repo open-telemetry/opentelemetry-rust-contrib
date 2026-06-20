@@ -38,6 +38,7 @@
 //! }
 //! ```
 
+use crate::trace::xray_extractor::{AWS_XRAY_TRACE_ENVIRONMENT_VARIABLE, AWS_XRAY_TRACE_HEADER};
 use opentelemetry::{
     otel_error,
     propagation::{text_map_propagator::FieldIter, Extractor, Injector, TextMapPropagator},
@@ -48,7 +49,6 @@ use std::borrow::Cow;
 use std::convert::TryFrom;
 use std::sync::OnceLock;
 
-const AWS_XRAY_TRACE_HEADER: &str = "x-amzn-trace-id";
 const AWS_XRAY_VERSION_KEY: &str = "1";
 const HEADER_PARENT_KEY: &str = "Parent";
 const HEADER_ROOT_KEY: &str = "Root";
@@ -205,7 +205,12 @@ impl XrayPropagator {
     }
 
     fn extract_span_context(&self, extractor: &dyn Extractor) -> Option<SpanContext> {
-        span_context_from_str(extractor.get(AWS_XRAY_TRACE_HEADER)?.trim())
+        span_context_from_str(
+            extractor
+                .get(AWS_XRAY_TRACE_HEADER)
+                .or(extractor.get(AWS_XRAY_TRACE_ENVIRONMENT_VARIABLE))?
+                .trim(),
+        )
     }
 }
 
