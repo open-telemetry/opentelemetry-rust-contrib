@@ -3,7 +3,7 @@ mod tracepoint;
 
 pub use exporter::MetricsExporter;
 
-#[cfg(test)]
+#[cfg(all(test, target_os = "linux"))]
 mod tests {
     use crate::MetricsExporter;
     use opentelemetry::metrics::MeterProvider;
@@ -14,186 +14,92 @@ mod tests {
     mod test_utils {
         use opentelemetry_proto::tonic::collector::metrics::v1::ExportMetricsServiceRequest;
         use prost::Message;
-        use serde_json::{self, Value};
-        use std::process::Command;
 
-        /// Represents a user event record from perf data
-        #[derive(Debug, Clone)]
-        #[allow(dead_code)]
-        pub struct UserEventRecord {
-            pub name: String,
-            pub protocol: u32,
-            pub version: String,
-            pub buffer: Vec<u8>,
+        use one_collect::perf_event::{RingBufBuilder, RingBufSessionBuilder};
+        use one_collect::tracefs::TraceFS;
+        use one_collect::Writable;
+
+        /// Verifies that tracefs (and therefore user_events) is reachable. Returns
+        /// a descriptive error if it is not.
+        pub fn check_user_events_available() -> Result<(), String> {
+            TraceFS::open().map(|_| ()).map_err(|e| {
+                format!(
+                    "Unable to open tracefs. user_events requires a Linux kernel \
+                     with tracefs mounted and sufficient permissions \
+                     (https://docs.kernel.org/trace/user_events.html): {e}"
+                )
+            })
         }
 
-        /// Extract user event records from JSON content
-        pub fn extract_user_events(
-            json_content: &str,
-        ) -> Result<Vec<UserEventRecord>, Box<dyn std::error::Error>> {
-            let parsed: Value = serde_json::from_str(json_content)?;
-            let mut records = Vec::new();
+        /// Builds an in-process perf ring buffer session over the `otlp_metrics`
+        /// user_events tracepoint, runs `emit` (which should record metrics and
+        /// shut down the meter provider so the exporter writes its events into the
+        /// now-enabled ring buffer), drains the ring buffer, and returns every
+        /// decoded OTLP metrics payload.
+        ///
+        /// The `MetricsExporter` must already be created before calling this:
+        /// creating the exporter registers the tracepoint, which is required for
+        /// `find_event` to succeed.
+        ///
+        /// This replaces the previous `perf record` + `perf-decode` + JSON parsing
+        /// pipeline with a self-contained, in-process consumer (no external tools,
+        /// no temp files, no `sudo` shell-outs).
+        pub fn collect_otlp_metrics<F: FnOnce()>(emit: F) -> Vec<ExportMetricsServiceRequest> {
+            let need_permission = "Need permission to access tracefs/perf_events (run via sudo?)";
 
-            // The JSON structure is { "./perf.data": [array of events] }
-            if let Some(events_map) = parsed.as_object() {
-                for (_, events_value) in events_map {
-                    if let Some(events_array) = events_value.as_array() {
-                        for event in events_array {
-                            if let Some(record) = parse_user_event_record(event)? {
-                                records.push(record);
-                            }
-                        }
-                    }
+            let tracefs = TraceFS::open().expect(need_permission);
+            let mut event = tracefs
+                .find_event("user_events", "otlp_metrics")
+                .expect("otlp_metrics tracepoint not found; create the MetricsExporter first");
+
+            // The `buffer` field is declared as `__rel_loc u8[]` in the tracepoint
+            // definition (see src/tracepoint/mod.rs). one_collect resolves the
+            // rel_loc to the raw OTLP protobuf bytes for us.
+            let buffer_ref = event.format().get_field_ref_unchecked("buffer");
+
+            let collected = Writable::<Vec<ExportMetricsServiceRequest>>::new(Vec::new());
+            let sink = collected.clone();
+
+            event.add_callback(move |data| {
+                let buffer = data.format().get_data(buffer_ref, data.event_data());
+                match ExportMetricsServiceRequest::decode(buffer) {
+                    Ok(request) => sink.write(|out| out.push(request)),
+                    Err(e) => eprintln!("Failed to decode OTLP metrics from buffer: {e}"),
                 }
-            }
+                Ok(())
+            });
 
-            Ok(records)
-        }
+            let mut session = RingBufSessionBuilder::new()
+                .with_page_count(32)
+                .with_tracepoint_events(RingBufBuilder::for_tracepoint())
+                .with_target_pid(std::process::id() as i32)
+                .build()
+                .expect(need_permission);
 
-        /// Parse a single user event record from JSON (test-only)
-        fn parse_user_event_record(
-            event: &Value,
-        ) -> Result<Option<UserEventRecord>, Box<dyn std::error::Error>> {
-            let name = event["n"].as_str().unwrap_or("").to_string();
-            let protocol = event["protocol"].as_u64().unwrap_or(0) as u32;
-            let version = event["version"].as_str().unwrap_or("").to_string();
+            session
+                .add_event(event)
+                .expect("Failed to add otlp_metrics event to session");
+            session.enable().expect(need_permission);
 
-            // Extract buffer as Vec<u8>
-            let buffer = if let Some(buffer_array) = event["buffer"].as_array() {
-                buffer_array
-                    .iter()
-                    .filter_map(|v| v.as_u64().map(|n| n as u8))
-                    .collect()
-            } else {
-                Vec::new()
-            };
+            // Record metrics and shut down the provider so the exporter writes its
+            // events while the ring buffer is enabled and capturing.
+            emit();
 
-            Ok(Some(UserEventRecord {
-                name,
-                protocol,
-                version,
-                buffer,
-            }))
-        }
+            // emit() shut the provider down synchronously, so every event is
+            // already in the kernel ring buffer by the time we get here.
+            // Disable the session first: this stops new collection but retains
+            // the already-buffered records. Once disabled, `parse_all` drains
+            // what's buffered and returns immediately (while a session is still
+            // enabled, `parse_all` would keep polling and never return), so
+            // there is no need for a timed wait.
+            session.disable().expect(need_permission);
+            session
+                .parse_all()
+                .expect("Failed to parse perf ring buffer");
 
-        /// Decode OTLP protobuf buffer to ExportMetricsServiceRequest (test-only)
-        fn decode_otlp_metrics(
-            buffer: &[u8],
-        ) -> Result<ExportMetricsServiceRequest, Box<dyn std::error::Error>> {
-            let request = ExportMetricsServiceRequest::decode(buffer)?;
-            Ok(request)
-        }
-
-        /// Helper function to process all OTLP metrics from JSON content (test-only)
-        pub fn extract_and_decode_otlp_metrics(
-            json_content: &str,
-        ) -> Result<Vec<ExportMetricsServiceRequest>, Box<dyn std::error::Error>> {
-            let user_events = extract_user_events(json_content)?;
             let mut decoded_metrics = Vec::new();
-
-            for event in user_events {
-                // Filter for OTLP metrics events
-                if event.name.contains("otlp_metrics") {
-                    match decode_otlp_metrics(&event.buffer) {
-                        Ok(metrics_request) => {
-                            decoded_metrics.push(metrics_request);
-                        }
-                        Err(e) => {
-                            eprintln!("Failed to decode OTLP metrics from buffer: {e}");
-                            // Continue processing other events instead of failing completely
-                        }
-                    }
-                }
-            }
-
-            Ok(decoded_metrics)
-        }
-
-        pub fn check_user_events_available() -> Result<String, String> {
-            let output = Command::new("sudo")
-                .arg("cat")
-                .arg("/sys/kernel/tracing/user_events_status")
-                .output()
-                .map_err(|e| format!("Failed to execute command: {e}"))?;
-
-            if output.status.success() {
-                let status = String::from_utf8_lossy(&output.stdout);
-                Ok(status.to_string())
-            } else {
-                Err(format!(
-                    "Command executed with failing error code: {}",
-                    String::from_utf8_lossy(&output.stderr)
-                ))
-            }
-        }
-
-        pub fn run_perf_and_decode(duration_secs: u64, event: &str) -> std::io::Result<String> {
-            // Run perf record for duration_secs seconds
-            let perf_status = Command::new("sudo")
-                .args([
-                    "timeout",
-                    "-s",
-                    "SIGINT",
-                    &duration_secs.to_string(),
-                    "perf",
-                    "record",
-                    "-o",
-                    "./perf.data",
-                    "-e",
-                    event,
-                ])
-                .status()?;
-
-            if !perf_status.success() {
-                // Check if it's the expected signal termination (SIGINT from timeout)
-                // timeout sends SIGINT, which will cause a non-zero exit code (130 typically)
-                if !matches!(perf_status.code(), Some(124) | Some(130) | Some(143)) {
-                    panic!(
-                        "perf record failed with exit code: {:?}",
-                        perf_status.code()
-                    );
-                }
-            }
-
-            // Change permissions on perf.data (which is the default file perf records to) to allow reading
-            let chmod_status = Command::new("sudo")
-                .args(["chmod", "uog+r", "./perf.data"])
-                .status()?;
-
-            if !chmod_status.success() {
-                panic!("chmod failed with exit code: {:?}", chmod_status.code());
-            }
-
-            // Decode the performance data and return it directly
-            // Note: This tool must be installed on the machine
-            // git clone https://github.com/microsoft/LinuxTracepoints &&
-            // cd LinuxTracepoints && mkdir build && cd build && cmake .. && make &&
-            // sudo cp bin/perf-decode /usr/local/bin &&
-            let decode_output = Command::new("perf-decode").args(["./perf.data"]).output()?;
-
-            if !decode_output.status.success() {
-                panic!(
-                    "perf-decode failed with exit code: {:?}",
-                    decode_output.status.code()
-                );
-            }
-
-            // Convert the output to a String
-            let raw_output = String::from_utf8_lossy(&decode_output.stdout).to_string();
-
-            // Remove any Byte Order Mark (BOM) characters
-            // UTF-8 BOM is EF BB BF (in hex)
-            let cleaned_output = if let Some(stripped) = raw_output.strip_prefix('\u{FEFF}') {
-                // Skip the BOM character
-                stripped.to_string()
-            } else {
-                raw_output
-            };
-
-            // Trim the output to remove any leading/trailing whitespace
-            let trimmed_output = cleaned_output.trim().to_string();
-
-            Ok(trimmed_output)
+            collected.read(|v| decoded_metrics = v.clone());
+            decoded_metrics
         }
 
         /// Extract metric data from different metric types
@@ -327,28 +233,13 @@ mod tests {
             ],
         );
 
-        let perf_thread = std::thread::spawn(move || {
-            test_utils::run_perf_and_decode(5, "user_events:otlp_metrics")
+        // Collect the OTLP metrics emitted on provider shutdown by reading the
+        // `otlp_metrics` user_events tracepoint directly from the perf ring buffer.
+        let decoded_metrics = test_utils::collect_otlp_metrics(|| {
+            provider
+                .shutdown()
+                .expect("Failed to shutdown meter provider");
         });
-
-        // Give a little time for perf to start recording
-        std::thread::sleep(std::time::Duration::from_millis(1000));
-
-        provider
-            .shutdown()
-            .expect("Failed to shutdown meter provider");
-        let result = perf_thread.join().expect("Perf thread panicked");
-
-        assert!(result.is_ok());
-        let json_content = result.unwrap();
-        assert!(!json_content.is_empty());
-
-        let formatted_output = json_content.trim().to_string();
-        println!("Formatted Output: {formatted_output}");
-
-        // Extract and decode OTLP metrics from the JSON content
-        let decoded_metrics = test_utils::extract_and_decode_otlp_metrics(&formatted_output)
-            .expect("Failed to extract and decode OTLP metrics");
 
         // Expected values from the test setup
         let expected_counter_name = "counter_u64_test";
@@ -530,20 +421,11 @@ mod tests {
         gauge.record(42, &[KeyValue::new("mykey1", "myvalue1")]);
         gauge.record(43, &[KeyValue::new("mykey1", "myvalueA")]);
 
-        let perf_thread = std::thread::spawn(move || {
-            test_utils::run_perf_and_decode(5, "user_events:otlp_metrics")
+        let decoded = test_utils::collect_otlp_metrics(|| {
+            provider
+                .shutdown()
+                .expect("Failed to shutdown meter provider");
         });
-        std::thread::sleep(std::time::Duration::from_millis(1000));
-        provider
-            .shutdown()
-            .expect("Failed to shutdown meter provider");
-
-        let json_content = perf_thread
-            .join()
-            .expect("Perf thread panicked")
-            .expect("perf-decode failed");
-        let decoded = test_utils::extract_and_decode_otlp_metrics(json_content.trim())
-            .expect("Failed to decode OTLP metrics");
 
         assert_eq!(
             decoded.len(),
@@ -622,20 +504,11 @@ mod tests {
         udc.add(-5, &[KeyValue::new("mykey1", "myvalue1")]);
         udc.add(-3, &[KeyValue::new("mykey1", "myvalueA")]);
 
-        let perf_thread = std::thread::spawn(move || {
-            test_utils::run_perf_and_decode(5, "user_events:otlp_metrics")
+        let decoded = test_utils::collect_otlp_metrics(|| {
+            provider
+                .shutdown()
+                .expect("Failed to shutdown meter provider");
         });
-        std::thread::sleep(std::time::Duration::from_millis(1000));
-        provider
-            .shutdown()
-            .expect("Failed to shutdown meter provider");
-
-        let json_content = perf_thread
-            .join()
-            .expect("Perf thread panicked")
-            .expect("perf-decode failed");
-        let decoded = test_utils::extract_and_decode_otlp_metrics(json_content.trim())
-            .expect("Failed to decode OTLP metrics");
 
         assert_eq!(decoded.len(), 2, "Expected one event per attribute set");
 
@@ -715,20 +588,11 @@ mod tests {
         hist.record(5.0, &attrs);
         hist.record(10.0, &attrs);
 
-        let perf_thread = std::thread::spawn(move || {
-            test_utils::run_perf_and_decode(5, "user_events:otlp_metrics")
+        let decoded = test_utils::collect_otlp_metrics(|| {
+            provider
+                .shutdown()
+                .expect("Failed to shutdown meter provider");
         });
-        std::thread::sleep(std::time::Duration::from_millis(1000));
-        provider
-            .shutdown()
-            .expect("Failed to shutdown meter provider");
-
-        let json_content = perf_thread
-            .join()
-            .expect("Perf thread panicked")
-            .expect("perf-decode failed");
-        let decoded = test_utils::extract_and_decode_otlp_metrics(json_content.trim())
-            .expect("Failed to decode OTLP metrics");
 
         assert_eq!(
             decoded.len(),

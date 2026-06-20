@@ -138,12 +138,15 @@ pub use logs::ProcessorBuilder;
 #[cfg(feature = "experimental_eventname_callback")]
 pub use logs::EventNameCallback;
 
-#[cfg(test)]
+#[cfg(all(test, target_os = "linux"))]
 mod tests {
 
     #[cfg(feature = "experimental_eventname_callback")]
     use crate::EventNameCallback;
     use crate::Processor;
+    use one_collect::perf_event::{RingBufBuilder, RingBufSessionBuilder};
+    use one_collect::tracefs::TraceFS;
+    use one_collect::Writable;
     use opentelemetry::trace::Tracer;
     use opentelemetry::trace::{TraceContextExt, TracerProvider};
     use opentelemetry::{Key, KeyValue};
@@ -154,11 +157,14 @@ mod tests {
         trace::{Sampler, SdkTracerProvider},
     };
     use serde_json::{from_str, Value};
-    use std::process::Command;
+    use std::time::Duration;
+    use tracepoint_decode::{EventHeaderEnumeratorContext, PerfConvertOptions};
     use tracing::error;
     use tracing_subscriber::{layer::SubscriberExt, EnvFilter, Layer};
 
-    // This test requires a Linux kernel with user_events support, perf, and perf-decode.
+    // This test requires a Linux kernel with user_events support. Events are
+    // captured and decoded in-process via `one_collect` + `tracepoint_decode`,
+    // so no external `perf`/`perf-decode` tooling is needed.
     // It is run in CI via the user-events-integration-test job.
     // To run locally: sudo -E ~/.cargo/bin/cargo test integration_test_basic -- --nocapture --ignored
 
@@ -204,7 +210,7 @@ mod tests {
 
         // Start perf recording in a separate thread and emit logs in parallel.
         let perf_thread =
-            std::thread::spawn(|| run_perf_and_decode(5, "user_events:myprovider_L2K1"));
+            std::thread::spawn(|| capture_and_decode_events(5, "user_events:myprovider_L2K1"));
 
         // Give a little time for perf to start recording
         std::thread::sleep(std::time::Duration::from_millis(1000));
@@ -395,7 +401,7 @@ mod tests {
 
         // Start perf recording in a separate thread and emit logs in parallel.
         let perf_thread =
-            std::thread::spawn(|| run_perf_and_decode(5, "user_events:myprovider_L2K1"));
+            std::thread::spawn(|| capture_and_decode_events(5, "user_events:myprovider_L2K1"));
 
         // Give a little time for perf to start recording
         std::thread::sleep(std::time::Duration::from_millis(1000));
@@ -529,7 +535,7 @@ mod tests {
 
         // Start perf recording in a separate thread and emit logs in parallel.
         let perf_thread =
-            std::thread::spawn(|| run_perf_and_decode(5, "user_events:myprovider_L2K1"));
+            std::thread::spawn(|| capture_and_decode_events(5, "user_events:myprovider_L2K1"));
 
         // Give a little time for perf to start recording
         std::thread::sleep(std::time::Duration::from_millis(1000));
@@ -704,7 +710,7 @@ mod tests {
         // Start perf recording in a separate thread and emit logs in parallel.
         let trace_point_clone = trace_point.to_string();
         let perf_thread =
-            std::thread::spawn(move || run_perf_and_decode(5, trace_point_clone.as_ref()));
+            std::thread::spawn(move || capture_and_decode_events(5, trace_point_clone.as_ref()));
 
         // Give a little time for perf to start recording
         std::thread::sleep(std::time::Duration::from_millis(1000));
@@ -827,8 +833,9 @@ mod tests {
         record.set_body("minimal message".into());
         // No event_name, no event_id, no attributes
 
-        let perf_thread =
-            std::thread::spawn(|| run_perf_and_decode(5, "user_events:myprovider_noresource_L3K1"));
+        let perf_thread = std::thread::spawn(|| {
+            capture_and_decode_events(5, "user_events:myprovider_noresource_L3K1")
+        });
 
         std::thread::sleep(std::time::Duration::from_millis(1000));
 
@@ -895,89 +902,157 @@ mod tests {
     }
 
     fn check_user_events_available() -> Result<String, String> {
-        let output = Command::new("sudo")
-            .arg("cat")
-            .arg("/sys/kernel/tracing/user_events_status")
-            .output()
-            .map_err(|e| format!("Failed to execute command: {e}"))?;
-
-        if output.status.success() {
-            let status = String::from_utf8_lossy(&output.stdout);
-            Ok(status.to_string())
-        } else {
-            Err(format!(
-                "Command executed with failing error code: {}",
-                String::from_utf8_lossy(&output.stderr)
-            ))
-        }
+        // Read the list of currently-registered user_events tracepoints directly
+        // from tracefs (`<tracefs>/user_events_status`) instead of shelling out
+        // to `sudo cat`. The test process already runs elevated, so it can read
+        // the status file directly.
+        let tracefs = TraceFS::open().map_err(|e| {
+            format!(
+                "Unable to open tracefs. user_events requires a Linux kernel with \
+                 tracefs mounted and sufficient permissions \
+                 (https://docs.kernel.org/trace/user_events.html): {e}"
+            )
+        })?;
+        let status_path = tracefs
+            .user_events_path()
+            .with_file_name("user_events_status");
+        std::fs::read_to_string(&status_path)
+            .map_err(|e| format!("Failed to read {}: {e}", status_path.display()))
     }
 
-    pub fn run_perf_and_decode(duration_secs: u64, event: &str) -> std::io::Result<String> {
-        // Run perf record for duration_secs seconds
-        let perf_status = Command::new("sudo")
-            .args([
-                "timeout",
-                "-s",
-                "SIGINT",
-                &duration_secs.to_string(),
-                "perf",
-                "record",
-                "-o",
-                "./perf.data",
-                "-e",
-                event,
-            ])
-            .status()?;
+    /// Captures EventHeader events from the given user_events tracepoint in-process
+    /// using `one_collect` for the perf ring buffer session and `tracepoint_decode`
+    /// for EventHeader decoding, then returns the decoded events as a JSON string
+    /// in the same `{ "./perf.data": [ {event}, ... ] }` shape the old
+    /// `perf-decode` pipeline produced, so the test assertions are unchanged.
+    ///
+    /// Returns an error if any captured record fails to decode, so decode
+    /// failures surface as a test failure rather than being silently dropped.
+    ///
+    /// `event` is the full tracepoint spec, e.g. "user_events:myprovider_L2K1".
+    /// Capture runs for `duration_secs`; the caller emits events on another thread
+    /// during this window, mirroring the old `perf record` duration.
+    ///
+    /// This replaces the previous `perf record` + `perf-decode` external-tool
+    /// pipeline with a self-contained, in-process consumer (no external tools, no
+    /// temp files, no `sudo` shell-outs).
+    fn capture_and_decode_events(duration_secs: u64, event: &str) -> std::io::Result<String> {
+        let need_permission = "Need permission to access tracefs/perf_events (run via sudo?)";
 
-        if !perf_status.success() {
-            // Check if it's the expected signal termination (SIGINT from timeout)
-            // timeout sends SIGINT, which will cause a non-zero exit code (130 typically)
-            if !matches!(perf_status.code(), Some(124) | Some(130) | Some(143)) {
-                panic!(
-                    "perf record failed with exit code: {:?}",
-                    perf_status.code()
-                );
+        // Strip the "user_events:" system prefix to get the tracepoint name,
+        // e.g. "user_events:myprovider_L2K1" -> "myprovider_L2K1".
+        let tracepoint = event
+            .strip_prefix("user_events:")
+            .unwrap_or(event)
+            .to_string();
+
+        let tracefs = TraceFS::open()?;
+        let mut tp_event = tracefs.find_event("user_events", &tracepoint)?;
+
+        // The EventHeader payload begins at the `eventheader_flags` field, right
+        // after the tracepoint common fields. `tracepoint_decode` wants the event
+        // data starting at that offset.
+        let flags_offset = tp_event
+            .format()
+            .get_field("eventheader_flags")
+            .map(|f| f.offset)
+            .ok_or_else(|| {
+                std::io::Error::new(
+                    std::io::ErrorKind::InvalidData,
+                    "eventheader_flags field missing from tracepoint format",
+                )
+            })?;
+
+        let tp_name = tracepoint.clone();
+        let collected = Writable::<Vec<String>>::new(Vec::new());
+        let errors = Writable::<Vec<String>>::new(Vec::new());
+        let sink = collected.clone();
+        let err_sink = errors.clone();
+        let mut ctx = EventHeaderEnumeratorContext::new();
+
+        tp_event.add_callback(move |data| {
+            let full = data.event_data();
+            if full.len() <= flags_offset {
+                return Ok(());
             }
+            let payload = &full[flags_offset..];
+
+            // Capture decode failures (rather than silently dropping the event)
+            // so the helper can surface them and the test fails with a
+            // diagnosable error instead of a missing/empty result.
+            let mut enumerator = match ctx.enumerate_with_name_and_data(
+                &tp_name,
+                payload,
+                EventHeaderEnumeratorContext::MOVE_NEXT_LIMIT_DEFAULT,
+            ) {
+                Ok(enumerator) => enumerator,
+                Err(e) => {
+                    err_sink.write(|errs| {
+                        errs.push(format!("failed to start EventHeader decode: {e}"))
+                    });
+                    return Ok(());
+                }
+            };
+
+            // Event identity, e.g. "myprovider:Log".
+            let identity = enumerator.event_info().identity_display().to_string();
+
+            // From the initial BeforeFirstItem state, this appends every
+            // top-level field as a comma-separated list of `"Name": value`
+            // pairs, with PartA/PartB/PartC rendered as nested JSON objects.
+            let mut body = String::new();
+            match enumerator.write_json_item_and_move_next_sibling(
+                &mut body,
+                false,
+                PerfConvertOptions::Default,
+            ) {
+                Ok(_) => sink.write(|out| out.push(format!("{{\"n\":\"{identity}\",{body}}}"))),
+                Err(e) => err_sink.write(|errs| {
+                    errs.push(format!("failed to write JSON for event {identity}: {e}"))
+                }),
+            }
+            Ok(())
+        });
+
+        let mut session = RingBufSessionBuilder::new()
+            .with_page_count(32)
+            .with_tracepoint_events(RingBufBuilder::for_tracepoint())
+            .with_target_pid(std::process::id() as i32)
+            .build()
+            .expect(need_permission);
+
+        session
+            .add_event(tp_event)
+            .expect("Failed to add tracepoint event to session");
+        session.enable().expect(need_permission);
+
+        // Capture for the requested window. The caller emits events on another
+        // thread during this time; `parse_for_duration` keeps draining the ring
+        // buffer until the duration elapses, so mid-window writes are captured.
+        session
+            .parse_for_duration(Duration::from_secs(duration_secs))
+            .expect("Failed to parse perf ring buffer");
+        session.disable().expect(need_permission);
+
+        // Surface any decode failures instead of silently dropping them, so a
+        // malformed event makes the test fail with a diagnosable error rather
+        // than a missing/short result.
+        let mut decode_errors = Vec::new();
+        errors.read(|v| decode_errors = v.clone());
+        if !decode_errors.is_empty() {
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::InvalidData,
+                format!(
+                    "Failed to decode {} user_events record(s): {}",
+                    decode_errors.len(),
+                    decode_errors.join("; ")
+                ),
+            ));
         }
 
-        // Change permissions on perf.data (which is the default file perf records to) to allow reading
-        let chmod_status = Command::new("sudo")
-            .args(["chmod", "uog+r", "./perf.data"])
-            .status()?;
+        let mut events = Vec::new();
+        collected.read(|v| events = v.clone());
 
-        if !chmod_status.success() {
-            panic!("chmod failed with exit code: {:?}", chmod_status.code());
-        }
-
-        // Decode the performance data and return it directly
-        // Note: This tool must be installed on the machine
-        // git clone https://github.com/microsoft/LinuxTracepoints &&
-        // cd LinuxTracepoints && mkdir build && cd build && cmake .. && make &&
-        // sudo cp bin/perf-decode /usr/local/bin &&
-        let decode_output = Command::new("perf-decode").args(["./perf.data"]).output()?;
-
-        if !decode_output.status.success() {
-            panic!(
-                "perf-decode failed with exit code: {:?}",
-                decode_output.status.code()
-            );
-        }
-
-        // Convert the output to a String
-        let raw_output = String::from_utf8_lossy(&decode_output.stdout).to_string();
-
-        // Remove any Byte Order Mark (BOM) characters
-        // UTF-8 BOM is EF BB BF (in hex)
-        let cleaned_output = if let Some(stripped) = raw_output.strip_prefix('\u{FEFF}') {
-            // Skip the BOM character
-            stripped.to_string()
-        } else {
-            raw_output
-        };
-
-        // Trim the output to remove any leading/trailing whitespace
-        let trimmed_output = cleaned_output.trim().to_string();
-
-        Ok(trimmed_output)
+        Ok(format!("{{\"./perf.data\":[{}]}}", events.join(",")))
     }
 }

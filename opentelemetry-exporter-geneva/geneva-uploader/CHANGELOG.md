@@ -1,5 +1,16 @@
 # Changelog
 
+## [Unreleased]
+
+### Added
+- New `tls-rustls` feature flag enables a pure-Rust TLS backend (rustls + p12-keystore) as an alternative to the default `tls-native` (native-tls / OpenSSL) backend. The two flags are additive (so `--all-features` builds compile cleanly); if both are enabled simultaneously, `tls-rustls` takes precedence at runtime. No built-in crypto provider (e.g. ring) is compiled in; consumers **must** install a `rustls::crypto::CryptoProvider` (e.g. `rustls-symcrypt`) at process start. The uploader returns a clear error if no provider is found.
+
+### Changed
+- Bump pinned `otel-arrow` rev for `otap-df-pdata` and `otap-df-pdata-views`
+  to `4f522d2e` so consumers can unify on a single `otap-df-pdata-views`
+  version and avoid duplicate `LogsDataView` trait errors. API-compatible;
+  the view trait signatures are unchanged.
+
 ## [0.5.0] - 2026-04-13
 
 ### Changed
