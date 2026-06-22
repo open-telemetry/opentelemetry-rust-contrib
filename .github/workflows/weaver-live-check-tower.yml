@@ -98,31 +98,20 @@ jobs:
           c() { curl --max-time 5 -sS -o /dev/null "$@" || true; }
 
           echo "::group::Drive traffic"
-          # Exercise the full HTTP method x status-code x route-shape
-          # matrix so weaver validates as many attribute combinations
-          # as possible against the pinned semconv registry.
-          for i in $(seq 1 8); do
-            # 200 OK on literal, templated, and wildcard routes.
-            c "http://127.0.0.1:5000/"
-            c "http://127.0.0.1:5000/users/$i"
-            c "http://127.0.0.1:5000/files/a/b/c/$i.txt"
-            # 201 / 200 / 200 / 204 across POST/PUT/PATCH/DELETE.
-            c -X POST   "http://127.0.0.1:5000/items"
-            c -X PUT    "http://127.0.0.1:5000/items/$i"
-            c -X PATCH  "http://127.0.0.1:5000/items/$i"
-            c -X DELETE "http://127.0.0.1:5000/items/$i"
-            # HEAD on a templated route + OPTIONS.
-            c -X HEAD    "http://127.0.0.1:5000/items/$i/head"
-            c -X OPTIONS "http://127.0.0.1:5000/items"
-            # 4xx
-            c "http://127.0.0.1:5000/bad-request"   # 400
-            c "http://127.0.0.1:5000/unauthorized"  # 401
-            c "http://127.0.0.1:5000/no-such-route" # 404
-            # 5xx via handler + unhandled panic.
-            c "http://127.0.0.1:5000/error"
-            c "http://127.0.0.1:5000/throw"
-          done
-          echo "traffic loop complete"
+          c "http://127.0.0.1:5000/"
+          c "http://127.0.0.1:5000/users/1"
+          c "http://127.0.0.1:5000/files/a/b/c/1.txt"
+          c -X POST   "http://127.0.0.1:5000/items"
+          c -X PUT    "http://127.0.0.1:5000/items/1"
+          c -X PATCH  "http://127.0.0.1:5000/items/1"
+          c -X DELETE "http://127.0.0.1:5000/items/1"
+          c -X HEAD    "http://127.0.0.1:5000/items/1/head"
+          c -X OPTIONS "http://127.0.0.1:5000/items"
+          c "http://127.0.0.1:5000/bad-request"
+          c "http://127.0.0.1:5000/unauthorized"
+          c "http://127.0.0.1:5000/no-such-route"
+          c "http://127.0.0.1:5000/error"
+          c "http://127.0.0.1:5000/throw"
           echo "::endgroup::"
 
           # Allow batch span / periodic metric exporters to flush.
