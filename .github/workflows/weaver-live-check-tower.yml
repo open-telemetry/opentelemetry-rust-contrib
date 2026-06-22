@@ -56,6 +56,10 @@ jobs:
             target
           key: weaver-live-check-${{ runner.os }}-${{ hashFiles('**/Cargo.lock') }}
 
+      - name: Build live-check-app example
+        working-directory: opentelemetry-instrumentation-tower/examples/live-check-app
+        run: cargo build --release
+
       - name: Setup weaver
         uses: open-telemetry/weaver/.github/actions/setup-weaver@v0.24.0
         with:
@@ -66,10 +70,6 @@ jobs:
         uses: open-telemetry/weaver/.github/actions/weaver-live-check-start@v0.24.0
         with:
           registry: ${{ env.SEMCONV_REGISTRY }}
-
-      - name: Build live-check-app example
-        working-directory: opentelemetry-instrumentation-tower/examples/live-check-app
-        run: cargo build --release
 
       - name: Run example + drive traffic
         working-directory: opentelemetry-instrumentation-tower
