@@ -130,7 +130,6 @@ jobs:
 
           kill "$APP_PID" 2>/dev/null || true
 
-      # ---- Reusable action: stop, summarize, gate ---------------
       - name: Stop weaver live-check
         if: always()
         uses: open-telemetry/weaver/.github/actions/weaver-live-check-stop@v0.24.0

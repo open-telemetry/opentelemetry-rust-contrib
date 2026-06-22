@@ -81,8 +81,7 @@ async fn server_error() -> impl IntoResponse {
     (StatusCode::INTERNAL_SERVER_ERROR, "intentional")
 }
 
-// Unhandled-panic path: validates that 5xx surfaces correctly when the
-// handler panics.
+// Intentional panic; CatchPanicLayer converts it to a 500 response.
 async fn panic_path() -> StatusCode {
     panic!("intentional panic for live-check coverage")
 }
@@ -94,7 +93,6 @@ async fn item_head(Path(_id): Path<u32>) -> StatusCode {
 
 #[tokio::main(flavor = "multi_thread", worker_threads = 2)]
 async fn main() {
-    // --- OTel SDK setup ---------------------------------------------------
     let metric_exporter = MetricExporter::builder().with_tonic().build().unwrap();
     let reader = PeriodicReader::builder(metric_exporter).build();
     let meter_provider = SdkMeterProvider::builder()
@@ -110,7 +108,6 @@ async fn main() {
         .build();
     global::set_tracer_provider(tracer_provider);
 
-    // --- Routes -----------------------------------------------------------
     // The matrix exercised below:
     //   methods:      GET, POST, PUT, PATCH, DELETE, HEAD, OPTIONS
     //   status codes: 200, 201, 204, 400, 401, 404, 500
