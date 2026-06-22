@@ -71,6 +71,10 @@ jobs:
         with:
           registry: ${{ env.SEMCONV_REGISTRY }}
 
+      # TODO: Consider defining a standard set of HTTP endpoints and their
+      # expected behaviour so that weaver (or a shared test harness) can drive
+      # traffic itself — each repo would just stand up a conformant app.
+      # Similar in spirit to how the W3C TraceContext test suite works.
       - name: Run example + drive traffic
         working-directory: opentelemetry-instrumentation-tower
         env:
