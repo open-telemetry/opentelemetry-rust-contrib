@@ -17,7 +17,7 @@ tower-http = { version = "0.6", features = ["catch-panic"], default-features = f
 opentelemetry = { workspace = true }
 opentelemetry_sdk = { workspace = true, default-features = false }
 opentelemetry-otlp = { workspace = true, features = ["grpc-tonic", "metrics", "trace"] }
-tokio = { version = "1", features = ["rt-multi-thread", "macros"], default-features = false }
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "signal"], default-features = false }
 
 [lints]
 workspace = true

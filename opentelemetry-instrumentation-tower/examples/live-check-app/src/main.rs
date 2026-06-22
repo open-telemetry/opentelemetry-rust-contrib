@@ -91,6 +91,27 @@ async fn item_head(Path(_id): Path<u32>) -> StatusCode {
     StatusCode::OK
 }
 
+async fn shutdown_signal() {
+    use tokio::signal;
+    let ctrl_c = async {
+        signal::ctrl_c().await.expect("ctrl-c handler");
+    };
+    #[cfg(unix)]
+    let terminate = async {
+        signal::unix::signal(signal::unix::SignalKind::terminate())
+            .expect("SIGTERM handler")
+            .recv()
+            .await;
+    };
+    #[cfg(unix)]
+    tokio::select! {
+        _ = ctrl_c => {},
+        _ = terminate => {},
+    }
+    #[cfg(not(unix))]
+    ctrl_c.await;
+}
+
 #[tokio::main(flavor = "multi_thread", worker_threads = 2)]
 async fn main() {
     let metric_exporter = MetricExporter::builder().with_tonic().build().unwrap();
@@ -99,14 +120,14 @@ async fn main() {
         .with_reader(reader)
         .with_resource(get_resource())
         .build();
-    global::set_meter_provider(meter_provider);
+    global::set_meter_provider(meter_provider.clone());
 
     let span_exporter = SpanExporter::builder().with_tonic().build().unwrap();
     let tracer_provider = SdkTracerProvider::builder()
         .with_batch_exporter(span_exporter)
         .with_resource(get_resource())
         .build();
-    global::set_tracer_provider(tracer_provider);
+    global::set_tracer_provider(tracer_provider.clone());
 
     // The matrix exercised below:
     //   methods:      GET, POST, PUT, PATCH, DELETE, HEAD, OPTIONS
@@ -140,7 +161,11 @@ async fn main() {
     let listener = tokio::net::TcpListener::bind("0.0.0.0:5000")
         .await
         .expect("bind 0.0.0.0:5000");
-    if let Err(err) = axum::serve(listener, app).await {
-        eprintln!("server error: {err}");
-    }
+    axum::serve(listener, app)
+        .with_graceful_shutdown(shutdown_signal())
+        .await
+        .expect("server error");
+
+    let _ = meter_provider.shutdown();
+    let _ = tracer_provider.shutdown();
 }

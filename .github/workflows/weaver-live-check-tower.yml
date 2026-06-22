@@ -114,10 +114,7 @@ jobs:
           c "http://127.0.0.1:5000/throw"
           echo "::endgroup::"
 
-          # Allow batch span / periodic metric exporters to flush.
-          sleep 6
-
-          kill "$APP_PID" 2>/dev/null || true
+          kill "$APP_PID" && wait "$APP_PID" || true
 
       - name: Stop weaver live-check
         if: always()
