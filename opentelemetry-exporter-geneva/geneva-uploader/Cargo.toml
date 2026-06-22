@@ -11,7 +11,7 @@ license = "Apache-2.0"
 
 [dependencies]
 otap-df-pdata-views = { git = "https://github.com/open-telemetry/otel-arrow", rev = "4f522d2e" }
-opentelemetry-proto = { version = "0.31", default-features = false, features = ["logs", "trace", "gen-tonic-messages"] }
+opentelemetry-proto = { version = "0.32", default-features = false, features = ["logs", "trace", "gen-tonic-messages"] }
 base64 = "0.22"
 serde = { version = "1.0", features = ["derive"] }
 serde_json = { version = "1.0", features = ["raw_value"] }
@@ -83,6 +83,11 @@ num_cpus = "1.16"
 lz4_flex = { version = "0.11" }
 criterion = {version = "0.8"}
 rand = {version = "0.9"}
+
+[[test]]
+name = "geneva_test_server_integration"
+path = "tests/geneva_test_server_integration.rs"
+required-features = ["mock_auth"]
 
 [lints]
 workspace = true
