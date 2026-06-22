@@ -3,11 +3,6 @@ name: Weaver Live Check (tower)
 # Validates that telemetry emitted by the tower instrumentation's
 # live-check-app example complies with the published OpenTelemetry
 # semantic conventions. Initial seed for issue #530.
-#
-# This workflow uses the reusable `weaver-live-check-start` /
-# `weaver-live-check-stop` composite actions; the workflow itself
-# only contains the project-specific glue (build the example, drive
-# traffic, stop the app).
 
 env:
   CI: true
