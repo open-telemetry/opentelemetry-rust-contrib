@@ -78,6 +78,7 @@ async fn uploader_batch_is_accepted_and_decoded_by_test_server() {
 fn string_attr(key: &str, value: &str) -> KeyValue {
     KeyValue {
         key: key.to_string(),
+        key_strindex: 0,
         value: Some(AnyValue {
             value: Some(Value::StringValue(value.to_string())),
         }),
@@ -87,6 +88,7 @@ fn string_attr(key: &str, value: &str) -> KeyValue {
 fn int_attr(key: &str, value: i64) -> KeyValue {
     KeyValue {
         key: key.to_string(),
+        key_strindex: 0,
         value: Some(AnyValue {
             value: Some(Value::IntValue(value)),
         }),

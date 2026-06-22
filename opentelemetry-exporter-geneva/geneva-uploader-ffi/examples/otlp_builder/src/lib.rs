@@ -57,6 +57,7 @@ unsafe extern "C" fn geneva_build_otlp_logs_minimal(
         };
         resource_attrs.push(KeyValue {
             key,
+            key_strindex: 0,
             value: Some(AnyValue {
                 value: Some(AnyValueValue::StringValue(val)),
             }),
@@ -154,6 +155,7 @@ unsafe extern "C" fn geneva_build_otlp_spans_minimal(
         };
         resource_attrs.push(KeyValue {
             key,
+            key_strindex: 0,
             value: Some(AnyValue {
                 value: Some(AnyValueValue::StringValue(val)),
             }),

@@ -51,7 +51,7 @@ impl fmt::Debug for GenevaExporter {
 
 impl opentelemetry_sdk::logs::LogExporter for GenevaExporter {
     async fn export(&self, batch: LogBatch<'_>) -> OTelSdkResult {
-        let otlp = group_logs_by_resource_and_scope(batch, &self.resource);
+        let otlp = group_logs_by_resource_and_scope(&batch, &self.resource);
 
         // Encode and compress logs into batches
         let view = ProtoLogsView(&otlp);
@@ -297,6 +297,7 @@ impl<'a> AnyValueView<'a> for ProtoAVView<'a> {
             Some(ProtoVal::ArrayValue(_)) => ValueType::Empty, // not iterable through this view
             Some(ProtoVal::KvlistValue(_)) => ValueType::Empty, // not iterable through this view
             Some(ProtoVal::BytesValue(_)) => ValueType::Bytes,
+            Some(ProtoVal::StringValueStrindex(_)) => ValueType::Empty,
             None => ValueType::Empty,
         }
     }

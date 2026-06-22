@@ -1268,6 +1268,7 @@ mod tests {
         // Add some attributes
         log.attributes.push(KeyValue {
             key: "user_id".to_string(),
+            key_strindex: 0,
             value: Some(AnyValue {
                 value: Some(Value::StringValue("user123".to_string())),
             }),
@@ -1275,6 +1276,7 @@ mod tests {
 
         log.attributes.push(KeyValue {
             key: "request_count".to_string(),
+            key_strindex: 0,
             value: Some(AnyValue {
                 value: Some(Value::IntValue(42)),
             }),
@@ -1320,6 +1322,7 @@ mod tests {
         };
         log3.attributes.push(KeyValue {
             key: "user_id".to_string(),
+            key_strindex: 0,
             value: Some(AnyValue {
                 value: Some(Value::StringValue("user123".to_string())),
             }),
@@ -1423,12 +1426,14 @@ mod tests {
         };
         log.attributes.push(KeyValue {
             key: "user".to_string(),
+            key_strindex: 0,
             value: Some(AnyValue {
                 value: Some(Value::StringValue("alice".to_string())),
             }),
         });
         log.attributes.push(KeyValue {
             key: "attempt".to_string(),
+            key_strindex: 0,
             value: Some(AnyValue {
                 value: Some(Value::IntValue(2)),
             }),
@@ -1585,12 +1590,14 @@ mod tests {
         let mut dup_log = base_log.clone();
         dup_log.attributes.push(KeyValue {
             key: "dup".to_string(),
+            key_strindex: 0,
             value: Some(AnyValue {
                 value: Some(Value::IntValue(1)),
             }),
         });
         dup_log.attributes.push(KeyValue {
             key: "dup".to_string(),
+            key_strindex: 0,
             value: Some(AnyValue {
                 value: Some(Value::IntValue(2)),
             }),
@@ -1652,6 +1659,7 @@ mod tests {
         };
         log3.attributes.push(KeyValue {
             key: "user_id".to_string(),
+            key_strindex: 0,
             value: Some(AnyValue {
                 value: Some(Value::StringValue("user123".to_string())),
             }),
@@ -1752,6 +1760,7 @@ mod tests {
         };
         log4.attributes.push(KeyValue {
             key: "error_code".to_string(),
+            key_strindex: 0,
             value: Some(AnyValue {
                 value: Some(Value::IntValue(404)),
             }),
@@ -1805,6 +1814,7 @@ mod tests {
 
         span.attributes.push(KeyValue {
             key: "http.method".to_string(),
+            key_strindex: 0,
             value: Some(AnyValue {
                 value: Some(Value::StringValue("GET".to_string())),
             }),
@@ -1812,6 +1822,7 @@ mod tests {
 
         span.attributes.push(KeyValue {
             key: "http.status_code".to_string(),
+            key_strindex: 0,
             value: Some(AnyValue {
                 value: Some(Value::IntValue(200)),
             }),
