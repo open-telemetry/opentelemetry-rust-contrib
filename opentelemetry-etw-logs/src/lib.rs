@@ -104,6 +104,10 @@ mod integration_tests {
     // producing a flat HashMap keyed by those dotted paths.
     // -----------------------------------------------------------------------
 
+    /// Extra delay given to `parse_until` to call `StartTrace` + `EnableTraceEx2`
+    /// in the kernel after the worker thread signals that it is about to invoke it.
+    const ETW_SESSION_START_DELAY: Duration = Duration::from_millis(200);
+
     /// Captured event with all properties parsed into named fields.
     struct CapturedEvent {
         event_name: String,
@@ -210,6 +214,14 @@ mod integration_tests {
     }
 
     /// Start a one_collect ETW capture session for the given provider name.
+    ///
+    /// This function blocks until the worker thread has signalled that it is
+    /// about to call `parse_until`, then waits an additional 200 ms to give
+    /// `parse_until` time to call `StartTrace` / `EnableTraceEx2` in the
+    /// kernel.  Without this synchronisation the first integration test
+    /// (cold-start) races with the ETW session setup: events emitted by the
+    /// exporter arrive before the session is subscribed and are silently
+    /// discarded, causing a 10-second timeout.
     fn start_etw_trace(provider_name: &str) -> (EtwTrace, mpsc::Receiver<CapturedEvent>) {
         // TraceLogging derives the provider GUID from the provider name; mirror
         // that here so we subscribe to the same GUID the exporter registers.
@@ -219,6 +231,10 @@ mod integration_tests {
         let stop = Arc::new(AtomicBool::new(false));
         let stop_worker = stop.clone();
         let session_name = format!("{provider_name}_session");
+
+        // One-shot channel: the worker sends () just before calling
+        // `parse_until` so the main thread can wait for it.
+        let (session_ready_tx, session_ready_rx) = mpsc::sync_channel::<()>(1);
 
         let worker = thread::spawn(move || {
             let mut session = EtwSession::new();
@@ -254,8 +270,19 @@ mod integration_tests {
 
             session.add_event(event, None);
 
+            // Signal the main thread that all setup is done and we are about
+            // to start the ETW session.
+            let _ = session_ready_tx.send(());
+
             let _ = session.parse_until(&session_name, move || stop_worker.load(Ordering::Relaxed));
         });
+
+        // Wait for the worker to finish setup, then give `parse_until` time
+        // to call StartTrace + EnableTraceEx2 in the kernel before returning.
+        session_ready_rx
+            .recv_timeout(Duration::from_secs(5))
+            .expect("ETW worker thread failed to signal readiness within 5 seconds");
+        std::thread::sleep(ETW_SESSION_START_DELAY);
 
         (
             EtwTrace {
