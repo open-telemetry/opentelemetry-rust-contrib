@@ -104,9 +104,12 @@ mod integration_tests {
     // producing a flat HashMap keyed by those dotted paths.
     // -----------------------------------------------------------------------
 
-    /// Extra delay given to `parse_until` to call `StartTrace` + `EnableTraceEx2`
-    /// in the kernel after the worker thread signals that it is about to invoke it.
-    const ETW_SESSION_START_DELAY: Duration = Duration::from_millis(200);
+    /// Delay after the worker signals readiness to give `parse_until` time to call
+    /// `StartTrace` + `EnableTraceEx2` in the kernel.  The channel signal only means
+    /// the worker is *about to* call `parse_until` — the actual kernel setup still
+    /// takes an indeterminate amount of time, so we sleep here to cover cold-start
+    /// overhead on CI runners where that can be several hundred milliseconds.
+    const ETW_SESSION_START_DELAY: Duration = Duration::from_millis(1000);
 
     /// Captured event with all properties parsed into named fields.
     struct CapturedEvent {
@@ -216,12 +219,12 @@ mod integration_tests {
     /// Start a one_collect ETW capture session for the given provider name.
     ///
     /// This function blocks until the worker thread has signalled that it is
-    /// about to call `parse_until`, then waits an additional 200 ms to give
-    /// `parse_until` time to call `StartTrace` / `EnableTraceEx2` in the
-    /// kernel.  Without this synchronisation the first integration test
-    /// (cold-start) races with the ETW session setup: events emitted by the
-    /// exporter arrive before the session is subscribed and are silently
-    /// discarded, causing a 10-second timeout.
+    /// **about to** call `parse_until`, then sleeps `ETW_SESSION_START_DELAY`
+    /// (1 s) to give `parse_until` time to call `StartTrace` / `EnableTraceEx2`
+    /// in the kernel.  The channel signal alone does *not* mean the ETW session
+    /// is ready — events emitted before `parse_until` finishes kernel setup are
+    /// silently dropped.  Without this synchronisation the first integration
+    /// test (cold-start) races with the ETW session setup and times out.
     fn start_etw_trace(provider_name: &str) -> (EtwTrace, mpsc::Receiver<CapturedEvent>) {
         // TraceLogging derives the provider GUID from the provider name; mirror
         // that here so we subscribe to the same GUID the exporter registers.
@@ -270,15 +273,20 @@ mod integration_tests {
 
             session.add_event(event, None);
 
-            // Signal the main thread that all setup is done and we are about
-            // to start the ETW session.
+            // Signal the main thread that one_collect event setup is complete
+            // and we are *about to* call parse_until (which will call
+            // StartTrace / EnableTraceEx2 in the kernel).  The main thread
+            // will sleep after receiving this signal to give the kernel time
+            // to complete session setup.
             let _ = session_ready_tx.send(());
 
             let _ = session.parse_until(&session_name, move || stop_worker.load(Ordering::Relaxed));
         });
 
-        // Wait for the worker to finish setup, then give `parse_until` time
-        // to call StartTrace + EnableTraceEx2 in the kernel before returning.
+        // The channel signal means the worker is about to call parse_until —
+        // not that the ETW session is fully active.  Sleep ETW_SESSION_START_DELAY
+        // to give parse_until time to call StartTrace + EnableTraceEx2 in the
+        // kernel before we return and the caller starts emitting events.
         session_ready_rx
             .recv_timeout(Duration::from_secs(5))
             .expect("ETW worker thread failed to signal readiness within 5 seconds");
