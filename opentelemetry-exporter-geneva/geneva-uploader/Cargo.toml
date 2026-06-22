@@ -22,10 +22,7 @@ uuid = { version = "1.0", features = ["v4"] }
 # http2 feature is required by hyper-util even when using http1_only().
 reqwest = { version = "0.12", features = ["http2"], default-features = false }
 native-tls = { version = "0.2", optional = true }
-rustls = { version = "0.23", default-features = false, features = [
-    "std",
-    "tls12",
-], optional = true }
+rustls = { version = "0.23", default-features = false, features = ["std", "tls12"], optional = true }
 rustls-pemfile = { version = "2", optional = true }
 rustls-native-certs = { version = "0.8", optional = true }
 p12-keystore = { version = "0.2", optional = true }
@@ -34,20 +31,14 @@ chrono = "0.4"
 url = "2.2"
 md-5 = "0.11.0"
 hex = "0.4"
-lz4_flex = { version = "0.11", features = [
-    "safe-encode",
-], default-features = false }
+lz4_flex = { version = "0.11", features = ["safe-encode"], default-features = false }
 # Azure Identity dependencies - using public crates.io versions.
 # Default features are disabled so the consumer-selected TLS backend (see
 # `tls-native` / `tls-rustls` below) chooses whether to pull in `native-tls`
 # through azure_core. Otherwise azure_core 0.29's defaults include
 # `reqwest_native_tls`, which links native-tls unconditionally.
 azure_identity = { version = "0.29", default-features = false }
-azure_core = { version = "0.29", default-features = false, features = [
-    "reqwest",
-    "reqwest_gzip",
-    "reqwest_deflate",
-] }
+azure_core = { version = "0.29", default-features = false, features = ["reqwest", "reqwest_gzip", "reqwest_deflate"] }
 tracing = "0.1"
 # Pinned to >=0.3.47 to pick up the RUSTSEC-2026-0009 fix; upper bound excludes
 # 0.3.48 which introduces a trait impl that conflicts with typespec_client_core
@@ -90,14 +81,11 @@ wiremock = "0.6"
 futures = "0.3"
 num_cpus = "1.16"
 lz4_flex = { version = "0.11" }
-criterion = { version = "0.8" }
-rand = { version = "0.9" }
+criterion = {version = "0.8"}
+rand = {version = "0.9"}
 
 [lints]
 workspace = true
 
 [package.metadata.cargo-machete]
-ignored = [
-    "md-5",
-    "time",
-] # md-5 is incorrectly detected as unused; time is pinned to pull in the RUSTSEC-2026-0009 fix transitively.
+ignored = ["md-5", "time"] # md-5 is incorrectly detected as unused; time is pinned to pull in the RUSTSEC-2026-0009 fix transitively.
