@@ -201,13 +201,17 @@ impl<'a> LogRecordParts<'a> {
             .map(Cow::Borrowed)
             .unwrap_or_else(|| Cow::Borrowed(&metadata_fields.role_instance));
 
-        let mut parts = LogRecordPartsParser::new(record, role, role_instance).parse(record);
+        let mut parts = if is_common_schema_record(record) {
+            CommonSchemaParts::parse(record, role, role_instance).finish()
+        } else {
+            Self::from_canonical(record, role, role_instance)
+        };
         parts.obo_config = lookup_obo_config(obo_event_map, parts.routing_event_name.as_ref());
         parts.finish_fields();
         parts
     }
 
-    fn canonical_base<R: LogRecordView>(
+    fn from_canonical<R: LogRecordView>(
         record: &'a R,
         role: Cow<'a, str>,
         role_instance: Cow<'a, str>,
@@ -253,6 +257,16 @@ impl<'a> LogRecordParts<'a> {
             if parts.body.is_none() {
                 parts.push_dynamic_value(Cow::Borrowed(FIELD_BODY), body);
             }
+        }
+
+        for attr in record.attributes() {
+            let Ok(key) = std::str::from_utf8(attr.key()) else {
+                continue;
+            };
+            let Some(value) = attr.value() else {
+                continue;
+            };
+            parts.push_dynamic_value(Cow::Owned(key.to_owned()), &value);
         }
 
         parts
@@ -310,33 +324,6 @@ impl<'a> LogRecordParts<'a> {
             value_len,
         });
         true
-    }
-
-    fn append_dynamic_prefix_from(&mut self, source: &Self, field_count: usize) {
-        if field_count == 0 {
-            return;
-        }
-
-        let Some(byte_end) = source.dynamic_fields[..field_count]
-            .last()
-            .map(|field| field.value_start + field.value_len)
-        else {
-            return;
-        };
-
-        let value_offset = self.dynamic_values.len();
-        self.dynamic_values
-            .extend_from_slice(&source.dynamic_values[..byte_end]);
-        self.dynamic_fields
-            .extend(
-                source.dynamic_fields[..field_count]
-                    .iter()
-                    .cloned()
-                    .map(|mut field| {
-                        field.value_start += value_offset;
-                        field
-                    }),
-            );
     }
 
     fn finish_fields(&mut self) {
@@ -424,113 +411,6 @@ impl<'a> LogRecordParts<'a> {
     }
 }
 
-struct LogRecordPartsParser<'a> {
-    canonical: Option<LogRecordParts<'a>>,
-    common_schema: Option<CommonSchemaParts<'a>>,
-    role: Cow<'a, str>,
-    role_instance: Cow<'a, str>,
-    has_cs_version: bool,
-    has_cs_log_type: bool,
-}
-
-impl<'a> LogRecordPartsParser<'a> {
-    fn new<R: LogRecordView>(
-        record: &'a R,
-        role: Cow<'a, str>,
-        role_instance: Cow<'a, str>,
-    ) -> Self {
-        Self {
-            canonical: Some(LogRecordParts::canonical_base(
-                record,
-                role.clone(),
-                role_instance.clone(),
-            )),
-            common_schema: None,
-            role,
-            role_instance,
-            has_cs_version: false,
-            has_cs_log_type: false,
-        }
-    }
-
-    fn parse<R: LogRecordView>(mut self, record: &'a R) -> LogRecordParts<'a> {
-        for attr in record.attributes() {
-            let Ok(key) = std::str::from_utf8(attr.key()) else {
-                continue;
-            };
-
-            let value = attr.value();
-            if self.common_schema.is_some() || is_common_schema_key(key) {
-                self.ensure_common_schema(record);
-                if let Some(common_schema) = &mut self.common_schema {
-                    common_schema.apply_attr(key, value.as_ref());
-                }
-                self.update_common_schema_markers(key, value.as_ref());
-            }
-
-            if let Some(canonical) = &mut self.canonical {
-                if let Some(value) = value.as_ref() {
-                    canonical.push_dynamic_value(Cow::Owned(key.to_owned()), value);
-                }
-            }
-
-            if self.is_common_schema() {
-                self.confirm_common_schema();
-            }
-        }
-
-        match self.canonical {
-            Some(canonical) => canonical,
-            None => self
-                .common_schema
-                .expect("Common Schema state is retained once confirmed")
-                .finish(),
-        }
-    }
-
-    fn ensure_common_schema<R: LogRecordView>(&mut self, record: &'a R) {
-        if self.common_schema.is_some() {
-            return;
-        }
-
-        let mut common_schema =
-            CommonSchemaParts::new(record, self.role.clone(), self.role_instance.clone());
-        if let Some(canonical) = &self.canonical {
-            common_schema
-                .parts
-                .append_dynamic_prefix_from(canonical, canonical.dynamic_fields.len());
-        }
-        self.common_schema = Some(common_schema);
-    }
-
-    fn update_common_schema_markers<'value, V>(&mut self, key: &str, value: Option<&V>)
-    where
-        V: AnyValueView<'value>,
-    {
-        match key {
-            KEY_CSVER => {
-                self.has_cs_version = value
-                    .and_then(value_as_i64)
-                    .is_some_and(|value| value == CS_VERSION_4);
-            }
-            KEY_PARTB_TYPENAME => {
-                self.has_cs_log_type = value
-                    .and_then(value_as_utf8)
-                    .is_some_and(|value| value == CS_LOG_TYPENAME);
-            }
-            _ => {}
-        }
-    }
-
-    fn is_common_schema(&self) -> bool {
-        self.has_cs_version && self.has_cs_log_type
-    }
-
-    fn confirm_common_schema(&mut self) {
-        self.canonical.take();
-    }
-}
-
 struct CommonSchemaParts<'a> {
     parts: LogRecordParts<'a>,
     part_a_name: Option<Cow<'a, str>>,
@@ -548,6 +428,33 @@ impl<'a> CommonSchemaParts<'a> {
             part_a_name: None,
             part_b_name: None,
         }
+    }
+
+    fn parse<R: LogRecordView>(
+        record: &'a R,
+        role: Cow<'a, str>,
+        role_instance: Cow<'a, str>,
+    ) -> Self {
+        let mut common_schema = Self::new(record, role, role_instance);
+        let mut seen_common_schema_key = false;
+
+        for attr in record.attributes() {
+            let Ok(key) = std::str::from_utf8(attr.key()) else {
+                continue;
+            };
+            let value = attr.value();
+
+            if seen_common_schema_key || is_common_schema_key(key) {
+                seen_common_schema_key = true;
+                common_schema.apply_attr(key, value.as_ref());
+            } else if let Some(value) = value.as_ref() {
+                common_schema
+                    .parts
+                    .push_dynamic_value(Cow::Owned(key.to_owned()), value);
+            }
+        }
+
+        common_schema
     }
 
     fn apply_attr<'value, V>(&mut self, key: &str, value: Option<&V>)
@@ -622,7 +529,7 @@ impl<'a> CommonSchemaParts<'a> {
             }
             "PartB.severityNumber" => {
                 if let Some(number) = value.and_then(value_as_i64) {
-                    self.parts.severity_number = number as i32;
+                    self.parts.severity_number = i32::try_from(number).unwrap_or(0);
                 }
             }
             "PartB.severityText" => {
@@ -677,6 +584,43 @@ fn is_common_schema_key(key: &str) -> bool {
         || key.starts_with("PartA.")
         || key.starts_with("PartB.")
         || key.starts_with("PartC.")
+}
+
+fn is_common_schema_record(record: &impl LogRecordView) -> bool {
+    let mut has_cs_version = false;
+    let mut has_cs_log_type = false;
+
+    // Common Schema producers can emit PartB after PartC, so detect the shape
+    // in a first pass before choosing the canonical or Common Schema encoder.
+    for attr in record.attributes() {
+        let Ok(key) = std::str::from_utf8(attr.key()) else {
+            continue;
+        };
+
+        match key {
+            KEY_CSVER => {
+                has_cs_version = attr
+                    .value()
+                    .as_ref()
+                    .and_then(value_as_i64)
+                    .is_some_and(|value| value == CS_VERSION_4);
+            }
+            KEY_PARTB_TYPENAME => {
+                has_cs_log_type = attr
+                    .value()
+                    .as_ref()
+                    .and_then(value_as_utf8)
+                    .is_some_and(|value| value == CS_LOG_TYPENAME);
+            }
+            _ => {}
+        }
+
+        if has_cs_version && has_cs_log_type {
+            return true;
+        }
+    }
+
+    false
 }
 
 fn record_timestamp(record: &impl LogRecordView) -> u64 {
@@ -834,6 +778,7 @@ impl MetadataFields {
 /// iterators with `flat_map`.
 struct LogBatchAccumulator {
     batches: HashMap<String, BatchData>,
+    batch_key_scratch: String,
 }
 
 struct BatchData {
@@ -873,6 +818,7 @@ impl LogBatchAccumulator {
     fn new() -> Self {
         Self {
             batches: HashMap::new(),
+            batch_key_scratch: String::new(),
         }
     }
 
@@ -889,15 +835,21 @@ impl LogBatchAccumulator {
         let routing_event_name = parts.routing_event_name.as_ref();
         // Role identity is included because the central blob metadata is batch-level.
         // Mixing roles would make the per-row Role columns disagree with upload metadata.
-        let batch_key = format!(
-            "{}\0{}\0{}",
-            routing_event_name, parts.role, parts.role_instance
-        );
+        self.batch_key_scratch.clear();
+        {
+            use std::fmt::Write as _;
+            let _ = write!(
+                self.batch_key_scratch,
+                "{}\0{}\0{}",
+                routing_event_name, parts.role, parts.role_instance
+            );
+        }
+        let batch_key = self.batch_key_scratch.as_str();
 
-        if !self.batches.contains_key(&batch_key) {
+        if !self.batches.contains_key(batch_key) {
             let key: Arc<str> = Arc::from(routing_event_name);
             self.batches.insert(
-                batch_key.clone(),
+                batch_key.to_owned(),
                 BatchData {
                     routing_name: key,
                     blob_metadata: metadata_fields
@@ -913,7 +865,7 @@ impl LogBatchAccumulator {
             );
         }
 
-        let entry = self.batches.get_mut(&batch_key).unwrap();
+        let entry = self.batches.get_mut(batch_key).unwrap();
 
         if timestamp != 0 {
             entry.metadata.start_time = entry.metadata.start_time.min(timestamp);
@@ -2068,6 +2020,68 @@ mod tests {
     }
 
     #[test]
+    fn test_common_schema_user_events_order_matches_equivalent_canonical_log() {
+        let encoder = OtlpEncoder::new();
+        let metadata = make_metadata("cs-user-events-order");
+        let timestamp = parse_rfc3339_nanos("2024-06-15T06:00:00Z").unwrap();
+
+        let canonical = LogRecord {
+            time_unix_nano: timestamp,
+            event_name: "UserEventsCheckoutFailure".to_string(),
+            severity_number: 17,
+            severity_text: "ERROR".to_string(),
+            body: Some(AnyValue {
+                value: Some(Value::StringValue("failed".to_string())),
+            }),
+            trace_id: hex::decode("0102030405060708090a0b0c0d0e0f10").unwrap(),
+            span_id: hex::decode("a1b2c3d4e5f60718").unwrap(),
+            attributes: vec![
+                string_attr("operation", "checkout"),
+                int_attr("result", 127),
+                int_attr("eventId", 42),
+            ],
+            ..Default::default()
+        };
+
+        let common_schema = LogRecord {
+            observed_time_unix_nano: 1,
+            attributes: vec![
+                int_attr(KEY_CSVER, CS_VERSION_4),
+                string_attr("PartA.time", "2024-06-15T06:00:00Z"),
+                string_attr("PartA.ext_dt_traceId", "0102030405060708090a0b0c0d0e0f10"),
+                string_attr("PartA.ext_dt_spanId", "a1b2c3d4e5f60718"),
+                string_attr("PartA.ext_cloud_role", "checkout"),
+                string_attr("PartA.ext_cloud_roleInstance", "instance-1"),
+                string_attr("PartC.operation", "checkout"),
+                int_attr("PartC.result", 127),
+                string_attr(KEY_PARTB_TYPENAME, CS_LOG_TYPENAME),
+                string_attr("PartB.body", "failed"),
+                int_attr("PartB.severityNumber", 17),
+                string_attr("PartB.severityText", "ERROR"),
+                int_attr("PartB.eventId", 42),
+                string_attr("PartB.name", "UserEventsCheckoutFailure"),
+            ],
+            ..Default::default()
+        };
+
+        let canonical_encoded = encode_log_batch_with_resource_attrs(
+            &encoder,
+            std::iter::once(&canonical),
+            vec![
+                string_attr("service.name", "checkout"),
+                string_attr("service.instance.id", "instance-1"),
+            ],
+            &metadata,
+        )
+        .unwrap();
+        let common_schema_encoded =
+            encode_log_batch_via_proto(&encoder, std::iter::once(&common_schema), &metadata)
+                .unwrap();
+
+        assert_single_batch_equal(&canonical_encoded, &common_schema_encoded);
+    }
+
+    #[test]
     fn test_common_schema_role_overrides_match_resource_service_attributes() {
         let encoder = OtlpEncoder::new();
         let metadata = make_metadata("cs-role-parity");
@@ -2223,19 +2237,19 @@ mod tests {
 
         let canonical = LogRecord {
             event_name: "SeverityEvent".to_string(),
-            severity_number: 50,
             body: Some(AnyValue {
                 value: Some(Value::StringValue("body".to_string())),
             }),
             ..Default::default()
         };
+        let out_of_i32_severity = i64::from(i32::MAX) + 1;
 
         let common_schema = LogRecord {
             attributes: vec![
                 int_attr(KEY_CSVER, CS_VERSION_4),
                 string_attr(KEY_PARTB_TYPENAME, CS_LOG_TYPENAME),
                 string_attr("PartB.name", "SeverityEvent"),
-                int_attr("PartB.severityNumber", 50),
+                int_attr("PartB.severityNumber", out_of_i32_severity),
                 string_attr("PartB.body", "body"),
             ],
             ..Default::default()
