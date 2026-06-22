@@ -14,7 +14,7 @@ env:
   WEAVER_VERSION: v0.24.0
   # Pinned semantic-conventions release for reproducible runs. Bump
   # deliberately when conventions change.
-  SEMCONV_REGISTRY: 'https://github.com/open-telemetry/semantic-conventions/archive/refs/tags/v1.41.1.tar.gz[model]'
+  SEMCONV_REGISTRY: 'https://github.com/open-telemetry/semantic-conventions/archive/refs/tags/v1.36.0.tar.gz[model]'
 
 permissions:
   contents: read
