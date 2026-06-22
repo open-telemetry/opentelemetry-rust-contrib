@@ -1688,7 +1688,22 @@ mod tests {
         logs: impl IntoIterator<Item = &'a LogRecord>,
         metadata: &MetadataFields,
     ) -> Result<Vec<EncodedBatch>, String> {
-        encode_log_batch_with_resource_attrs(encoder, logs, Vec::new(), metadata)
+        encode_log_batch_via_proto_with_obo(encoder, logs, metadata, None)
+    }
+
+    fn encode_log_batch_via_proto_with_obo<'a>(
+        encoder: &OtlpEncoder,
+        logs: impl IntoIterator<Item = &'a LogRecord>,
+        metadata: &MetadataFields,
+        obo_event_map: Option<&OboEventMap>,
+    ) -> Result<Vec<EncodedBatch>, String> {
+        encode_log_batch_with_resource_attrs_and_obo(
+            encoder,
+            logs,
+            Vec::new(),
+            metadata,
+            obo_event_map,
+        )
     }
 
     fn encode_log_batch_with_resource_attrs<'a>(
@@ -1696,6 +1711,16 @@ mod tests {
         logs: impl IntoIterator<Item = &'a LogRecord>,
         resource_attrs: Vec<KeyValue>,
         metadata: &MetadataFields,
+    ) -> Result<Vec<EncodedBatch>, String> {
+        encode_log_batch_with_resource_attrs_and_obo(encoder, logs, resource_attrs, metadata, None)
+    }
+
+    fn encode_log_batch_with_resource_attrs_and_obo<'a>(
+        encoder: &OtlpEncoder,
+        logs: impl IntoIterator<Item = &'a LogRecord>,
+        resource_attrs: Vec<KeyValue>,
+        metadata: &MetadataFields,
+        obo_event_map: Option<&OboEventMap>,
     ) -> Result<Vec<EncodedBatch>, String> {
         use otap_df_pdata::views::otlp::bytes::logs::RawLogsData;
         use prost::Message as _;
@@ -1714,7 +1739,7 @@ mod tests {
             }],
         }
         .encode_to_vec();
-        encoder.encode_logs_from_view(&RawLogsData::new(&bytes), metadata, None)
+        encoder.encode_logs_from_view(&RawLogsData::new(&bytes), metadata, obo_event_map)
     }
 
     fn string_attr(key: &str, value: &str) -> KeyValue {
@@ -3119,5 +3144,434 @@ mod tests {
         assert_eq!(alpha.metadata.end_time, 3_000);
         assert_eq!(beta.metadata.start_time, 2_000);
         assert_eq!(beta.metadata.end_time, 4_000);
+    }
+
+    // ==================== OBO (On Behalf Of) Per-Event Tests ====================
+
+    fn make_obo_event_map(
+        event_name: &str,
+        identity: &str,
+        annotations: Option<&str>,
+    ) -> OboEventMap {
+        let mut map = HashMap::new();
+        map.insert(
+            event_name.to_string(),
+            OboEventConfig {
+                identity: identity.to_string(),
+                annotations: annotations.map(|s| s.to_string()),
+            },
+        );
+        map
+    }
+
+    #[test]
+    fn test_obo_lookup_matches_literal_event_name() {
+        let metadata = make_metadata("TestNamespace");
+        let obo_map = make_obo_event_map("MyEvent", "Microsoft.TestService", Some("<Config/>"));
+        let log = LogRecord {
+            observed_time_unix_nano: 1_700_000_000_000_000_000,
+            event_name: "MyEvent".to_string(),
+            severity_number: 9,
+            ..Default::default()
+        };
+        let result = encode_log_batch_via_proto_with_obo(
+            &OtlpEncoder::new(),
+            [log].iter(),
+            &metadata,
+            Some(&obo_map),
+        );
+        assert!(result.is_ok());
+    }
+
+    #[test]
+    fn test_obo_lookup_matches_anchored_event_name() {
+        let metadata = make_metadata("TestNamespace");
+        let obo_map = make_obo_event_map("^MyEvent$", "Microsoft.TestService", Some("<Config/>"));
+        let log = LogRecord {
+            observed_time_unix_nano: 1_700_000_000_000_000_000,
+            event_name: "MyEvent".to_string(),
+            severity_number: 9,
+            ..Default::default()
+        };
+        let result = encode_log_batch_via_proto_with_obo(
+            &OtlpEncoder::new(),
+            [log].iter(),
+            &metadata,
+            Some(&obo_map),
+        );
+        assert!(result.is_ok());
+    }
+
+    #[test]
+    fn test_obo_lookup_no_match_for_different_event() {
+        let metadata = make_metadata("TestNamespace");
+        let obo_map = make_obo_event_map("MyEvent", "Microsoft.TestService", None);
+        let log = LogRecord {
+            observed_time_unix_nano: 1_700_000_000_000_000_000,
+            event_name: "OtherEvent".to_string(),
+            severity_number: 9,
+            ..Default::default()
+        };
+        let result = encode_log_batch_via_proto_with_obo(
+            &OtlpEncoder::new(),
+            [log].iter(),
+            &metadata,
+            Some(&obo_map),
+        );
+        assert!(result.is_ok());
+    }
+
+    #[test]
+    fn test_obo_lookup_strips_anchored_event_name() {
+        let obo_map = make_obo_event_map("MyEvent", "Microsoft.TestService", None);
+        let config = lookup_obo_config(Some(&obo_map), "^MyEvent$");
+        assert!(config.is_some());
+    }
+
+    #[test]
+    fn test_obo_fields_in_log_schema() {
+        let metadata = make_metadata("TestNamespace");
+        let obo_map = make_obo_event_map(
+            "TestEvent",
+            "Microsoft.SomeService",
+            Some(r#"<Config onBehalfFields="resourceId" priority="Normal"/>"#),
+        );
+        let log = LogRecord {
+            observed_time_unix_nano: 1_700_000_000_000_000_000,
+            event_name: "TestEvent".to_string(),
+            severity_number: 9,
+            ..Default::default()
+        };
+        let result = encode_log_batch_via_proto_with_obo(
+            &OtlpEncoder::new(),
+            [log].iter(),
+            &metadata,
+            Some(&obo_map),
+        );
+        assert!(result.is_ok(), "OBO log batch should encode successfully");
+        let batches = result.unwrap();
+        assert_eq!(batches.len(), 1);
+        assert_eq!(batches[0].row_count, 1);
+    }
+
+    #[test]
+    fn test_obo_fields_absent_when_not_configured() {
+        let metadata = make_metadata("TestNamespace");
+        let log = LogRecord {
+            observed_time_unix_nano: 1_700_000_000_000_000_000,
+            event_name: "TestEvent".to_string(),
+            severity_number: 9,
+            ..Default::default()
+        };
+        let result = encode_log_batch_via_proto(&OtlpEncoder::new(), [log].iter(), &metadata);
+        assert!(
+            result.is_ok(),
+            "Log batch without OBO should encode successfully"
+        );
+    }
+
+    #[test]
+    fn test_obo_identity_only_no_annotations() {
+        let metadata = make_metadata("TestNamespace");
+        let obo_map = make_obo_event_map("TestEvent", "Microsoft.SomeService", None);
+        let log = LogRecord {
+            observed_time_unix_nano: 1_700_000_000_000_000_000,
+            event_name: "TestEvent".to_string(),
+            severity_number: 9,
+            ..Default::default()
+        };
+        let result = encode_log_batch_via_proto_with_obo(
+            &OtlpEncoder::new(),
+            [log].iter(),
+            &metadata,
+            Some(&obo_map),
+        );
+        assert!(
+            result.is_ok(),
+            "OBO with identity only should encode successfully"
+        );
+    }
+
+    #[test]
+    fn test_obo_fields_in_span_schema() {
+        let obo_config = OboEventConfig {
+            identity: "Microsoft.SomeService".to_string(),
+            annotations: Some(r#"<Config onBehalfFields="resourceId"/>"#.to_string()),
+        };
+        let span = Span {
+            trace_id: vec![1; 16],
+            span_id: vec![2; 8],
+            name: "test_span".to_string(),
+            kind: 1,
+            start_time_unix_nano: 1_700_000_000_000_000_000,
+            end_time_unix_nano: 1_700_000_001_000_000_000,
+            ..Default::default()
+        };
+        let fields = OtlpEncoder::determine_span_fields(&span, "Span", Some(&obo_config));
+        assert!(
+            fields
+                .iter()
+                .any(|f| f.name.as_ref() == FIELD_OBO_SERVICE_ID),
+            "Span schema should include onbehalfServiceId"
+        );
+        assert!(
+            fields
+                .iter()
+                .any(|f| f.name.as_ref() == FIELD_OBO_ANNOTATIONS),
+            "Span schema should include onbehalfAnnotations"
+        );
+    }
+
+    #[test]
+    fn test_encode_log_batch_with_obo() {
+        let metadata = make_metadata("TestNamespace");
+        let obo_map = make_obo_event_map(
+            "TestEvent",
+            "Microsoft.BatchService",
+            Some(r#"<Config onBehalfFields="resourceId"/>"#),
+        );
+        let log = LogRecord {
+            observed_time_unix_nano: 1_700_000_000_000_000_000,
+            event_name: "TestEvent".to_string(),
+            severity_number: 9,
+            severity_text: "INFO".to_string(),
+            ..Default::default()
+        };
+        let result = encode_log_batch_via_proto_with_obo(
+            &OtlpEncoder::new(),
+            [log].iter(),
+            &metadata,
+            Some(&obo_map),
+        );
+        assert!(result.is_ok(), "encode with OBO should succeed");
+        let batches = result.unwrap();
+        assert_eq!(batches.len(), 1);
+        assert_eq!(batches[0].row_count, 1);
+    }
+
+    #[test]
+    fn test_encode_span_batch_with_obo() {
+        let metadata = make_metadata("TestNamespace");
+        let obo_map = make_obo_event_map(
+            "Span",
+            "Microsoft.SpanBatchService",
+            Some(r#"<Config onBehalfFields="resourceId"/>"#),
+        );
+        let encoder = OtlpEncoder::new();
+        let span = Span {
+            trace_id: vec![1; 16],
+            span_id: vec![2; 8],
+            name: "test_span".to_string(),
+            kind: 1,
+            start_time_unix_nano: 1_700_000_000_000_000_000,
+            end_time_unix_nano: 1_700_000_001_000_000_000,
+            ..Default::default()
+        };
+        let result = encoder.encode_span_batch([span].iter(), &metadata, Some(&obo_map));
+        assert!(result.is_ok(), "encode_span_batch with OBO should succeed");
+        let batches = result.unwrap();
+        assert_eq!(batches.len(), 1);
+        assert_eq!(batches[0].row_count, 1);
+    }
+
+    #[test]
+    fn test_mixed_batch_obo_and_non_obo_events() {
+        let metadata = make_metadata("TestNamespace");
+        let obo_map = make_obo_event_map(
+            "OboEvent",
+            "Microsoft.OboService",
+            Some(r#"<Config onBehalfFields="resourceId"/>"#),
+        );
+        let obo_log = LogRecord {
+            observed_time_unix_nano: 1_700_000_000_000_000_000,
+            event_name: "OboEvent".to_string(),
+            severity_number: 9,
+            ..Default::default()
+        };
+        let regular_log = LogRecord {
+            observed_time_unix_nano: 1_700_000_001_000_000_000,
+            event_name: "RegularEvent".to_string(),
+            severity_number: 9,
+            ..Default::default()
+        };
+        let result = encode_log_batch_via_proto_with_obo(
+            &OtlpEncoder::new(),
+            [obo_log, regular_log].iter(),
+            &metadata,
+            Some(&obo_map),
+        );
+        assert!(result.is_ok(), "Mixed batch should succeed");
+        let batches = result.unwrap();
+        assert_eq!(
+            batches.len(),
+            2,
+            "Should have separate batches for different event names"
+        );
+    }
+
+    #[test]
+    fn test_no_obo_map_means_no_obo() {
+        let metadata = make_metadata("TestNamespace");
+        let log = LogRecord {
+            observed_time_unix_nano: 1_700_000_000_000_000_000,
+            event_name: "TestEvent".to_string(),
+            severity_number: 9,
+            ..Default::default()
+        };
+        let result = encode_log_batch_via_proto(&OtlpEncoder::new(), [log].iter(), &metadata);
+        assert!(result.is_ok(), "encode without OBO should succeed");
+    }
+
+    #[test]
+    fn test_obo_empty_identity_not_active() {
+        let metadata = make_metadata("TestNamespace");
+        let mut obo_map = HashMap::new();
+        obo_map.insert(
+            "TestEvent".to_string(),
+            OboEventConfig {
+                identity: "".to_string(),
+                annotations: Some("some annotations".to_string()),
+            },
+        );
+        let log = LogRecord {
+            observed_time_unix_nano: 1_700_000_000_000_000_000,
+            event_name: "TestEvent".to_string(),
+            severity_number: 9,
+            ..Default::default()
+        };
+        let result = encode_log_batch_via_proto_with_obo(
+            &OtlpEncoder::new(),
+            [log].iter(),
+            &metadata,
+            Some(&obo_map),
+        );
+        assert!(result.is_ok(), "Should succeed even with empty identity");
+    }
+
+    #[test]
+    fn test_obo_whitespace_identity_not_active() {
+        let metadata = make_metadata("TestNamespace");
+        let mut obo_map = HashMap::new();
+        obo_map.insert(
+            "TestEvent".to_string(),
+            OboEventConfig {
+                identity: "   ".to_string(),
+                annotations: None,
+            },
+        );
+        let log = LogRecord {
+            observed_time_unix_nano: 1_700_000_000_000_000_000,
+            event_name: "TestEvent".to_string(),
+            severity_number: 9,
+            ..Default::default()
+        };
+        let result = encode_log_batch_via_proto_with_obo(
+            &OtlpEncoder::new(),
+            [log].iter(),
+            &metadata,
+            Some(&obo_map),
+        );
+        assert!(result.is_ok(), "Should succeed with whitespace identity");
+    }
+
+    #[test]
+    fn test_obo_blank_annotations_suppressed() {
+        let metadata = make_metadata("TestNamespace");
+        let mut obo_map = HashMap::new();
+        obo_map.insert(
+            "TestEvent".to_string(),
+            OboEventConfig {
+                identity: "Microsoft.TestService".to_string(),
+                annotations: Some("   ".to_string()),
+            },
+        );
+        let log = LogRecord {
+            observed_time_unix_nano: 1_700_000_000_000_000_000,
+            event_name: "TestEvent".to_string(),
+            severity_number: 9,
+            ..Default::default()
+        };
+        let result = encode_log_batch_via_proto_with_obo(
+            &OtlpEncoder::new(),
+            [log].iter(),
+            &metadata,
+            Some(&obo_map),
+        );
+        assert!(result.is_ok(), "Should succeed with blank annotations");
+        let batches = result.unwrap();
+        assert_eq!(batches.len(), 1);
+        assert_eq!(batches[0].row_count, 1);
+    }
+
+    #[test]
+    fn test_common_schema_part_b_name_drives_obo_lookup() {
+        let metadata = make_metadata("TestNamespace");
+        let obo_map = make_obo_event_map(
+            "CommonSchemaEvent",
+            "Microsoft.CommonSchemaService",
+            Some(r#"<Config onBehalfFields="resourceId"/>"#),
+        );
+        let log = LogRecord {
+            attributes: vec![
+                int_attr(KEY_CSVER, CS_VERSION_4),
+                string_attr(KEY_PARTB_TYPENAME, CS_LOG_TYPENAME),
+                string_attr("PartB.name", "CommonSchemaEvent"),
+                string_attr("PartB.body", "body"),
+            ],
+            ..Default::default()
+        };
+
+        let without_obo =
+            encode_log_batch_via_proto(&OtlpEncoder::new(), std::iter::once(&log), &metadata)
+                .unwrap();
+        let with_obo = encode_log_batch_via_proto_with_obo(
+            &OtlpEncoder::new(),
+            std::iter::once(&log),
+            &metadata,
+            Some(&obo_map),
+        )
+        .unwrap();
+
+        assert_eq!(with_obo.len(), 1);
+        assert_eq!(with_obo[0].event_name, "CommonSchemaEvent");
+        assert_ne!(
+            with_obo[0].metadata.schema_ids, without_obo[0].metadata.schema_ids,
+            "Common Schema PartB.name should select the OBO config for that event"
+        );
+    }
+
+    #[test]
+    fn test_obo_event_config_helpers() {
+        let active = OboEventConfig {
+            identity: "Microsoft.Service".to_string(),
+            annotations: Some("config".to_string()),
+        };
+        assert!(active.is_active());
+        assert_eq!(active.active_annotations(), Some("config"));
+
+        let empty_id = OboEventConfig {
+            identity: "".to_string(),
+            annotations: Some("config".to_string()),
+        };
+        assert!(!empty_id.is_active());
+
+        let whitespace_id = OboEventConfig {
+            identity: "   ".to_string(),
+            annotations: None,
+        };
+        assert!(!whitespace_id.is_active());
+
+        let blank_ann = OboEventConfig {
+            identity: "Microsoft.Service".to_string(),
+            annotations: Some("  ".to_string()),
+        };
+        assert!(blank_ann.is_active());
+        assert_eq!(blank_ann.active_annotations(), None);
+
+        let none_ann = OboEventConfig {
+            identity: "Microsoft.Service".to_string(),
+            annotations: None,
+        };
+        assert_eq!(none_ann.active_annotations(), None);
     }
 }
