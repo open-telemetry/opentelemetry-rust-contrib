@@ -2,6 +2,16 @@
 
 ## [Unreleased]
 
+### Added
+- Forwarded `tls-native` (default) and `tls-rustls` feature flags from `geneva-uploader`. Build with `--no-default-features --features tls-rustls` to use the pure-Rust TLS backend (required for FIPS / OpenSSL-free deployments that install a custom `rustls::crypto::CryptoProvider`).
+
+### Changed
+- Bump opentelemetry-proto version to 0.32.
+- Bump pinned `otel-arrow` rev for `otap-df-pdata` and `otap-df-pdata-views`
+  to `4f522d2e` so consumers can unify on a single `otap-df-pdata-views`
+  version and avoid duplicate `LogsDataView` trait errors. API-compatible;
+  the view trait signatures are unchanged.
+
 ## [0.5.0] - 2026-04-13
 
 ### Changed

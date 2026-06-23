@@ -1,9 +1,9 @@
 //! ETW metrics end-to-end integration test.
 //!
 //! Exercises the public `MetricsExporter` pipeline, starts a real ETW
-//! `UserTrace` session via `ferrisetw`, reads `EVENT_RECORD.UserData`
-//! directly (the exporter emits manifested events with a `raw_data` payload,
-//! so the user buffer is the raw OTLP protobuf), decodes each event as
+//! capture session via `one_collect`, reads the raw event payload
+//! (the exporter emits manifested events with a `raw_data` payload, so the
+//! user buffer is the raw OTLP protobuf), decodes each event as
 //! `ExportMetricsServiceRequest`, and asserts the OTLP shape for every
 //! supported instrument type (Counter, UpDownCounter, Gauge, Histogram).
 //!
@@ -21,12 +21,16 @@
 #![cfg(target_os = "windows")]
 
 use std::collections::HashMap;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc;
+use std::sync::{Arc, Mutex};
+use std::thread;
 use std::time::{Duration, Instant};
 
-use ferrisetw::schema_locator::SchemaLocator;
-use ferrisetw::trace::UserTrace;
-use ferrisetw::EventRecord;
+use one_collect::etw::{EtwSession, LEVEL_VERBOSE};
+use one_collect::event::os::windows::WindowsEventExtension;
+use one_collect::event::Event;
+use one_collect::Guid;
 
 use opentelemetry::metrics::MeterProvider as _;
 use opentelemetry::KeyValue;
@@ -38,43 +42,79 @@ use opentelemetry_proto::tonic::metrics::v1::{metric::Data as MetricData, Metric
 use opentelemetry_sdk::metrics::{PeriodicReader, SdkMeterProvider};
 use opentelemetry_sdk::Resource;
 use prost::Message;
-use windows::Win32::System::Diagnostics::Etw::EVENT_RECORD;
 
 // Must match the provider GUID statically registered in src/etw/mod.rs.
-const PROVIDER_GUID: &str = "EDC24920-E004-40F6-A8E1-0E6E48F39D84";
+// GUID EDC24920-E004-40F6-A8E1-0E6E48F39D84.
+const PROVIDER_GUID: u128 = 0xEDC2_4920_E004_40F6_A8E1_0E6E_48F3_9D84;
 
-fn start_etw_trace() -> (UserTrace, mpsc::Receiver<ExportMetricsServiceRequest>) {
+/// Handle to a running ETW capture session backed by one_collect.
+///
+/// `one_collect::etw::EtwSession::parse_until` blocks the calling thread
+/// and runs event callbacks on it, so the session is driven on a dedicated
+/// worker thread. Dropping (or explicitly `stop`-ping) the handle signals
+/// that thread to stop and joins it.
+struct EtwTrace {
+    stop: Arc<AtomicBool>,
+    worker: Mutex<Option<thread::JoinHandle<()>>>,
+}
+
+impl EtwTrace {
+    fn stop(&self) -> thread::Result<()> {
+        self.stop.store(true, Ordering::Relaxed);
+        match self.worker.lock().unwrap().take() {
+            Some(worker) => worker.join(),
+            None => Ok(()),
+        }
+    }
+}
+
+impl Drop for EtwTrace {
+    fn drop(&mut self) {
+        let _ = self.stop();
+    }
+}
+
+fn start_etw_trace() -> (EtwTrace, mpsc::Receiver<ExportMetricsServiceRequest>) {
     let (tx, rx) = mpsc::sync_channel::<ExportMetricsServiceRequest>(64);
+    let stop = Arc::new(AtomicBool::new(false));
+    let stop_worker = stop.clone();
 
-    let provider = ferrisetw::provider::Provider::by_guid(PROVIDER_GUID)
-        .add_callback(
-            move |record: &EventRecord, _schema_locator: &SchemaLocator| {
-                let er_ptr = record as *const EventRecord as *const EVENT_RECORD;
-                // SAFETY: ferrisetw::EventRecord is layout-compatible with
-                // windows EVENT_RECORD and is valid for the callback's lifetime.
-                let user_data: &[u8] = unsafe {
-                    if (*er_ptr).UserData.is_null() || (*er_ptr).UserDataLength == 0 {
-                        &[]
-                    } else {
-                        std::slice::from_raw_parts(
-                            (*er_ptr).UserData as *const u8,
-                            (*er_ptr).UserDataLength as usize,
-                        )
-                    }
-                };
-                if let Ok(req) = ExportMetricsServiceRequest::decode(user_data) {
-                    let _ = tx.try_send(req);
-                }
-            },
-        )
-        .build();
+    let worker = thread::spawn(move || {
+        let mut session = EtwSession::new();
 
-    let trace = UserTrace::new()
-        .enable(provider)
-        .start_and_process()
-        .expect("failed to start ETW UserTrace (admin privileges required)");
+        // Wide event: capture every event from the provider (any ID). The
+        // exporter emits a raw OTLP protobuf payload as the user buffer, so
+        // `data.event_data()` is the bytes we decode directly.
+        let mut event = Event::for_etw(
+            0,
+            "Event".to_string(),
+            Guid::from_u128(PROVIDER_GUID),
+            LEVEL_VERBOSE,
+            u64::MAX,
+        );
+        event.set_id_wild_card_flag();
 
-    (trace, rx)
+        event.add_callback(move |data| {
+            if let Ok(req) = ExportMetricsServiceRequest::decode(data.event_data()) {
+                let _ = tx.try_send(req);
+            }
+            Ok(())
+        });
+
+        session.add_event(event, None);
+
+        let _ = session.parse_until("etw-metrics-int-test", move || {
+            stop_worker.load(Ordering::Relaxed)
+        });
+    });
+
+    (
+        EtwTrace {
+            stop,
+            worker: Mutex::new(Some(worker)),
+        },
+        rx,
+    )
 }
 
 /// Wait up to 5s for the first event, then drain anything that arrives within

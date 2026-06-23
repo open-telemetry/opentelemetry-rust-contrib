@@ -20,7 +20,12 @@ prost = "0.14"
 [dev-dependencies]
 tokio = { version = "1.0", features = ["full"] }
 tracing-subscriber = { version = "0.3", features = ["env-filter","registry", "std", "fmt"] }
-serde_json = "1.0"
+
+# Linux-only: in-process user_events consumer used by the integration tests to
+# read the `otlp_metrics` tracepoint directly from the perf ring buffer instead
+# of shelling out to `perf record` + `perf-decode`.
+[target.'cfg(target_os = "linux")'.dev-dependencies]
+one_collect = "0.1.34532"
 
 [features]
 internal-logs = ["opentelemetry/internal-logs", "opentelemetry_sdk/internal-logs", "opentelemetry-proto/internal-logs"]

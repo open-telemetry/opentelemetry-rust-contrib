@@ -19,6 +19,7 @@ pub fn build_otlp_logs_minimal(
     if let Some((k, v)) = resource_kv {
         resource_attrs.push(KeyValue {
             key: k.to_string(),
+            key_strindex: 0,
             value: Some(AnyValue {
                 value: Some(AnyValueValue::StringValue(v.to_string())),
             }),
