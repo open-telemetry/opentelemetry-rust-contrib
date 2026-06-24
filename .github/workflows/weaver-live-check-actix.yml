@@ -118,6 +118,11 @@ jobs:
           c "http://127.0.0.1:5000/error"
           echo "::endgroup::"
 
+          # Give the periodic metric reader one final export interval to flush
+          # before we tear down. (Spans use a simple processor and are already
+          # flushed synchronously per request.)
+          sleep 3
+
           kill "$APP_PID" && wait "$APP_PID" || true
 
       - name: Stop weaver live-check

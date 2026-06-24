@@ -118,17 +118,23 @@ async fn main() -> std::io::Result<()> {
     global::set_meter_provider(meter_provider.clone());
 
     let span_exporter = SpanExporter::builder().with_tonic().build().unwrap();
+    // Simple processor (synchronous per-span export) instead of batch: keeps
+    // the example resilient to runtime model differences between actix-rt and
+    // plain tokio - every span hits weaver before the next request returns,
+    // no flush-on-shutdown race.
     let tracer_provider = SdkTracerProvider::builder()
-        .with_batch_exporter(span_exporter)
+        .with_simple_exporter(span_exporter)
         .with_resource(get_resource())
         .build();
     global::set_tracer_provider(tracer_provider.clone());
+
+    eprintln!("live-check-app: starting on 0.0.0.0:5000");
 
     // The matrix exercised below:
     //   methods:      GET, POST, PUT, PATCH, DELETE, HEAD, OPTIONS
     //   status codes: 200, 201, 204, 400, 401, 404, 500
     //   route shapes: literal, templated param, wildcard catch-all
-    //   error shape:  handled 4xx/5xx + unhandled panic
+    //   error shape:  handled 4xx/5xx (no panic - see note above)
     let server = HttpServer::new(|| {
         App::new()
             .wrap(RequestTracing::new())
@@ -146,8 +152,10 @@ async fn main() -> std::io::Result<()> {
             .route("/unauthorized", web::get().to(unauthorized))
             .route("/error", web::get().to(server_error))
     })
-    // Single worker keeps a panic from racing against shutdown signal delivery.
     .workers(1)
+    // We drive shutdown explicitly; actix's built-in signal handler would race
+    // with our flush-on-shutdown sequence below.
+    .disable_signals()
     .bind(("0.0.0.0", 5000))?
     .shutdown_timeout(2)
     .run();
@@ -156,11 +164,19 @@ async fn main() -> std::io::Result<()> {
     let server_task = tokio::spawn(server);
 
     shutdown_signal().await;
+    eprintln!("live-check-app: shutdown signal received, stopping server");
     server_handle.stop(true).await;
     let _ = server_task.await;
 
-    let _ = meter_provider.shutdown();
-    let _ = tracer_provider.shutdown();
+    eprintln!("live-check-app: flushing tracer/meter providers");
+    if let Err(e) = tracer_provider.shutdown() {
+        eprintln!("live-check-app: tracer shutdown error: {e:?}");
+    }
+    if let Err(e) = meter_provider.shutdown() {
+        eprintln!("live-check-app: meter shutdown error: {e:?}");
+    }
+    eprintln!("live-check-app: done");
 
     Ok(())
 }
+
