@@ -293,8 +293,7 @@ mod integration_tests {
         // capture session will deliver our probe events through `rx`.  If
         // registration fails silently (register returns ()) the probe loop
         // will time out and panic with a clear message via PROBE_DEADLINE.
-        let probe_provider =
-            Arc::pin(tld::Provider::new(provider_name, &tld::Provider::options()));
+        let probe_provider = Arc::pin(tld::Provider::new(provider_name, &tld::Provider::options()));
         // SAFETY: probe_provider is kept alive until unregister() below.
         unsafe { probe_provider.as_ref().register() };
 
@@ -330,8 +329,7 @@ mod integration_tests {
 
         let unregister_result = probe_provider.as_ref().unregister();
         assert_eq!(
-            unregister_result,
-            0,
+            unregister_result, 0,
             "Failed to unregister ETW probe provider (Win32 error {unregister_result})"
         );
 
