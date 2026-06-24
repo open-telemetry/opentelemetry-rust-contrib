@@ -1,9 +1,9 @@
 //! Minimal UUIDv4 generation.
 //!
-//! In order to avoid third-party dependencies, we generate UUIDv4s using only 
-//! the standard library. The result will be unique, but not cryptographically 
-//! secure, which is sufficient for service instance IDs. Randomness comes 
-//! from an OS-seeded [`RandomState`], with time, process id, and a counter 
+//! In order to avoid third-party dependencies, we generate UUIDv4s using only
+//! the standard library. The result will be unique, but not cryptographically
+//! secure, which is sufficient for service instance IDs. Randomness comes
+//! from an OS-seeded [`RandomState`], with time, process id, and a counter
 //! mixed in so repeated calls are extremely unlikely to collide.
 use std::collections::hash_map::RandomState;
 use std::hash::{BuildHasher, Hasher};
@@ -16,15 +16,15 @@ static COUNTER: AtomicU64 = AtomicU64::new(0);
 ///  e.g. `"f47ac10b-58cc-4372-a567-0e02b2c3d479"`.
 pub(crate) fn v4() -> String {
     let mut bytes = random_bytes();
-    
+
     // https://www.rfc-editor.org/rfc/rfc9562.html#name-version-field
     // Set the high nibble of bytes[6] to 0100. This is the version.
     bytes[6] = (bytes[6] & 0x0f) | 0x40;
-   
+
     // https://www.rfc-editor.org/rfc/rfc9562.html#name-variant-field
     // Set the two most significant bits of bytes[8] to 10. This is the variant.
     bytes[8] = (bytes[8] & 0x3f) | 0x80;
-    
+
     format(&bytes)
 }
 
@@ -37,7 +37,7 @@ fn random_bytes() -> [u8; 16] {
 }
 
 /// Produce 64 random bits. Each call uses an independently seeded RandomState.
-/// Time, process ID, and a counter are mixed in to ensure successive calls 
+/// Time, process ID, and a counter are mixed in to ensure successive calls
 /// produce different output.
 fn seed_word() -> u64 {
     let mut hasher = RandomState::new().build_hasher();
