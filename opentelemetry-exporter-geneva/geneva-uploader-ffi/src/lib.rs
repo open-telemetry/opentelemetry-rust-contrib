@@ -2561,11 +2561,8 @@ mod tests {
     #[cfg(all(feature = "mock_auth", feature = "otlp_bytes"))]
     fn test_encode_log_records_all_attribute_types_match_otlp() {
         use opentelemetry_proto::tonic::collector::logs::v1::ExportLogsServiceRequest;
-        use opentelemetry_proto::tonic::common::v1::{
-            any_value, AnyValue, InstrumentationScope, KeyValue,
-        };
+        use opentelemetry_proto::tonic::common::v1::{any_value, AnyValue, KeyValue};
         use opentelemetry_proto::tonic::logs::v1::{LogRecord, ResourceLogs, ScopeLogs};
-        use opentelemetry_proto::tonic::resource::v1::Resource;
         use otap_df_pdata::views::otlp::bytes::logs::RawLogsData;
 
         let cfg = GenevaClientConfig {
@@ -2664,23 +2661,7 @@ mod tests {
 
         let req = ExportLogsServiceRequest {
             resource_logs: vec![ResourceLogs {
-                resource: Some(Resource {
-                    attributes: vec![KeyValue {
-                        key: "service.name".to_string(),
-                        key_strindex: 0,
-                        value: Some(AnyValue {
-                            value: Some(any_value::Value::StringValue(
-                                "ffi-attr-types".to_string(),
-                            )),
-                        }),
-                    }],
-                    ..Default::default()
-                }),
                 scope_logs: vec![ScopeLogs {
-                    scope: Some(InstrumentationScope {
-                        name: "ffi.attr.types".to_string(),
-                        ..Default::default()
-                    }),
                     log_records: vec![LogRecord {
                         time_unix_nano: record.time_unix_nano,
                         severity_number: record.severity_number,

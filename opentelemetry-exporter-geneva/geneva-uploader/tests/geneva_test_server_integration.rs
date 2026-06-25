@@ -51,16 +51,7 @@ async fn uploader_batch_is_accepted_and_decoded_by_test_server() {
     let request_bytes = request.encode_to_vec();
     let request_view = RawLogsData::new(&request_bytes);
 
-    let batches = client
-        .encode_and_compress_logs(&request_view)
-        .expect("batch should encode");
-    assert_eq!(batches.len(), 1);
-    client
-        .upload_batch(&batches[0])
-        .await
-        .expect("batch should upload");
-
-    let detail = server.wait_for_request(&batches[0].event_name).await;
+    let detail = upload_single_batch_and_wait(&client, &server, &request_view).await;
     assert_eq!(detail["decode_status"], "decoded");
     assert_eq!(detail["event_name"], "CheckoutEvent");
     assert_eq!(detail["row_count"], 1);
@@ -73,6 +64,73 @@ async fn uploader_batch_is_accepted_and_decoded_by_test_server() {
     assert_eq!(payload["body"], "checkout failed");
     assert_eq!(payload["operation"], "checkout");
     assert_eq!(payload["result"], 127);
+
+    let common_schema_request = ExportLogsServiceRequest {
+        resource_logs: vec![ResourceLogs {
+            scope_logs: vec![ScopeLogs {
+                log_records: vec![LogRecord {
+                    time_unix_nano: 1_718_432_000_000_000_000,
+                    attributes: vec![
+                        int_attr("__csver__", 0x400),
+                        string_attr("PartA.time", "2024-06-15T06:00:00Z"),
+                        string_attr("PartA.ext_cloud_role", "checkout"),
+                        string_attr("PartA.ext_cloud_roleInstance", "instance-1"),
+                        string_attr("PartC.operation", "checkout"),
+                        int_attr("PartC.result", 127),
+                        string_attr("PartB._typeName", "Log"),
+                        string_attr("PartB.name", "CommonSchemaCheckoutEvent"),
+                        string_attr("PartB.body", "common schema checkout failed"),
+                        int_attr("PartB.severityNumber", 17),
+                        string_attr("PartB.severityText", "ERROR"),
+                    ],
+                    ..Default::default()
+                }],
+                ..Default::default()
+            }],
+            ..Default::default()
+        }],
+    };
+    let common_schema_request_bytes = common_schema_request.encode_to_vec();
+    let common_schema_request_view = RawLogsData::new(&common_schema_request_bytes);
+
+    let common_schema_detail =
+        upload_single_batch_and_wait(&client, &server, &common_schema_request_view).await;
+    assert_eq!(common_schema_detail["decode_status"], "decoded");
+    assert_eq!(
+        common_schema_detail["event_name"],
+        "CommonSchemaCheckoutEvent"
+    );
+    assert_eq!(common_schema_detail["row_count"], 1);
+
+    let records = common_schema_detail["records"]
+        .as_array()
+        .expect("common schema records array");
+    assert_eq!(records.len(), 1);
+    let payload = &records[0]["payload"];
+    assert_eq!(payload["Role"], "checkout");
+    assert_eq!(payload["RoleInstance"], "instance-1");
+    assert_eq!(payload["body"], "common schema checkout failed");
+    assert_eq!(payload["SeverityNumber"], 17);
+    assert_eq!(payload["SeverityText"], "ERROR");
+    assert_eq!(payload["operation"], "checkout");
+    assert_eq!(payload["result"], 127);
+}
+
+async fn upload_single_batch_and_wait(
+    client: &GenevaClient,
+    server: &TestServer,
+    request_view: &RawLogsData<'_>,
+) -> serde_json::Value {
+    let batches = client
+        .encode_and_compress_logs(request_view)
+        .expect("batch should encode");
+    assert_eq!(batches.len(), 1);
+    client
+        .upload_batch(&batches[0])
+        .await
+        .expect("batch should upload");
+
+    server.wait_for_request(&batches[0].event_name).await
 }
 
 fn string_attr(key: &str, value: &str) -> KeyValue {
