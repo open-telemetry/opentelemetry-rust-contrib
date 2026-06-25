@@ -6,6 +6,7 @@
 
 - Add `ContainerResourceDetector` to detect `container.id` from `/proc/self/cgroup`, with fallback to `/proc/self/mountinfo`.
 - Add host.name attribute to `HostResourceDetector`
+- Add `ServiceInstanceIdResourceDetector` to generate a random UUIDv4 `service.instance.id`.
 
 ## v0.11.0
 

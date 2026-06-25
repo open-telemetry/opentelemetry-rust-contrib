@@ -8,6 +8,7 @@ members = [
     "opentelemetry-etw-metrics",
     "opentelemetry-etw-traces",
     "opentelemetry-instrumentation-actix-web",
+    "opentelemetry-instrumentation-actix-web/examples/*",
     "opentelemetry-instrumentation-tower",
     "opentelemetry-instrumentation-tower/examples/*",
     "opentelemetry-resource-detectors",
