@@ -210,6 +210,15 @@ mod integration_tests {
     }
 
     /// Start a one_collect ETW capture session for the given provider name.
+    ///
+    /// This function blocks until the ETW session is confirmed live by emitting
+    /// probe events with a uniquely-named event and waiting for one to
+    /// round-trip back through the capture channel.  Because `parse_until`
+    /// calls `StartTrace`/`EnableTraceEx2` asynchronously after the worker
+    /// signals, events emitted before that kernel setup completes are silently
+    /// dropped by ETW (no replay).  The probe loop terminates exactly when the
+    /// first probe is observed, proving the session is ready without relying on
+    /// any fixed sleep.  A 10-second failsafe matches the `recv_event` deadline.
     fn start_etw_trace(provider_name: &str) -> (EtwTrace, mpsc::Receiver<CapturedEvent>) {
         // TraceLogging derives the provider GUID from the provider name; mirror
         // that here so we subscribe to the same GUID the exporter registers.
@@ -219,6 +228,10 @@ mod integration_tests {
         let stop = Arc::new(AtomicBool::new(false));
         let stop_worker = stop.clone();
         let session_name = format!("{provider_name}_session");
+
+        // One-shot channel: the worker sends () just before calling
+        // `parse_until` so the main thread can wait for it.
+        let (session_ready_tx, session_ready_rx) = mpsc::sync_channel::<()>(1);
 
         let worker = thread::spawn(move || {
             let mut session = EtwSession::new();
@@ -254,8 +267,77 @@ mod integration_tests {
 
             session.add_event(event, None);
 
+            // Signal the main thread that one_collect setup is complete and
+            // we are about to call parse_until (StartTrace/EnableTraceEx2).
+            let _ = session_ready_tx.send(());
+
             let _ = session.parse_until(&session_name, move || stop_worker.load(Ordering::Relaxed));
         });
+
+        // Wait for the worker to signal it is about to call parse_until, then
+        // probe the session deterministically: emit a uniquely-named event in a
+        // loop until one round-trips back through the capture channel, which
+        // proves StartTrace/EnableTraceEx2 has completed in the kernel.
+        session_ready_rx
+            .recv_timeout(Duration::from_secs(5))
+            .expect("ETW worker thread failed to signal readiness within 5 seconds");
+
+        // Probe event name: distinct from every real test event name ("Log", etc.)
+        // so it can be identified and drained without ambiguity.
+        const PROBE_EVENT_NAME: &str = "__etw_session_probe__";
+        const PROBE_DEADLINE: Duration = Duration::from_secs(10);
+        // How long to wait for a probe event before re-emitting and retrying.
+        const PROBE_POLL_INTERVAL: Duration = Duration::from_millis(50);
+
+        // Register a second provider instance under the same name/GUID so the
+        // capture session will deliver our probe events through `rx`.  If
+        // registration fails silently (register returns ()) the probe loop
+        // will time out and panic with a clear message via PROBE_DEADLINE.
+        let probe_provider = Arc::pin(tld::Provider::new(provider_name, &tld::Provider::options()));
+        // SAFETY: probe_provider is kept alive until unregister() below.
+        unsafe { probe_provider.as_ref().register() };
+
+        let mut probe_event_builder = tld::EventBuilder::new();
+        let probe_start = std::time::Instant::now();
+        loop {
+            // Emit a probe event; ETW drops it silently if the session is not
+            // yet live, and delivers it once StartTrace/EnableTraceEx2 is done.
+            probe_event_builder.reset(PROBE_EVENT_NAME, tld::Level::Verbose, 1, 0);
+            probe_event_builder.write(&probe_provider, None, None);
+
+            match rx.recv_timeout(PROBE_POLL_INTERVAL) {
+                Ok(evt) if evt.event_name == PROBE_EVENT_NAME => break,
+                // Non-probe events are discarded.  Real test events cannot
+                // arrive here because start_etw_trace returns before the
+                // caller creates its SdkLoggerProvider, and tests are run
+                // single-threaded (--test-threads=1).
+                Ok(_) => continue,
+                Err(mpsc::RecvTimeoutError::Disconnected) => {
+                    panic!("ETW capture channel disconnected during probe")
+                }
+                Err(mpsc::RecvTimeoutError::Timeout) => {
+                    if probe_start.elapsed() >= PROBE_DEADLINE {
+                        panic!(
+                            "ETW session failed to become ready within {} s \
+                             (probe provider registration may have also failed)",
+                            PROBE_DEADLINE.as_secs()
+                        );
+                    }
+                }
+            }
+        }
+
+        let unregister_result = probe_provider.as_ref().unregister();
+        assert_eq!(
+            unregister_result, 0,
+            "Failed to unregister ETW probe provider (Win32 error {unregister_result})"
+        );
+
+        // Drain any in-flight probe events that arrived after the first
+        // round-trip.  Multiple probes may have been emitted before the session
+        // became live; draining them here ensures the caller's receiver only
+        // sees real test events.
+        while rx.try_recv().is_ok() {}
 
         (
             EtwTrace {
