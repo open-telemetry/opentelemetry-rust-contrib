@@ -5,22 +5,31 @@ use crate::uuid;
 use opentelemetry::KeyValue;
 use opentelemetry_sdk::resource::ResourceDetector;
 use opentelemetry_sdk::Resource;
+use std::sync::OnceLock;
 
 /// Detect the `service.instance.id` resource attribute.
 ///
 /// The [OpenTelemetry specification] recommends `service.instance.id` be a
 /// random UUIDv4 when no inherently unique identifier is available.
 ///
+/// The id is generated once and reused for the lifetime of the process, so every
+/// resource built from this detector shares the same instance id.
+///
 /// [OpenTelemetry specification]: https://opentelemetry.io/docs/specs/semconv/resource/service/#service-instance
 #[derive(Debug, Default)]
 pub struct ServiceInstanceIdResourceDetector;
+
+fn instance_id() -> &'static str {
+    static INSTANCE_ID: OnceLock<String> = OnceLock::new();
+    INSTANCE_ID.get_or_init(uuid::v4)
+}
 
 impl ResourceDetector for ServiceInstanceIdResourceDetector {
     fn detect(&self) -> Resource {
         Resource::builder_empty()
             .with_attributes(vec![KeyValue::new(
                 opentelemetry_semantic_conventions::attribute::SERVICE_INSTANCE_ID,
-                uuid::v4(),
+                instance_id(),
             )])
             .build()
     }
@@ -47,11 +56,13 @@ mod tests {
     }
 
     #[test]
-    fn generates_a_new_id_per_detect() {
-        let detector = ServiceInstanceIdResourceDetector;
+    fn returns_the_same_id_across_detectors() {
         let key = Key::from_static_str(
             opentelemetry_semantic_conventions::attribute::SERVICE_INSTANCE_ID,
         );
-        assert_ne!(detector.detect().get(&key), detector.detect().get(&key));
+        let first = ServiceInstanceIdResourceDetector.detect().get(&key);
+        let second = ServiceInstanceIdResourceDetector.detect().get(&key);
+        assert!(first.is_some());
+        assert_eq!(first, second);
     }
 }
