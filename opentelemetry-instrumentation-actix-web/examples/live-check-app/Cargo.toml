@@ -1,0 +1,22 @@
+[package]
+name = "example-live-check-actix"
+version = "0.1.0-alpha.0"
+edition = "2021"
+rust-version = "1.88.0"
+publish = false
+
+# Purpose-built example used by the `weaver-live-check-actix` CI workflow
+# to exercise the actix-web instrumentation across a comprehensive HTTP
+# method x status-code x route-shape matrix. Not intended as illustrative
+# user-facing documentation - use `examples/server.rs` for that.
+
+[dependencies]
+opentelemetry-instrumentation-actix-web = { path = "../../", default-features = false, features = ["metrics"] }
+actix-web = { version = "4.12", default-features = false, features = ["macros", "compress-zstd"] }
+opentelemetry = { workspace = true }
+opentelemetry_sdk = { workspace = true, default-features = false, features = ["rt-tokio"] }
+opentelemetry-otlp = { workspace = true, features = ["grpc-tonic", "metrics", "trace"] }
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "signal"], default-features = false }
+
+[lints]
+workspace = true

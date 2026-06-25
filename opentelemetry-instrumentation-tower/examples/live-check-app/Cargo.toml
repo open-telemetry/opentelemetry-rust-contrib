@@ -1,0 +1,23 @@
+[package]
+name = "example-live-check-app"
+version = "0.1.0-alpha.0"
+edition = "2021"
+rust-version = "1.75.0"
+publish = false
+
+# Purpose-built example used by the `weaver-live-check-tower` CI workflow
+# to exercise the tower instrumentation across a comprehensive HTTP
+# method x status-code x route-shape matrix. Not intended as illustrative
+# user-facing documentation - use `axum-http-service` for that.
+
+[dependencies]
+opentelemetry_instrumentation_tower = { path = "../../", package = "opentelemetry-instrumentation-tower", features = ["axum"], default-features = false }
+axum = { features = ["http1", "tokio"], version = "0.8", default-features = false }
+tower-http = { version = "0.6", features = ["catch-panic"], default-features = false }
+opentelemetry = { workspace = true }
+opentelemetry_sdk = { workspace = true, default-features = false }
+opentelemetry-otlp = { workspace = true, features = ["grpc-tonic", "metrics", "trace"] }
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "signal"], default-features = false }
+
+[lints]
+workspace = true
