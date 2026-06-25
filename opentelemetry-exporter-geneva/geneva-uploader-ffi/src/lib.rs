@@ -2675,24 +2675,28 @@ mod tests {
                         attributes: vec![
                             KeyValue {
                                 key: "string.attr".to_string(),
+                                key_strindex: 0,
                                 value: Some(AnyValue {
                                     value: Some(any_value::Value::StringValue("value".to_string())),
                                 }),
                             },
                             KeyValue {
                                 key: "int.attr".to_string(),
+                                key_strindex: 0,
                                 value: Some(AnyValue {
                                     value: Some(any_value::Value::IntValue(42)),
                                 }),
                             },
                             KeyValue {
                                 key: "double.attr".to_string(),
+                                key_strindex: 0,
                                 value: Some(AnyValue {
                                     value: Some(any_value::Value::DoubleValue(3.5)),
                                 }),
                             },
                             KeyValue {
                                 key: "bool.attr".to_string(),
+                                key_strindex: 0,
                                 value: Some(AnyValue {
                                     value: Some(any_value::Value::BoolValue(true)),
                                 }),

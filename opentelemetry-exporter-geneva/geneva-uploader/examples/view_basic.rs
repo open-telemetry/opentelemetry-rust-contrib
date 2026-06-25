@@ -52,6 +52,7 @@ fn build_export_logs_request() -> ExportLogsServiceRequest {
             resource: Some(Resource {
                 attributes: vec![KeyValue {
                     key: "service.name".to_string(),
+                    key_strindex: 0,
                     value: Some(AnyValue {
                         value: Some(any_value::Value::StringValue(
                             "geneva-view-basic-example".to_string(),

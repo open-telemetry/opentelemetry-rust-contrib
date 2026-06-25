@@ -480,28 +480,28 @@ impl<'a> CommonSchemaParts<'a> {
                     self.part_b_name = Some(Cow::Owned(name.to_owned()));
                 }
             }
-            "PartA.ext_dt_traceId" => {
+            "PartA.ext_dt_traceId" | "PartA.ext_dt.traceId" => {
                 if let Some(trace_id) = value.and_then(value_as_utf8) {
                     if let Some(bytes) = parse_hex_bytes::<16>(trace_id.trim()) {
                         self.parts.trace_id = Some(bytes);
                     }
                 }
             }
-            "PartA.ext_dt_spanId" => {
+            "PartA.ext_dt_spanId" | "PartA.ext_dt.spanId" => {
                 if let Some(span_id) = value.and_then(value_as_utf8) {
                     if let Some(bytes) = parse_hex_bytes::<8>(span_id.trim()) {
                         self.parts.span_id = Some(bytes);
                     }
                 }
             }
-            "PartA.ext_dt_traceFlags" => {
+            "PartA.ext_dt_traceFlags" | "PartA.ext_dt.traceFlags" => {
                 if let Some(flags) = value.and_then(value_as_i64) {
                     if let Ok(flags) = u32::try_from(flags) {
                         self.parts.trace_flags = Some(flags);
                     }
                 }
             }
-            "PartA.ext_cloud_role" => {
+            "PartA.ext_cloud_role" | "PartA.ext_cloud.role" => {
                 if let Some(value) = value
                     .and_then(value_as_utf8)
                     .filter(|s| !s.trim().is_empty())
@@ -509,7 +509,7 @@ impl<'a> CommonSchemaParts<'a> {
                     self.parts.role = Cow::Owned(value.to_owned());
                 }
             }
-            "PartA.ext_cloud_roleInstance" => {
+            "PartA.ext_cloud_roleInstance" | "PartA.ext_cloud.roleInstance" => {
                 if let Some(value) = value
                     .and_then(value_as_utf8)
                     .filter(|s| !s.trim().is_empty())
@@ -1697,6 +1697,7 @@ mod tests {
     fn string_attr(key: &str, value: &str) -> KeyValue {
         KeyValue {
             key: key.to_string(),
+            key_strindex: 0,
             value: Some(AnyValue {
                 value: Some(Value::StringValue(value.to_string())),
             }),
@@ -1706,6 +1707,7 @@ mod tests {
     fn int_attr(key: &str, value: i64) -> KeyValue {
         KeyValue {
             key: key.to_string(),
+            key_strindex: 0,
             value: Some(AnyValue {
                 value: Some(Value::IntValue(value)),
             }),
@@ -1715,6 +1717,7 @@ mod tests {
     fn bool_attr(key: &str, value: bool) -> KeyValue {
         KeyValue {
             key: key.to_string(),
+            key_strindex: 0,
             value: Some(AnyValue {
                 value: Some(Value::BoolValue(value)),
             }),
@@ -1724,6 +1727,7 @@ mod tests {
     fn double_attr(key: &str, value: f64) -> KeyValue {
         KeyValue {
             key: key.to_string(),
+            key_strindex: 0,
             value: Some(AnyValue {
                 value: Some(Value::DoubleValue(value)),
             }),
@@ -1786,6 +1790,7 @@ mod tests {
         // Add some attributes
         log.attributes.push(KeyValue {
             key: "user_id".to_string(),
+            key_strindex: 0,
             value: Some(AnyValue {
                 value: Some(Value::StringValue("user123".to_string())),
             }),
@@ -1793,6 +1798,7 @@ mod tests {
 
         log.attributes.push(KeyValue {
             key: "request_count".to_string(),
+            key_strindex: 0,
             value: Some(AnyValue {
                 value: Some(Value::IntValue(42)),
             }),
@@ -1838,6 +1844,7 @@ mod tests {
         };
         log3.attributes.push(KeyValue {
             key: "user_id".to_string(),
+            key_strindex: 0,
             value: Some(AnyValue {
                 value: Some(Value::StringValue("user123".to_string())),
             }),
@@ -1942,12 +1949,14 @@ mod tests {
         };
         log.attributes.push(KeyValue {
             key: "user".to_string(),
+            key_strindex: 0,
             value: Some(AnyValue {
                 value: Some(Value::StringValue("alice".to_string())),
             }),
         });
         log.attributes.push(KeyValue {
             key: "attempt".to_string(),
+            key_strindex: 0,
             value: Some(AnyValue {
                 value: Some(Value::IntValue(2)),
             }),
@@ -2060,6 +2069,57 @@ mod tests {
                 string_attr("PartB.severityText", "ERROR"),
                 int_attr("PartB.eventId", 42),
                 string_attr("PartB.name", "UserEventsCheckoutFailure"),
+            ],
+            ..Default::default()
+        };
+
+        let canonical_encoded = encode_log_batch_with_resource_attrs(
+            &encoder,
+            std::iter::once(&canonical),
+            vec![
+                string_attr("service.name", "checkout"),
+                string_attr("service.instance.id", "instance-1"),
+            ],
+            &metadata,
+        )
+        .unwrap();
+        let common_schema_encoded =
+            encode_log_batch_via_proto(&encoder, std::iter::once(&common_schema), &metadata)
+                .unwrap();
+
+        assert_single_batch_equal(&canonical_encoded, &common_schema_encoded);
+    }
+
+    #[test]
+    fn test_common_schema_nested_part_a_extensions_match_canonical_log() {
+        let encoder = OtlpEncoder::new();
+        let metadata = make_metadata("cs-nested-part-a");
+        let timestamp = parse_rfc3339_nanos("2024-06-15T06:00:00Z").unwrap();
+
+        let canonical = LogRecord {
+            time_unix_nano: timestamp,
+            event_name: "NestedPartA".to_string(),
+            body: Some(AnyValue {
+                value: Some(Value::StringValue("body".to_string())),
+            }),
+            trace_id: hex::decode("0102030405060708090a0b0c0d0e0f10").unwrap(),
+            span_id: hex::decode("a1b2c3d4e5f60718").unwrap(),
+            flags: 1,
+            ..Default::default()
+        };
+
+        let common_schema = LogRecord {
+            attributes: vec![
+                int_attr(KEY_CSVER, CS_VERSION_4),
+                string_attr(KEY_PARTB_TYPENAME, CS_LOG_TYPENAME),
+                string_attr("PartA.time", "2024-06-15T06:00:00Z"),
+                string_attr("PartA.ext_dt.traceId", "0102030405060708090a0b0c0d0e0f10"),
+                string_attr("PartA.ext_dt.spanId", "a1b2c3d4e5f60718"),
+                int_attr("PartA.ext_dt.traceFlags", 1),
+                string_attr("PartA.ext_cloud.role", "checkout"),
+                string_attr("PartA.ext_cloud.roleInstance", "instance-1"),
+                string_attr("PartB.name", "NestedPartA"),
+                string_attr("PartB.body", "body"),
             ],
             ..Default::default()
         };
@@ -2564,12 +2624,14 @@ mod tests {
         let mut dup_log = base_log.clone();
         dup_log.attributes.push(KeyValue {
             key: "dup".to_string(),
+            key_strindex: 0,
             value: Some(AnyValue {
                 value: Some(Value::IntValue(1)),
             }),
         });
         dup_log.attributes.push(KeyValue {
             key: "dup".to_string(),
+            key_strindex: 0,
             value: Some(AnyValue {
                 value: Some(Value::IntValue(2)),
             }),
@@ -2624,6 +2686,7 @@ mod tests {
         };
         log3.attributes.push(KeyValue {
             key: "user_id".to_string(),
+            key_strindex: 0,
             value: Some(AnyValue {
                 value: Some(Value::StringValue("user123".to_string())),
             }),
@@ -2722,6 +2785,7 @@ mod tests {
         };
         log4.attributes.push(KeyValue {
             key: "error_code".to_string(),
+            key_strindex: 0,
             value: Some(AnyValue {
                 value: Some(Value::IntValue(404)),
             }),
@@ -2775,6 +2839,7 @@ mod tests {
 
         span.attributes.push(KeyValue {
             key: "http.method".to_string(),
+            key_strindex: 0,
             value: Some(AnyValue {
                 value: Some(Value::StringValue("GET".to_string())),
             }),
@@ -2782,6 +2847,7 @@ mod tests {
 
         span.attributes.push(KeyValue {
             key: "http.status_code".to_string(),
+            key_strindex: 0,
             value: Some(AnyValue {
                 value: Some(Value::IntValue(200)),
             }),
