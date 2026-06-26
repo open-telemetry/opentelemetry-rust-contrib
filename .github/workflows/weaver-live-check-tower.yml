@@ -133,4 +133,3 @@ jobs:
           name: weaver-live-check-tower
           path: ${{ steps.live-check.outputs.state-dir }}
           if-no-files-found: warn
-
