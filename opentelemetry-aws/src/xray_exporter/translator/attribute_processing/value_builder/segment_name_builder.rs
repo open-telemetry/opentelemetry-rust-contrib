@@ -119,10 +119,22 @@ impl<'value> ValueBuilder<'value> for SegmentNameBuilder<'value> {
 
 impl<'v> SpanAttributeProcessor<'v, 6> for SegmentNameBuilder<'v> {
     const HANDLERS: [(&'static str, fn(&mut Self, &'v Value) -> bool); 6] = [
-        (semconv::RPC_SYSTEM, Self::rpc_system_is_aws_api),
-        (semconv::PEER_SERVICE, Self::peer_service),
+        (
+            #[allow(deprecated)]
+            semconv::RPC_SYSTEM,
+            Self::rpc_system_is_aws_api,
+        ),
+        (
+            #[allow(deprecated)]
+            semconv::PEER_SERVICE,
+            Self::peer_service,
+        ),
         (semconv::AWS_SERVICE, Self::aws_service),
-        (semconv::RPC_SERVICE, Self::rpc_service),
+        (
+            #[allow(deprecated)]
+            semconv::RPC_SERVICE,
+            Self::rpc_service,
+        ),
         (semconv::DB_SERVICE, Self::db_service),
         (semconv::SERVICE_NAME, Self::service_name),
     ];
