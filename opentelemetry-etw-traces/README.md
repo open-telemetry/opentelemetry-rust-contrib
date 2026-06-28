@@ -22,6 +22,10 @@ captured by agents running locally and listening for specific ETW events.
 Spans are encoded following the [Microsoft Common Schema v4.0](https://learn.microsoft.com/en-us/opentelemetry/common-schema) format using
 [TraceLogging Dynamic](https://crates.io/crates/tracelogging_dynamic).
 
+[![Crates.io: opentelemetry-etw-traces](https://img.shields.io/crates/v/opentelemetry-etw-traces.svg)](https://crates.io/crates/opentelemetry-etw-traces)
+[![Documentation](https://docs.rs/opentelemetry-etw-traces/badge.svg)](https://docs.rs/opentelemetry-etw-traces)
+[![Slack](https://img.shields.io/badge/slack-@cncf/otel/rust-brightgreen.svg?logo=slack)](https://cloud-native.slack.com/archives/C03GDP0H023)
+
 ## Viewing ETW Traces
 
 Traces exported to ETW can be viewed using tools like `logman`, `perfview` etc.
