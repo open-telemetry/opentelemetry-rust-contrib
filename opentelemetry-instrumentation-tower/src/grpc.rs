@@ -648,7 +648,7 @@ mod tests {
 
     use std::convert::Infallible;
 
-    use http::{Request, Response, StatusCode};
+    use http::{Request, Response, StatusCode, Version};
     use http_body_util::{BodyExt, Empty};
     use opentelemetry_sdk::metrics::{
         data::{AggregatedMetrics, MetricData},
@@ -686,6 +686,27 @@ mod tests {
         }
     }
 
+    fn grpc_request() -> Request<Empty<&'static [u8]>> {
+        Request::builder()
+            .method("POST")
+            .uri("http://example.com/package.Service/GetThing")
+            .version(Version::HTTP_2)
+            .header("content-type", "application/grpc")
+            .header("te", "trailers")
+            .body(Empty::new())
+            .unwrap()
+    }
+
+    fn grpc_response<B>(grpc_status: &'static str, body: B) -> Response<B> {
+        Response::builder()
+            .status(StatusCode::OK)
+            .version(Version::HTTP_2)
+            .header("content-type", "application/grpc")
+            .header("grpc-status", grpc_status)
+            .body(body)
+            .unwrap()
+    }
+
     #[test]
     fn parses_grpc_path() {
         assert_eq!(
@@ -709,23 +730,11 @@ mod tests {
             .with_tracer_provider(tracer_provider.clone())
             .build();
         let service = tower::service_fn(|_req: Request<Empty<&'static [u8]>>| async {
-            Ok::<_, std::convert::Infallible>(
-                Response::builder()
-                    .status(StatusCode::OK)
-                    .header("grpc-status", "0")
-                    .body(Empty::<&'static [u8]>::new())
-                    .unwrap(),
-            )
+            Ok::<_, std::convert::Infallible>(grpc_response("0", Empty::<&'static [u8]>::new()))
         });
         let mut service = layer.layer(service);
 
-        let request = Request::builder()
-            .method("POST")
-            .uri("http://example.com/package.Service/GetThing")
-            .body(Empty::new())
-            .unwrap();
-
-        let response = service.call(request).await.unwrap();
+        let response = service.call(grpc_request()).await.unwrap();
         response.into_body().collect().await.unwrap();
         tracer_provider.force_flush().unwrap();
 
@@ -753,23 +762,11 @@ mod tests {
             .with_tracer_provider(tracer_provider.clone())
             .build();
         let service = tower::service_fn(|_req: Request<Empty<&'static [u8]>>| async {
-            Ok::<_, std::convert::Infallible>(
-                Response::builder()
-                    .status(StatusCode::OK)
-                    .header("grpc-status", "13")
-                    .body(Empty::<&'static [u8]>::new())
-                    .unwrap(),
-            )
+            Ok::<_, std::convert::Infallible>(grpc_response("13", Empty::<&'static [u8]>::new()))
         });
         let mut service = layer.layer(service);
 
-        let request = Request::builder()
-            .method("POST")
-            .uri("http://example.com/package.Service/GetThing")
-            .body(Empty::new())
-            .unwrap();
-
-        let response = service.call(request).await.unwrap();
+        let response = service.call(grpc_request()).await.unwrap();
         response.into_body().collect().await.unwrap();
         tracer_provider.force_flush().unwrap();
 
@@ -799,23 +796,11 @@ mod tests {
             let mut trailers = http::HeaderMap::new();
             trailers.insert("grpc-status", http::HeaderValue::from_static("13"));
 
-            Ok::<_, std::convert::Infallible>(
-                Response::builder()
-                    .status(StatusCode::OK)
-                    .header("grpc-status", "0")
-                    .body(TrailerBody::new(trailers))
-                    .unwrap(),
-            )
+            Ok::<_, std::convert::Infallible>(grpc_response("0", TrailerBody::new(trailers)))
         });
         let mut service = layer.layer(service);
 
-        let request = Request::builder()
-            .method("POST")
-            .uri("http://example.com/package.Service/GetThing")
-            .body(Empty::new())
-            .unwrap();
-
-        let response = service.call(request).await.unwrap();
+        let response = service.call(grpc_request()).await.unwrap();
         response.into_body().collect().await.unwrap();
         tracer_provider.force_flush().unwrap();
 
@@ -840,23 +825,11 @@ mod tests {
             .build();
 
         let service = tower::service_fn(|_req: Request<Empty<&'static [u8]>>| async {
-            Ok::<_, std::convert::Infallible>(
-                Response::builder()
-                    .status(StatusCode::OK)
-                    .header("grpc-status", "0")
-                    .body(Empty::<&'static [u8]>::new())
-                    .unwrap(),
-            )
+            Ok::<_, std::convert::Infallible>(grpc_response("0", Empty::<&'static [u8]>::new()))
         });
         let mut service = layer.layer(service);
 
-        let request = Request::builder()
-            .method("POST")
-            .uri("http://example.com/package.Service/GetThing")
-            .body(Empty::new())
-            .unwrap();
-
-        let response = service.call(request).await.unwrap();
+        let response = service.call(grpc_request()).await.unwrap();
         response.into_body().collect().await.unwrap();
         tokio::time::sleep(Duration::from_millis(500)).await;
 

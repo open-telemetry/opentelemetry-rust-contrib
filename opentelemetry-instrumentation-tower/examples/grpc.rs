@@ -1,6 +1,6 @@
 use std::convert::Infallible;
 
-use http::{Request, Response, StatusCode};
+use http::{Request, Response, StatusCode, Version};
 use http_body_util::Empty;
 use opentelemetry_instrumentation_tower::grpc::GRPCLayerBuilder;
 use tower::{Service, ServiceBuilder, ServiceExt};
@@ -10,6 +10,8 @@ async fn grpc_handler(
 ) -> Result<Response<Empty<&'static [u8]>>, Infallible> {
     Ok(Response::builder()
         .status(StatusCode::OK)
+        .version(Version::HTTP_2)
+        .header("content-type", "application/grpc")
         .header("grpc-status", "0")
         .body(Empty::new())
         .unwrap())
@@ -25,6 +27,9 @@ async fn main() {
     let request = Request::builder()
         .method("POST")
         .uri("http://example.com/example.Greeter/SayHello")
+        .version(Version::HTTP_2)
+        .header("content-type", "application/grpc")
+        .header("te", "trailers")
         .body(Empty::new())
         .unwrap();
 
