@@ -34,8 +34,11 @@
 //!   (GET/POST/PUT/DELETE/HEAD/OPTIONS/PATCH/CONNECT/TRACE) and the `http`
 //!   and `https` schemes, so the corresponding `KeyValue::clone()` is
 //!   allocation-free in the hot path.
-//! - **`Vec<KeyValue>` allocations**: `span_attributes` and `label_superset`
-//!   are built and populated on every request.
+//! - **`Vec<KeyValue>` allocations**: `span_attributes` is still built per
+//!   request. `label_superset` (the metric label set) is pre-sized to its
+//!   final capacity and ownership of the per-request `KeyValue`s is moved
+//!   into it instead of being cloned, so it only allocates its backing
+//!   buffer.
 //! - **Unconditional attribute extraction**: all `KeyValue` attributes are built
 //!   on every request without first checking whether the tracer or meter are
 //!   no-ops.
@@ -65,12 +68,12 @@
 //!
 //! | Scenario             | Median   | vs baseline |
 //! | -------------------- | -------- | ----------- |
-//! | baseline             |   44 ns  | —           |
-//! | noop                 |  568 ns  | +524 ns     |
-//! | tracing              |  708 ns  | +664 ns     |
-//! | tracing-sampled-out  |  592 ns  | +548 ns     |
-//! | metrics              |  895 ns  | +851 ns     |
-//! | tracing + metrics    | 1054 ns  | +1010 ns    |
+//! | baseline             |   53 ns  | —           |
+//! | noop                 |  559 ns  | +506 ns     |
+//! | tracing              |  680 ns  | +627 ns     |
+//! | tracing-sampled-out  |  581 ns  | +528 ns     |
+//! | metrics              |  855 ns  | +802 ns     |
+//! | tracing + metrics    |  970 ns  | +917 ns     |
 //!
 //! Captured on: MacBook Pro, Apple M4 Pro (10P + 4E cores), 24 GB RAM,
 //! macOS 26.4.1, rustc 1.95.0, OpenTelemetry 0.32.
