@@ -1,4 +1,4 @@
-# Tower OTEL HTTP Instrumentation Middleware
+# Tower OpenTelemetry HTTP Instrumentation Middleware
 
 ![OpenTelemetry — An observability framework for cloud-native software.][splash]
 
@@ -9,48 +9,41 @@
 | Stability | alpha                                        |
 | Owners    | [Franco Posa](https://github.com/francoposa), [Jan Steinke](https://github.com/jan-xyz) |
 
-OpenTelemetry HTTP Metrics and Tracing Middleware for Tower-compatible Rust HTTP servers.
-
-This middleware provides both metrics and distributed tracing for HTTP requests, following OpenTelemetry semantic conventions.
-
-[![Crates.io: opentelemetry-instrumentation-tower](https://img.shields.io/crates/v/opentelemetry-instrumentation-tower.svg)](https://crates.io/crates/opentelemetry-instrumentation-tower)
+[![Crates.io](https://img.shields.io/crates/v/opentelemetry-instrumentation-tower.svg)](https://crates.io/crates/opentelemetry-instrumentation-tower)
 [![Documentation](https://docs.rs/opentelemetry-instrumentation-tower/badge.svg)](https://docs.rs/opentelemetry-instrumentation-tower)
+[![License](https://img.shields.io/crates/l/opentelemetry-instrumentation-tower)](./LICENSE)
 [![Slack](https://img.shields.io/badge/slack-@cncf/otel/rust-brightgreen.svg?logo=slack)](https://cloud-native.slack.com/archives/C03GDP0H023)
 
-## Features
+[OpenTelemetry](https://opentelemetry.io/) HTTP metrics and tracing middleware
+for [Tower](https://docs.rs/tower)-compatible Rust HTTP servers (Axum, Hyper,
+Tonic, etc.). The middleware emits the standard `http.server.*` metrics and a
+server span per request, following the OpenTelemetry
+[HTTP semantic conventions](https://opentelemetry.io/docs/specs/semconv/http/).
 
-- **HTTP Metrics**: Request duration, active requests, request/response body sizes
-- **Distributed Tracing**: HTTP spans with semantic attributes
-- **Semantic Conventions**: Uses OpenTelemetry semantic conventions for consistent attribute naming
-- **Flexible Configuration**: Support for custom attribute extractors and tracer configuration
-- **Framework Support**: Works with any Tower-compatible HTTP framework (Axum, Hyper, Tonic etc.)
+## Quick start
 
-## Metrics
+With the default `axum` feature, applying the middleware is a single layer call:
 
-The middleware exports the following metrics:
+```rust
+use axum::{routing::get, Router};
+use opentelemetry_instrumentation_tower::HTTPLayer;
 
-- `http.server.request.duration` - Duration of HTTP requests
-- `http.server.active_requests` - Number of active HTTP requests
-- `http.server.request.body.size` - Size of HTTP request bodies
-- `http.server.response.body.size` - Size of HTTP response bodies
+let app: Router = Router::new()
+    .route("/", get(|| async { "hello" }))
+    // Apply *after* the routes so the matched route template is available.
+    .layer(HTTPLayer::new());
+```
 
-## Tracing
-
-HTTP spans are created with the following attributes (following OpenTelemetry semantic conventions):
-
-- `http.request.method` - HTTP method
-- `url.scheme` - URL scheme (http/https)
-- `url.path` - Request path
-- `url.full` - Full URL
-- `user_agent.original` - User agent string
-- `http.response.status_code` - HTTP response status code
+See the [API documentation](https://docs.rs/opentelemetry-instrumentation-tower)
+for emitted metrics, span attributes, customization via `HTTPLayerBuilder`, and
+cardinality guidance.
 
 ## Examples
 
-See `examples` directory in repo for runnable code and supporting config files.
-Attempts are made to keep the code here synced, but it will not be perfect.
+Runnable examples (Axum, Hyper, custom route extractor) live in the
+[`examples/`](./examples) directory. They pin specific OpenTelemetry crate
+versions and may need adjustments when those versions change.
 
-OTEL libraries in particular are sensitive to minor version changes at this point,
-so the examples may only work with the OTEL crate versions pinned in `examples`.
+## Changelog
 
-Created by Franco Posa (franco @ [francoposa.io](https://francoposa.io))
+See [CHANGELOG.md](./CHANGELOG.md) for release history.
