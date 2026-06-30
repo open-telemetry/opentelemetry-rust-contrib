@@ -545,6 +545,7 @@ impl<RouteExt, ReqExt, ResExt> HTTPLayerBuilder<RouteExt, ReqExt, ResExt> {
 fn instrumentation_scope() -> InstrumentationScope {
     InstrumentationScope::builder(INSTRUMENTATION_NAME)
         .with_version(env!("CARGO_PKG_VERSION"))
+        .with_schema_url(opentelemetry_semantic_conventions::SCHEMA_URL)
         .build()
 }
 
