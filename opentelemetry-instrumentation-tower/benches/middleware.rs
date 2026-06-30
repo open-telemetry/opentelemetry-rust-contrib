@@ -105,17 +105,6 @@ fn build_requests(n: u64) -> Vec<http::Request<String>> {
         .collect()
 }
 
-/// Setup meter provider with in-memory exporter (minimal I/O overhead)
-fn setup_meter() -> (SdkMeterProvider, InMemoryMetricExporter) {
-    let exporter = InMemoryMetricExporter::default();
-    // Use very long interval to ensure no timer-based exports during benchmark
-    let reader = PeriodicReader::builder(exporter.clone())
-        .with_interval(Duration::from_secs(3600))
-        .build();
-    let provider = SdkMeterProvider::builder().with_reader(reader).build();
-    (provider, exporter)
-}
-
 fn benchmark_middleware(c: &mut Criterion) {
     // Use tokio runtime since Criterion's AsyncExecutor is implemented for tokio
     let rt = tokio::runtime::Runtime::new().unwrap();
@@ -227,7 +216,12 @@ fn benchmark_middleware(c: &mut Criterion) {
     // Scenario 5: Metrics only (no-op tracer)
     group.bench_function(BenchmarkId::new("request", "metrics"), |b| {
         let tracer_provider = NoopTracerProvider::new();
-        let (meter_provider, _metric_exporter) = setup_meter();
+        let _metric_exporter = InMemoryMetricExporter::default();
+        // Use very long interval to ensure no timer-based exports during benchmark.
+        let reader = PeriodicReader::builder(_metric_exporter.clone())
+            .with_interval(Duration::from_secs(3600))
+            .build();
+        let meter_provider = SdkMeterProvider::builder().with_reader(reader).build();
         let layer = HTTPLayerBuilder::builder()
             .with_tracer_provider(tracer_provider)
             .with_meter_provider(meter_provider)
@@ -255,7 +249,12 @@ fn benchmark_middleware(c: &mut Criterion) {
     group.bench_function(BenchmarkId::new("request", "tracing+metrics"), |b| {
         // No exporter = no-op processing, just measures instrumentation overhead.
         let tracer_provider = SdkTracerProvider::builder().build();
-        let (meter_provider, _metric_exporter) = setup_meter();
+        let _metric_exporter = InMemoryMetricExporter::default();
+        // Use very long interval to ensure no timer-based exports during benchmark.
+        let reader = PeriodicReader::builder(_metric_exporter.clone())
+            .with_interval(Duration::from_secs(3600))
+            .build();
+        let meter_provider = SdkMeterProvider::builder().with_reader(reader).build();
         let layer = HTTPLayerBuilder::builder()
             .with_tracer_provider(tracer_provider)
             .with_meter_provider(meter_provider)
