@@ -77,8 +77,11 @@
 //!
 
 use criterion::{criterion_group, criterion_main, BenchmarkId, Criterion, Throughput};
+use http_body_util::{BodyExt, Empty};
 use opentelemetry::global;
+use opentelemetry::metrics::noop::NoopMeterProvider;
 use opentelemetry::trace::noop::NoopTracerProvider;
+use opentelemetry_instrumentation_tower::grpc::GRPCLayerBuilder;
 use opentelemetry_instrumentation_tower::HTTPLayerBuilder;
 use opentelemetry_sdk::{
     metrics::{InMemoryMetricExporter, PeriodicReader, SdkMeterProvider},
@@ -94,6 +97,19 @@ async fn handler(_req: http::Request<String>) -> Result<http::Response<String>, 
     Ok(http::Response::new(String::new()))
 }
 
+/// Minimal gRPC handler — returns an empty HTTP/2 gRPC response.
+async fn grpc_handler(
+    _req: http::Request<Empty<&'static [u8]>>,
+) -> Result<http::Response<Empty<&'static [u8]>>, Infallible> {
+    Ok(http::Response::builder()
+        .status(http::StatusCode::OK)
+        .version(http::Version::HTTP_2)
+        .header("content-type", "application/grpc")
+        .header("grpc-status", "0")
+        .body(Empty::new())
+        .unwrap())
+}
+
 /// Build requests outside the timed loop so request construction cost does not
 /// inflate the middleware overhead measurement.
 fn build_requests(n: u64) -> Vec<http::Request<String>> {
@@ -103,6 +119,23 @@ fn build_requests(n: u64) -> Vec<http::Request<String>> {
                 .method("GET")
                 .uri("http://example.com/users/123")
                 .body(String::new())
+                .unwrap()
+        })
+        .collect()
+}
+
+/// Build gRPC-shaped HTTP/2 requests outside the timed loop so request construction
+/// cost does not inflate the middleware overhead measurement.
+fn build_grpc_requests(n: u64) -> Vec<http::Request<Empty<&'static [u8]>>> {
+    (0..n)
+        .map(|_| {
+            http::Request::builder()
+                .method("POST")
+                .uri("http://example.com/package.Service/GetThing")
+                .version(http::Version::HTTP_2)
+                .header("content-type", "application/grpc")
+                .header("te", "trailers")
+                .body(Empty::new())
                 .unwrap()
         })
         .collect()
@@ -130,6 +163,10 @@ fn setup_sampled_out_tracer() -> SdkTracerProvider {
 /// Call this in scenarios that should not generate traces.
 fn noop_tracer() {
     global::set_tracer_provider(NoopTracerProvider::new());
+}
+
+fn noop_meter() {
+    global::set_meter_provider(NoopMeterProvider::new());
 }
 
 /// Setup meter provider with in-memory exporter (minimal I/O overhead)
@@ -282,6 +319,150 @@ fn benchmark_middleware(c: &mut Criterion) {
     });
 
     group.finish();
+
+    let mut grpc_group = c.benchmark_group("tower-grpc-instrumentation");
+    grpc_group.throughput(Throughput::Elements(1));
+
+    grpc_group.bench_function(BenchmarkId::new("request", "baseline"), |b| {
+        b.to_async(&rt).iter_custom(|iters| async move {
+            let mut service = tower::service_fn(grpc_handler);
+            let requests = build_grpc_requests(iters);
+
+            let start = std::time::Instant::now();
+            for req in requests {
+                let resp = service.ready().await.unwrap().call(req).await.unwrap();
+                let body = resp.into_body().collect().await.unwrap();
+                black_box(body);
+            }
+            start.elapsed()
+        });
+    });
+
+    grpc_group.bench_function(BenchmarkId::new("request", "noop"), |b| {
+        noop_tracer();
+        noop_meter();
+        let layer = GRPCLayerBuilder::builder().build();
+        b.to_async(&rt).iter_custom(|iters| {
+            let layer = layer.clone();
+            async move {
+                let mut service = ServiceBuilder::new()
+                    .layer(layer)
+                    .service(tower::service_fn(grpc_handler));
+                let requests = build_grpc_requests(iters);
+
+                let start = std::time::Instant::now();
+                for req in requests {
+                    let resp = service.ready().await.unwrap().call(req).await.unwrap();
+                    let body = resp.into_body().collect().await.unwrap();
+                    black_box(body);
+                }
+                start.elapsed()
+            }
+        });
+    });
+
+    grpc_group.bench_function(BenchmarkId::new("request", "tracing"), |b| {
+        let tracer_provider = setup_tracer();
+        noop_meter();
+        let layer = GRPCLayerBuilder::builder()
+            .with_tracer_provider(tracer_provider)
+            .build();
+        b.to_async(&rt).iter_custom(|iters| {
+            let layer = layer.clone();
+            async move {
+                let mut service = ServiceBuilder::new()
+                    .layer(layer)
+                    .service(tower::service_fn(grpc_handler));
+                let requests = build_grpc_requests(iters);
+
+                let start = std::time::Instant::now();
+                for req in requests {
+                    let resp = service.ready().await.unwrap().call(req).await.unwrap();
+                    let body = resp.into_body().collect().await.unwrap();
+                    black_box(body);
+                }
+                start.elapsed()
+            }
+        });
+    });
+
+    grpc_group.bench_function(BenchmarkId::new("request", "tracing-sampled-out"), |b| {
+        let tracer_provider = setup_sampled_out_tracer();
+        noop_meter();
+        let layer = GRPCLayerBuilder::builder()
+            .with_tracer_provider(tracer_provider)
+            .build();
+        b.to_async(&rt).iter_custom(|iters| {
+            let layer = layer.clone();
+            async move {
+                let mut service = ServiceBuilder::new()
+                    .layer(layer)
+                    .service(tower::service_fn(grpc_handler));
+                let requests = build_grpc_requests(iters);
+
+                let start = std::time::Instant::now();
+                for req in requests {
+                    let resp = service.ready().await.unwrap().call(req).await.unwrap();
+                    let body = resp.into_body().collect().await.unwrap();
+                    black_box(body);
+                }
+                start.elapsed()
+            }
+        });
+    });
+
+    grpc_group.bench_function(BenchmarkId::new("request", "metrics"), |b| {
+        noop_tracer();
+        let (meter_provider, _metric_exporter) = setup_meter();
+        let layer = GRPCLayerBuilder::builder()
+            .with_meter_provider(meter_provider)
+            .build();
+        b.to_async(&rt).iter_custom(|iters| {
+            let layer = layer.clone();
+            async move {
+                let mut service = ServiceBuilder::new()
+                    .layer(layer)
+                    .service(tower::service_fn(grpc_handler));
+                let requests = build_grpc_requests(iters);
+
+                let start = std::time::Instant::now();
+                for req in requests {
+                    let resp = service.ready().await.unwrap().call(req).await.unwrap();
+                    let body = resp.into_body().collect().await.unwrap();
+                    black_box(body);
+                }
+                start.elapsed()
+            }
+        });
+    });
+
+    grpc_group.bench_function(BenchmarkId::new("request", "tracing+metrics"), |b| {
+        let tracer_provider = setup_tracer();
+        let (meter_provider, _metric_exporter) = setup_meter();
+        let layer = GRPCLayerBuilder::builder()
+            .with_tracer_provider(tracer_provider)
+            .with_meter_provider(meter_provider)
+            .build();
+        b.to_async(&rt).iter_custom(|iters| {
+            let layer = layer.clone();
+            async move {
+                let mut service = ServiceBuilder::new()
+                    .layer(layer)
+                    .service(tower::service_fn(grpc_handler));
+                let requests = build_grpc_requests(iters);
+
+                let start = std::time::Instant::now();
+                for req in requests {
+                    let resp = service.ready().await.unwrap().call(req).await.unwrap();
+                    let body = resp.into_body().collect().await.unwrap();
+                    black_box(body);
+                }
+                start.elapsed()
+            }
+        });
+    });
+
+    grpc_group.finish();
 }
 
 criterion_group!(benches, benchmark_middleware);
