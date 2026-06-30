@@ -369,7 +369,7 @@ pin_project! {
             let this = this.project();
             if let Some(fin) = this.finalization.take() {
                 let _guard = this.otel_cx.clone().attach();
-                finalize_response(*this.rpc_status_code, fin);
+                finalize_response(this.rpc_status_code, fin);
             }
         }
     }
@@ -411,7 +411,7 @@ where
             None => {
                 if let Some(fin) = this.finalization.take() {
                     let _guard = this.otel_cx.clone().attach();
-                    finalize_response(*this.rpc_status_code, fin);
+                    finalize_response(this.rpc_status_code, fin);
                 }
                 Poll::Ready(None)
             }
