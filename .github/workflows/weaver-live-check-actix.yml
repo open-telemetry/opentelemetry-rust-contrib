@@ -49,7 +49,7 @@ jobs:
         run: rustup toolchain install stable --profile minimal --no-self-update
 
       - name: Cache cargo
-        uses: actions/cache@v4
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
         with:
           path: |
             ~/.cargo/registry
@@ -62,13 +62,13 @@ jobs:
         run: cargo build --release
 
       - name: Setup weaver
-        uses: open-telemetry/weaver/.github/actions/setup-weaver@v0.24.0
+        uses: open-telemetry/weaver/.github/actions/setup-weaver@9b84f5cd76cb98e8aaf37bc58936b31fe0ddbab4 # v0.24.0
         with:
           version: ${{ env.WEAVER_VERSION }}
 
       - name: Start weaver live-check
         id: live-check
-        uses: open-telemetry/weaver/.github/actions/weaver-live-check-start@v0.24.0
+        uses: open-telemetry/weaver/.github/actions/weaver-live-check-start@9b84f5cd76cb98e8aaf37bc58936b31fe0ddbab4 # v0.24.0
         with:
           registry: ${{ env.SEMCONV_REGISTRY }}
 
@@ -127,13 +127,13 @@ jobs:
 
       - name: Stop weaver live-check
         if: always()
-        uses: open-telemetry/weaver/.github/actions/weaver-live-check-stop@v0.24.0
+        uses: open-telemetry/weaver/.github/actions/weaver-live-check-stop@9b84f5cd76cb98e8aaf37bc58936b31fe0ddbab4 # v0.24.0
         with:
           fail-on: violation
 
       - name: Upload live-check report
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: weaver-live-check-actix
           path: ${{ steps.live-check.outputs.state-dir }}
