@@ -29,6 +29,7 @@ tower-layer = { version = "0.3", default-features = false }
 
 [dev-dependencies]
 criterion = { workspace = true, features = ["async_tokio"] }
+http-body-util = { version = "0.1", default-features = false }
 opentelemetry_sdk = { workspace = true, features = ["metrics", "trace", "testing"] }
 tokio = { version = "1.0", features = ["macros", "rt", "rt-multi-thread"] }
 tower = { version = "0.5", features = ["util"] }

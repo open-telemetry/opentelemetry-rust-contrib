@@ -24,43 +24,6 @@ const OTEL_DEFAULT_RPC_SERVER_DURATION_BOUNDS: [f64; 14] = [
     0.005, 0.01, 0.025, 0.05, 0.075, 0.1, 0.25, 0.5, 0.75, 1.0, 2.5, 5.0, 7.5, 10.0,
 ];
 
-/// Extracts a fully-qualified gRPC method from an HTTP request.
-pub trait GRPCMethodExtractor<B>: Clone + Send + Sync + 'static {
-    /// Returns the `rpc.method` value when available.
-    fn extract_method(&self, req: &http::Request<B>) -> Option<String>;
-}
-
-/// Extracts the gRPC method from paths shaped like `/package.Service/Method`.
-#[derive(Clone, Default)]
-pub struct DefaultGRPCMethodExtractor;
-
-impl<B> GRPCMethodExtractor<B> for DefaultGRPCMethodExtractor {
-    fn extract_method(&self, req: &http::Request<B>) -> Option<String> {
-        parse_grpc_path(req.uri().path()).map(str::to_owned)
-    }
-}
-
-/// A function-based gRPC method extractor.
-#[derive(Clone)]
-pub struct FnGRPCMethodExtractor<F> {
-    extractor: F,
-}
-
-impl<F> FnGRPCMethodExtractor<F> {
-    pub fn new(extractor: F) -> Self {
-        Self { extractor }
-    }
-}
-
-impl<F, B> GRPCMethodExtractor<B> for FnGRPCMethodExtractor<F>
-where
-    F: Fn(&http::Request<B>) -> Option<String> + Clone + Send + Sync + 'static,
-{
-    fn extract_method(&self, req: &http::Request<B>) -> Option<String> {
-        (self.extractor)(req)
-    }
-}
-
 /// Trait for extracting custom attributes from gRPC requests.
 pub trait GRPCRequestAttributeExtractor<B>: Clone + Send + Sync + 'static {
     fn extract_attributes(&self, req: &http::Request<B>) -> Vec<KeyValue>;
@@ -136,14 +99,8 @@ struct GRPCLayerState {
 
 #[derive(Clone)]
 /// [`Service`] used by [`GRPCLayer`].
-pub struct GRPCService<
-    S,
-    MethodExt = DefaultGRPCMethodExtractor,
-    ReqExt = NoOpGRPCExtractor,
-    ResExt = NoOpGRPCExtractor,
-> {
+pub struct GRPCService<S, ReqExt = NoOpGRPCExtractor, ResExt = NoOpGRPCExtractor> {
     state: Arc<GRPCLayerState>,
-    method_extractor: MethodExt,
     request_extractor: ReqExt,
     response_extractor: ResExt,
     inner_service: S,
@@ -152,13 +109,8 @@ pub struct GRPCService<
 
 #[derive(Clone)]
 /// [`Layer`] which applies OpenTelemetry gRPC server metrics and tracing middleware.
-pub struct GRPCLayer<
-    MethodExt = DefaultGRPCMethodExtractor,
-    ReqExt = NoOpGRPCExtractor,
-    ResExt = NoOpGRPCExtractor,
-> {
+pub struct GRPCLayer<ReqExt = NoOpGRPCExtractor, ResExt = NoOpGRPCExtractor> {
     state: Arc<GRPCLayerState>,
-    method_extractor: MethodExt,
     request_extractor: ReqExt,
     response_extractor: ResExt,
     tracer: Arc<BoxedTracer>,
@@ -178,15 +130,10 @@ impl Default for GRPCLayer {
 }
 
 /// Builder for [`GRPCLayer`].
-pub struct GRPCLayerBuilder<
-    MethodExt = DefaultGRPCMethodExtractor,
-    ReqExt = NoOpGRPCExtractor,
-    ResExt = NoOpGRPCExtractor,
-> {
+pub struct GRPCLayerBuilder<ReqExt = NoOpGRPCExtractor, ResExt = NoOpGRPCExtractor> {
     tracer: Option<Arc<BoxedTracer>>,
     meter: Option<Meter>,
     duration_bounds: Option<Vec<f64>>,
-    method_extractor: MethodExt,
     request_extractor: ReqExt,
     response_extractor: ResExt,
 }
@@ -197,45 +144,18 @@ impl GRPCLayerBuilder {
             tracer: None,
             meter: None,
             duration_bounds: Some(Vec::from(OTEL_DEFAULT_RPC_SERVER_DURATION_BOUNDS)),
-            method_extractor: DefaultGRPCMethodExtractor,
             request_extractor: NoOpGRPCExtractor,
             response_extractor: NoOpGRPCExtractor,
         }
     }
 }
 
-impl<MethodExt, ReqExt, ResExt> GRPCLayerBuilder<MethodExt, ReqExt, ResExt> {
-    /// Set a custom gRPC method extractor.
-    pub fn with_method_extractor<NewMethodExt>(
-        self,
-        extractor: NewMethodExt,
-    ) -> GRPCLayerBuilder<NewMethodExt, ReqExt, ResExt> {
-        GRPCLayerBuilder {
-            tracer: self.tracer,
-            meter: self.meter,
-            duration_bounds: self.duration_bounds,
-            method_extractor: extractor,
-            request_extractor: self.request_extractor,
-            response_extractor: self.response_extractor,
-        }
-    }
-
-    /// Convenience method to set a function-based gRPC method extractor.
-    pub fn with_method_extractor_fn<F, B>(
-        self,
-        f: F,
-    ) -> GRPCLayerBuilder<FnGRPCMethodExtractor<F>, ReqExt, ResExt>
-    where
-        F: Fn(&http::Request<B>) -> Option<String> + Clone + Send + Sync + 'static,
-    {
-        self.with_method_extractor(FnGRPCMethodExtractor::new(f))
-    }
-
+impl<ReqExt, ResExt> GRPCLayerBuilder<ReqExt, ResExt> {
     /// Set a request attribute extractor.
     pub fn with_request_extractor<NewReqExt, B>(
         self,
         extractor: NewReqExt,
-    ) -> GRPCLayerBuilder<MethodExt, NewReqExt, ResExt>
+    ) -> GRPCLayerBuilder<NewReqExt, ResExt>
     where
         NewReqExt: GRPCRequestAttributeExtractor<B>,
     {
@@ -243,7 +163,6 @@ impl<MethodExt, ReqExt, ResExt> GRPCLayerBuilder<MethodExt, ReqExt, ResExt> {
             tracer: self.tracer,
             meter: self.meter,
             duration_bounds: self.duration_bounds,
-            method_extractor: self.method_extractor,
             request_extractor: extractor,
             response_extractor: self.response_extractor,
         }
@@ -253,7 +172,7 @@ impl<MethodExt, ReqExt, ResExt> GRPCLayerBuilder<MethodExt, ReqExt, ResExt> {
     pub fn with_request_extractor_fn<F, B>(
         self,
         f: F,
-    ) -> GRPCLayerBuilder<MethodExt, FnGRPCRequestExtractor<F>, ResExt>
+    ) -> GRPCLayerBuilder<FnGRPCRequestExtractor<F>, ResExt>
     where
         F: Fn(&http::Request<B>) -> Vec<KeyValue> + Clone + Send + Sync + 'static,
     {
@@ -264,7 +183,7 @@ impl<MethodExt, ReqExt, ResExt> GRPCLayerBuilder<MethodExt, ReqExt, ResExt> {
     pub fn with_response_extractor<NewResExt, B>(
         self,
         extractor: NewResExt,
-    ) -> GRPCLayerBuilder<MethodExt, ReqExt, NewResExt>
+    ) -> GRPCLayerBuilder<ReqExt, NewResExt>
     where
         NewResExt: GRPCResponseAttributeExtractor<B>,
     {
@@ -272,7 +191,6 @@ impl<MethodExt, ReqExt, ResExt> GRPCLayerBuilder<MethodExt, ReqExt, ResExt> {
             tracer: self.tracer,
             meter: self.meter,
             duration_bounds: self.duration_bounds,
-            method_extractor: self.method_extractor,
             request_extractor: self.request_extractor,
             response_extractor: extractor,
         }
@@ -282,7 +200,7 @@ impl<MethodExt, ReqExt, ResExt> GRPCLayerBuilder<MethodExt, ReqExt, ResExt> {
     pub fn with_response_extractor_fn<F, B>(
         self,
         f: F,
-    ) -> GRPCLayerBuilder<MethodExt, ReqExt, FnGRPCResponseExtractor<F>>
+    ) -> GRPCLayerBuilder<ReqExt, FnGRPCResponseExtractor<F>>
     where
         F: Fn(&http::Response<B>) -> Vec<KeyValue> + Clone + Send + Sync + 'static,
     {
@@ -307,7 +225,7 @@ impl<MethodExt, ReqExt, ResExt> GRPCLayerBuilder<MethodExt, ReqExt, ResExt> {
         self
     }
 
-    pub fn build(self) -> GRPCLayer<MethodExt, ReqExt, ResExt> {
+    pub fn build(self) -> GRPCLayer<ReqExt, ResExt> {
         let tracer = self
             .tracer
             .unwrap_or_else(|| Arc::new(global::tracer_with_scope(instrumentation_scope())));
@@ -320,7 +238,6 @@ impl<MethodExt, ReqExt, ResExt> GRPCLayerBuilder<MethodExt, ReqExt, ResExt> {
 
         GRPCLayer {
             state: Arc::new(GRPCLayerState::new(meter, duration_bounds)),
-            method_extractor: self.method_extractor,
             request_extractor: self.request_extractor,
             response_extractor: self.response_extractor,
             tracer,
@@ -341,18 +258,16 @@ impl GRPCLayerState {
     }
 }
 
-impl<S, MethodExt, ReqExt, ResExt> Layer<S> for GRPCLayer<MethodExt, ReqExt, ResExt>
+impl<S, ReqExt, ResExt> Layer<S> for GRPCLayer<ReqExt, ResExt>
 where
-    MethodExt: Clone,
     ReqExt: Clone,
     ResExt: Clone,
 {
-    type Service = GRPCService<S, MethodExt, ReqExt, ResExt>;
+    type Service = GRPCService<S, ReqExt, ResExt>;
 
     fn layer(&self, service: S) -> Self::Service {
         GRPCService {
             state: self.state.clone(),
-            method_extractor: self.method_extractor.clone(),
             request_extractor: self.request_extractor.clone(),
             response_extractor: self.response_extractor.clone(),
             inner_service: service,
@@ -374,6 +289,13 @@ struct RequestFinalization<ResExt> {
     response_extractor: ResExt,
 }
 
+struct BodyFinalization {
+    request_data: RequestData,
+    layer_state: Arc<GRPCLayerState>,
+    custom_response_attributes: Vec<KeyValue>,
+    http_status: http::StatusCode,
+}
+
 pin_project! {
     /// Future type returned by [`GRPCService`].
     pub struct GRPCResponseFuture<F, ResExt> {
@@ -388,37 +310,135 @@ impl<F, ResBody, E, ResExt> Future for GRPCResponseFuture<F, ResExt>
 where
     F: Future<Output = result::Result<http::Response<ResBody>, E>>,
     E: fmt::Debug,
+    ResBody: http_body::Body,
+    ResBody::Error: fmt::Debug,
     ResExt: GRPCResponseAttributeExtractor<ResBody>,
 {
-    type Output = F::Output;
+    type Output = result::Result<http::Response<GRPCResponseBody<ResBody>>, E>;
 
     fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
         let this = self.project();
         let _guard = this.otel_cx.clone().attach();
         let result = std::task::ready!(this.inner.poll(cx));
-        if let Some(fin) = this.finalization.take() {
-            finalize_request(
-                &result,
-                fin.request_data,
-                &fin.layer_state,
-                &fin.response_extractor,
-            );
+        match result {
+            Ok(response) => {
+                let fin = this
+                    .finalization
+                    .take()
+                    .expect("gRPC response future polled after completion");
+                let custom_response_attributes =
+                    fin.response_extractor.extract_attributes(&response);
+                let http_status = response.status();
+                let rpc_status_code = rpc_status_code(response.headers(), http_status);
+                let (parts, body) = response.into_parts();
+                let body = GRPCResponseBody {
+                    inner: body,
+                    otel_cx: this.otel_cx.clone(),
+                    finalization: Some(BodyFinalization {
+                        request_data: fin.request_data,
+                        layer_state: fin.layer_state,
+                        custom_response_attributes,
+                        http_status,
+                    }),
+                    rpc_status_code,
+                };
+                Poll::Ready(Ok(http::Response::from_parts(parts, body)))
+            }
+            Err(error) => {
+                if let Some(fin) = this.finalization.take() {
+                    finalize_error(&error, fin.request_data, &fin.layer_state);
+                }
+                Poll::Ready(Err(error))
+            }
         }
-        Poll::Ready(result)
     }
 }
 
-impl<S, ReqBody, ResBody, MethodExt, ReqExt, ResExt> Service<http::Request<ReqBody>>
-    for GRPCService<S, MethodExt, ReqExt, ResExt>
+pin_project! {
+    /// Response body wrapper that observes gRPC status from trailers.
+    pub struct GRPCResponseBody<B> {
+        #[pin]
+        inner: B,
+        otel_cx: OtelContext,
+        finalization: Option<BodyFinalization>,
+        rpc_status_code: &'static str,
+    }
+
+    impl<B> PinnedDrop for GRPCResponseBody<B> {
+        fn drop(this: Pin<&mut Self>) {
+            let this = this.project();
+            if let Some(fin) = this.finalization.take() {
+                let _guard = this.otel_cx.clone().attach();
+                finalize_response(*this.rpc_status_code, fin);
+            }
+        }
+    }
+}
+
+impl<B> http_body::Body for GRPCResponseBody<B>
+where
+    B: http_body::Body,
+    B::Error: fmt::Debug,
+{
+    type Data = B::Data;
+    type Error = B::Error;
+
+    fn poll_frame(
+        self: Pin<&mut Self>,
+        cx: &mut Context<'_>,
+    ) -> Poll<Option<result::Result<http_body::Frame<Self::Data>, Self::Error>>> {
+        let mut this = self.project();
+
+        match std::task::ready!(this.inner.as_mut().poll_frame(cx)) {
+            Some(Ok(frame)) => {
+                if let Some(trailers) = frame.trailers_ref() {
+                    if let Some(fin) = this.finalization.take() {
+                        let rpc_status_code = rpc_status_code(trailers, fin.http_status);
+                        *this.rpc_status_code = rpc_status_code;
+                        let _guard = this.otel_cx.clone().attach();
+                        finalize_response(rpc_status_code, fin);
+                    }
+                }
+                Poll::Ready(Some(Ok(frame)))
+            }
+            Some(Err(error)) => {
+                if let Some(fin) = this.finalization.take() {
+                    let _guard = this.otel_cx.clone().attach();
+                    finalize_body_error(&error, fin);
+                }
+                Poll::Ready(Some(Err(error)))
+            }
+            None => {
+                if let Some(fin) = this.finalization.take() {
+                    let _guard = this.otel_cx.clone().attach();
+                    finalize_response(*this.rpc_status_code, fin);
+                }
+                Poll::Ready(None)
+            }
+        }
+    }
+
+    fn is_end_stream(&self) -> bool {
+        self.inner.is_end_stream()
+    }
+
+    fn size_hint(&self) -> http_body::SizeHint {
+        self.inner.size_hint()
+    }
+}
+
+impl<S, ReqBody, ResBody, ReqExt, ResExt> Service<http::Request<ReqBody>>
+    for GRPCService<S, ReqExt, ResExt>
 where
     S: Service<http::Request<ReqBody>, Response = http::Response<ResBody>>,
     S::Future: Send,
     S::Error: fmt::Debug,
-    MethodExt: GRPCMethodExtractor<ReqBody>,
     ReqExt: GRPCRequestAttributeExtractor<ReqBody>,
     ResExt: GRPCResponseAttributeExtractor<ResBody>,
+    ResBody: http_body::Body,
+    ResBody::Error: fmt::Debug,
 {
-    type Response = S::Response;
+    type Response = http::Response<GRPCResponseBody<ResBody>>;
     type Error = S::Error;
     type Future = GRPCResponseFuture<S::Future, ResExt>;
 
@@ -432,10 +452,9 @@ where
             propagator.extract(&HeaderExtractor(req.headers()))
         });
 
-        let rpc_method = self
-            .method_extractor
-            .extract_method(&req)
-            .unwrap_or_else(|| req.uri().path().trim_start_matches('/').to_owned());
+        let rpc_method = parse_grpc_path(req.uri().path())
+            .unwrap_or_else(|| req.uri().path().trim_start_matches('/'))
+            .to_owned();
 
         let system_kv = KeyValue::new(semconv::attribute::RPC_SYSTEM_NAME, "grpc");
         let method_kv = KeyValue::new(semconv::attribute::RPC_METHOD, rpc_method.clone());
@@ -484,92 +503,87 @@ where
     }
 }
 
-fn finalize_request<ResBody, E, ResExt>(
-    result: &result::Result<http::Response<ResBody>, E>,
-    request_data: RequestData,
-    layer_state: &Arc<GRPCLayerState>,
-    response_extractor: &ResExt,
-) where
-    E: fmt::Debug,
-    ResExt: GRPCResponseAttributeExtractor<ResBody>,
-{
+fn finalize_response(rpc_status_code: &'static str, fin: BodyFinalization) {
     let cx = OtelContext::current();
     let span = cx.span();
+    let failed = is_error_status(rpc_status_code);
 
-    match result {
-        Ok(response) => {
-            let rpc_status_code = rpc_status_code(response);
-            let custom_response_attributes = response_extractor.extract_attributes(response);
-            let failed = is_error_status(rpc_status_code);
-
-            let mut label_superset = Vec::with_capacity(
-                3 + usize::from(failed)
-                    + request_data.custom_request_attributes.len()
-                    + custom_response_attributes.len(),
-            );
-            label_superset.push(request_data.system_kv.clone());
-            label_superset.push(request_data.method_kv.clone());
-            label_superset.push(KeyValue::new(
-                semconv::attribute::RPC_RESPONSE_STATUS_CODE,
-                rpc_status_code,
-            ));
-            if failed {
-                label_superset.push(KeyValue::new(
-                    semconv::attribute::ERROR_TYPE,
-                    rpc_status_code,
-                ));
-            }
-            label_superset.extend(request_data.custom_request_attributes);
-            label_superset.extend(custom_response_attributes.iter().cloned());
-
-            span.set_attribute(KeyValue::new(
-                semconv::attribute::RPC_RESPONSE_STATUS_CODE,
-                rpc_status_code,
-            ));
-            for attr in custom_response_attributes {
-                span.set_attribute(attr);
-            }
-            if failed {
-                span.set_attribute(KeyValue::new(
-                    semconv::attribute::ERROR_TYPE,
-                    rpc_status_code,
-                ));
-                span.set_status(Status::Error {
-                    description: format!("gRPC status {rpc_status_code}").into(),
-                });
-            }
-
-            layer_state.server_duration.record(
-                request_data.duration_start.elapsed().as_secs_f64(),
-                &label_superset,
-            );
-        }
-        Err(error) => {
-            span.set_status(Status::Error {
-                description: format!("{error:?}").into(),
-            });
-
-            let label_superset = [
-                request_data.system_kv.clone(),
-                request_data.method_kv.clone(),
-                KeyValue::new(semconv::attribute::ERROR_TYPE, "_OTHER"),
-            ];
-            layer_state.server_duration.record(
-                request_data.duration_start.elapsed().as_secs_f64(),
-                &label_superset,
-            );
-        }
+    let mut label_superset = Vec::with_capacity(
+        3 + usize::from(failed)
+            + fin.request_data.custom_request_attributes.len()
+            + fin.custom_response_attributes.len(),
+    );
+    label_superset.push(fin.request_data.system_kv.clone());
+    label_superset.push(fin.request_data.method_kv.clone());
+    label_superset.push(KeyValue::new(
+        semconv::attribute::RPC_RESPONSE_STATUS_CODE,
+        rpc_status_code,
+    ));
+    if failed {
+        label_superset.push(KeyValue::new(
+            semconv::attribute::ERROR_TYPE,
+            rpc_status_code,
+        ));
     }
+    label_superset.extend(fin.request_data.custom_request_attributes);
+    label_superset.extend(fin.custom_response_attributes.iter().cloned());
+
+    span.set_attribute(KeyValue::new(
+        semconv::attribute::RPC_RESPONSE_STATUS_CODE,
+        rpc_status_code,
+    ));
+    for attr in fin.custom_response_attributes {
+        span.set_attribute(attr);
+    }
+    if failed {
+        span.set_attribute(KeyValue::new(
+            semconv::attribute::ERROR_TYPE,
+            rpc_status_code,
+        ));
+        span.set_status(Status::Error {
+            description: format!("gRPC status {rpc_status_code}").into(),
+        });
+    }
+
+    fin.layer_state.server_duration.record(
+        fin.request_data.duration_start.elapsed().as_secs_f64(),
+        &label_superset,
+    );
 }
 
-fn rpc_status_code<B>(response: &http::Response<B>) -> &'static str {
-    response
-        .headers()
+fn finalize_error(
+    error: &impl fmt::Debug,
+    request_data: RequestData,
+    layer_state: &Arc<GRPCLayerState>,
+) {
+    let cx = OtelContext::current();
+    let span = cx.span();
+    span.set_status(Status::Error {
+        description: format!("{error:?}").into(),
+    });
+
+    let label_superset = [
+        request_data.system_kv.clone(),
+        request_data.method_kv.clone(),
+        KeyValue::new(semconv::attribute::ERROR_TYPE, "_OTHER"),
+    ];
+    layer_state.server_duration.record(
+        request_data.duration_start.elapsed().as_secs_f64(),
+        &label_superset,
+    );
+}
+
+fn finalize_body_error(error: &impl fmt::Debug, fin: BodyFinalization) {
+    finalize_error(&error, fin.request_data, &fin.layer_state);
+}
+
+fn rpc_status_code(headers: &http::HeaderMap, http_status: http::StatusCode) -> &'static str {
+    headers
         .get("grpc-status")
         .and_then(|value| value.to_str().ok())
         .map(grpc_status_name)
         .unwrap_or_else(|| {
-            if response.status().is_success() {
+            if http_status.is_success() {
                 "OK"
             } else {
                 "UNKNOWN"
@@ -632,7 +646,10 @@ fn instrumentation_scope() -> InstrumentationScope {
 mod tests {
     use super::*;
 
+    use std::convert::Infallible;
+
     use http::{Request, Response, StatusCode};
+    use http_body_util::{BodyExt, Empty};
     use opentelemetry_sdk::metrics::{
         data::{AggregatedMetrics, MetricData},
         InMemoryMetricExporter, PeriodicReader, SdkMeterProvider,
@@ -640,6 +657,34 @@ mod tests {
     use opentelemetry_sdk::trace::{InMemorySpanExporterBuilder, SdkTracerProvider};
     use std::time::Duration;
     use tower::Service;
+
+    struct TrailerBody {
+        trailers: Option<http::HeaderMap>,
+    }
+
+    impl TrailerBody {
+        fn new(trailers: http::HeaderMap) -> Self {
+            Self {
+                trailers: Some(trailers),
+            }
+        }
+    }
+
+    impl http_body::Body for TrailerBody {
+        type Data = &'static [u8];
+        type Error = Infallible;
+
+        fn poll_frame(
+            mut self: Pin<&mut Self>,
+            _cx: &mut Context<'_>,
+        ) -> Poll<Option<result::Result<http_body::Frame<Self::Data>, Self::Error>>> {
+            Poll::Ready(
+                self.trailers
+                    .take()
+                    .map(|trailers| Ok(http_body::Frame::trailers(trailers))),
+            )
+        }
+    }
 
     #[test]
     fn parses_grpc_path() {
@@ -663,12 +708,12 @@ mod tests {
         let layer = GRPCLayerBuilder::builder()
             .with_tracer_provider(tracer_provider.clone())
             .build();
-        let service = tower::service_fn(|_req: Request<String>| async {
+        let service = tower::service_fn(|_req: Request<Empty<&'static [u8]>>| async {
             Ok::<_, std::convert::Infallible>(
                 Response::builder()
                     .status(StatusCode::OK)
                     .header("grpc-status", "0")
-                    .body(String::new())
+                    .body(Empty::<&'static [u8]>::new())
                     .unwrap(),
             )
         });
@@ -677,10 +722,11 @@ mod tests {
         let request = Request::builder()
             .method("POST")
             .uri("http://example.com/package.Service/GetThing")
-            .body(String::new())
+            .body(Empty::new())
             .unwrap();
 
-        let _response = service.call(request).await.unwrap();
+        let response = service.call(request).await.unwrap();
+        response.into_body().collect().await.unwrap();
         tracer_provider.force_flush().unwrap();
 
         let spans = trace_exporter.get_finished_spans().unwrap();
@@ -706,12 +752,12 @@ mod tests {
         let layer = GRPCLayerBuilder::builder()
             .with_tracer_provider(tracer_provider.clone())
             .build();
-        let service = tower::service_fn(|_req: Request<String>| async {
+        let service = tower::service_fn(|_req: Request<Empty<&'static [u8]>>| async {
             Ok::<_, std::convert::Infallible>(
                 Response::builder()
                     .status(StatusCode::OK)
                     .header("grpc-status", "13")
-                    .body(String::new())
+                    .body(Empty::<&'static [u8]>::new())
                     .unwrap(),
             )
         });
@@ -720,10 +766,11 @@ mod tests {
         let request = Request::builder()
             .method("POST")
             .uri("http://example.com/package.Service/GetThing")
-            .body(String::new())
+            .body(Empty::new())
             .unwrap();
 
-        let _response = service.call(request).await.unwrap();
+        let response = service.call(request).await.unwrap();
+        response.into_body().collect().await.unwrap();
         tracer_provider.force_flush().unwrap();
 
         let spans = trace_exporter.get_finished_spans().unwrap();
@@ -739,6 +786,49 @@ mod tests {
     }
 
     #[tokio::test(flavor = "current_thread")]
+    async fn test_grpc_trailer_status_overrides_header_status() {
+        let trace_exporter = InMemorySpanExporterBuilder::new().build();
+        let tracer_provider = SdkTracerProvider::builder()
+            .with_simple_exporter(trace_exporter.clone())
+            .build();
+
+        let layer = GRPCLayerBuilder::builder()
+            .with_tracer_provider(tracer_provider.clone())
+            .build();
+        let service = tower::service_fn(|_req: Request<Empty<&'static [u8]>>| async {
+            let mut trailers = http::HeaderMap::new();
+            trailers.insert("grpc-status", http::HeaderValue::from_static("13"));
+
+            Ok::<_, std::convert::Infallible>(
+                Response::builder()
+                    .status(StatusCode::OK)
+                    .header("grpc-status", "0")
+                    .body(TrailerBody::new(trailers))
+                    .unwrap(),
+            )
+        });
+        let mut service = layer.layer(service);
+
+        let request = Request::builder()
+            .method("POST")
+            .uri("http://example.com/package.Service/GetThing")
+            .body(Empty::new())
+            .unwrap();
+
+        let response = service.call(request).await.unwrap();
+        response.into_body().collect().await.unwrap();
+        tracer_provider.force_flush().unwrap();
+
+        let spans = trace_exporter.get_finished_spans().unwrap();
+        assert_eq!(spans.len(), 1);
+        assert!(matches!(spans[0].status, Status::Error { .. }));
+        assert!(spans[0].attributes.contains(&KeyValue::new(
+            semconv::attribute::RPC_RESPONSE_STATUS_CODE,
+            "INTERNAL"
+        )));
+    }
+
+    #[tokio::test(flavor = "current_thread")]
     async fn test_grpc_metrics_labels() {
         let exporter = InMemoryMetricExporter::default();
         let reader = PeriodicReader::builder(exporter.clone())
@@ -749,12 +839,12 @@ mod tests {
             .with_meter_provider(meter_provider.clone())
             .build();
 
-        let service = tower::service_fn(|_req: Request<String>| async {
+        let service = tower::service_fn(|_req: Request<Empty<&'static [u8]>>| async {
             Ok::<_, std::convert::Infallible>(
                 Response::builder()
                     .status(StatusCode::OK)
                     .header("grpc-status", "0")
-                    .body(String::new())
+                    .body(Empty::<&'static [u8]>::new())
                     .unwrap(),
             )
         });
@@ -763,10 +853,11 @@ mod tests {
         let request = Request::builder()
             .method("POST")
             .uri("http://example.com/package.Service/GetThing")
-            .body(String::new())
+            .body(Empty::new())
             .unwrap();
 
-        let _response = service.call(request).await.unwrap();
+        let response = service.call(request).await.unwrap();
+        response.into_body().collect().await.unwrap();
         tokio::time::sleep(Duration::from_millis(500)).await;
 
         let metrics = exporter.get_finished_metrics().unwrap();
