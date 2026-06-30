@@ -294,6 +294,7 @@ pub struct HTTPLayerBuilder<
     ReqExt = NoOpExtractor,
     ResExt = NoOpExtractor,
 > {
+    tracer: Option<Arc<BoxedTracer>>,
     meter: Option<Meter>,
     req_dur_bounds: Option<Vec<f64>>,
     route_extractor: RouteExt,
@@ -340,6 +341,7 @@ impl fmt::Debug for Error {
 impl HTTPLayerBuilder {
     pub fn builder() -> Self {
         HTTPLayerBuilder {
+            tracer: None,
             meter: None,
             req_dur_bounds: Some(Vec::from(OTEL_DEFAULT_HTTP_SERVER_DURATION_BOUNDS)),
             route_extractor: DefaultRouteExtractor::default(),
@@ -372,6 +374,7 @@ impl<RouteExt, ReqExt, ResExt> HTTPLayerBuilder<RouteExt, ReqExt, ResExt> {
         extractor: NewRoute,
     ) -> HTTPLayerBuilder<NewRoute, ReqExt, ResExt> {
         HTTPLayerBuilder {
+            tracer: self.tracer,
             meter: self.meter,
             req_dur_bounds: self.req_dur_bounds,
             route_extractor: extractor,
@@ -412,6 +415,7 @@ impl<RouteExt, ReqExt, ResExt> HTTPLayerBuilder<RouteExt, ReqExt, ResExt> {
         NewReqExt: RequestAttributeExtractor<B>,
     {
         HTTPLayerBuilder {
+            tracer: self.tracer,
             meter: self.meter,
             req_dur_bounds: self.req_dur_bounds,
             route_extractor: self.route_extractor,
@@ -429,6 +433,7 @@ impl<RouteExt, ReqExt, ResExt> HTTPLayerBuilder<RouteExt, ReqExt, ResExt> {
         NewResExt: ResponseAttributeExtractor<B>,
     {
         HTTPLayerBuilder {
+            tracer: self.tracer,
             meter: self.meter,
             req_dur_bounds: self.req_dur_bounds,
             route_extractor: self.route_extractor,
@@ -464,7 +469,9 @@ impl<RouteExt, ReqExt, ResExt> HTTPLayerBuilder<RouteExt, ReqExt, ResExt> {
             .req_dur_bounds
             .unwrap_or_else(|| Vec::from(OTEL_DEFAULT_HTTP_SERVER_DURATION_BOUNDS));
 
-        let tracer = Arc::new(global::tracer("opentelemetry-instrumentation-tower"));
+        let tracer = self
+            .tracer
+            .unwrap_or_else(|| Arc::new(global::tracer("opentelemetry-instrumentation-tower")));
 
         let meter: Meter = self
             .meter
@@ -479,17 +486,22 @@ impl<RouteExt, ReqExt, ResExt> HTTPLayerBuilder<RouteExt, ReqExt, ResExt> {
         })
     }
 
+    /// Override the tracer used for trace collection.
+    ///
+    /// By default the layer uses the global tracer provider via
+    /// `opentelemetry::global::tracer()`. Passing a no-op tracer disables traces for
+    /// this layer without changing process-wide global state.
+    pub fn with_tracer(mut self, tracer: impl Into<Arc<BoxedTracer>>) -> Self {
+        self.tracer = Some(tracer.into());
+        self
+    }
+
     /// Override the meter used for metrics collection.
     ///
-    /// This method exists primarily for testing purposes, allowing tests to inject
-    /// a custom meter (e.g., backed by an in-memory exporter) without relying on
-    /// global state. Using global providers in tests can cause interference between
-    /// concurrent tests.
-    ///
-    /// In production, the default behavior of using the global meter provider
-    /// (via `opentelemetry::global::meter()`) is recommended.
-    #[cfg(test)]
-    fn with_meter(mut self, meter: Meter) -> Self {
+    /// By default the layer uses the global meter provider via
+    /// `opentelemetry::global::meter()`. Passing a no-op meter disables metrics for
+    /// this layer without changing process-wide global state.
+    pub fn with_meter(mut self, meter: Meter) -> Self {
         self.meter = Some(meter);
         self
     }
@@ -904,11 +916,11 @@ mod tests {
             tracer_provider.tracer("test_tracer"),
         )));
 
-        let mut layer = HTTPLayerBuilder::builder()
+        let layer = HTTPLayerBuilder::builder()
             .with_route_extractor(PathExtractor)
+            .with_tracer(tracer.clone())
             .build()
             .unwrap();
-        layer.tracer = tracer.clone();
 
         let mut service = ServiceBuilder::new()
             .layer(layer)
@@ -1248,11 +1260,11 @@ mod tests {
             tracer_provider.tracer("test_tracer"),
         )));
 
-        let mut layer = HTTPLayerBuilder::builder()
+        let layer = HTTPLayerBuilder::builder()
             .with_route_extractor(PathExtractor)
+            .with_tracer(tracer)
             .build()
             .unwrap();
-        layer.tracer = tracer.clone();
 
         let service = tower::service_fn(|_req: Request<String>| async {
             // Access the current context - this should have the HTTP span
@@ -1300,11 +1312,11 @@ mod tests {
         )));
 
         // Explicitly use method-only span names (no route extractor)
-        let mut layer = HTTPLayerBuilder::builder()
+        let layer = HTTPLayerBuilder::builder()
             .with_route_extractor(NoRouteExtractor)
+            .with_tracer(tracer)
             .build()
             .unwrap();
-        layer.tracer = tracer.clone();
 
         let service = tower::service_fn(|_req: Request<String>| async {
             Ok::<_, std::convert::Infallible>(
@@ -1344,11 +1356,11 @@ mod tests {
             tracer_provider.tracer("test_tracer"),
         )));
 
-        let mut layer = HTTPLayerBuilder::builder()
+        let layer = HTTPLayerBuilder::builder()
             .with_route_extractor(PathExtractor)
+            .with_tracer(tracer)
             .build()
             .unwrap();
-        layer.tracer = tracer.clone();
 
         let service = tower::service_fn(|_req: Request<String>| async {
             Ok::<_, std::convert::Infallible>(
@@ -1389,7 +1401,7 @@ mod tests {
         )));
 
         // Custom extractor that normalizes path parameters
-        let mut layer = HTTPLayerBuilder::builder()
+        let layer = HTTPLayerBuilder::builder()
             .with_route_extractor_fn(|req: &Request<String>| {
                 let path = req.uri().path();
                 // Simple normalization: replace numeric IDs with {id}
@@ -1406,9 +1418,9 @@ mod tests {
                     .join("/");
                 Some(normalized)
             })
+            .with_tracer(tracer)
             .build()
             .unwrap();
-        layer.tracer = tracer.clone();
 
         let service = tower::service_fn(|_req: Request<String>| async {
             Ok::<_, std::convert::Infallible>(
@@ -1449,11 +1461,11 @@ mod tests {
             tracer_provider.tracer("test_tracer"),
         )));
 
-        let mut layer = HTTPLayerBuilder::builder()
+        let layer = HTTPLayerBuilder::builder()
             .with_route_extractor(AxumMatchedPathExtractor)
+            .with_tracer(tracer)
             .build()
             .unwrap();
-        layer.tracer = tracer.clone();
 
         let service = tower::service_fn(|_req: Request<String>| async {
             Ok::<_, std::convert::Infallible>(
