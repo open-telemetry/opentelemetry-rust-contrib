@@ -13,6 +13,10 @@ OpenTelemetry HTTP Metrics and Tracing Middleware for Tower-compatible Rust HTTP
 
 This middleware provides both metrics and distributed tracing for HTTP requests, following OpenTelemetry semantic conventions.
 
+[![Crates.io: opentelemetry-instrumentation-tower](https://img.shields.io/crates/v/opentelemetry-instrumentation-tower.svg)](https://crates.io/crates/opentelemetry-instrumentation-tower)
+[![Documentation](https://docs.rs/opentelemetry-instrumentation-tower/badge.svg)](https://docs.rs/opentelemetry-instrumentation-tower)
+[![Slack](https://img.shields.io/badge/slack-@cncf/otel/rust-brightgreen.svg?logo=slack)](https://cloud-native.slack.com/archives/C03GDP0H023)
+
 ## Features
 
 - **HTTP Metrics**: Request duration, active requests, request/response body sizes
