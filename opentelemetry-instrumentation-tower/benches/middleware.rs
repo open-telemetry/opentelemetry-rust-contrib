@@ -74,6 +74,7 @@
 //!
 
 use criterion::{criterion_group, criterion_main, BenchmarkId, Criterion, Throughput};
+use opentelemetry::metrics::noop::NoopMeterProvider;
 use opentelemetry::trace::noop::NoopTracerProvider;
 use opentelemetry_instrumentation_tower::HTTPLayerBuilder;
 use opentelemetry_sdk::{
@@ -142,7 +143,7 @@ fn benchmark_middleware(c: &mut Criterion) {
     // context propagation hooks, etc.) when no real telemetry is produced.
     group.bench_function(BenchmarkId::new("request", "noop"), |b| {
         let tracer_provider = NoopTracerProvider::new();
-        let meter_provider = SdkMeterProvider::builder().build();
+        let meter_provider = NoopMeterProvider::new();
         let layer = HTTPLayerBuilder::builder()
             .with_tracer_provider(tracer_provider)
             .with_meter_provider(meter_provider)
@@ -170,7 +171,7 @@ fn benchmark_middleware(c: &mut Criterion) {
     group.bench_function(BenchmarkId::new("request", "tracing"), |b| {
         // No exporter = no-op processing, just measures instrumentation overhead.
         let tracer_provider = SdkTracerProvider::builder().build();
-        let meter_provider = SdkMeterProvider::builder().build();
+        let meter_provider = NoopMeterProvider::new();
         let layer = HTTPLayerBuilder::builder()
             .with_tracer_provider(tracer_provider)
             .with_meter_provider(meter_provider)
@@ -199,7 +200,7 @@ fn benchmark_middleware(c: &mut Criterion) {
         let tracer_provider = SdkTracerProvider::builder()
             .with_sampler(Sampler::AlwaysOff)
             .build();
-        let meter_provider = SdkMeterProvider::builder().build();
+        let meter_provider = NoopMeterProvider::new();
         let layer = HTTPLayerBuilder::builder()
             .with_tracer_provider(tracer_provider)
             .with_meter_provider(meter_provider)
