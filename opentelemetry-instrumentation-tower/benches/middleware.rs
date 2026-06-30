@@ -104,28 +104,6 @@ fn build_requests(n: u64) -> Vec<http::Request<String>> {
         .collect()
 }
 
-/// Setup tracer provider with no-op processor (measures instrumentation overhead only)
-fn setup_tracer() -> SdkTracerProvider {
-    // No exporter = no-op processing, just measures instrumentation overhead
-    SdkTracerProvider::builder().build()
-}
-
-/// Setup tracer provider with AlwaysOff sampler (all spans are dropped).
-/// This measures the overhead of the non-sampled code path.
-fn setup_sampled_out_tracer() -> SdkTracerProvider {
-    SdkTracerProvider::builder()
-        .with_sampler(Sampler::AlwaysOff)
-        .build()
-}
-
-fn noop_tracer() -> NoopTracerProvider {
-    NoopTracerProvider::new()
-}
-
-fn noop_meter() -> SdkMeterProvider {
-    SdkMeterProvider::builder().build()
-}
-
 /// Setup meter provider with in-memory exporter (minimal I/O overhead)
 fn setup_meter() -> (SdkMeterProvider, InMemoryMetricExporter) {
     let exporter = InMemoryMetricExporter::default();
@@ -163,8 +141,8 @@ fn benchmark_middleware(c: &mut Criterion) {
     // Measures the pure overhead of the HTTPLayer machinery (attribute extraction,
     // context propagation hooks, etc.) when no real telemetry is produced.
     group.bench_function(BenchmarkId::new("request", "noop"), |b| {
-        let tracer_provider = noop_tracer();
-        let meter_provider = noop_meter();
+        let tracer_provider = NoopTracerProvider::new();
+        let meter_provider = SdkMeterProvider::builder().build();
         let layer = HTTPLayerBuilder::builder()
             .with_tracer_provider(tracer_provider)
             .with_meter_provider(meter_provider)
@@ -190,8 +168,9 @@ fn benchmark_middleware(c: &mut Criterion) {
 
     // Scenario 3: Tracing only (no-op meter)
     group.bench_function(BenchmarkId::new("request", "tracing"), |b| {
-        let tracer_provider = setup_tracer();
-        let meter_provider = noop_meter();
+        // No exporter = no-op processing, just measures instrumentation overhead.
+        let tracer_provider = SdkTracerProvider::builder().build();
+        let meter_provider = SdkMeterProvider::builder().build();
         let layer = HTTPLayerBuilder::builder()
             .with_tracer_provider(tracer_provider)
             .with_meter_provider(meter_provider)
@@ -217,8 +196,10 @@ fn benchmark_middleware(c: &mut Criterion) {
 
     // Scenario 4: Tracing with AlwaysOff sampler (no-op meter)
     group.bench_function(BenchmarkId::new("request", "tracing-sampled-out"), |b| {
-        let tracer_provider = setup_sampled_out_tracer();
-        let meter_provider = noop_meter();
+        let tracer_provider = SdkTracerProvider::builder()
+            .with_sampler(Sampler::AlwaysOff)
+            .build();
+        let meter_provider = SdkMeterProvider::builder().build();
         let layer = HTTPLayerBuilder::builder()
             .with_tracer_provider(tracer_provider)
             .with_meter_provider(meter_provider)
@@ -244,7 +225,7 @@ fn benchmark_middleware(c: &mut Criterion) {
 
     // Scenario 5: Metrics only (no-op tracer)
     group.bench_function(BenchmarkId::new("request", "metrics"), |b| {
-        let tracer_provider = noop_tracer();
+        let tracer_provider = NoopTracerProvider::new();
         let (meter_provider, _metric_exporter) = setup_meter();
         let layer = HTTPLayerBuilder::builder()
             .with_tracer_provider(tracer_provider)
@@ -271,7 +252,8 @@ fn benchmark_middleware(c: &mut Criterion) {
 
     // Scenario 6: Both tracing + metrics
     group.bench_function(BenchmarkId::new("request", "tracing+metrics"), |b| {
-        let tracer_provider = setup_tracer();
+        // No exporter = no-op processing, just measures instrumentation overhead.
+        let tracer_provider = SdkTracerProvider::builder().build();
         let (meter_provider, _metric_exporter) = setup_meter();
         let layer = HTTPLayerBuilder::builder()
             .with_tracer_provider(tracer_provider)
