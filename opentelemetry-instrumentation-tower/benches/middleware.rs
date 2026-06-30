@@ -27,8 +27,13 @@
 //!
 //! ### Middleware-internal (optimizable by this crate)
 //!
-//! - **Heap allocations per request**: `scheme`, `method`, `path`, `URI`,
-//!   `protocol`, `version` each `to_string()` / `to_owned()` into a new `String`.
+//! - **Heap allocations per request**: `path`, `URI` and (for non-common
+//!   methods or schemes) the `method`/`scheme` strings still `to_string()`
+//!   / `to_owned()` into a new `String`. The `method` and `scheme` labels
+//!   are promoted to `&'static str` for the common HTTP methods
+//!   (GET/POST/PUT/DELETE/HEAD/OPTIONS/PATCH/CONNECT/TRACE) and the `http`
+//!   and `https` schemes, so the corresponding `KeyValue::clone()` is
+//!   allocation-free in the hot path.
 //! - **`Vec<KeyValue>` allocations**: `span_attributes` and `label_superset`
 //!   are built and populated on every request.
 //! - **Unconditional attribute extraction**: all `KeyValue` attributes are built
@@ -60,12 +65,12 @@
 //!
 //! | Scenario             | Median   | vs baseline |
 //! | -------------------- | -------- | ----------- |
-//! | baseline             |   47 ns  | —           |
-//! | noop                 |  867 ns  | +820 ns     |
-//! | tracing              | 1048 ns  | +1000 ns    |
-//! | tracing-sampled-out  |  913 ns  | +866 ns     |
-//! | metrics              | 1202 ns  | +1155 ns    |
-//! | tracing + metrics    | 1353 ns  | +1306 ns    |
+//! | baseline             |   44 ns  | —           |
+//! | noop                 |  568 ns  | +524 ns     |
+//! | tracing              |  708 ns  | +664 ns     |
+//! | tracing-sampled-out  |  592 ns  | +548 ns     |
+//! | metrics              |  895 ns  | +851 ns     |
+//! | tracing + metrics    | 1054 ns  | +1010 ns    |
 //!
 //! Captured on: MacBook Pro, Apple M4 Pro (10P + 4E cores), 24 GB RAM,
 //! macOS 26.4.1, rustc 1.95.0, OpenTelemetry 0.32.

@@ -561,6 +561,26 @@ struct RequestData {
     custom_request_attributes: Vec<KeyValue>,
 }
 
+/// Maps common HTTP methods to a `&'static str` so the resulting `KeyValue`
+/// stores the method as a static string (no heap allocation, allocation-free
+/// `KeyValue::clone()`). Returns `None` for custom/extension methods, which
+/// fall back to an owned `String`.
+#[inline]
+fn method_as_static(m: &http::Method) -> Option<&'static str> {
+    match *m {
+        http::Method::GET => Some("GET"),
+        http::Method::POST => Some("POST"),
+        http::Method::PUT => Some("PUT"),
+        http::Method::DELETE => Some("DELETE"),
+        http::Method::HEAD => Some("HEAD"),
+        http::Method::OPTIONS => Some("OPTIONS"),
+        http::Method::PATCH => Some("PATCH"),
+        http::Method::CONNECT => Some("CONNECT"),
+        http::Method::TRACE => Some("TRACE"),
+        _ => None,
+    }
+}
+
 struct RequestFinalization<ResExt> {
     request_data: RequestData,
     layer_state: Arc<HTTPLayerState>,
@@ -636,11 +656,21 @@ where
         let protocol_name_kv = KeyValue::new(NETWORK_PROTOCOL_NAME_LABEL, protocol);
         let protocol_version_kv = KeyValue::new(NETWORK_PROTOCOL_VERSION_LABEL, version);
 
-        let scheme = req.uri().scheme_str().unwrap_or("").to_string();
-        let url_scheme_kv = KeyValue::new(URL_SCHEME_LABEL, scheme);
+        // Promote the common "http"/"https" schemes to `&'static str` so the
+        // `KeyValue` is allocation-free and clones across metric label sets are cheap.
+        let url_scheme_kv = match req.uri().scheme_str() {
+            Some("http") => KeyValue::new(URL_SCHEME_LABEL, "http"),
+            Some("https") => KeyValue::new(URL_SCHEME_LABEL, "https"),
+            Some(other) => KeyValue::new(URL_SCHEME_LABEL, other.to_owned()),
+            None => KeyValue::new(URL_SCHEME_LABEL, ""),
+        };
 
+        // Same trick for well-known HTTP methods.
         let method = req.method().as_str().to_owned();
-        let method_kv = KeyValue::new(HTTP_REQUEST_METHOD_LABEL, method.clone());
+        let method_kv = match method_as_static(req.method()) {
+            Some(s) => KeyValue::new(HTTP_REQUEST_METHOD_LABEL, s),
+            None => KeyValue::new(HTTP_REQUEST_METHOD_LABEL, method.clone()),
+        };
 
         // Extract route using the configured extractor
         let route = self.route_extractor.extract_route(&req);
