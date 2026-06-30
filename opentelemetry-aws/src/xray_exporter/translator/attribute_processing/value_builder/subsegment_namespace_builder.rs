@@ -64,7 +64,11 @@ impl<'value> ValueBuilder<'value> for SubsegmentNamespaceBuilder {
 }
 impl<'v> SpanAttributeProcessor<'v, 2> for SubsegmentNamespaceBuilder {
     const HANDLERS: [(&'static str, fn(&mut Self, &'v Value) -> bool); 2] = [
-        (semconv::RPC_SYSTEM, Self::rpc_system_is_aws_api),
+        (
+            #[allow(deprecated)]
+            semconv::RPC_SYSTEM,
+            Self::rpc_system_is_aws_api,
+        ),
         (semconv::AWS_SERVICE, Self::aws_service_is_some),
     ];
 }
