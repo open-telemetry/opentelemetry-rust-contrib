@@ -86,9 +86,19 @@ fn trace_context_header_fields() -> &'static [String; 1] {
 /// [otel-spec]: https://github.com/open-telemetry/opentelemetry-specification/blob/master/specification/trace/api.md#SpanContext
 /// [xray-trace-id]: https://docs.aws.amazon.com/xray/latest/devguide/xray-api-sendingdata.html#xray-api-traceids
 /// [xray-header]: https://docs.aws.amazon.com/xray/latest/devguide/xray-concepts.html#xray-concepts-tracingheader
+
+/// Configures how `XrayPropagator` handles a missing `Sampled` field in the trace header.
+#[derive(Clone, Debug, Default, PartialEq)]
+pub enum MissingSampledBehavior {
+    #[default]
+    Deferred,
+    Sampled,
+    NotSampled,
+}
+
 #[derive(Clone, Debug, Default)]
 pub struct XrayPropagator {
-    _private: (),
+    missing_sampled_behavior: MissingSampledBehavior,
 }
 
 /// Extract `SpanContext` from AWS X-Ray format string
@@ -98,56 +108,7 @@ pub struct XrayPropagator {
 /// [otel-spec]: https://github.com/open-telemetry/opentelemetry-specification/blob/master/specification/trace/api.md#SpanContext
 /// [xray-trace-id]: https://docs.aws.amazon.com/xray/latest/devguide/xray-api-sendingdata.html#xray-api-traceids
 pub fn span_context_from_str(value: &str) -> Option<SpanContext> {
-    let parts: Vec<(&str, &str)> = value
-        .split_terminator(';')
-        .filter_map(from_key_value_pair)
-        .collect();
-
-    let mut trace_id = TraceId::INVALID;
-    let mut parent_segment_id = SpanId::INVALID;
-    let mut sampling_decision = TRACE_FLAG_DEFERRED;
-    let mut kv_vec = Vec::with_capacity(parts.len());
-
-    for (key, value) in parts {
-        match key {
-            HEADER_ROOT_KEY => match TraceId::try_from(XrayTraceId(Cow::from(value))) {
-                Err(_) => return None,
-                Ok(parsed) => trace_id = parsed,
-            },
-            HEADER_PARENT_KEY => {
-                parent_segment_id = SpanId::from_hex(value).unwrap_or(SpanId::INVALID)
-            }
-            HEADER_SAMPLED_KEY => {
-                sampling_decision = match value {
-                    NOT_SAMPLED => TraceFlags::default(),
-                    SAMPLED => TraceFlags::SAMPLED,
-                    REQUESTED_SAMPLE_DECISION => TRACE_FLAG_DEFERRED,
-                    _ => TRACE_FLAG_DEFERRED,
-                }
-            }
-            _ => kv_vec.push((key.to_ascii_lowercase(), value.to_string())),
-        }
-    }
-
-    match TraceState::from_key_value(kv_vec) {
-        Ok(trace_state) => {
-            if trace_id == TraceId::INVALID {
-                return None;
-            }
-
-            Some(SpanContext::new(
-                trace_id,
-                parent_segment_id,
-                sampling_decision,
-                true,
-                trace_state,
-            ))
-        }
-        Err(trace_state_err) => {
-            otel_error!(name: "SpanContextFromStr", error = format!("{:?}", trace_state_err));
-            None //todo: assign an error type instead of using None
-        }
-    }
+    XrayPropagator::default().parse_span_context(value)
 }
 
 /// Generate AWS X-Ray format string from `SpanContext`
@@ -204,13 +165,78 @@ impl XrayPropagator {
         XrayPropagator::default()
     }
 
+    /// Sets the behavior when the `Sampled` field is missing from the trace header.
+    pub fn with_missing_sampled_behavior(mut self, behavior: MissingSampledBehavior) -> Self {
+        self.missing_sampled_behavior = behavior;
+        self
+    }
+
+    fn default_sampling_decision(&self) -> TraceFlags {
+        match self.missing_sampled_behavior {
+            MissingSampledBehavior::Deferred => TRACE_FLAG_DEFERRED,
+            MissingSampledBehavior::Sampled => TraceFlags::SAMPLED,
+            MissingSampledBehavior::NotSampled => TraceFlags::default(),
+        }
+    }
+
     fn extract_span_context(&self, extractor: &dyn Extractor) -> Option<SpanContext> {
-        span_context_from_str(
-            extractor
-                .get(AWS_XRAY_TRACE_HEADER)
-                .or(extractor.get(AWS_XRAY_TRACE_ENVIRONMENT_VARIABLE))?
-                .trim(),
-        )
+        let header = extractor
+            .get(AWS_XRAY_TRACE_HEADER)
+            .or(extractor.get(AWS_XRAY_TRACE_ENVIRONMENT_VARIABLE))?;
+        self.parse_span_context(header.trim())
+    }
+
+    fn parse_span_context(&self, value: &str) -> Option<SpanContext> {
+        let parts: Vec<(&str, &str)> = value
+            .split_terminator(';')
+            .filter_map(from_key_value_pair)
+            .collect();
+
+        let mut trace_id = TraceId::INVALID;
+        let mut parent_segment_id = SpanId::INVALID;
+        let mut sampling_decision = self.default_sampling_decision();
+        let mut kv_vec = Vec::with_capacity(parts.len());
+
+        for (key, value) in parts {
+            match key {
+                HEADER_ROOT_KEY => match TraceId::try_from(XrayTraceId(Cow::from(value))) {
+                    Err(_) => return None,
+                    Ok(parsed) => trace_id = parsed,
+                },
+                HEADER_PARENT_KEY => {
+                    parent_segment_id = SpanId::from_hex(value).unwrap_or(SpanId::INVALID)
+                }
+                HEADER_SAMPLED_KEY => {
+                    sampling_decision = match value {
+                        NOT_SAMPLED => TraceFlags::default(),
+                        SAMPLED => TraceFlags::SAMPLED,
+                        REQUESTED_SAMPLE_DECISION => TRACE_FLAG_DEFERRED,
+                        _ => TRACE_FLAG_DEFERRED,
+                    }
+                }
+                _ => kv_vec.push((key.to_ascii_lowercase(), value.to_string())),
+            }
+        }
+
+        match TraceState::from_key_value(kv_vec) {
+            Ok(trace_state) => {
+                if trace_id == TraceId::INVALID {
+                    return None;
+                }
+
+                Some(SpanContext::new(
+                    trace_id,
+                    parent_segment_id,
+                    sampling_decision,
+                    true,
+                    trace_state,
+                ))
+            }
+            Err(trace_state_err) => {
+                otel_error!(name: "SpanContextFromStr", error = format!("{:?}", trace_state_err));
+                None //todo: assign an error type instead of using None
+            }
+        }
     }
 }
 
@@ -386,5 +412,72 @@ mod tests {
                 assert_eq!(injected_value, Some(&header_value.to_string()));
             }
         }
+    }
+
+    #[test]
+    fn test_missing_sampled_defaults_to_deferred() {
+        let propagator = XrayPropagator::default();
+        let header = "Root=1-58406520-a006649127e371903a2de979;Parent=4c721bf33e3caf8f";
+        let map: HashMap<String, String> =
+            vec![(AWS_XRAY_TRACE_HEADER.to_string(), header.to_string())]
+                .into_iter()
+                .collect();
+
+        let context = propagator.extract(&map);
+        assert_eq!(
+            context.span().span_context().trace_flags(),
+            TRACE_FLAG_DEFERRED
+        );
+    }
+
+    #[test]
+    fn test_missing_sampled_with_sampled_behavior() {
+        let propagator =
+            XrayPropagator::new().with_missing_sampled_behavior(MissingSampledBehavior::Sampled);
+        let header = "Root=1-58406520-a006649127e371903a2de979;Parent=4c721bf33e3caf8f";
+        let map: HashMap<String, String> =
+            vec![(AWS_XRAY_TRACE_HEADER.to_string(), header.to_string())]
+                .into_iter()
+                .collect();
+
+        let context = propagator.extract(&map);
+        assert_eq!(
+            context.span().span_context().trace_flags(),
+            TraceFlags::SAMPLED
+        );
+    }
+
+    #[test]
+    fn test_missing_sampled_with_not_sampled_behavior() {
+        let propagator =
+            XrayPropagator::new().with_missing_sampled_behavior(MissingSampledBehavior::NotSampled);
+        let header = "Root=1-58406520-a006649127e371903a2de979;Parent=4c721bf33e3caf8f";
+        let map: HashMap<String, String> =
+            vec![(AWS_XRAY_TRACE_HEADER.to_string(), header.to_string())]
+                .into_iter()
+                .collect();
+
+        let context = propagator.extract(&map);
+        assert_eq!(
+            context.span().span_context().trace_flags(),
+            TraceFlags::default()
+        );
+    }
+
+    #[test]
+    fn test_explicit_sampled_overrides_config() {
+        let propagator =
+            XrayPropagator::new().with_missing_sampled_behavior(MissingSampledBehavior::NotSampled);
+        let header = "Root=1-58406520-a006649127e371903a2de979;Parent=4c721bf33e3caf8f;Sampled=1";
+        let map: HashMap<String, String> =
+            vec![(AWS_XRAY_TRACE_HEADER.to_string(), header.to_string())]
+                .into_iter()
+                .collect();
+
+        let context = propagator.extract(&map);
+        assert_eq!(
+            context.span().span_context().trace_flags(),
+            TraceFlags::SAMPLED
+        );
     }
 }
