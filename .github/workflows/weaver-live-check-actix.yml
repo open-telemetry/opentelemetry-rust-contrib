@@ -68,7 +68,7 @@ jobs:
 
       - name: Start weaver live-check
         id: live-check
-        uses: open-telemetry/weaver/.github/actions/weaver-live-check-start@9b84f5cd76cb98e8aaf37bc58936b31fe0ddbab4 # v0.24.0
+        uses: open-telemetry/weaver/.github/actions/weaver-live-check-start@adcf6fda79c3df1cb537669442aef753b7019777 # v0.24.2
         with:
           registry: ${{ env.SEMCONV_REGISTRY }}
 
