@@ -43,7 +43,7 @@ tracing = "0.1"
 # Pinned to >=0.3.47 to pick up the RUSTSEC-2026-0009 fix; upper bound excludes
 # 0.3.48 which introduces a trait impl that conflicts with typespec_client_core
 # (transitive via azure_core) and breaks the build (E0119). Not used directly.
-time = ">=0.3.47, <0.3.48"
+time = ">=0.3.47, <0.3.54"
 
 [features]
 mock_auth = [] # Disabled by default. Not to be enabled in the prod release.
