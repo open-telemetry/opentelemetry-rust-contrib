@@ -62,7 +62,7 @@ jobs:
         run: cargo build --release
 
       - name: Setup weaver
-        uses: open-telemetry/weaver/.github/actions/setup-weaver@9b84f5cd76cb98e8aaf37bc58936b31fe0ddbab4 # v0.24.0
+        uses: open-telemetry/weaver/.github/actions/setup-weaver@adcf6fda79c3df1cb537669442aef753b7019777 # v0.24.2
         with:
           version: ${{ env.WEAVER_VERSION }}
 
