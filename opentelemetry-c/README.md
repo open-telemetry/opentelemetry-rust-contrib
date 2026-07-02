@@ -331,6 +331,12 @@ export failures never crash the process** — they surface as a non-OK status fr
 `force_flush`/`shutdown` and are logged by the SDK. SDK construction fails fast with a
 status for invalid configuration.
 
+Configuration values coming from C are bounded: the batch **max queue size** and **max
+export batch size** are capped at internal maximums, and an oversized non-zero value is
+rejected with `OTEL_STATUS_INVALID_ARGUMENT` (never silently clamped) so it cannot drive a
+large up-front allocation. `0` still selects the SDK/spec default, and the effective export
+batch size is additionally capped by the SDK at the max queue size.
+
 ## Known limitations
 
 - Traces only. Metrics and logs are not implemented yet.

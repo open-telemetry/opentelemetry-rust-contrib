@@ -16,7 +16,10 @@
  *   - otel_sdk_shutdown() runs the underlying shutdown at most once. The first call wins;
  *     concurrent or later calls return OTEL_STATUS_ALREADY_SHUTDOWN. After shutdown,
  *     force_flush / set_as_global return OTEL_STATUS_ALREADY_SHUTDOWN and span creation
- *     becomes a no-op.
+ *     becomes a no-op. A concurrent set_as_global and shutdown may linearize in either
+ *     order: set_as_global may still publish the provider if it observes the SDK as
+ *     not-yet-shut-down (which then becomes a no-op once shutdown completes); once
+ *     shutdown is observed, set_as_global returns OTEL_STATUS_ALREADY_SHUTDOWN.
  *   - A timed otel_sdk_force_flush() runs the flush on a helper thread; at most one such
  *     helper exists at a time (a concurrent timed flush returns OTEL_STATUS_TIMEOUT
  *     rather than spawning another). A blocking flush (timeout 0) uses the calling
@@ -100,13 +103,21 @@ otel_status_t otel_sdk_builder_set_otlp_timeout_millis(otel_sdk_builder_t* build
 
 /* ---- Batch span processor options (0 => spec default) --------------------- */
 
-/* Maximum queue size (default 2048). */
+/*
+ * Maximum queue size (default 2048). Bounded: a non-zero value larger than an internal
+ * maximum is rejected with OTEL_STATUS_INVALID_ARGUMENT (not silently clamped), since the
+ * processor preallocates a channel of this capacity.
+ */
 otel_status_t otel_sdk_builder_set_batch_max_queue_size(otel_sdk_builder_t* builder,
                                                         size_t max_queue_size);
 /* Scheduled delay between exports, milliseconds (default 5000). */
 otel_status_t otel_sdk_builder_set_batch_scheduled_delay_millis(otel_sdk_builder_t* builder,
                                                                 uint64_t delay_millis);
-/* Maximum spans per export batch (default 512). */
+/*
+ * Maximum spans per export batch (default 512). Bounded like the queue size above: an
+ * oversized non-zero value is rejected with OTEL_STATUS_INVALID_ARGUMENT. The effective
+ * value is additionally capped by the SDK at the max queue size.
+ */
 otel_status_t otel_sdk_builder_set_batch_max_export_batch_size(otel_sdk_builder_t* builder,
                                                                size_t max_export_batch_size);
 /*
@@ -138,7 +149,13 @@ otel_tracer_provider_t* otel_sdk_get_tracer_provider(const otel_sdk_t* sdk);
 
 /*
  * Install this SDK's provider as the process-global provider. May be called more than
- * once; the most recent call wins.
+ * once; the most recent call wins. Returns OTEL_STATUS_ALREADY_SHUTDOWN if the SDK has
+ * been shut down.
+ *
+ * A concurrent set_as_global and otel_sdk_shutdown() may linearize in either order: if
+ * set_as_global observes the SDK as not-yet-shut-down it may publish the provider (which
+ * then becomes a no-op once shutdown completes); once shutdown is observed, set_as_global
+ * returns OTEL_STATUS_ALREADY_SHUTDOWN.
  */
 otel_status_t otel_sdk_set_as_global(otel_sdk_t* sdk);
 

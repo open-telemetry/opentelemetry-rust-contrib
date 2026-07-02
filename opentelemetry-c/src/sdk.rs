@@ -120,6 +120,40 @@ fn optional_size(value: usize) -> Option<usize> {
     }
 }
 
+/// Upper bound on the batch processor's **max queue size** accepted from C.
+///
+/// `BatchSpanProcessor` allocates a bounded channel of this capacity up front
+/// (`sync_channel(max_queue_size)`), so an unbounded C-provided value could drive a huge
+/// allocation — and a process abort — before any span is recorded. `0` still selects the
+/// SDK default; a larger non-zero value is rejected (never silently clamped).
+const MAX_BATCH_QUEUE_SIZE: usize = 1_048_576;
+
+/// Upper bound on the batch processor's **max export batch size** accepted from C.
+///
+/// The processor preallocates a `Vec` of this capacity for each export, so the same
+/// allocation concern applies. The SDK additionally clamps the effective export batch size
+/// to the configured max queue size. `0` selects the SDK default; a larger non-zero value
+/// is rejected.
+const MAX_BATCH_EXPORT_BATCH_SIZE: usize = 1_048_576;
+
+/// Validate a C-provided batch size against an upper bound, returning the optional size
+/// (`0` == unset/default). A non-zero value greater than `max` is rejected with a clear
+/// diagnostic rather than silently clamped, so a hostile or mistaken value cannot drive a
+/// large up-front allocation inside the `BatchSpanProcessor`.
+fn bounded_optional_size(
+    value: usize,
+    max: usize,
+    what: &str,
+) -> Result<Option<usize>, OtelStatus> {
+    if value > max {
+        return Err(fail(
+            OtelStatus::InvalidArgument,
+            format!("{what} ({value}) exceeds the maximum supported value ({max})"),
+        ));
+    }
+    Ok(optional_size(value))
+}
+
 // ---------------------------------------------------------------------------
 // Builder lifecycle
 // ---------------------------------------------------------------------------
@@ -297,6 +331,11 @@ pub unsafe extern "C" fn otel_sdk_builder_set_otlp_timeout_millis(
 
 /// Set the batch processor maximum queue size (`0` == spec default of 2048).
 ///
+/// A non-zero value greater than an internal upper bound is rejected with
+/// `OTEL_STATUS_INVALID_ARGUMENT` (never silently clamped): the processor preallocates a
+/// bounded channel of this capacity, so an unbounded value could otherwise drive a huge
+/// allocation.
+///
 /// # Safety
 /// `builder` must satisfy the handle contract.
 #[no_mangle]
@@ -306,8 +345,17 @@ pub unsafe extern "C" fn otel_sdk_builder_set_batch_max_queue_size(
 ) -> OtelStatus {
     unsafe {
         with_config(builder, |config| {
-            config.batch_max_queue_size = optional_size(max_queue_size);
-            OtelStatus::Ok
+            match bounded_optional_size(
+                max_queue_size,
+                MAX_BATCH_QUEUE_SIZE,
+                "batch max queue size",
+            ) {
+                Ok(size) => {
+                    config.batch_max_queue_size = size;
+                    OtelStatus::Ok
+                }
+                Err(status) => status,
+            }
         })
     }
 }
@@ -331,6 +379,10 @@ pub unsafe extern "C" fn otel_sdk_builder_set_batch_scheduled_delay_millis(
 
 /// Set the batch processor maximum export batch size (`0` == spec default of 512).
 ///
+/// A non-zero value greater than an internal upper bound is rejected with
+/// `OTEL_STATUS_INVALID_ARGUMENT` (never silently clamped). The effective export batch
+/// size is additionally clamped by the SDK to not exceed the max queue size.
+///
 /// # Safety
 /// `builder` must satisfy the handle contract.
 #[no_mangle]
@@ -340,8 +392,17 @@ pub unsafe extern "C" fn otel_sdk_builder_set_batch_max_export_batch_size(
 ) -> OtelStatus {
     unsafe {
         with_config(builder, |config| {
-            config.batch_max_export_batch_size = optional_size(max_export_batch_size);
-            OtelStatus::Ok
+            match bounded_optional_size(
+                max_export_batch_size,
+                MAX_BATCH_EXPORT_BATCH_SIZE,
+                "batch max export batch size",
+            ) {
+                Ok(size) => {
+                    config.batch_max_export_batch_size = size;
+                    OtelStatus::Ok
+                }
+                Err(status) => status,
+            }
         })
     }
 }
@@ -741,5 +802,86 @@ mod tests {
             !flag.load(Ordering::Acquire),
             "FlushGuard::drop must clear the in-flight flag even on panic"
         );
+    }
+
+    #[test]
+    fn oversized_batch_max_queue_size_is_rejected() {
+        unsafe {
+            let builder = otel_sdk_builder_new();
+            assert!(!builder.is_null());
+            // 0 (default) and in-range values are accepted.
+            assert_eq!(
+                otel_sdk_builder_set_batch_max_queue_size(builder, 0),
+                OtelStatus::Ok
+            );
+            assert_eq!(
+                otel_sdk_builder_set_batch_max_queue_size(builder, MAX_BATCH_QUEUE_SIZE),
+                OtelStatus::Ok
+            );
+            // Oversized non-zero values are rejected, not silently clamped.
+            assert_eq!(
+                otel_sdk_builder_set_batch_max_queue_size(builder, MAX_BATCH_QUEUE_SIZE + 1),
+                OtelStatus::InvalidArgument
+            );
+            assert_eq!(
+                otel_sdk_builder_set_batch_max_queue_size(builder, usize::MAX),
+                OtelStatus::InvalidArgument
+            );
+            otel_sdk_builder_destroy(builder);
+        }
+    }
+
+    #[test]
+    fn oversized_batch_max_export_batch_size_is_rejected() {
+        unsafe {
+            let builder = otel_sdk_builder_new();
+            assert!(!builder.is_null());
+            assert_eq!(
+                otel_sdk_builder_set_batch_max_export_batch_size(builder, 0),
+                OtelStatus::Ok
+            );
+            assert_eq!(
+                otel_sdk_builder_set_batch_max_export_batch_size(
+                    builder,
+                    MAX_BATCH_EXPORT_BATCH_SIZE
+                ),
+                OtelStatus::Ok
+            );
+            assert_eq!(
+                otel_sdk_builder_set_batch_max_export_batch_size(
+                    builder,
+                    MAX_BATCH_EXPORT_BATCH_SIZE + 1
+                ),
+                OtelStatus::InvalidArgument
+            );
+            assert_eq!(
+                otel_sdk_builder_set_batch_max_export_batch_size(builder, usize::MAX),
+                OtelStatus::InvalidArgument
+            );
+            otel_sdk_builder_destroy(builder);
+        }
+    }
+
+    #[test]
+    fn export_batch_larger_than_queue_still_builds() {
+        // We preserve the SDK's min(export, queue) behavior rather than rejecting: setting
+        // a larger export batch size than the queue size must still build successfully.
+        unsafe {
+            let builder = otel_sdk_builder_new();
+            assert_eq!(
+                otel_sdk_builder_set_batch_max_queue_size(builder, 100),
+                OtelStatus::Ok
+            );
+            assert_eq!(
+                otel_sdk_builder_set_batch_max_export_batch_size(builder, 1000),
+                OtelStatus::Ok
+            );
+            let mut sdk: *mut OtelSdk = std::ptr::null_mut();
+            assert_eq!(otel_sdk_build(builder, &mut sdk), OtelStatus::Ok);
+            assert!(!sdk.is_null());
+            otel_sdk_builder_destroy(builder);
+            otel_sdk_shutdown(sdk, 500);
+            otel_sdk_destroy(sdk);
+        }
     }
 }
