@@ -113,12 +113,17 @@ impl OtelStringView {
     pub(crate) unsafe fn to_string_lossy(self) -> Result<String, OtelStatus> {
         // SAFETY: forwarded to the caller's contract.
         let bytes = unsafe { self.as_bytes() }?;
-        match std::str::from_utf8(bytes) {
-            Ok(s) => try_owned_string(s),
-            // Rare invalid-UTF-8 path: `from_utf8_lossy` performs the U+FFFD replacement.
-            Err(_) => Ok(String::from_utf8_lossy(bytes).into_owned()),
-        }
+        try_owned_string_lossy(bytes)
     }
+}
+
+/// Append `s` to `out`, reserving space fallibly first so that allocation failure returns
+/// a status instead of aborting the process (the default global-allocator behavior).
+fn push_str_fallible(out: &mut String, s: &str) -> Result<(), OtelStatus> {
+    out.try_reserve(s.len())
+        .map_err(|_| fail(OtelStatus::InternalError, "failed to allocate string"))?;
+    out.push_str(s);
+    Ok(())
 }
 
 /// Fallibly copy a `&str` into an owned `String`, mapping allocation failure to a status
@@ -126,11 +131,37 @@ impl OtelStringView {
 /// length is controlled by the caller.
 fn try_owned_string(s: &str) -> Result<String, OtelStatus> {
     let mut owned = String::new();
-    owned
-        .try_reserve_exact(s.len())
-        .map_err(|_| fail(OtelStatus::InternalError, "failed to allocate string"))?;
-    owned.push_str(s);
+    push_str_fallible(&mut owned, s)?;
     Ok(owned)
+}
+
+/// Fallibly build the lossy (U+FFFD-replaced) owned form of `bytes`, matching
+/// `String::from_utf8_lossy` but returning [`OtelStatus::InternalError`] on allocation
+/// failure instead of aborting — never allocating infallibly from C-controlled length.
+fn try_owned_string_lossy(bytes: &[u8]) -> Result<String, OtelStatus> {
+    const REPLACEMENT: &str = "\u{FFFD}";
+    let mut out = String::new();
+    let mut rest = bytes;
+    loop {
+        match std::str::from_utf8(rest) {
+            Ok(valid) => {
+                push_str_fallible(&mut out, valid)?;
+                return Ok(out);
+            }
+            Err(err) => {
+                let good = err.valid_up_to();
+                // SAFETY: `rest[..good]` is valid UTF-8 by the definition of `valid_up_to`.
+                let valid = unsafe { std::str::from_utf8_unchecked(&rest[..good]) };
+                push_str_fallible(&mut out, valid)?;
+                push_str_fallible(&mut out, REPLACEMENT)?;
+                match err.error_len() {
+                    Some(bad) => rest = &rest[good + bad..],
+                    // A truncated trailing multi-byte sequence: one replacement, then done.
+                    None => return Ok(out),
+                }
+            }
+        }
+    }
 }
 
 /// Discriminant identifying the active member of the [`OtelAttributeValue`] union.
@@ -348,6 +379,28 @@ mod tests {
             OtelStatus::InvalidUtf8
         );
         assert!(unsafe { v.to_string_lossy() }.unwrap().ends_with('a'));
+    }
+
+    #[test]
+    fn lossy_conversion_matches_std_semantics() {
+        // The fallible lossy path must reproduce `String::from_utf8_lossy` exactly,
+        // including U+FFFD replacement for invalid bytes and truncated trailing sequences,
+        // while never allocating infallibly from C-controlled length.
+        for raw in [
+            b"plain ascii".as_slice(),      // fully valid
+            b"ab\xffcd".as_slice(),         // invalid byte in the middle
+            b"\xffhead".as_slice(),         // invalid byte at the start
+            b"tail\xe2\x82".as_slice(),     // truncated multi-byte sequence at the end
+            b"\xf0\x28\x8c\x28".as_slice(), // several invalid sequences
+            b"".as_slice(),                 // empty
+        ] {
+            let view = OtelStringView {
+                ptr: raw.as_ptr() as *const c_char,
+                len: raw.len(),
+            };
+            let got = unsafe { view.to_string_lossy() }.unwrap();
+            assert_eq!(got, String::from_utf8_lossy(raw), "mismatch for {raw:?}");
+        }
     }
 
     #[test]

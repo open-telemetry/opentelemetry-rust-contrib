@@ -3,7 +3,7 @@
 [![Apache License][license-image]][license-url]
 
 A **C API and SDK for [OpenTelemetry](https://opentelemetry.io)**, implemented in Rust.
-This crate exposes a stable C ABI over the Rust OpenTelemetry SDK so that C (and C++)
+This crate exposes an experimental C ABI over the Rust OpenTelemetry SDK so that C (and C++)
 applications can create traces and export them via OTLP without writing any Rust.
 
 This is a contrib component of
@@ -60,9 +60,13 @@ Cargo produces, under `../target/<profile>/`:
 
 - `libopentelemetry_c.so` / `.dylib` / `opentelemetry_c.dll` — C-linkable **shared**
   library (`cdylib`).
-- `libopentelemetry_c.a` / `opentelemetry_c.lib` — **static** library (`staticlib`).
+- `libopentelemetry_c.a` (or the platform equivalent) — **static** library (`staticlib`).
+- `libopentelemetry_c.rlib` — Rust **rlib**, used only by this crate's own tests and
+  internal Rust builds; C/C++ consumers do not use it.
 
-The public headers live in [`include/opentelemetry_c/`](include/opentelemetry_c):
+C and C++ consumers use two things: the public headers from
+[`include/opentelemetry_c/`](include/opentelemetry_c), and the `cdylib` (shared) or
+`staticlib` (static) library from the Cargo target output above.
 
 - `common.h` — status codes, booleans, string views, typed attributes, version/error.
 - `trace.h` — tracer provider, tracer, and span handles.
@@ -99,16 +103,30 @@ cc -std=c11 my_app.c \
    -o my_app
 ```
 
+At **run time** the dynamic loader must be able to find the shared library. The
+`-Wl,-rpath` above bakes a search path into the executable; alternatively:
+
+- **Linux:** set `LD_LIBRARY_PATH` to the library's directory, or install it to a standard
+  location (e.g. `/usr/local/lib`, then `ldconfig`).
+- **macOS:** set `DYLD_LIBRARY_PATH`, or use an `@rpath` / install-name based layout.
+- **Windows:** place `opentelemetry_c.dll` next to the executable or on the `PATH`.
+
 ### Against the static library
 
-Static linking additionally requires the platform libraries that the Rust runtime and
-the TLS stack depend on:
-
-- **Linux:** `-lpthread -ldl -lm`
-- **macOS:** `-framework Security -framework CoreFoundation -framework SystemConfiguration`
+Static linking pulls the Rust runtime, TLS, and HTTP stacks into your binary, so it may
+require **additional native/system libraries** from those dependencies at link time. The
+exact set is platform- and feature-dependent — print it for this crate with:
 
 ```sh
-# Linux, static
+cargo rustc --release --lib -- --print native-static-libs
+```
+
+Add the native libraries it reports to your link line. The example below is
+**illustrative and platform-dependent** (Linux); take the authoritative list from the
+command above rather than hard-coding it:
+
+```sh
+# Linux, static — illustrative; confirm the trailing libraries with --print native-static-libs
 cc -std=c11 my_app.c \
    -I path/to/opentelemetry-c/include \
    path/to/target/release/libopentelemetry_c.a \
@@ -118,6 +136,18 @@ cc -std=c11 my_app.c \
 
 A ready-to-run example with a `Makefile` (covering both Linux and macOS) is in
 [`examples/c-basic-traces/`](examples/c-basic-traces).
+
+## Using from C++
+
+C++ consumes the **same headers** — every declaration in `include/opentelemetry_c/` is
+already wrapped in `extern "C"`, so you can `#include <opentelemetry_c/api.h>` directly
+from C++ and link the same shared or static library described above.
+
+If you want RAII ownership, add **thin local wrappers** in your application or
+instrumentation library that call the matching `*_destroy` from a destructor (for example
+a `std::unique_ptr` with a custom deleter per handle type). This crate intentionally does
+**not** ship a C++ wrapper library; keeping the public surface plain C keeps it language-
+and toolchain-agnostic and lets each consumer choose its own idioms.
 
 ## Minimal C example
 
@@ -205,13 +235,14 @@ configuration (`otel_sdk_builder_set_otlp_endpoint`) takes precedence.
   caller. The caller **must** release it with the matching `*_destroy`.
 - Every `*_destroy` accepts `NULL` as a safe no-op. Do **not** destroy the same
   non-NULL handle twice (this is a use-after-free, exactly like C `free`).
-- **You must pass only live handles** returned by this library. Handles carry a per-type
-  magic number checked on entry, but this is a **best-effort diagnostic, not a safety
-  net**: it reliably rejects `NULL` and catches passing a *live* handle of the wrong
-  type, but it **cannot** detect a freed/already-destroyed handle or a foreign pointer
-  (reading such memory is undefined behavior). Using a handle after `destroy`,
-  double-destroying, or racing `destroy` with another call on the same handle is
-  undefined behavior.
+- **You must pass only `NULL` or a live handle of the exact expected type** returned by
+  this library. Handles carry a per-type magic number, but it is a **best-effort
+  diagnostic, not a safety net**: `NULL` is rejected up front, but the magic is read only
+  *after* the pointer is dereferenced as the expected type, so it cannot be relied upon to
+  catch a wrong handle type, a freed/already-destroyed handle, or a foreign pointer (all
+  undefined behavior to pass). Passing the wrong handle type, using a handle after
+  `destroy`, double-destroying, or racing `destroy` with another call on the same handle
+  is undefined behavior.
 - **All strings are borrowed for the duration of the call only.** They are passed as
   `otel_string_view_t` (pointer + length, UTF-8, not required to be NUL-terminated).
   The library copies whatever it needs to retain before returning, so the caller may
@@ -221,13 +252,29 @@ configuration (`otel_sdk_builder_set_otlp_endpoint`) takes precedence.
   **independent** handle; destroying it does not affect the SDK, and it remains valid
   after the SDK handle is destroyed (though telemetry stops once the SDK is shut down).
 
+## Consuming from an instrumentation library
+
+When integrating this API into a reusable C/C++ instrumentation library (as opposed to an
+application), keep SDK lifecycle ownership with the application:
+
+- The **application** owns SDK setup and teardown: `otel_sdk_build`,
+  `otel_sdk_set_as_global`, `otel_sdk_force_flush`, and `otel_sdk_shutdown`. A library
+  should **not** flush or shut down the SDK unless it also created and installed it.
+- An **instrumentation library** should usually accept or create only what it needs —
+  typically an `otel_tracer_t*` (from a provided provider or the global one) and the spans
+  it starts — and release exactly the handles it owns.
+- **Document ownership at your API boundary:** for every handle you accept or return,
+  state whether the caller or the library is responsible for the matching `*_destroy`.
+
 ## Thread-safety rules
 
 Each handle type has its own contract; there is no blanket guarantee.
 
 - **SDK handles (`otel_sdk_t`)** are safe to use concurrently from multiple threads:
   `otel_sdk_set_as_global`, `otel_sdk_force_flush`, `otel_sdk_shutdown`, and
-  `otel_sdk_get_tracer_provider` may all run at the same time on one handle.
+  `otel_sdk_get_tracer_provider` may all run at the same time on one handle. A concurrent
+  `set_as_global` and `shutdown` may linearize in either order; once shutdown is observed,
+  `set_as_global` returns `OTEL_STATUS_ALREADY_SHUTDOWN`.
 - **Tracer providers and tracers** are safe to share and use concurrently.
 - A **single span handle must not be used concurrently** from multiple threads. Use
   one span per thread, or synchronize access externally. Distinct spans may be used on
@@ -293,6 +340,16 @@ status for invalid configuration.
 - Context propagation across process boundaries (extract/inject) is not exposed yet;
   parenting is done explicitly by passing a parent span handle.
 - The C ABI is experimental and unstable (see the note at the top).
+
+## Packaging status
+
+Formal packaging integrations — `pkg-config` files, a CMake package config, vcpkg/Conan
+recipes, distro packages, and install rules — are **intentionally not included yet**.
+Today, consumers use the headers in `include/opentelemetry_c/` and the `cdylib` /
+`staticlib` from Cargo's target output directly (see [Linking from C](#linking-from-c) and
+[Using from C++](#using-from-c)). These integrations can be added later once distribution
+and install-layout expectations are agreed; until then, do not assume a stable installed
+file layout.
 
 ## Regenerating headers with cbindgen (optional)
 

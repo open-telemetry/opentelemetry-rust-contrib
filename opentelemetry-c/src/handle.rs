@@ -6,15 +6,17 @@
 //!
 //! ## What the magic value can and cannot do
 //!
-//! The magic check is a **best-effort diagnostic, not a memory-safety boundary**.
-//! [`checked_ref`] / [`checked_mut`] must dereference the pointer to read the magic, so
-//! they are only sound when the caller upholds the documented precondition: the pointer
-//! is NULL or points to a **live** handle of the expected type produced by this library.
-//! Under that contract the magic reliably rejects NULL and catches type confusion between
-//! live handles. It **cannot** reliably detect a use-after-free, an already-destroyed
-//! handle, or an arbitrary/foreign pointer — reading such memory is itself undefined
-//! behavior. Callers must not pass freed or foreign pointers, and must not race `destroy`
-//! with any other call on the same handle.
+//! The magic check is a **best-effort diagnostic, not a memory-safety boundary**. Callers
+//! must pass NULL or a live handle of the **exact expected type** returned by this
+//! library. [`checked_ref`] / [`checked_mut`] reject NULL up front (reliably and safely),
+//! but to read the magic they must first dereference the pointer *as the expected type* —
+//! so the check is only meaningful once that contract already holds. Passing a wrong
+//! handle type, a freed/already-destroyed handle, or a foreign pointer, double-destroying,
+//! or racing `destroy` with any other call on the same handle is invalid caller behavior
+//! (undefined behavior); the magic **cannot be relied upon** to catch it, because the
+//! offending dereference has already happened. In practice the check still turns some
+//! misuse into a clean rejection, but only as a diagnostic once the caller has satisfied
+//! the contract.
 
 use std::panic::{catch_unwind, AssertUnwindSafe};
 
@@ -32,17 +34,19 @@ pub(crate) trait HasMagic {
     fn set_magic(&mut self, value: u64);
 }
 
-/// Borrow a `&T` from a `*const T` handle after NULL and (best-effort) magic validation.
+/// Borrow a `&T` from a `*const T` handle. NULL is rejected up front; the magic value is
+/// then checked as a best-effort diagnostic.
 ///
-/// Returns `None` (and records a diagnostic) if the pointer is NULL or the magic value
-/// does not match the expected type. The magic check is a best-effort diagnostic for
-/// live handles only (see the module docs); it is not a defense against freed or foreign
-/// pointers, which are undefined behavior to pass.
+/// Returns `None` (recording a diagnostic) if the pointer is NULL or the magic value does
+/// not match. The magic check runs *after* dereferencing `ptr` as a `T`, so it is only a
+/// sanity check once the caller's contract holds (see the module docs) — it is **not** a
+/// defense against wrong-type, freed, or foreign pointers, which are undefined behavior to
+/// pass.
 ///
 /// # Safety
-/// `ptr` must be NULL or point to a **live** `T` produced by this library (not freed, not
-/// a different handle type, not a foreign pointer), and must not be destroyed or mutated
-/// concurrently for the duration of the borrow.
+/// `ptr` must be NULL or point to a **live handle of the exact type `T`** produced by this
+/// library (not another handle type, not freed, not a foreign pointer), and must not be
+/// destroyed or mutated concurrently for the duration of the borrow.
 pub(crate) unsafe fn checked_ref<'a, T: HasMagic>(ptr: *const T) -> Option<&'a T> {
     if ptr.is_null() {
         set_last_error("null handle passed to OpenTelemetry C API");
@@ -57,15 +61,15 @@ pub(crate) unsafe fn checked_ref<'a, T: HasMagic>(ptr: *const T) -> Option<&'a T
     Some(handle)
 }
 
-/// Borrow a `&mut T` from a `*mut T` handle after NULL and (best-effort) magic validation.
-///
-/// The magic check is a best-effort diagnostic for live handles only (see the module
-/// docs); it does not reliably detect freed or foreign pointers.
+/// Borrow a `&mut T` from a `*mut T` handle. NULL is rejected up front; the magic value is
+/// then checked as a best-effort diagnostic (see the module docs) — it does **not**
+/// reliably detect wrong-type, freed, or foreign pointers, since it runs only after `ptr`
+/// is dereferenced as a `T`.
 ///
 /// # Safety
-/// `ptr` must be NULL or point to a **live**, uniquely-borrowed `T` produced by this
-/// library. It must not be used concurrently from another thread, nor destroyed
-/// concurrently, for the duration of the borrow.
+/// `ptr` must be NULL or point to a **live handle of the exact type `T`** produced by this
+/// library, uniquely borrowed. It must not be used concurrently from another thread, nor
+/// destroyed concurrently, for the duration of the borrow.
 pub(crate) unsafe fn checked_mut<'a, T: HasMagic>(ptr: *mut T) -> Option<&'a mut T> {
     if ptr.is_null() {
         set_last_error("null handle passed to OpenTelemetry C API");
@@ -87,12 +91,12 @@ pub(crate) fn into_raw<T>(value: T) -> *mut T {
 
 /// Reclaim and drop a handle previously created with [`into_raw`].
 ///
-/// NULL is ignored. For a live handle whose magic does not match `T` (a wrong-type
-/// pointer) the allocation is left untouched. The magic is poisoned to zero before the
-/// box is freed, which turns *some* accidental reuses of the freed handle into a rejected
-/// magic check rather than silent corruption — but this is best-effort only and must not
-/// be relied upon: using a handle after it is destroyed, or racing `destroy` with any
-/// other call on the same handle, is undefined behavior.
+/// NULL is ignored. As a best-effort diagnostic the magic is checked (after dereferencing
+/// `ptr` as a `T`) and a mismatch leaves the allocation untouched; the magic is also
+/// poisoned to zero before the box is freed. Neither substitutes for the caller's
+/// contract: passing the wrong handle type, using a handle after it is destroyed,
+/// double-destroying, or racing `destroy` with any other call on the same handle is
+/// undefined behavior.
 ///
 /// # Safety
 /// `ptr` must be NULL or a pointer returned by [`into_raw`] for the same `T` that has not

@@ -517,7 +517,12 @@ pub unsafe extern "C" fn otel_sdk_get_tracer_provider(
 /// through this SDK. May be called more than once; the most recent call wins. Returns
 /// `OTEL_STATUS_ALREADY_SHUTDOWN` if the SDK has been shut down.
 ///
-/// Safe to call concurrently with other non-destroy SDK operations on the same handle.
+/// Safe to call concurrently with other non-destroy SDK operations on the same handle. A
+/// concurrent `set_as_global` and [`otel_sdk_shutdown`] may linearize in **either order**,
+/// and both outcomes are acceptable: if `set_as_global` observes the SDK as not-yet-shut-
+/// down it may publish the provider even if `shutdown` is about to win (the just-published
+/// provider then simply becomes a no-op once shutdown completes); once shutdown has been
+/// observed, `set_as_global` returns `OTEL_STATUS_ALREADY_SHUTDOWN`. No locking is needed.
 ///
 /// # Safety
 /// `sdk` must satisfy the handle contract and must not be destroyed concurrently.

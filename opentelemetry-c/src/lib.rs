@@ -1,8 +1,8 @@
 //! # opentelemetry-c
 //!
 //! A Rust-backed C API and SDK for [OpenTelemetry](https://opentelemetry.io), exposing
-//! a stable C ABI for distributed tracing. The Rust OpenTelemetry SDK does all of the
-//! real work behind an opaque-handle C facade; C callers never see Rust types,
+//! an experimental C ABI for distributed tracing. The Rust OpenTelemetry SDK does all of
+//! the real work behind an opaque-handle C facade; C callers never see Rust types,
 //! ownership rules, or async runtimes.
 //!
 //! ## What this crate provides (traces)
@@ -22,7 +22,9 @@
 //!
 //! - Every entry point is `extern "C"`, `#[no_mangle]`, and wrapped in a panic firewall
 //!   (`catch_unwind`); a Rust panic can never cross the C boundary.
-//! - Handles are opaque pointers validated with a per-type magic number.
+//! - Handles are opaque pointers tagged with a per-type magic number, checked as a
+//!   best-effort diagnostic; callers must pass NULL or a live handle of the exact expected
+//!   type (wrong-type, freed, or foreign pointers are undefined behavior to pass).
 //! - Fallible functions return an [`error::OtelStatus`]; functions that create handles
 //!   return a nullable pointer. A diagnostic string is available from
 //!   `otel_last_error_message()`.
