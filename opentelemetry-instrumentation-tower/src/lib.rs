@@ -690,7 +690,7 @@ where
         if let Some(fin) = this.finalization.take() {
             finalize_request(
                 &result,
-                &fin.request_data,
+                fin.request_data,
                 &fin.layer_state,
                 &fin.response_extractor,
             );
@@ -834,7 +834,7 @@ where
 /// Finalizes the request by updating the span and recording metrics after the response is received.
 fn finalize_request<ResBody, E, ResExt>(
     result: &result::Result<http::Response<ResBody>, E>,
-    request_data: &RequestData,
+    request_data: RequestData,
     layer_state: &Arc<HTTPLayerState>,
     response_extractor: &ResExt,
 ) where
@@ -842,40 +842,31 @@ fn finalize_request<ResBody, E, ResExt>(
     ResExt: ResponseAttributeExtractor<ResBody>,
     E: std::fmt::Debug,
 {
+    let RequestData {
+        duration_start,
+        req_body_size,
+        protocol_name_kv,
+        protocol_version_kv,
+        url_scheme_kv,
+        method_kv,
+        route_kv_opt,
+        custom_request_attributes,
+    } = request_data;
+
     let cx = OtelContext::current();
     let span = cx.span();
 
     match result {
         Ok(response) => {
             let status = response.status();
+            let status_code_kv =
+                KeyValue::new(HTTP_RESPONSE_STATUS_CODE_LABEL, i64::from(status.as_u16()));
 
-            // Build base label set
-            let mut label_superset = vec![
-                request_data.protocol_name_kv.clone(),
-                request_data.protocol_version_kv.clone(),
-                request_data.url_scheme_kv.clone(),
-                request_data.method_kv.clone(),
-                KeyValue::new(HTTP_RESPONSE_STATUS_CODE_LABEL, i64::from(status.as_u16())),
-            ];
-
-            if let Some(route_kv) = &request_data.route_kv_opt {
-                label_superset.push(route_kv.clone());
-            }
-
-            // Add custom request attributes
-            label_superset.extend(request_data.custom_request_attributes.clone());
-
-            // Extract and add custom response attributes
+            // Extract custom response attributes (empty/non-allocating for NoOp).
             let custom_response_attributes = response_extractor.extract_attributes(response);
-            label_superset.extend(custom_response_attributes.clone());
 
             // Update span
-            span.set_attribute(KeyValue::new(
-                semconv::trace::HTTP_RESPONSE_STATUS_CODE,
-                status.as_u16() as i64,
-            ));
-
-            // Add custom response attributes to span
+            span.set_attribute(status_code_kv.clone());
             for attr in &custom_response_attributes {
                 span.set_attribute(attr.clone());
             }
@@ -887,13 +878,32 @@ fn finalize_request<ResBody, E, ResExt>(
                 });
             }
 
-            // Record metrics
-            layer_state.server_request_duration.record(
-                request_data.duration_start.elapsed().as_secs_f64(),
-                &label_superset,
-            );
+            // Build label superset by moving owned values where possible.
+            // `url_scheme_kv` and `method_kv` are cloned for the active-requests
+            // decrement; their underlying strings are typically `&'static str`
+            // so the clones are allocation-free.
+            let cap = 5
+                + route_kv_opt.is_some() as usize
+                + custom_request_attributes.len()
+                + custom_response_attributes.len();
+            let mut label_superset = Vec::with_capacity(cap);
+            label_superset.push(protocol_name_kv);
+            label_superset.push(protocol_version_kv);
+            label_superset.push(url_scheme_kv.clone());
+            label_superset.push(method_kv.clone());
+            label_superset.push(status_code_kv);
+            if let Some(route_kv) = route_kv_opt {
+                label_superset.push(route_kv);
+            }
+            // Move (not clone) the custom attribute Vecs into the label set.
+            label_superset.extend(custom_request_attributes);
+            label_superset.extend(custom_response_attributes);
 
-            if let Some(req_content_length) = request_data.req_body_size {
+            layer_state
+                .server_request_duration
+                .record(duration_start.elapsed().as_secs_f64(), &label_superset);
+
+            if let Some(req_content_length) = req_body_size {
                 layer_state
                     .server_request_body_size
                     .record(req_content_length, &label_superset);
@@ -904,6 +914,10 @@ fn finalize_request<ResBody, E, ResExt>(
                     .server_response_body_size
                     .record(resp_content_length, &label_superset);
             }
+
+            layer_state
+                .server_active_requests
+                .add(-1, &[url_scheme_kv, method_kv]);
         }
         Err(error) => {
             // Mark span as error
@@ -911,29 +925,23 @@ fn finalize_request<ResBody, E, ResExt>(
                 description: format!("{:?}", error).into(),
             });
 
-            // Still record duration metric with error label
-            let label_superset = vec![
-                request_data.protocol_name_kv.clone(),
-                request_data.protocol_version_kv.clone(),
-                request_data.url_scheme_kv.clone(),
-                request_data.method_kv.clone(),
+            // Still record duration metric (without status code).
+            let label_superset = [
+                protocol_name_kv,
+                protocol_version_kv,
+                url_scheme_kv.clone(),
+                method_kv.clone(),
             ];
 
-            layer_state.server_request_duration.record(
-                request_data.duration_start.elapsed().as_secs_f64(),
-                &label_superset,
-            );
+            layer_state
+                .server_request_duration
+                .record(duration_start.elapsed().as_secs_f64(), &label_superset);
+
+            layer_state
+                .server_active_requests
+                .add(-1, &[url_scheme_kv, method_kv]);
         }
     }
-
-    // Always decrement active requests counter
-    layer_state.server_active_requests.add(
-        -1,
-        &[
-            request_data.url_scheme_kv.clone(),
-            request_data.method_kv.clone(),
-        ],
-    );
 }
 
 fn split_and_format_protocol_version(http_version: http::Version) -> (&'static str, &'static str) {
