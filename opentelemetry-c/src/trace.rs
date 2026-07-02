@@ -72,6 +72,16 @@ impl HasMagic for OtelTracer {
     }
 }
 
+// The C contract documents tracer-provider and tracer handles as safe to share and use
+// across threads. Concurrent callers form `&OtelTracerProvider` / `&OtelTracer` from a raw
+// pointer, which is sound across threads only if these types are `Sync`. Assert it at
+// compile time so a future non-`Sync` field breaks the build instead of the contract.
+const _: () = {
+    fn assert_sync<T: Sync>() {}
+    let _ = assert_sync::<OtelTracerProvider>;
+    let _ = assert_sync::<OtelTracer>;
+};
+
 /// Opaque span handle (`otel_span_t`).
 pub struct OtelSpan {
     magic: u64,

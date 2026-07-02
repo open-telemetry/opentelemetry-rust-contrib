@@ -205,8 +205,13 @@ configuration (`otel_sdk_builder_set_otlp_endpoint`) takes precedence.
   caller. The caller **must** release it with the matching `*_destroy`.
 - Every `*_destroy` accepts `NULL` as a safe no-op. Do **not** destroy the same
   non-NULL handle twice (this is a use-after-free, exactly like C `free`).
-- Handles are validated with a per-type magic number, so passing the wrong handle type
-  or an already-destroyed handle is detected and rejected instead of dereferenced.
+- **You must pass only live handles** returned by this library. Handles carry a per-type
+  magic number checked on entry, but this is a **best-effort diagnostic, not a safety
+  net**: it reliably rejects `NULL` and catches passing a *live* handle of the wrong
+  type, but it **cannot** detect a freed/already-destroyed handle or a foreign pointer
+  (reading such memory is undefined behavior). Using a handle after `destroy`,
+  double-destroying, or racing `destroy` with another call on the same handle is
+  undefined behavior.
 - **All strings are borrowed for the duration of the call only.** They are passed as
   `otel_string_view_t` (pointer + length, UTF-8, not required to be NUL-terminated).
   The library copies whatever it needs to retain before returning, so the caller may

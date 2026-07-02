@@ -48,19 +48,33 @@ impl OtelStringView {
 
     /// Borrow the raw bytes described by this view.
     ///
-    /// Returns `None` when the view is malformed (NULL pointer with non-zero length).
+    /// Returns an error status when the view is malformed: a NULL pointer with a
+    /// non-zero length, or a length greater than `isize::MAX` (the maximum number of
+    /// bytes a Rust slice may span, and a `slice::from_raw_parts` safety precondition).
     ///
     /// # Safety
     /// `ptr` must be valid for reads of `len` bytes, or NULL when `len == 0`.
-    unsafe fn as_bytes(&self) -> Option<&[u8]> {
+    unsafe fn as_bytes(&self) -> Result<&[u8], OtelStatus> {
         if self.len == 0 {
-            return Some(&[]);
+            return Ok(&[]);
         }
         if self.ptr.is_null() {
-            return None;
+            return Err(fail(
+                OtelStatus::InvalidArgument,
+                "string view has NULL ptr with non-zero len",
+            ));
         }
-        // SAFETY: caller guarantees `ptr` covers `len` valid bytes.
-        Some(unsafe { std::slice::from_raw_parts(self.ptr as *const u8, self.len) })
+        // A slice may span at most `isize::MAX` bytes; reject anything larger *before*
+        // forming the slice, since `slice::from_raw_parts` would otherwise be UB.
+        if self.len > isize::MAX as usize {
+            return Err(fail(
+                OtelStatus::InvalidArgument,
+                "string view len exceeds the maximum supported size",
+            ));
+        }
+        // SAFETY: `ptr` is non-NULL, the caller guarantees it covers `len` valid bytes,
+        // and `len <= isize::MAX` (checked above).
+        Ok(unsafe { std::slice::from_raw_parts(self.ptr as *const u8, self.len) })
     }
 
     /// Convert to a `&str`, requiring valid UTF-8.
@@ -69,42 +83,54 @@ impl OtelStringView {
     /// See [`OtelStringView::as_bytes`].
     pub(crate) unsafe fn as_str(&self) -> Result<&str, OtelStatus> {
         // SAFETY: forwarded to the caller's contract.
-        let bytes = unsafe { self.as_bytes() }.ok_or_else(|| {
-            fail(
-                OtelStatus::InvalidArgument,
-                "string view has NULL ptr with non-zero len",
-            )
-        })?;
+        let bytes = unsafe { self.as_bytes() }?;
         std::str::from_utf8(bytes)
             .map_err(|_| fail(OtelStatus::InvalidUtf8, "string view is not valid UTF-8"))
     }
 
     /// Convert to an owned `String`, requiring valid UTF-8.
     ///
+    /// The copy is made fallibly: allocation failure yields [`OtelStatus::InternalError`]
+    /// instead of aborting the process (the default global-allocator behavior).
+    ///
     /// # Safety
     /// See [`OtelStringView::as_bytes`].
     pub(crate) unsafe fn to_string_strict(self) -> Result<String, OtelStatus> {
         // SAFETY: forwarded to the caller's contract.
-        unsafe { self.as_str() }.map(|s| s.to_owned())
+        let s = unsafe { self.as_str() }?;
+        try_owned_string(s)
     }
 
     /// Convert to an owned `String`, replacing invalid UTF-8 with U+FFFD.
     ///
     /// Used for best-effort fields (attribute keys/values, span/event names) where the
-    /// OpenTelemetry specification prefers lossy degradation over hard failure.
+    /// OpenTelemetry specification prefers lossy degradation over hard failure. The
+    /// common (valid UTF-8) path copies fallibly, mapping allocation failure to
+    /// [`OtelStatus::InternalError`] instead of aborting.
     ///
     /// # Safety
     /// See [`OtelStringView::as_bytes`].
     pub(crate) unsafe fn to_string_lossy(self) -> Result<String, OtelStatus> {
         // SAFETY: forwarded to the caller's contract.
-        let bytes = unsafe { self.as_bytes() }.ok_or_else(|| {
-            fail(
-                OtelStatus::InvalidArgument,
-                "string view has NULL ptr with non-zero len",
-            )
-        })?;
-        Ok(String::from_utf8_lossy(bytes).into_owned())
+        let bytes = unsafe { self.as_bytes() }?;
+        match std::str::from_utf8(bytes) {
+            Ok(s) => try_owned_string(s),
+            // Rare invalid-UTF-8 path: `from_utf8_lossy` performs the U+FFFD replacement.
+            Err(_) => Ok(String::from_utf8_lossy(bytes).into_owned()),
+        }
     }
+}
+
+/// Fallibly copy a `&str` into an owned `String`, mapping allocation failure to a status
+/// instead of aborting the process. Used for owned copies of C-provided string data whose
+/// length is controlled by the caller.
+fn try_owned_string(s: &str) -> Result<String, OtelStatus> {
+    let mut owned = String::new();
+    owned
+        .try_reserve_exact(s.len())
+        .map_err(|_| fail(OtelStatus::InternalError, "failed to allocate string"))?;
+    owned.push_str(s);
+    Ok(owned)
 }
 
 /// Discriminant identifying the active member of the [`OtelAttributeValue`] union.
@@ -332,6 +358,30 @@ mod tests {
         };
         assert_eq!(
             unsafe { v.as_str() }.unwrap_err(),
+            OtelStatus::InvalidArgument
+        );
+    }
+
+    #[test]
+    fn oversized_len_is_rejected_before_slice_creation() {
+        // A len greater than isize::MAX must be rejected before the slice is ever formed
+        // (forming it would be undefined behavior). A non-NULL dangling pointer proves no
+        // read/slice occurs: the size check precedes slice::from_raw_parts.
+        let dangling = std::ptr::NonNull::<c_char>::dangling().as_ptr() as *const c_char;
+        let view = OtelStringView {
+            ptr: dangling,
+            len: (isize::MAX as usize) + 1,
+        };
+        assert_eq!(
+            unsafe { view.as_str() }.unwrap_err(),
+            OtelStatus::InvalidArgument
+        );
+        assert_eq!(
+            unsafe { view.to_string_strict() }.unwrap_err(),
+            OtelStatus::InvalidArgument
+        );
+        assert_eq!(
+            unsafe { view.to_string_lossy() }.unwrap_err(),
             OtelStatus::InvalidArgument
         );
     }

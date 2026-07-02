@@ -554,6 +554,17 @@ fn map_flush_result(result: opentelemetry_sdk::error::OTelSdkResult) -> OtelStat
     }
 }
 
+/// Clears the shared force-flush in-flight flag when dropped. Held by the helper thread
+/// so the flag is released even if `provider.force_flush()` panics (which would otherwise
+/// leave the flag set and block every future timed flush).
+struct FlushGuard(Arc<AtomicBool>);
+
+impl Drop for FlushGuard {
+    fn drop(&mut self) {
+        self.0.store(false, Ordering::Release);
+    }
+}
+
 /// Flush any buffered spans to the exporter.
 ///
 /// If `timeout_millis` is `0` the call blocks on the calling thread until the flush
@@ -609,22 +620,23 @@ pub unsafe extern "C" fn otel_sdk_force_flush(
         }
 
         // Run the flush on a helper thread so the C-supplied timeout is honored even if
-        // the exporter stalls. The provider is cheaply cloneable (Arc-backed) and the
-        // in-flight guard is shared so the helper can clear it when the flush finishes.
+        // the exporter stalls. The provider is cheaply cloneable (Arc-backed); a
+        // `FlushGuard` clears the shared in-flight flag when the helper finishes, even if
+        // the flush panics.
         let provider = sdk.provider.clone();
-        let in_flight = Arc::clone(&sdk.flush_in_flight);
+        let guard = FlushGuard(Arc::clone(&sdk.flush_in_flight));
         let (tx, rx) = mpsc::channel();
         let spawned = thread::Builder::new()
             .name("otel-c-force-flush".to_owned())
             .spawn(move || {
                 let result = provider.force_flush();
-                // Clear the guard as soon as the flush work is done, before sending (the
-                // receiver may already be gone if the caller timed out).
-                in_flight.store(false, Ordering::Release);
+                // Release the guard now (before sending) so a subsequent sequential flush
+                // is not spuriously rejected; on a panic the guard's `Drop` clears it.
+                drop(guard);
                 let _ = tx.send(result);
             });
         if let Err(err) = spawned {
-            // Roll back the guard so future flushes can proceed.
+            // The helper never started, so clear the in-flight flag here.
             sdk.flush_in_flight.store(false, Ordering::Release);
             return fail(
                 OtelStatus::InternalError,
@@ -691,4 +703,38 @@ pub unsafe extern "C" fn otel_sdk_shutdown(sdk: *mut OtelSdk, timeout_millis: u6
 #[no_mangle]
 pub unsafe extern "C" fn otel_sdk_destroy(sdk: *mut OtelSdk) {
     guard_unit(|| unsafe { destroy(sdk) });
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn flush_guard_clears_flag_on_normal_drop() {
+        let flag = Arc::new(AtomicBool::new(true));
+        {
+            let _guard = FlushGuard(Arc::clone(&flag));
+        }
+        assert!(
+            !flag.load(Ordering::Acquire),
+            "FlushGuard::drop must clear the in-flight flag"
+        );
+    }
+
+    #[test]
+    fn flush_guard_clears_flag_even_on_panic() {
+        // If the flush panics inside the helper thread, the guard's Drop must still clear
+        // the flag; otherwise every future timed flush would be wrongly rejected.
+        let flag = Arc::new(AtomicBool::new(true));
+        let inner = Arc::clone(&flag);
+        let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(move || {
+            let _guard = FlushGuard(inner);
+            panic!("simulated force_flush panic (expected in this test)");
+        }));
+        assert!(result.is_err(), "the closure must have panicked");
+        assert!(
+            !flag.load(Ordering::Acquire),
+            "FlushGuard::drop must clear the in-flight flag even on panic"
+        );
+    }
 }
