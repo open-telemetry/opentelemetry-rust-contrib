@@ -14,6 +14,9 @@ cargo clippy --workspace --all-targets --all-features -- -Dwarnings
 
 cargo_feature opentelemetry-aws "default"
 
+cargo_feature opentelemetry-c "native-tls"
+cargo_feature opentelemetry-c "rustls-tls"
+
 cargo_feature opentelemetry-datadog "reqwest-blocking-client,intern-std"
 cargo_feature opentelemetry-datadog "reqwest-client,intern-std"
 # TODO: Clippy doesn't seem to like surf client.
