@@ -34,10 +34,11 @@
   extension points for future exporter/processor kinds without an ABI break.
 - Criterion benchmark `sdk_hotpath` measuring the SDK-backed hot path (tracer acquisition
   through the installed global provider, span start/end, attribute setters, and a bounded
-  event) with a real OTLP-exporter + batch-processor pipeline. It runs with no collector and
-  no network export (the exporter targets a closed loopback port; flushes fail fast and are
-  discarded), is not an export/throughput benchmark, and is not a CI gate. Run explicitly with
-  `cargo bench -p opentelemetry-c-sdk`. See `opentelemetry-c/README.md` for details.
+  event) with a real OTLP-exporter + batch-processor pipeline. It runs with no collector
+  required (the exporter targets a closed loopback port, so background export attempts may fail
+  fast and are discarded), is not an export/throughput benchmark, and is not a CI gate. Run
+  explicitly with `cargo bench -p opentelemetry-c-sdk`. See `opentelemetry-c/README.md` for
+  details.
 - `otel_otlp_trace_exporter_builder_add_header` now rejects a duplicate header key
   (case-insensitively, so `Authorization` and `authorization` collide) with
   `OTEL_STATUS_INVALID_ARGUMENT` (and a `otel_last_error_message()` diagnostic) instead of

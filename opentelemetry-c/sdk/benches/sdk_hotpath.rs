@@ -67,8 +67,9 @@ fn assert_ok(status: OtelStatus) {
 }
 
 /// Build a real trace pipeline and install it as the process-global provider. Returns the owned
-/// SDK handle (shut down + destroyed at the end of the bench). The OTLP exporter targets a closed
-/// loopback port, so nothing is ever exported over the network.
+/// SDK handle (shut down + destroyed at the end of the bench). No collector is required: the
+/// OTLP exporter targets a closed loopback port, so background export attempts may fail fast
+/// (connection refused) and are discarded.
 fn install_sdk() -> *mut OtelSdk {
     unsafe {
         // OTLP exporter. `build` does not connect (the client is lazy); only a batch flush would,
