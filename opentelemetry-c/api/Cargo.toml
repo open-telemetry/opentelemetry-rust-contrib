@@ -23,6 +23,12 @@ opentelemetry-c-abi = { path = "../abi" }
 [dev-dependencies]
 # Used by the provider-lifetime race test to build a test-only implementation vtable.
 opentelemetry-c-abi = { path = "../abi" }
+# Hot-path FFI-overhead benchmarks (no-SDK / no-op provider path). Explicit; not a test.
+criterion = { workspace = true }
+
+[[bench]]
+name = "api_hotpath"
+harness = false
 
 [lints]
 workspace = true

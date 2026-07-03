@@ -12,3 +12,7 @@
   `opentelemetry_sdk`, `opentelemetry-otlp`, or `reqwest` — so instrumentation can link the
   API alone. Existing FFI-safety hardening is preserved (fixed-width discriminants,
   best-effort handle contract, panic firewall, documented thread/lifecycle contracts).
+- Criterion benchmark `api_hotpath` measuring the API-only, no-SDK (no-op provider) hot-path
+  FFI boundary cost (global provider / tracer acquisition, span start/end, scalar and string
+  attribute setters). Run explicitly with `cargo bench -p opentelemetry-c-api`; not a test or
+  CI gate. See `opentelemetry-c/README.md` for details.

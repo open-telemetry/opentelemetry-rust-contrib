@@ -31,6 +31,15 @@ reqwest = { version = "0.13", default-features = false, features = ["blocking"] 
 
 [dev-dependencies]
 opentelemetry_sdk = { workspace = true, features = ["trace", "testing"] }
+# The SDK-backed hot-path benchmark drives the real C API entrypoints (global provider
+# slot, span/tracer ops). Linking the API rlib here also resolves this crate's `api_ffi`
+# extern `otel_api_*` imports for the bench binary. Benchmark/test only — never a runtime dep.
+opentelemetry-c-api = { path = "../api" }
+criterion = { workspace = true }
+
+[[bench]]
+name = "sdk_hotpath"
+harness = false
 
 [features]
 # Platform TLS is the default (OS TLS stack; HTTPS-capable; no bundled crypto).

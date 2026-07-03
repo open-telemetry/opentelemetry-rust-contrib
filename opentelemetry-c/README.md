@@ -85,6 +85,38 @@ the SDK vtable take `&mut` without C-layer synchronization). API hot-path entry 
 report failures clear the thread-local last-error slot at entry; that clear uses no global
 lock and performs no heap allocation.
 
+## Benchmarks
+
+Two [Criterion](https://crates.io/crates/criterion) benchmark suites protect the hot-path
+performance contract above. They are **tracing-only**, run explicitly (never as part of
+`cargo test` or a required CI gate), and require **no collector and no network**:
+
+```sh
+cargo bench -p opentelemetry-c-api   # api_hotpath: API-only, no-SDK (no-op provider) path
+cargo bench -p opentelemetry-c-sdk   # sdk_hotpath: API + real SDK pipeline, no network export
+```
+
+- **`api_hotpath` (no-SDK)** measures the pure C boundary cost — opaque handle
+  allocation/validation and the panic-guarded no-op dispatch — with no SDK installed, so the
+  global provider resolves to the no-op default. It isolates FFI-marshalling overhead.
+- **`sdk_hotpath` (SDK-backed)** installs a real OTLP-exporter + batch-span-processor pipeline
+  as the global provider through the public C SDK API, then drives the same C API entrypoints.
+  It measures span/attribute/event cost through the C boundary **plus** the Rust SDK's own
+  machinery. The OTLP exporter targets a closed loopback port, so any batch flush fails fast
+  and is discarded — nothing is exported over the network. It is **not** an export/network
+  throughput benchmark and is **not** a default regression guard for export.
+
+Both suites separate setup (pipeline build, global install, tracer acquisition) from the
+measured loop and cache the tracer handle, so span benchmarks do not measure tracer
+acquisition. Any future exporter/network benchmark must stay opt-in and out of the default
+regression set.
+
+Both suites call the real `#[no_mangle] extern "C"` ABI symbols that C consumers link
+against, so they exercise the actual C caller path at the ABI level (C source-level linkage
+is already covered by the header-compile tests and the `c-basic-traces` example). A native
+C-source timing harness linked against the cdylibs is a possible low-priority follow-up; it is
+intentionally omitted here to avoid extra Makefile/link/CI maintenance for marginal coverage.
+
 ## Supported model
 
 The shared-global model is validated on **Unix-like dynamic linking (Linux and macOS)** with

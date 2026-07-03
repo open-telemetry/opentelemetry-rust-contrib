@@ -20,3 +20,9 @@
   OTLP/batch-specific setters were removed from the SDK builder. Builders transfer ownership
   of their children on `OTEL_STATUS_OK`. The generic exporter/processor handles are opaque
   extension points for future exporter/processor kinds without an ABI break.
+- Criterion benchmark `sdk_hotpath` measuring the SDK-backed hot path (tracer acquisition
+  through the installed global provider, span start/end, attribute setters, and a bounded
+  event) with a real OTLP-exporter + batch-processor pipeline. It runs with no collector and
+  no network export (the exporter targets a closed loopback port; flushes fail fast and are
+  discarded), is not an export/throughput benchmark, and is not a CI gate. Run explicitly with
+  `cargo bench -p opentelemetry-c-sdk`. See `opentelemetry-c/README.md` for details.
