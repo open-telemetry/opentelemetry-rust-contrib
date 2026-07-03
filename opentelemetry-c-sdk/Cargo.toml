@@ -1,0 +1,42 @@
+[package]
+name = "opentelemetry-c-sdk"
+description = "Rust-backed C SDK for OpenTelemetry traces (OTLP exporter, batch processor) that installs into the C API's global provider"
+version = "0.1.0"
+edition = "2021"
+rust-version = "1.75.0"
+homepage = "https://github.com/open-telemetry/opentelemetry-rust-contrib/tree/main/opentelemetry-c-sdk"
+repository = "https://github.com/open-telemetry/opentelemetry-rust-contrib/tree/main/opentelemetry-c-sdk"
+keywords = ["opentelemetry", "tracing", "ffi", "c", "otlp"]
+categories = ["development-tools::debugging", "api-bindings"]
+license = "Apache-2.0"
+
+# The SDK library. C consumers link this PLUS `libopentelemetry_c_api`; the SDK cdylib
+# links against the API cdylib to call its registration ABI (see build.rs).
+[lib]
+crate-type = ["cdylib", "staticlib", "rlib"]
+
+[dependencies]
+opentelemetry-c-abi = { path = "../opentelemetry-c-abi" }
+opentelemetry = { workspace = true, features = ["trace"] }
+opentelemetry_sdk = { workspace = true, features = ["trace"] }
+opentelemetry-otlp = { workspace = true, features = [
+    "trace",
+    "http-proto",
+    "reqwest-blocking-client",
+] }
+# Direct dependency used only to select the OTLP blocking HTTP client's TLS backend via
+# this crate's `native-tls` / `rustls-tls` features. The exporter is driven through
+# opentelemetry-otlp; this crate never calls reqwest directly.
+reqwest = { version = "0.13", default-features = false, features = ["blocking"] }
+
+[dev-dependencies]
+opentelemetry_sdk = { workspace = true, features = ["trace", "testing"] }
+
+[features]
+# Platform TLS is the default (OS TLS stack; HTTPS-capable; no bundled crypto).
+default = ["native-tls"]
+native-tls = ["reqwest/native-tls"]
+rustls-tls = ["reqwest/rustls"]
+
+[lints]
+workspace = true
