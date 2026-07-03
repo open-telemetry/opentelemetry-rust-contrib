@@ -38,6 +38,25 @@ fn sdk_include() -> PathBuf {
     manifest().join("include")
 }
 
+/// A unique temp `.c` path per invocation, so parallel test threads/processes never clobber
+/// or delete each other's source file. std-only: process id + `SystemTime` nanos + a
+/// monotonic per-process counter.
+fn unique_temp_c(label: &str) -> PathBuf {
+    use std::sync::atomic::{AtomicU64, Ordering};
+    static SEQ: AtomicU64 = AtomicU64::new(0);
+    let nanos = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_nanos())
+        .unwrap_or(0);
+    let seq = SEQ.fetch_add(1, Ordering::Relaxed);
+    std::env::temp_dir().join(format!(
+        "otel_c_{label}_hdr_check_{}_{}_{}.c",
+        std::process::id(),
+        nanos,
+        seq
+    ))
+}
+
 fn syntax_check(cc: &str, args: &[&std::ffi::OsStr]) {
     let out = Command::new(cc).args(args).output().expect("invoke cc");
     assert!(
@@ -62,7 +81,7 @@ fn sdk_header_and_example_compile() {
     // A TU that includes only sdk.h (which pulls in the API's common.h/trace.h), and also
     // exercises the optional header-only helpers to confirm they are reachable through the
     // SDK header context. `-fsyntax-only` does not link, so a NULL span is fine.
-    let tmp = std::env::temp_dir().join("otel_c_sdk_hdr_check.c");
+    let tmp = unique_temp_c("sdk");
     std::fs::write(
         &tmp,
         r#"#include <opentelemetry_c/sdk.h>
@@ -96,7 +115,7 @@ int main(void) {
 
     // A TU that includes every pipeline header and exercises the full builder chain, so each
     // new header compiles standalone and the ownership-transfer signatures line up.
-    let pipeline = std::env::temp_dir().join("otel_c_pipeline_hdr_check.c");
+    let pipeline = unique_temp_c("pipeline");
     std::fs::write(
         &pipeline,
         r#"#include <opentelemetry_c/sdk.h>

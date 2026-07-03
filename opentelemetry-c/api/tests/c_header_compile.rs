@@ -27,8 +27,27 @@ fn include_dir() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("include")
 }
 
+/// A unique temp `.c` path per invocation, so parallel test threads/processes never clobber
+/// or delete each other's source file. std-only: process id + `SystemTime` nanos + a
+/// monotonic per-process counter.
+fn unique_temp_c(label: &str) -> PathBuf {
+    use std::sync::atomic::{AtomicU64, Ordering};
+    static SEQ: AtomicU64 = AtomicU64::new(0);
+    let nanos = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_nanos())
+        .unwrap_or(0);
+    let seq = SEQ.fetch_add(1, Ordering::Relaxed);
+    std::env::temp_dir().join(format!(
+        "otel_c_{label}_hdr_check_{}_{}_{}.c",
+        std::process::id(),
+        nanos,
+        seq
+    ))
+}
+
 fn syntax_check(cc: &str, include: &PathBuf, src: &str) {
-    let tmp = std::env::temp_dir().join("otel_c_api_hdr_check.c");
+    let tmp = unique_temp_c("api");
     std::fs::write(&tmp, src).expect("write temp source");
     let out = Command::new(cc)
         .args([
