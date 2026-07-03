@@ -47,9 +47,10 @@ otel_status_t otel_otlp_trace_exporter_builder_set_endpoint(
 /*
  * Add an HTTP header sent with every export request (e.g. for authentication).
  *
- * Duplicate keys are rejected: adding a key that was already added returns
- * OTEL_STATUS_INVALID_ARGUMENT (with a message via otel_last_error_message()) and leaves the
- * builder unchanged, rather than silently overwriting the earlier value.
+ * Duplicate keys are rejected case-insensitively: adding a key that matches an already-added
+ * key under ASCII case-insensitive comparison (e.g. "Authorization" vs "authorization")
+ * returns OTEL_STATUS_INVALID_ARGUMENT (with a message via otel_last_error_message()) and
+ * leaves the builder unchanged, rather than silently overwriting the earlier value.
  */
 otel_status_t otel_otlp_trace_exporter_builder_add_header(
     otel_otlp_trace_exporter_builder_t* builder, otel_string_view_t key,

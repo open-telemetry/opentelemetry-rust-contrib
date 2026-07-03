@@ -105,9 +105,10 @@ pub unsafe extern "C" fn otel_otlp_trace_exporter_builder_set_endpoint(
 
 /// Add an HTTP header sent with every OTLP export request.
 ///
-/// Duplicate keys are rejected: if `key` (after strict UTF-8 conversion) is already present,
-/// the call fails with `OTEL_STATUS_INVALID_ARGUMENT` and leaves the configuration unchanged,
-/// rather than silently overwriting the earlier value.
+/// Duplicate keys are rejected case-insensitively: if `key` (after strict UTF-8 conversion)
+/// matches an already-added key under ASCII case-insensitive comparison — so `Authorization`
+/// and `authorization` collide — the call fails with `OTEL_STATUS_INVALID_ARGUMENT` and leaves
+/// the configuration unchanged, rather than silently overwriting the earlier value.
 ///
 /// # Safety
 /// `builder`, `key`, `value` must satisfy their contracts.
@@ -129,7 +130,11 @@ pub unsafe extern "C" fn otel_otlp_trace_exporter_builder_add_header(
                 }
                 Err(e) => return fail_abi(e),
             };
-            if config.headers.iter().any(|(existing, _)| existing == &key) {
+            if config
+                .headers
+                .iter()
+                .any(|(existing, _)| existing.eq_ignore_ascii_case(&key))
+            {
                 return fail_owned(
                     OtelStatus::InvalidArgument,
                     format!("OTLP header key already exists: {key}"),
@@ -276,9 +281,10 @@ mod tests {
                 otel_otlp_trace_exporter_builder_add_header(eb, sv("authorization"), sv("first")),
                 OtelStatus::Ok
             );
-            // A second add of the SAME key is rejected (no silent overwrite) ...
+            // A second add of the SAME key differing only in ASCII case is rejected
+            // case-insensitively (no silent overwrite) ...
             assert_eq!(
-                otel_otlp_trace_exporter_builder_add_header(eb, sv("authorization"), sv("second")),
+                otel_otlp_trace_exporter_builder_add_header(eb, sv("Authorization"), sv("second")),
                 OtelStatus::InvalidArgument
             );
             // ... with a clear last-error message ...

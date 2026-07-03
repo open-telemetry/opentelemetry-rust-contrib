@@ -26,6 +26,7 @@
   no network export (the exporter targets a closed loopback port; flushes fail fast and are
   discarded), is not an export/throughput benchmark, and is not a CI gate. Run explicitly with
   `cargo bench -p opentelemetry-c-sdk`. See `opentelemetry-c/README.md` for details.
-- `otel_otlp_trace_exporter_builder_add_header` now rejects a duplicate header key with
+- `otel_otlp_trace_exporter_builder_add_header` now rejects a duplicate header key
+  (case-insensitively, so `Authorization` and `authorization` collide) with
   `OTEL_STATUS_INVALID_ARGUMENT` (and a `otel_last_error_message()` diagnostic) instead of
   silently overwriting the previously added value.
