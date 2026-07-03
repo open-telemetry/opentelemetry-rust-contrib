@@ -86,7 +86,7 @@ collector — proving the shared global provider.
 Because `cargo test` does not emit cdylib artifacts, build them first:
 
 ```sh
-cargo build -p opentelemetry-c-api -p opentelemetry-c-sdk
+cargo build -p opentelemetry-c-api -p opentelemetry-c-sdk --all-features
 cargo test -p opentelemetry-c-sdk --test cross_artifact --all-features
 ```
 
