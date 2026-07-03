@@ -59,7 +59,7 @@ pub extern "C" fn otel_last_error_message() -> OtelStringView {
             Some(cstring) => {
                 let bytes = cstring.as_bytes();
                 OtelStringView {
-                    ptr: bytes.as_ptr() as *const c_char,
+                    ptr: bytes.as_ptr().cast::<c_char>(),
                     len: bytes.len(),
                 }
             }
@@ -82,7 +82,7 @@ pub unsafe extern "C" fn otel_api_set_last_error(ptr: *const c_char, len: usize)
             return;
         }
         // SAFETY: validated non-NULL with len within isize::MAX per the caller contract.
-        let bytes = unsafe { std::slice::from_raw_parts(ptr as *const u8, len) };
+        let bytes = unsafe { std::slice::from_raw_parts(ptr.cast::<u8>(), len) };
         set_last_error(bytes.to_vec());
     });
 }
@@ -104,7 +104,7 @@ mod tests {
         set_last_error("boom");
         let view = otel_last_error_message();
         // SAFETY: view points at the live thread-local CString.
-        let bytes = unsafe { std::slice::from_raw_parts(view.ptr as *const u8, view.len) };
+        let bytes = unsafe { std::slice::from_raw_parts(view.ptr.cast::<u8>(), view.len) };
         assert_eq!(bytes, b"boom");
         clear_last_error();
         assert!(otel_last_error_message().ptr.is_null());
@@ -114,9 +114,9 @@ mod tests {
     fn api_set_last_error_from_bytes() {
         clear_last_error();
         let msg = b"sdk-said-this";
-        unsafe { otel_api_set_last_error(msg.as_ptr() as *const c_char, msg.len()) };
+        unsafe { otel_api_set_last_error(msg.as_ptr().cast::<c_char>(), msg.len()) };
         let view = otel_last_error_message();
-        let bytes = unsafe { std::slice::from_raw_parts(view.ptr as *const u8, view.len) };
+        let bytes = unsafe { std::slice::from_raw_parts(view.ptr.cast::<u8>(), view.len) };
         assert_eq!(bytes, msg);
         // NULL clears.
         unsafe { otel_api_set_last_error(std::ptr::null(), 0) };

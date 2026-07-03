@@ -25,7 +25,7 @@ use opentelemetry_c_api::{
 
 fn set_err(msg: &str) {
     // SAFETY: `msg` is a valid UTF-8 byte range for the duration of the call.
-    unsafe { otel_api_set_last_error(msg.as_ptr() as *const c_char, msg.len()) };
+    unsafe { otel_api_set_last_error(msg.as_ptr().cast::<c_char>(), msg.len()) };
 }
 
 /// Validate `name` exactly as the SDK does; on a malformed view, set the last-error and
@@ -131,7 +131,7 @@ static BACKED_VTABLE: OtelImplVtable = OtelImplVtable {
 
 fn good(s: &'static str) -> OtelStringView {
     OtelStringView {
-        ptr: s.as_ptr() as *const c_char,
+        ptr: s.as_ptr().cast::<c_char>(),
         len: s.len(),
     }
 }

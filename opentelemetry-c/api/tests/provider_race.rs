@@ -150,7 +150,7 @@ static TEST_VTABLE: OtelImplVtable = OtelImplVtable {
 
 fn sv(s: &'static str) -> OtelStringView {
     OtelStringView {
-        ptr: s.as_ptr() as *const c_char,
+        ptr: s.as_ptr().cast::<c_char>(),
         len: s.len(),
     }
 }

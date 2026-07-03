@@ -107,7 +107,7 @@ impl OtelStringView {
             ));
         }
         // SAFETY: non-NULL, caller guarantees `len` valid bytes, `len <= isize::MAX`.
-        Ok(unsafe { std::slice::from_raw_parts(self.ptr as *const u8, self.len) })
+        Ok(unsafe { std::slice::from_raw_parts(self.ptr.cast::<u8>(), self.len) })
     }
 
     /// Convert to a `&str`, requiring valid UTF-8.
@@ -401,7 +401,7 @@ mod tests {
 
     fn sv(s: &str) -> OtelStringView {
         OtelStringView {
-            ptr: s.as_ptr() as *const c_char,
+            ptr: s.as_ptr().cast::<c_char>(),
             len: s.len(),
         }
     }

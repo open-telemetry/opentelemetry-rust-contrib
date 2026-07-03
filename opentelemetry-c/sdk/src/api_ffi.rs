@@ -66,7 +66,7 @@ mod imp {
             let mut b = slot.borrow_mut();
             b.clear();
             if !ptr.is_null() && len > 0 && len <= isize::MAX as usize {
-                b.extend_from_slice(unsafe { std::slice::from_raw_parts(ptr as *const u8, len) });
+                b.extend_from_slice(unsafe { std::slice::from_raw_parts(ptr.cast::<u8>(), len) });
             }
         });
     }
@@ -95,7 +95,7 @@ pub(crate) fn provider_new(
 
 /// Record a diagnostic in the API-owned thread-local error slot.
 pub(crate) fn set_last_error(message: &str) {
-    unsafe { imp::otel_api_set_last_error(message.as_ptr() as *const c_char, message.len()) };
+    unsafe { imp::otel_api_set_last_error(message.as_ptr().cast::<c_char>(), message.len()) };
 }
 
 /// Clear the API-owned thread-local error slot.

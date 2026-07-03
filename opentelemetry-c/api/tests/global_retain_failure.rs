@@ -34,7 +34,7 @@ extern "C" fn retain_null_no_error(_c: *mut c_void) -> *mut c_void {
 extern "C" fn retain_null_with_error(_c: *mut c_void) -> *mut c_void {
     let msg = b"vtable-set retain error";
     // SAFETY: valid pointer/len for the duration of the call.
-    unsafe { otel_api_set_last_error(msg.as_ptr() as *const c_char, msg.len()) };
+    unsafe { otel_api_set_last_error(msg.as_ptr().cast::<c_char>(), msg.len()) };
     std::ptr::null_mut()
 }
 
@@ -117,7 +117,7 @@ static VTABLE_WITH_ERROR: OtelImplVtable = vtable_with(retain_null_with_error);
 
 fn good(s: &'static str) -> OtelStringView {
     OtelStringView {
-        ptr: s.as_ptr() as *const c_char,
+        ptr: s.as_ptr().cast::<c_char>(),
         len: s.len(),
     }
 }
@@ -133,7 +133,7 @@ fn last_error_bytes() -> Option<Vec<u8>> {
         return None;
     }
     // SAFETY: the view points at the live thread-local error CString.
-    Some(unsafe { std::slice::from_raw_parts(v.ptr as *const u8, v.len) }.to_vec())
+    Some(unsafe { std::slice::from_raw_parts(v.ptr.cast::<u8>(), v.len) }.to_vec())
 }
 
 /// A single test function so the process-global slot is mutated sequentially (integration
