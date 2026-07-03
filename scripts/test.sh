@@ -12,7 +12,7 @@ set -eu
 #
 # This runs on every Unix CI runner (Linux and macOS), so it enforces the supported
 # Unix-like dynamic-linking artifact model — including macOS, whose cdylib link relies on
-# `opentelemetry-c-sdk/build.rs` emitting `-undefined dynamic_lookup`.
+# `opentelemetry-c/sdk/build.rs` emitting `-undefined dynamic_lookup`.
 echo "Building opentelemetry-c-api / opentelemetry-c-sdk cdylibs for the cross-artifact test"
 cargo build -p opentelemetry-c-api -p opentelemetry-c-sdk --all-features
 

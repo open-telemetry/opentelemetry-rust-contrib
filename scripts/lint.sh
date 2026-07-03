@@ -14,8 +14,8 @@ cargo clippy --workspace --all-targets --all-features -- -Dwarnings
 
 cargo_feature opentelemetry-aws "default"
 
-cargo_feature opentelemetry-c-sdk "native-tls"
-cargo_feature opentelemetry-c-sdk "rustls-tls"
+cargo_feature opentelemetry-c/sdk "native-tls"
+cargo_feature opentelemetry-c/sdk "rustls-tls"
 
 cargo_feature opentelemetry-datadog "reqwest-blocking-client,intern-std"
 cargo_feature opentelemetry-datadog "reqwest-client,intern-std"

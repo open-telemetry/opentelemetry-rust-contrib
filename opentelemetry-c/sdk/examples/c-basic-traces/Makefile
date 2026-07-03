@@ -11,9 +11,9 @@
 
 .PHONY: all run clean
 
-API_INC := ../../../opentelemetry-c-api/include
+API_INC := ../../../api/include
 SDK_INC := ../../include
-LIB_DIR := ../../../target/release
+LIB_DIR := ../../../../target/release
 BINARY  := c-basic-traces
 
 CC    ?= cc
@@ -31,7 +31,7 @@ all: $(BINARY)
 
 build-rust:
 	@echo "Building opentelemetry-c-api and opentelemetry-c-sdk (release)..."
-	@cd ../../.. && cargo build --release -p opentelemetry-c-api -p opentelemetry-c-sdk
+	@cd ../../../.. && cargo build --release -p opentelemetry-c-api -p opentelemetry-c-sdk
 
 $(BINARY): main.c build-rust
 	@echo "Linking $(BINARY) against libopentelemetry_c_api + libopentelemetry_c_sdk..."

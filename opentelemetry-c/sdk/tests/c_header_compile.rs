@@ -30,10 +30,8 @@ fn manifest() -> PathBuf {
 }
 
 fn api_include() -> PathBuf {
-    manifest()
-        .parent()
-        .unwrap()
-        .join("opentelemetry-c-api/include")
+    // The API crate is a sibling under `opentelemetry-c/`: sdk -> opentelemetry-c -> api.
+    manifest().parent().unwrap().join("api/include")
 }
 
 fn sdk_include() -> PathBuf {

@@ -5,7 +5,7 @@
 The **C SDK** of the Rust-backed OpenTelemetry C binding: an OTLP **HTTP/protobuf**
 exporter and a batch span processor behind the `otel_sdk_*` C functions. Installing the
 SDK registers it into the **API library's** global provider slot, so instrumentation that
-links only [`opentelemetry-c-api`](../opentelemetry-c-api) exports through it.
+links only [`opentelemetry-c-api`](../api) exports through it.
 
 The exporter uses the blocking `reqwest` client, so the SDK owns all of its own threading
 and **no user-managed async runtime is required**. HTTPS is supported via a selectable TLS
@@ -26,8 +26,8 @@ verified** and needs an import-library follow-up (see the API README's Platform 
 cargo build --release -p opentelemetry-c-api -p opentelemetry-c-sdk
 
 cc -std=c11 my_app.c \
-   -I path/to/opentelemetry-c-api/include \
-   -I path/to/opentelemetry-c-sdk/include \
+   -I path/to/opentelemetry-c/api/include \
+   -I path/to/opentelemetry-c/sdk/include \
    -L path/to/target/release -lopentelemetry_c_api -lopentelemetry_c_sdk \
    -Wl,-rpath,path/to/target/release -o my_app
 ```

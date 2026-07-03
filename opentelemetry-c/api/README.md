@@ -80,7 +80,7 @@ An **instrumentation library** compiles against the headers and links only the A
 
 ```sh
 cc -std=c11 my_instr.c \
-   -I path/to/opentelemetry-c-api/include \
+   -I path/to/opentelemetry-c/api/include \
    -L path/to/target/release -lopentelemetry_c_api \
    -Wl,-rpath,path/to/target/release -o my_instr
 ```

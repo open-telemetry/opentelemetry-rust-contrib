@@ -60,7 +60,11 @@ fn is_ci() -> bool {
 
 /// Find a target profile dir that contains BOTH cdylibs.
 fn find_lib_dir() -> Option<PathBuf> {
+    // This crate lives at `<workspace>/opentelemetry-c/sdk`, so the workspace `target/` dir
+    // is two parents up: opentelemetry-c/sdk -> opentelemetry-c -> <workspace>.
     let workspace_target = Path::new(env!("CARGO_MANIFEST_DIR"))
+        .parent()
+        .unwrap()
         .parent()
         .unwrap()
         .join("target");

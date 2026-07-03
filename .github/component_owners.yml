@@ -19,13 +19,7 @@ components:
   opentelemetry-aws/:
     - jj22ee
 
-  opentelemetry-c-abi/:
-    - lalitb
-
-  opentelemetry-c-api/:
-    - lalitb
-
-  opentelemetry-c-sdk/:
+  opentelemetry-c/:
     - lalitb
 
   opentelemetry-config/:
