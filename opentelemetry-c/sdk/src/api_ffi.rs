@@ -111,6 +111,7 @@ pub(crate) mod test_probe {
         imp::REGISTERED
             .lock()
             .unwrap()
-            .map(|(v, c)| (v as *const OtelImplVtable, c as *mut c_void))
+            .as_ref()
+            .map(|&(v, c)| (v as *const OtelImplVtable, c as *mut c_void))
     }
 }

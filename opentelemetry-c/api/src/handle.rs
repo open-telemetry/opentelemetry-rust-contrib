@@ -5,7 +5,7 @@
 //!
 //! The magic check is a **best-effort diagnostic, not a memory-safety boundary**. Callers
 //! must pass NULL or a live handle of the **exact expected type** returned by this library.
-//! [`checked_ref`] / [`checked_mut`] reject NULL up front, but to read the magic they must
+//! [`checked_ref`] rejects NULL up front, but to read the magic it must
 //! first dereference the pointer *as the expected type*, so the check is only meaningful
 //! once that contract holds. Passing a wrong handle type, a freed handle, or a foreign
 //! pointer, double-destroying, or racing `destroy` with any other call is undefined

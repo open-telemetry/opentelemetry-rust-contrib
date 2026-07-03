@@ -106,13 +106,14 @@ impl Span for LocalParentSpan {
 
 // ---- Attribute conversion --------------------------------------------------
 
-/// Convert a borrowed C attribute into an owned [`KeyValue`] (lossy keys/strings).
+/// Convert a borrowed C attribute into an owned [`KeyValue`] (strict UTF-8 keys/strings;
+/// invalid UTF-8 is rejected).
 ///
 /// # Safety
 /// String views inside `kv` must be valid.
 pub(crate) unsafe fn to_key_value(kv: &OtelKeyValue) -> Result<KeyValue, OtelStatus> {
     // SAFETY: forwarded to the caller's contract.
-    let key = unsafe { kv.key.to_string_lossy() }.map_err(fail_abi)?;
+    let key = unsafe { kv.key.to_string_strict() }.map_err(fail_abi)?;
     if key.is_empty() {
         return Err(fail(
             OtelStatus::InvalidArgument,
@@ -128,7 +129,7 @@ pub(crate) unsafe fn to_key_value(kv: &OtelKeyValue) -> Result<KeyValue, OtelSta
     let value: Value = match value_type {
         OtelAttributeType::String => {
             // SAFETY: tag guarantees the string member is active.
-            let s = unsafe { kv.value.string_value.to_string_lossy() }.map_err(fail_abi)?;
+            let s = unsafe { kv.value.string_value.to_string_strict() }.map_err(fail_abi)?;
             Value::String(StringValue::from(s))
         }
         // SAFETY: tag guarantees the respective member is active.
@@ -203,7 +204,7 @@ extern "C" fn vt_provider_get_tracer(
         // SAFETY: `ctx` is a live provider context produced by this crate.
         let provider = unsafe { &*(ctx as *const SdkTracerProvider) };
         // SAFETY: string views satisfy the ABI contract.
-        let name = match unsafe { name.to_string_lossy() } {
+        let name = match unsafe { name.to_string_strict() } {
             Ok(n) => n,
             Err(e) => {
                 fail_abi(e);
@@ -212,7 +213,7 @@ extern "C" fn vt_provider_get_tracer(
         };
         let mut scope = InstrumentationScope::builder(name);
         // SAFETY: string views satisfy the ABI contract.
-        match unsafe { version.to_string_lossy() } {
+        match unsafe { version.to_string_strict() } {
             Ok(v) if !v.is_empty() => scope = scope.with_version(v),
             Ok(_) => {}
             Err(e) => {
@@ -220,7 +221,7 @@ extern "C" fn vt_provider_get_tracer(
                 return std::ptr::null_mut();
             }
         }
-        match unsafe { schema_url.to_string_lossy() } {
+        match unsafe { schema_url.to_string_strict() } {
             Ok(s) if !s.is_empty() => scope = scope.with_schema_url(s),
             Ok(_) => {}
             Err(e) => {
@@ -274,7 +275,7 @@ extern "C" fn vt_tracer_start_span(
         // SAFETY: `ctx` is a live tracer context produced by this crate.
         let tracer = unsafe { &*(ctx as *const BoxedTracer) };
         // SAFETY: string view satisfies the ABI contract.
-        let name = match unsafe { name.to_string_lossy() } {
+        let name = match unsafe { name.to_string_strict() } {
             Ok(n) => n,
             Err(e) => {
                 fail_abi(e);
@@ -322,7 +323,7 @@ extern "C" fn vt_span_set_string(
     guard_status(|| {
         // SAFETY: `ctx` live span, single-threaded per contract.
         let span = unsafe { span_mut(ctx) };
-        let key = match unsafe { key.to_string_lossy() } {
+        let key = match unsafe { key.to_string_strict() } {
             Ok(k) if !k.is_empty() => k,
             Ok(_) => {
                 return fail(
@@ -332,7 +333,7 @@ extern "C" fn vt_span_set_string(
             }
             Err(e) => return fail_abi(e),
         };
-        let value = match unsafe { value.to_string_lossy() } {
+        let value = match unsafe { value.to_string_strict() } {
             Ok(v) => v,
             Err(e) => return fail_abi(e),
         };
@@ -344,7 +345,7 @@ extern "C" fn vt_span_set_string(
 extern "C" fn vt_span_set_bool(ctx: *mut c_void, key: OtelStringView, value: u32) -> OtelStatus {
     guard_status(|| {
         let span = unsafe { span_mut(ctx) };
-        let key = match unsafe { key.to_string_lossy() } {
+        let key = match unsafe { key.to_string_strict() } {
             Ok(k) if !k.is_empty() => k,
             Ok(_) => {
                 return fail(
@@ -362,7 +363,7 @@ extern "C" fn vt_span_set_bool(ctx: *mut c_void, key: OtelStringView, value: u32
 extern "C" fn vt_span_set_i64(ctx: *mut c_void, key: OtelStringView, value: i64) -> OtelStatus {
     guard_status(|| {
         let span = unsafe { span_mut(ctx) };
-        let key = match unsafe { key.to_string_lossy() } {
+        let key = match unsafe { key.to_string_strict() } {
             Ok(k) if !k.is_empty() => k,
             Ok(_) => {
                 return fail(
@@ -380,7 +381,7 @@ extern "C" fn vt_span_set_i64(ctx: *mut c_void, key: OtelStringView, value: i64)
 extern "C" fn vt_span_set_f64(ctx: *mut c_void, key: OtelStringView, value: f64) -> OtelStatus {
     guard_status(|| {
         let span = unsafe { span_mut(ctx) };
-        let key = match unsafe { key.to_string_lossy() } {
+        let key = match unsafe { key.to_string_strict() } {
             Ok(k) if !k.is_empty() => k,
             Ok(_) => {
                 return fail(
@@ -403,7 +404,7 @@ extern "C" fn vt_span_add_event(
 ) -> OtelStatus {
     guard_status(|| {
         let span = unsafe { span_mut(ctx) };
-        let name = match unsafe { name.to_string_lossy() } {
+        let name = match unsafe { name.to_string_strict() } {
             Ok(n) => n,
             Err(e) => return fail_abi(e),
         };
@@ -436,7 +437,7 @@ extern "C" fn vt_span_set_status(
             OtelSpanStatusCode::Unset => Status::Unset,
             OtelSpanStatusCode::Ok => Status::Ok,
             OtelSpanStatusCode::Error => {
-                let desc = match unsafe { description.to_string_lossy() } {
+                let desc = match unsafe { description.to_string_strict() } {
                     Ok(d) => d,
                     Err(e) => return fail_abi(e),
                 };
@@ -451,7 +452,7 @@ extern "C" fn vt_span_set_status(
 extern "C" fn vt_span_update_name(ctx: *mut c_void, name: OtelStringView) -> OtelStatus {
     guard_status(|| {
         let span = unsafe { span_mut(ctx) };
-        let name = match unsafe { name.to_string_lossy() } {
+        let name = match unsafe { name.to_string_strict() } {
             Ok(n) => n,
             Err(e) => return fail_abi(e),
         };
@@ -597,6 +598,89 @@ mod tests {
         assert!(names.contains(&"c".to_string()) && names.contains(&"p".to_string()));
         (vt.span_free)(child);
         (vt.span_free)(parent);
+        (vt.tracer_free)(tctx);
+        (vt.provider_free)(pctx);
+    }
+
+    /// Invalid UTF-8 in any C string view crossing the vtable must be rejected (strict
+    /// contract): pointer-returning ops yield NULL, status-returning ops yield INVALID_UTF8.
+    #[test]
+    fn invalid_utf8_is_rejected() {
+        use opentelemetry_c_abi::OtelAttributeValue;
+
+        fn sv_bytes(b: &[u8]) -> OtelStringView {
+            OtelStringView {
+                ptr: b.as_ptr().cast::<c_char>(),
+                len: b.len(),
+            }
+        }
+        // 0xFF is never valid in UTF-8.
+        let bad: &[u8] = b"\xff\xfe";
+
+        let exporter = InMemorySpanExporter::default();
+        let provider = SdkTracerProvider::builder()
+            .with_span_processor(SimpleSpanProcessor::new(exporter.clone()))
+            .build();
+        let vt = &SDK_VTABLE;
+        let pctx = provider_ctx(provider);
+
+        // Tracer acquisition: an invalid scope name yields a NULL tracer.
+        assert!((vt.provider_get_tracer)(pctx, sv_bytes(bad), empty(), empty()).is_null());
+
+        let tctx = (vt.provider_get_tracer)(pctx, sv("scope"), empty(), empty());
+        assert!(!tctx.is_null());
+
+        // Span start: an invalid name yields a NULL span.
+        assert!((vt.tracer_start_span)(tctx, sv_bytes(bad), 0, std::ptr::null_mut()).is_null());
+
+        let span = (vt.tracer_start_span)(tctx, sv("op"), 0, std::ptr::null_mut());
+        assert!(!span.is_null());
+
+        // Attribute key and string value.
+        assert_eq!(
+            (vt.span_set_string)(span, sv_bytes(bad), sv("v")),
+            OtelStatus::InvalidUtf8
+        );
+        assert_eq!(
+            (vt.span_set_string)(span, sv("k"), sv_bytes(bad)),
+            OtelStatus::InvalidUtf8
+        );
+        // Scalar setter key.
+        assert_eq!(
+            (vt.span_set_i64)(span, sv_bytes(bad), 1),
+            OtelStatus::InvalidUtf8
+        );
+        // Event name.
+        assert_eq!(
+            (vt.span_add_event)(span, sv_bytes(bad), std::ptr::null(), 0),
+            OtelStatus::InvalidUtf8
+        );
+        // Event attribute key via to_key_value (Int64 value: no string member touched).
+        let bad_kv = OtelKeyValue {
+            key: sv_bytes(bad),
+            value_type: 2, // Int64
+            value: OtelAttributeValue { int64_value: 5 },
+        };
+        assert_eq!(
+            (vt.span_add_event)(span, sv("evt"), &bad_kv, 1),
+            OtelStatus::InvalidUtf8
+        );
+        // Error-status description is converted (code 2 == Error).
+        assert_eq!(
+            (vt.span_set_status)(span, 2, sv_bytes(bad)),
+            OtelStatus::InvalidUtf8
+        );
+        // update_name.
+        assert_eq!(
+            (vt.span_update_name)(span, sv_bytes(bad)),
+            OtelStatus::InvalidUtf8
+        );
+
+        // The happy path still succeeds (valid UTF-8 accepted).
+        assert_eq!((vt.span_set_string)(span, sv("k"), sv("v")), OtelStatus::Ok);
+
+        (vt.span_end)(span);
+        (vt.span_free)(span);
         (vt.tracer_free)(tctx);
         (vt.provider_free)(pctx);
     }
