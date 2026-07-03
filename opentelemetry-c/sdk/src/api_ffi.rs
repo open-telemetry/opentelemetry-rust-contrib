@@ -114,4 +114,9 @@ pub(crate) mod test_probe {
             .as_ref()
             .map(|&(v, c)| (v as *const OtelImplVtable, c as *mut c_void))
     }
+
+    /// The current thread's recorded last-error message (empty if none).
+    pub fn last_error() -> String {
+        imp::LAST_ERROR.with(|slot| String::from_utf8_lossy(&slot.borrow()).into_owned())
+    }
 }

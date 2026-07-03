@@ -105,6 +105,10 @@ pub unsafe extern "C" fn otel_otlp_trace_exporter_builder_set_endpoint(
 
 /// Add an HTTP header sent with every OTLP export request.
 ///
+/// Duplicate keys are rejected: if `key` (after strict UTF-8 conversion) is already present,
+/// the call fails with `OTEL_STATUS_INVALID_ARGUMENT` and leaves the configuration unchanged,
+/// rather than silently overwriting the earlier value.
+///
 /// # Safety
 /// `builder`, `key`, `value` must satisfy their contracts.
 #[no_mangle]
@@ -125,6 +129,12 @@ pub unsafe extern "C" fn otel_otlp_trace_exporter_builder_add_header(
                 }
                 Err(e) => return fail_abi(e),
             };
+            if config.headers.iter().any(|(existing, _)| existing == &key) {
+                return fail_owned(
+                    OtelStatus::InvalidArgument,
+                    format!("OTLP header key already exists: {key}"),
+                );
+            }
             let value = match value.to_string_strict() {
                 Ok(v) => v,
                 Err(e) => return fail_abi(e),
@@ -246,6 +256,39 @@ mod tests {
                 otel_otlp_trace_exporter_builder_set_timeout_millis(eb, 3000),
                 OtelStatus::Ok
             );
+            let mut exporter: *mut OtelTraceExporter = std::ptr::null_mut();
+            assert_eq!(
+                otel_otlp_trace_exporter_builder_build(eb, &mut exporter),
+                OtelStatus::Ok
+            );
+            assert!(!exporter.is_null());
+            otel_otlp_trace_exporter_builder_destroy(eb);
+            otel_trace_exporter_destroy(exporter);
+        }
+    }
+
+    #[test]
+    fn duplicate_header_key_is_rejected() {
+        unsafe {
+            let eb = otel_otlp_trace_exporter_builder_new();
+            // First occurrence of a key is accepted.
+            assert_eq!(
+                otel_otlp_trace_exporter_builder_add_header(eb, sv("authorization"), sv("first")),
+                OtelStatus::Ok
+            );
+            // A second add of the SAME key is rejected (no silent overwrite) ...
+            assert_eq!(
+                otel_otlp_trace_exporter_builder_add_header(eb, sv("authorization"), sv("second")),
+                OtelStatus::InvalidArgument
+            );
+            // ... with a clear last-error message ...
+            assert!(crate::api_ffi::test_probe::last_error().contains("already exists"));
+            // ... while a different key is still accepted.
+            assert_eq!(
+                otel_otlp_trace_exporter_builder_add_header(eb, sv("x-custom"), sv("v")),
+                OtelStatus::Ok
+            );
+            // The builder still builds (the retained first value was never overwritten).
             let mut exporter: *mut OtelTraceExporter = std::ptr::null_mut();
             assert_eq!(
                 otel_otlp_trace_exporter_builder_build(eb, &mut exporter),
