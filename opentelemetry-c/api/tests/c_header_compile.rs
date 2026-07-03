@@ -72,3 +72,37 @@ fn api_umbrella_header_compiles() {
         "#include <opentelemetry_c/common.h>\n#include <opentelemetry_c/trace.h>\nint main(void){return 0;}\n",
     );
 }
+
+#[test]
+fn api_convenience_helpers_compile() {
+    let cc = match find_cc() {
+        Some(cc) => cc,
+        None => {
+            eprintln!("skipping: no C compiler found");
+            return;
+        }
+    };
+    // Exercise every optional header-only helper: the typed key/value constructors
+    // (common.h) and the span-status shorthands (trace.h), including building an attribute
+    // array for otel_span_add_event(). `-fsyntax-only` does not link, so a NULL span is fine.
+    syntax_check(
+        &cc,
+        &include_dir(),
+        r#"#include <opentelemetry_c/api.h>
+int main(void) {
+    otel_key_value_t attrs[] = {
+        otel_kv_string(otel_cstr("str"), otel_cstr("v")),
+        otel_kv_bool(otel_cstr("flag"), OTEL_TRUE),
+        otel_kv_int64(otel_cstr("count"), 42),
+        otel_kv_double(otel_cstr("ratio"), 1.5)
+    };
+    otel_span_t* span = (void*)0;
+    (void)otel_span_add_event(span, otel_cstr("event"), attrs, sizeof(attrs) / sizeof(attrs[0]));
+    (void)otel_span_set_attribute(span, otel_kv_int64(otel_cstr("x"), 1));
+    (void)otel_span_set_ok(span);
+    (void)otel_span_set_error(span, otel_cstr("boom"));
+    return 0;
+}
+"#,
+    );
+}

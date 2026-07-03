@@ -172,6 +172,45 @@ static inline otel_string_view_t otel_string_view_empty(void) {
     view.len = 0;
     return view;
 }
+
+/*
+ * Typed otel_key_value_t constructors.
+ *
+ * Each returns a POD attribute by value with the correct type tag and matching union member
+ * set; no allocation, copy, or FFI call occurs. The `key` (and, for otel_kv_string, the
+ * `value`) are BORROWED string views: the referenced bytes must remain valid until the
+ * otel_span_* call the result is passed to returns, exactly as when filling an
+ * otel_key_value_t by hand. Convenient for building attribute arrays for otel_span_add_event()
+ * and for otel_span_set_attribute().
+ */
+static inline otel_key_value_t otel_kv_string(otel_string_view_t key, otel_string_view_t value) {
+    otel_key_value_t kv;
+    kv.key = key;
+    kv.value_type = OTEL_ATTRIBUTE_TYPE_STRING;
+    kv.value.string_value = value;
+    return kv;
+}
+static inline otel_key_value_t otel_kv_bool(otel_string_view_t key, otel_bool_t value) {
+    otel_key_value_t kv;
+    kv.key = key;
+    kv.value_type = OTEL_ATTRIBUTE_TYPE_BOOL;
+    kv.value.bool_value = value;
+    return kv;
+}
+static inline otel_key_value_t otel_kv_int64(otel_string_view_t key, int64_t value) {
+    otel_key_value_t kv;
+    kv.key = key;
+    kv.value_type = OTEL_ATTRIBUTE_TYPE_INT64;
+    kv.value.int64_value = value;
+    return kv;
+}
+static inline otel_key_value_t otel_kv_double(otel_string_view_t key, double value) {
+    otel_key_value_t kv;
+    kv.key = key;
+    kv.value_type = OTEL_ATTRIBUTE_TYPE_DOUBLE;
+    kv.value.double_value = value;
+    return kv;
+}
 #endif /* inline helpers */
 
 #ifdef __cplusplus

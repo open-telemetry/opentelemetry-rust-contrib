@@ -46,11 +46,11 @@ static void do_instrumentation_work(void) {
     child_opts.parent = parent;
     otel_span_t* child = otel_tracer_start_span(tracer, otel_cstr("query-database"), &child_opts);
     otel_span_set_string_attribute(child, otel_cstr("db.system"), otel_cstr("postgresql"));
-    otel_span_set_status(child, OTEL_SPAN_STATUS_OK, otel_string_view_empty());
+    otel_span_set_ok(child);
     otel_span_end(child);
     otel_span_destroy(child);
 
-    otel_span_set_status(parent, OTEL_SPAN_STATUS_OK, otel_string_view_empty());
+    otel_span_set_ok(parent);
     otel_span_end(parent);
     otel_span_destroy(parent);
 

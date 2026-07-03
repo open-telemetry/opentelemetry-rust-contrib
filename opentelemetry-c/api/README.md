@@ -63,6 +63,20 @@ Under [`include/opentelemetry_c/`](include/opentelemetry_c):
 - `trace.h` — tracer provider, tracer, and span handles.
 - `api.h` — umbrella (`common.h` + `trace.h`).
 
+### Optional convenience helpers
+
+Purely optional `static inline` (C99+/C++) wrappers over the raw API — **header-only, no ABI
+symbols, no allocation or copy** (the status shorthands just perform the one
+`otel_span_set_status()` call they wrap). String views are passed through borrowed, so the
+referenced bytes must stay valid until the wrapped call returns. The public headers remain the
+full reference:
+
+- `otel_kv_string` / `otel_kv_bool` / `otel_kv_int64` / `otel_kv_double` — build a typed
+  `otel_key_value_t` by value, e.g. for `otel_span_add_event()` attribute arrays.
+- `otel_span_set_ok` / `otel_span_set_error` — optional status shorthands over
+  `otel_span_set_status()`.
+- `otel_cstr` / `otel_string_view_empty` — build a string view from a C string / an empty view.
+
 ## Building & linking
 
 ```sh

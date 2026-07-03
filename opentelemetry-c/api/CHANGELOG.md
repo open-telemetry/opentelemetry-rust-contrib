@@ -16,3 +16,9 @@
   FFI boundary cost (global provider / tracer acquisition, span start/end, scalar and string
   attribute setters). Run explicitly with `cargo bench -p opentelemetry-c-api`; not a test or
   CI gate. See `opentelemetry-c/README.md` for details.
+- Optional header-only convenience helpers over the raw C API (no new ABI symbols, no Rust
+  changes): typed `otel_key_value_t` constructors `otel_kv_string` / `otel_kv_bool` /
+  `otel_kv_int64` / `otel_kv_double` (`common.h`) and span-status shorthands
+  `otel_span_set_ok` / `otel_span_set_error` (`trace.h`). They are `static inline` (guarded for
+  C99+/C++ like the existing `otel_cstr`), build POD by value with no allocation/copy, and
+  (for the status shorthands) perform exactly the one `otel_span_set_status()` call they wrap.

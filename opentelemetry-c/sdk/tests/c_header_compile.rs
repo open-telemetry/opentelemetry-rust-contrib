@@ -59,11 +59,22 @@ fn sdk_header_and_example_compile() {
     let api_inc = api_include();
     let sdk_inc = sdk_include();
 
-    // A TU that includes only sdk.h (which pulls in the API's common.h/trace.h).
+    // A TU that includes only sdk.h (which pulls in the API's common.h/trace.h), and also
+    // exercises the optional header-only helpers to confirm they are reachable through the
+    // SDK header context. `-fsyntax-only` does not link, so a NULL span is fine.
     let tmp = std::env::temp_dir().join("otel_c_sdk_hdr_check.c");
     std::fs::write(
         &tmp,
-        "#include <opentelemetry_c/sdk.h>\nint main(void){ otel_sdk_builder_t* b = otel_sdk_builder_new(); (void)b; return 0; }\n",
+        r#"#include <opentelemetry_c/sdk.h>
+int main(void) {
+    otel_sdk_builder_t* b = otel_sdk_builder_new();
+    (void)b;
+    otel_span_t* span = (void*)0;
+    (void)otel_span_set_attribute(span, otel_kv_double(otel_cstr("d"), 2.5));
+    (void)otel_span_set_ok(span);
+    return 0;
+}
+"#,
     )
     .expect("write temp source");
     syntax_check(

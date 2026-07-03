@@ -191,6 +191,25 @@ otel_status_t otel_span_end(otel_span_t* span);
  */
 void otel_span_destroy(otel_span_t* span);
 
+/* ---- Convenience helpers -------------------------------------------------- */
+
+#if defined(__cplusplus) || (defined(__STDC_VERSION__) && __STDC_VERSION__ >= 199901L)
+/*
+ * Optional header-only shorthands over otel_span_set_status(). Each performs exactly one FFI
+ * call — the same otel_span_set_status() the caller would make — and returns its status
+ * unchanged; no allocation or copy is added. otel_span_set_ok() passes an empty description
+ * (ignored for non-error codes). For otel_span_set_error() the `description` bytes are
+ * BORROWED and must remain valid until the call returns.
+ */
+static inline otel_status_t otel_span_set_ok(otel_span_t* span) {
+    return otel_span_set_status(span, OTEL_SPAN_STATUS_OK, otel_string_view_empty());
+}
+static inline otel_status_t otel_span_set_error(otel_span_t* span,
+                                                otel_string_view_t description) {
+    return otel_span_set_status(span, OTEL_SPAN_STATUS_ERROR, description);
+}
+#endif /* inline helpers */
+
 #ifdef __cplusplus
 } /* extern "C" */
 #endif
