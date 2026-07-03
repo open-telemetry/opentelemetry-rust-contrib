@@ -64,6 +64,30 @@ pub(crate) unsafe fn destroy<T: HasMagic>(ptr: *mut T) {
     drop(unsafe { Box::from_raw(ptr) });
 }
 
+/// Take ownership of a handle for an **ownership transfer** (e.g. moving an exporter into a
+/// processor builder). Validates the handle, poisons its magic so a subsequent (erroneous)
+/// `destroy` on the same pointer is a safe no-op rather than a double-free, and returns the
+/// owned `Box`. Returns `None` (with the last-error set) for a NULL/wrong/dead handle — in
+/// which case nothing is consumed and the caller still owns the original handle.
+///
+/// # Safety
+/// `ptr` must be NULL or a live handle of the exact type `T` from [`into_raw`], not used
+/// concurrently.
+pub(crate) unsafe fn take<T: HasMagic>(ptr: *mut T) -> Option<Box<T>> {
+    if ptr.is_null() {
+        api_ffi::set_last_error("null handle passed to OpenTelemetry C API");
+        return None;
+    }
+    let handle = unsafe { &mut *ptr };
+    if handle.magic() != T::MAGIC {
+        api_ffi::set_last_error("handle failed validation: not a live handle of the expected type");
+        return None;
+    }
+    // Poison so a later destroy on this pointer no-ops instead of double-freeing.
+    handle.set_magic(0);
+    Some(unsafe { Box::from_raw(ptr) })
+}
+
 pub(crate) fn guard_status<F: FnOnce() -> OtelStatus>(f: F) -> OtelStatus {
     match catch_unwind(AssertUnwindSafe(f)) {
         Ok(s) => s,

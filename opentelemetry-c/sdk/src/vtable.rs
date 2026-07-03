@@ -6,6 +6,13 @@
 //! an SDK-backed object. Every function is panic-guarded (a Rust panic must never unwind
 //! across the C ABI into the API cdylib). No Rust types cross the boundary; contexts are
 //! opaque `*mut c_void` that only this crate allocates and frees.
+//!
+//! **Hot-path contract** (see the component README): the span/tracer functions here are the
+//! hot path. Keep them thin — only required C→SDK marshalling (owning the borrowed key/value/
+//! name bytes the OTel SDK needs) plus the SDK's own work. Do **not** add locks, registries,
+//! C-side buffering, per-span config/env lookups, or builder/exporter/processor access here.
+//! Span ops rely on the one-span-per-thread contract to take `&mut` without synchronization
+//! ([`span_mut`]); the only lock/`Arc`-clone lives in provider retain, on tracer acquisition.
 
 use std::borrow::Cow;
 use std::os::raw::c_void;

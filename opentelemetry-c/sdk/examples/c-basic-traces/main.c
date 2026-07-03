@@ -12,6 +12,8 @@
  */
 #include <opentelemetry_c/api.h> /* API: common.h + trace.h */
 #include <opentelemetry_c/sdk.h> /* SDK: builder + lifecycle */
+#include <opentelemetry_c/otlp_trace_exporter.h> /* OTLP HTTP/protobuf exporter builder */
+#include <opentelemetry_c/batch_span_processor.h> /* batch span processor builder */
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -64,16 +66,51 @@ int main(void) {
     do_instrumentation_work();
     printf("api-only no-op path OK\n");
 
-    /* Application: build + install the SDK. */
-    otel_sdk_builder_t* builder = otel_sdk_builder_new();
-    otel_sdk_builder_set_service_name(builder, otel_cstr("c-basic-traces"));
+    /* Application: build the trace pipeline (exporter -> processor -> SDK) and install it. */
     const char* endpoint = getenv("OTEL_EXPORTER_OTLP_TRACES_ENDPOINT");
     if (endpoint == NULL || endpoint[0] == '\0') {
         endpoint = "http://localhost:4318/v1/traces";
     }
-    otel_sdk_builder_set_otlp_endpoint(builder, otel_cstr(endpoint));
-    otel_sdk_builder_set_otlp_timeout_millis(builder, 10000);
     printf("exporting to %s\n", endpoint);
+
+    /* 1. OTLP HTTP/protobuf trace exporter. */
+    otel_otlp_trace_exporter_builder_t* eb = otel_otlp_trace_exporter_builder_new();
+    otel_otlp_trace_exporter_builder_set_endpoint(eb, otel_cstr(endpoint));
+    otel_otlp_trace_exporter_builder_set_timeout_millis(eb, 10000);
+    otel_trace_exporter_t* exporter = NULL;
+    if (otel_otlp_trace_exporter_builder_build(eb, &exporter) != OTEL_STATUS_OK || exporter == NULL) {
+        print_last_error("otel_otlp_trace_exporter_builder_build failed");
+        otel_otlp_trace_exporter_builder_destroy(eb);
+        return EXIT_FAILURE;
+    }
+    otel_otlp_trace_exporter_builder_destroy(eb);
+
+    /* 2. Batch span processor wrapping the exporter (ownership transfers on OK). */
+    otel_batch_span_processor_builder_t* pb = otel_batch_span_processor_builder_new();
+    if (otel_batch_span_processor_builder_set_exporter(pb, exporter) != OTEL_STATUS_OK) {
+        print_last_error("otel_batch_span_processor_builder_set_exporter failed");
+        otel_trace_exporter_destroy(exporter); /* still ours on failure */
+        otel_batch_span_processor_builder_destroy(pb);
+        return EXIT_FAILURE;
+    }
+    otel_batch_span_processor_builder_set_max_queue_size(pb, 2048);
+    otel_span_processor_t* processor = NULL;
+    if (otel_batch_span_processor_builder_build(pb, &processor) != OTEL_STATUS_OK || processor == NULL) {
+        print_last_error("otel_batch_span_processor_builder_build failed");
+        otel_batch_span_processor_builder_destroy(pb);
+        return EXIT_FAILURE;
+    }
+    otel_batch_span_processor_builder_destroy(pb);
+
+    /* 3. SDK builder with the processor (ownership transfers on OK). */
+    otel_sdk_builder_t* builder = otel_sdk_builder_new();
+    otel_sdk_builder_set_service_name(builder, otel_cstr("c-basic-traces"));
+    if (otel_sdk_builder_add_span_processor(builder, processor) != OTEL_STATUS_OK) {
+        print_last_error("otel_sdk_builder_add_span_processor failed");
+        otel_span_processor_destroy(processor); /* still ours on failure */
+        otel_sdk_builder_destroy(builder);
+        return EXIT_FAILURE;
+    }
 
     otel_sdk_t* sdk = NULL;
     otel_status_t status = otel_sdk_build(builder, &sdk);

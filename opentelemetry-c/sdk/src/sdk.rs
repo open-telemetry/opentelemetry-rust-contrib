@@ -1,9 +1,14 @@
-//! SDK builder and lifecycle: configure a resource, an OTLP HTTP/protobuf exporter, and a
-//! batch span processor, then build an [`OtelSdk`] that owns the resulting
-//! `SdkTracerProvider`. Installing as global (or fetching a provider handle) registers the
-//! SDK's implementation into the **API cdylib's** global slot across the C ABI.
+//! SDK builder and lifecycle.
+//!
+//! The [`OtelSdkBuilder`] holds resource/service configuration and a list of span processors,
+//! then builds an [`OtelSdk`] that owns the resulting `SdkTracerProvider`. Trace exporters and
+//! span processors are configured by their own builders ([`crate::otlp_exporter`],
+//! [`crate::batch_processor`]) and handed to this builder via `add_span_processor`, so the SDK
+//! builder is not coupled to any one exporter or processor implementation.
+//!
+//! Installing as global (or fetching a provider handle) registers the SDK's implementation
+//! into the **API cdylib's** global slot across the C ABI.
 
-use std::collections::HashMap;
 use std::os::raw::c_void;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{mpsc, Arc};
@@ -11,8 +16,7 @@ use std::thread;
 use std::time::Duration;
 
 use opentelemetry::KeyValue;
-use opentelemetry_otlp::{Protocol, SpanExporter, WithExportConfig, WithHttpConfig};
-use opentelemetry_sdk::trace::{BatchConfigBuilder, BatchSpanProcessor, SdkTracerProvider};
+use opentelemetry_sdk::trace::{BatchSpanProcessor, SdkTracerProvider};
 use opentelemetry_sdk::Resource;
 
 use opentelemetry_c_abi::{OtelKeyValue, OtelStatus, OtelStringView};
@@ -20,36 +24,24 @@ use opentelemetry_c_abi::{OtelKeyValue, OtelStatus, OtelStringView};
 use crate::api_ffi;
 use crate::error::{clear_last_error, fail, fail_owned, status_from_sdk_error};
 use crate::handle::{
-    checked_mut, checked_ref, destroy, guard_ptr, guard_status, guard_unit, into_raw, HasMagic,
+    checked_mut, checked_ref, destroy, guard_ptr, guard_status, guard_unit, into_raw, take,
+    HasMagic,
 };
+use crate::span_processor::OtelSpanProcessor;
 use crate::vtable;
 
 const SDK_BUILDER_MAGIC: u64 = 0x4F54_4C43_5344_4B42; // "OTLCSDKB"
 const SDK_MAGIC: u64 = 0x4F54_4C43_5344_4B00; // "OTLCSDK\0"
 
-/// Upper bound on the batch max queue size accepted from C (the processor preallocates a
-/// bounded channel of this capacity). `0` selects the SDK default; larger is rejected.
-const MAX_BATCH_QUEUE_SIZE: usize = 1_048_576;
-/// Upper bound on the batch max export batch size accepted from C (preallocated `Vec`).
-const MAX_BATCH_EXPORT_BATCH_SIZE: usize = 1_048_576;
-
-#[derive(Default)]
-struct SdkConfig {
-    service_name: Option<String>,
-    resource_attributes: Vec<KeyValue>,
-    otlp_endpoint: Option<String>,
-    otlp_headers: Vec<(String, String)>,
-    otlp_timeout: Option<Duration>,
-    batch_max_queue_size: Option<usize>,
-    batch_scheduled_delay: Option<Duration>,
-    batch_max_export_batch_size: Option<usize>,
-    batch_export_timeout: Option<Duration>,
-}
-
 /// Opaque builder handle (`otel_sdk_builder_t`). Not thread-safe; confine to one thread.
 pub struct OtelSdkBuilder {
     magic: u64,
-    config: SdkConfig,
+    service_name: Option<String>,
+    resource_attributes: Vec<KeyValue>,
+    // Span processors transferred in via `add_span_processor`; moved into the provider on
+    // `build`, or freed on destroy if `build` was not completed. Currently the concrete
+    // `BatchSpanProcessor`; adding other processor kinds would generalize this to an enum.
+    processors: Vec<BatchSpanProcessor>,
 }
 
 impl HasMagic for OtelSdkBuilder {
@@ -90,23 +82,6 @@ const _: () = {
 fn optional_millis(millis: u64) -> Option<Duration> {
     (millis != 0).then(|| Duration::from_millis(millis))
 }
-fn optional_size(value: usize) -> Option<usize> {
-    (value != 0).then_some(value)
-}
-
-fn bounded_optional_size(
-    value: usize,
-    max: usize,
-    what: &str,
-) -> Result<Option<usize>, OtelStatus> {
-    if value > max {
-        return Err(fail_owned(
-            OtelStatus::InvalidArgument,
-            format!("{what} ({value}) exceeds the maximum supported value ({max})"),
-        ));
-    }
-    Ok(optional_size(value))
-}
 
 // ---- Builder lifecycle -----------------------------------------------------
 
@@ -117,12 +92,15 @@ pub extern "C" fn otel_sdk_builder_new() -> *mut OtelSdkBuilder {
         clear_last_error();
         into_raw(OtelSdkBuilder {
             magic: SDK_BUILDER_MAGIC,
-            config: SdkConfig::default(),
+            service_name: None,
+            resource_attributes: Vec::new(),
+            processors: Vec::new(),
         })
     })
 }
 
-/// Destroy an SDK builder (no-op on NULL).
+/// Destroy an SDK builder (no-op on NULL). Frees any span processors transferred in but not
+/// yet consumed by `otel_sdk_build`.
 ///
 /// # Safety
 /// `builder` must be NULL or a live builder not destroyed concurrently.
@@ -133,14 +111,14 @@ pub unsafe extern "C" fn otel_sdk_builder_destroy(builder: *mut OtelSdkBuilder) 
 
 /// # Safety
 /// `builder` must satisfy the handle contract (single-threaded).
-unsafe fn with_config<F>(builder: *mut OtelSdkBuilder, f: F) -> OtelStatus
+unsafe fn with_builder<F>(builder: *mut OtelSdkBuilder, f: F) -> OtelStatus
 where
-    F: FnOnce(&mut SdkConfig) -> OtelStatus,
+    F: FnOnce(&mut OtelSdkBuilder) -> OtelStatus,
 {
     guard_status(|| {
         clear_last_error();
         match unsafe { checked_mut(builder) } {
-            Some(b) => f(&mut b.config),
+            Some(b) => f(b),
             None => OtelStatus::InvalidArgument,
         }
     })
@@ -156,9 +134,9 @@ pub unsafe extern "C" fn otel_sdk_builder_set_service_name(
     name: OtelStringView,
 ) -> OtelStatus {
     unsafe {
-        with_config(builder, |config| match name.to_string_strict() {
+        with_builder(builder, |b| match name.to_string_strict() {
             Ok(name) => {
-                config.service_name = Some(name);
+                b.service_name = Some(name);
                 OtelStatus::Ok
             }
             Err(e) => crate::error::fail_abi(e),
@@ -176,9 +154,9 @@ pub unsafe extern "C" fn otel_sdk_builder_add_resource_attribute(
     attribute: OtelKeyValue,
 ) -> OtelStatus {
     unsafe {
-        with_config(builder, |config| match vtable_to_key_value(&attribute) {
+        with_builder(builder, |b| match vtable_to_key_value(&attribute) {
             Ok(kv) => {
-                config.resource_attributes.push(kv);
+                b.resource_attributes.push(kv);
                 OtelStatus::Ok
             }
             Err(status) => status,
@@ -186,162 +164,33 @@ pub unsafe extern "C" fn otel_sdk_builder_add_resource_attribute(
     }
 }
 
-/// Set the full OTLP traces endpoint URL, used as-is.
+/// Add (transfer) a span processor built by a span-processor builder. On `OTEL_STATUS_OK`,
+/// ownership of `processor` moves into the SDK builder and the caller must not destroy it. On
+/// failure (invalid builder or processor), the caller still owns `processor`.
 ///
 /// # Safety
-/// `builder` and `endpoint` must satisfy their contracts.
+/// `builder` must satisfy the handle contract; `processor` must be NULL or a live
+/// `otel_span_processor_t` not used concurrently.
 #[no_mangle]
-pub unsafe extern "C" fn otel_sdk_builder_set_otlp_endpoint(
+pub unsafe extern "C" fn otel_sdk_builder_add_span_processor(
     builder: *mut OtelSdkBuilder,
-    endpoint: OtelStringView,
+    processor: *mut OtelSpanProcessor,
 ) -> OtelStatus {
-    unsafe {
-        with_config(builder, |config| match endpoint.to_string_strict() {
-            Ok(endpoint) => {
-                config.otlp_endpoint = Some(endpoint);
-                OtelStatus::Ok
-            }
-            Err(e) => crate::error::fail_abi(e),
-        })
-    }
-}
-
-/// Add an HTTP header sent with every OTLP export request.
-///
-/// # Safety
-/// `builder`, `key`, `value` must satisfy their contracts.
-#[no_mangle]
-pub unsafe extern "C" fn otel_sdk_builder_add_otlp_header(
-    builder: *mut OtelSdkBuilder,
-    key: OtelStringView,
-    value: OtelStringView,
-) -> OtelStatus {
-    unsafe {
-        with_config(builder, |config| {
-            let key = match key.to_string_strict() {
-                Ok(k) if !k.is_empty() => k,
-                Ok(_) => {
-                    return fail(
-                        OtelStatus::InvalidArgument,
-                        "OTLP header key must not be empty",
-                    )
-                }
-                Err(e) => return crate::error::fail_abi(e),
-            };
-            let value = match value.to_string_strict() {
-                Ok(v) => v,
-                Err(e) => return crate::error::fail_abi(e),
-            };
-            config.otlp_headers.push((key, value));
-            OtelStatus::Ok
-        })
-    }
-}
-
-/// Set the OTLP export request timeout in milliseconds (`0` == exporter default).
-///
-/// # Safety
-/// `builder` must satisfy the handle contract.
-#[no_mangle]
-pub unsafe extern "C" fn otel_sdk_builder_set_otlp_timeout_millis(
-    builder: *mut OtelSdkBuilder,
-    timeout_millis: u64,
-) -> OtelStatus {
-    unsafe {
-        with_config(builder, |config| {
-            config.otlp_timeout = optional_millis(timeout_millis);
-            OtelStatus::Ok
-        })
-    }
-}
-
-/// Set the batch processor maximum queue size (`0` == spec default of 2048). An oversized
-/// non-zero value is rejected with `OTEL_STATUS_INVALID_ARGUMENT` (never clamped).
-///
-/// # Safety
-/// `builder` must satisfy the handle contract.
-#[no_mangle]
-pub unsafe extern "C" fn otel_sdk_builder_set_batch_max_queue_size(
-    builder: *mut OtelSdkBuilder,
-    max_queue_size: usize,
-) -> OtelStatus {
-    unsafe {
-        with_config(builder, |config| {
-            match bounded_optional_size(
-                max_queue_size,
-                MAX_BATCH_QUEUE_SIZE,
-                "batch max queue size",
-            ) {
-                Ok(size) => {
-                    config.batch_max_queue_size = size;
-                    OtelStatus::Ok
-                }
-                Err(status) => status,
-            }
-        })
-    }
-}
-
-/// Set the batch processor scheduled delay in milliseconds (`0` == spec default).
-///
-/// # Safety
-/// `builder` must satisfy the handle contract.
-#[no_mangle]
-pub unsafe extern "C" fn otel_sdk_builder_set_batch_scheduled_delay_millis(
-    builder: *mut OtelSdkBuilder,
-    delay_millis: u64,
-) -> OtelStatus {
-    unsafe {
-        with_config(builder, |config| {
-            config.batch_scheduled_delay = optional_millis(delay_millis);
-            OtelStatus::Ok
-        })
-    }
-}
-
-/// Set the batch processor maximum export batch size (`0` == spec default of 512).
-/// Oversized values are rejected; the effective value is also capped by the SDK at the
-/// max queue size.
-///
-/// # Safety
-/// `builder` must satisfy the handle contract.
-#[no_mangle]
-pub unsafe extern "C" fn otel_sdk_builder_set_batch_max_export_batch_size(
-    builder: *mut OtelSdkBuilder,
-    max_export_batch_size: usize,
-) -> OtelStatus {
-    unsafe {
-        with_config(builder, |config| {
-            match bounded_optional_size(
-                max_export_batch_size,
-                MAX_BATCH_EXPORT_BATCH_SIZE,
-                "batch max export batch size",
-            ) {
-                Ok(size) => {
-                    config.batch_max_export_batch_size = size;
-                    OtelStatus::Ok
-                }
-                Err(status) => status,
-            }
-        })
-    }
-}
-
-/// Set the batch processor per-export timeout in milliseconds (`0` == spec default).
-///
-/// # Safety
-/// `builder` must satisfy the handle contract.
-#[no_mangle]
-pub unsafe extern "C" fn otel_sdk_builder_set_batch_export_timeout_millis(
-    builder: *mut OtelSdkBuilder,
-    timeout_millis: u64,
-) -> OtelStatus {
-    unsafe {
-        with_config(builder, |config| {
-            config.batch_export_timeout = optional_millis(timeout_millis);
-            OtelStatus::Ok
-        })
-    }
+    guard_status(|| {
+        clear_last_error();
+        // Validate the builder BEFORE taking ownership, so a bad builder leaves the processor
+        // caller-owned.
+        let builder = match unsafe { checked_mut(builder) } {
+            Some(b) => b,
+            None => return OtelStatus::InvalidArgument,
+        };
+        let owned = match unsafe { take::<OtelSpanProcessor>(processor) } {
+            Some(p) => p,
+            None => return OtelStatus::InvalidArgument,
+        };
+        builder.processors.push(owned.processor);
+        OtelStatus::Ok
+    })
 }
 
 // ---- Build -----------------------------------------------------------------
@@ -352,62 +201,27 @@ fn vtable_to_key_value(kv: &OtelKeyValue) -> Result<KeyValue, OtelStatus> {
     unsafe { crate::vtable::to_key_value(kv) }
 }
 
-fn build_resource(config: &SdkConfig) -> Resource {
-    let mut builder = Resource::builder();
-    if let Some(name) = &config.service_name {
-        builder = builder.with_service_name(name.clone());
+fn build_resource(builder: &OtelSdkBuilder) -> Resource {
+    let mut resource = Resource::builder();
+    if let Some(name) = &builder.service_name {
+        resource = resource.with_service_name(name.clone());
     }
-    if !config.resource_attributes.is_empty() {
-        builder = builder.with_attributes(config.resource_attributes.iter().cloned());
+    if !builder.resource_attributes.is_empty() {
+        resource = resource.with_attributes(builder.resource_attributes.iter().cloned());
     }
-    builder.build()
+    resource.build()
 }
 
-fn build_exporter(config: &SdkConfig) -> Result<SpanExporter, OtelStatus> {
-    let mut builder = SpanExporter::builder()
-        .with_http()
-        .with_protocol(Protocol::HttpBinary);
-    if let Some(endpoint) = &config.otlp_endpoint {
-        builder = builder.with_endpoint(endpoint.clone());
-    }
-    if let Some(timeout) = config.otlp_timeout.or(config.batch_export_timeout) {
-        builder = builder.with_timeout(timeout);
-    }
-    if !config.otlp_headers.is_empty() {
-        let headers: HashMap<String, String> = config.otlp_headers.iter().cloned().collect();
-        builder = builder.with_headers(headers);
-    }
-    builder.build().map_err(|err| {
-        fail_owned(
-            OtelStatus::InvalidConfig,
-            format!("failed to build OTLP exporter: {err}"),
-        )
-    })
-}
-
-fn build_processor(config: &SdkConfig, exporter: SpanExporter) -> BatchSpanProcessor {
-    let mut batch = BatchConfigBuilder::default();
-    if let Some(size) = config.batch_max_queue_size {
-        batch = batch.with_max_queue_size(size);
-    }
-    if let Some(delay) = config.batch_scheduled_delay {
-        batch = batch.with_scheduled_delay(delay);
-    }
-    if let Some(size) = config.batch_max_export_batch_size {
-        batch = batch.with_max_export_batch_size(size);
-    }
-    BatchSpanProcessor::builder(exporter)
-        .with_batch_config(batch.build())
-        .build()
-}
-
-/// Build an SDK from the accumulated builder configuration.
+/// Build an SDK from the accumulated builder configuration. On `OTEL_STATUS_OK`, `*out_sdk`
+/// receives a new [`OtelSdk`] handle owned by the caller. Any span processors added to the
+/// builder move into the built SDK. The builder remains owned by the caller (destroy it when
+/// done); note that a subsequent build produces an SDK with no processors.
 ///
 /// # Safety
 /// `builder` must satisfy the handle contract; `out_sdk` a valid writable `otel_sdk_t*`.
 #[no_mangle]
 pub unsafe extern "C" fn otel_sdk_build(
-    builder: *const OtelSdkBuilder,
+    builder: *mut OtelSdkBuilder,
     out_sdk: *mut *mut OtelSdk,
 ) -> OtelStatus {
     guard_status(|| {
@@ -419,21 +233,18 @@ pub unsafe extern "C" fn otel_sdk_build(
             );
         }
         unsafe { *out_sdk = std::ptr::null_mut() };
-        let builder = match unsafe { checked_ref(builder) } {
+        let builder = match unsafe { checked_mut(builder) } {
             Some(b) => b,
             None => return OtelStatus::InvalidArgument,
         };
-        let config = &builder.config;
-        let exporter = match build_exporter(config) {
-            Ok(e) => e,
-            Err(status) => return status,
-        };
-        let processor = build_processor(config, exporter);
-        let resource = build_resource(config);
-        let provider = SdkTracerProvider::builder()
-            .with_span_processor(processor)
-            .with_resource(resource)
-            .build();
+        // Move the transferred processors out of the builder into the provider.
+        let processors = std::mem::take(&mut builder.processors);
+        let resource = build_resource(builder);
+        let mut provider_builder = SdkTracerProvider::builder().with_resource(resource);
+        for processor in processors {
+            provider_builder = provider_builder.with_span_processor(processor);
+        }
+        let provider = provider_builder.build();
         let sdk = into_raw(OtelSdk {
             magic: SDK_MAGIC,
             provider,
@@ -623,11 +434,54 @@ pub unsafe extern "C" fn otel_sdk_destroy(sdk: *mut OtelSdk) {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::batch_processor::{
+        otel_batch_span_processor_builder_build, otel_batch_span_processor_builder_destroy,
+        otel_batch_span_processor_builder_new, otel_batch_span_processor_builder_set_exporter,
+    };
+    use crate::otlp_exporter::{
+        otel_otlp_trace_exporter_builder_build, otel_otlp_trace_exporter_builder_destroy,
+        otel_otlp_trace_exporter_builder_new, otel_otlp_trace_exporter_builder_set_endpoint,
+    };
+    use crate::span_processor::otel_span_processor_destroy;
 
     fn sv(s: &str) -> OtelStringView {
         OtelStringView {
             ptr: s.as_ptr() as *const std::os::raw::c_char,
             len: s.len(),
+        }
+    }
+
+    /// Build a real (batch + OTLP) span processor via the pipeline builders, for tests that
+    /// need a live `otel_span_processor_t`.
+    fn build_processor() -> *mut OtelSpanProcessor {
+        unsafe {
+            let eb = otel_otlp_trace_exporter_builder_new();
+            assert_eq!(
+                otel_otlp_trace_exporter_builder_set_endpoint(
+                    eb,
+                    sv("http://127.0.0.1:9/v1/traces")
+                ),
+                OtelStatus::Ok
+            );
+            let mut exporter = std::ptr::null_mut();
+            assert_eq!(
+                otel_otlp_trace_exporter_builder_build(eb, &mut exporter),
+                OtelStatus::Ok
+            );
+            otel_otlp_trace_exporter_builder_destroy(eb);
+            let pb = otel_batch_span_processor_builder_new();
+            assert_eq!(
+                otel_batch_span_processor_builder_set_exporter(pb, exporter),
+                OtelStatus::Ok
+            );
+            let mut processor = std::ptr::null_mut();
+            assert_eq!(
+                otel_batch_span_processor_builder_build(pb, &mut processor),
+                OtelStatus::Ok
+            );
+            otel_batch_span_processor_builder_destroy(pb);
+            assert!(!processor.is_null());
+            processor
         }
     }
 
@@ -637,9 +491,14 @@ mod tests {
         // registration ABI (stubbed in unit tests; exercised for real by the cross-artifact
         // C test).
         unsafe {
+            let processor = build_processor();
             let b = otel_sdk_builder_new();
             assert_eq!(
-                otel_sdk_builder_set_otlp_endpoint(b, sv("http://127.0.0.1:9/v1/traces")),
+                otel_sdk_builder_set_service_name(b, sv("unit-test")),
+                OtelStatus::Ok
+            );
+            assert_eq!(
+                otel_sdk_builder_add_span_processor(b, processor),
                 OtelStatus::Ok
             );
             let mut sdk: *mut OtelSdk = std::ptr::null_mut();
@@ -660,26 +519,42 @@ mod tests {
     }
 
     #[test]
-    fn oversized_batch_sizes_are_rejected() {
+    fn add_span_processor_ownership_transfer() {
         unsafe {
+            // Failure: a bad (NULL) builder leaves the processor caller-owned, so we can still
+            // destroy it without a leak/double-free.
+            let processor = build_processor();
+            assert_eq!(
+                otel_sdk_builder_add_span_processor(std::ptr::null_mut(), processor),
+                OtelStatus::InvalidArgument
+            );
+            otel_span_processor_destroy(processor); // still owned by caller: frees it
+
+            // Success: ownership transfers into the SDK builder. A subsequent destroy of the
+            // transferred handle is a safe no-op (poisoned), and destroying the builder frees
+            // the processor exactly once.
+            let processor = build_processor();
             let b = otel_sdk_builder_new();
             assert_eq!(
-                otel_sdk_builder_set_batch_max_queue_size(b, 0),
+                otel_sdk_builder_add_span_processor(b, processor),
                 OtelStatus::Ok
             );
-            assert_eq!(
-                otel_sdk_builder_set_batch_max_queue_size(b, MAX_BATCH_QUEUE_SIZE),
-                OtelStatus::Ok
-            );
-            assert_eq!(
-                otel_sdk_builder_set_batch_max_queue_size(b, MAX_BATCH_QUEUE_SIZE + 1),
-                OtelStatus::InvalidArgument
-            );
-            assert_eq!(
-                otel_sdk_builder_set_batch_max_export_batch_size(b, usize::MAX),
-                OtelStatus::InvalidArgument
-            );
+            otel_span_processor_destroy(processor); // no-op: builder owns it now
+            otel_sdk_builder_destroy(b); // frees the transferred processor
+        }
+    }
+
+    #[test]
+    fn build_with_no_processor_succeeds() {
+        // A provider with no span processor is valid (spans are simply not exported).
+        unsafe {
+            let b = otel_sdk_builder_new();
+            let mut sdk: *mut OtelSdk = std::ptr::null_mut();
+            assert_eq!(otel_sdk_build(b, &mut sdk), OtelStatus::Ok);
+            assert!(!sdk.is_null());
             otel_sdk_builder_destroy(b);
+            otel_sdk_shutdown(sdk, 500);
+            otel_sdk_destroy(sdk);
         }
     }
 

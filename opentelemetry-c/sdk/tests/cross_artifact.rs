@@ -109,11 +109,26 @@ extern int otel_span_end(otel_span_t*);
 extern void otel_span_destroy(otel_span_t*);
 extern void otel_tracer_destroy(otel_tracer_t*);
 extern void otel_tracer_provider_destroy(otel_tracer_provider_t*);
+typedef struct otel_trace_exporter_t otel_trace_exporter_t;
+typedef struct otel_span_processor_t otel_span_processor_t;
+typedef struct otel_otlp_trace_exporter_builder_t otel_otlp_trace_exporter_builder_t;
+typedef struct otel_batch_span_processor_builder_t otel_batch_span_processor_builder_t;
+extern otel_otlp_trace_exporter_builder_t* otel_otlp_trace_exporter_builder_new(void);
+extern int otel_otlp_trace_exporter_builder_set_endpoint(otel_otlp_trace_exporter_builder_t*, otel_string_view_t);
+extern int otel_otlp_trace_exporter_builder_set_timeout_millis(otel_otlp_trace_exporter_builder_t*, uint64_t);
+extern int otel_otlp_trace_exporter_builder_build(const otel_otlp_trace_exporter_builder_t*, otel_trace_exporter_t**);
+extern void otel_otlp_trace_exporter_builder_destroy(otel_otlp_trace_exporter_builder_t*);
+extern void otel_trace_exporter_destroy(otel_trace_exporter_t*);
+extern otel_batch_span_processor_builder_t* otel_batch_span_processor_builder_new(void);
+extern int otel_batch_span_processor_builder_set_exporter(otel_batch_span_processor_builder_t*, otel_trace_exporter_t*);
+extern int otel_batch_span_processor_builder_set_max_queue_size(otel_batch_span_processor_builder_t*, size_t);
+extern int otel_batch_span_processor_builder_build(otel_batch_span_processor_builder_t*, otel_span_processor_t**);
+extern void otel_batch_span_processor_builder_destroy(otel_batch_span_processor_builder_t*);
+extern void otel_span_processor_destroy(otel_span_processor_t*);
 extern otel_sdk_builder_t* otel_sdk_builder_new(void);
 extern int otel_sdk_builder_set_service_name(otel_sdk_builder_t*, otel_string_view_t);
-extern int otel_sdk_builder_set_otlp_endpoint(otel_sdk_builder_t*, otel_string_view_t);
-extern int otel_sdk_builder_set_otlp_timeout_millis(otel_sdk_builder_t*, uint64_t);
-extern int otel_sdk_build(const otel_sdk_builder_t*, otel_sdk_t**);
+extern int otel_sdk_builder_add_span_processor(otel_sdk_builder_t*, otel_span_processor_t*);
+extern int otel_sdk_build(otel_sdk_builder_t*, otel_sdk_t**);
 extern void otel_sdk_builder_destroy(otel_sdk_builder_t*);
 extern int otel_sdk_set_as_global(otel_sdk_t*);
 extern int otel_sdk_force_flush(otel_sdk_t*, uint64_t);
@@ -135,14 +150,25 @@ static void work(void){
 }
 int main(void){
     work(); /* API-only no-op before install (must be safe) */
+    /* Build the pipeline: OTLP exporter -> batch processor -> SDK builder. */
+    otel_otlp_trace_exporter_builder_t* eb = otel_otlp_trace_exporter_builder_new();
+    otel_otlp_trace_exporter_builder_set_endpoint(eb, cs(getenv("OTEL_EXPORTER_OTLP_TRACES_ENDPOINT")));
+    otel_otlp_trace_exporter_builder_set_timeout_millis(eb, 5000);
+    otel_trace_exporter_t* exporter=(void*)0;
+    if (otel_otlp_trace_exporter_builder_build(eb,&exporter)!=0||!exporter) return 2;
+    otel_otlp_trace_exporter_builder_destroy(eb);
+    otel_batch_span_processor_builder_t* pb = otel_batch_span_processor_builder_new();
+    if (otel_batch_span_processor_builder_set_exporter(pb,exporter)!=0) return 3;
+    otel_span_processor_t* processor=(void*)0;
+    if (otel_batch_span_processor_builder_build(pb,&processor)!=0||!processor) return 4;
+    otel_batch_span_processor_builder_destroy(pb);
     otel_sdk_builder_t* b = otel_sdk_builder_new();
     otel_sdk_builder_set_service_name(b, cs("cross-artifact"));
-    otel_sdk_builder_set_otlp_endpoint(b, cs(getenv("OTEL_EXPORTER_OTLP_TRACES_ENDPOINT")));
-    otel_sdk_builder_set_otlp_timeout_millis(b, 5000);
+    if (otel_sdk_builder_add_span_processor(b,processor)!=0) return 5;
     otel_sdk_t* sdk=(void*)0;
-    if (otel_sdk_build(b,&sdk)!=0||!sdk) return 2;
+    if (otel_sdk_build(b,&sdk)!=0||!sdk) return 6;
     otel_sdk_builder_destroy(b);
-    if (otel_sdk_set_as_global(sdk)!=0) return 3;
+    if (otel_sdk_set_as_global(sdk)!=0) return 7;
     work(); /* API-only calls AFTER install must export through the SDK */
     otel_sdk_force_flush(sdk, 5000);
     otel_sdk_shutdown(sdk, 5000);

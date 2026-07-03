@@ -13,3 +13,10 @@
   sizes; panic-safe entry points; local parent/child span semantics; force-flush and
   shutdown. A `cross_artifact` integration test proves API-only spans export through the SDK
   across the separate cdylibs.
+- Pipeline object model: the SDK setup is decomposed into a generic trace exporter
+  (`otel_trace_exporter_t`) and span processor (`otel_span_processor_t`), built by the OTLP
+  trace exporter builder (`otlp_trace_exporter.h`) and batch span processor builder
+  (`batch_span_processor.h`), and assembled through `otel_sdk_builder_add_span_processor`.
+  OTLP/batch-specific setters were removed from the SDK builder. Builders transfer ownership
+  of their children on `OTEL_STATUS_OK`. The generic exporter/processor handles are opaque
+  extension points for future exporter/processor kinds without an ABI break.

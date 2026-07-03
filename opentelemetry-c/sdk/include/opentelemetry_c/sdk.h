@@ -57,9 +57,24 @@
  *
  * Typical lifecycle
  * -----------------
+ *   Build an exporter, wrap it in a span processor, then hand the processor to the SDK
+ *   builder (see otlp_trace_exporter.h and batch_span_processor.h for the pipeline pieces):
+ *
+ *   otel_otlp_trace_exporter_builder_t* eb = otel_otlp_trace_exporter_builder_new();
+ *   otel_otlp_trace_exporter_builder_set_endpoint(eb, otel_cstr("http://localhost:4318/v1/traces"));
+ *   otel_trace_exporter_t* exporter = NULL;
+ *   otel_otlp_trace_exporter_builder_build(eb, &exporter);
+ *   otel_otlp_trace_exporter_builder_destroy(eb);
+ *
+ *   otel_batch_span_processor_builder_t* pb = otel_batch_span_processor_builder_new();
+ *   otel_batch_span_processor_builder_set_exporter(pb, exporter); // ownership transfers on OK
+ *   otel_span_processor_t* processor = NULL;
+ *   otel_batch_span_processor_builder_build(pb, &processor);
+ *   otel_batch_span_processor_builder_destroy(pb);
+ *
  *   otel_sdk_builder_t* b = otel_sdk_builder_new();
  *   otel_sdk_builder_set_service_name(b, otel_cstr("my-service"));
- *   otel_sdk_builder_set_otlp_endpoint(b, otel_cstr("http://localhost:4318/v1/traces"));
+ *   otel_sdk_builder_add_span_processor(b, processor); // ownership transfers on OK
  *   otel_sdk_t* sdk = NULL;
  *   if (otel_sdk_build(b, &sdk) == OTEL_STATUS_OK) {
  *       otel_sdk_set_as_global(sdk);
@@ -74,6 +89,7 @@
 
 #include <opentelemetry_c/common.h>
 #include <opentelemetry_c/trace.h>
+#include <opentelemetry_c/span_processor.h>
 
 #ifdef __cplusplus
 extern "C" {
@@ -89,8 +105,8 @@ typedef struct otel_sdk_t otel_sdk_t;
  * failure. Release with otel_sdk_builder_destroy(). */
 otel_sdk_builder_t* otel_sdk_builder_new(void);
 
-/* Destroy an SDK builder (no-op on NULL). Safe to call after otel_sdk_build(); the
- * builder is only read, never consumed, by build. */
+/* Destroy an SDK builder (no-op on NULL). Frees any span processors that were transferred
+ * in via otel_sdk_builder_add_span_processor() but not yet consumed by otel_sdk_build(). */
 void otel_sdk_builder_destroy(otel_sdk_builder_t* builder);
 
 /* ---- Resource ------------------------------------------------------------- */
@@ -103,56 +119,21 @@ otel_status_t otel_sdk_builder_set_service_name(otel_sdk_builder_t* builder,
 otel_status_t otel_sdk_builder_add_resource_attribute(otel_sdk_builder_t* builder,
                                                       otel_key_value_t attribute);
 
-/* ---- OTLP exporter (HTTP/protobuf) ---------------------------------------- */
+/* ---- Span processors ------------------------------------------------------ */
 
 /*
- * Set the full OTLP traces endpoint URL, used as-is (no path is appended), e.g.
- * "http://localhost:4318/v1/traces". Remember to include the "/v1/traces" path.
+ * Add (transfer) a span processor to the SDK's trace pipeline. Build the processor with a
+ * span-processor builder (e.g. batch_span_processor.h), which in turn consumes a trace
+ * exporter (e.g. otlp_trace_exporter.h).
  *
- * If unset, the exporter falls back to (in order): the
- * OTEL_EXPORTER_OTLP_TRACES_ENDPOINT environment variable (used as-is), the
- * OTEL_EXPORTER_OTLP_ENDPOINT environment variable (with "/v1/traces" appended), and
- * finally the OTLP default "http://localhost:4318/v1/traces". Programmatic
- * configuration takes precedence over the environment variables.
+ * Ownership: on OTEL_STATUS_OK, ownership of `processor` transfers to the SDK builder and
+ * the caller must NOT call otel_span_processor_destroy() on it. On failure (invalid builder
+ * or processor), the caller still owns `processor`. Add more than one processor to fan spans
+ * out to multiple pipelines. A builder with no span processor still builds a valid SDK whose
+ * spans are simply not exported.
  */
-otel_status_t otel_sdk_builder_set_otlp_endpoint(otel_sdk_builder_t* builder,
-                                                 otel_string_view_t endpoint);
-
-/* Add an HTTP header sent with every export request (e.g. for authentication). */
-otel_status_t otel_sdk_builder_add_otlp_header(otel_sdk_builder_t* builder,
-                                               otel_string_view_t key,
-                                               otel_string_view_t value);
-
-/* Set the per-request export timeout in milliseconds (0 => exporter default). */
-otel_status_t otel_sdk_builder_set_otlp_timeout_millis(otel_sdk_builder_t* builder,
-                                                       uint64_t timeout_millis);
-
-/* ---- Batch span processor options (0 => spec default) --------------------- */
-
-/*
- * Maximum queue size (default 2048). Bounded: a non-zero value larger than an internal
- * maximum is rejected with OTEL_STATUS_INVALID_ARGUMENT (not silently clamped), since the
- * processor preallocates a channel of this capacity.
- */
-otel_status_t otel_sdk_builder_set_batch_max_queue_size(otel_sdk_builder_t* builder,
-                                                        size_t max_queue_size);
-/* Scheduled delay between exports, milliseconds (default 5000). */
-otel_status_t otel_sdk_builder_set_batch_scheduled_delay_millis(otel_sdk_builder_t* builder,
-                                                                uint64_t delay_millis);
-/*
- * Maximum spans per export batch (default 512). Bounded like the queue size above: an
- * oversized non-zero value is rejected with OTEL_STATUS_INVALID_ARGUMENT. The effective
- * value is additionally capped by the SDK at the max queue size.
- */
-otel_status_t otel_sdk_builder_set_batch_max_export_batch_size(otel_sdk_builder_t* builder,
-                                                               size_t max_export_batch_size);
-/*
- * Per-export timeout, milliseconds (default 30000). When set, this is applied as the OTLP
- * HTTP request timeout unless otel_sdk_builder_set_otlp_timeout_millis() is also set (which
- * then wins).
- */
-otel_status_t otel_sdk_builder_set_batch_export_timeout_millis(otel_sdk_builder_t* builder,
-                                                               uint64_t timeout_millis);
+otel_status_t otel_sdk_builder_add_span_processor(otel_sdk_builder_t* builder,
+                                                  otel_span_processor_t* processor);
 
 /* ---- Build ---------------------------------------------------------------- */
 
@@ -160,9 +141,12 @@ otel_status_t otel_sdk_builder_set_batch_export_timeout_millis(otel_sdk_builder_
  * Build an SDK from the accumulated configuration. On success writes a non-NULL handle
  * to *out_sdk and returns OTEL_STATUS_OK. On failure returns an error status, sets
  * *out_sdk to NULL, and records a message retrievable via otel_last_error_message().
- * The builder is not consumed and must still be destroyed by the caller.
+ *
+ * The span processors transferred to the builder move into the built SDK; the builder
+ * remains owned by the caller and must still be destroyed. Note that a second build on the
+ * same builder produces an SDK with no processors (they were consumed by the first build).
  */
-otel_status_t otel_sdk_build(const otel_sdk_builder_t* builder, otel_sdk_t** out_sdk);
+otel_status_t otel_sdk_build(otel_sdk_builder_t* builder, otel_sdk_t** out_sdk);
 
 /* ---- Provider access and global installation ------------------------------ */
 

@@ -83,6 +83,60 @@ fn sdk_header_and_example_compile() {
     );
     let _ = std::fs::remove_file(&tmp);
 
+    // A TU that includes every pipeline header and exercises the full builder chain, so each
+    // new header compiles standalone and the ownership-transfer signatures line up.
+    let pipeline = std::env::temp_dir().join("otel_c_pipeline_hdr_check.c");
+    std::fs::write(
+        &pipeline,
+        r#"#include <opentelemetry_c/sdk.h>
+#include <opentelemetry_c/trace_exporter.h>
+#include <opentelemetry_c/span_processor.h>
+#include <opentelemetry_c/otlp_trace_exporter.h>
+#include <opentelemetry_c/batch_span_processor.h>
+int main(void) {
+    otel_otlp_trace_exporter_builder_t* eb = otel_otlp_trace_exporter_builder_new();
+    otel_otlp_trace_exporter_builder_set_endpoint(eb, otel_cstr("http://localhost:4318/v1/traces"));
+    otel_otlp_trace_exporter_builder_set_timeout_millis(eb, 5000);
+    otel_trace_exporter_t* exporter = (void*)0;
+    otel_otlp_trace_exporter_builder_build(eb, &exporter);
+    otel_otlp_trace_exporter_builder_destroy(eb);
+
+    otel_batch_span_processor_builder_t* pb = otel_batch_span_processor_builder_new();
+    otel_batch_span_processor_builder_set_exporter(pb, exporter);
+    otel_batch_span_processor_builder_set_max_queue_size(pb, 2048);
+    otel_span_processor_t* processor = (void*)0;
+    otel_batch_span_processor_builder_build(pb, &processor);
+    otel_batch_span_processor_builder_destroy(pb);
+
+    otel_sdk_builder_t* sb = otel_sdk_builder_new();
+    otel_sdk_builder_set_service_name(sb, otel_cstr("hdr-check"));
+    otel_sdk_builder_add_span_processor(sb, processor);
+    otel_sdk_t* sdk = (void*)0;
+    otel_sdk_build(sb, &sdk);
+    otel_sdk_builder_destroy(sb);
+    (void)sdk;
+    return 0;
+}
+"#,
+    )
+    .expect("write pipeline source");
+    syntax_check(
+        &cc,
+        &[
+            "-std=c11".as_ref(),
+            "-Wall".as_ref(),
+            "-Wextra".as_ref(),
+            "-Werror".as_ref(),
+            "-fsyntax-only".as_ref(),
+            "-I".as_ref(),
+            api_inc.as_os_str(),
+            "-I".as_ref(),
+            sdk_inc.as_os_str(),
+            pipeline.as_os_str(),
+        ],
+    );
+    let _ = std::fs::remove_file(&pipeline);
+
     // The shipped split example (includes api.h + sdk.h).
     let example = manifest().join("examples/c-basic-traces/main.c");
     assert!(example.exists(), "example missing: {}", example.display());

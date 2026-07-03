@@ -58,17 +58,57 @@ Statically linking the API into multiple artifacts creates separate global slots
 A ready-to-run example that links both libraries is in
 [`examples/c-basic-traces/`](examples/c-basic-traces) (`make run`).
 
-## Header
+## Pipeline object model
 
-[`include/opentelemetry_c/sdk.h`](include/opentelemetry_c/sdk.h) — SDK builder and lifecycle
-(`otel_sdk_builder_*`, `otel_sdk_build`, `otel_sdk_set_as_global`,
-`otel_sdk_get_tracer_provider`, `otel_sdk_force_flush`, `otel_sdk_shutdown`,
-`otel_sdk_destroy`).
+The SDK builds a trace pipeline from separate, composable objects that map to OpenTelemetry
+concepts, so the SDK builder is not coupled to any one exporter or processor:
+
+```
+OTLP exporter builder ──build──▶ otel_trace_exporter_t
+                                        │ set_exporter (ownership transfers)
+                                        ▼
+batch span processor builder ─build─▶ otel_span_processor_t
+                                        │ add_span_processor (ownership transfers)
+                                        ▼
+                 SDK builder ──build──▶ otel_sdk_t ──set_as_global──▶ global provider
+```
+
+Only the **OTLP HTTP/protobuf trace exporter** and the **batch span processor** are
+implemented today. The generic `otel_trace_exporter_t` / `otel_span_processor_t` handles are
+opaque extension points: other exporter/processor kinds can be added later without breaking
+the C ABI. No custom-callback exporter is provided yet.
+
+### Ownership transfer rules
+
+- A `build(builder, &out)` call creates a new owned object; the builder stays owned by the
+  caller (destroy it when done).
+- `otel_batch_span_processor_builder_set_exporter` transfers the exporter into the processor
+  builder **on `OTEL_STATUS_OK`**; on failure the caller still owns it.
+- `otel_sdk_builder_add_span_processor` transfers the processor into the SDK builder **on
+  `OTEL_STATUS_OK`**; on failure the caller still owns it.
+- After a successful transfer, do **not** destroy the transferred handle (its destroy becomes
+  a safe no-op).
+- Destroying a builder frees any transferred children it still owns (i.e. that a later
+  `build` did not consume). All `*_destroy` functions are NULL-safe and must not race with
+  other use of the same handle.
+
+## Headers
+
+- [`include/opentelemetry_c/sdk.h`](include/opentelemetry_c/sdk.h) — SDK builder, resource
+  config, `add_span_processor`, build, and lifecycle (`set_as_global`, `get_tracer_provider`,
+  `force_flush`, `shutdown`, `destroy`).
+- [`otlp_trace_exporter.h`](include/opentelemetry_c/otlp_trace_exporter.h) — OTLP HTTP/protobuf
+  exporter builder (endpoint / header / timeout).
+- [`batch_span_processor.h`](include/opentelemetry_c/batch_span_processor.h) — batch processor
+  builder (exporter + bounded queue/delay/batch settings).
+- [`trace_exporter.h`](include/opentelemetry_c/trace_exporter.h) /
+  [`span_processor.h`](include/opentelemetry_c/span_processor.h) — the generic opaque handles.
 
 ## Behavior & guarantees
 
-- Application owns SDK lifecycle: build → `set_as_global` → (instrumentation emits spans via
-  the API) → `force_flush` → `shutdown`. Shutdown runs at most once.
+- Application owns the pipeline + SDK lifecycle: build exporter → build processor → build SDK
+  → `set_as_global` → (instrumentation emits spans via the API) → `force_flush` → `shutdown`.
+  Shutdown runs at most once.
 - Batch queue / export-batch sizes from C are bounded; oversized values are rejected with
   `OTEL_STATUS_INVALID_ARGUMENT`, `0` selects the SDK default.
 - All entry points are panic-safe. Runtime export failures never crash the process.
