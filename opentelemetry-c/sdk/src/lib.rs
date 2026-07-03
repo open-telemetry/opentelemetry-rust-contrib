@@ -2,8 +2,8 @@
 //!
 //! The **C SDK** of the `opentelemetry-c` split. It provides a trace pipeline composed of a
 //! trace exporter and a span processor: an OTLP HTTP/protobuf exporter (built by
-//! [`otlp_exporter`]) wrapped in a batch span processor (built by [`batch_processor`]) and
-//! assembled into an [`sdk`] provider. Installing as global (or fetching a provider handle)
+//! `otlp_exporter`) wrapped in a batch span processor (built by `batch_processor`) and
+//! assembled into an `sdk` provider. Installing as global (or fetching a provider handle)
 //! registers this SDK's implementation into the **API cdylib's** global provider slot across
 //! the C ABI, so API-only instrumentation observes it.
 //!
