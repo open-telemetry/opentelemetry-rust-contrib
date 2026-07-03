@@ -289,7 +289,11 @@ pub unsafe extern "C" fn otel_tracer_start_span(
             Some(t) => t,
             None => return std::ptr::null_mut(),
         };
-        if tracer.vtable.is_null() {
+        // Copy the validated vtable into a local so we don't repeatedly read the handle's raw
+        // pointer field after the null check (also clears static-analysis warnings about
+        // dereferencing a raw pointer loaded from the handle).
+        let vtable = tracer.vtable;
+        if vtable.is_null() {
             // Unbacked (no-op) tracer: a valid no-op span, as the spec expects.
             return new_span(std::ptr::null(), std::ptr::null_mut());
         }
@@ -306,23 +310,22 @@ pub unsafe extern "C" fn otel_tracer_start_span(
                     // Only pass the parent context if it belongs to the SAME implementation
                     // (same vtable); a parent from a different implementation is treated as
                     // no parent, so the new span is a root span (documented in trace.h).
-                    Some(parent) if parent.vtable == tracer.vtable => parent_ctx = parent.ctx,
+                    Some(parent) if parent.vtable == vtable => parent_ctx = parent.ctx,
                     Some(_) => {}
                     None => return std::ptr::null_mut(),
                 }
             }
         }
 
-        // SAFETY: `tracer.vtable` is live; `tracer.ctx` its tracer context.
-        let span_ctx =
-            unsafe { ((*tracer.vtable).tracer_start_span)(tracer.ctx, name, kind, parent_ctx) };
+        // SAFETY: `vtable` is live; `tracer.ctx` its tracer context.
+        let span_ctx = unsafe { ((*vtable).tracer_start_span)(tracer.ctx, name, kind, parent_ctx) };
         if span_ctx.is_null() {
             // A REAL backed tracer was asked and failed (malformed name, allocation failure,
             // or a guarded vtable panic); it left the last-error set. Surface the failure as
             // NULL — do NOT clear the error or degrade to a no-op span.
             return std::ptr::null_mut();
         }
-        new_span(tracer.vtable, span_ctx)
+        new_span(vtable, span_ctx)
     })
 }
 

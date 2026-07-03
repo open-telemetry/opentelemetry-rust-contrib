@@ -147,9 +147,9 @@ otel_status_t otel_sdk_builder_set_batch_scheduled_delay_millis(otel_sdk_builder
 otel_status_t otel_sdk_builder_set_batch_max_export_batch_size(otel_sdk_builder_t* builder,
                                                                size_t max_export_batch_size);
 /*
- * Per-export timeout, milliseconds (default 30000). With the synchronous batch
- * processor this is applied as the OTLP request timeout unless
- * otel_sdk_builder_set_otlp_timeout_millis() is also set (which then wins).
+ * Per-export timeout, milliseconds (default 30000). When set, this is applied as the OTLP
+ * HTTP request timeout unless otel_sdk_builder_set_otlp_timeout_millis() is also set (which
+ * then wins).
  */
 otel_status_t otel_sdk_builder_set_batch_export_timeout_millis(otel_sdk_builder_t* builder,
                                                                uint64_t timeout_millis);

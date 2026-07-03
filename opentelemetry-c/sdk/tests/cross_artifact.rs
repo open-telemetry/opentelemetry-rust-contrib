@@ -60,16 +60,28 @@ fn is_ci() -> bool {
 
 /// Find a target profile dir that contains BOTH cdylibs.
 fn find_lib_dir() -> Option<PathBuf> {
-    // This crate lives at `<workspace>/opentelemetry-c/sdk`, so the workspace `target/` dir
-    // is two parents up: opentelemetry-c/sdk -> opentelemetry-c -> <workspace>.
-    let workspace_target = Path::new(env!("CARGO_MANIFEST_DIR"))
+    // This crate lives at `<workspace>/opentelemetry-c/sdk`, so the workspace root is two
+    // parents up: opentelemetry-c/sdk -> opentelemetry-c -> <workspace>.
+    let workspace_root = Path::new(env!("CARGO_MANIFEST_DIR"))
         .parent()
         .unwrap()
         .parent()
-        .unwrap()
-        .join("target");
+        .unwrap();
+    // Honor CARGO_TARGET_DIR: an absolute value is used as-is; a relative value is resolved
+    // against the workspace root (NOT the SDK crate dir). Otherwise default to <root>/target.
+    let target_dir = match std::env::var_os("CARGO_TARGET_DIR") {
+        Some(dir) if !dir.is_empty() => {
+            let dir = PathBuf::from(dir);
+            if dir.is_absolute() {
+                dir
+            } else {
+                workspace_root.join(dir)
+            }
+        }
+        _ => workspace_root.join("target"),
+    };
     for profile in ["release", "debug"] {
-        let dir = workspace_target.join(profile);
+        let dir = target_dir.join(profile);
         let has = |stem: &str| dylib_names(stem).iter().any(|n| dir.join(n).exists());
         if has("opentelemetry_c_api") && has("opentelemetry_c_sdk") {
             return Some(dir);
@@ -203,6 +215,16 @@ fn start_mock() -> (u16, Arc<AtomicUsize>, Arc<AtomicBool>) {
 
 #[test]
 fn api_only_calls_after_sdk_install_export_through_sdk() {
+    // This proof relies on Unix dynamic-linking semantics (rpath plus DYLD_LIBRARY_PATH /
+    // LD_LIBRARY_PATH). Windows dynamic linking of the split is not a supported/claimed
+    // model, so skip cleanly on non-Unix targets — even under CI — rather than fail
+    // confusingly. Unix CI fail-hard behavior (missing cc / cdylibs) is unchanged.
+    if !cfg!(unix) {
+        eprintln!(
+            "skipping: the cross-artifact proof requires Unix dynamic linking (non-Unix target)"
+        );
+        return;
+    }
     let cc = match find_cc() {
         Some(cc) => cc,
         None => {
