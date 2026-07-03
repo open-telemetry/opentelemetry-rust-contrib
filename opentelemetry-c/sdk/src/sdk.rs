@@ -446,7 +446,7 @@ mod tests {
 
     fn sv(s: &str) -> OtelStringView {
         OtelStringView {
-            ptr: s.as_ptr() as *const std::os::raw::c_char,
+            ptr: s.as_ptr().cast::<std::os::raw::c_char>(),
             len: s.len(),
         }
     }
