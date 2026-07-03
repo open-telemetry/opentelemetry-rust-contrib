@@ -68,6 +68,12 @@ otel_status_t otel_otlp_trace_exporter_builder_set_timeout_millis(
  *
  * Ownership of *out: release it with otel_trace_exporter_destroy(), or transfer it into a
  * span processor builder via otel_batch_span_processor_builder_set_exporter().
+ *
+ * OTLP disabled: the OTLP exporter is an optional cargo feature (`otlp`, on by default). If
+ * opentelemetry-c-sdk is built WITHOUT that feature, these builder symbols remain present for
+ * ABI stability and the config setters above still validate and store configuration, but this
+ * build function returns OTEL_STATUS_INVALID_CONFIG, writes NULL to *out, and records a
+ * last-error message explaining that OTLP support was compiled out.
  */
 otel_status_t otel_otlp_trace_exporter_builder_build(
     const otel_otlp_trace_exporter_builder_t* builder, otel_trace_exporter_t** out);

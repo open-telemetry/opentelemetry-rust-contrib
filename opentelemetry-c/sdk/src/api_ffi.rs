@@ -107,6 +107,9 @@ pub(crate) fn clear_last_error() {
 pub(crate) mod test_probe {
     use super::*;
 
+    // Only the OTLP-backed `set_as_global` unit test drives this probe; without the `otlp`
+    // feature that test is compiled out, so gate the helper to match (avoids dead_code).
+    #[cfg(feature = "otlp")]
     pub fn registered() -> Option<(*const OtelImplVtable, *mut c_void)> {
         imp::REGISTERED
             .lock()

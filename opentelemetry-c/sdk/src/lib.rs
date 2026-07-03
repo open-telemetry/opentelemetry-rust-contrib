@@ -1,11 +1,22 @@
 //! # opentelemetry-c-sdk
 //!
-//! The **C SDK** of the `opentelemetry-c` split. It provides a trace pipeline composed of a
-//! trace exporter and a span processor: an OTLP HTTP/protobuf exporter (built by
-//! `otlp_exporter`) wrapped in a batch span processor (built by `batch_processor`) and
-//! assembled into an `sdk` provider. Installing as global (or fetching a provider handle)
-//! registers this SDK's implementation into the **API cdylib's** global provider slot across
-//! the C ABI, so API-only instrumentation observes it.
+//! The **C SDK** of the `opentelemetry-c` split. It follows idiomatic OpenTelemetry layering:
+//! the SDK core (builder + `SdkTracerProvider`) is a separate concern from **span processors**
+//! and **exporters**, which are generic, opaque extension points:
+//!
+//! - `otel_trace_exporter_t` wraps an internal `TraceExporterImpl` (a `SpanExporter`). The OTLP
+//!   HTTP/protobuf exporter is one **optional** variant (cargo feature `otlp`, on by default),
+//!   built by `otlp_exporter`.
+//! - `otel_span_processor_t` wraps an internal `SpanProcessorImpl` (a `SpanProcessor`). The
+//!   batch span processor is one variant (SDK core), built by `batch_processor`.
+//! - The SDK builder (`sdk`) stores a homogeneous `Vec<SpanProcessorImpl>`, so it is coupled to
+//!   neither OTLP nor the batch processor.
+//!
+//! With `--no-default-features` the SDK core builds without `opentelemetry-otlp`, `reqwest`, or
+//! any TLS backend; the OTLP builder symbols remain but return `OTEL_STATUS_INVALID_CONFIG`.
+//! Installing as global (or fetching a provider handle) registers this SDK's implementation
+//! into the **API cdylib's** global provider slot across the C ABI, so API-only instrumentation
+//! observes it.
 //!
 //! ## Linking model
 //!
@@ -17,8 +28,10 @@
 
 #![allow(unsafe_attr_outside_unsafe)]
 
-// `reqwest` is a direct dependency solely to select the OTLP blocking client's TLS backend
-// via the `native-tls` / `rustls-tls` cargo features; it is never called directly.
+// `reqwest` is an optional direct dependency (feature `otlp`) solely to select the OTLP
+// blocking client's TLS backend via the `native-tls` / `rustls-tls` cargo features; it is
+// never called directly.
+#[cfg(feature = "otlp")]
 use reqwest as _;
 
 mod api_ffi;

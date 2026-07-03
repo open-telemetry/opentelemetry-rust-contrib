@@ -16,6 +16,12 @@ cargo_feature opentelemetry-aws "default"
 
 cargo_feature opentelemetry-c/sdk "native-tls"
 cargo_feature opentelemetry-c/sdk "rustls-tls"
+# OTLP exporter with no TLS backend (HTTP only).
+cargo_feature opentelemetry-c/sdk "otlp"
+# SDK core with OTLP compiled out entirely (no opentelemetry-otlp / reqwest / TLS).
+echo "checking opentelemetry-c/sdk with no default features (SDK core)"
+cargo clippy --manifest-path=opentelemetry-c/sdk/Cargo.toml --all-targets --no-default-features -- \
+    -Dwarnings
 
 cargo_feature opentelemetry-datadog "reqwest-blocking-client,intern-std"
 cargo_feature opentelemetry-datadog "reqwest-client,intern-std"

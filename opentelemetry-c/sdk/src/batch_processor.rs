@@ -18,8 +18,8 @@ use crate::error::{clear_last_error, fail, fail_owned};
 use crate::handle::{
     checked_mut, destroy, guard_ptr, guard_status, guard_unit, into_raw, take, HasMagic,
 };
-use crate::span_processor::OtelSpanProcessor;
-use crate::trace_exporter::OtelTraceExporter;
+use crate::span_processor::{OtelSpanProcessor, SpanProcessorImpl};
+use crate::trace_exporter::{OtelTraceExporter, TraceExporterImpl};
 
 const BATCH_PROCESSOR_BUILDER_MAGIC: u64 = 0x4F54_4C43_4253_5042; // "OTLCBSPB"
 
@@ -237,10 +237,7 @@ pub unsafe extern "C" fn otel_batch_span_processor_builder_set_export_timeout_mi
     }
 }
 
-fn build_processor(
-    config: &BatchConfig,
-    exporter: opentelemetry_otlp::SpanExporter,
-) -> BatchSpanProcessor {
+fn build_processor(config: &BatchConfig, exporter: TraceExporterImpl) -> BatchSpanProcessor {
     let mut batch = BatchConfigBuilder::default();
     if let Some(size) = config.max_queue_size {
         batch = batch.with_max_queue_size(size);
@@ -297,7 +294,7 @@ pub unsafe extern "C" fn otel_batch_span_processor_builder_build(
             }
         };
         let processor = build_processor(&builder.config, exporter);
-        unsafe { *out = into_raw(OtelSpanProcessor::new(processor)) };
+        unsafe { *out = into_raw(OtelSpanProcessor::new(SpanProcessorImpl::Batch(processor))) };
         OtelStatus::Ok
     })
 }
@@ -305,14 +302,19 @@ pub unsafe extern "C" fn otel_batch_span_processor_builder_build(
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[cfg(feature = "otlp")]
     use crate::otlp_exporter::{
         otel_otlp_trace_exporter_builder_build, otel_otlp_trace_exporter_builder_destroy,
         otel_otlp_trace_exporter_builder_new, otel_otlp_trace_exporter_builder_set_endpoint,
     };
+    #[cfg(feature = "otlp")]
     use crate::span_processor::otel_span_processor_destroy;
+    #[cfg(feature = "otlp")]
     use crate::trace_exporter::otel_trace_exporter_destroy;
+    #[cfg(feature = "otlp")]
     use opentelemetry_c_abi::OtelStringView;
 
+    #[cfg(feature = "otlp")]
     fn sv(s: &str) -> OtelStringView {
         OtelStringView {
             ptr: s.as_ptr().cast::<std::os::raw::c_char>(),
@@ -321,6 +323,7 @@ mod tests {
     }
 
     /// Build a valid exporter handle (constructing it does not connect).
+    #[cfg(feature = "otlp")]
     fn make_exporter() -> *mut OtelTraceExporter {
         unsafe {
             let eb = otel_otlp_trace_exporter_builder_new();
@@ -342,6 +345,7 @@ mod tests {
         }
     }
 
+    #[cfg(feature = "otlp")]
     #[test]
     fn set_exporter_failure_leaves_exporter_caller_owned() {
         unsafe {
@@ -356,6 +360,7 @@ mod tests {
         }
     }
 
+    #[cfg(feature = "otlp")]
     #[test]
     fn set_exporter_success_transfers_ownership() {
         unsafe {
@@ -386,6 +391,7 @@ mod tests {
         }
     }
 
+    #[cfg(feature = "otlp")]
     #[test]
     fn build_success_consumes_exporter() {
         unsafe {

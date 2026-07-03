@@ -16,7 +16,7 @@ use std::thread;
 use std::time::Duration;
 
 use opentelemetry::KeyValue;
-use opentelemetry_sdk::trace::{BatchSpanProcessor, SdkTracerProvider};
+use opentelemetry_sdk::trace::SdkTracerProvider;
 use opentelemetry_sdk::Resource;
 
 use opentelemetry_c_abi::{OtelKeyValue, OtelStatus, OtelStringView};
@@ -27,7 +27,7 @@ use crate::handle::{
     checked_mut, checked_ref, destroy, guard_ptr, guard_status, guard_unit, into_raw, take,
     HasMagic,
 };
-use crate::span_processor::OtelSpanProcessor;
+use crate::span_processor::{OtelSpanProcessor, SpanProcessorImpl};
 use crate::vtable;
 
 const SDK_BUILDER_MAGIC: u64 = 0x4F54_4C43_5344_4B42; // "OTLCSDKB"
@@ -39,9 +39,9 @@ pub struct OtelSdkBuilder {
     service_name: Option<String>,
     resource_attributes: Vec<KeyValue>,
     // Span processors transferred in via `add_span_processor`; moved into the provider on
-    // `build`, or freed on destroy if `build` was not completed. Currently the concrete
-    // `BatchSpanProcessor`; adding other processor kinds would generalize this to an enum.
-    processors: Vec<BatchSpanProcessor>,
+    // `build`, or freed on destroy if `build` was not completed. Homogeneous `SpanProcessorImpl`
+    // so any processor kind (batch today, e.g. simple later) is stored uniformly here.
+    processors: Vec<SpanProcessorImpl>,
 }
 
 impl HasMagic for OtelSdkBuilder {
@@ -434,16 +434,20 @@ pub unsafe extern "C" fn otel_sdk_destroy(sdk: *mut OtelSdk) {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[cfg(feature = "otlp")]
     use crate::batch_processor::{
         otel_batch_span_processor_builder_build, otel_batch_span_processor_builder_destroy,
         otel_batch_span_processor_builder_new, otel_batch_span_processor_builder_set_exporter,
     };
+    #[cfg(feature = "otlp")]
     use crate::otlp_exporter::{
         otel_otlp_trace_exporter_builder_build, otel_otlp_trace_exporter_builder_destroy,
         otel_otlp_trace_exporter_builder_new, otel_otlp_trace_exporter_builder_set_endpoint,
     };
+    #[cfg(feature = "otlp")]
     use crate::span_processor::otel_span_processor_destroy;
 
+    #[cfg(feature = "otlp")]
     fn sv(s: &str) -> OtelStringView {
         OtelStringView {
             ptr: s.as_ptr().cast::<std::os::raw::c_char>(),
@@ -453,6 +457,7 @@ mod tests {
 
     /// Build a real (batch + OTLP) span processor via the pipeline builders, for tests that
     /// need a live `otel_span_processor_t`.
+    #[cfg(feature = "otlp")]
     fn build_processor() -> *mut OtelSpanProcessor {
         unsafe {
             let eb = otel_otlp_trace_exporter_builder_new();
@@ -485,6 +490,7 @@ mod tests {
         }
     }
 
+    #[cfg(feature = "otlp")]
     #[test]
     fn set_as_global_registers_sdk_vtable_with_api() {
         // Prove the SDK installs *its* vtable + a non-null provider context into the API's
@@ -518,6 +524,7 @@ mod tests {
         }
     }
 
+    #[cfg(feature = "otlp")]
     #[test]
     fn add_span_processor_ownership_transfer() {
         unsafe {

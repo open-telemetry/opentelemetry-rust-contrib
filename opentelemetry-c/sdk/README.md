@@ -75,8 +75,28 @@ batch span processor builder ─build─▶ otel_span_processor_t
 
 Only the **OTLP HTTP/protobuf trace exporter** and the **batch span processor** are
 implemented today. The generic `otel_trace_exporter_t` / `otel_span_processor_t` handles are
-opaque extension points: other exporter/processor kinds can be added later without breaking
-the C ABI. No custom-callback exporter is provided yet.
+opaque extension points: internally each wraps an enum (`TraceExporterImpl` implementing
+`SpanExporter`, `SpanProcessorImpl` implementing `SpanProcessor`), so another exporter or
+processor kind is a new variant plus a builder — no change to the C ABI, the generic handles,
+or the SDK builder's storage. No custom-callback exporter is provided yet.
+
+### Cargo features (optional OTLP)
+
+The **SDK core** — the builder, `SdkTracerProvider`, the batch span processor, and the generic
+exporter/processor handles — is a separate concern from any exporter implementation. The OTLP
+HTTP/protobuf exporter is an **optional** exporter, enabled by default:
+
+| Feature | Default | Effect |
+| --- | --- | --- |
+| `otlp` | ✅ (via TLS features) | Compile in the OTLP HTTP/protobuf exporter (`opentelemetry-otlp`, `reqwest`). |
+| `native-tls` | ✅ | Implies `otlp`; OTLP HTTPS via the OS TLS stack (`reqwest/native-tls`). |
+| `rustls-tls` | ❌ | Implies `otlp`; OTLP HTTPS via rustls (`reqwest/rustls`). |
+
+Building with `--no-default-features` produces the SDK core **without** `opentelemetry-otlp`,
+`reqwest`, or any TLS backend. The `otel_otlp_trace_exporter_builder_*` symbols remain (the C
+ABI is identical across feature sets), but `otel_otlp_trace_exporter_builder_build` returns
+`OTEL_STATUS_INVALID_CONFIG` with a last-error explaining the `otlp` feature is disabled.
+Enabling `otlp` without a TLS feature builds an HTTP-only OTLP exporter (no HTTPS).
 
 ### Ownership transfer rules
 

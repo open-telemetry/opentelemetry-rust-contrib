@@ -1,22 +1,26 @@
-//! Hot-path FFI-overhead benchmarks for the **SDK-backed** path (no collector / no network).
+//! Hot-path FFI-overhead benchmarks for the **SDK-backed** path.
+//!
+//! Requires the `otlp` cargo feature (part of default features); the `[[bench]]` target sets
+//! `required-features = ["otlp"]`, so it is skipped in `--no-default-features` builds.
 //!
 //! These install a *real* Rust OTel SDK trace pipeline (OTLP exporter + batch span processor)
 //! as the global provider through the public C SDK API, then drive the public C API span/tracer
 //! entrypoints. They measure the true cost of a span/attribute/event through the C boundary plus
 //! the Rust SDK's own machinery — the counterpart to the no-op `api_hotpath` bench.
 //!
-//! No collector is required and nothing is exported over the network: the OTLP exporter targets a
-//! closed loopback port, so any batch flush fails fast (connection refused) and is discarded. The
-//! batch processor's bounded queue/buffer keeps memory bounded; a very large scheduled delay makes
-//! flushing batch-size-driven rather than timer-driven. `force_flush` is never called. This is
-//! **not** a network/export throughput benchmark and is not a default regression guard for export.
+//! No collector is required: the OTLP exporter targets a closed loopback port (`127.0.0.1:1`),
+//! so background export attempts may fail fast (connection refused) and are discarded. The batch
+//! processor's bounded queue/buffer keeps memory bounded; a very large scheduled delay makes
+//! flushing batch-size-driven rather than timer-driven, and `force_flush` is never called. This
+//! is **not** an exporter/network throughput benchmark and is not a default regression guard for
+//! export.
 //!
 //! Setup (pipeline build + global install + tracer acquisition) is kept out of the measured loops.
 //! Attribute/event setters run on a **fresh** span per iteration via `iter_batched`, so the span's
 //! per-span attribute/event limits are never hit and each op measures the real "store" path; the
 //! excluded setup/teardown starts and ends+destroys that span.
 //!
-//! Run with: `cargo bench -p opentelemetry-c-sdk`
+//! Run with: `cargo bench -p opentelemetry-c-sdk` (default features include `otlp`).
 
 use std::hint::black_box;
 use std::os::raw::c_char;

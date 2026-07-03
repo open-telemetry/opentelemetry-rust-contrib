@@ -19,15 +19,20 @@ crate-type = ["cdylib", "staticlib", "rlib"]
 opentelemetry-c-abi = { path = "../abi" }
 opentelemetry = { workspace = true, features = ["trace"] }
 opentelemetry_sdk = { workspace = true, features = ["trace"] }
-opentelemetry-otlp = { workspace = true, features = [
+# The OTLP HTTP/protobuf trace exporter is an OPTIONAL exporter implementation, not SDK core.
+# It is enabled by default (via the `otlp`/TLS features below) but the SDK core — builder,
+# batch span processor, and the generic exporter/processor handles — builds without it.
+opentelemetry-otlp = { workspace = true, optional = true, features = [
     "trace",
     "http-proto",
     "reqwest-blocking-client",
 ] }
-# Direct dependency used only to select the OTLP blocking HTTP client's TLS backend via
-# this crate's `native-tls` / `rustls-tls` features. The exporter is driven through
-# opentelemetry-otlp; this crate never calls reqwest directly.
-reqwest = { version = "0.13", default-features = false, features = ["blocking"] }
+# Optional direct dependency used only to select the OTLP blocking HTTP client's TLS backend
+# via this crate's `native-tls` / `rustls-tls` features. Pulled in only with the `otlp`
+# feature; the exporter is driven through opentelemetry-otlp — this crate never calls reqwest.
+reqwest = { version = "0.13", optional = true, default-features = false, features = [
+    "blocking",
+] }
 
 [dev-dependencies]
 opentelemetry_sdk = { workspace = true, features = ["trace", "testing"] }
@@ -40,12 +45,21 @@ criterion = { workspace = true }
 [[bench]]
 name = "sdk_hotpath"
 harness = false
+# Builds a real OTLP exporter, so it requires the `otlp` feature (in default features). This
+# keeps `cargo bench --no-default-features` from trying to compile a bench that cannot work.
+required-features = ["otlp"]
 
 [features]
-# Platform TLS is the default (OS TLS stack; HTTPS-capable; no bundled crypto).
+# Default preserves today's experience: the OTLP HTTP/protobuf exporter with OS/platform TLS.
 default = ["native-tls"]
-native-tls = ["reqwest/native-tls"]
-rustls-tls = ["reqwest/rustls"]
+# The OTLP HTTP/protobuf trace exporter (optional). Disabling it (`--no-default-features`)
+# drops `opentelemetry-otlp`, `reqwest`, and all TLS backends; the SDK core still builds and
+# the `otel_otlp_trace_exporter_builder_*` symbols remain, returning OTEL_STATUS_INVALID_CONFIG.
+otlp = ["dep:opentelemetry-otlp", "dep:reqwest"]
+# TLS backend for the OTLP blocking HTTP client (only meaningful with `otlp`, which each
+# implies). For reqwest 0.13 the correct feature names are `native-tls` and `rustls`.
+native-tls = ["otlp", "reqwest/native-tls"]
+rustls-tls = ["otlp", "reqwest/rustls"]
 
 [lints]
 workspace = true

@@ -50,6 +50,12 @@ points, so more exporter/processor kinds can be added later without breaking the
 `build`/`set_exporter`/`add_span_processor` transfers ownership on `OTEL_STATUS_OK`; see the
 [sdk/README.md](sdk/README.md) and the pipeline headers for the exact rules.
 
+The SDK **core** is separate from any exporter implementation: the OTLP HTTP/protobuf exporter
+is an **optional** cargo feature (`otlp`), enabled by default. Building `opentelemetry-c-sdk`
+with `--no-default-features` excludes `opentelemetry-otlp`, `reqwest`, and all TLS backends
+while the SDK core still builds; the OTLP builder symbols remain but return
+`OTEL_STATUS_INVALID_CONFIG`. See [sdk/README.md](sdk/README.md#cargo-features-optional-otlp).
+
 See [api/README.md](api/README.md) and [sdk/README.md](sdk/README.md) for build/link
 commands, ownership rules, and the runnable `sdk/examples/c-basic-traces` example.
 
@@ -89,11 +95,11 @@ lock and performs no heap allocation.
 
 Two [Criterion](https://crates.io/crates/criterion) benchmark suites protect the hot-path
 performance contract above. They are **tracing-only**, run explicitly (never as part of
-`cargo test` or a required CI gate), and require **no collector and no network**:
+`cargo test` or a required CI gate), and require **no running collector**:
 
 ```sh
 cargo bench -p opentelemetry-c-api   # api_hotpath: API-only, no-SDK (no-op provider) path
-cargo bench -p opentelemetry-c-sdk   # sdk_hotpath: API + real SDK pipeline, no network export
+cargo bench -p opentelemetry-c-sdk   # sdk_hotpath: API + real SDK pipeline (requires otlp)
 ```
 
 - **`api_hotpath` (no-SDK)** measures the pure C boundary cost — opaque handle
@@ -102,9 +108,11 @@ cargo bench -p opentelemetry-c-sdk   # sdk_hotpath: API + real SDK pipeline, no 
 - **`sdk_hotpath` (SDK-backed)** installs a real OTLP-exporter + batch-span-processor pipeline
   as the global provider through the public C SDK API, then drives the same C API entrypoints.
   It measures span/attribute/event cost through the C boundary **plus** the Rust SDK's own
-  machinery. The OTLP exporter targets a closed loopback port, so any batch flush fails fast
-  and is discarded — nothing is exported over the network. It is **not** an export/network
-  throughput benchmark and is **not** a default regression guard for export.
+  machinery. It **requires the `otlp` feature** (part of default features) — the `[[bench]]`
+  target sets `required-features = ["otlp"]`, so it is skipped under `--no-default-features`. No
+  collector is required: the OTLP exporter targets a closed loopback port, so background export
+  attempts may fail fast (connection refused) and are discarded. It is **not** an
+  exporter/network throughput benchmark and is **not** a default regression guard for export.
 
 Both suites separate setup (pipeline build, global install, tracer acquisition) from the
 measured loop and cache the tracer handle, so span benchmarks do not measure tracer

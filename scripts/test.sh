@@ -19,5 +19,14 @@ cargo build -p opentelemetry-c-api -p opentelemetry-c-sdk --all-features
 echo "Running tests for all packages in workspace with --all-features"
 cargo test --workspace --all-features --tests
 
+# Also exercise the SDK core with OTLP compiled out, so the separation of concerns (SDK core
+# vs. optional OTLP exporter) is covered by CI, not just the default OTLP build. Build the
+# artifact first (proves the cdylib/staticlib link without opentelemetry-otlp / reqwest / TLS),
+# then run the core unit tests.
+echo "Building opentelemetry-c-sdk with --no-default-features (SDK core, no OTLP/reqwest/TLS)"
+cargo build -p opentelemetry-c-sdk --no-default-features
+echo "Running opentelemetry-c-sdk tests with --no-default-features (SDK core, no OTLP)"
+cargo test -p opentelemetry-c-sdk --no-default-features --tests
+
 echo "Running doctests for all packages in workspace with --all-features"
 cargo test --workspace --all-features --doc

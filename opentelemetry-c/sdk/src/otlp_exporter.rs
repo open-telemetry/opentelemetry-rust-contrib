@@ -1,14 +1,16 @@
 //! The OTLP trace exporter builder (`otel_otlp_trace_exporter_builder_t`).
 //!
-//! Configures and builds an OTLP **HTTP/protobuf** trace exporter, producing a generic
-//! [`OtelTraceExporter`] handle. HTTPS is available via a selectable TLS backend chosen at
-//! compile time with the crate's `native-tls` (default) or `rustls-tls` cargo features; the
-//! exporter owns its own blocking HTTP client, so no user-managed async runtime is required.
+//! Configures and builds an OTLP **HTTP/protobuf** trace exporter as one [`TraceExporterImpl`]
+//! variant, producing a generic [`OtelTraceExporter`] handle. HTTPS is available via a
+//! selectable TLS backend chosen at compile time with the crate's `native-tls` (default) or
+//! `rustls-tls` cargo features; the exporter owns its own blocking HTTP client, so no
+//! user-managed async runtime is required.
+//!
+//! OTLP is **optional** (cargo feature `otlp`, on by default). The builder symbols are always
+//! present so the ABI is stable; when the feature is disabled the config-only setters still
+//! work but `otel_otlp_trace_exporter_builder_build` returns `OTEL_STATUS_INVALID_CONFIG`.
 
-use std::collections::HashMap;
 use std::time::Duration;
-
-use opentelemetry_otlp::{Protocol, SpanExporter, WithExportConfig, WithHttpConfig};
 
 use opentelemetry_c_abi::{OtelStatus, OtelStringView};
 
@@ -16,7 +18,13 @@ use crate::error::{clear_last_error, fail, fail_abi, fail_owned};
 use crate::handle::{
     checked_mut, checked_ref, destroy, guard_ptr, guard_status, guard_unit, into_raw, HasMagic,
 };
-use crate::trace_exporter::OtelTraceExporter;
+use crate::trace_exporter::{OtelTraceExporter, TraceExporterImpl};
+
+#[cfg(feature = "otlp")]
+use std::collections::HashMap;
+
+#[cfg(feature = "otlp")]
+use opentelemetry_otlp::{Protocol, SpanExporter, WithExportConfig, WithHttpConfig};
 
 const OTLP_EXPORTER_BUILDER_MAGIC: u64 = 0x4F54_4C43_4F54_4C42; // "OTLCOTLB"
 
@@ -167,7 +175,9 @@ pub unsafe extern "C" fn otel_otlp_trace_exporter_builder_set_timeout_millis(
     }
 }
 
-fn build_otlp_exporter(config: &OtlpExporterConfig) -> Result<SpanExporter, OtelStatus> {
+/// Build the OTLP exporter variant of [`TraceExporterImpl`] from the accumulated config.
+#[cfg(feature = "otlp")]
+fn build_trace_exporter(config: &OtlpExporterConfig) -> Result<TraceExporterImpl, OtelStatus> {
     let mut builder = SpanExporter::builder()
         .with_http()
         .with_protocol(Protocol::HttpBinary);
@@ -181,12 +191,24 @@ fn build_otlp_exporter(config: &OtlpExporterConfig) -> Result<SpanExporter, Otel
         let headers: HashMap<String, String> = config.headers.iter().cloned().collect();
         builder = builder.with_headers(headers);
     }
-    builder.build().map_err(|err| {
+    let exporter = builder.build().map_err(|err| {
         fail_owned(
             OtelStatus::InvalidConfig,
             format!("failed to build OTLP exporter: {err}"),
         )
-    })
+    })?;
+    Ok(TraceExporterImpl::Otlp(exporter))
+}
+
+/// OTLP-disabled stub: the builder is accepted but no OTLP exporter can be built. Kept as a
+/// clear, non-crashing failure so the ABI stays stable across feature configurations.
+#[cfg(not(feature = "otlp"))]
+fn build_trace_exporter(_config: &OtlpExporterConfig) -> Result<TraceExporterImpl, OtelStatus> {
+    Err(fail(
+        OtelStatus::InvalidConfig,
+        "OTLP HTTP exporter is not available: rebuild opentelemetry-c-sdk with the `otlp` \
+         cargo feature (enabled by default) to use otel_otlp_trace_exporter_builder_build",
+    ))
 }
 
 /// Build a trace exporter from the accumulated configuration. On `OTEL_STATUS_OK`, `*out`
@@ -212,7 +234,7 @@ pub unsafe extern "C" fn otel_otlp_trace_exporter_builder_build(
             Some(b) => b,
             None => return OtelStatus::InvalidArgument,
         };
-        let exporter = match build_otlp_exporter(&builder.config) {
+        let exporter = match build_trace_exporter(&builder.config) {
             Ok(e) => e,
             Err(status) => return status,
         };
@@ -224,6 +246,7 @@ pub unsafe extern "C" fn otel_otlp_trace_exporter_builder_build(
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[cfg(feature = "otlp")]
     use crate::trace_exporter::otel_trace_exporter_destroy;
 
     fn sv(s: &str) -> OtelStringView {
@@ -233,6 +256,7 @@ mod tests {
         }
     }
 
+    #[cfg(feature = "otlp")]
     #[test]
     fn setters_and_build_succeed() {
         unsafe {
@@ -294,15 +318,44 @@ mod tests {
                 otel_otlp_trace_exporter_builder_add_header(eb, sv("x-custom"), sv("v")),
                 OtelStatus::Ok
             );
-            // The builder still builds (the retained first value was never overwritten).
+            // With OTLP enabled the builder still builds (the retained first value was never
+            // overwritten). The dedup assertions above are exporter-independent.
+            #[cfg(feature = "otlp")]
+            {
+                let mut exporter: *mut OtelTraceExporter = std::ptr::null_mut();
+                assert_eq!(
+                    otel_otlp_trace_exporter_builder_build(eb, &mut exporter),
+                    OtelStatus::Ok
+                );
+                assert!(!exporter.is_null());
+                otel_trace_exporter_destroy(exporter);
+            }
+            otel_otlp_trace_exporter_builder_destroy(eb);
+        }
+    }
+
+    #[cfg(not(feature = "otlp"))]
+    #[test]
+    fn build_without_otlp_feature_returns_invalid_config() {
+        unsafe {
+            let eb = otel_otlp_trace_exporter_builder_new();
+            // Config-only setters still succeed even with OTLP compiled out.
+            assert_eq!(
+                otel_otlp_trace_exporter_builder_set_endpoint(
+                    eb,
+                    sv("http://127.0.0.1:4318/v1/traces")
+                ),
+                OtelStatus::Ok
+            );
+            // Building the exporter fails clearly, without crashing.
             let mut exporter: *mut OtelTraceExporter = std::ptr::null_mut();
             assert_eq!(
                 otel_otlp_trace_exporter_builder_build(eb, &mut exporter),
-                OtelStatus::Ok
+                OtelStatus::InvalidConfig
             );
-            assert!(!exporter.is_null());
+            assert!(exporter.is_null());
+            assert!(crate::api_ffi::test_probe::last_error().contains("otlp"));
             otel_otlp_trace_exporter_builder_destroy(eb);
-            otel_trace_exporter_destroy(exporter);
         }
     }
 

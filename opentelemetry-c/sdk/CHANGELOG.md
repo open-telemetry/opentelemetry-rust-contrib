@@ -4,6 +4,18 @@
 
 ### Added
 
+- Exporter/processor separation of concerns with **optional OTLP**. The generic
+  `otel_trace_exporter_t` / `otel_span_processor_t` handles now wrap internal enums
+  (`TraceExporterImpl: SpanExporter`, `SpanProcessorImpl: SpanProcessor`), and the SDK builder
+  stores a homogeneous `Vec<SpanProcessorImpl>` — so the SDK core is coupled to neither OTLP
+  nor the batch processor, and a new exporter/processor kind is a variant plus a builder (no C
+  ABI change). `opentelemetry-otlp` and `reqwest` are now **optional** behind the default-on
+  `otlp` feature; `--no-default-features` builds the SDK core without them or any TLS backend.
+  The `otel_otlp_trace_exporter_builder_*` symbols remain in every configuration;
+  `otel_otlp_trace_exporter_builder_build` returns `OTEL_STATUS_INVALID_CONFIG` when `otlp` is
+  disabled. Public C ABI, headers, and default-feature behavior are unchanged. For reqwest 0.13
+  the TLS features are `native-tls` (default) and `rustls-tls` (→ `reqwest/rustls`).
+
 - Initial release of `opentelemetry-c-sdk` as part of the split of `opentelemetry-c` into
   separate C **API** and **SDK** artifacts. The SDK library provides the OTLP HTTP/protobuf
   exporter, batch span processor, and `otel_sdk_*` lifecycle behind the C ABI. Installing as
