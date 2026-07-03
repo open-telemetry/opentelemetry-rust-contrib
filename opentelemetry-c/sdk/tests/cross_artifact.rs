@@ -281,7 +281,17 @@ fn api_only_calls_after_sdk_install_export_through_sdk() {
         }
     };
 
-    let out = std::env::temp_dir().join("otel_c_cross_artifact");
+    // Unique per process (and run) so concurrent `cargo test` invocations do not collide on the
+    // harness source/binary in the shared temp dir. `src` derives from `out`, so both are unique.
+    let unique = format!(
+        "otel_c_cross_artifact_{}_{}",
+        std::process::id(),
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_nanos())
+            .unwrap_or(0)
+    );
+    let out = std::env::temp_dir().join(unique);
     let src = out.with_extension("c");
     std::fs::write(&src, HARNESS_C).expect("write harness");
 
