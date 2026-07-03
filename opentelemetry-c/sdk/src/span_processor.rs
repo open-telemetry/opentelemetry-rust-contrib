@@ -1,7 +1,7 @@
 //! The generic span-processor handle (`otel_span_processor_t`) and its internal implementation
 //! enum.
 //!
-//! The opaque C handle wraps a [`SpanProcessorImpl`] — an internal enum whose variants are the
+//! The opaque C handle wraps a `SpanProcessorImpl` — an internal enum whose variants are the
 //! concrete span-processor kinds this SDK supports. It implements
 //! [`opentelemetry_sdk::trace::SpanProcessor`], so the SDK builder stores a homogeneous
 //! `Vec<SpanProcessorImpl>` and drives every processor uniformly. The batch span processor is
@@ -57,7 +57,7 @@ impl SpanProcessor for SpanProcessorImpl {
     }
 }
 
-/// Opaque span-processor handle. Owns a built [`SpanProcessorImpl`] until it is consumed by the
+/// Opaque span-processor handle. Owns a built `SpanProcessorImpl` until it is consumed by the
 /// SDK builder (via `add_span_processor`) or destroyed.
 pub struct OtelSpanProcessor {
     magic: u64,

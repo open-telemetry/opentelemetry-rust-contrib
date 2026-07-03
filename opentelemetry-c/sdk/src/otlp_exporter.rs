@@ -1,6 +1,6 @@
 //! The OTLP trace exporter builder (`otel_otlp_trace_exporter_builder_t`).
 //!
-//! Configures and builds an OTLP **HTTP/protobuf** trace exporter as one [`TraceExporterImpl`]
+//! Configures and builds an OTLP **HTTP/protobuf** trace exporter as one `TraceExporterImpl`
 //! variant, producing a generic [`OtelTraceExporter`] handle. HTTPS is available via a
 //! selectable TLS backend chosen at compile time with the crate's `native-tls` (default) or
 //! `rustls-tls` cargo features; the exporter owns its own blocking HTTP client, so no
@@ -175,7 +175,7 @@ pub unsafe extern "C" fn otel_otlp_trace_exporter_builder_set_timeout_millis(
     }
 }
 
-/// Build the OTLP exporter variant of [`TraceExporterImpl`] from the accumulated config.
+/// Build the OTLP exporter variant of `TraceExporterImpl` from the accumulated config.
 #[cfg(feature = "otlp")]
 fn build_trace_exporter(config: &OtlpExporterConfig) -> Result<TraceExporterImpl, OtelStatus> {
     let mut builder = SpanExporter::builder()

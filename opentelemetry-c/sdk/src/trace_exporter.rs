@@ -1,7 +1,7 @@
 //! The generic trace-exporter handle (`otel_trace_exporter_t`) and its internal
 //! implementation enum.
 //!
-//! The opaque C handle wraps a [`TraceExporterImpl`] — an internal enum whose variants are the
+//! The opaque C handle wraps a `TraceExporterImpl` — an internal enum whose variants are the
 //! concrete exporter kinds this SDK supports. It implements
 //! [`opentelemetry_sdk::trace::SpanExporter`], so a span processor can drive it uniformly
 //! regardless of which exporter is inside. The OTLP HTTP/protobuf exporter is one **optional**
@@ -72,7 +72,7 @@ impl SpanExporter for TraceExporterImpl {
     }
 }
 
-/// Opaque trace-exporter handle. Owns a built [`TraceExporterImpl`] until it is consumed by a
+/// Opaque trace-exporter handle. Owns a built `TraceExporterImpl` until it is consumed by a
 /// span processor builder (via `set_exporter`) or destroyed.
 pub struct OtelTraceExporter {
     magic: u64,
