@@ -78,7 +78,7 @@ fn parse_component(index: usize) -> u32 {
 #[no_mangle]
 pub extern "C" fn otel_version_string() -> OtelStringView {
     handle::guard_value(OtelStringView::empty(), || OtelStringView {
-        ptr: VERSION.as_ptr() as *const std::os::raw::c_char,
+        ptr: VERSION.as_ptr().cast::<std::os::raw::c_char>(),
         len: VERSION.len(),
     })
 }
