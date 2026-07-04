@@ -2,8 +2,8 @@
 
 | Status    |              |
 | --------- | ------------ |
-| Stability | experimental |
-| Owners    | @lalitb      |
+| Stability | alpha        |
+| Owners    |              |
 
 A **Rust-backed C binding** for OpenTelemetry traces, delivered as one component split into
 separate **API** and **SDK** libraries (plus an internal ABI crate). This split lets a C/C++
