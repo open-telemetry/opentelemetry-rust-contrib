@@ -15,6 +15,7 @@ mod imp {
     use super::*;
     // MSRV is 1.75; `unsafe extern` blocks require 1.82. Keep a plain extern block and
     // allow the Rust-2024-compat lint. These import the API cdylib's internal symbols.
+    #[allow(unknown_lints)]
     #[allow(missing_unsafe_on_extern)]
     extern "C" {
         pub fn otel_api_register_global_provider(
