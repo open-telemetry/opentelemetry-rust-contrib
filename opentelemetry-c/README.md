@@ -56,6 +56,26 @@ with `--no-default-features` excludes `opentelemetry-otlp`, `reqwest`, and all T
 while the SDK core still builds; the OTLP builder symbols remain but return
 `OTEL_STATUS_INVALID_CONFIG`. See [sdk/README.md](sdk/README.md#cargo-features-optional-otlp).
 
+## Current scope and planned trace extensions
+
+This initial slice is trace-first. It exposes the core C API/SDK split, global provider
+wiring, spans, attributes, events, status, OTLP HTTP/protobuf export, and the batch span
+processor.
+
+Not yet exposed, but intended as additive extensions over the same ABI shape:
+
+- sampler configuration;
+- span limits;
+- ID generator configuration;
+- propagation inject/extract;
+- span links;
+- simple span processor;
+- custom/user-provided trace exporter;
+- metrics and logs.
+
+The generic `otel_trace_exporter_t` and `otel_span_processor_t` handles are designed so new
+exporter and processor kinds can be added without reshaping the SDK builder.
+
 See [api/README.md](api/README.md) and [sdk/README.md](sdk/README.md) for build/link
 commands, ownership rules, and the runnable `sdk/examples/c-basic-traces` example.
 
