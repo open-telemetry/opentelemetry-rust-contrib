@@ -33,6 +33,81 @@ instrumentation library depend only on the API, while the application owns the S
   `sdk.h` plus the pipeline headers); they build the trace pipeline, install it globally,
   flush, and shut down.
 
+## Minimal C usage
+
+### Instrumentation library: API only
+
+Instrumentation libraries include only `api.h` and link only `libopentelemetry_c_api`. Calls
+are safe no-ops until the application installs an SDK.
+
+```c
+#include <opentelemetry_c/api.h>
+
+void do_work(void) {
+    otel_tracer_provider_t* provider = otel_global_tracer_provider();
+    otel_tracer_t* tracer = otel_tracer_provider_get_tracer(
+        provider, otel_cstr("my-instrumentation"), otel_cstr("0.1.0"),
+        otel_string_view_empty());
+
+    otel_span_t* span = otel_tracer_start_span(tracer, otel_cstr("work"), NULL);
+    otel_span_set_string_attribute(span, otel_cstr("example.key"), otel_cstr("value"));
+    otel_span_set_ok(span);
+    otel_span_end(span);
+
+    otel_span_destroy(span);
+    otel_tracer_destroy(tracer);
+    otel_tracer_provider_destroy(provider);
+}
+```
+
+### Application: SDK setup
+
+Applications link both `libopentelemetry_c_api` and `libopentelemetry_c_sdk`. They configure
+the trace pipeline and install it globally before instrumentation runs.
+
+```c
+#include <opentelemetry_c/api.h>
+#include <opentelemetry_c/batch_span_processor.h>
+#include <opentelemetry_c/otlp_trace_exporter.h>
+#include <opentelemetry_c/sdk.h>
+
+int main(void) {
+    otel_otlp_trace_exporter_builder_t* eb = otel_otlp_trace_exporter_builder_new();
+    otel_otlp_trace_exporter_builder_set_endpoint(
+        eb, otel_cstr("http://localhost:4318/v1/traces"));
+
+    otel_trace_exporter_t* exporter = NULL;
+    otel_otlp_trace_exporter_builder_build(eb, &exporter);
+    otel_otlp_trace_exporter_builder_destroy(eb);
+
+    otel_batch_span_processor_builder_t* pb = otel_batch_span_processor_builder_new();
+    otel_batch_span_processor_builder_set_exporter(pb, exporter);
+
+    otel_span_processor_t* processor = NULL;
+    otel_batch_span_processor_builder_build(pb, &processor);
+    otel_batch_span_processor_builder_destroy(pb);
+
+    otel_sdk_builder_t* sb = otel_sdk_builder_new();
+    otel_sdk_builder_set_service_name(sb, otel_cstr("example-service"));
+    otel_sdk_builder_add_span_processor(sb, processor);
+
+    otel_sdk_t* sdk = NULL;
+    otel_sdk_build(sb, &sdk);
+    otel_sdk_builder_destroy(sb);
+    otel_sdk_set_as_global(sdk);
+
+    do_work();
+
+    otel_sdk_force_flush(sdk, 5000);
+    otel_sdk_shutdown(sdk, 5000);
+    otel_sdk_destroy(sdk);
+    return 0;
+}
+```
+
+The complete buildable version with error handling and a `Makefile` is
+[`sdk/examples/c-basic-traces`](sdk/examples/c-basic-traces).
+
 ## Pipeline object model (SDK)
 
 The SDK configures a trace pipeline from separate, composable objects that map to
