@@ -186,7 +186,7 @@ fn start_mock() -> (u16, Arc<AtomicUsize>, Arc<AtomicBool>) {
     let stop = Arc::new(AtomicBool::new(false));
     let (b2, s2) = (Arc::clone(&bytes), Arc::clone(&stop));
     std::thread::spawn(move || {
-        while !s2.load(Ordering::Relaxed) {
+        while !s2.load(Ordering::Acquire) {
             match listener.accept() {
                 Ok((mut sock, _)) => {
                     sock.set_read_timeout(Some(Duration::from_secs(2))).ok();
@@ -320,9 +320,13 @@ fn api_only_calls_after_sdk_install_export_through_sdk() {
         .env("LD_LIBRARY_PATH", &lib_dir)
         .output()
         .expect("run harness");
-    // Give the collector a moment to finish reading the final POST.
-    std::thread::sleep(Duration::from_millis(300));
-    stop.store(true, Ordering::Relaxed);
+    // Wait (bounded) for the collector to receive the export. This avoids a fixed sleep that can
+    // stop the mock too early under slow CI while still failing promptly if no POST arrives.
+    let deadline = std::time::Instant::now() + Duration::from_secs(5);
+    while bytes.load(Ordering::Relaxed) == 0 && std::time::Instant::now() < deadline {
+        std::thread::sleep(Duration::from_millis(20));
+    }
+    stop.store(true, Ordering::Release);
 
     let _ = std::fs::remove_file(&src);
     let _ = std::fs::remove_file(&out);
