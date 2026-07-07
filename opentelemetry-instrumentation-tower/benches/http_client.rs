@@ -29,7 +29,6 @@
 
 use criterion::{criterion_group, criterion_main, BenchmarkId, Criterion, Throughput};
 use opentelemetry::global;
-use opentelemetry::trace::noop::NoopTracerProvider;
 use opentelemetry_instrumentation_tower::http::client::LayerBuilder;
 use opentelemetry_sdk::{
     metrics::{InMemoryMetricExporter, PeriodicReader, SdkMeterProvider},
@@ -76,11 +75,6 @@ fn setup_sampled_out_tracer() -> SdkTracerProvider {
     provider
 }
 
-/// Reset global tracer provider to a true no-op instance.
-fn noop_tracer() {
-    global::set_tracer_provider(NoopTracerProvider::new());
-}
-
 /// Setup meter provider with in-memory exporter (minimal I/O overhead).
 fn setup_meter() -> (SdkMeterProvider, InMemoryMetricExporter) {
     let exporter = InMemoryMetricExporter::default();
@@ -117,11 +111,13 @@ fn benchmark_http_client(c: &mut Criterion) {
         });
     });
 
-    // Scenario 2: Layer present, but both tracer and meter are no-ops.
+    // Scenario 2: Layer present, but tracing and metrics are disabled via the builder.
     group.bench_function(BenchmarkId::new("request", "noop"), |b| {
-        noop_tracer(); // reset any tracer left from a previous run
-                       // meter is not set, so meter instruments are already no-op
-        let layer = LayerBuilder::builder().build().unwrap();
+        let layer = LayerBuilder::builder()
+            .with_tracing(false)
+            .with_metrics(false)
+            .build()
+            .unwrap();
         b.to_async(&rt).iter_custom(|iters| {
             let layer = layer.clone();
             async move {
@@ -140,10 +136,10 @@ fn benchmark_http_client(c: &mut Criterion) {
         });
     });
 
-    // Scenario 3: Tracing only (global meter not set, so meter instruments are no-op)
+    // Scenario 3: Tracing only (metrics disabled via the builder)
     group.bench_function(BenchmarkId::new("request", "tracing"), |b| {
         let _tracer_provider = setup_tracer();
-        let layer = LayerBuilder::builder().build().unwrap();
+        let layer = LayerBuilder::builder().with_metrics(false).build().unwrap();
         b.to_async(&rt).iter_custom(|iters| {
             let layer = layer.clone();
             async move {
@@ -162,10 +158,10 @@ fn benchmark_http_client(c: &mut Criterion) {
         });
     });
 
-    // Scenario 4: Tracing with AlwaysOff sampler
+    // Scenario 4: Tracing with AlwaysOff sampler (metrics disabled via the builder)
     group.bench_function(BenchmarkId::new("request", "tracing-sampled-out"), |b| {
         let _tracer_provider = setup_sampled_out_tracer();
-        let layer = LayerBuilder::builder().build().unwrap();
+        let layer = LayerBuilder::builder().with_metrics(false).build().unwrap();
         b.to_async(&rt).iter_custom(|iters| {
             let layer = layer.clone();
             async move {
@@ -184,11 +180,10 @@ fn benchmark_http_client(c: &mut Criterion) {
         });
     });
 
-    // Scenario 5: Metrics only (tracer reset to NoopTracerProvider)
+    // Scenario 5: Metrics only (tracing disabled via the builder)
     group.bench_function(BenchmarkId::new("request", "metrics"), |b| {
-        noop_tracer();
         let (_meter_provider, _metric_exporter) = setup_meter();
-        let layer = LayerBuilder::builder().build().unwrap();
+        let layer = LayerBuilder::builder().with_tracing(false).build().unwrap();
         b.to_async(&rt).iter_custom(|iters| {
             let layer = layer.clone();
             async move {

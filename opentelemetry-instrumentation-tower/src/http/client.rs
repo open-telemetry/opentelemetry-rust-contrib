@@ -12,8 +12,9 @@ use std::task::{Context, Poll};
 use std::time::Instant;
 
 use opentelemetry::global::{self, BoxedTracer};
-use opentelemetry::metrics::{Histogram, Meter};
-use opentelemetry::trace::{SpanKind, Status, TraceContextExt, Tracer};
+use opentelemetry::metrics::{Histogram, Meter, MeterProvider, NoopMeterProvider};
+use opentelemetry::trace::noop::NoopTracerProvider;
+use opentelemetry::trace::{SpanKind, Status, TraceContextExt, Tracer, TracerProvider};
 use opentelemetry::Context as OtelContext;
 use opentelemetry::KeyValue;
 use opentelemetry_http::HeaderInjector;
@@ -92,6 +93,8 @@ pub struct LayerBuilder<RouteExt = NoRouteExtractor, ReqExt = NoOpExtractor, Res
 {
     meter: Option<Meter>,
     req_dur_bounds: Option<Vec<f64>>,
+    tracing_enabled: bool,
+    metrics_enabled: bool,
     route_extractor: RouteExt,
     request_extractor: ReqExt,
     response_extractor: ResExt,
@@ -102,6 +105,8 @@ impl LayerBuilder {
         LayerBuilder {
             meter: None,
             req_dur_bounds: Some(Vec::from(OTEL_DEFAULT_HTTP_CLIENT_DURATION_BOUNDS)),
+            tracing_enabled: true,
+            metrics_enabled: true,
             route_extractor: NoRouteExtractor,
             request_extractor: NoOpExtractor,
             response_extractor: NoOpExtractor,
@@ -123,6 +128,8 @@ impl<RouteExt, ReqExt, ResExt> LayerBuilder<RouteExt, ReqExt, ResExt> {
         LayerBuilder {
             meter: self.meter,
             req_dur_bounds: self.req_dur_bounds,
+            tracing_enabled: self.tracing_enabled,
+            metrics_enabled: self.metrics_enabled,
             route_extractor: extractor,
             request_extractor: self.request_extractor,
             response_extractor: self.response_extractor,
@@ -151,6 +158,8 @@ impl<RouteExt, ReqExt, ResExt> LayerBuilder<RouteExt, ReqExt, ResExt> {
         LayerBuilder {
             meter: self.meter,
             req_dur_bounds: self.req_dur_bounds,
+            tracing_enabled: self.tracing_enabled,
+            metrics_enabled: self.metrics_enabled,
             route_extractor: self.route_extractor,
             request_extractor: extractor,
             response_extractor: self.response_extractor,
@@ -168,6 +177,8 @@ impl<RouteExt, ReqExt, ResExt> LayerBuilder<RouteExt, ReqExt, ResExt> {
         LayerBuilder {
             meter: self.meter,
             req_dur_bounds: self.req_dur_bounds,
+            tracing_enabled: self.tracing_enabled,
+            metrics_enabled: self.metrics_enabled,
             route_extractor: self.route_extractor,
             request_extractor: self.request_extractor,
             response_extractor: extractor,
@@ -201,11 +212,20 @@ impl<RouteExt, ReqExt, ResExt> LayerBuilder<RouteExt, ReqExt, ResExt> {
             .req_dur_bounds
             .unwrap_or_else(|| Vec::from(OTEL_DEFAULT_HTTP_CLIENT_DURATION_BOUNDS));
 
-        let tracer = Arc::new(global::tracer(crate::INSTRUMENTATION_NAME));
+        let tracer = if self.tracing_enabled {
+            Arc::new(global::tracer(crate::INSTRUMENTATION_NAME))
+        } else {
+            Arc::new(BoxedTracer::new(Box::new(
+                NoopTracerProvider::new().tracer(crate::INSTRUMENTATION_NAME),
+            )))
+        };
 
-        let meter: Meter = self
-            .meter
-            .unwrap_or_else(|| global::meter(crate::INSTRUMENTATION_NAME));
+        let meter: Meter = if self.metrics_enabled {
+            self.meter
+                .unwrap_or_else(|| global::meter(crate::INSTRUMENTATION_NAME))
+        } else {
+            NoopMeterProvider::new().meter(crate::INSTRUMENTATION_NAME)
+        };
 
         Ok(Layer {
             state: Arc::from(Self::make_state(meter, req_dur_bounds)),
@@ -214,6 +234,25 @@ impl<RouteExt, ReqExt, ResExt> LayerBuilder<RouteExt, ReqExt, ResExt> {
             response_extractor: self.response_extractor,
             tracer,
         })
+    }
+
+    /// Enable or disable trace collection for this layer.
+    ///
+    /// Tracing is enabled by default. When disabled, the layer records no
+    /// client spans, but context is still injected into outgoing request
+    /// headers so downstream servers keep the trace intact.
+    pub fn with_tracing(mut self, enabled: bool) -> Self {
+        self.tracing_enabled = enabled;
+        self
+    }
+
+    /// Enable or disable metrics collection for this layer.
+    ///
+    /// Metrics are enabled by default. When disabled, the layer records no
+    /// HTTP client metrics.
+    pub fn with_metrics(mut self, enabled: bool) -> Self {
+        self.metrics_enabled = enabled;
+        self
     }
 
     /// Override the meter used for metrics collection (test-only).
@@ -751,5 +790,90 @@ mod tests {
         } else {
             panic!("Expected histogram data for client duration metric");
         }
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn test_with_tracing_disabled_records_no_client_span() {
+        let trace_exporter = InMemorySpanExporterBuilder::new().build();
+        let tracer_provider = SdkTracerProvider::builder()
+            .with_simple_exporter(trace_exporter.clone())
+            .build();
+        let tracer = Arc::new(BoxedTracer::new(Box::new(
+            tracer_provider.tracer("test_tracer"),
+        )));
+
+        let layer = LayerBuilder::builder().with_tracing(false).build().unwrap();
+
+        let mut service = ServiceBuilder::new()
+            .layer(layer)
+            .service(tower::service_fn(|_req: Request<String>| async {
+                Ok::<_, std::convert::Infallible>(
+                    Response::builder()
+                        .status(StatusCode::OK)
+                        .body(String::from("OK"))
+                        .unwrap(),
+                )
+            }));
+
+        // A surrounding span keeps context/propagation intact even with the
+        // layer's own tracing disabled.
+        let parent_span = tracer.start("parent_operation");
+        let cx = OtelContext::current_with_span(parent_span);
+
+        let request = Request::builder()
+            .method("GET")
+            .uri("http://example.com/api")
+            .body("test".to_string())
+            .unwrap();
+
+        let _response = async { service.ready().await.unwrap().call(request).await.unwrap() }
+            .with_context(cx)
+            .await;
+
+        tracer_provider.force_flush().unwrap();
+
+        let spans = trace_exporter.get_finished_spans().unwrap();
+        let span_names: Vec<&str> = spans.iter().map(|span| span.name.as_ref()).collect();
+        assert_eq!(span_names, vec!["parent_operation"]);
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn test_with_metrics_disabled_records_no_metrics() {
+        let exporter = InMemoryMetricExporter::default();
+        let reader = PeriodicReader::builder(exporter.clone())
+            .with_interval(Duration::from_millis(100))
+            .build();
+        let meter_provider = SdkMeterProvider::builder().with_reader(reader).build();
+        let meter = meter_provider.meter("test");
+
+        let layer = LayerBuilder::builder()
+            .with_meter(meter)
+            .with_metrics(false)
+            .build()
+            .unwrap();
+
+        let service = tower::service_fn(|_req: Request<String>| async {
+            Ok::<_, std::convert::Infallible>(
+                Response::builder()
+                    .status(StatusCode::OK)
+                    .body(String::from("OK"))
+                    .unwrap(),
+            )
+        });
+
+        let mut service = layer.layer(service);
+
+        let request = Request::builder()
+            .method("GET")
+            .uri("https://example.com/test")
+            .body("test body".to_string())
+            .unwrap();
+
+        let _response = service.call(request).await.unwrap();
+
+        meter_provider.force_flush().unwrap();
+
+        let metrics = exporter.get_finished_metrics().unwrap();
+        assert!(metrics.is_empty());
     }
 }

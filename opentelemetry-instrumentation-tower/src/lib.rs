@@ -38,7 +38,13 @@
 //!
 //! # fn run<S>(inner: S) {
 //! let client = ServiceBuilder::new()
-//!     .layer(http::client::Layer::new())
+//!     // Tracing and metrics are on by default; toggle either per layer.
+//!     .layer(
+//!         http::client::LayerBuilder::builder()
+//!             .with_metrics(false)
+//!             .build()
+//!             .unwrap(),
+//!     )
 //!     .service(inner);
 //! # let _ = client;
 //! # }

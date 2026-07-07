@@ -7,6 +7,8 @@
 * HTTP client instrumentation layer (`http::client::Layer`) producing a
   `SpanKind::Client` span and the standard `http.client.*` metrics, and
   injecting the current trace context into outgoing request headers.
+  Tracing and metrics can be toggled per layer via `with_tracing(bool)` and
+  `with_metrics(bool)` (both enabled by default).
 * Cargo features to select which layers are compiled: `http-server` and
   `http-client` (both enabled by default).
 * Configurable route extraction with built-in extractors:
