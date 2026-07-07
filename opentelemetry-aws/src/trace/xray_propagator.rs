@@ -67,6 +67,15 @@ fn trace_context_header_fields() -> &'static [String; 1] {
     TRACE_CONTEXT_HEADER_FIELDS.get_or_init(|| [AWS_XRAY_TRACE_HEADER.to_owned()])
 }
 
+/// Configures how `XrayPropagator` handles a missing `Sampled` field in the trace header.
+#[derive(Clone, Debug, Default, PartialEq)]
+pub enum MissingSampledBehavior {
+    #[default]
+    Deferred,
+    Sampled,
+    NotSampled,
+}
+
 /// Extracts and injects `SpanContext`s into `Extractor`s or `Injector`s using AWS X-Ray header format.
 ///
 /// Extracts and injects values to/from the `x-amzn-trace-id` header. Converting between
@@ -86,16 +95,6 @@ fn trace_context_header_fields() -> &'static [String; 1] {
 /// [otel-spec]: https://github.com/open-telemetry/opentelemetry-specification/blob/master/specification/trace/api.md#SpanContext
 /// [xray-trace-id]: https://docs.aws.amazon.com/xray/latest/devguide/xray-api-sendingdata.html#xray-api-traceids
 /// [xray-header]: https://docs.aws.amazon.com/xray/latest/devguide/xray-concepts.html#xray-concepts-tracingheader
-
-/// Configures how `XrayPropagator` handles a missing `Sampled` field in the trace header.
-#[derive(Clone, Debug, Default, PartialEq)]
-pub enum MissingSampledBehavior {
-    #[default]
-    Deferred,
-    Sampled,
-    NotSampled,
-}
-
 #[derive(Clone, Debug, Default)]
 pub struct XrayPropagator {
     missing_sampled_behavior: MissingSampledBehavior,
@@ -166,7 +165,7 @@ impl XrayPropagator {
     }
 
     /// Sets the behavior when the `Sampled` field is missing from the trace header.
-    pub fn with_missing_sampled_behavior(mut self, behavior: MissingSampledBehavior) -> Self {
+    pub fn missing_sampled_behavior(mut self, behavior: MissingSampledBehavior) -> Self {
         self.missing_sampled_behavior = behavior;
         self
     }
@@ -433,7 +432,7 @@ mod tests {
     #[test]
     fn test_missing_sampled_with_sampled_behavior() {
         let propagator =
-            XrayPropagator::new().with_missing_sampled_behavior(MissingSampledBehavior::Sampled);
+            XrayPropagator::new().missing_sampled_behavior(MissingSampledBehavior::Sampled);
         let header = "Root=1-58406520-a006649127e371903a2de979;Parent=4c721bf33e3caf8f";
         let map: HashMap<String, String> =
             vec![(AWS_XRAY_TRACE_HEADER.to_string(), header.to_string())]
@@ -450,7 +449,7 @@ mod tests {
     #[test]
     fn test_missing_sampled_with_not_sampled_behavior() {
         let propagator =
-            XrayPropagator::new().with_missing_sampled_behavior(MissingSampledBehavior::NotSampled);
+            XrayPropagator::new().missing_sampled_behavior(MissingSampledBehavior::NotSampled);
         let header = "Root=1-58406520-a006649127e371903a2de979;Parent=4c721bf33e3caf8f";
         let map: HashMap<String, String> =
             vec![(AWS_XRAY_TRACE_HEADER.to_string(), header.to_string())]
@@ -467,7 +466,7 @@ mod tests {
     #[test]
     fn test_explicit_sampled_overrides_config() {
         let propagator =
-            XrayPropagator::new().with_missing_sampled_behavior(MissingSampledBehavior::NotSampled);
+            XrayPropagator::new().missing_sampled_behavior(MissingSampledBehavior::NotSampled);
         let header = "Root=1-58406520-a006649127e371903a2de979;Parent=4c721bf33e3caf8f;Sampled=1";
         let map: HashMap<String, String> =
             vec![(AWS_XRAY_TRACE_HEADER.to_string(), header.to_string())]
