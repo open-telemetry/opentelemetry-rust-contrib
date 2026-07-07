@@ -13,8 +13,12 @@ readme = "README.md"
 include = ["src/", "benches/"]
 
 [features]
-default = []
-axum = ["dep:axum"]
+default = ["http-server", "http-client"]
+http-server = []
+http-client = []
+grpc-server = []
+grpc-client = []
+axum = ["dep:axum", "http-server"]
 
 [dependencies]
 axum = { features = ["matched-path", "macros"], version = "0.8", default-features = false, optional = true }

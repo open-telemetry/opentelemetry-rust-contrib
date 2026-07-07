@@ -1,6 +1,6 @@
 //! Benchmarks for tower OpenTelemetry middleware overhead.
 //!
-//! This benchmark measures the **pure instrumentation overhead** of the `HTTPLayer`
+//! This benchmark measures the **pure instrumentation overhead** of the `http::server::Layer`
 //! middleware. It uses tower's service utilities to call handlers directly, bypassing
 //! the network stack (TCP/HTTP parsing). This isolates the middleware cost and provides
 //! consistent, reproducible measurements.
@@ -11,11 +11,11 @@
 //! ## Scenarios
 //!
 //! - **Baseline**: No middleware (control measurement)
-//! - **No-op**: `HTTPLayer` present, but both tracer and meter are no-ops
-//! - **Tracing**: `HTTPLayer` with active tracer, no-op meter (all spans sampled)
+//! - **No-op**: `http::server::Layer` present, but both tracer and meter are no-ops
+//! - **Tracing**: `http::server::Layer` with active tracer, no-op meter (all spans sampled)
 //! - **Tracing (sampled-out)**: Same, but with `AlwaysOff` sampler (all spans dropped)
-//! - **Metrics**: `HTTPLayer` with active meter, no-op tracer (no spans created)
-//! - **Tracing + Metrics**: `HTTPLayer` with both active tracer and active meter
+//! - **Metrics**: `http::server::Layer` with active meter, no-op tracer (no spans created)
+//! - **Tracing + Metrics**: `http::server::Layer` with both active tracer and active meter
 //!
 //! Each tracing scenario sets the global `TracerProvider` before building the layer so
 //! that no tracer state leaks between scenarios.  Scenarios that do not need traces use
@@ -79,7 +79,7 @@
 use criterion::{criterion_group, criterion_main, BenchmarkId, Criterion, Throughput};
 use opentelemetry::global;
 use opentelemetry::trace::noop::NoopTracerProvider;
-use opentelemetry_instrumentation_tower::HTTPLayerBuilder;
+use opentelemetry_instrumentation_tower::http::server::LayerBuilder;
 use opentelemetry_sdk::{
     metrics::{InMemoryMetricExporter, PeriodicReader, SdkMeterProvider},
     trace::{Sampler, SdkTracerProvider},
@@ -167,12 +167,12 @@ fn benchmark_middleware(c: &mut Criterion) {
     });
 
     // Scenario 2: Middleware present, but both tracer and meter are no-ops.
-    // Measures the pure overhead of the HTTPLayer machinery (attribute extraction,
+    // Measures the pure overhead of the server::Layer machinery (attribute extraction,
     // context propagation hooks, etc.) when no real telemetry is produced.
     group.bench_function(BenchmarkId::new("request", "noop"), |b| {
         noop_tracer(); // reset any tracer left from a previous run
                        // meter is not set, so meter instruments are already no-op
-        let layer = HTTPLayerBuilder::builder().build().unwrap();
+        let layer = LayerBuilder::builder().build().unwrap();
         b.to_async(&rt).iter_custom(|iters| {
             let layer = layer.clone();
             async move {
@@ -194,7 +194,7 @@ fn benchmark_middleware(c: &mut Criterion) {
     // Scenario 3: Tracing only (global meter not set, so meter instruments are no-op)
     group.bench_function(BenchmarkId::new("request", "tracing"), |b| {
         let _tracer_provider = setup_tracer();
-        let layer = HTTPLayerBuilder::builder().build().unwrap();
+        let layer = LayerBuilder::builder().build().unwrap();
         b.to_async(&rt).iter_custom(|iters| {
             let layer = layer.clone();
             async move {
@@ -216,7 +216,7 @@ fn benchmark_middleware(c: &mut Criterion) {
     // Scenario 4: Tracing with AlwaysOff sampler (global meter not set, so meter instruments are no-op)
     group.bench_function(BenchmarkId::new("request", "tracing-sampled-out"), |b| {
         let _tracer_provider = setup_sampled_out_tracer();
-        let layer = HTTPLayerBuilder::builder().build().unwrap();
+        let layer = LayerBuilder::builder().build().unwrap();
         b.to_async(&rt).iter_custom(|iters| {
             let layer = layer.clone();
             async move {
@@ -239,7 +239,7 @@ fn benchmark_middleware(c: &mut Criterion) {
     group.bench_function(BenchmarkId::new("request", "metrics"), |b| {
         noop_tracer();
         let (_meter_provider, _metric_exporter) = setup_meter();
-        let layer = HTTPLayerBuilder::builder().build().unwrap();
+        let layer = LayerBuilder::builder().build().unwrap();
         b.to_async(&rt).iter_custom(|iters| {
             let layer = layer.clone();
             async move {
@@ -262,7 +262,7 @@ fn benchmark_middleware(c: &mut Criterion) {
     group.bench_function(BenchmarkId::new("request", "tracing+metrics"), |b| {
         let _tracer_provider = setup_tracer();
         let (_meter_provider, _metric_exporter) = setup_meter();
-        let layer = HTTPLayerBuilder::builder().build().unwrap();
+        let layer = LayerBuilder::builder().build().unwrap();
         b.to_async(&rt).iter_custom(|iters| {
             let layer = layer.clone();
             async move {

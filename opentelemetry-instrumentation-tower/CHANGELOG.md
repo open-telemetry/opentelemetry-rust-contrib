@@ -4,6 +4,12 @@
 
 ### Added
 
+* HTTP client instrumentation layer (`http::client::Layer`) producing a
+  `SpanKind::Client` span and the standard `http.client.*` metrics, and
+  injecting the current trace context into outgoing request headers.
+* Cargo features to select which layers are compiled: `http-server` and
+  `http-client` (both enabled by default), plus reserved `grpc-server` /
+  `grpc-client` features.
 * Configurable route extraction with built-in extractors:
   - `NoRouteExtractor` - No route, uses only HTTP method (e.g., `GET`), safest for cardinality
   - `PathExtractor` - Uses the URL path without query params (e.g., `/users/123`)
@@ -16,6 +22,10 @@
 
 ### Changed
 
+* **BREAKING**: Reorganized the public API into `http::server` and `http::client`
+  modules with unprefixed `Layer`, `LayerBuilder`, `Service`, and `ResponseFuture`
+  types, and moved the extractors into `http::extractors`. Replace
+  `HTTPLayer`/`HTTPLayerBuilder` with `http::server::Layer`/`http::server::LayerBuilder`.
 * **BREAKING**: Removed public `with_meter()` method. The middleware now uses global meter and tracer providers by
   default via `opentelemetry::global::meter()` and `opentelemetry::global::tracer()`. The `with_meter()` method is
   retained as a non-public test utility to allow injecting custom meters without relying on global state.

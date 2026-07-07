@@ -2,7 +2,7 @@ use http_body_util::Full;
 use hyper::body::Bytes;
 use hyper::{Request, Response};
 use opentelemetry::global;
-use opentelemetry_instrumentation_tower::HTTPLayerBuilder;
+use opentelemetry_instrumentation_tower::http::server::LayerBuilder;
 use opentelemetry_otlp::{MetricExporter, SpanExporter};
 use opentelemetry_sdk::metrics::Aggregation::ExplicitBucketHistogram;
 use opentelemetry_sdk::metrics::{Instrument, Stream};
@@ -108,7 +108,7 @@ async fn main() {
         global::set_tracer_provider(provider);
     }
 
-    let otel_service_layer = HTTPLayerBuilder::builder().build().unwrap();
+    let otel_service_layer = LayerBuilder::builder().build().unwrap();
 
     let tower_service = ServiceBuilder::new()
         .layer(otel_service_layer)
