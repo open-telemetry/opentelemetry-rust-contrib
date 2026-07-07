@@ -141,7 +141,10 @@ void otel_tracer_destroy(otel_tracer_t* tracer);
 
 /* ---- Span ----------------------------------------------------------------- */
 
-/* Set a typed attribute. Keys must be non-empty UTF-8. */
+/*
+ * Set a typed attribute. Keys must be non-empty UTF-8. SDK-backed spans reject invalid keys
+ * or string values; no-SDK no-op spans may skip validation because the call records nothing.
+ */
 otel_status_t otel_span_set_string_attribute(otel_span_t* span,
                                              otel_string_view_t key,
                                              otel_string_view_t value);
@@ -155,7 +158,10 @@ otel_status_t otel_span_set_double_attribute(otel_span_t* span,
                                              otel_string_view_t key,
                                              double value);
 
-/* Set an attribute from a tagged key/value. */
+/*
+ * Set an attribute from a tagged key/value. SDK-backed spans reject invalid tags, keys, or
+ * string values; no-SDK no-op spans may skip validation because the call records nothing.
+ */
 otel_status_t otel_span_set_attribute(otel_span_t* span, otel_key_value_t attribute);
 
 /*
@@ -169,8 +175,9 @@ otel_status_t otel_span_add_event(otel_span_t* span,
 
 /*
  * Set the span status. For OTEL_SPAN_STATUS_ERROR, `description` carries the error
- * message; for other codes it is ignored and may be an empty view. A `code` outside
- * otel_span_status_code_t is rejected with OTEL_STATUS_INVALID_ARGUMENT.
+ * message; for other codes it is ignored and may be an empty view. SDK-backed spans reject
+ * a `code` outside otel_span_status_code_t with OTEL_STATUS_INVALID_ARGUMENT; no-SDK no-op
+ * spans may skip validation because the call records nothing.
  */
 otel_status_t otel_span_set_status(otel_span_t* span,
                                    otel_span_status_code_t code,

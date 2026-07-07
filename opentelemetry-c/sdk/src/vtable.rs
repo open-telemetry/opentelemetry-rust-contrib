@@ -19,12 +19,11 @@ use std::os::raw::c_void;
 use std::panic::{catch_unwind, AssertUnwindSafe};
 use std::time::SystemTime;
 
-use opentelemetry::global::{BoxedSpan, BoxedTracer};
 use opentelemetry::trace::{
     Span, SpanContext, SpanKind, Status, TraceContextExt, Tracer, TracerProvider,
 };
 use opentelemetry::{Context, InstrumentationScope, Key, KeyValue, StringValue, Value};
-use opentelemetry_sdk::trace::SdkTracerProvider;
+use opentelemetry_sdk::trace::{SdkTracer, SdkTracerProvider, Span as SdkOtelSpan};
 
 use opentelemetry_c_abi::{
     OtelAttributeType, OtelImplVtable, OtelKeyValue, OtelSpanKind, OtelSpanStatusCode, OtelStatus,
@@ -38,9 +37,9 @@ const MAX_EVENT_ATTRIBUTES: usize = 1_048_576;
 
 // ---- Context types (opaque `*mut c_void` on the wire) ----------------------
 
-/// A span context: the boxed `BoxedSpan`.
+/// A span context: the concrete SDK span.
 struct SdkSpan {
-    span: BoxedSpan,
+    span: SdkOtelSpan,
 }
 
 /// # Safety
@@ -229,8 +228,7 @@ extern "C" fn vt_provider_get_tracer(
                 return std::ptr::null_mut();
             }
         }
-        let tracer: BoxedTracer =
-            BoxedTracer::new(Box::new(provider.tracer_with_scope(scope.build())));
+        let tracer = provider.tracer_with_scope(scope.build());
         Box::into_raw(Box::new(tracer)) as *mut c_void
     })
 }
@@ -273,7 +271,7 @@ extern "C" fn vt_tracer_start_span(
             return std::ptr::null_mut();
         }
         // SAFETY: `ctx` is a live tracer context produced by this crate.
-        let tracer = unsafe { &*(ctx as *const BoxedTracer) };
+        let tracer = unsafe { &*(ctx as *const SdkTracer) };
         // SAFETY: string view satisfies the ABI contract.
         let name = match unsafe { name.to_string_strict() } {
             Ok(n) => n,
@@ -292,7 +290,7 @@ extern "C" fn vt_tracer_start_span(
             };
 
         let builder = tracer.span_builder(name).with_kind(span_kind);
-        let span: BoxedSpan = if parent_span_ctx.is_null() {
+        let span = if parent_span_ctx.is_null() {
             tracer.build_with_context(builder, &Context::new())
         } else {
             // SAFETY: the API only passes a parent context produced by THIS vtable.
@@ -307,8 +305,8 @@ extern "C" fn vt_tracer_start_span(
 extern "C" fn vt_tracer_free(ctx: *mut c_void) {
     guard_unit(|| {
         if !ctx.is_null() {
-            // SAFETY: `ctx` was a Box<BoxedTracer> produced by this crate.
-            drop(unsafe { Box::from_raw(ctx as *mut BoxedTracer) });
+            // SAFETY: `ctx` was a Box<SdkTracer> produced by this crate.
+            drop(unsafe { Box::from_raw(ctx as *mut SdkTracer) });
         }
     });
 }
@@ -473,9 +471,9 @@ extern "C" fn vt_span_free(ctx: *mut c_void) {
     guard_unit(|| {
         if !ctx.is_null() {
             // SAFETY: `ctx` was a Box<SdkSpan> produced by this crate. The API ends the span
-            // (via vt_span_end) before freeing; dropping the BoxedSpan also ends it if it was
-            // not already ended (the SDK span tracks its ended state, so this never
-            // double-ends). This matches the OtelImplVtable::span_free ownership contract.
+            // (via vt_span_end) before freeing; dropping the SDK span also ends it if it was not
+            // already ended (the SDK span tracks its ended state, so this never double-ends).
+            // This matches the OtelImplVtable::span_free ownership contract.
             drop(unsafe { Box::from_raw(ctx as *mut SdkSpan) });
         }
     });

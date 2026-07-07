@@ -144,6 +144,7 @@ Not yet exposed, but intended as additive extensions over the same ABI shape:
 - ID generator configuration;
 - propagation inject/extract;
 - span links;
+- array-valued attributes (current attributes are scalar string/bool/int64/double only);
 - simple span processor;
 - custom/user-provided trace exporter;
 - metrics and logs.
