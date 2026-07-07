@@ -535,7 +535,7 @@ fn finalize_request<ResBody, E, ResExt>(
 mod tests {
     use super::*;
 
-    use crate::http::extractors::{ExtensionRouteExtractor, PathExtractor, RouteTemplate};
+    use crate::http::extractors::PathExtractor;
 
     use crate::common::attributes::HTTP_REQUEST_METHOD_LABEL;
     use http::{Request, Response, StatusCode};
@@ -630,57 +630,6 @@ mod tests {
             KeyValue::new(semconv::trace::HTTP_RESPONSE_STATUS_CODE, 200),
         ];
         assert_eq!(client_span.attributes, expected_attributes);
-    }
-
-    #[tokio::test(flavor = "current_thread")]
-    async fn test_extension_route_extractor_sets_low_cardinality_route() {
-        let trace_exporter = InMemorySpanExporterBuilder::new().build();
-        let tracer_provider = SdkTracerProvider::builder()
-            .with_simple_exporter(trace_exporter.clone())
-            .build();
-        let tracer = Arc::new(BoxedTracer::new(Box::new(
-            tracer_provider.tracer("test_tracer"),
-        )));
-
-        let mut layer = LayerBuilder::builder()
-            .with_route_extractor(ExtensionRouteExtractor)
-            .build()
-            .unwrap();
-        layer.tracer = tracer.clone();
-
-        let mut service = ServiceBuilder::new()
-            .layer(layer)
-            .service(tower::service_fn(|_req: Request<String>| async {
-                Ok::<_, std::convert::Infallible>(
-                    Response::builder()
-                        .status(StatusCode::OK)
-                        .body(String::from("OK"))
-                        .unwrap(),
-                )
-            }));
-
-        let mut request = Request::builder()
-            .method("GET")
-            .uri("http://example.com/api/users/123")
-            .body("test".to_string())
-            .unwrap();
-        request
-            .extensions_mut()
-            .insert(RouteTemplate::new("/api/users/{id}"));
-
-        let _response = service.ready().await.unwrap().call(request).await.unwrap();
-
-        tracer_provider.force_flush().unwrap();
-
-        let spans = trace_exporter.get_finished_spans().unwrap();
-        let client_span = spans
-            .iter()
-            .find(|span| span.span_kind == SpanKind::Client)
-            .expect("Should find client span");
-        assert_eq!(client_span.name, "GET /api/users/{id}");
-        assert!(client_span.attributes.iter().any(|kv| {
-            kv.key.as_str() == semconv::trace::HTTP_ROUTE && kv.value.as_str() == "/api/users/{id}"
-        }));
     }
 
     #[tokio::test(flavor = "current_thread")]

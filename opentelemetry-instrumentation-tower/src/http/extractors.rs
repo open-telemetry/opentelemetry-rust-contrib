@@ -108,68 +108,6 @@ impl<B> RouteExtractor<B> for PathExtractor {
     }
 }
 
-/// A low-cardinality route template carried in a request's extensions.
-///
-/// This is the client-side counterpart to Axum's `MatchedPath`: since an HTTP
-/// client has no router that could fill in a matched route, the caller states
-/// the template explicitly by inserting a `RouteTemplate` into the request
-/// extensions before the request reaches the layer. [`ExtensionRouteExtractor`]
-/// then reads it for the span name and `http.route` attribute.
-#[derive(Clone, Debug)]
-pub struct RouteTemplate(String);
-
-impl RouteTemplate {
-    /// Create a route template from any string-like value (e.g. `"/users/{id}"`).
-    pub fn new(template: impl Into<String>) -> Self {
-        Self(template.into())
-    }
-
-    /// The template string.
-    pub fn as_str(&self) -> &str {
-        &self.0
-    }
-}
-
-impl From<String> for RouteTemplate {
-    fn from(template: String) -> Self {
-        Self(template)
-    }
-}
-
-impl From<&str> for RouteTemplate {
-    fn from(template: &str) -> Self {
-        Self(template.to_owned())
-    }
-}
-
-/// Route extractor that reads a [`RouteTemplate`] from the request extensions.
-///
-/// Use this to give outgoing client requests a low-cardinality route without a
-/// router: insert `RouteTemplate` into the request extensions and this extractor
-/// turns it into the span name (`"{method} {template}"`) and `http.route`
-/// attribute. Returns `None` (method-only span name) when no template is set,
-/// so it is safe by default.
-///
-/// # Example
-///
-/// ```ignore
-/// let mut req = http::Request::post("https://api.example.com/users/123")
-///     .body(body)?;
-/// req.extensions_mut()
-///     .insert(RouteTemplate::new("/users/{id}"));
-/// // span name -> "POST /users/{id}", http.route = "/users/{id}"
-/// ```
-#[derive(Clone, Default)]
-pub struct ExtensionRouteExtractor;
-
-impl<B> RouteExtractor<B> for ExtensionRouteExtractor {
-    fn extract_route(&self, req: &http::Request<B>) -> Option<String> {
-        req.extensions()
-            .get::<RouteTemplate>()
-            .map(|template| template.0.clone())
-    }
-}
-
 /// A function-based route extractor.
 #[derive(Clone)]
 pub struct FnRouteExtractor<F> {
