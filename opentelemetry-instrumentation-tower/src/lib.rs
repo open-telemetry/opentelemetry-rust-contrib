@@ -51,7 +51,6 @@
 //!
 //! - `http-server` *(default)* — the HTTP server layer ([`http::server`]).
 //! - `http-client` *(default)* — the HTTP client layer ([`http::client`]).
-//! - `grpc-server` / `grpc-client` — reserved for the gRPC layers.
 //! - `axum` — enables [`http::extractors::AxumMatchedPathExtractor`] and makes it
 //!   the default route extractor for the server layer.
 //!

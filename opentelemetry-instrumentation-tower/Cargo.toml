@@ -16,8 +16,6 @@ include = ["src/", "benches/"]
 default = ["http-server", "http-client"]
 http-server = []
 http-client = []
-grpc-server = []
-grpc-client = []
 axum = ["dep:axum", "http-server"]
 
 [dependencies]

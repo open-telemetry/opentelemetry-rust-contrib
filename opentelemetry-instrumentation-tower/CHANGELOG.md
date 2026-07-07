@@ -8,8 +8,7 @@
   `SpanKind::Client` span and the standard `http.client.*` metrics, and
   injecting the current trace context into outgoing request headers.
 * Cargo features to select which layers are compiled: `http-server` and
-  `http-client` (both enabled by default), plus reserved `grpc-server` /
-  `grpc-client` features.
+  `http-client` (both enabled by default).
 * Configurable route extraction with built-in extractors:
   - `NoRouteExtractor` - No route, uses only HTTP method (e.g., `GET`), safest for cardinality
   - `PathExtractor` - Uses the URL path without query params (e.g., `/users/123`)
