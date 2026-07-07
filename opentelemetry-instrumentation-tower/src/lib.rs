@@ -66,6 +66,9 @@ use std::fmt;
 mod common;
 pub mod http;
 
+/// Instrumentation scope name reported on emitted spans and metrics.
+pub(crate) const INSTRUMENTATION_NAME: &str = "opentelemetry-instrumentation-tower";
+
 /// Error type for `opentelemetry_instrumentation_tower`.
 pub struct Error {
     #[allow(dead_code)]

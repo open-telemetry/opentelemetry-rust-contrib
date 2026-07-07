@@ -10,11 +10,12 @@ use std::sync::Arc;
 use std::task::{Context, Poll};
 use std::time::Instant;
 
-use opentelemetry::global::BoxedTracer;
+use opentelemetry::global::{self, BoxedTracer};
 use opentelemetry::metrics::{Histogram, Meter, UpDownCounter};
-use opentelemetry::trace::{SpanKind, TraceContextExt, Tracer};
+use opentelemetry::trace::{SpanKind, Status, TraceContextExt, Tracer};
 use opentelemetry::Context as OtelContext;
 use opentelemetry::KeyValue;
+use opentelemetry_http::HeaderExtractor;
 use opentelemetry_semantic_conventions as semconv;
 use pin_project_lite::pin_project;
 use tower_layer::Layer as TowerLayer;
@@ -24,7 +25,6 @@ use crate::common::attributes::{
     method_kv, split_and_format_protocol_version, url_scheme_kv, HTTP_RESPONSE_STATUS_CODE_LABEL,
     HTTP_ROUTE_LABEL, NETWORK_PROTOCOL_NAME_LABEL, NETWORK_PROTOCOL_VERSION_LABEL,
 };
-use crate::common::{instrumentation, propagation, status};
 use crate::http::extractors::{
     DefaultRouteExtractor, NoOpExtractor, RequestAttributeExtractor, ResponseAttributeExtractor,
     RouteExtractor,
@@ -234,9 +234,11 @@ impl<RouteExt, ReqExt, ResExt> LayerBuilder<RouteExt, ReqExt, ResExt> {
             .req_dur_bounds
             .unwrap_or_else(|| Vec::from(OTEL_DEFAULT_HTTP_SERVER_DURATION_BOUNDS));
 
-        let tracer = instrumentation::tracer();
+        let tracer = Arc::new(global::tracer(crate::INSTRUMENTATION_NAME));
 
-        let meter: Meter = self.meter.unwrap_or_else(instrumentation::meter);
+        let meter: Meter = self
+            .meter
+            .unwrap_or_else(|| global::meter(crate::INSTRUMENTATION_NAME));
 
         Ok(Layer {
             state: Arc::from(Self::make_state(meter, req_dur_bounds)),
@@ -420,7 +422,9 @@ where
         let custom_request_attributes = self.request_extractor.extract_attributes(&req);
 
         // Extract the context from the incoming request headers
-        let parent_cx = propagation::extract(req.headers());
+        let parent_cx = global::get_text_map_propagator(|propagator| {
+            propagator.extract(&HeaderExtractor(req.headers()))
+        });
 
         let mut span_attributes = vec![
             KeyValue::new(semconv::trace::HTTP_REQUEST_METHOD, method.clone()),
@@ -539,9 +543,12 @@ fn finalize_request<ResBody, E, ResExt>(
                 span.set_attribute(attr.clone());
             }
 
-            // Set span status based on HTTP status code
-            if let Some(span_status) = status::server_status(http_status) {
-                span.set_status(span_status);
+            // Set span status based on HTTP status code. Per the HTTP semantic
+            // conventions, a server span is only an error for 5xx responses.
+            if http_status.is_server_error() {
+                span.set_status(Status::Error {
+                    description: format!("HTTP {}", http_status.as_u16()).into(),
+                });
             }
 
             // Record metrics
@@ -564,7 +571,7 @@ fn finalize_request<ResBody, E, ResExt>(
         }
         Err(error) => {
             // Mark span as error
-            span.set_status(opentelemetry::trace::Status::Error {
+            span.set_status(Status::Error {
                 description: format!("{:?}", error).into(),
             });
 

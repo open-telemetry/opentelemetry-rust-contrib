@@ -11,11 +11,12 @@ use std::sync::Arc;
 use std::task::{Context, Poll};
 use std::time::Instant;
 
-use opentelemetry::global::BoxedTracer;
+use opentelemetry::global::{self, BoxedTracer};
 use opentelemetry::metrics::{Histogram, Meter};
-use opentelemetry::trace::{SpanKind, TraceContextExt, Tracer};
+use opentelemetry::trace::{SpanKind, Status, TraceContextExt, Tracer};
 use opentelemetry::Context as OtelContext;
 use opentelemetry::KeyValue;
+use opentelemetry_http::HeaderInjector;
 use opentelemetry_semantic_conventions as semconv;
 use pin_project_lite::pin_project;
 use tower_layer::Layer as TowerLayer;
@@ -26,7 +27,6 @@ use crate::common::attributes::{
     HTTP_ROUTE_LABEL, NETWORK_PROTOCOL_NAME_LABEL, NETWORK_PROTOCOL_VERSION_LABEL,
     SERVER_ADDRESS_LABEL, SERVER_PORT_LABEL,
 };
-use crate::common::{instrumentation, propagation, status};
 use crate::http::extractors::{
     DefaultRouteExtractor, NoOpExtractor, RequestAttributeExtractor, ResponseAttributeExtractor,
     RouteExtractor,
@@ -209,9 +209,11 @@ impl<RouteExt, ReqExt, ResExt> LayerBuilder<RouteExt, ReqExt, ResExt> {
             .req_dur_bounds
             .unwrap_or_else(|| Vec::from(OTEL_DEFAULT_HTTP_CLIENT_DURATION_BOUNDS));
 
-        let tracer = instrumentation::tracer();
+        let tracer = Arc::new(global::tracer(crate::INSTRUMENTATION_NAME));
 
-        let meter: Meter = self.meter.unwrap_or_else(instrumentation::meter);
+        let meter: Meter = self
+            .meter
+            .unwrap_or_else(|| global::meter(crate::INSTRUMENTATION_NAME));
 
         Ok(Layer {
             state: Arc::from(Self::make_state(meter, req_dur_bounds)),
@@ -415,7 +417,9 @@ where
 
         // Inject the client span context into the outgoing request headers so the
         // downstream server can continue the trace.
-        propagation::inject(&cx, req.headers_mut());
+        global::get_text_map_propagator(|propagator| {
+            propagator.inject_context(&cx, &mut HeaderInjector(req.headers_mut()))
+        });
 
         let request_data = RequestData {
             duration_start,
@@ -499,8 +503,10 @@ fn finalize_request<ResBody, E, ResExt>(
                 span.set_attribute(attr.clone());
             }
 
-            if let Some(span_status) = status::client_status(http_status) {
-                span.set_status(span_status);
+            if http_status.is_client_error() || http_status.is_server_error() {
+                span.set_status(Status::Error {
+                    description: format!("HTTP {}", http_status.as_u16()).into(),
+                });
             }
 
             layer_state.client_request_duration.record(
@@ -521,7 +527,7 @@ fn finalize_request<ResBody, E, ResExt>(
             }
         }
         Err(error) => {
-            span.set_status(opentelemetry::trace::Status::Error {
+            span.set_status(Status::Error {
                 description: format!("{:?}", error).into(),
             });
 
