@@ -13,12 +13,11 @@
   - With `axum` feature: Uses `AxumMatchedPathExtractor` (route templates, low cardinality)
   - Without `axum` feature: Uses `NoRouteExtractor` (method only, safest)
 * Route extraction now provides both span names and `http.route` metric attribute from the same source
-* Added `HTTPLayerBuilder::with_tracer_provider()` and `HTTPLayerBuilder::with_meter_provider()` to configure telemetry providers without changing global OpenTelemetry state
+* Added `HTTPLayerBuilder::with_tracing(bool)` and `HTTPLayerBuilder::with_metrics(bool)` to enable or disable each signal for a layer (both default to enabled). Disabling tracing does not stop context propagation: incoming trace headers are still extracted and the current context still flows to the inner service.
 
 ### Changed
 
-* **BREAKING**: Replaced `with_meter()` with `with_meter_provider()` to configure metrics with an OpenTelemetry
-  meter provider. The middleware uses global meter and tracer providers by default.
+* **BREAKING**: Replaced `with_meter()` with global providers plus per-layer `with_tracing(bool)`/`with_metrics(bool)` toggles. The middleware always uses the global meter and tracer providers; configure the backend once via the OpenTelemetry global providers.
 * **BREAKING**: Renamed types. Use the new names:
     - `HTTPMetricsLayer` → `HTTPLayer`
     - `HTTPMetricsService` → `HTTPService`
@@ -87,10 +86,10 @@ global::set_tracer_provider(tracer_provider); // for tracing support
 // Then create the layer - simple API using global providers
 let layer = HTTPLayer::new();
 
-// Or configure providers for this layer without changing global state
+// Or disable a signal for this layer (both are enabled by default)
 let layer = HTTPLayerBuilder::builder()
-    .with_meter_provider(meter_provider)
-    .with_tracer_provider(tracer_provider)
+    .with_tracing(false)
+    .with_metrics(true)
     .build()
     .unwrap();
 ```

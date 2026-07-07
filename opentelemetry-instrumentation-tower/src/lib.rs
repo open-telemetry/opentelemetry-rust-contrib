@@ -83,9 +83,12 @@ use std::{fmt, result};
 
 #[cfg(feature = "axum")]
 use axum::extract::MatchedPath;
-use opentelemetry::global::{self, BoxedTracer, ObjectSafeTracer};
+#[cfg(test)]
+use opentelemetry::global::ObjectSafeTracer;
+use opentelemetry::global::{self, BoxedTracer};
 use opentelemetry::metrics::{Histogram, UpDownCounter};
-use opentelemetry::metrics::{Meter, MeterProvider};
+use opentelemetry::metrics::{Meter, MeterProvider, NoopMeterProvider};
+use opentelemetry::trace::noop::NoopTracerProvider;
 use opentelemetry::trace::{SpanKind, Status, TraceContextExt, Tracer, TracerProvider};
 use opentelemetry::Context as OtelContext;
 use opentelemetry::InstrumentationScope;
@@ -373,6 +376,8 @@ pub struct HTTPLayerBuilder<
 > {
     tracer: Option<Arc<BoxedTracer>>,
     meter: Option<Meter>,
+    tracing_enabled: bool,
+    metrics_enabled: bool,
     req_dur_bounds: Option<Vec<f64>>,
     route_extractor: RouteExt,
     request_extractor: ReqExt,
@@ -420,6 +425,8 @@ impl HTTPLayerBuilder {
         HTTPLayerBuilder {
             tracer: None,
             meter: None,
+            tracing_enabled: true,
+            metrics_enabled: true,
             req_dur_bounds: Some(Vec::from(OTEL_DEFAULT_HTTP_SERVER_DURATION_BOUNDS)),
             route_extractor: DefaultRouteExtractor::default(),
             request_extractor: NoOpExtractor,
@@ -453,6 +460,8 @@ impl<RouteExt, ReqExt, ResExt> HTTPLayerBuilder<RouteExt, ReqExt, ResExt> {
         HTTPLayerBuilder {
             tracer: self.tracer,
             meter: self.meter,
+            tracing_enabled: self.tracing_enabled,
+            metrics_enabled: self.metrics_enabled,
             req_dur_bounds: self.req_dur_bounds,
             route_extractor: extractor,
             request_extractor: self.request_extractor,
@@ -494,6 +503,8 @@ impl<RouteExt, ReqExt, ResExt> HTTPLayerBuilder<RouteExt, ReqExt, ResExt> {
         HTTPLayerBuilder {
             tracer: self.tracer,
             meter: self.meter,
+            tracing_enabled: self.tracing_enabled,
+            metrics_enabled: self.metrics_enabled,
             req_dur_bounds: self.req_dur_bounds,
             route_extractor: self.route_extractor,
             request_extractor: extractor,
@@ -512,6 +523,8 @@ impl<RouteExt, ReqExt, ResExt> HTTPLayerBuilder<RouteExt, ReqExt, ResExt> {
         HTTPLayerBuilder {
             tracer: self.tracer,
             meter: self.meter,
+            tracing_enabled: self.tracing_enabled,
+            metrics_enabled: self.metrics_enabled,
             req_dur_bounds: self.req_dur_bounds,
             route_extractor: self.route_extractor,
             request_extractor: self.request_extractor,
@@ -546,13 +559,21 @@ impl<RouteExt, ReqExt, ResExt> HTTPLayerBuilder<RouteExt, ReqExt, ResExt> {
             .req_dur_bounds
             .unwrap_or_else(|| Vec::from(OTEL_DEFAULT_HTTP_SERVER_DURATION_BOUNDS));
 
-        let tracer = self
-            .tracer
-            .unwrap_or_else(|| Arc::new(global::tracer_with_scope(instrumentation_scope())));
+        let tracer = if self.tracing_enabled {
+            self.tracer
+                .unwrap_or_else(|| Arc::new(global::tracer_with_scope(instrumentation_scope())))
+        } else {
+            Arc::new(BoxedTracer::new(Box::new(
+                NoopTracerProvider::new().tracer_with_scope(instrumentation_scope()),
+            )))
+        };
 
-        let meter: Meter = self
-            .meter
-            .unwrap_or_else(|| global::meter_with_scope(instrumentation_scope()));
+        let meter: Meter = if self.metrics_enabled {
+            self.meter
+                .unwrap_or_else(|| global::meter_with_scope(instrumentation_scope()))
+        } else {
+            NoopMeterProvider::new().meter_with_scope(instrumentation_scope())
+        };
 
         Ok(HTTPLayer {
             state: Arc::from(Self::make_state(meter, req_dur_bounds)),
@@ -563,12 +584,28 @@ impl<RouteExt, ReqExt, ResExt> HTTPLayerBuilder<RouteExt, ReqExt, ResExt> {
         })
     }
 
-    /// Override the tracer provider used for trace collection.
+    /// Enable or disable trace collection for this layer.
     ///
-    /// By default the layer uses the global tracer provider. Passing a no-op
-    /// tracer provider disables traces for this layer without changing
-    /// process-wide global state.
-    pub fn with_tracer_provider<P>(mut self, tracer_provider: P) -> Self
+    /// Tracing is enabled by default. When disabled, the layer records no
+    /// spans, but context propagation is unaffected: incoming trace headers
+    /// are still extracted and the current context still flows to the inner
+    /// service.
+    pub fn with_tracing(mut self, enabled: bool) -> Self {
+        self.tracing_enabled = enabled;
+        self
+    }
+
+    /// Enable or disable metrics collection for this layer.
+    ///
+    /// Metrics are enabled by default. When disabled, the layer records no
+    /// HTTP server metrics.
+    pub fn with_metrics(mut self, enabled: bool) -> Self {
+        self.metrics_enabled = enabled;
+        self
+    }
+
+    #[cfg(test)]
+    fn with_tracer_provider<P>(mut self, tracer_provider: P) -> Self
     where
         P: TracerProvider,
         P::Tracer: ObjectSafeTracer + Send + Sync + 'static,
@@ -579,12 +616,8 @@ impl<RouteExt, ReqExt, ResExt> HTTPLayerBuilder<RouteExt, ReqExt, ResExt> {
         self
     }
 
-    /// Override the meter provider used for metrics collection.
-    ///
-    /// By default the layer uses the global meter provider. Passing a no-op
-    /// meter provider disables metrics for this layer without changing
-    /// process-wide global state.
-    pub fn with_meter_provider(mut self, meter_provider: impl MeterProvider) -> Self {
+    #[cfg(test)]
+    fn with_meter_provider(mut self, meter_provider: impl MeterProvider) -> Self {
         self.meter = Some(meter_provider.meter_with_scope(instrumentation_scope()));
         self
     }
