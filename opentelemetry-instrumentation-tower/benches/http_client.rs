@@ -18,8 +18,9 @@
 //! - **Metrics**: active meter, no-op tracer
 //! - **Tracing + Metrics**: both active
 //!
-//! A W3C `TraceContextPropagator` is installed for the whole run so the tracing
-//! scenarios exercise the real header-injection path.
+//! Like the server benchmark, this runs with the default no-op text-map
+//! propagator so the numbers reflect the layer's own overhead rather than the
+//! cost of a concrete propagator's header injection.
 //!
 //! ## Run
 //!
@@ -32,7 +33,6 @@ use opentelemetry::global;
 use opentelemetry_instrumentation_tower::http::client::LayerBuilder;
 use opentelemetry_sdk::{
     metrics::{InMemoryMetricExporter, PeriodicReader, SdkMeterProvider},
-    propagation::TraceContextPropagator,
     trace::{Sampler, SdkTracerProvider},
 };
 use std::convert::Infallible;
@@ -89,9 +89,6 @@ fn setup_meter() -> (SdkMeterProvider, InMemoryMetricExporter) {
 fn benchmark_http_client(c: &mut Criterion) {
     // Use tokio runtime since Criterion's AsyncExecutor is implemented for tokio
     let rt = tokio::runtime::Runtime::new().unwrap();
-
-    // Install a real propagator so tracing scenarios exercise header injection.
-    global::set_text_map_propagator(TraceContextPropagator::new());
 
     let mut group = c.benchmark_group("tower-http-client");
     group.throughput(Throughput::Elements(1));
