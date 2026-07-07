@@ -14,10 +14,15 @@
   - `NoRouteExtractor` - No route, uses only HTTP method (e.g., `GET`), safest for cardinality
   - `PathExtractor` - Uses the URL path without query params (e.g., `/users/123`)
   - `AxumMatchedPathExtractor` - Uses Axum's `MatchedPath` for route templates (requires `axum` feature)
+  - `ExtensionRouteExtractor` - Reads a `RouteTemplate` from the request extensions; the
+    client-side counterpart to `AxumMatchedPathExtractor` for low-cardinality routes without a router
   - `FnRouteExtractor` - Custom function-based extraction via `with_route_extractor_fn()`
 * Default route extractor depends on features:
   - With `axum` feature: Uses `AxumMatchedPathExtractor` (route templates, low cardinality)
   - Without `axum` feature: Uses `NoRouteExtractor` (method only, safest)
+  - The **client** layer always defaults to `NoRouteExtractor` (the `axum` matched-path
+    extractor only applies to server routing); use `ExtensionRouteExtractor` or
+    `with_route_extractor_fn()` for low-cardinality client routes.
 * Route extraction now provides both span names and `http.route` metric attribute from the same source
 
 ### Changed

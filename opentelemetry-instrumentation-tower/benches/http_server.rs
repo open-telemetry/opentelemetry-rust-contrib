@@ -1,4 +1,4 @@
-//! Benchmarks for tower OpenTelemetry middleware overhead.
+//! Benchmarks for the tower OpenTelemetry HTTP **server** layer overhead.
 //!
 //! This benchmark measures the **pure instrumentation overhead** of the `http::server::Layer`
 //! middleware. It uses tower's service utilities to call handlers directly, bypassing
@@ -56,7 +56,7 @@
 //! ## Run
 //!
 //! ```sh
-//! cargo bench --bench middleware -p opentelemetry-instrumentation-tower
+//! cargo bench --bench http_server -p opentelemetry-instrumentation-tower
 //! ```
 //!
 //! ## Reference Numbers
@@ -144,11 +144,11 @@ fn setup_meter() -> (SdkMeterProvider, InMemoryMetricExporter) {
     (provider, exporter)
 }
 
-fn benchmark_middleware(c: &mut Criterion) {
+fn benchmark_http_server(c: &mut Criterion) {
     // Use tokio runtime since Criterion's AsyncExecutor is implemented for tokio
     let rt = tokio::runtime::Runtime::new().unwrap();
 
-    let mut group = c.benchmark_group("tower-instrumentation");
+    let mut group = c.benchmark_group("tower-http-server");
     group.throughput(Throughput::Elements(1));
 
     // Scenario 1: Baseline - no middleware
@@ -284,5 +284,5 @@ fn benchmark_middleware(c: &mut Criterion) {
     group.finish();
 }
 
-criterion_group!(benches, benchmark_middleware);
+criterion_group!(benches, benchmark_http_server);
 criterion_main!(benches);

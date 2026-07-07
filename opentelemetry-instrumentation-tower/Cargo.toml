@@ -39,7 +39,11 @@ tower = { version = "0.5", features = ["util"] }
 tower-test = { version = "0.4" }
 
 [[bench]]
-name = "middleware"
+name = "http_server"
+harness = false
+
+[[bench]]
+name = "http_client"
 harness = false
 
 [lints]
