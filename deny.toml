@@ -31,4 +31,7 @@ ignore = [
     # exporter is planned for removal (see #609), at which point this entry
     # can be dropped.
     "RUSTSEC-2026-0174",
+    # quick-xml 0.26.0; dev-only via pprof -> inferno. No upstream fix yet.
+    "RUSTSEC-2026-0194",
+    "RUSTSEC-2026-0195",
 ]
