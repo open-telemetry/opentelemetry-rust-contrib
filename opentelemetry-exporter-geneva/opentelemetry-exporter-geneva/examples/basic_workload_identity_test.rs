@@ -1,7 +1,7 @@
 //! run with `$ cargo run --example basic_workload_identity_test`
 
 use geneva_uploader::client::{GenevaClient, GenevaClientConfig};
-use geneva_uploader::AuthMethod;
+use geneva_uploader::{AuthMethod, LogMethod, SpanMethod};
 use opentelemetry_appender_tracing::layer;
 use opentelemetry_exporter_geneva::GenevaExporter;
 use opentelemetry_sdk::logs::log_processor_with_async_runtime::BatchLogProcessor;
@@ -84,6 +84,12 @@ async fn main() {
         role_instance,
         auth_method,
         msi_resource: None, // Not used for Workload Identity
+        logs: LogMethod {
+            default_event_name: None,
+        },
+        spans: SpanMethod {
+            default_event_name: None,
+        },
         obo_event_map: None,
     };
 

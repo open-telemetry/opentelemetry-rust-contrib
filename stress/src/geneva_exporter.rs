@@ -33,7 +33,7 @@
         Progress: 449360 ops completed (449360 successful, 100.0%) in 30.01s = 14976.14 ops/sec
 
 */
-use geneva_uploader::{AuthMethod, GenevaClient, GenevaClientConfig};
+use geneva_uploader::{AuthMethod, GenevaClient, GenevaClientConfig, LogMethod, SpanMethod};
 use opentelemetry_proto::tonic::collector::logs::v1::ExportLogsServiceRequest;
 use opentelemetry_proto::tonic::common::v1::any_value::Value;
 use opentelemetry_proto::tonic::common::v1::{AnyValue, KeyValue};
@@ -130,6 +130,12 @@ async fn init_client() -> Result<(GenevaClient, Option<String>), Box<dyn std::er
             role_name: std::env::var("GENEVA_ROLE").unwrap_or_else(|_| "test".to_string()),
             role_instance: std::env::var("GENEVA_INSTANCE").unwrap_or_else(|_| "test".to_string()),
             msi_resource: None,
+            logs: LogMethod {
+                default_event_name: None,
+            },
+            spans: SpanMethod {
+                default_event_name: None,
+            },
             obo_event_map: None,
         };
 
@@ -150,6 +156,12 @@ async fn init_client() -> Result<(GenevaClient, Option<String>), Box<dyn std::er
             role_name: "test".to_string(),
             role_instance: "test".to_string(),
             msi_resource: None,
+            logs: LogMethod {
+                default_event_name: None,
+            },
+            spans: SpanMethod {
+                default_event_name: None,
+            },
             obo_event_map: None,
         };
 
@@ -206,6 +218,12 @@ async fn init_client() -> Result<(GenevaClient, Option<String>), Box<dyn std::er
             role_name: "test".to_string(),
             role_instance: "test".to_string(),
             msi_resource: None,
+            logs: LogMethod {
+                default_event_name: None,
+            },
+            spans: SpanMethod {
+                default_event_name: None,
+            },
             obo_event_map: None,
         };
 

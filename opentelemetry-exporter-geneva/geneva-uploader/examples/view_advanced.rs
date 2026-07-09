@@ -37,7 +37,7 @@
 //! records will appear in Geneva under the event name `"Log"`.
 
 use geneva_uploader::client::{GenevaClient, GenevaClientConfig};
-use geneva_uploader::AuthMethod;
+use geneva_uploader::{AuthMethod, LogMethod, SpanMethod};
 use otap_df_pdata_views::views::{
     common::{AnyValueView, AttributeView, InstrumentationScopeView, ValueType},
     logs::{LogRecordView, LogsDataView, ResourceLogsView, ScopeLogsView},
@@ -344,6 +344,12 @@ async fn main() {
         role_name,
         role_instance,
         msi_resource: None,
+        logs: LogMethod {
+            default_event_name: None,
+        },
+        spans: SpanMethod {
+            default_event_name: None,
+        },
         obo_event_map: None,
     })
     .expect("Failed to create GenevaClient");
