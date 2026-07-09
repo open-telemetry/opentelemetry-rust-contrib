@@ -107,7 +107,8 @@ pub struct GenevaClient {
     uploader: Arc<GenevaUploader>,
     encoder: OtlpEncoder,
     metadata_fields: MetadataFields,
-    config: GenevaClientConfig,
+    log_table_name: Arc<str>,
+    span_table_name: Arc<str>,
     obo_event_map: Option<OboEventMap>,
 }
 
@@ -124,7 +125,10 @@ fn effective_table_name<'a>(
 
 impl GenevaClient {
     pub fn new(cfg: GenevaClientConfig) -> Result<Self, String> {
-        let client_config = cfg.clone();
+        let log_table_name: Arc<str> =
+            effective_table_name(cfg.logs.default_event_name.as_deref(), "Log").into();
+        let span_table_name: Arc<str> =
+            effective_table_name(cfg.spans.default_event_name.as_deref(), "Span").into();
 
         info!(
             name: "client.new",
@@ -234,7 +238,8 @@ impl GenevaClient {
             uploader: Arc::new(uploader),
             encoder: OtlpEncoder::new(),
             metadata_fields,
-            config: client_config,
+            log_table_name,
+            span_table_name,
             obo_event_map: cfg.obo_event_map,
         })
     }
@@ -281,14 +286,11 @@ impl GenevaClient {
             "Encoding and compressing logs"
         );
 
-        let table_name =
-            effective_table_name(self.config.logs.default_event_name.as_deref(), "Log");
-
         self.encoder
             .encode_logs_from_view(
                 view,
                 &self.metadata_fields,
-                table_name,
+                self.log_table_name.as_ref(),
                 self.obo_event_map.as_ref(),
             )
             .map_err(|e| {
@@ -319,14 +321,11 @@ impl GenevaClient {
             .flat_map(|resource_span| resource_span.scope_spans.iter())
             .flat_map(|scope_span| scope_span.spans.iter());
 
-        let table_name =
-            effective_table_name(self.config.spans.default_event_name.as_deref(), "Span");
-
         self.encoder
             .encode_span_batch(
                 span_iter,
                 &self.metadata_fields,
-                table_name,
+                self.span_table_name.as_ref(),
                 self.obo_event_map.as_ref(),
             )
             .map_err(|e| {

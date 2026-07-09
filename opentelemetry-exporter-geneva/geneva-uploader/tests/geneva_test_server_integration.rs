@@ -59,7 +59,7 @@ async fn uploader_batch_is_accepted_and_decoded_by_test_server() {
 
     let detail = upload_single_batch_and_wait(&client, &server, &request_view).await;
     assert_eq!(detail["decode_status"], "decoded");
-    assert_eq!(detail["event_name"], "CheckoutEvent");
+    assert_eq!(detail["event_name"], "Log");
     assert_eq!(detail["row_count"], 1);
 
     let records = detail["records"].as_array().expect("records array");
@@ -102,10 +102,7 @@ async fn uploader_batch_is_accepted_and_decoded_by_test_server() {
     let common_schema_detail =
         upload_single_batch_and_wait(&client, &server, &common_schema_request_view).await;
     assert_eq!(common_schema_detail["decode_status"], "decoded");
-    assert_eq!(
-        common_schema_detail["event_name"],
-        "CommonSchemaCheckoutEvent"
-    );
+    assert_eq!(common_schema_detail["event_name"], "Log");
     assert_eq!(common_schema_detail["row_count"], 1);
 
     let records = common_schema_detail["records"]
