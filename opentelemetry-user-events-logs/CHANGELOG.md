@@ -6,6 +6,8 @@
   The processor now calls the exporter synchronously, avoiding potential panics
   from nested `block_on()` calls (e.g. when logging from inside an async
   runtime).
+- Format Common Schema PartA `time` values with an RFC3339 `Z` suffix for UTC
+  timestamps instead of `+00:00`.
 
 ## v0.16.0
 
