@@ -831,8 +831,13 @@ impl LogBatchAccumulator {
         resource_role: &RoleOverrides,
         obo_event_map: Option<&OboEventMap>,
     ) {
-        let parts =
-            LogRecordParts::new(record, metadata_fields, table_name, resource_role, obo_event_map);
+        let parts = LogRecordParts::new(
+            record,
+            metadata_fields,
+            table_name,
+            resource_role,
+            obo_event_map,
+        );
         let timestamp = parts.timestamp;
         let routing_event_name = parts.routing_event_name.as_ref();
         // Role identity is included because the central blob metadata is batch-level.
@@ -1183,8 +1188,13 @@ impl OtlpEncoder {
             String::new(),
         );
         let role_overrides = RoleOverrides::default();
-        let parts =
-            LogRecordParts::new(record, &metadata_fields, CS_LOG_TYPENAME, &role_overrides, None);
+        let parts = LogRecordParts::new(
+            record,
+            &metadata_fields,
+            CS_LOG_TYPENAME,
+            &role_overrides,
+            None,
+        );
         (parts.fields, parts.dynamic_fields_start)
     }
 
@@ -1197,8 +1207,13 @@ impl OtlpEncoder {
         metadata_fields: &MetadataFields,
     ) -> Vec<u8> {
         let role_overrides = RoleOverrides::default();
-        let parts =
-            LogRecordParts::new(record, metadata_fields, CS_LOG_TYPENAME, &role_overrides, None);
+        let parts = LogRecordParts::new(
+            record,
+            metadata_fields,
+            CS_LOG_TYPENAME,
+            &role_overrides,
+            None,
+        );
         debug_assert_eq!(fields.len(), parts.fields.len());
         debug_assert_eq!(dynamic_fields_start, parts.dynamic_fields_start);
         Self::write_row_parts(&parts, metadata_fields)
@@ -3469,7 +3484,11 @@ mod tests {
         );
         assert!(result.is_ok(), "Mixed batch should succeed");
         let batches = result.unwrap();
-        assert_eq!(batches.len(), 1, "Routing table is fixed; events share one batch");
+        assert_eq!(
+            batches.len(),
+            1,
+            "Routing table is fixed; events share one batch"
+        );
     }
 
     #[test]

@@ -62,8 +62,6 @@ pub struct SpanMethod {
     pub default_event_name: Option<String>,
 }
 
-
-
 /// Error type returned by [`GenevaClient::upload_batch`].
 ///
 /// Provides enough information for callers to implement retry strategies:
@@ -113,7 +111,10 @@ pub struct GenevaClient {
     obo_event_map: Option<OboEventMap>,
 }
 
-fn effective_table_name<'a>(default_event_name: Option<&'a str>, fallback: &'static str) -> &'a str {
+fn effective_table_name<'a>(
+    default_event_name: Option<&'a str>,
+    fallback: &'static str,
+) -> &'a str {
     let Some(default_event_name) = default_event_name else {
         return fallback;
     };
@@ -280,10 +281,8 @@ impl GenevaClient {
             "Encoding and compressing logs"
         );
 
-        let table_name = effective_table_name(
-            self.config.logs.default_event_name.as_deref(),
-            "Log",
-        );
+        let table_name =
+            effective_table_name(self.config.logs.default_event_name.as_deref(), "Log");
 
         self.encoder
             .encode_logs_from_view(
@@ -320,10 +319,8 @@ impl GenevaClient {
             .flat_map(|resource_span| resource_span.scope_spans.iter())
             .flat_map(|scope_span| scope_span.spans.iter());
 
-        let table_name = effective_table_name(
-            self.config.spans.default_event_name.as_deref(),
-            "Span",
-        );
+        let table_name =
+            effective_table_name(self.config.spans.default_event_name.as_deref(), "Span");
 
         self.encoder
             .encode_span_batch(
@@ -456,17 +453,11 @@ mod tests {
     }
 
     fn build_config_with_logs_none(spans: Option<SpanMethod>) -> GenevaClientConfig {
-        build_config_from_optional(OptionalMethodConfig {
-            logs: None,
-            spans,
-        })
+        build_config_from_optional(OptionalMethodConfig { logs: None, spans })
     }
 
     fn build_config_with_spans_none(logs: Option<LogMethod>) -> GenevaClientConfig {
-        build_config_from_optional(OptionalMethodConfig {
-            logs,
-            spans: None,
-        })
+        build_config_from_optional(OptionalMethodConfig { logs, spans: None })
     }
 
     #[test]
@@ -489,7 +480,8 @@ mod tests {
         let config = build_config_with_logs_none(Some(SpanMethod {
             default_event_name: Some("SpanOverride".to_string()),
         }));
-        let span_table_name = effective_table_name(config.spans.default_event_name.as_deref(), "Span");
+        let span_table_name =
+            effective_table_name(config.spans.default_event_name.as_deref(), "Span");
 
         assert_eq!(span_table_name, "SpanOverride");
     }
@@ -497,7 +489,8 @@ mod tests {
     #[test]
     fn config_logs_none_helper_uses_span_fallback_when_none() {
         let config = build_config_with_logs_none(None);
-        let span_table_name = effective_table_name(config.spans.default_event_name.as_deref(), "Span");
+        let span_table_name =
+            effective_table_name(config.spans.default_event_name.as_deref(), "Span");
 
         assert_eq!(span_table_name, "Span");
     }
@@ -543,7 +536,8 @@ mod tests {
         });
 
         let log_table_name = effective_table_name(config.logs.default_event_name.as_deref(), "Log");
-        let span_table_name = effective_table_name(config.spans.default_event_name.as_deref(), "Span");
+        let span_table_name =
+            effective_table_name(config.spans.default_event_name.as_deref(), "Span");
 
         assert_eq!(log_table_name, "Log");
         assert_eq!(span_table_name, "SpanOverride");
@@ -559,7 +553,8 @@ mod tests {
         });
 
         let log_table_name = effective_table_name(config.logs.default_event_name.as_deref(), "Log");
-        let span_table_name = effective_table_name(config.spans.default_event_name.as_deref(), "Span");
+        let span_table_name =
+            effective_table_name(config.spans.default_event_name.as_deref(), "Span");
 
         assert_eq!(log_table_name, "LogOverride");
         assert_eq!(span_table_name, "Span");
@@ -580,7 +575,8 @@ mod tests {
         let config = build_config_with_spans_none(Some(LogMethod {
             default_event_name: Some("LogOverride".to_string()),
         }));
-        let span_table_name = effective_table_name(config.spans.default_event_name.as_deref(), "Span");
+        let span_table_name =
+            effective_table_name(config.spans.default_event_name.as_deref(), "Span");
 
         assert_eq!(span_table_name, "Span");
     }
@@ -602,10 +598,10 @@ mod tests {
         );
 
         let log_table_name = effective_table_name(config.logs.default_event_name.as_deref(), "Log");
-        let span_table_name = effective_table_name(config.spans.default_event_name.as_deref(), "Span");
+        let span_table_name =
+            effective_table_name(config.spans.default_event_name.as_deref(), "Span");
 
         assert_eq!(log_table_name, "LogOverride");
         assert_eq!(span_table_name, "SpanOverride");
     }
 }
-
