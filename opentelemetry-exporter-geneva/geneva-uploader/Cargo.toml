@@ -23,7 +23,7 @@ uuid = { version = "1.0", features = ["v4"] }
 reqwest = { version = "0.12", features = ["http2"], default-features = false }
 native-tls = { version = "0.2", optional = true }
 rustls = { version = "0.23", default-features = false, features = ["std", "tls12"], optional = true }
-rustls-pemfile = { version = "2", optional = true }
+rustls-pki-types = { version = "1.9", features = ["std"], optional = true }
 rustls-native-certs = { version = "0.8", optional = true }
 p12-keystore = { version = "0.2", optional = true }
 thiserror = "2.0"
@@ -61,7 +61,7 @@ tls-native = [
 ]
 tls-rustls = [
     "dep:rustls",
-    "dep:rustls-pemfile",
+    "dep:rustls-pki-types",
     "dep:rustls-native-certs",
     "dep:p12-keystore",
     "reqwest/rustls-tls-native-roots-no-provider",
