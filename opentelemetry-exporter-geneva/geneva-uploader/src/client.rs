@@ -111,23 +111,12 @@ pub struct GenevaClient {
     obo_event_map: Option<OboEventMap>,
 }
 
-fn effective_table_name<'a>(
-    default_event_name: Option<&'a str>,
-    fallback: &'static str,
-) -> &'a str {
-    let Some(default_event_name) = default_event_name else {
-        return fallback;
-    };
-
-    default_event_name
-}
-
 impl GenevaClient {
     pub fn new(cfg: GenevaClientConfig) -> Result<Self, String> {
         let log_table_name: Arc<str> =
-            effective_table_name(cfg.logs.default_event_name.as_deref(), "Log").into();
+            cfg.logs.default_event_name.as_deref().unwrap_or("Log").into();
         let span_table_name: Arc<str> =
-            effective_table_name(cfg.spans.default_event_name.as_deref(), "Span").into();
+            cfg.spans.default_event_name.as_deref().unwrap_or("Span").into();
 
         info!(
             name: "client.new",
@@ -434,9 +423,12 @@ mod tests {
     }
 
     #[test]
-    fn effective_table_name_prefers_override_and_falls_back() {
-        assert_eq!(effective_table_name(Some("AppLog"), "Log"), "AppLog");
-        assert_eq!(effective_table_name(None, "Log"), "Log");
+    fn default_event_name_unwrap_or_prefers_override_and_falls_back() {
+        let configured = Some("AppLog");
+        let missing: Option<&str> = None;
+
+        assert_eq!(configured.unwrap_or("Log"), "AppLog");
+        assert_eq!(missing.unwrap_or("Log"), "Log");
     }
 
     #[test]
