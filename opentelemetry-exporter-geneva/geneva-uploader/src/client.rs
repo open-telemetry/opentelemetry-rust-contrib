@@ -398,34 +398,13 @@ impl GenevaClient {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::collections::HashMap;
+    use opentelemetry_proto::tonic::collector::logs::v1::ExportLogsServiceRequest;
+    use opentelemetry_proto::tonic::logs::v1::{LogRecord, ResourceLogs, ScopeLogs};
+    use opentelemetry_proto::tonic::trace::v1::{ResourceSpans, ScopeSpans, Span};
+    use otap_df_pdata::views::otlp::bytes::logs::RawLogsData;
+    use prost::Message as _;
 
-    struct OptionalMethodConfig {
-        logs: Option<LogsConfig>,
-        spans: Option<TracesConfig>,
-    }
-
-    fn resolve_log_table_name(default_event_name: Option<&str>) -> String {
-        let logs = LogsConfig {
-            default_event_name: default_event_name.map(str::to_owned),
-        };
-
-        effective_table_name(logs.default_event_name.as_deref(), "Log").to_string()
-    }
-
-    fn resolve_span_table_name(default_event_name: Option<&str>) -> String {
-        let spans = TracesConfig {
-            default_event_name: default_event_name.map(str::to_owned),
-        };
-
-        effective_table_name(spans.default_event_name.as_deref(), "Span").to_string()
-    }
-
-    fn build_config(logs: Option<LogsConfig>, spans: Option<TracesConfig>) -> GenevaClientConfig {
-        build_config_from_optional(OptionalMethodConfig { logs, spans })
-    }
-
-    fn build_config_from_optional(optional: OptionalMethodConfig) -> GenevaClientConfig {
+    fn build_config(logs: Option<&str>, spans: Option<&str>) -> GenevaClientConfig {
         GenevaClientConfig {
             endpoint: "https://example.test".to_string(),
             environment: "Test".to_string(),
@@ -440,166 +419,70 @@ mod tests {
             role_name: "role".to_string(),
             role_instance: "instance".to_string(),
             msi_resource: None,
-            logs: optional.logs.unwrap_or(LogsConfig {
-                default_event_name: None,
-            }),
-            spans: optional.spans.unwrap_or(TracesConfig {
-                default_event_name: None,
-            }),
-            obo_event_map: Some(HashMap::new()),
+            logs: LogsConfig {
+                default_event_name: logs.map(str::to_owned),
+            },
+            spans: TracesConfig {
+                default_event_name: spans.map(str::to_owned),
+            },
+            obo_event_map: None,
         }
     }
 
-    fn build_config_with_logs_none(spans: Option<TracesConfig>) -> GenevaClientConfig {
-        build_config_from_optional(OptionalMethodConfig { logs: None, spans })
-    }
-
-    fn build_config_with_spans_none(logs: Option<LogsConfig>) -> GenevaClientConfig {
-        build_config_from_optional(OptionalMethodConfig { logs, spans: None })
+    fn build_client(logs: Option<&str>, spans: Option<&str>) -> GenevaClient {
+        GenevaClient::new(build_config(logs, spans)).expect("client should initialize")
     }
 
     #[test]
-    fn logs_table_name_defaults_to_log_when_none() {
-        assert_eq!(resolve_log_table_name(None), "Log");
+    fn effective_table_name_prefers_override_and_falls_back() {
+        assert_eq!(effective_table_name(Some("AppLog"), "Log"), "AppLog");
+        assert_eq!(effective_table_name(None, "Log"), "Log");
     }
 
     #[test]
-    fn config_logs_default_event_name_none_uses_log_table_name() {
-        let config = build_config_with_logs_none(Some(TracesConfig {
-            default_event_name: Some("SpanOverride".to_string()),
-        }));
-        let log_table_name = effective_table_name(config.logs.default_event_name.as_deref(), "Log");
+    fn encode_and_compress_logs_uses_configured_default_event_name() {
+        let client = build_client(Some("AppLog"), None);
 
-        assert_eq!(log_table_name, "Log");
+        let request = ExportLogsServiceRequest {
+            resource_logs: vec![ResourceLogs {
+                scope_logs: vec![ScopeLogs {
+                    log_records: vec![LogRecord::default()],
+                    ..Default::default()
+                }],
+                ..Default::default()
+            }],
+        };
+
+        let bytes = request.encode_to_vec();
+        let view = RawLogsData::new(&bytes);
+        let batches = client
+            .encode_and_compress_logs(&view)
+            .expect("log encoding should succeed");
+
+        assert_eq!(batches.len(), 1);
+        assert_eq!(batches[0].event_name, "AppLog");
     }
 
     #[test]
-    fn config_logs_none_helper_keeps_span_override() {
-        let config = build_config_with_logs_none(Some(TracesConfig {
-            default_event_name: Some("SpanOverride".to_string()),
-        }));
-        let span_table_name =
-            effective_table_name(config.spans.default_event_name.as_deref(), "Span");
+    fn encode_and_compress_spans_uses_configured_default_event_name() {
+        let client = build_client(None, Some("AppTrace"));
 
-        assert_eq!(span_table_name, "SpanOverride");
-    }
+        let spans = vec![ResourceSpans {
+            scope_spans: vec![ScopeSpans {
+                spans: vec![Span {
+                    name: "span-name".to_string(),
+                    ..Default::default()
+                }],
+                ..Default::default()
+            }],
+            ..Default::default()
+        }];
 
-    #[test]
-    fn config_logs_none_helper_uses_span_fallback_when_none() {
-        let config = build_config_with_logs_none(None);
-        let span_table_name =
-            effective_table_name(config.spans.default_event_name.as_deref(), "Span");
+        let batches = client
+            .encode_and_compress_spans(&spans)
+            .expect("span encoding should succeed");
 
-        assert_eq!(span_table_name, "Span");
-    }
-
-    #[test]
-    fn config_spans_none_helper_keeps_log_override() {
-        let config = build_config_with_spans_none(Some(LogsConfig {
-            default_event_name: Some("LogOverride".to_string()),
-        }));
-        let log_table_name = effective_table_name(config.logs.default_event_name.as_deref(), "Log");
-
-        assert_eq!(log_table_name, "LogOverride");
-    }
-
-    #[test]
-    fn config_spans_none_helper_uses_log_fallback_when_none() {
-        let config = build_config_with_spans_none(None);
-        let log_table_name = effective_table_name(config.logs.default_event_name.as_deref(), "Log");
-
-        assert_eq!(log_table_name, "Log");
-    }
-
-    #[test]
-    fn config_build_helper_none_and_override_works() {
-        let config = build_config(
-            None,
-            Some(TracesConfig {
-                default_event_name: Some("SpanOverride".to_string()),
-            }),
-        );
-        let log_table_name = effective_table_name(config.logs.default_event_name.as_deref(), "Log");
-
-        assert_eq!(log_table_name, "Log");
-    }
-
-    #[test]
-    fn config_from_optional_logs_missing_uses_log_fallback() {
-        let config = build_config_from_optional(OptionalMethodConfig {
-            logs: None,
-            spans: Some(TracesConfig {
-                default_event_name: Some("SpanOverride".to_string()),
-            }),
-        });
-
-        let log_table_name = effective_table_name(config.logs.default_event_name.as_deref(), "Log");
-        let span_table_name =
-            effective_table_name(config.spans.default_event_name.as_deref(), "Span");
-
-        assert_eq!(log_table_name, "Log");
-        assert_eq!(span_table_name, "SpanOverride");
-    }
-
-    #[test]
-    fn config_from_optional_spans_missing_uses_span_fallback() {
-        let config = build_config_from_optional(OptionalMethodConfig {
-            logs: Some(LogsConfig {
-                default_event_name: Some("LogOverride".to_string()),
-            }),
-            spans: None,
-        });
-
-        let log_table_name = effective_table_name(config.logs.default_event_name.as_deref(), "Log");
-        let span_table_name =
-            effective_table_name(config.spans.default_event_name.as_deref(), "Span");
-
-        assert_eq!(log_table_name, "LogOverride");
-        assert_eq!(span_table_name, "Span");
-    }
-
-    #[test]
-    fn logs_table_name_uses_default_event_name_when_set() {
-        assert_eq!(resolve_log_table_name(Some("UserEvent")), "UserEvent");
-    }
-
-    #[test]
-    fn spans_table_name_defaults_to_span_when_none() {
-        assert_eq!(resolve_span_table_name(None), "Span");
-    }
-
-    #[test]
-    fn config_spans_default_event_name_none_uses_span_table_name() {
-        let config = build_config_with_spans_none(Some(LogsConfig {
-            default_event_name: Some("LogOverride".to_string()),
-        }));
-        let span_table_name =
-            effective_table_name(config.spans.default_event_name.as_deref(), "Span");
-
-        assert_eq!(span_table_name, "Span");
-    }
-
-    #[test]
-    fn spans_table_name_uses_default_event_name_when_set() {
-        assert_eq!(resolve_span_table_name(Some("SpanEvent")), "SpanEvent");
-    }
-
-    #[test]
-    fn config_logs_and_spans_default_event_name_set_use_overrides() {
-        let config = build_config(
-            Some(LogsConfig {
-                default_event_name: Some("LogOverride".to_string()),
-            }),
-            Some(TracesConfig {
-                default_event_name: Some("SpanOverride".to_string()),
-            }),
-        );
-
-        let log_table_name = effective_table_name(config.logs.default_event_name.as_deref(), "Log");
-        let span_table_name =
-            effective_table_name(config.spans.default_event_name.as_deref(), "Span");
-
-        assert_eq!(log_table_name, "LogOverride");
-        assert_eq!(span_table_name, "SpanOverride");
+        assert_eq!(batches.len(), 1);
+        assert_eq!(batches[0].event_name, "AppTrace");
     }
 }
