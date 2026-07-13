@@ -11,7 +11,7 @@ use std::sync::OnceLock;
 use tokio::runtime::Runtime;
 
 use geneva_uploader::client::{EncodedBatch, GenevaClient, GenevaClientConfig, UploadError};
-use geneva_uploader::{AuthMethod, LogMethod, SpanMethod};
+use geneva_uploader::{AuthMethod, LogsConfig, TracesConfig};
 use opentelemetry_proto::tonic::collector::trace::v1::ExportTraceServiceRequest;
 use prost::Message;
 use std::path::PathBuf;
@@ -596,10 +596,10 @@ pub unsafe extern "C" fn geneva_client_new(
         role_name,
         role_instance,
         msi_resource,
-        logs: LogMethod {
+        logs: LogsConfig {
             default_event_name: None,
         },
-        spans: SpanMethod {
+        spans: TracesConfig {
             default_event_name: None,
         },
         obo_event_map,
@@ -1645,10 +1645,10 @@ mod tests {
             role_name: "testrole".to_string(),
             role_instance: "testinstance".to_string(),
             msi_resource: None,
-            logs: LogMethod {
+            logs: LogsConfig {
                 default_event_name: None,
             },
-            spans: SpanMethod {
+            spans: TracesConfig {
                 default_event_name: None,
             },
             obo_event_map: None,
@@ -2177,10 +2177,10 @@ mod tests {
             role_name: "testrole".to_string(),
             role_instance: "testinstance".to_string(),
             msi_resource: None,
-            logs: LogMethod {
+            logs: LogsConfig {
                 default_event_name: None,
             },
-            spans: SpanMethod {
+            spans: TracesConfig {
                 default_event_name: None,
             },
             obo_event_map: None,
@@ -2306,10 +2306,10 @@ mod tests {
             role_name: "testrole".to_string(),
             role_instance: "testinstance".to_string(),
             msi_resource: None,
-            logs: LogMethod {
+            logs: LogsConfig {
                 default_event_name: None,
             },
-            spans: SpanMethod {
+            spans: TracesConfig {
                 default_event_name: None,
             },
             obo_event_map: None,
@@ -2473,10 +2473,10 @@ mod tests {
             role_name: "testrole".to_string(),
             role_instance: "testinstance".to_string(),
             msi_resource: None,
-            logs: LogMethod {
+            logs: LogsConfig {
                 default_event_name: None,
             },
-            spans: SpanMethod {
+            spans: TracesConfig {
                 default_event_name: None,
             },
             obo_event_map: None,
@@ -2600,10 +2600,10 @@ mod tests {
             role_name: "testrole".to_string(),
             role_instance: "testinstance".to_string(),
             msi_resource: None,
-            logs: LogMethod {
+            logs: LogsConfig {
                 default_event_name: None,
             },
-            spans: SpanMethod {
+            spans: TracesConfig {
                 default_event_name: None,
             },
             obo_event_map: None,
@@ -2773,10 +2773,10 @@ mod tests {
             role_name: "testrole".to_string(),
             role_instance: "testinstance".to_string(),
             msi_resource: None,
-            logs: LogMethod {
+            logs: LogsConfig {
                 default_event_name: None,
             },
-            spans: SpanMethod {
+            spans: TracesConfig {
                 default_event_name: None,
             },
             obo_event_map: None,

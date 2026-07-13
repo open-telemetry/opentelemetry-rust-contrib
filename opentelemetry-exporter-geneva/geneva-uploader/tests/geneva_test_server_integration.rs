@@ -1,5 +1,5 @@
 use geneva_test_server::testing::TestServer;
-use geneva_uploader::{AuthMethod, GenevaClient, GenevaClientConfig, LogMethod, SpanMethod};
+use geneva_uploader::{AuthMethod, GenevaClient, GenevaClientConfig, LogsConfig, TracesConfig};
 use opentelemetry_proto::tonic::collector::logs::v1::ExportLogsServiceRequest;
 use opentelemetry_proto::tonic::common::v1::{any_value::Value, AnyValue, KeyValue};
 use opentelemetry_proto::tonic::logs::v1::{LogRecord, ResourceLogs, ScopeLogs};
@@ -22,10 +22,10 @@ async fn uploader_batch_is_accepted_and_decoded_by_test_server() {
         role_name: "checkout".to_string(),
         role_instance: "instance-1".to_string(),
         msi_resource: None,
-        logs: LogMethod {
+        logs: LogsConfig {
             default_event_name: None,
         },
-        spans: SpanMethod {
+        spans: TracesConfig {
             default_event_name: None,
         },
         obo_event_map: None,

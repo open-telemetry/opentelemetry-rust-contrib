@@ -31,7 +31,7 @@
 //! ```
 
 use geneva_uploader::client::{GenevaClient, GenevaClientConfig};
-use geneva_uploader::{AuthMethod, LogMethod, SpanMethod};
+use geneva_uploader::{AuthMethod, LogsConfig, TracesConfig};
 use opentelemetry_proto::tonic::collector::logs::v1::ExportLogsServiceRequest;
 use opentelemetry_proto::tonic::common::v1::{any_value, AnyValue, InstrumentationScope, KeyValue};
 use opentelemetry_proto::tonic::logs::v1::{LogRecord, ResourceLogs, ScopeLogs};
@@ -142,10 +142,10 @@ async fn main() {
         role_name,
         role_instance,
         msi_resource: None,
-        logs: LogMethod {
+        logs: LogsConfig {
             default_event_name: None,
         },
-        spans: SpanMethod {
+        spans: TracesConfig {
             default_event_name: None,
         },
         obo_event_map: None,

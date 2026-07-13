@@ -27,7 +27,7 @@
 //! ```
 
 use geneva_uploader::client::{GenevaClient, GenevaClientConfig};
-use geneva_uploader::{AuthMethod, LogMethod, SpanMethod};
+use geneva_uploader::{AuthMethod, LogsConfig, TracesConfig};
 use opentelemetry_appender_tracing::layer;
 use opentelemetry_exporter_geneva::GenevaExporter;
 use opentelemetry_sdk::logs::log_processor_with_async_runtime::BatchLogProcessor;
@@ -89,10 +89,10 @@ async fn main() {
         role_name,
         role_instance,
         msi_resource: None,
-        logs: LogMethod {
+        logs: LogsConfig {
             default_event_name: None,
         },
-        spans: SpanMethod {
+        spans: TracesConfig {
             default_event_name: None,
         },
         obo_event_map: None,

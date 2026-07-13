@@ -47,18 +47,18 @@ pub struct GenevaClientConfig {
     pub role_name: String,
     pub role_instance: String,
     pub msi_resource: Option<String>, // Required for Managed Identity variants
-    pub logs: LogMethod,
-    pub spans: SpanMethod,
+    pub logs: LogsConfig,
+    pub spans: TracesConfig,
     pub obo_event_map: Option<OboEventMap>, // Per-event OBO config (None = no OBO)
 }
 
 #[derive(Clone, Debug)]
-pub struct LogMethod {
+pub struct LogsConfig {
     pub default_event_name: Option<String>,
 }
 
 #[derive(Clone, Debug)]
-pub struct SpanMethod {
+pub struct TracesConfig {
     pub default_event_name: Option<String>,
 }
 
@@ -144,7 +144,7 @@ impl GenevaClient {
             target: "geneva-uploader",
             logs_default_event_name = %cfg.logs.default_event_name.as_deref().unwrap_or("<none>"),
             spans_default_event_name = %cfg.spans.default_event_name.as_deref().unwrap_or("<none>"),
-            "Using LogMethod and SpanMethod configuration"
+            "Using LogsConfig and TracesConfig configuration"
         );
 
         // Validate MSI resource presence for managed identity variants
@@ -402,12 +402,12 @@ mod tests {
     use std::collections::HashMap;
 
     struct OptionalMethodConfig {
-        logs: Option<LogMethod>,
-        spans: Option<SpanMethod>,
+        logs: Option<LogsConfig>,
+        spans: Option<TracesConfig>,
     }
 
     fn resolve_log_table_name(default_event_name: Option<&str>) -> String {
-        let logs = LogMethod {
+        let logs = LogsConfig {
             default_event_name: default_event_name.map(str::to_owned),
         };
 
@@ -415,14 +415,14 @@ mod tests {
     }
 
     fn resolve_span_table_name(default_event_name: Option<&str>) -> String {
-        let spans = SpanMethod {
+        let spans = TracesConfig {
             default_event_name: default_event_name.map(str::to_owned),
         };
 
         effective_table_name(spans.default_event_name.as_deref(), "Span").to_string()
     }
 
-    fn build_config(logs: Option<LogMethod>, spans: Option<SpanMethod>) -> GenevaClientConfig {
+    fn build_config(logs: Option<LogsConfig>, spans: Option<TracesConfig>) -> GenevaClientConfig {
         build_config_from_optional(OptionalMethodConfig { logs, spans })
     }
 
@@ -441,21 +441,21 @@ mod tests {
             role_name: "role".to_string(),
             role_instance: "instance".to_string(),
             msi_resource: None,
-            logs: optional.logs.unwrap_or(LogMethod {
+            logs: optional.logs.unwrap_or(LogsConfig {
                 default_event_name: None,
             }),
-            spans: optional.spans.unwrap_or(SpanMethod {
+            spans: optional.spans.unwrap_or(TracesConfig {
                 default_event_name: None,
             }),
             obo_event_map: Some(HashMap::new()),
         }
     }
 
-    fn build_config_with_logs_none(spans: Option<SpanMethod>) -> GenevaClientConfig {
+    fn build_config_with_logs_none(spans: Option<TracesConfig>) -> GenevaClientConfig {
         build_config_from_optional(OptionalMethodConfig { logs: None, spans })
     }
 
-    fn build_config_with_spans_none(logs: Option<LogMethod>) -> GenevaClientConfig {
+    fn build_config_with_spans_none(logs: Option<LogsConfig>) -> GenevaClientConfig {
         build_config_from_optional(OptionalMethodConfig { logs, spans: None })
     }
 
@@ -466,7 +466,7 @@ mod tests {
 
     #[test]
     fn config_logs_default_event_name_none_uses_log_table_name() {
-        let config = build_config_with_logs_none(Some(SpanMethod {
+        let config = build_config_with_logs_none(Some(TracesConfig {
             default_event_name: Some("SpanOverride".to_string()),
         }));
         let log_table_name = effective_table_name(config.logs.default_event_name.as_deref(), "Log");
@@ -476,7 +476,7 @@ mod tests {
 
     #[test]
     fn config_logs_none_helper_keeps_span_override() {
-        let config = build_config_with_logs_none(Some(SpanMethod {
+        let config = build_config_with_logs_none(Some(TracesConfig {
             default_event_name: Some("SpanOverride".to_string()),
         }));
         let span_table_name =
@@ -496,7 +496,7 @@ mod tests {
 
     #[test]
     fn config_spans_none_helper_keeps_log_override() {
-        let config = build_config_with_spans_none(Some(LogMethod {
+        let config = build_config_with_spans_none(Some(LogsConfig {
             default_event_name: Some("LogOverride".to_string()),
         }));
         let log_table_name = effective_table_name(config.logs.default_event_name.as_deref(), "Log");
@@ -516,7 +516,7 @@ mod tests {
     fn config_build_helper_none_and_override_works() {
         let config = build_config(
             None,
-            Some(SpanMethod {
+            Some(TracesConfig {
                 default_event_name: Some("SpanOverride".to_string()),
             }),
         );
@@ -529,7 +529,7 @@ mod tests {
     fn config_from_optional_logs_missing_uses_log_fallback() {
         let config = build_config_from_optional(OptionalMethodConfig {
             logs: None,
-            spans: Some(SpanMethod {
+            spans: Some(TracesConfig {
                 default_event_name: Some("SpanOverride".to_string()),
             }),
         });
@@ -545,7 +545,7 @@ mod tests {
     #[test]
     fn config_from_optional_spans_missing_uses_span_fallback() {
         let config = build_config_from_optional(OptionalMethodConfig {
-            logs: Some(LogMethod {
+            logs: Some(LogsConfig {
                 default_event_name: Some("LogOverride".to_string()),
             }),
             spans: None,
@@ -571,7 +571,7 @@ mod tests {
 
     #[test]
     fn config_spans_default_event_name_none_uses_span_table_name() {
-        let config = build_config_with_spans_none(Some(LogMethod {
+        let config = build_config_with_spans_none(Some(LogsConfig {
             default_event_name: Some("LogOverride".to_string()),
         }));
         let span_table_name =
@@ -588,10 +588,10 @@ mod tests {
     #[test]
     fn config_logs_and_spans_default_event_name_set_use_overrides() {
         let config = build_config(
-            Some(LogMethod {
+            Some(LogsConfig {
                 default_event_name: Some("LogOverride".to_string()),
             }),
-            Some(SpanMethod {
+            Some(TracesConfig {
                 default_event_name: Some("SpanOverride".to_string()),
             }),
         );
