@@ -61,7 +61,6 @@ pub struct LogsConfig {
 pub struct TracesConfig {
     pub default_event_name: Option<String>,
 }
-
 /// Error type returned by [`GenevaClient::upload_batch`].
 ///
 /// Provides enough information for callers to implement retry strategies:
