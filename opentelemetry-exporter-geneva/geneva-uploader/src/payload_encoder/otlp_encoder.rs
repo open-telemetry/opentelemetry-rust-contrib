@@ -3258,7 +3258,7 @@ mod tests {
         };
         let result = encode_log_batch_via_proto_with_obo(
             &OtlpEncoder::new(),
-            [log].iter(),
+            [log.clone()].iter(),
             &metadata,
             Some(&obo_map),
         );
@@ -3277,7 +3277,7 @@ mod tests {
         };
         let result = encode_log_batch_via_proto_with_obo(
             &OtlpEncoder::new(),
-            [log].iter(),
+            [log.clone()].iter(),
             &metadata,
             Some(&obo_map),
         );
@@ -3296,7 +3296,7 @@ mod tests {
         };
         let result = encode_log_batch_via_proto_with_obo(
             &OtlpEncoder::new(),
-            [log].iter(),
+            [log.clone()].iter(),
             &metadata,
             Some(&obo_map),
         );
@@ -3314,7 +3314,7 @@ mod tests {
     fn test_obo_fields_in_log_schema() {
         let metadata = make_metadata("TestNamespace");
         let obo_map = make_obo_event_map(
-            "TestEvent",
+            "Log",
             "Microsoft.SomeService",
             Some(r#"<Config onBehalfFields="resourceId" priority="Normal"/>"#),
         );
@@ -3326,7 +3326,7 @@ mod tests {
         };
         let result = encode_log_batch_via_proto_with_obo(
             &OtlpEncoder::new(),
-            [log].iter(),
+            [log.clone()].iter(),
             &metadata,
             Some(&obo_map),
         );
@@ -3334,6 +3334,13 @@ mod tests {
         let batches = result.unwrap();
         assert_eq!(batches.len(), 1);
         assert_eq!(batches[0].row_count, 1);
+
+        let without_obo = encode_log_batch_via_proto(&OtlpEncoder::new(), [log.clone()].iter(), &metadata)
+            .unwrap();
+        assert_ne!(
+            batches[0].metadata.schema_ids, without_obo[0].metadata.schema_ids,
+            "table-keyed OBO config should change the encoded schema"
+        );
     }
 
     #[test]
@@ -3355,7 +3362,7 @@ mod tests {
     #[test]
     fn test_obo_identity_only_no_annotations() {
         let metadata = make_metadata("TestNamespace");
-        let obo_map = make_obo_event_map("TestEvent", "Microsoft.SomeService", None);
+        let obo_map = make_obo_event_map("Log", "Microsoft.SomeService", None);
         let log = LogRecord {
             observed_time_unix_nano: 1_700_000_000_000_000_000,
             event_name: "TestEvent".to_string(),
@@ -3364,7 +3371,7 @@ mod tests {
         };
         let result = encode_log_batch_via_proto_with_obo(
             &OtlpEncoder::new(),
-            [log].iter(),
+            [log.clone()].iter(),
             &metadata,
             Some(&obo_map),
         );
@@ -3408,7 +3415,7 @@ mod tests {
     fn test_encode_log_batch_with_obo() {
         let metadata = make_metadata("TestNamespace");
         let obo_map = make_obo_event_map(
-            "TestEvent",
+            "Log",
             "Microsoft.BatchService",
             Some(r#"<Config onBehalfFields="resourceId"/>"#),
         );
@@ -3421,7 +3428,7 @@ mod tests {
         };
         let result = encode_log_batch_via_proto_with_obo(
             &OtlpEncoder::new(),
-            [log].iter(),
+            [log.clone()].iter(),
             &metadata,
             Some(&obo_map),
         );
@@ -3429,6 +3436,13 @@ mod tests {
         let batches = result.unwrap();
         assert_eq!(batches.len(), 1);
         assert_eq!(batches[0].row_count, 1);
+
+        let without_obo = encode_log_batch_via_proto(&OtlpEncoder::new(), [log.clone()].iter(), &metadata)
+            .unwrap();
+        assert_ne!(
+            batches[0].metadata.schema_ids, without_obo[0].metadata.schema_ids,
+            "table-keyed OBO should be visible in the encoded schema"
+        );
     }
 
     #[test]
@@ -3460,7 +3474,7 @@ mod tests {
     fn test_mixed_batch_obo_and_non_obo_events() {
         let metadata = make_metadata("TestNamespace");
         let obo_map = make_obo_event_map(
-            "OboEvent",
+            "Log",
             "Microsoft.OboService",
             Some(r#"<Config onBehalfFields="resourceId"/>"#),
         );
@@ -3489,6 +3503,7 @@ mod tests {
             1,
             "Routing table is fixed; events share one batch"
         );
+        assert_eq!(batches[0].event_name, "Log");
     }
 
     #[test]
@@ -3509,7 +3524,7 @@ mod tests {
         let metadata = make_metadata("TestNamespace");
         let mut obo_map = HashMap::new();
         obo_map.insert(
-            "TestEvent".to_string(),
+            "Log".to_string(),
             OboEventConfig {
                 identity: "".to_string(),
                 annotations: Some("some annotations".to_string()),
@@ -3535,7 +3550,7 @@ mod tests {
         let metadata = make_metadata("TestNamespace");
         let mut obo_map = HashMap::new();
         obo_map.insert(
-            "TestEvent".to_string(),
+            "Log".to_string(),
             OboEventConfig {
                 identity: "   ".to_string(),
                 annotations: None,
@@ -3561,7 +3576,7 @@ mod tests {
         let metadata = make_metadata("TestNamespace");
         let mut obo_map = HashMap::new();
         obo_map.insert(
-            "TestEvent".to_string(),
+            "Log".to_string(),
             OboEventConfig {
                 identity: "Microsoft.TestService".to_string(),
                 annotations: Some("   ".to_string()),
@@ -3616,6 +3631,7 @@ mod tests {
 
         assert_eq!(with_obo.len(), 1);
         assert_eq!(with_obo[0].event_name, "Log");
+        assert_eq!(with_obo[0].row_count, 1);
         assert_ne!(
             with_obo[0].metadata.schema_ids, without_obo[0].metadata.schema_ids,
             "OBO config should apply when the routing table matches the OBO map key"
