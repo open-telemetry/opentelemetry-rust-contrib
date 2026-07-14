@@ -57,7 +57,11 @@ impl<'value> ValueBuilder<'value> for HttpResponseContentLengthBuilder {
 
 impl<'v> SpanAttributeProcessor<'v, 2> for HttpResponseContentLengthBuilder {
     const HANDLERS: [(&'static str, fn(&mut Self, &'v Value) -> bool); 2] = [
-        (semconv::RPC_MESSAGE_TYPE, Self::message_type_is_received),
+        (
+            #[allow(deprecated)]
+            semconv::RPC_MESSAGE_TYPE,
+            Self::message_type_is_received,
+        ),
         (
             semconv::HTTP_RESPONSE_BODY_SIZE,
             Self::message_payload_size_bytes,

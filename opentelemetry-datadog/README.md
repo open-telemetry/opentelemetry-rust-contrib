@@ -4,17 +4,26 @@
 
 [splash]: https://raw.githubusercontent.com/open-telemetry/opentelemetry-rust/main/assets/logo-text.png
 
+> **⚠️ DEPRECATED** — This crate is deprecated and will be removed from this
+> repository. Datadog now ships [`dd-trace-rs`], a first-party integration
+> built on top of `opentelemetry_sdk`. New users should adopt `dd-trace-rs`,
+> and existing users are encouraged to migrate. The last release of this crate
+> on crates.io will remain available, but no further releases are planned.
+>
+> See [issue #609] for context.
+>
+> [`dd-trace-rs`]: https://github.com/DataDog/dd-trace-rs
+> [issue #609]: https://github.com/open-telemetry/opentelemetry-rust-contrib/issues/609
+
 | Status        |                                            |
 | ------------- |--------------------------------------------|
-| Stability     | beta                                       |
-| Owners        | [Anton Grübel](https://github.com/gruebel) |
+| Stability     | deprecated                                 |
+| Owners        | _unmaintained_                             |
 
 Community supported vendor integrations for applications instrumented with [`OpenTelemetry`].
 
 [![Crates.io: opentelemetry-datadog](https://img.shields.io/crates/v/opentelemetry-datadog.svg)](https://crates.io/crates/opentelemetry-datadog)
 [![Documentation](https://docs.rs/opentelemetry-datadog/badge.svg)](https://docs.rs/opentelemetry-datadog)
-[![LICENSE](https://img.shields.io/crates/l/opentelemetry-datadog)](./LICENSE)
-[![GitHub Actions CI](https://github.com/open-telemetry/opentelemetry-rust-contrib/workflows/CI/badge.svg)](https://github.com/open-telemetry/opentelemetry-rust-contrib/actions?query=workflow%3ACI+branch%3Amain)
 [![Slack](https://img.shields.io/badge/slack-@cncf/otel/rust-brightgreen.svg?logo=slack)](https://cloud-native.slack.com/archives/C03GDP0H023)
 
 ## Overview

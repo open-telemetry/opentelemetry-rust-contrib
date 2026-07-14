@@ -82,6 +82,7 @@ mod benchmarks {
 
             log.attributes.push(KeyValue {
                 key,
+                key_strindex: 0,
                 value: Some(value),
             });
         }

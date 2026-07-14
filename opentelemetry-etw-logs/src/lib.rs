@@ -72,13 +72,20 @@ pub use processor::ProcessorBuilder;
 
 #[cfg(all(test, target_os = "windows"))]
 mod integration_tests {
+    use std::cell::RefCell;
     use std::collections::HashMap;
+    use std::rc::Rc;
+    use std::sync::atomic::{AtomicBool, Ordering};
     use std::sync::mpsc;
+    use std::sync::{Arc, Mutex};
+    use std::thread;
     use std::time::Duration;
 
-    use ferrisetw::schema_locator::SchemaLocator;
-    use ferrisetw::trace::UserTrace;
-    use ferrisetw::EventRecord;
+    use one_collect::etw::tdh::TdhDecoder;
+    use one_collect::etw::{EtwSession, LEVEL_VERBOSE};
+    use one_collect::event::os::windows::WindowsEventExtension;
+    use one_collect::event::Event;
+    use one_collect::Guid;
 
     use tracelogging_dynamic as tld;
 
@@ -88,14 +95,13 @@ mod integration_tests {
     use opentelemetry_sdk::Resource;
 
     // -----------------------------------------------------------------------
-    // TDH-based ETW event property parser
+    // ETW event property capture via one_collect
     //
-    // ferrisetw's Parser cannot handle TraceLogging struct properties (PartA,
-    // PartB, ext_dt, etc.) — it returns UnimplementedType("structure").
-    // We use TDH APIs directly to enumerate all event properties from the
-    // schema (TRACE_EVENT_INFO) and read their values from the raw data
-    // buffer, producing a flat HashMap keyed by dotted paths like
-    // "PartA.ext_cloud.role" or "PartB.body".
+    // one_collect's TdhDecoder resolves TraceLogging struct properties (PartA,
+    // PartB, ext_dt, etc.) into a flat EventFormat whose nested fields are
+    // flattened with dotted names ("PartA.ext_cloud.role", "PartB.body").
+    // We walk that schema and read each leaf value from the event payload,
+    // producing a flat HashMap keyed by those dotted paths.
     // -----------------------------------------------------------------------
 
     /// Captured event with all properties parsed into named fields.
@@ -155,181 +161,191 @@ mod integration_tests {
         }
     }
 
-    /// Parse all event properties using Windows TDH APIs.
+    /// Build a flat property map from a decoded TraceLogging event.
     ///
-    /// Walks the TRACE_EVENT_INFO property array (which mirrors the
-    /// TraceLogging metadata) and reads leaf values from the user data
-    /// buffer. Struct entries (PartA, PartB, ext_dt, etc.) occupy 0 bytes
-    /// in the data and are used only to build dotted path names.
-    ///
-    /// # Safety
-    /// `er` must point to a valid EVENT_RECORD for the duration of the call.
-    #[allow(unsafe_op_in_unsafe_fn)]
-    unsafe fn parse_event_properties(
-        er: *const windows::Win32::System::Diagnostics::Etw::EVENT_RECORD,
+    /// one_collect's `TdhDecoder` produces an `EventFormat` whose nested
+    /// struct fields are already flattened with dotted names. We resolve
+    /// each leaf field's bytes (handling variable-length skip chains via
+    /// `try_get_field_data_closure`) into a `HashMap` keyed by dotted path.
+    fn build_properties(
+        decoded: &one_collect::etw::tdh::TdhDecodedEvent<'_>,
     ) -> HashMap<String, Vec<u8>> {
-        use windows::Win32::System::Diagnostics::Etw::{
-            TdhGetEventInformation, EVENT_PROPERTY_INFO, TRACE_EVENT_INFO,
-        };
+        let format = decoded.event_data.format();
+        let payload = decoded.event_data.event_data();
 
         let mut result = HashMap::new();
-
-        // Query required buffer size
-        let mut buf_size = 0u32;
-        let _ = TdhGetEventInformation(er, None, None, &mut buf_size);
-        if buf_size == 0 {
-            return result;
+        for field in format.fields() {
+            if let Some(mut get_data) = format.try_get_field_data_closure(&field.name) {
+                result.insert(field.name.clone(), get_data(payload).to_vec());
+            }
         }
+        result
+    }
 
-        // Allocate and retrieve TRACE_EVENT_INFO
-        let mut buf = vec![0u8; buf_size as usize];
-        let tei_ptr = buf.as_mut_ptr() as *mut TRACE_EVENT_INFO;
-        let status = TdhGetEventInformation(er, None, Some(tei_ptr), &mut buf_size);
-        if status != 0 {
-            return result;
+    /// Handle to a running ETW capture session backed by one_collect.
+    ///
+    /// `one_collect::etw::EtwSession::parse_until` blocks the calling thread
+    /// and runs event callbacks on it, so the session is driven on a
+    /// dedicated worker thread. Dropping (or explicitly `stop`-ping) the
+    /// handle signals that thread to stop and joins it.
+    struct EtwTrace {
+        stop: Arc<AtomicBool>,
+        worker: Mutex<Option<thread::JoinHandle<()>>>,
+    }
+
+    impl EtwTrace {
+        fn stop(&self) -> thread::Result<()> {
+            self.stop.store(true, Ordering::Relaxed);
+            match self.worker.lock().unwrap().take() {
+                Some(worker) => worker.join(),
+                None => Ok(()),
+            }
         }
+    }
 
-        let tei = &*tei_ptr;
-        let top_level_count = tei.TopLevelPropertyCount as usize;
-        let prop_count = tei.PropertyCount as usize;
+    impl Drop for EtwTrace {
+        fn drop(&mut self) {
+            let _ = self.stop();
+        }
+    }
 
-        let props = std::slice::from_raw_parts(tei.EventPropertyInfoArray.as_ptr(), prop_count);
+    /// Start a one_collect ETW capture session for the given provider name.
+    ///
+    /// This function blocks until the ETW session is confirmed live by emitting
+    /// probe events with a uniquely-named event and waiting for one to
+    /// round-trip back through the capture channel.  Because `parse_until`
+    /// calls `StartTrace`/`EnableTraceEx2` asynchronously after the worker
+    /// signals, events emitted before that kernel setup completes are silently
+    /// dropped by ETW (no replay).  The probe loop terminates exactly when the
+    /// first probe is observed, proving the session is ready without relying on
+    /// any fixed sleep.  A 10-second failsafe matches the `recv_event` deadline.
+    fn start_etw_trace(provider_name: &str) -> (EtwTrace, mpsc::Receiver<CapturedEvent>) {
+        // TraceLogging derives the provider GUID from the provider name; mirror
+        // that here so we subscribe to the same GUID the exporter registers.
+        let guid = Guid::from_u128(tld::Guid::from_name(provider_name).to_u128());
 
-        // User data buffer (leaf values only; struct headers are 0 bytes)
-        let data: &[u8] = if (*er).UserData.is_null() || (*er).UserDataLength == 0 {
-            &[]
-        } else {
-            std::slice::from_raw_parts((*er).UserData as *const u8, (*er).UserDataLength as usize)
-        };
+        let (tx, rx) = mpsc::sync_channel::<CapturedEvent>(16);
+        let stop = Arc::new(AtomicBool::new(false));
+        let stop_worker = stop.clone();
+        let session_name = format!("{provider_name}_session");
 
-        let base = buf.as_ptr();
-        let mut data_pos = 0usize;
+        // One-shot channel: the worker sends () just before calling
+        // `parse_until` so the main thread can wait for it.
+        let (session_ready_tx, session_ready_rx) = mpsc::sync_channel::<()>(1);
 
-        // Recursive DFS: TDH lists top-level properties at [0..TopLevelPropertyCount).
-        // Struct entries use StructStartIndex/NumOfStructMembers to reference their
-        // children elsewhere in the array. The data buffer follows DFS order.
-        fn visit(
-            props: &[EVENT_PROPERTY_INFO],
-            indices: &[usize],
-            prefix: &str,
-            base: *const u8,
-            data: &[u8],
-            data_pos: &mut usize,
-            result: &mut HashMap<String, Vec<u8>>,
-        ) {
-            for &idx in indices {
-                let prop = &props[idx];
-                let name = unsafe { read_wide_string_at(base, prop.NameOffset as usize) };
-                let is_struct = (prop.Flags.0 & 0x1) != 0;
-                let full_path = if prefix.is_empty() {
-                    name.clone()
-                } else {
-                    format!("{prefix}.{name}")
+        let worker = thread::spawn(move || {
+            let mut session = EtwSession::new();
+            let ancillary = session.ancillary_data();
+            let decoder = Rc::new(RefCell::new(TdhDecoder::new()));
+
+            // Wide event: capture every event from the provider (any ID), at
+            // verbose level with all keywords enabled.
+            let mut event = Event::for_etw(0, "Event".to_string(), guid, LEVEL_VERBOSE, u64::MAX);
+            event.set_id_wild_card_flag();
+
+            event.add_callback(move |_data| {
+                let ancillary = ancillary.borrow();
+                let record = match ancillary.record() {
+                    Some(record) => record,
+                    None => return Ok(()),
                 };
 
-                if is_struct {
-                    let start = unsafe { prop.Anonymous1.structType.StructStartIndex } as usize;
-                    let count = unsafe { prop.Anonymous1.structType.NumOfStructMembers } as usize;
-                    let child_indices: Vec<usize> = (start..start + count).collect();
-                    visit(
-                        props,
-                        &child_indices,
-                        &full_path,
-                        base,
-                        data,
-                        data_pos,
-                        result,
-                    );
-                } else {
-                    let in_type = unsafe { prop.Anonymous1.nonStructType.InType };
-                    let (value, size) = read_leaf_value(data, *data_pos, in_type);
-                    result.insert(full_path, value);
-                    *data_pos += size;
+                let mut decoder = decoder.borrow_mut();
+                if let Ok(decoded) = decoder.decode(record) {
+                    let descriptor = record.EventHeader.EventDescriptor;
+                    let captured = CapturedEvent {
+                        event_name: decoded.event_name.unwrap_or_default().to_string(),
+                        level: descriptor.Level,
+                        keyword: descriptor.Keyword,
+                        properties: build_properties(&decoded),
+                    };
+                    let _ = tx.try_send(captured);
+                }
+
+                Ok(())
+            });
+
+            session.add_event(event, None);
+
+            // Signal the main thread that one_collect setup is complete and
+            // we are about to call parse_until (StartTrace/EnableTraceEx2).
+            let _ = session_ready_tx.send(());
+
+            let _ = session.parse_until(&session_name, move || stop_worker.load(Ordering::Relaxed));
+        });
+
+        // Wait for the worker to signal it is about to call parse_until, then
+        // probe the session deterministically: emit a uniquely-named event in a
+        // loop until one round-trips back through the capture channel, which
+        // proves StartTrace/EnableTraceEx2 has completed in the kernel.
+        session_ready_rx
+            .recv_timeout(Duration::from_secs(5))
+            .expect("ETW worker thread failed to signal readiness within 5 seconds");
+
+        // Probe event name: distinct from every real test event name ("Log", etc.)
+        // so it can be identified and drained without ambiguity.
+        const PROBE_EVENT_NAME: &str = "__etw_session_probe__";
+        const PROBE_DEADLINE: Duration = Duration::from_secs(10);
+        // How long to wait for a probe event before re-emitting and retrying.
+        const PROBE_POLL_INTERVAL: Duration = Duration::from_millis(50);
+
+        // Register a second provider instance under the same name/GUID so the
+        // capture session will deliver our probe events through `rx`.  If
+        // registration fails silently (register returns ()) the probe loop
+        // will time out and panic with a clear message via PROBE_DEADLINE.
+        let probe_provider = Arc::pin(tld::Provider::new(provider_name, &tld::Provider::options()));
+        // SAFETY: probe_provider is kept alive until unregister() below.
+        unsafe { probe_provider.as_ref().register() };
+
+        let mut probe_event_builder = tld::EventBuilder::new();
+        let probe_start = std::time::Instant::now();
+        loop {
+            // Emit a probe event; ETW drops it silently if the session is not
+            // yet live, and delivers it once StartTrace/EnableTraceEx2 is done.
+            probe_event_builder.reset(PROBE_EVENT_NAME, tld::Level::Verbose, 1, 0);
+            probe_event_builder.write(&probe_provider, None, None);
+
+            match rx.recv_timeout(PROBE_POLL_INTERVAL) {
+                Ok(evt) if evt.event_name == PROBE_EVENT_NAME => break,
+                // Non-probe events are discarded.  Real test events cannot
+                // arrive here because start_etw_trace returns before the
+                // caller creates its SdkLoggerProvider, and tests are run
+                // single-threaded (--test-threads=1).
+                Ok(_) => continue,
+                Err(mpsc::RecvTimeoutError::Disconnected) => {
+                    panic!("ETW capture channel disconnected during probe")
+                }
+                Err(mpsc::RecvTimeoutError::Timeout) => {
+                    if probe_start.elapsed() >= PROBE_DEADLINE {
+                        panic!(
+                            "ETW session failed to become ready within {} s \
+                             (probe provider registration may have also failed)",
+                            PROBE_DEADLINE.as_secs()
+                        );
+                    }
                 }
             }
         }
 
-        let top_level_indices: Vec<usize> = (0..top_level_count).collect();
-        visit(
-            props,
-            &top_level_indices,
-            "",
-            base,
-            data,
-            &mut data_pos,
-            &mut result,
+        let unregister_result = probe_provider.as_ref().unregister();
+        assert_eq!(
+            unregister_result, 0,
+            "Failed to unregister ETW probe provider (Win32 error {unregister_result})"
         );
 
-        result
-    }
+        // Drain any in-flight probe events that arrived after the first
+        // round-trip.  Multiple probes may have been emitted before the session
+        // became live; draining them here ensures the caller's receiver only
+        // sees real test events.
+        while rx.try_recv().is_ok() {}
 
-    #[allow(unsafe_op_in_unsafe_fn)]
-    unsafe fn read_wide_string_at(base: *const u8, offset: usize) -> String {
-        let ptr = base.add(offset) as *const u16;
-        let mut len = 0;
-        while *ptr.add(len) != 0 {
-            len += 1;
-        }
-        String::from_utf16_lossy(std::slice::from_raw_parts(ptr, len))
-    }
-
-    /// Read a leaf value from the data buffer based on its TDH InType.
-    ///
-    /// Returns (raw_bytes, total_bytes_consumed_from_buffer).
-    fn read_leaf_value(data: &[u8], pos: usize, in_type: u16) -> (Vec<u8>, usize) {
-        match in_type {
-            // Counted types: u16 byte-length prefix + data bytes
-            // 1=UnicodeString, 2=AnsiString, 14=Binary,
-            // 300=CountedString(UTF-16), 301=CountedAnsiString(UTF-8)
-            1 | 2 | 14 | 300 | 301 => {
-                let byte_len = u16::from_le_bytes([data[pos], data[pos + 1]]) as usize;
-                (data[pos + 2..pos + 2 + byte_len].to_vec(), 2 + byte_len)
-            }
-            // Fixed-size types
-            3 | 4 => (data[pos..pos + 1].to_vec(), 1), // Int8 / UInt8
-            5 | 6 => (data[pos..pos + 2].to_vec(), 2), // Int16 / UInt16
-            7 | 8 | 13 => (data[pos..pos + 4].to_vec(), 4), // Int32 / UInt32 / Bool32
-            9 | 10 => (data[pos..pos + 8].to_vec(), 8), // Int64 / UInt64
-            11 => (data[pos..pos + 4].to_vec(), 4),    // Float32
-            12 => (data[pos..pos + 8].to_vec(), 8),    // Float64
-            _ => panic!("Unsupported TDH InType: {in_type}"),
-        }
-    }
-
-    /// Start a ferrisetw UserTrace session for the given provider name.
-    fn start_etw_trace(
-        provider_name: &str,
-    ) -> (ferrisetw::trace::UserTrace, mpsc::Receiver<CapturedEvent>) {
-        use windows::Win32::System::Diagnostics::Etw::EVENT_RECORD;
-
-        let guid_bytes = tld::Guid::from_name(provider_name).to_utf8_bytes();
-        let guid_str = std::str::from_utf8(&guid_bytes).unwrap();
-
-        let (tx, rx) = mpsc::sync_channel::<CapturedEvent>(16);
-
-        let etw_provider = ferrisetw::provider::Provider::by_guid(guid_str)
-            .add_callback(
-                move |record: &EventRecord, _schema_locator: &SchemaLocator| {
-                    let er_ptr = record as *const EventRecord as *const EVENT_RECORD;
-                    let properties = unsafe { parse_event_properties(er_ptr) };
-
-                    let captured = CapturedEvent {
-                        event_name: record.event_name(),
-                        level: record.level(),
-                        keyword: record.keyword(),
-                        properties,
-                    };
-                    let _ = tx.try_send(captured);
-                },
-            )
-            .build();
-
-        let trace = UserTrace::new()
-            .enable(etw_provider)
-            .start_and_process()
-            .unwrap();
-
-        (trace, rx)
+        (
+            EtwTrace {
+                stop,
+                worker: Mutex::new(Some(worker)),
+            },
+            rx,
+        )
     }
 
     /// Receive a captured event with the given event name, within a timeout.
@@ -353,7 +369,7 @@ mod integration_tests {
     //
     // These tests emit logs via the public OTel Logger API
     // (SdkLoggerProvider → Logger → Processor → ETW) and capture the
-    // resulting ETW events with ferrisetw for payload validation.
+    // resulting ETW events with one_collect for payload validation.
     // -----------------------------------------------------------------------
 
     /// Full test: validates PartA, PartB, and PartC with multiple attribute types.

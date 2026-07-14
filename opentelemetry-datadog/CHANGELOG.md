@@ -2,6 +2,14 @@
 
 ## vNext
 
+- **DEPRECATED**: This crate is now deprecated and will be removed from this
+  repository in a future release. Datadog ships a first-party integration,
+  [`dd-trace-rs`](https://github.com/DataDog/dd-trace-rs), built on top of
+  `opentelemetry_sdk`. New users should adopt `dd-trace-rs`, and existing users
+  are encouraged to migrate. See
+  [issue #609](https://github.com/open-telemetry/opentelemetry-rust-contrib/issues/609)
+  for context.
+
 ## v0.20.0
 
 Released 2026-May-13

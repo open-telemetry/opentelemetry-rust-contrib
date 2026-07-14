@@ -4,18 +4,26 @@
 
 [splash]: https://raw.githubusercontent.com/open-telemetry/opentelemetry-rust/main/assets/logo-text.png
 
-| Status        |           |
-| ------------- |-----------|
-| Stability     | alpha     |
-| Owners        | TBD       |
+> **⚠️ DEPRECATED** — This crate is deprecated and will be removed from this
+> repository. It has been unmaintained, and no committed maintainer stepped up
+> in response to [issue #609]. Users should migrate to OTLP — Google Cloud
+> supports OTLP ingestion directly, and the OpenTelemetry Collector ships a
+> [`googlecloud` exporter]. The last release of this crate on crates.io will
+> remain available, but no further releases are planned.
+>
+> [issue #609]: https://github.com/open-telemetry/opentelemetry-rust-contrib/issues/609
+> [`googlecloud` exporter]: https://github.com/open-telemetry/opentelemetry-collector-contrib/tree/main/exporter/googlecloudexporter
+
+| Status        |                |
+| ------------- |----------------|
+| Stability     | deprecated     |
+| Owners        | _unmaintained_ |
 
 This crate provides an `opentelemetry` exporter for use with Google Stackdriver trace. It uses gRPC to send tracing spans.
 Contributions are welcome.
 
 [![Crates.io: opentelemetry-stackdriver](https://img.shields.io/crates/v/opentelemetry-stackdriver.svg)](https://crates.io/crates/opentelemetry-stackdriver)
 [![Documentation](https://docs.rs/opentelemetry-stackdriver/badge.svg)](https://docs.rs/opentelemetry-stackdriver)
-[![LICENSE](https://img.shields.io/crates/l/opentelemetry-stackdriver)](./LICENSE)
-[![GitHub Actions CI](https://github.com/open-telemetry/opentelemetry-rust-contrib/workflows/CI/badge.svg)](https://github.com/open-telemetry/opentelemetry-rust-contrib/actions?query=workflow%3ACI+branch%3Amain)
 [![Slack](https://img.shields.io/badge/slack-@cncf/otel/rust-brightgreen.svg?logo=slack)](https://cloud-native.slack.com/archives/C03GDP0H023)
 
 ## Propagator

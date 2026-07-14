@@ -33,6 +33,13 @@ mod tests {
     // Tests that mutate IDENTITY_ENDPOINT / IDENTITY_HEADER must hold this lock.
     static ENV_LOCK: Mutex<()> = Mutex::const_new(());
 
+    /// Install a rustls CryptoProvider for tests that use certificate auth.
+    /// In production, callers must install their own provider (e.g. rustls-symcrypt).
+    #[cfg(feature = "tls-rustls")]
+    fn ensure_crypto_provider() {
+        let _ = rustls::crypto::ring::default_provider().install_default();
+    }
+
     struct EnvVarGuard {
         previous: Vec<(&'static str, Option<String>)>,
     }
@@ -380,6 +387,8 @@ mod tests {
     #[cfg_attr(target_os = "macos", ignore)] // cert generated not compatible with macOS
     #[tokio::test]
     async fn get_ingestion_info_mocked() {
+        #[cfg(feature = "tls-rustls")]
+        ensure_crypto_provider();
         let mock_server = MockServer::start().await;
         let (mock_response, jwt_endpoint, valid_token) = config_service_response();
 
@@ -551,6 +560,8 @@ mod tests {
 
     #[tokio::test]
     async fn tls_rejects_untrusted_runtime_generated_ca() {
+        #[cfg(feature = "tls-rustls")]
+        ensure_crypto_provider();
         let tls_material = generate_ca_signed_tls_material();
         let (response_body, _, _) = config_service_response();
         let tls_server = spawn_tls_config_service(
@@ -592,6 +603,8 @@ mod tests {
 
     #[tokio::test]
     async fn tls_accepts_runtime_generated_ca() {
+        #[cfg(feature = "tls-rustls")]
+        ensure_crypto_provider();
         let tls_material = generate_ca_signed_tls_material();
         let (response_body, jwt_endpoint, valid_token) = config_service_response();
         let tls_server = spawn_tls_config_service(
@@ -640,6 +653,8 @@ mod tests {
     #[cfg_attr(target_os = "macos", ignore)] // cert generated not compatible with macOS
     #[tokio::test]
     async fn error_handling_with_non_success_status() {
+        #[cfg(feature = "tls-rustls")]
+        ensure_crypto_provider();
         let mock_server = MockServer::start().await;
 
         Mock::given(method("GET"))
@@ -685,6 +700,8 @@ mod tests {
     #[cfg_attr(target_os = "macos", ignore)] // cert generated not compatible with macOS
     #[tokio::test]
     async fn missing_ingestion_gateway_info() {
+        #[cfg(feature = "tls-rustls")]
+        ensure_crypto_provider();
         let mock_server = MockServer::start().await;
 
         // Response without IngestionGatewayInfo
@@ -735,6 +752,8 @@ mod tests {
     #[cfg_attr(target_os = "macos", ignore)] // cert generated not compatible with macOS
     #[tokio::test]
     async fn invalid_certificate_path() {
+        #[cfg(feature = "tls-rustls")]
+        ensure_crypto_provider();
         let config = GenevaConfigClientConfig {
             endpoint: "https://example.com".to_string(),
             environment: "env".to_string(),

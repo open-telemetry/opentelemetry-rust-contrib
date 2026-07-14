@@ -13,8 +13,6 @@ Community supported Resource detectors implementations for applications instrume
 
 [![Crates.io: opentelemetry-resource-detectors](https://img.shields.io/crates/v/opentelemetry-resource-detectors.svg)](https://crates.io/crates/opentelemetry-resource-detectors)
 [![Documentation](https://docs.rs/opentelemetry-resource-detectors/badge.svg)](https://docs.rs/opentelemetry-resource-detectors)
-[![LICENSE](https://img.shields.io/crates/l/opentelemetry-resource-detectors)](./LICENSE)
-[![GitHub Actions CI](https://github.com/open-telemetry/opentelemetry-rust-contrib/workflows/CI/badge.svg)](https://github.com/open-telemetry/opentelemetry-rust-contrib/actions?query=workflow%3ACI+branch%3Amain)
 [![Slack](https://img.shields.io/badge/slack-@cncf/otel/rust-brightgreen.svg?logo=slack)](https://cloud-native.slack.com/archives/C03GDP0H023)
 
 ## Overview
@@ -25,9 +23,11 @@ Community supported Resource detectors implementations for applications instrume
 
 | Detector                | Implemented Resources             | OS Supported | Semantic Conventions                                                                      |
 |-------------------------|-----------------------------------|--------------|-------------------------------------------------------------------------------------------|
-| ProcessResourceDetector | PROCESS_COMMAND_ARGS, PROCESS_PID | all          | https://github.com/open-telemetry/semantic-conventions/blob/main/docs/resource/process.md |
-| OsResourceDetector      | OS_TYPE                           | all          | https://github.com/open-telemetry/semantic-conventions/blob/main/docs/resource/os.md      |
-| HostResourceDetector    | HOST_ID                           | linux        | https://github.com/open-telemetry/semantic-conventions/blob/main/docs/resource/host.md    |
-| HostResourceDetector    | HOST_ARCH                         | all          | https://github.com/open-telemetry/semantic-conventions/blob/main/docs/resource/host.md    |
-| K8sResourceDetector     | K8S_NAMESPACE_NAME                | all          | https://github.com/open-telemetry/semantic-conventions/blob/main/docs/resource/k8s.md     |
-| K8sResourceDetector     | K8S_POD_NAME                      | all          | https://github.com/open-telemetry/semantic-conventions/blob/main/docs/resource/k8s.md     |
+| ProcessResourceDetector           | PROCESS_COMMAND_ARGS, PROCESS_PID | all          | https://github.com/open-telemetry/semantic-conventions/blob/main/docs/resource/process.md |
+| OsResourceDetector                | OS_TYPE                           | all          | https://github.com/open-telemetry/semantic-conventions/blob/main/docs/resource/os.md      |
+| HostResourceDetector              | HOST_ID                           | linux        | https://github.com/open-telemetry/semantic-conventions/blob/main/docs/resource/host.md    |
+| HostResourceDetector              | HOST_ARCH, HOST_NAME              | all          | https://github.com/open-telemetry/semantic-conventions/blob/main/docs/resource/host.md    |
+| K8sResourceDetector               | K8S_NAMESPACE_NAME                | all          | https://github.com/open-telemetry/semantic-conventions/blob/main/docs/resource/k8s.md     |
+| K8sResourceDetector               | K8S_POD_NAME                      | all          | https://github.com/open-telemetry/semantic-conventions/blob/main/docs/resource/k8s.md     |
+| ContainerResourceDetector         | CONTAINER_ID                      | linux        | https://github.com/open-telemetry/semantic-conventions/blob/main/docs/resource/container.md |
+| ServiceInstanceIdResourceDetector | SERVICE_INSTANCE_ID               | all          | https://github.com/open-telemetry/semantic-conventions/blob/main/docs/resource/service.md |

@@ -25,6 +25,14 @@ pub struct EncodedBatch {
     pub row_count: usize,
 }
 
+impl EncodedBatch {
+    /// Returns the size in bytes of the compressed payload uploaded to Geneva.
+    #[must_use]
+    pub fn compressed_size(&self) -> usize {
+        self.data.len()
+    }
+}
+
 /// Configuration for GenevaClient (user-facing)
 #[derive(Clone, Debug)]
 pub struct GenevaClientConfig {

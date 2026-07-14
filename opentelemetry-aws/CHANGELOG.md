@@ -5,6 +5,7 @@
 ### Added
 
 - Read `cloud.account.id` from symlink created by the OTel Lambda Extension in the Lambda resource detector
+- `XrayExtractor` has been added to extract the X-Ray Trace ID from the `x-amzn-trace-id` HTTP header or the `_X_AMZN_TRACE_ID` environment variable as a fallback.
 
 ### Changed
 

@@ -6,7 +6,9 @@ members = [
     "opentelemetry-datadog",
     "opentelemetry-etw-logs",
     "opentelemetry-etw-metrics",
+    "opentelemetry-etw-traces",
     "opentelemetry-instrumentation-actix-web",
+    "opentelemetry-instrumentation-actix-web/examples/*",
     "opentelemetry-instrumentation-tower",
     "opentelemetry-instrumentation-tower/examples/*",
     "opentelemetry-resource-detectors",
@@ -34,6 +36,7 @@ debug = 1
 opentelemetry = "0.32"
 opentelemetry-appender-tracing = "0.32"
 opentelemetry-http = "0.32"
+opentelemetry-otlp = { version = "0.32", default-features = false }
 opentelemetry-proto = { version = "0.32", default-features = false }
 opentelemetry_sdk = { version = "0.32", default-features = false }
 opentelemetry-stdout = { version = "0.32", default-features = false }

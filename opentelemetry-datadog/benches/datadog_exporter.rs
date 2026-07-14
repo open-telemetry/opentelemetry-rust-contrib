@@ -1,3 +1,5 @@
+#![allow(deprecated)]
+
 use std::time::{Duration, SystemTime};
 
 use bytes::Bytes;

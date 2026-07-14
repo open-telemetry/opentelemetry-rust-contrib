@@ -46,10 +46,10 @@ jobs:
         sudo rm -rf /usr/local/lib/android
         sudo rm -rf /usr/share/dotnet
         df -h
-    - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+    - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
       with:
         submodules: true
-    - uses: dtolnay/rust-toolchain@3c5f7ea28cd621ae0bf5283f0e981fb97b8a7af9
+    - uses: dtolnay/rust-toolchain@fa04a1451ff1842e2626ccb99004d0195b455a88
       with:
         toolchain: ${{ matrix.rust }}
         components: rustfmt
@@ -72,52 +72,20 @@ jobs:
       uses: step-security/harden-runner@9af89fc71515a100421586dfdb3dc9c984fbf411 # v2.19.4
       with:
         egress-policy: audit
-    - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+    - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
       with:
         submodules: true
-    - uses: dtolnay/rust-toolchain@3c5f7ea28cd621ae0bf5283f0e981fb97b8a7af9
+    - uses: dtolnay/rust-toolchain@fa04a1451ff1842e2626ccb99004d0195b455a88
       with:
         toolchain: stable
         components: llvm-tools-preview
     - name: cargo install cargo-llvm-cov
-      uses: taiki-e/install-action@e49978b799e49ff429d162b7a30601a569ab6538 # v2.81.1
+      uses: taiki-e/install-action@16b05812d776ae1dfaabc8277e421fb6d2506419 # v2.82.7
       with:
         tool: cargo-llvm-cov
     - name: Check user_events kernel support
       run: |
         sudo cat /sys/kernel/tracing/user_events_status || { echo "user_events not supported on this runner"; exit 1; }
-    - name: Install perf
-      run: |
-        sudo apt-get update
-        # The Azure runner's kernel (e.g. 6.14-azure) ships linux-tools packages
-        # that are stubs without actual perf binaries. Install linux-tools-generic
-        # which provides a real perf binary for the base Ubuntu kernel. The perf
-        # binary is backwards-compatible for tracepoint recording.
-        sudo apt-get install -y linux-tools-generic
-        # The /usr/bin/perf wrapper rejects kernel version mismatches.
-        # Replace it with the actual perf binary so it works under sudo.
-        # Search broadly since the path varies by Ubuntu version:
-        #   /usr/lib/linux-tools/<ver>/perf or /usr/lib/linux-tools-<ver>/perf
-        PERF_BIN=$(find /usr/lib/ -maxdepth 3 -name "perf" -type f -executable 2>/dev/null | grep -v python | head -1)
-        if [ -n "$PERF_BIN" ]; then
-          echo "Replacing /usr/bin/perf wrapper with $PERF_BIN"
-          sudo cp -f "$PERF_BIN" /usr/bin/perf
-        else
-          echo "ERROR: No perf binary found. Installed files:"
-          dpkg -L linux-tools-6.8.0-106 2>/dev/null || true
-          find /usr/lib/ -maxdepth 3 -name "perf" 2>/dev/null || true
-          exit 1
-        fi
-        perf version
-    - name: Build and install perf-decode
-      run: |
-        sudo apt-get install -y cmake build-essential
-        git clone https://github.com/microsoft/LinuxTracepoints.git
-        cd LinuxTracepoints
-        mkdir build && cd build
-        cmake ..
-        make -j$(nproc)
-        sudo cp bin/perf-decode /usr/local/bin/
     - name: Run user_events integration tests (trace)
       run: sudo -E $HOME/.cargo/bin/cargo llvm-cov --no-report --manifest-path opentelemetry-user-events-trace/Cargo.toml --all-features -- --ignored --nocapture --test-threads=1
     - name: Run user_events integration tests (logs)
@@ -141,10 +109,10 @@ jobs:
       uses: step-security/harden-runner@9af89fc71515a100421586dfdb3dc9c984fbf411 # v2.19.4
       with:
         egress-policy: audit
-    - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+    - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
       with:
         submodules: true
-    - uses: dtolnay/rust-toolchain@3c5f7ea28cd621ae0bf5283f0e981fb97b8a7af9
+    - uses: dtolnay/rust-toolchain@fa04a1451ff1842e2626ccb99004d0195b455a88
       with:
         toolchain: stable
     - uses: arduino/setup-protoc@c65c819552d16ad3c9b72d9dfd5ba5237b9c906b # v3.0.0
@@ -159,21 +127,23 @@ jobs:
       uses: step-security/harden-runner@9af89fc71515a100421586dfdb3dc9c984fbf411 # v2.19.4
       with:
         egress-policy: audit
-    - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+    - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
       with:
         submodules: true
-    - uses: dtolnay/rust-toolchain@3c5f7ea28cd621ae0bf5283f0e981fb97b8a7af9
+    - uses: dtolnay/rust-toolchain@fa04a1451ff1842e2626ccb99004d0195b455a88
       with:
         toolchain: stable
         components: llvm-tools-preview
     - name: cargo install cargo-llvm-cov
-      uses: taiki-e/install-action@e49978b799e49ff429d162b7a30601a569ab6538 # v2.81.1
+      uses: taiki-e/install-action@16b05812d776ae1dfaabc8277e421fb6d2506419 # v2.82.7
       with:
         tool: cargo-llvm-cov
     - name: Run ETW integration tests (logs)
       run: cargo llvm-cov --no-report --manifest-path opentelemetry-etw-logs/Cargo.toml --all-features -- --ignored --nocapture --test-threads=1
     - name: Run ETW integration tests (metrics)
       run: cargo llvm-cov --no-report --manifest-path opentelemetry-etw-metrics/Cargo.toml --all-features -- --ignored --nocapture --test-threads=1
+    - name: Run ETW integration tests (traces)
+      run: cargo llvm-cov --no-report --manifest-path opentelemetry-etw-traces/Cargo.toml --all-features -- --ignored --nocapture --test-threads=1
     - name: Generate lcov report
       run: cargo llvm-cov report --lcov --output-path lcov.info
     - name: Upload to codecov.io
@@ -194,10 +164,10 @@ jobs:
       with:
         egress-policy: audit
 
-    - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+    - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
       with:
         submodules: true
-    - uses: dtolnay/rust-toolchain@3c5f7ea28cd621ae0bf5283f0e981fb97b8a7af9
+    - uses: dtolnay/rust-toolchain@fa04a1451ff1842e2626ccb99004d0195b455a88
       with:
         toolchain: stable
         components: rustfmt,clippy
@@ -225,13 +195,13 @@ jobs:
         with:
           egress-policy: audit
 
-      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
           submodules: true
-      - uses: dtolnay/rust-toolchain@3c5f7ea28cd621ae0bf5283f0e981fb97b8a7af9
+      - uses: dtolnay/rust-toolchain@fa04a1451ff1842e2626ccb99004d0195b455a88
         with:
           toolchain: stable
-      - uses: taiki-e/install-action@e49978b799e49ff429d162b7a30601a569ab6538 # v2.81.1
+      - uses: taiki-e/install-action@16b05812d776ae1dfaabc8277e421fb6d2506419 # v2.82.7
         with:
           tool: cargo-msrv
       # cargo-msrv verify runs `cargo check` in workspace context for each crate.
@@ -269,13 +239,13 @@ jobs:
         with:
           egress-policy: audit
 
-      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
           submodules: true
-      - uses: dtolnay/rust-toolchain@3c5f7ea28cd621ae0bf5283f0e981fb97b8a7af9
+      - uses: dtolnay/rust-toolchain@fa04a1451ff1842e2626ccb99004d0195b455a88
         with:
           toolchain: 1.88.0
-      - uses: taiki-e/install-action@e49978b799e49ff429d162b7a30601a569ab6538 # v2.81.1
+      - uses: taiki-e/install-action@16b05812d776ae1dfaabc8277e421fb6d2506419 # v2.82.7
         with:
           tool: cargo-msrv
       - name: Check MSRV for Geneva crates
@@ -291,7 +261,7 @@ jobs:
         with:
           egress-policy: audit
 
-      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
       - uses: EmbarkStudios/cargo-deny-action@bb137d7af7e4fb67e5f82a49c4fce4fad40782fe # v2.0.20
         with:
           command: check advisories
@@ -303,8 +273,8 @@ jobs:
         uses: step-security/harden-runner@9af89fc71515a100421586dfdb3dc9c984fbf411 # v2.19.4
         with:
           egress-policy: audit
-      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
-      - uses: dtolnay/rust-toolchain@3c5f7ea28cd621ae0bf5283f0e981fb97b8a7af9
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+      - uses: dtolnay/rust-toolchain@fa04a1451ff1842e2626ccb99004d0195b455a88
         with:
           toolchain: stable
       - uses: arduino/setup-protoc@c65c819552d16ad3c9b72d9dfd5ba5237b9c906b # v3.0.0
@@ -324,10 +294,10 @@ jobs:
         with:
           egress-policy: audit
 
-      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
           submodules: true
-      - uses: dtolnay/rust-toolchain@3c5f7ea28cd621ae0bf5283f0e981fb97b8a7af9
+      - uses: dtolnay/rust-toolchain@fa04a1451ff1842e2626ccb99004d0195b455a88
         with:
           toolchain: stable
           components: llvm-tools-preview
@@ -335,7 +305,7 @@ jobs:
         with:
             repo-token: ${{ secrets.GITHUB_TOKEN }}
       - name: cargo install cargo-llvm-cov
-        uses: taiki-e/install-action@e49978b799e49ff429d162b7a30601a569ab6538 # v2.81.1
+        uses: taiki-e/install-action@16b05812d776ae1dfaabc8277e421fb6d2506419 # v2.82.7
         with:
           tool: cargo-llvm-cov
       - name: cargo generate-lockfile
@@ -356,13 +326,13 @@ jobs:
         with:
           egress-policy: audit
 
-      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
           submodules: true
-      - uses: dtolnay/rust-toolchain@3c5f7ea28cd621ae0bf5283f0e981fb97b8a7af9
+      - uses: dtolnay/rust-toolchain@fa04a1451ff1842e2626ccb99004d0195b455a88
         with:
           toolchain: stable
-      - uses: taiki-e/install-action@e49978b799e49ff429d162b7a30601a569ab6538 # v2.81.1
+      - uses: taiki-e/install-action@16b05812d776ae1dfaabc8277e421fb6d2506419 # v2.82.7
         with:
           tool: cargo-machete
       - name: cargo machete
@@ -376,13 +346,13 @@ jobs:
         with:
           egress-policy: audit
 
-      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
           submodules: true
-      - uses: dtolnay/rust-toolchain@3c5f7ea28cd621ae0bf5283f0e981fb97b8a7af9
+      - uses: dtolnay/rust-toolchain@fa04a1451ff1842e2626ccb99004d0195b455a88
         with:
           toolchain: stable
-      - uses: taiki-e/install-action@e49978b799e49ff429d162b7a30601a569ab6538 # v2.81.1
+      - uses: taiki-e/install-action@16b05812d776ae1dfaabc8277e421fb6d2506419 # v2.82.7
         with:
           tool: cargo-workspace-lints
       - name: cargo workspace-lints
