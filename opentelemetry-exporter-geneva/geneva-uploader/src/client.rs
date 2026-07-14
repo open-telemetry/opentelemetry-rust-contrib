@@ -432,11 +432,19 @@ mod tests {
 
     #[test]
     fn default_event_name_unwrap_or_prefers_override_and_falls_back() {
-        let configured = Some("AppLog");
-        let missing: Option<&str> = None;
+        let configured = maybe_event_name(true);
+        let missing = maybe_event_name(false);
 
         assert_eq!(configured.unwrap_or("Log"), "AppLog");
         assert_eq!(missing.unwrap_or("Log"), "Log");
+    }
+
+    fn maybe_event_name(configured: bool) -> Option<&'static str> {
+        if configured {
+            Some("AppLog")
+        } else {
+            None
+        }
     }
 
     #[test]
