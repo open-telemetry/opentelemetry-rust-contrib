@@ -3335,8 +3335,9 @@ mod tests {
         assert_eq!(batches.len(), 1);
         assert_eq!(batches[0].row_count, 1);
 
-        let without_obo = encode_log_batch_via_proto(&OtlpEncoder::new(), [log.clone()].iter(), &metadata)
-            .unwrap();
+        let without_obo =
+            encode_log_batch_via_proto(&OtlpEncoder::new(), [log.clone()].iter(), &metadata)
+                .unwrap();
         assert_ne!(
             batches[0].metadata.schema_ids, without_obo[0].metadata.schema_ids,
             "table-keyed OBO config should change the encoded schema"
@@ -3437,8 +3438,9 @@ mod tests {
         assert_eq!(batches.len(), 1);
         assert_eq!(batches[0].row_count, 1);
 
-        let without_obo = encode_log_batch_via_proto(&OtlpEncoder::new(), [log.clone()].iter(), &metadata)
-            .unwrap();
+        let without_obo =
+            encode_log_batch_via_proto(&OtlpEncoder::new(), [log.clone()].iter(), &metadata)
+                .unwrap();
         assert_ne!(
             batches[0].metadata.schema_ids, without_obo[0].metadata.schema_ids,
             "table-keyed OBO should be visible in the encoded schema"

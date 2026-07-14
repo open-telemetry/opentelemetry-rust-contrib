@@ -130,8 +130,12 @@ async fn init_client() -> Result<(GenevaClient, Option<String>), Box<dyn std::er
             role_name: std::env::var("GENEVA_ROLE").unwrap_or_else(|_| "test".to_string()),
             role_instance: std::env::var("GENEVA_INSTANCE").unwrap_or_else(|_| "test".to_string()),
             msi_resource: None,
-            logs: LogsConfig { default_event_name: None },
-            spans: TracesConfig { default_event_name: None },
+            logs: LogsConfig {
+                default_event_name: None,
+            },
+            spans: TracesConfig {
+                default_event_name: None,
+            },
             obo_event_map: None,
         };
 
@@ -152,8 +156,12 @@ async fn init_client() -> Result<(GenevaClient, Option<String>), Box<dyn std::er
             role_name: "test".to_string(),
             role_instance: "test".to_string(),
             msi_resource: None,
-            logs: LogsConfig { default_event_name: None },
-            spans: TracesConfig { default_event_name: None },
+            logs: LogsConfig {
+                default_event_name: None,
+            },
+            spans: TracesConfig {
+                default_event_name: None,
+            },
             obo_event_map: None,
         };
 
@@ -210,8 +218,12 @@ async fn init_client() -> Result<(GenevaClient, Option<String>), Box<dyn std::er
             role_name: "test".to_string(),
             role_instance: "test".to_string(),
             msi_resource: None,
-            logs: LogsConfig { default_event_name: None },
-            spans: TracesConfig { default_event_name: None },
+            logs: LogsConfig {
+                default_event_name: None,
+            },
+            spans: TracesConfig {
+                default_event_name: None,
+            },
             obo_event_map: None,
         };
 

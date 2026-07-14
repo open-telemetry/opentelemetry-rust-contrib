@@ -113,10 +113,18 @@ pub struct GenevaClient {
 
 impl GenevaClient {
     pub fn new(cfg: GenevaClientConfig) -> Result<Self, String> {
-        let log_table_name: Arc<str> =
-            cfg.logs.default_event_name.as_deref().unwrap_or("Log").into();
-        let span_table_name: Arc<str> =
-            cfg.spans.default_event_name.as_deref().unwrap_or("Span").into();
+        let log_table_name: Arc<str> = cfg
+            .logs
+            .default_event_name
+            .as_deref()
+            .unwrap_or("Log")
+            .into();
+        let span_table_name: Arc<str> = cfg
+            .spans
+            .default_event_name
+            .as_deref()
+            .unwrap_or("Span")
+            .into();
 
         info!(
             name: "client.new",
