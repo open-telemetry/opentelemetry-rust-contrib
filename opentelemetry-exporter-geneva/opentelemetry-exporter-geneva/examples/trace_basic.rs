@@ -1,7 +1,7 @@
 //! run with `$ cargo run --example trace_basic
 
 use geneva_uploader::client::{GenevaClient, GenevaClientConfig};
-use geneva_uploader::AuthMethod;
+use geneva_uploader::{AuthMethod, LogsConfig, TracesConfig};
 use opentelemetry::{global, trace::Tracer, KeyValue};
 use opentelemetry_exporter_geneva::GenevaTraceExporter;
 use opentelemetry_sdk::trace::{SdkTracerProvider, SimpleSpanProcessor};
@@ -57,6 +57,12 @@ async fn main() {
         role_name,
         role_instance,
         msi_resource: None,
+        logs: LogsConfig {
+            default_event_name: None,
+        },
+        spans: TracesConfig {
+            default_event_name: None,
+        },
         obo_event_map: None,
     };
 
