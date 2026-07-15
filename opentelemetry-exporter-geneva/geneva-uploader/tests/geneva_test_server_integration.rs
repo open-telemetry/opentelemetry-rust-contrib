@@ -1,10 +1,11 @@
 use geneva_test_server::testing::TestServer;
-use geneva_uploader::{AuthMethod, GenevaClient, GenevaClientConfig};
+use geneva_uploader::{AuthMethod, GenevaClient, GenevaClientConfig, LogsConfig, TracesConfig};
 use opentelemetry_proto::tonic::collector::logs::v1::ExportLogsServiceRequest;
 use opentelemetry_proto::tonic::common::v1::{any_value::Value, AnyValue, KeyValue};
 use opentelemetry_proto::tonic::logs::v1::{LogRecord, ResourceLogs, ScopeLogs};
 use otap_df_pdata::views::otlp::bytes::logs::RawLogsData;
 use prost::Message as _;
+use std::collections::HashSet;
 
 #[tokio::test]
 #[ignore = "run by the dedicated geneva-uploader test-server CI job"]
@@ -22,6 +23,12 @@ async fn uploader_batch_is_accepted_and_decoded_by_test_server() {
         role_name: "checkout".to_string(),
         role_instance: "instance-1".to_string(),
         msi_resource: None,
+        logs: LogsConfig {
+            default_event_name: None,
+        },
+        spans: TracesConfig {
+            default_event_name: None,
+        },
         obo_event_map: None,
     })
     .expect("client should initialize");
@@ -51,9 +58,9 @@ async fn uploader_batch_is_accepted_and_decoded_by_test_server() {
     let request_bytes = request.encode_to_vec();
     let request_view = RawLogsData::new(&request_bytes);
 
-    let detail = upload_single_batch_and_wait(&client, &server, &request_view).await;
+    let detail = upload_single_batch_and_wait(&client, &server, &request_view, &[]).await;
     assert_eq!(detail["decode_status"], "decoded");
-    assert_eq!(detail["event_name"], "CheckoutEvent");
+    assert_eq!(detail["event_name"], "Log");
     assert_eq!(detail["row_count"], 1);
 
     let records = detail["records"].as_array().expect("records array");
@@ -64,6 +71,10 @@ async fn uploader_batch_is_accepted_and_decoded_by_test_server() {
     assert_eq!(payload["body"], "checkout failed");
     assert_eq!(payload["operation"], "checkout");
     assert_eq!(payload["result"], 127);
+    let first_request_id = detail["request_id"]
+        .as_str()
+        .expect("first request id")
+        .to_string();
 
     let common_schema_request = ExportLogsServiceRequest {
         resource_logs: vec![ResourceLogs {
@@ -93,13 +104,15 @@ async fn uploader_batch_is_accepted_and_decoded_by_test_server() {
     let common_schema_request_bytes = common_schema_request.encode_to_vec();
     let common_schema_request_view = RawLogsData::new(&common_schema_request_bytes);
 
-    let common_schema_detail =
-        upload_single_batch_and_wait(&client, &server, &common_schema_request_view).await;
+    let common_schema_detail = upload_single_batch_and_wait(
+        &client,
+        &server,
+        &common_schema_request_view,
+        &[first_request_id.as_str()],
+    )
+    .await;
     assert_eq!(common_schema_detail["decode_status"], "decoded");
-    assert_eq!(
-        common_schema_detail["event_name"],
-        "CommonSchemaCheckoutEvent"
-    );
+    assert_eq!(common_schema_detail["event_name"], "Log");
     assert_eq!(common_schema_detail["row_count"], 1);
 
     let records = common_schema_detail["records"]
@@ -120,6 +133,7 @@ async fn upload_single_batch_and_wait(
     client: &GenevaClient,
     server: &TestServer,
     request_view: &RawLogsData<'_>,
+    exclude_request_ids: &[&str],
 ) -> serde_json::Value {
     let batches = client
         .encode_and_compress_logs(request_view)
@@ -130,7 +144,49 @@ async fn upload_single_batch_and_wait(
         .await
         .expect("batch should upload");
 
-    server.wait_for_request(&batches[0].event_name).await
+    let excluded: HashSet<&str> = exclude_request_ids.iter().copied().collect();
+    let deadline = tokio::time::Instant::now() + std::time::Duration::from_secs(5);
+    let http = reqwest::Client::new();
+    loop {
+        let list = http
+            .get(format!(
+                "{}/api/v1/debug/requests?event={}",
+                server.base_url(),
+                batches[0].event_name
+            ))
+            .send()
+            .await
+            .expect("list requests")
+            .json::<serde_json::Value>()
+            .await
+            .expect("decode request list");
+
+        if let Some(request_id) = list["items"].as_array().and_then(|items| {
+            items
+                .iter()
+                .filter_map(|item| item["request_id"].as_str())
+                .find(|id| !excluded.contains(*id))
+        }) {
+            let detail = http
+                .get(format!(
+                    "{}/api/v1/debug/requests/{request_id}/wait",
+                    server.base_url()
+                ))
+                .send()
+                .await
+                .expect("wait request")
+                .json::<serde_json::Value>()
+                .await
+                .expect("decode request detail");
+            return detail;
+        }
+
+        assert!(
+            tokio::time::Instant::now() < deadline,
+            "request was not observed before timeout"
+        );
+        tokio::time::sleep(std::time::Duration::from_millis(25)).await;
+    }
 }
 
 fn string_attr(key: &str, value: &str) -> KeyValue {
