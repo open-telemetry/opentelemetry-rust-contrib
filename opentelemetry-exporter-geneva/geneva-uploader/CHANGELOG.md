@@ -11,6 +11,7 @@
   to `4f522d2e` so consumers can unify on a single `otap-df-pdata-views`
   version and avoid duplicate `LogsDataView` trait errors. API-compatible;
   the view trait signatures are unchanged.
+- `GenevaClientConfig` now applies signal-specific defaults consistently on emitted batches: when `logs.default_event_name` / `spans.default_event_name` is set, encoded batches use that value as `event_name`; when unset, they fall back to `Log` and `Span` respectively.
 
 ## [0.5.0] - 2026-04-13
 

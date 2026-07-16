@@ -344,6 +344,12 @@ mod tests {
             }
 
             let request = String::from_utf8_lossy(&request);
+            if request.trim().is_empty() {
+                // Some failure-path tests (for example, untrusted CA) can
+                // establish/tear down the socket without sending an HTTP
+                // request body. Do not fail those tests on an empty request.
+                return;
+            }
             assert!(
                 request.starts_with("GET /api/agent/v3/mockenv/mockacct/MonitoringStorageKeys/?"),
                 "unexpected request: {request}",
