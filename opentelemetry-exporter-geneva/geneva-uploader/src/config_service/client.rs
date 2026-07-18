@@ -1170,8 +1170,8 @@ fn build_rustls_client_config(
 
     #[cfg(test)]
     if let Some(root_ca_pem) = _test_root_ca_pem {
-        let mut reader = std::io::BufReader::new(root_ca_pem);
-        for cert in rustls_pemfile::certs(&mut reader) {
+        use rustls_pki_types::pem::PemObject;
+        for cert in rustls_pki_types::CertificateDer::pem_slice_iter(root_ca_pem) {
             let cert = cert.map_err(|e| GenevaConfigClientError::Certificate(e.to_string()))?;
             roots
                 .add(cert)

@@ -28,8 +28,6 @@ This user_events exporter enables applications to use OpenTelemetry API to captu
 
 [![Crates.io: opentelemetry-user-events-trace](https://img.shields.io/crates/v/opentelemetry-user-events-trace.svg)](https://crates.io/crates/opentelemetry-user-events-trace)
 [![Documentation](https://docs.rs/opentelemetry-user-events-trace/badge.svg)](https://docs.rs/opentelemetry-user-events-trace)
-[![LICENSE](https://img.shields.io/crates/l/opentelemetry-user-events-trace)](./LICENSE)
-[![GitHub Actions CI](https://github.com/open-telemetry/opentelemetry-rust-contrib/workflows/CI/badge.svg)](https://github.com/open-telemetry/opentelemetry-rust-contrib/actions?query=workflow%3ACI+branch%3Amain)
 [![Slack](https://img.shields.io/badge/slack-@cncf/otel/rust-brightgreen.svg?logo=slack)](https://cloud-native.slack.com/archives/C03GDP0H023)
 
 ## OpenTelemetry Overview

@@ -1,3 +1,77 @@
+//! [OpenTelemetry] instrumentation middleware for [Tower]-compatible HTTP servers
+//! (Axum, Hyper, Tonic, etc.).
+//!
+//! The middleware produces both metrics and distributed tracing for incoming HTTP
+//! requests, following the OpenTelemetry [HTTP semantic conventions].
+//!
+//! # Metrics
+//!
+//! - `http.server.request.duration` — duration of HTTP server requests.
+//! - `http.server.active_requests` — number of in-flight HTTP server requests.
+//! - `http.server.request.body.size` — size of HTTP server request bodies.
+//! - `http.server.response.body.size` — size of HTTP server response bodies.
+//!
+//! # Tracing
+//!
+//! A server span (`SpanKind::Server`) is created per request, with attributes such
+//! as `http.request.method`, `url.scheme`, `url.path`, `url.full`,
+//! `user_agent.original`, `http.route`, and `http.response.status_code`.
+//!
+//! # Quick start
+//!
+//! With the default `axum` feature enabled, applying the middleware is a single
+//! [`HTTPLayer::new`] call:
+//!
+//! ```ignore
+//! use axum::{routing::get, Router};
+//! use opentelemetry_instrumentation_tower::HTTPLayer;
+//!
+//! # async fn root() -> &'static str { "hello" }
+//! # fn run() {
+//! let app: Router = Router::new()
+//!     .route("/", get(root))
+//!     // Apply the OTel layer *after* the routes so that
+//!     // `AxumMatchedPathExtractor` can read the matched route template.
+//!     .layer(HTTPLayer::new());
+//! # let _ = app;
+//! # }
+//! ```
+//!
+//! The layer reads the global [`TracerProvider`] and [`MeterProvider`], so configure
+//! those before constructing the layer.
+//!
+//! # Customization
+//!
+//! Use [`HTTPLayerBuilder`] to plug in custom extractors:
+//!
+//! - [`RouteExtractor`] decides how the `http.route` attribute (and span name) is
+//!   produced. Built-in choices: [`NoRouteExtractor`], [`PathExtractor`],
+//!   [`AxumMatchedPathExtractor`] (requires the `axum` feature), or
+//!   [`FnRouteExtractor`].
+//! - [`RequestAttributeExtractor`] / [`ResponseAttributeExtractor`] let you attach
+//!   additional attributes to spans and metrics. The default is [`NoOpExtractor`].
+//!
+//! See [`RouteExtractor`] for cardinality guidance — picking the wrong extractor
+//! can blow up the cardinality of your metrics.
+//!
+//! # Cargo features
+//!
+//! - `axum` *(default-off)* — enables [`AxumMatchedPathExtractor`] and makes it the
+//!   default route extractor. Without this feature the default extractor is
+//!   [`NoRouteExtractor`] (method-only span names, no `http.route` attribute).
+//!
+//! # Examples
+//!
+//! Runnable end-to-end examples live in the [`examples/`] directory of the
+//! `opentelemetry-rust-contrib` repository.
+//!
+//! [OpenTelemetry]: https://opentelemetry.io
+//! [Tower]: https://docs.rs/tower
+//! [HTTP semantic conventions]: https://opentelemetry.io/docs/specs/semconv/http/
+//! [`TracerProvider`]: opentelemetry::trace::TracerProvider
+//! [`MeterProvider`]: opentelemetry::metrics::MeterProvider
+//! [`examples/`]: https://github.com/open-telemetry/opentelemetry-rust-contrib/tree/main/opentelemetry-instrumentation-tower/examples
+
 use std::borrow::Cow;
 use std::future::Future;
 use std::pin::Pin;
@@ -561,6 +635,26 @@ struct RequestData {
     custom_request_attributes: Vec<KeyValue>,
 }
 
+/// Maps common HTTP methods to a `&'static str` so the resulting `KeyValue`
+/// stores the method as a static string (no heap allocation, allocation-free
+/// `KeyValue::clone()`). Returns `None` for custom/extension methods, which
+/// fall back to an owned `String`.
+#[inline]
+fn method_as_static(m: &http::Method) -> Option<&'static str> {
+    match *m {
+        http::Method::GET => Some("GET"),
+        http::Method::POST => Some("POST"),
+        http::Method::PUT => Some("PUT"),
+        http::Method::DELETE => Some("DELETE"),
+        http::Method::HEAD => Some("HEAD"),
+        http::Method::OPTIONS => Some("OPTIONS"),
+        http::Method::PATCH => Some("PATCH"),
+        http::Method::CONNECT => Some("CONNECT"),
+        http::Method::TRACE => Some("TRACE"),
+        _ => None,
+    }
+}
+
 struct RequestFinalization<ResExt> {
     request_data: RequestData,
     layer_state: Arc<HTTPLayerState>,
@@ -636,11 +730,21 @@ where
         let protocol_name_kv = KeyValue::new(NETWORK_PROTOCOL_NAME_LABEL, protocol);
         let protocol_version_kv = KeyValue::new(NETWORK_PROTOCOL_VERSION_LABEL, version);
 
-        let scheme = req.uri().scheme_str().unwrap_or("").to_string();
-        let url_scheme_kv = KeyValue::new(URL_SCHEME_LABEL, scheme);
+        // Promote the common "http"/"https" schemes to `&'static str` so the
+        // `KeyValue` is allocation-free and clones across metric label sets are cheap.
+        let url_scheme_kv = match req.uri().scheme_str() {
+            Some("http") => KeyValue::new(URL_SCHEME_LABEL, "http"),
+            Some("https") => KeyValue::new(URL_SCHEME_LABEL, "https"),
+            Some(other) => KeyValue::new(URL_SCHEME_LABEL, other.to_owned()),
+            None => KeyValue::new(URL_SCHEME_LABEL, ""),
+        };
 
+        // Same trick for well-known HTTP methods.
         let method = req.method().as_str().to_owned();
-        let method_kv = KeyValue::new(HTTP_REQUEST_METHOD_LABEL, method.clone());
+        let method_kv = match method_as_static(req.method()) {
+            Some(s) => KeyValue::new(HTTP_REQUEST_METHOD_LABEL, s),
+            None => KeyValue::new(HTTP_REQUEST_METHOD_LABEL, method.clone()),
+        };
 
         // Extract route using the configured extractor
         let route = self.route_extractor.extract_route(&req);

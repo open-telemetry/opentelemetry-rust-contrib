@@ -11,7 +11,7 @@ use std::sync::OnceLock;
 use tokio::runtime::Runtime;
 
 use geneva_uploader::client::{EncodedBatch, GenevaClient, GenevaClientConfig, UploadError};
-use geneva_uploader::AuthMethod;
+use geneva_uploader::{AuthMethod, LogsConfig, TracesConfig};
 use opentelemetry_proto::tonic::collector::trace::v1::ExportTraceServiceRequest;
 use prost::Message;
 use std::path::PathBuf;
@@ -596,6 +596,12 @@ pub unsafe extern "C" fn geneva_client_new(
         role_name,
         role_instance,
         msi_resource,
+        logs: LogsConfig {
+            default_event_name: None,
+        },
+        spans: TracesConfig {
+            default_event_name: None,
+        },
         obo_event_map,
     };
 
@@ -1639,6 +1645,12 @@ mod tests {
             role_name: "testrole".to_string(),
             role_instance: "testinstance".to_string(),
             msi_resource: None,
+            logs: LogsConfig {
+                default_event_name: None,
+            },
+            spans: TracesConfig {
+                default_event_name: None,
+            },
             obo_event_map: None,
         };
         let client = GenevaClient::new(cfg).expect("failed to create GenevaClient with MockAuth");
@@ -2165,6 +2177,12 @@ mod tests {
             role_name: "testrole".to_string(),
             role_instance: "testinstance".to_string(),
             msi_resource: None,
+            logs: LogsConfig {
+                default_event_name: None,
+            },
+            spans: TracesConfig {
+                default_event_name: None,
+            },
             obo_event_map: None,
         };
         let client = GenevaClient::new(cfg).expect("failed to create GenevaClient with MockAuth");
@@ -2230,9 +2248,9 @@ mod tests {
         drop(mock_server);
     }
 
-    // Verifies batching groups by LogRecord.event_name:
-    // multiple different event_names in one request produce multiple batches,
-    // and each batch upload hits ingestion with the corresponding event query param.
+    // Verifies fixed-table routing for OTLP logs:
+    // multiple different record event names coalesce into one batch, and the
+    // upload uses the log table name as the event query param.
     #[test]
     #[cfg(all(feature = "mock_auth", feature = "otlp_bytes"))]
     fn test_encode_batching_by_event_name_and_upload() {
@@ -2288,6 +2306,12 @@ mod tests {
             role_name: "testrole".to_string(),
             role_instance: "testinstance".to_string(),
             msi_resource: None,
+            logs: LogsConfig {
+                default_event_name: None,
+            },
+            spans: TracesConfig {
+                default_event_name: None,
+            },
             obo_event_map: None,
         };
         let client = GenevaClient::new(cfg).expect("failed to create GenevaClient with MockAuth");
@@ -2340,9 +2364,9 @@ mod tests {
         assert_eq!(rc as u32, GenevaError::Success as u32, "encode failed");
         assert!(!batches_ptr.is_null());
 
-        // Expect 2 batches (EventA, EventB)
+        // Fixed-table routing coalesces different record event names into one batch.
         let len = unsafe { geneva_batches_len(batches_ptr) };
-        assert_eq!(len, 2, "expected 2 batches grouped by event_name");
+        assert_eq!(len, 1, "expected one batch for the log table");
 
         // Upload all batches
         for i in 0..len {
@@ -2359,9 +2383,8 @@ mod tests {
             };
         }
 
-        // Verify requests contain event=EventA and event=EventB in their URLs
-        // Poll until both POSTs appear or timeout to avoid flakiness
-        let (urls, has_a, has_b) = runtime().block_on(async {
+        // Verify requests use the fixed Log table name in their URLs.
+        let (urls, has_log_event) = runtime().block_on(async {
             use tokio::time::{sleep, Duration};
             let mut last_urls: Vec<String> = Vec::new();
             for _ in 0..200 {
@@ -2372,10 +2395,9 @@ mod tests {
                     .map(|r| r.url.to_string())
                     .collect();
 
-                let has_a = posts.iter().any(|u| u.contains("event=EventA"));
-                let has_b = posts.iter().any(|u| u.contains("event=EventB"));
-                if has_a && has_b {
-                    return (posts, true, true);
+                let has_log_event = posts.iter().any(|u| u.contains("event=Log"));
+                if has_log_event {
+                    return (posts, true);
                 }
 
                 if !posts.is_empty() {
@@ -2389,17 +2411,12 @@ mod tests {
                 let reqs = mock_server.received_requests().await.unwrap();
                 last_urls = reqs.into_iter().map(|r| r.url.to_string()).collect();
             }
-            let has_a = last_urls.iter().any(|u| u.contains("event=EventA"));
-            let has_b = last_urls.iter().any(|u| u.contains("event=EventB"));
-            (last_urls, has_a, has_b)
+            let has_log_event = last_urls.iter().any(|u| u.contains("event=Log"));
+            (last_urls, has_log_event)
         });
         assert!(
-            has_a,
-            "Expected request containing event=EventA; got: {urls:?}"
-        );
-        assert!(
-            has_b,
-            "Expected request containing event=EventB; got: {urls:?}"
+            has_log_event,
+            "Expected request containing event=Log; got: {urls:?}"
         );
 
         // Cleanup
@@ -2456,6 +2473,12 @@ mod tests {
             role_name: "testrole".to_string(),
             role_instance: "testinstance".to_string(),
             msi_resource: None,
+            logs: LogsConfig {
+                default_event_name: None,
+            },
+            spans: TracesConfig {
+                default_event_name: None,
+            },
             obo_event_map: None,
         };
         let client = GenevaClient::new(cfg).expect("failed to create GenevaClient with MockAuth");
@@ -2548,8 +2571,8 @@ mod tests {
         );
 
         let len = unsafe { geneva_batches_len(batches_ptr) };
-        // Two different event names → two batches
-        assert_eq!(len, 2, "expected one batch per event name");
+        // Fixed-table routing coalesces different record event names into one batch.
+        assert_eq!(len, 1, "expected one batch for the log table");
 
         unsafe { geneva_batches_free(batches_ptr) };
         let raw_handle = Box::into_raw(handle_box);
@@ -2561,11 +2584,8 @@ mod tests {
     #[cfg(all(feature = "mock_auth", feature = "otlp_bytes"))]
     fn test_encode_log_records_all_attribute_types_match_otlp() {
         use opentelemetry_proto::tonic::collector::logs::v1::ExportLogsServiceRequest;
-        use opentelemetry_proto::tonic::common::v1::{
-            any_value, AnyValue, InstrumentationScope, KeyValue,
-        };
+        use opentelemetry_proto::tonic::common::v1::{any_value, AnyValue, KeyValue};
         use opentelemetry_proto::tonic::logs::v1::{LogRecord, ResourceLogs, ScopeLogs};
-        use opentelemetry_proto::tonic::resource::v1::Resource;
         use otap_df_pdata::views::otlp::bytes::logs::RawLogsData;
 
         let cfg = GenevaClientConfig {
@@ -2580,6 +2600,12 @@ mod tests {
             role_name: "testrole".to_string(),
             role_instance: "testinstance".to_string(),
             msi_resource: None,
+            logs: LogsConfig {
+                default_event_name: None,
+            },
+            spans: TracesConfig {
+                default_event_name: None,
+            },
             obo_event_map: None,
         };
 
@@ -2664,23 +2690,7 @@ mod tests {
 
         let req = ExportLogsServiceRequest {
             resource_logs: vec![ResourceLogs {
-                resource: Some(Resource {
-                    attributes: vec![KeyValue {
-                        key: "service.name".to_string(),
-                        key_strindex: 0,
-                        value: Some(AnyValue {
-                            value: Some(any_value::Value::StringValue(
-                                "ffi-attr-types".to_string(),
-                            )),
-                        }),
-                    }],
-                    ..Default::default()
-                }),
                 scope_logs: vec![ScopeLogs {
-                    scope: Some(InstrumentationScope {
-                        name: "ffi.attr.types".to_string(),
-                        ..Default::default()
-                    }),
                     log_records: vec![LogRecord {
                         time_unix_nano: record.time_unix_nano,
                         severity_number: record.severity_number,
@@ -2763,6 +2773,12 @@ mod tests {
             role_name: "testrole".to_string(),
             role_instance: "testinstance".to_string(),
             msi_resource: None,
+            logs: LogsConfig {
+                default_event_name: None,
+            },
+            spans: TracesConfig {
+                default_event_name: None,
+            },
             obo_event_map: None,
         };
 

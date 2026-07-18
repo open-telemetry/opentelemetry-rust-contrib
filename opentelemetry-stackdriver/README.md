@@ -24,8 +24,6 @@ Contributions are welcome.
 
 [![Crates.io: opentelemetry-stackdriver](https://img.shields.io/crates/v/opentelemetry-stackdriver.svg)](https://crates.io/crates/opentelemetry-stackdriver)
 [![Documentation](https://docs.rs/opentelemetry-stackdriver/badge.svg)](https://docs.rs/opentelemetry-stackdriver)
-[![LICENSE](https://img.shields.io/crates/l/opentelemetry-stackdriver)](./LICENSE)
-[![GitHub Actions CI](https://github.com/open-telemetry/opentelemetry-rust-contrib/workflows/CI/badge.svg)](https://github.com/open-telemetry/opentelemetry-rust-contrib/actions?query=workflow%3ACI+branch%3Amain)
 [![Slack](https://img.shields.io/badge/slack-@cncf/otel/rust-brightgreen.svg?logo=slack)](https://cloud-native.slack.com/archives/C03GDP0H023)
 
 ## Propagator
