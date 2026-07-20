@@ -11,7 +11,9 @@ use chrono::{TimeZone, Utc};
 use md5::{Digest as _, Md5};
 use opentelemetry_proto::tonic::common::v1::any_value::Value;
 use opentelemetry_proto::tonic::trace::v1::Span;
-use otap_df_pdata_views::views::common::{AnyValueView, AttributeView, ValueType};
+use otap_df_pdata_views::views::common::{
+    AnyValueView, AttributeView, InstrumentationScopeView, ValueType,
+};
 use otap_df_pdata_views::views::logs::{
     LogRecordView, LogsDataView, ResourceLogsView, ScopeLogsView,
 };
@@ -80,6 +82,111 @@ impl OboEventConfig {
 /// Map of event_name -> OBO config. Events not in the map don't get OBO.
 pub type OboEventMap = HashMap<String, OboEventConfig>;
 
+/// Routing key used to resolve per-record destination event names for logs.
+#[derive(Clone, Debug)]
+pub enum LogsEventNameRoutingKey {
+    EventName,
+    ResourceAttribute(String),
+    ScopeAttribute(String),
+    LogRecordAttribute(String),
+}
+
+impl LogsEventNameRoutingKey {
+    /// Attribute/scope key name for attribute-based routing kinds; `None` for `EventName`.
+    fn attribute_key(&self) -> Option<&str> {
+        match self {
+            LogsEventNameRoutingKey::EventName => None,
+            LogsEventNameRoutingKey::ResourceAttribute(key)
+            | LogsEventNameRoutingKey::ScopeAttribute(key)
+            | LogsEventNameRoutingKey::LogRecordAttribute(key) => Some(key.as_str()),
+        }
+    }
+}
+
+/// Optional logs routing config. When configured, each log record can be routed
+/// to a destination event based on `routing_key` and `events` lookup.
+#[derive(Clone, Debug)]
+pub struct LogsEventNameMapping {
+    pub routing_key: LogsEventNameRoutingKey,
+    pub events: HashMap<String, Option<String>>,
+}
+
+impl LogsEventNameMapping {
+    /// Rejects mappings that can never route: empty `events`, blank source keys,
+    /// or a blank attribute routing-key name.
+    pub(crate) fn validate(&self) -> Result<(), String> {
+        validate_event_mapping(
+            "LogsConfig.event_name_mapping",
+            self.routing_key.attribute_key(),
+            &self.events,
+        )
+    }
+}
+
+/// Routing key used to resolve per-record destination event names for spans.
+#[derive(Clone, Debug)]
+pub enum SpanEventNameRoutingKey {
+    ResourceAttribute(String),
+    ScopeAttribute(String),
+    SpanAttribute(String),
+}
+
+impl SpanEventNameRoutingKey {
+    /// Attribute/scope key name for the (always attribute-based) span routing kinds.
+    fn attribute_key(&self) -> Option<&str> {
+        match self {
+            SpanEventNameRoutingKey::ResourceAttribute(key)
+            | SpanEventNameRoutingKey::ScopeAttribute(key)
+            | SpanEventNameRoutingKey::SpanAttribute(key) => Some(key.as_str()),
+        }
+    }
+}
+
+/// Optional span routing config. When configured, each span can be routed
+/// to a destination event based on `routing_key` and `events` lookup.
+#[derive(Clone, Debug)]
+pub struct SpanEventNameMapping {
+    pub routing_key: SpanEventNameRoutingKey,
+    pub events: HashMap<String, Option<String>>,
+}
+
+impl SpanEventNameMapping {
+    /// Rejects mappings that can never route: empty `events`, blank source keys,
+    /// or a blank attribute routing-key name.
+    pub(crate) fn validate(&self) -> Result<(), String> {
+        validate_event_mapping(
+            "TracesConfig.event_name_mapping",
+            self.routing_key.attribute_key(),
+            &self.events,
+        )
+    }
+}
+
+/// Shared validation for logs/spans routing mappings. `routing_key_name` is the
+/// attribute/scope key for attribute-based kinds, or `None` for event-name routing.
+fn validate_event_mapping(
+    ctx: &str,
+    routing_key_name: Option<&str>,
+    events: &HashMap<String, Option<String>>,
+) -> Result<(), String> {
+    if events.is_empty() {
+        return Err(format!(
+            "{ctx}.events must be non-empty when routing is configured"
+        ));
+    }
+    if let Some(name) = routing_key_name {
+        if name.trim().is_empty() {
+            return Err(format!(
+                "{ctx}.routing_key attribute name must not be blank"
+            ));
+        }
+    }
+    if events.keys().any(|key| key.trim().is_empty()) {
+        return Err(format!("{ctx}.events source keys must not be blank"));
+    }
+    Ok(())
+}
+
 fn non_blank_utf8(bytes: &[u8]) -> Option<&str> {
     let s = std::str::from_utf8(bytes).ok()?;
     (!s.trim().is_empty()).then_some(s)
@@ -87,6 +194,127 @@ fn non_blank_utf8(bytes: &[u8]) -> Option<&str> {
 
 fn normalized_event_name(record: &impl LogRecordView) -> Option<&str> {
     record.event_name().and_then(non_blank_utf8)
+}
+
+/// Reserved routing key that selects the instrumentation scope name.
+pub(crate) const SCOPE_NAME_ROUTING_KEY: &str = "scope.name";
+/// Reserved routing key that selects the instrumentation scope version.
+pub(crate) const SCOPE_VERSION_ROUTING_KEY: &str = "scope.version";
+
+/// Resolves a routing `source_value` against a mapping's `events` table.
+///
+/// Returns:
+/// - `Some(destination)` when the source value has a non-empty destination,
+/// - `Some(source_value)` when the source value maps to `None`/empty (passthrough),
+/// - `None` when there is no entry for the source value (caller falls back to the
+///   configured default/table name).
+///
+/// Shared by logs and spans routing to keep the lookup semantics identical.
+pub(crate) fn resolve_mapped_destination(
+    events: &HashMap<String, Option<String>>,
+    source_value: &str,
+) -> Option<String> {
+    let mapped = events.get(source_value)?;
+    match mapped.as_deref() {
+        Some(destination) if !destination.trim().is_empty() => Some(destination.to_string()),
+        _ => Some(source_value.to_string()),
+    }
+}
+
+fn routing_value_from_attributes<'a, A, I>(attributes: I, key: &str) -> Option<String>
+where
+    A: AttributeView + 'a,
+    I: IntoIterator<Item = A>,
+{
+    for attr in attributes {
+        let Ok(attr_key) = std::str::from_utf8(attr.key()) else {
+            continue;
+        };
+        if attr_key != key {
+            continue;
+        }
+        let value = attr.value()?;
+
+        return match value.value_type() {
+            ValueType::String => value
+                .as_string()
+                .and_then(non_blank_utf8)
+                .map(str::to_owned),
+            ValueType::Int64 => value.as_int64().map(|v| v.to_string()),
+            ValueType::Double => value.as_double().map(|v| v.to_string()),
+            ValueType::Bool => value.as_bool().map(|v| v.to_string()),
+            _ => None,
+        };
+    }
+    None
+}
+
+fn routing_value_from_scope<SV>(scope: &SV, key: &str) -> Option<String>
+where
+    SV: InstrumentationScopeView,
+{
+    match key {
+        SCOPE_NAME_ROUTING_KEY => scope.name().and_then(non_blank_utf8).map(str::to_owned),
+        SCOPE_VERSION_ROUTING_KEY => scope.version().and_then(non_blank_utf8).map(str::to_owned),
+        _ => routing_value_from_attributes(scope.attributes(), key),
+    }
+}
+
+fn resolve_log_routing_event_name<R, RV, SV>(
+    record: &R,
+    resource: Option<&RV>,
+    scope: Option<&SV>,
+    table_name: &str,
+    event_name_mapping: Option<&LogsEventNameMapping>,
+) -> Option<String>
+where
+    R: LogRecordView,
+    RV: ResourceView,
+    SV: InstrumentationScopeView,
+{
+    let mapping = event_name_mapping?;
+    let routing_value = match &mapping.routing_key {
+        LogsEventNameRoutingKey::EventName => normalized_event_name(record).map(str::to_owned),
+        LogsEventNameRoutingKey::ResourceAttribute(key) => {
+            resource.and_then(|res| routing_value_from_attributes(res.attributes(), key.as_str()))
+        }
+        LogsEventNameRoutingKey::ScopeAttribute(key) => {
+            scope.and_then(|scope| routing_value_from_scope(scope, key.as_str()))
+        }
+        LogsEventNameRoutingKey::LogRecordAttribute(key) => {
+            routing_value_from_attributes(record.attributes(), key.as_str())
+        }
+    };
+
+    if let Some(source_value) = routing_value.as_deref() {
+        if let Some(mapped_event_name) = resolve_mapped_destination(&mapping.events, source_value) {
+            debug!(
+                name: "otlp_encoder.log_event_routing",
+                target: "geneva-uploader",
+                source_value = %source_value,
+                routed_event_name = %mapped_event_name,
+                "Resolved log event routing from mapping"
+            );
+            return Some(mapped_event_name);
+        }
+
+        debug!(
+            name: "otlp_encoder.log_event_routing",
+            target: "geneva-uploader",
+            source_value = %source_value,
+            fallback_event_name = %table_name,
+            "No mapping entry for routing source; using fallback event name"
+        );
+        return Some(table_name.to_string());
+    }
+
+    debug!(
+        name: "otlp_encoder.log_event_routing",
+        target: "geneva-uploader",
+        fallback_event_name = %table_name,
+        "Routing source value not found on log record; using fallback event name"
+    );
+    Some(table_name.to_string())
 }
 
 /// Look up an event in the OBO map, handling .NET-style anchored regex format.
@@ -115,6 +343,127 @@ pub(crate) fn lookup_obo_config<'a>(
 struct RoleOverrides {
     role: Option<String>,
     role_instance: Option<String>,
+}
+
+#[cfg(test)]
+struct EmptyResourceView;
+
+#[cfg(test)]
+struct EmptyScopeView;
+
+#[cfg(test)]
+struct EmptyAttributeView;
+
+#[cfg(test)]
+struct EmptyAnyValue;
+
+#[cfg(test)]
+impl ResourceView for EmptyResourceView {
+    type Attribute<'a>
+        = EmptyAttributeView
+    where
+        Self: 'a;
+    type AttributesIter<'a>
+        = std::iter::Empty<EmptyAttributeView>
+    where
+        Self: 'a;
+
+    fn attributes(&self) -> Self::AttributesIter<'_> {
+        std::iter::empty()
+    }
+
+    fn dropped_attributes_count(&self) -> u32 {
+        0
+    }
+}
+
+#[cfg(test)]
+impl InstrumentationScopeView for EmptyScopeView {
+    type Attribute<'a>
+        = EmptyAttributeView
+    where
+        Self: 'a;
+    type AttributeIter<'a>
+        = std::iter::Empty<EmptyAttributeView>
+    where
+        Self: 'a;
+
+    fn name(&self) -> Option<&[u8]> {
+        None
+    }
+
+    fn version(&self) -> Option<&[u8]> {
+        None
+    }
+
+    fn attributes(&self) -> Self::AttributeIter<'_> {
+        std::iter::empty()
+    }
+
+    fn dropped_attributes_count(&self) -> u32 {
+        0
+    }
+}
+
+#[cfg(test)]
+impl AttributeView for EmptyAttributeView {
+    type Val<'val>
+        = EmptyAnyValue
+    where
+        Self: 'val;
+
+    fn key(&self) -> &[u8] {
+        b""
+    }
+
+    fn value(&self) -> Option<Self::Val<'_>> {
+        None
+    }
+}
+
+#[cfg(test)]
+impl<'a> AnyValueView<'a> for EmptyAnyValue {
+    type KeyValue = EmptyAttributeView;
+    type ArrayIter<'arr>
+        = std::iter::Empty<EmptyAnyValue>
+    where
+        Self: 'arr;
+    type KeyValueIter<'kv>
+        = std::iter::Empty<EmptyAttributeView>
+    where
+        Self: 'kv;
+
+    fn value_type(&self) -> ValueType {
+        ValueType::Empty
+    }
+
+    fn as_string(&self) -> Option<&[u8]> {
+        None
+    }
+
+    fn as_bool(&self) -> Option<bool> {
+        None
+    }
+
+    fn as_int64(&self) -> Option<i64> {
+        None
+    }
+
+    fn as_double(&self) -> Option<f64> {
+        None
+    }
+
+    fn as_bytes(&self) -> Option<&[u8]> {
+        None
+    }
+
+    fn as_array(&self) -> Option<Self::ArrayIter<'_>> {
+        None
+    }
+
+    fn as_kvlist(&self) -> Option<Self::KeyValueIter<'_>> {
+        None
+    }
 }
 
 impl RoleOverrides {
@@ -164,6 +513,28 @@ impl DynamicField {
     }
 }
 
+struct LogRoutingContext<'a, RV, SV>
+where
+    RV: ResourceView,
+    SV: InstrumentationScopeView,
+{
+    table_name: &'a str,
+    resource_role: &'a RoleOverrides,
+    resource: Option<&'a RV>,
+    scope: Option<&'a SV>,
+    event_name_mapping: Option<&'a LogsEventNameMapping>,
+    obo_event_map: Option<&'a OboEventMap>,
+}
+
+struct LogEncodeContext<'a, RV, SV>
+where
+    RV: ResourceView,
+    SV: InstrumentationScopeView,
+{
+    metadata_fields: &'a MetadataFields,
+    routing: LogRoutingContext<'a, RV, SV>,
+}
+
 struct LogRecordParts<'a> {
     timestamp: u64,
     routing_event_name: Cow<'a, str>,
@@ -184,30 +555,45 @@ struct LogRecordParts<'a> {
 }
 
 impl<'a> LogRecordParts<'a> {
-    fn new<R: LogRecordView>(
-        record: &'a R,
-        metadata_fields: &'a MetadataFields,
-        table_name: &'a str,
-        resource_role: &'a RoleOverrides,
-        obo_event_map: Option<&'a OboEventMap>,
-    ) -> Self {
-        let role = resource_role
+    fn new<R, RV, SV>(record: &'a R, ctx: &LogEncodeContext<'a, RV, SV>) -> Self
+    where
+        R: LogRecordView,
+        RV: ResourceView,
+        SV: InstrumentationScopeView,
+    {
+        let role = ctx
+            .routing
+            .resource_role
             .role
             .as_deref()
             .map(Cow::Borrowed)
-            .unwrap_or_else(|| Cow::Borrowed(&metadata_fields.role));
-        let role_instance = resource_role
+            .unwrap_or_else(|| Cow::Borrowed(&ctx.metadata_fields.role));
+        let role_instance = ctx
+            .routing
+            .resource_role
             .role_instance
             .as_deref()
             .map(Cow::Borrowed)
-            .unwrap_or_else(|| Cow::Borrowed(&metadata_fields.role_instance));
+            .unwrap_or_else(|| Cow::Borrowed(&ctx.metadata_fields.role_instance));
 
         let mut parts = if is_common_schema_record(record) {
-            CommonSchemaParts::parse(record, role, role_instance, table_name).finish()
+            CommonSchemaParts::parse(record, role, role_instance, ctx.routing.table_name).finish()
         } else {
-            Self::from_canonical(record, role, role_instance, table_name)
+            Self::from_canonical(record, role, role_instance, ctx.routing.table_name)
         };
-        parts.obo_config = lookup_obo_config(obo_event_map, parts.routing_event_name.as_ref());
+
+        if let Some(routing_event_name) = resolve_log_routing_event_name(
+            record,
+            ctx.routing.resource,
+            ctx.routing.scope,
+            ctx.routing.table_name,
+            ctx.routing.event_name_mapping,
+        ) {
+            parts.routing_event_name = Cow::Owned(routing_event_name);
+        }
+
+        parts.obo_config =
+            lookup_obo_config(ctx.routing.obo_event_map, parts.routing_event_name.as_ref());
         parts.finish_fields();
         parts
     }
@@ -823,21 +1209,13 @@ impl LogBatchAccumulator {
     }
 
     /// Encode a single log record and append it to the appropriate batch.
-    fn push<R: LogRecordView>(
-        &mut self,
-        record: &R,
-        metadata_fields: &MetadataFields,
-        table_name: &str,
-        resource_role: &RoleOverrides,
-        obo_event_map: Option<&OboEventMap>,
-    ) {
-        let parts = LogRecordParts::new(
-            record,
-            metadata_fields,
-            table_name,
-            resource_role,
-            obo_event_map,
-        );
+    fn push<R, RV, SV>(&mut self, record: &R, ctx: &LogEncodeContext<'_, RV, SV>)
+    where
+        R: LogRecordView,
+        RV: ResourceView,
+        SV: InstrumentationScopeView,
+    {
+        let parts = LogRecordParts::new(record, ctx);
         let timestamp = parts.timestamp;
         let routing_event_name = parts.routing_event_name.as_ref();
         // Role identity is included because the central blob metadata is batch-level.
@@ -859,7 +1237,8 @@ impl LogBatchAccumulator {
                 batch_key.to_owned(),
                 BatchData {
                     routing_name: key,
-                    blob_metadata: metadata_fields
+                    blob_metadata: ctx
+                        .metadata_fields
                         .metadata_string_for(parts.role.as_ref(), parts.role_instance.as_ref()),
                     schemas: Vec::new(),
                     events: Vec::new(),
@@ -897,7 +1276,7 @@ impl LogBatchAccumulator {
             }
         };
 
-        let row_buffer = OtlpEncoder::write_row_parts(&parts, metadata_fields);
+        let row_buffer = OtlpEncoder::write_row_parts(&parts, ctx.metadata_fields);
         let level = parts.severity_number as u8;
         // Reuse the Arc already stored in BatchData — just a refcount increment.
         let event_name = Arc::clone(&entry.routing_name);
@@ -998,24 +1377,31 @@ impl OtlpEncoder {
         view: &T,
         metadata_fields: &MetadataFields,
         table_name: &str,
+        event_name_mapping: Option<&LogsEventNameMapping>,
         obo_event_map: Option<&OboEventMap>,
     ) -> Result<Vec<EncodedBatch>, String> {
         let mut acc = LogBatchAccumulator::new();
         for resource_logs in view.resources() {
-            let resource_role = resource_logs
-                .resource()
+            let resource = resource_logs.resource();
+            let resource_role = resource
                 .as_ref()
                 .map(RoleOverrides::from_resource)
                 .unwrap_or_default();
             for scope_logs in resource_logs.scopes() {
-                for log_record in scope_logs.log_records() {
-                    acc.push(
-                        &log_record,
-                        metadata_fields,
+                let scope = scope_logs.scope();
+                let ctx = LogEncodeContext {
+                    metadata_fields,
+                    routing: LogRoutingContext {
                         table_name,
-                        &resource_role,
+                        resource_role: &resource_role,
+                        resource: resource.as_ref(),
+                        scope: scope.as_ref(),
+                        event_name_mapping,
                         obo_event_map,
-                    );
+                    },
+                };
+                for log_record in scope_logs.log_records() {
+                    acc.push(&log_record, &ctx);
                 }
             }
         }
@@ -1188,13 +1574,18 @@ impl OtlpEncoder {
             String::new(),
         );
         let role_overrides = RoleOverrides::default();
-        let parts = LogRecordParts::new(
-            record,
-            &metadata_fields,
-            CS_LOG_TYPENAME,
-            &role_overrides,
-            None,
-        );
+        let ctx = LogEncodeContext {
+            metadata_fields: &metadata_fields,
+            routing: LogRoutingContext {
+                table_name: CS_LOG_TYPENAME,
+                resource_role: &role_overrides,
+                resource: None::<&EmptyResourceView>,
+                scope: None::<&EmptyScopeView>,
+                event_name_mapping: None,
+                obo_event_map: None,
+            },
+        };
+        let parts = LogRecordParts::new(record, &ctx);
         (parts.fields, parts.dynamic_fields_start)
     }
 
@@ -1207,13 +1598,18 @@ impl OtlpEncoder {
         metadata_fields: &MetadataFields,
     ) -> Vec<u8> {
         let role_overrides = RoleOverrides::default();
-        let parts = LogRecordParts::new(
-            record,
+        let ctx = LogEncodeContext {
             metadata_fields,
-            CS_LOG_TYPENAME,
-            &role_overrides,
-            None,
-        );
+            routing: LogRoutingContext {
+                table_name: CS_LOG_TYPENAME,
+                resource_role: &role_overrides,
+                resource: None::<&EmptyResourceView>,
+                scope: None::<&EmptyScopeView>,
+                event_name_mapping: None,
+                obo_event_map: None,
+            },
+        };
+        let parts = LogRecordParts::new(record, &ctx);
         debug_assert_eq!(fields.len(), parts.fields.len());
         debug_assert_eq!(dynamic_fields_start, parts.dynamic_fields_start);
         Self::write_row_parts(&parts, metadata_fields)
@@ -1644,7 +2040,7 @@ impl OtlpEncoder {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use opentelemetry_proto::tonic::common::v1::{AnyValue, KeyValue};
+    use opentelemetry_proto::tonic::common::v1::{AnyValue, InstrumentationScope, KeyValue};
     use opentelemetry_proto::tonic::logs::v1::{LogRecord, ResourceLogs, ScopeLogs};
     use opentelemetry_proto::tonic::resource::v1::Resource;
 
@@ -1665,7 +2061,7 @@ mod tests {
         logs: impl IntoIterator<Item = &'a LogRecord>,
         metadata: &MetadataFields,
     ) -> Result<Vec<EncodedBatch>, String> {
-        encode_log_batch_via_proto_with_obo(encoder, logs, metadata, None)
+        encode_log_batch_via_proto_with_mapping_and_obo(encoder, logs, metadata, None, None)
     }
 
     fn encode_log_batch_via_proto_with_obo<'a>(
@@ -1674,11 +2070,59 @@ mod tests {
         metadata: &MetadataFields,
         obo_event_map: Option<&OboEventMap>,
     ) -> Result<Vec<EncodedBatch>, String> {
-        encode_log_batch_with_resource_attrs_and_obo(
+        encode_log_batch_via_proto_with_mapping_and_obo(
             encoder,
             logs,
-            Vec::new(),
             metadata,
+            None,
+            obo_event_map,
+        )
+    }
+
+    fn encode_log_batch_via_proto_with_mapping_and_obo<'a>(
+        encoder: &OtlpEncoder,
+        logs: impl IntoIterator<Item = &'a LogRecord>,
+        metadata: &MetadataFields,
+        event_name_mapping: Option<&LogsEventNameMapping>,
+        obo_event_map: Option<&OboEventMap>,
+    ) -> Result<Vec<EncodedBatch>, String> {
+        encode_log_batch_via_proto_with_table_mapping_and_obo(
+            encoder,
+            logs,
+            metadata,
+            "Log",
+            event_name_mapping,
+            obo_event_map,
+        )
+    }
+
+    fn encode_log_batch_via_proto_with_table_mapping_and_obo<'a>(
+        encoder: &OtlpEncoder,
+        logs: impl IntoIterator<Item = &'a LogRecord>,
+        metadata: &MetadataFields,
+        table_name: &str,
+        event_name_mapping: Option<&LogsEventNameMapping>,
+        obo_event_map: Option<&OboEventMap>,
+    ) -> Result<Vec<EncodedBatch>, String> {
+        use otap_df_pdata::views::otlp::bytes::logs::RawLogsData;
+        use prost::Message as _;
+        let log_records: Vec<LogRecord> = logs.into_iter().cloned().collect();
+        let bytes = opentelemetry_proto::tonic::collector::logs::v1::ExportLogsServiceRequest {
+            resource_logs: vec![ResourceLogs {
+                scope_logs: vec![ScopeLogs {
+                    log_records,
+                    ..Default::default()
+                }],
+                ..Default::default()
+            }],
+        }
+        .encode_to_vec();
+
+        encoder.encode_logs_from_view(
+            &RawLogsData::new(&bytes),
+            metadata,
+            table_name,
+            event_name_mapping,
             obo_event_map,
         )
     }
@@ -1689,14 +2133,24 @@ mod tests {
         resource_attrs: Vec<KeyValue>,
         metadata: &MetadataFields,
     ) -> Result<Vec<EncodedBatch>, String> {
-        encode_log_batch_with_resource_attrs_and_obo(encoder, logs, resource_attrs, metadata, None)
+        encode_log_batch_with_resource_scope_attrs_mapping_and_obo(
+            encoder,
+            logs,
+            resource_attrs,
+            Vec::new(),
+            metadata,
+            None,
+            None,
+        )
     }
 
-    fn encode_log_batch_with_resource_attrs_and_obo<'a>(
+    fn encode_log_batch_with_resource_scope_attrs_mapping_and_obo<'a>(
         encoder: &OtlpEncoder,
         logs: impl IntoIterator<Item = &'a LogRecord>,
         resource_attrs: Vec<KeyValue>,
+        scope_attrs: Vec<KeyValue>,
         metadata: &MetadataFields,
+        event_name_mapping: Option<&LogsEventNameMapping>,
         obo_event_map: Option<&OboEventMap>,
     ) -> Result<Vec<EncodedBatch>, String> {
         use otap_df_pdata::views::otlp::bytes::logs::RawLogsData;
@@ -1709,6 +2163,10 @@ mod tests {
                     ..Default::default()
                 }),
                 scope_logs: vec![ScopeLogs {
+                    scope: (!scope_attrs.is_empty()).then_some(InstrumentationScope {
+                        attributes: scope_attrs,
+                        ..Default::default()
+                    }),
                     log_records,
                     ..Default::default()
                 }],
@@ -1716,7 +2174,27 @@ mod tests {
             }],
         }
         .encode_to_vec();
-        encoder.encode_logs_from_view(&RawLogsData::new(&bytes), metadata, "Log", obo_event_map)
+        encoder.encode_logs_from_view(
+            &RawLogsData::new(&bytes),
+            metadata,
+            "Log",
+            event_name_mapping,
+            obo_event_map,
+        )
+    }
+
+    fn make_event_name_mapping(
+        routing_key: LogsEventNameRoutingKey,
+        events: &[(&str, Option<&str>)],
+    ) -> LogsEventNameMapping {
+        let mut map = HashMap::new();
+        for (source, destination) in events {
+            map.insert((*source).to_string(), destination.map(str::to_string));
+        }
+        LogsEventNameMapping {
+            routing_key,
+            events: map,
+        }
     }
 
     fn string_attr(key: &str, value: &str) -> KeyValue {
@@ -2563,7 +3041,13 @@ mod tests {
         let export_bytes = wrap_log_record_bytes(&log_bytes);
 
         let actual = encoder
-            .encode_logs_from_view(&RawLogsData::new(&export_bytes), &metadata, "Log", None)
+            .encode_logs_from_view(
+                &RawLogsData::new(&export_bytes),
+                &metadata,
+                "Log",
+                None,
+                None,
+            )
             .unwrap();
         assert_single_batch_equal(&expected, &actual);
     }
@@ -2595,7 +3079,13 @@ mod tests {
         let export_bytes = wrap_log_record_bytes(&log_bytes);
 
         let actual = encoder
-            .encode_logs_from_view(&RawLogsData::new(&export_bytes), &metadata, "Log", None)
+            .encode_logs_from_view(
+                &RawLogsData::new(&export_bytes),
+                &metadata,
+                "Log",
+                None,
+                None,
+            )
             .unwrap();
         assert_single_batch_equal(&expected, &actual);
     }
@@ -2630,7 +3120,13 @@ mod tests {
         let export_bytes = wrap_log_record_bytes(&log_bytes);
 
         let actual = encoder
-            .encode_logs_from_view(&RawLogsData::new(&export_bytes), &metadata, "Log", None)
+            .encode_logs_from_view(
+                &RawLogsData::new(&export_bytes),
+                &metadata,
+                "Log",
+                None,
+                None,
+            )
             .unwrap();
         assert_single_batch_equal(&expected, &actual);
     }
@@ -3144,7 +3640,7 @@ mod tests {
 
         use otap_df_pdata::views::otlp::bytes::logs::RawLogsData;
         let encoded = encoder
-            .encode_logs_from_view(&RawLogsData::new(&bytes), &metadata, "Log", None)
+            .encode_logs_from_view(&RawLogsData::new(&bytes), &metadata, "Log", None, None)
             .unwrap();
 
         assert_eq!(encoded.len(), 1);
@@ -3215,7 +3711,7 @@ mod tests {
         .encode_to_vec();
 
         let result = encoder
-            .encode_logs_from_view(&RawLogsData::new(&bytes), &metadata, "Log", None)
+            .encode_logs_from_view(&RawLogsData::new(&bytes), &metadata, "Log", None, None)
             .unwrap();
 
         // Routing is fixed by table_name; all records land in one batch.
@@ -3263,6 +3759,369 @@ mod tests {
             Some(&obo_map),
         );
         assert!(result.is_ok());
+    }
+
+    #[test]
+    fn test_event_name_mapping_routes_by_event_name() {
+        let metadata = make_metadata("TestNamespace");
+        let mapping = make_event_name_mapping(
+            LogsEventNameRoutingKey::EventName,
+            &[
+                ("evnt1", Some("")),
+                ("evnt2", Some("CriticalLog")),
+                ("evnt3", None),
+            ],
+        );
+        let logs = [
+            LogRecord {
+                observed_time_unix_nano: 1,
+                event_name: "evnt1".to_string(),
+                ..Default::default()
+            },
+            LogRecord {
+                observed_time_unix_nano: 2,
+                event_name: "evnt2".to_string(),
+                ..Default::default()
+            },
+            LogRecord {
+                observed_time_unix_nano: 3,
+                event_name: "evnt3".to_string(),
+                ..Default::default()
+            },
+            LogRecord {
+                observed_time_unix_nano: 4,
+                event_name: "evnt4".to_string(),
+                ..Default::default()
+            },
+        ];
+
+        let batches = encode_log_batch_via_proto_with_mapping_and_obo(
+            &OtlpEncoder::new(),
+            logs.iter(),
+            &metadata,
+            Some(&mapping),
+            None,
+        )
+        .expect("event-name mapping should encode successfully");
+
+        let mut by_event: HashMap<String, usize> = batches
+            .iter()
+            .map(|batch| (batch.event_name.clone(), batch.row_count))
+            .collect();
+        assert_eq!(by_event.remove("evnt1"), Some(1));
+        assert_eq!(by_event.remove("CriticalLog"), Some(1));
+        assert_eq!(by_event.remove("evnt3"), Some(1));
+        assert_eq!(by_event.remove("Log"), Some(1));
+        assert!(by_event.is_empty());
+    }
+
+    #[test]
+    fn test_event_name_mapping_routes_by_resource_attribute() {
+        let metadata = make_metadata("TestNamespace");
+        let mapping = make_event_name_mapping(
+            LogsEventNameRoutingKey::ResourceAttribute("cluster".to_string()),
+            &[("clusterA", Some("")), ("clusterB", Some("PremiumLog"))],
+        );
+        let logs = [LogRecord {
+            observed_time_unix_nano: 1,
+            ..Default::default()
+        }];
+
+        let batches = encode_log_batch_with_resource_scope_attrs_mapping_and_obo(
+            &OtlpEncoder::new(),
+            logs.iter(),
+            vec![string_attr("cluster", "clusterB")],
+            Vec::new(),
+            &metadata,
+            Some(&mapping),
+            None,
+        )
+        .expect("resource-attribute mapping should encode successfully");
+
+        assert_eq!(batches.len(), 1);
+        assert_eq!(batches[0].event_name, "PremiumLog");
+    }
+
+    #[test]
+    fn test_event_name_mapping_routes_by_scope_attribute_and_scope_name() {
+        use otap_df_pdata::views::otlp::bytes::logs::RawLogsData;
+        use prost::Message as _;
+
+        enum ScopeRoutingCase<'a> {
+            ScopeAttribute {
+                scope_attributes: Vec<KeyValue>,
+                routing_key: LogsEventNameRoutingKey,
+                mapping: &'a [(&'a str, Option<&'a str>)],
+                expected_event_name: &'a str,
+            },
+            ScopeName {
+                scope_name: &'a str,
+                mapping: &'a [(&'a str, Option<&'a str>)],
+                expected_event_name: &'a str,
+            },
+        }
+
+        let metadata = make_metadata("TestNamespace");
+        let cases = [
+            ScopeRoutingCase::ScopeAttribute {
+                scope_attributes: vec![string_attr("cluster", "clusterA")],
+                routing_key: LogsEventNameRoutingKey::ScopeAttribute("cluster".to_string()),
+                mapping: &[("clusterA", Some("ScopedLog"))],
+                expected_event_name: "ScopedLog",
+            },
+            ScopeRoutingCase::ScopeName {
+                scope_name: "Test1",
+                mapping: &[("Test1", Some("ScopedNameLog"))],
+                expected_event_name: "ScopedNameLog",
+            },
+        ];
+
+        for case in cases {
+            match case {
+                ScopeRoutingCase::ScopeAttribute {
+                    scope_attributes,
+                    routing_key,
+                    mapping,
+                    expected_event_name,
+                } => {
+                    let mapping = make_event_name_mapping(routing_key, mapping);
+                    let logs = [LogRecord {
+                        observed_time_unix_nano: 1,
+                        ..Default::default()
+                    }];
+
+                    let batches = encode_log_batch_with_resource_scope_attrs_mapping_and_obo(
+                        &OtlpEncoder::new(),
+                        logs.iter(),
+                        Vec::new(),
+                        scope_attributes,
+                        &metadata,
+                        Some(&mapping),
+                        None,
+                    )
+                    .expect("scope-attribute mapping should encode successfully");
+
+                    assert_eq!(batches.len(), 1);
+                    assert_eq!(batches[0].event_name, expected_event_name);
+                }
+                ScopeRoutingCase::ScopeName {
+                    scope_name,
+                    mapping,
+                    expected_event_name,
+                } => {
+                    let mapping = make_event_name_mapping(
+                        LogsEventNameRoutingKey::ScopeAttribute("scope.name".to_string()),
+                        mapping,
+                    );
+
+                    let bytes =
+                        opentelemetry_proto::tonic::collector::logs::v1::ExportLogsServiceRequest {
+                            resource_logs: vec![ResourceLogs {
+                                scope_logs: vec![ScopeLogs {
+                                    scope: Some(InstrumentationScope {
+                                        name: scope_name.to_string(),
+                                        ..Default::default()
+                                    }),
+                                    log_records: vec![LogRecord {
+                                        observed_time_unix_nano: 1,
+                                        ..Default::default()
+                                    }],
+                                    ..Default::default()
+                                }],
+                                ..Default::default()
+                            }],
+                        }
+                        .encode_to_vec();
+
+                    let batches = OtlpEncoder::new()
+                        .encode_logs_from_view(
+                            &RawLogsData::new(&bytes),
+                            &metadata,
+                            "Log",
+                            Some(&mapping),
+                            None,
+                        )
+                        .expect("scope-name mapping should encode successfully");
+
+                    assert_eq!(batches.len(), 1);
+                    assert_eq!(batches[0].event_name, expected_event_name);
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn test_event_name_mapping_routes_by_log_record_attribute() {
+        let metadata = make_metadata("TestNamespace");
+        let mapping = make_event_name_mapping(
+            LogsEventNameRoutingKey::LogRecordAttribute("cluster".to_string()),
+            &[("clusterA", Some("")), ("clusterB", Some("PremiumLog"))],
+        );
+        let logs = [
+            LogRecord {
+                observed_time_unix_nano: 1,
+                attributes: vec![string_attr("cluster", "clusterA")],
+                ..Default::default()
+            },
+            LogRecord {
+                observed_time_unix_nano: 2,
+                attributes: vec![string_attr("cluster", "clusterB")],
+                ..Default::default()
+            },
+            LogRecord {
+                observed_time_unix_nano: 3,
+                attributes: vec![string_attr("cluster", "clusterC")],
+                ..Default::default()
+            },
+        ];
+
+        let batches = encode_log_batch_via_proto_with_mapping_and_obo(
+            &OtlpEncoder::new(),
+            logs.iter(),
+            &metadata,
+            Some(&mapping),
+            None,
+        )
+        .expect("log-record-attribute mapping should encode successfully");
+
+        let mut by_event: HashMap<String, usize> = batches
+            .iter()
+            .map(|batch| (batch.event_name.clone(), batch.row_count))
+            .collect();
+        assert_eq!(by_event.remove("clusterA"), Some(1));
+        assert_eq!(by_event.remove("PremiumLog"), Some(1));
+        assert_eq!(by_event.remove("Log"), Some(1));
+        assert!(by_event.is_empty());
+    }
+
+    #[test]
+    fn test_event_name_mapping_routes_by_non_string_attribute_values() {
+        // Int/bool/double routing values are stringified before the mapping lookup.
+        let metadata = make_metadata("TestNamespace");
+        let mapping = make_event_name_mapping(
+            LogsEventNameRoutingKey::LogRecordAttribute("code".to_string()),
+            &[
+                ("42", Some("IntLog")),
+                ("true", Some("BoolLog")),
+                ("3.5", Some("DoubleLog")),
+            ],
+        );
+        let logs = [
+            LogRecord {
+                observed_time_unix_nano: 1,
+                attributes: vec![int_attr("code", 42)],
+                ..Default::default()
+            },
+            LogRecord {
+                observed_time_unix_nano: 2,
+                attributes: vec![bool_attr("code", true)],
+                ..Default::default()
+            },
+            LogRecord {
+                observed_time_unix_nano: 3,
+                attributes: vec![double_attr("code", 3.5)],
+                ..Default::default()
+            },
+        ];
+
+        let batches = encode_log_batch_via_proto_with_mapping_and_obo(
+            &OtlpEncoder::new(),
+            logs.iter(),
+            &metadata,
+            Some(&mapping),
+            None,
+        )
+        .expect("non-string routing values should encode successfully");
+
+        let mut by_event: HashMap<String, usize> = batches
+            .iter()
+            .map(|batch| (batch.event_name.clone(), batch.row_count))
+            .collect();
+        assert_eq!(by_event.remove("IntLog"), Some(1));
+        assert_eq!(by_event.remove("BoolLog"), Some(1));
+        assert_eq!(by_event.remove("DoubleLog"), Some(1));
+        assert!(by_event.is_empty());
+    }
+
+    #[test]
+    fn test_event_name_mapping_blank_string_attribute_falls_back_to_default() {
+        // A whitespace-only attribute value is treated as absent, so routing falls back.
+        let metadata = make_metadata("TestNamespace");
+        let mapping = make_event_name_mapping(
+            LogsEventNameRoutingKey::LogRecordAttribute("cluster".to_string()),
+            &[("clusterA", Some("PremiumLog"))],
+        );
+        let logs = [LogRecord {
+            observed_time_unix_nano: 1,
+            attributes: vec![string_attr("cluster", "   ")],
+            ..Default::default()
+        }];
+
+        let batches = encode_log_batch_via_proto_with_mapping_and_obo(
+            &OtlpEncoder::new(),
+            logs.iter(),
+            &metadata,
+            Some(&mapping),
+            None,
+        )
+        .expect("blank routing value should encode successfully");
+
+        assert_eq!(batches.len(), 1);
+        assert_eq!(batches[0].event_name, "Log");
+    }
+
+    #[test]
+    fn test_event_name_mapping_missing_key_falls_back_to_configured_default_event_name() {
+        let metadata = make_metadata("TestNamespace");
+        let mapping = make_event_name_mapping(
+            LogsEventNameRoutingKey::EventName,
+            &[("evnt1", Some("CriticalLog"))],
+        );
+        let logs = [LogRecord {
+            observed_time_unix_nano: 1,
+            event_name: "missing-key".to_string(),
+            ..Default::default()
+        }];
+
+        let batches = encode_log_batch_via_proto_with_table_mapping_and_obo(
+            &OtlpEncoder::new(),
+            logs.iter(),
+            &metadata,
+            "AppLog",
+            Some(&mapping),
+            None,
+        )
+        .expect("missing routing key should fall back to configured default event name");
+
+        assert_eq!(batches.len(), 1);
+        assert_eq!(batches[0].event_name, "AppLog");
+    }
+
+    #[test]
+    fn test_event_name_mapping_missing_key_falls_back_to_log_when_default_not_configured() {
+        let metadata = make_metadata("TestNamespace");
+        let mapping = make_event_name_mapping(
+            LogsEventNameRoutingKey::EventName,
+            &[("evnt1", Some("CriticalLog"))],
+        );
+        let logs = [LogRecord {
+            observed_time_unix_nano: 1,
+            event_name: "missing-key".to_string(),
+            ..Default::default()
+        }];
+
+        let batches = encode_log_batch_via_proto_with_table_mapping_and_obo(
+            &OtlpEncoder::new(),
+            logs.iter(),
+            &metadata,
+            "Log",
+            Some(&mapping),
+            None,
+        )
+        .expect("missing routing key should fall back to Log when default is not configured");
+
+        assert_eq!(batches.len(), 1);
+        assert_eq!(batches[0].event_name, "Log");
     }
 
     #[test]
