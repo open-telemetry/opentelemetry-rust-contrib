@@ -93,11 +93,6 @@ pub struct AgentFedCredential {
     pub endpoint: String,
     /// Account moniker for the upload.
     pub moniker: String,
-    /// Monitoring endpoint hint from the host. For agent-fed uploads the
-    /// `endpoint=` query parameter is normally derived from the token's
-    /// `Endpoint` claim; this value is only a fallback when that claim is
-    /// absent.
-    pub monitoring_endpoint: String,
 }
 
 impl std::fmt::Debug for AgentFedCredential {
@@ -107,7 +102,6 @@ impl std::fmt::Debug for AgentFedCredential {
             .field("token", &"<redacted>")
             .field("endpoint", &self.endpoint)
             .field("moniker", &self.moniker)
-            .field("monitoring_endpoint", &self.monitoring_endpoint)
             .finish()
     }
 }

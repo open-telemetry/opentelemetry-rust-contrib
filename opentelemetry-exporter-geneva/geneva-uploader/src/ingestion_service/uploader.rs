@@ -2,7 +2,6 @@ use crate::config_service::client::{
     extract_endpoint_from_token, GenevaConfigClient, GenevaConfigClientError,
 };
 use crate::payload_encoder::central_blob::BatchMetadata;
-use bytes::Bytes;
 use reqwest::{header, Client};
 use serde::Deserialize;
 use serde_json::Value;
@@ -284,7 +283,6 @@ impl GenevaUploader {
             "Starting upload"
         );
 
-        let data = Bytes::from(data);
         // `endpoint_query_param` becomes the `endpoint=` query param (see
         // `create_upload_uri`).
         let (auth_token, gig_endpoint, moniker, endpoint_query_param) = match &self.source {
@@ -310,18 +308,11 @@ impl GenevaUploader {
                 // claim embedded in the auth token. The native GCS config-service
                 // path derives that value from the token itself (see
                 // get_ingestion_info -> extract_endpoint_from_token), so the
-                // agent-fed path must do the same. The host-supplied monitoring
-                // endpoint is a different value (the QOS/telemetry endpoint) and
-                // must NOT be used here. Fall back to the host-supplied value
-                // (then the data endpoint) only if the token omits the claim.
-                let endpoint_query_param =
-                    extract_endpoint_from_token(&cred.token).unwrap_or_else(|_| {
-                        if cred.monitoring_endpoint.is_empty() {
-                            cred.endpoint.clone()
-                        } else {
-                            cred.monitoring_endpoint.clone()
-                        }
-                    });
+                // agent-fed path must do the same. Some valid tokens legitimately
+                // omit the claim; mirror the GCS path and fall back to the
+                // credential's own endpoint rather than rejecting the upload.
+                let endpoint_query_param = extract_endpoint_from_token(&cred.token)
+                    .unwrap_or_else(|_| cred.endpoint.clone());
                 (
                     cred.token,
                     cred.endpoint,
@@ -354,7 +345,7 @@ impl GenevaUploader {
             .http_client
             .post(&full_url)
             .header(header::AUTHORIZATION, format!("Bearer {auth_token}"))
-            .body(data.clone())
+            .body(data)
             .send()
             .await?;
         let status = response.status();
@@ -399,7 +390,6 @@ impl GenevaUploader {
             event_name = %event_name,
             status = status.as_u16(),
             moniker = %moniker,
-            url = %full_url,
             body = %body,
             "Upload failed"
         );
@@ -564,16 +554,14 @@ mod tests {
         token: std::sync::Mutex<String>,
         endpoint: String,
         moniker: String,
-        monitoring_endpoint: String,
     }
 
     impl TestAgentFedSource {
-        fn new(token: &str, endpoint: &str, moniker: &str, monitoring_endpoint: &str) -> Self {
+        fn new(token: &str, endpoint: &str, moniker: &str) -> Self {
             Self {
                 token: std::sync::Mutex::new(token.to_string()),
                 endpoint: endpoint.to_string(),
                 moniker: moniker.to_string(),
-                monitoring_endpoint: monitoring_endpoint.to_string(),
             }
         }
         fn set_token(&self, token: &str) {
@@ -587,7 +575,6 @@ mod tests {
                 token: self.token.lock().unwrap().clone(),
                 endpoint: self.endpoint.clone(),
                 moniker: self.moniker.clone(),
-                monitoring_endpoint: self.monitoring_endpoint.clone(),
             };
             Box::pin(async move { Some(cred) })
         }
@@ -619,22 +606,25 @@ mod tests {
         use wiremock::{Mock, MockServer, ResponseTemplate};
 
         let mock_server = MockServer::start().await;
+        // A claimless host token is valid: with no `Endpoint` claim to extract,
+        // the upload falls back to the credential's endpoint for the `endpoint=`
+        // query param (mirroring the GCS path), so a plain token still uploads.
+        let token = "host-token-AAA";
         // The GCS config-service is intentionally NOT mocked. If the agent-fed
         // path attempted the handshake it would fail; a 202 here proves it was
         // skipped and the host-supplied token was used directly.
         Mock::given(method("POST"))
             .and(path("/api/v1/ingestion/ingest"))
-            .and(header("authorization", "Bearer host-token-AAA"))
+            .and(header("authorization", format!("Bearer {token}")))
             .respond_with(ResponseTemplate::new(202).set_body_string(r#"{"ticket":"t-1"}"#))
             .expect(1)
             .mount(&mock_server)
             .await;
 
         let source = Arc::new(TestAgentFedSource::new(
-            "host-token-AAA",
+            token,
             &mock_server.uri(),
             "test-moniker",
-            &mock_server.uri(),
         ));
         let uploader = agent_fed_uploader(source);
         let metadata = make_test_metadata();
@@ -643,7 +633,7 @@ mod tests {
             .upload(vec![1, 2, 3], "Log", &metadata, 1, None)
             .await;
         assert!(resp.is_ok(), "agent-fed upload should succeed: {resp:?}");
-        // mock_server drop verifies exactly one POST carrying `Bearer host-token-AAA`.
+        // mock_server drop verifies exactly one POST carrying the host token.
     }
 
     #[tokio::test]
@@ -652,27 +642,24 @@ mod tests {
         use wiremock::{Mock, MockServer, ResponseTemplate};
 
         let mock_server = MockServer::start().await;
+        let token_a = "tok-A";
+        let token_b = "tok-B";
         Mock::given(method("POST"))
             .and(path("/api/v1/ingestion/ingest"))
-            .and(header("authorization", "Bearer tok-A"))
+            .and(header("authorization", format!("Bearer {token_a}")))
             .respond_with(ResponseTemplate::new(202).set_body_string(r#"{"ticket":"a"}"#))
             .expect(1)
             .mount(&mock_server)
             .await;
         Mock::given(method("POST"))
             .and(path("/api/v1/ingestion/ingest"))
-            .and(header("authorization", "Bearer tok-B"))
+            .and(header("authorization", format!("Bearer {token_b}")))
             .respond_with(ResponseTemplate::new(202).set_body_string(r#"{"ticket":"b"}"#))
             .expect(1)
             .mount(&mock_server)
             .await;
 
-        let source = Arc::new(TestAgentFedSource::new(
-            "tok-A",
-            &mock_server.uri(),
-            "m",
-            &mock_server.uri(),
-        ));
+        let source = Arc::new(TestAgentFedSource::new(token_a, &mock_server.uri(), "m"));
         let uploader = agent_fed_uploader(source.clone());
         let metadata = make_test_metadata();
 
@@ -681,7 +668,7 @@ mod tests {
             .await
             .expect("upload A");
         // Host rotates the credential; the next upload must use the new token.
-        source.set_token("tok-B");
+        source.set_token(token_b);
         uploader
             .upload(vec![2], "Log", &metadata, 1, None)
             .await
