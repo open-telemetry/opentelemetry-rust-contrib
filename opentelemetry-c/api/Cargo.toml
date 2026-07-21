@@ -1,0 +1,34 @@
+[package]
+name = "opentelemetry-c-api"
+description = "Rust-backed C API facade for OpenTelemetry traces (owns the global provider slot)"
+version = "0.1.0"
+edition = "2021"
+rust-version = "1.75.0"
+homepage = "https://github.com/open-telemetry/opentelemetry-rust-contrib/tree/main/opentelemetry-c/api"
+repository = "https://github.com/open-telemetry/opentelemetry-rust-contrib/tree/main/opentelemetry-c/api"
+keywords = ["opentelemetry", "tracing", "ffi", "c"]
+categories = ["development-tools::debugging", "api-bindings"]
+license = "Apache-2.0"
+
+# The API library. `cdylib`/`staticlib` are what C/C++ instrumentation links against;
+# `rlib` keeps it usable from this crate's own Rust tests. It owns the single process
+# global provider slot and depends ONLY on the internal ABI types crate — never on
+# `opentelemetry_sdk`, `opentelemetry-otlp`, or `reqwest`.
+[lib]
+crate-type = ["cdylib", "staticlib", "rlib"]
+
+[dependencies]
+opentelemetry-c-abi = { path = "../abi" }
+
+[dev-dependencies]
+# Used by the provider-lifetime race test to build a test-only implementation vtable.
+opentelemetry-c-abi = { path = "../abi" }
+# Hot-path FFI-overhead benchmarks (no-SDK / no-op provider path). Explicit; not a test.
+criterion = { workspace = true }
+
+[[bench]]
+name = "api_hotpath"
+harness = false
+
+[lints]
+workspace = true

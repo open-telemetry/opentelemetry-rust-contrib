@@ -242,6 +242,12 @@ jobs:
       - name: cargo generate-lockfile
         if: hashFiles('Cargo.lock') == ''
         run: cargo generate-lockfile
+      - name: Build C API/SDK cdylibs for the cross-artifact test
+        # The opentelemetry-c-sdk `cross_artifact` test links a C harness against the built
+        # cdylibs and (CI=true) fails hard if they are missing. `cargo llvm-cov` uses its own
+        # target dir and does not emit cdylibs, so build them into target/ first (matching
+        # scripts/test.sh) so this coverage run does not fail on a missing artifact.
+        run: cargo build -p opentelemetry-c-api -p opentelemetry-c-sdk --all-features
       - name: cargo llvm-cov
         run: cargo llvm-cov --locked --all-features --workspace --lcov --output-path lcov.info
       - name: Upload to codecov.io
