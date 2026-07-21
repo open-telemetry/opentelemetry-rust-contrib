@@ -1216,6 +1216,70 @@ mod tests {
     }
 
     #[test]
+    fn new_logs_client_accepts_all_attribute_routing_kinds() {
+        // Exercises GenevaClient::new's logs-mapping description/validation for each
+        // attribute routing kind (resource/scope/log-record).
+        for routing_key in [
+            LogsEventNameRoutingKey::ResourceAttribute("res".to_string()),
+            LogsEventNameRoutingKey::ScopeAttribute("scope".to_string()),
+            LogsEventNameRoutingKey::LogRecordAttribute("rec".to_string()),
+        ] {
+            let mut cfg = build_config(Some("AppLog"), None);
+            cfg.logs = Some(LogsConfig {
+                default_event_name: Some("AppLog".to_string()),
+                event_name_mapping: Some(LogsEventNameMapping {
+                    routing_key,
+                    events: HashMap::from([("src".to_string(), Some("Dest".to_string()))]),
+                }),
+            });
+            GenevaClient::new(cfg).expect("logs client with attribute routing should initialize");
+        }
+    }
+
+    #[test]
+    fn encode_and_compress_spans_groups_multiple_spans_with_same_route() {
+        // Two spans resolving to the same destination share a single grouped batch,
+        // exercising the "append to existing group" path.
+        let client = build_span_client(
+            Some("AppTrace"),
+            Some(make_span_event_name_mapping(
+                SpanEventNameRoutingKey::SpanAttribute("cluster".to_string()),
+                &[("clusterA", Some("TraceA"))],
+            )),
+        );
+
+        let resource_spans = vec![ResourceSpans {
+            resource: None,
+            scope_spans: vec![ScopeSpans {
+                scope: Some(InstrumentationScope {
+                    name: "s".to_string(),
+                    ..Default::default()
+                }),
+                spans: vec![
+                    Span {
+                        attributes: vec![string_attr("cluster", "clusterA")],
+                        ..Default::default()
+                    },
+                    Span {
+                        attributes: vec![string_attr("cluster", "clusterA")],
+                        ..Default::default()
+                    },
+                ],
+                ..Default::default()
+            }],
+            ..Default::default()
+        }];
+
+        let batches = client
+            .encode_and_compress_spans(&resource_spans)
+            .expect("span encoding should succeed");
+
+        assert_eq!(batches.len(), 1);
+        assert_eq!(batches[0].event_name, "TraceA");
+        assert_eq!(batches[0].row_count, 2);
+    }
+
+    #[test]
     fn encode_and_compress_logs_uses_default_table_name_when_logs_config_absent() {
         let client = GenevaClient::new(GenevaClientConfig {
             endpoint: "https://example.test".to_string(),
