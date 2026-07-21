@@ -47,9 +47,20 @@ pub struct GenevaClientConfig {
     pub role_name: String,
     pub role_instance: String,
     pub msi_resource: Option<String>, // Required for Managed Identity variants
+    pub logs: LogsConfig,
+    pub spans: TracesConfig,
     pub obo_event_map: Option<OboEventMap>, // Per-event OBO config (None = no OBO)
 }
 
+#[derive(Clone, Debug)]
+pub struct LogsConfig {
+    pub default_event_name: Option<String>,
+}
+
+#[derive(Clone, Debug)]
+pub struct TracesConfig {
+    pub default_event_name: Option<String>,
+}
 /// Error type returned by [`GenevaClient::upload_batch`].
 ///
 /// Provides enough information for callers to implement retry strategies:
@@ -95,11 +106,26 @@ pub struct GenevaClient {
     uploader: Arc<GenevaUploader>,
     encoder: OtlpEncoder,
     metadata_fields: MetadataFields,
+    log_table_name: Arc<str>,
+    span_table_name: Arc<str>,
     obo_event_map: Option<OboEventMap>,
 }
 
 impl GenevaClient {
     pub fn new(cfg: GenevaClientConfig) -> Result<Self, String> {
+        let log_table_name: Arc<str> = cfg
+            .logs
+            .default_event_name
+            .as_deref()
+            .unwrap_or("Log")
+            .into();
+        let span_table_name: Arc<str> = cfg
+            .spans
+            .default_event_name
+            .as_deref()
+            .unwrap_or("Span")
+            .into();
+
         info!(
             name: "client.new",
             target: "geneva-uploader",
@@ -107,6 +133,14 @@ impl GenevaClient {
             namespace = %cfg.namespace,
             account = %cfg.account,
             "Initializing GenevaClient"
+        );
+
+        info!(
+            name: "client.new.geneva_event_name",
+            target: "geneva-uploader",
+            logs_default_event_name = %cfg.logs.default_event_name.as_deref().unwrap_or("<none>"),
+            spans_default_event_name = %cfg.spans.default_event_name.as_deref().unwrap_or("<none>"),
+            "Using LogsConfig and TracesConfig configuration"
         );
 
         // Validate MSI resource presence for managed identity variants
@@ -200,6 +234,8 @@ impl GenevaClient {
             uploader: Arc::new(uploader),
             encoder: OtlpEncoder::new(),
             metadata_fields,
+            log_table_name,
+            span_table_name,
             obo_event_map: cfg.obo_event_map,
         })
     }
@@ -247,7 +283,12 @@ impl GenevaClient {
         );
 
         self.encoder
-            .encode_logs_from_view(view, &self.metadata_fields, self.obo_event_map.as_ref())
+            .encode_logs_from_view(
+                view,
+                &self.metadata_fields,
+                self.log_table_name.as_ref(),
+                self.obo_event_map.as_ref(),
+            )
             .map_err(|e| {
                 debug!(
                     name: "client.encode_and_compress_logs.error",
@@ -280,6 +321,7 @@ impl GenevaClient {
             .encode_span_batch(
                 span_iter,
                 &self.metadata_fields,
+                self.span_table_name.as_ref(),
                 self.obo_event_map.as_ref(),
             )
             .map_err(|e| {
@@ -347,5 +389,108 @@ impl GenevaClient {
                     other => UploadError::Other(other.to_string()),
                 }
             })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use opentelemetry_proto::tonic::collector::logs::v1::ExportLogsServiceRequest;
+    use opentelemetry_proto::tonic::logs::v1::{LogRecord, ResourceLogs, ScopeLogs};
+    use opentelemetry_proto::tonic::trace::v1::{ResourceSpans, ScopeSpans, Span};
+    use otap_df_pdata::views::otlp::bytes::logs::RawLogsData;
+    use prost::Message as _;
+
+    fn build_config(logs: Option<&str>, spans: Option<&str>) -> GenevaClientConfig {
+        GenevaClientConfig {
+            endpoint: "https://example.test".to_string(),
+            environment: "Test".to_string(),
+            account: "acct".to_string(),
+            namespace: "ns".to_string(),
+            region: "eastus".to_string(),
+            config_major_version: 2,
+            auth_method: AuthMethod::WorkloadIdentity {
+                resource: "https://monitor.azure.com".to_string(),
+            },
+            tenant: "tenant".to_string(),
+            role_name: "role".to_string(),
+            role_instance: "instance".to_string(),
+            msi_resource: None,
+            logs: LogsConfig {
+                default_event_name: logs.map(str::to_owned),
+            },
+            spans: TracesConfig {
+                default_event_name: spans.map(str::to_owned),
+            },
+            obo_event_map: None,
+        }
+    }
+
+    fn build_client(logs: Option<&str>, spans: Option<&str>) -> GenevaClient {
+        GenevaClient::new(build_config(logs, spans)).expect("client should initialize")
+    }
+
+    #[test]
+    fn default_event_name_unwrap_or_prefers_override_and_falls_back() {
+        let configured = maybe_event_name(true);
+        let missing = maybe_event_name(false);
+
+        assert_eq!(configured.unwrap_or("Log"), "AppLog");
+        assert_eq!(missing.unwrap_or("Log"), "Log");
+    }
+
+    fn maybe_event_name(configured: bool) -> Option<&'static str> {
+        if configured {
+            Some("AppLog")
+        } else {
+            None
+        }
+    }
+
+    #[test]
+    fn encode_and_compress_logs_uses_configured_default_event_name() {
+        let client = build_client(Some("AppLog"), None);
+
+        let request = ExportLogsServiceRequest {
+            resource_logs: vec![ResourceLogs {
+                scope_logs: vec![ScopeLogs {
+                    log_records: vec![LogRecord::default()],
+                    ..Default::default()
+                }],
+                ..Default::default()
+            }],
+        };
+
+        let bytes = request.encode_to_vec();
+        let view = RawLogsData::new(&bytes);
+        let batches = client
+            .encode_and_compress_logs(&view)
+            .expect("log encoding should succeed");
+
+        assert_eq!(batches.len(), 1);
+        assert_eq!(batches[0].event_name, "AppLog");
+    }
+
+    #[test]
+    fn encode_and_compress_spans_uses_configured_default_event_name() {
+        let client = build_client(None, Some("AppTrace"));
+
+        let spans = vec![ResourceSpans {
+            scope_spans: vec![ScopeSpans {
+                spans: vec![Span {
+                    name: "span-name".to_string(),
+                    ..Default::default()
+                }],
+                ..Default::default()
+            }],
+            ..Default::default()
+        }];
+
+        let batches = client
+            .encode_and_compress_spans(&spans)
+            .expect("span encoding should succeed");
+
+        assert_eq!(batches.len(), 1);
+        assert_eq!(batches[0].event_name, "AppTrace");
     }
 }

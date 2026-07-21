@@ -187,6 +187,7 @@ impl<'a> LogRecordParts<'a> {
     fn new<R: LogRecordView>(
         record: &'a R,
         metadata_fields: &'a MetadataFields,
+        table_name: &'a str,
         resource_role: &'a RoleOverrides,
         obo_event_map: Option<&'a OboEventMap>,
     ) -> Self {
@@ -202,9 +203,9 @@ impl<'a> LogRecordParts<'a> {
             .unwrap_or_else(|| Cow::Borrowed(&metadata_fields.role_instance));
 
         let mut parts = if is_common_schema_record(record) {
-            CommonSchemaParts::parse(record, role, role_instance).finish()
+            CommonSchemaParts::parse(record, role, role_instance, table_name).finish()
         } else {
-            Self::from_canonical(record, role, role_instance)
+            Self::from_canonical(record, role, role_instance, table_name)
         };
         parts.obo_config = lookup_obo_config(obo_event_map, parts.routing_event_name.as_ref());
         parts.finish_fields();
@@ -215,12 +216,11 @@ impl<'a> LogRecordParts<'a> {
         record: &'a R,
         role: Cow<'a, str>,
         role_instance: Cow<'a, str>,
+        table_name: &'a str,
     ) -> Self {
         let event_name = normalized_event_name(record);
         let name = event_name.map(Cow::Borrowed);
-        let routing_event_name = event_name
-            .map(Cow::Borrowed)
-            .unwrap_or_else(|| Cow::Borrowed(CS_LOG_TYPENAME));
+        let routing_event_name = Cow::Borrowed(table_name);
         let severity_text = record
             .severity_text()
             .and_then(|b| std::str::from_utf8(b).ok())
@@ -276,10 +276,11 @@ impl<'a> LogRecordParts<'a> {
         record: &'a R,
         role: Cow<'a, str>,
         role_instance: Cow<'a, str>,
+        table_name: &'a str,
     ) -> Self {
         Self {
             timestamp: record_timestamp(record),
-            routing_event_name: Cow::Borrowed(CS_LOG_TYPENAME),
+            routing_event_name: Cow::Borrowed(table_name),
             name: None,
             severity_number: record.severity_number().unwrap_or(0),
             severity_text: record
@@ -422,9 +423,10 @@ impl<'a> CommonSchemaParts<'a> {
         record: &'a R,
         role: Cow<'a, str>,
         role_instance: Cow<'a, str>,
+        table_name: &'a str,
     ) -> Self {
         Self {
-            parts: LogRecordParts::common_schema_base(record, role, role_instance),
+            parts: LogRecordParts::common_schema_base(record, role, role_instance, table_name),
             part_a_name: None,
             part_b_name: None,
         }
@@ -434,8 +436,9 @@ impl<'a> CommonSchemaParts<'a> {
         record: &'a R,
         role: Cow<'a, str>,
         role_instance: Cow<'a, str>,
+        table_name: &'a str,
     ) -> Self {
-        let mut common_schema = Self::new(record, role, role_instance);
+        let mut common_schema = Self::new(record, role, role_instance, table_name);
         let mut seen_common_schema_key = false;
 
         for attr in record.attributes() {
@@ -572,9 +575,6 @@ impl<'a> CommonSchemaParts<'a> {
 
     fn finish(mut self) -> LogRecordParts<'a> {
         self.parts.name = self.part_b_name.or(self.part_a_name);
-        if let Some(name) = &self.parts.name {
-            self.parts.routing_event_name = Cow::Owned(name.to_string());
-        }
         self.parts
     }
 }
@@ -827,10 +827,17 @@ impl LogBatchAccumulator {
         &mut self,
         record: &R,
         metadata_fields: &MetadataFields,
+        table_name: &str,
         resource_role: &RoleOverrides,
         obo_event_map: Option<&OboEventMap>,
     ) {
-        let parts = LogRecordParts::new(record, metadata_fields, resource_role, obo_event_map);
+        let parts = LogRecordParts::new(
+            record,
+            metadata_fields,
+            table_name,
+            resource_role,
+            obo_event_map,
+        );
         let timestamp = parts.timestamp;
         let routing_event_name = parts.routing_event_name.as_ref();
         // Role identity is included because the central blob metadata is batch-level.
@@ -990,6 +997,7 @@ impl OtlpEncoder {
         &self,
         view: &T,
         metadata_fields: &MetadataFields,
+        table_name: &str,
         obo_event_map: Option<&OboEventMap>,
     ) -> Result<Vec<EncodedBatch>, String> {
         let mut acc = LogBatchAccumulator::new();
@@ -1001,27 +1009,32 @@ impl OtlpEncoder {
                 .unwrap_or_default();
             for scope_logs in resource_logs.scopes() {
                 for log_record in scope_logs.log_records() {
-                    acc.push(&log_record, metadata_fields, &resource_role, obo_event_map);
+                    acc.push(
+                        &log_record,
+                        metadata_fields,
+                        table_name,
+                        &resource_role,
+                        obo_event_map,
+                    );
                 }
             }
         }
         acc.finalize()
     }
 
-    /// Encode a batch of spans into a single payload
-    /// All spans are grouped into a single batch with event_name "Span" for routing
+    /// Encode a batch of spans into a single payload.
+    /// All spans are grouped into a single batch using `table_name` for routing.
     /// The returned `data` field contains LZ4 chunked compressed bytes.
     /// On compression failure, the error is returned (no logging, no fallback).
     pub(crate) fn encode_span_batch<'a>(
         &self,
         spans: impl IntoIterator<Item = &'a Span>,
         metadata_fields: &MetadataFields,
+        table_name: &str,
         obo_event_map: Option<&OboEventMap>,
     ) -> Result<Vec<EncodedBatch>, String> {
-        // All spans use "Span" as event name for routing - no grouping by span name
-        const EVENT_NAME: &str = "Span";
-
-        let obo_config = lookup_obo_config(obo_event_map, EVENT_NAME);
+        // Spans are batched into one event table (no grouping by span name).
+        let obo_config = lookup_obo_config(obo_event_map, table_name);
         let mut schemas = Vec::new();
         let mut events = Vec::new();
         let mut start_time = u64::MAX;
@@ -1029,7 +1042,7 @@ impl OtlpEncoder {
 
         for span in spans {
             // 1. Get schema fields
-            let field_info = Self::determine_span_fields(span, EVENT_NAME, obo_config);
+            let field_info = Self::determine_span_fields(span, table_name, obo_config);
 
             // 2. Update timestamp range
             if span.start_time_unix_nano != 0 {
@@ -1070,7 +1083,7 @@ impl OtlpEncoder {
             let central_event = CentralEventEntry {
                 schema_id,
                 level,
-                event_name: Arc::from(EVENT_NAME),
+                event_name: Arc::from(table_name),
                 row: row_buffer,
             };
             events.push(central_event);
@@ -1142,7 +1155,7 @@ impl OtlpEncoder {
         debug!(
             name: "encoder.encode_span_batch",
             target: "geneva-uploader",
-            event_name = EVENT_NAME,
+            event_name = table_name,
             schemas = schemas_count,
             spans = events_count,
             uncompressed_size = uncompressed.len(),
@@ -1151,7 +1164,7 @@ impl OtlpEncoder {
         );
 
         Ok(vec![EncodedBatch {
-            event_name: EVENT_NAME.to_string(),
+            event_name: table_name.to_string(),
             data: compressed,
             metadata: batch_metadata,
             row_count: events_count,
@@ -1175,7 +1188,13 @@ impl OtlpEncoder {
             String::new(),
         );
         let role_overrides = RoleOverrides::default();
-        let parts = LogRecordParts::new(record, &metadata_fields, &role_overrides, None);
+        let parts = LogRecordParts::new(
+            record,
+            &metadata_fields,
+            CS_LOG_TYPENAME,
+            &role_overrides,
+            None,
+        );
         (parts.fields, parts.dynamic_fields_start)
     }
 
@@ -1188,7 +1207,13 @@ impl OtlpEncoder {
         metadata_fields: &MetadataFields,
     ) -> Vec<u8> {
         let role_overrides = RoleOverrides::default();
-        let parts = LogRecordParts::new(record, metadata_fields, &role_overrides, None);
+        let parts = LogRecordParts::new(
+            record,
+            metadata_fields,
+            CS_LOG_TYPENAME,
+            &role_overrides,
+            None,
+        );
         debug_assert_eq!(fields.len(), parts.fields.len());
         debug_assert_eq!(dynamic_fields_start, parts.dynamic_fields_start);
         Self::write_row_parts(&parts, metadata_fields)
@@ -1691,7 +1716,7 @@ mod tests {
             }],
         }
         .encode_to_vec();
-        encoder.encode_logs_from_view(&RawLogsData::new(&bytes), metadata, obo_event_map)
+        encoder.encode_logs_from_view(&RawLogsData::new(&bytes), metadata, "Log", obo_event_map)
     }
 
     fn string_attr(key: &str, value: &str) -> KeyValue {
@@ -1856,10 +1881,10 @@ mod tests {
         let result =
             encode_log_batch_via_proto(&encoder, [log1, log2, log3].iter(), &metadata).unwrap();
 
-        // Should create one batch (same event_name = "user_action")
+        // Should create one batch; routing table is fixed by encoder input.
         assert_eq!(result.len(), 1);
         let batch = &result[0];
-        assert_eq!(batch.event_name, "user_action");
+        assert_eq!(batch.event_name, "Log");
 
         // Verify that multiple schemas were created within the same batch
         // schema_ids should contain multiple semicolon-separated MD5 hashes
@@ -1907,7 +1932,7 @@ mod tests {
         let result = encode_log_batch_via_proto(&encoder, [log].iter(), &metadata).unwrap();
 
         assert_eq!(result.len(), 1);
-        assert_eq!(result[0].event_name, "test_event");
+        assert_eq!(result[0].event_name, "Log");
         assert_eq!(result[0].compressed_size(), result[0].data.len());
         assert!(result[0].compressed_size() > 0);
     }
@@ -1966,7 +1991,7 @@ mod tests {
             encode_log_batch_via_proto(&encoder, [log.clone()].iter(), &metadata).unwrap();
         // Smoke test: a rich proto-backed view encodes to a single non-empty batch.
         assert_eq!(encoded.len(), 1);
-        assert_eq!(encoded[0].event_name, "view_event");
+        assert_eq!(encoded[0].event_name, "Log");
         assert!(!encoded[0].data.is_empty());
     }
 
@@ -2221,7 +2246,7 @@ mod tests {
         assert_eq!(encoded.len(), 2);
         assert!(encoded
             .iter()
-            .all(|batch| batch.event_name == "SharedEvent" && batch.row_count == 1));
+            .all(|batch| batch.event_name == "Log" && batch.row_count == 1));
     }
 
     #[test]
@@ -2405,7 +2430,7 @@ mod tests {
         .unwrap();
 
         assert_eq!(encoded.len(), 1);
-        assert_eq!(encoded[0].event_name, "SharedEvent");
+        assert_eq!(encoded[0].event_name, "Log");
         assert_eq!(encoded[0].row_count, 2);
         assert!(!encoded[0].metadata.schema_ids.is_empty());
     }
@@ -2538,7 +2563,7 @@ mod tests {
         let export_bytes = wrap_log_record_bytes(&log_bytes);
 
         let actual = encoder
-            .encode_logs_from_view(&RawLogsData::new(&export_bytes), &metadata, None)
+            .encode_logs_from_view(&RawLogsData::new(&export_bytes), &metadata, "Log", None)
             .unwrap();
         assert_single_batch_equal(&expected, &actual);
     }
@@ -2570,7 +2595,7 @@ mod tests {
         let export_bytes = wrap_log_record_bytes(&log_bytes);
 
         let actual = encoder
-            .encode_logs_from_view(&RawLogsData::new(&export_bytes), &metadata, None)
+            .encode_logs_from_view(&RawLogsData::new(&export_bytes), &metadata, "Log", None)
             .unwrap();
         assert_single_batch_equal(&expected, &actual);
     }
@@ -2605,7 +2630,7 @@ mod tests {
         let export_bytes = wrap_log_record_bytes(&log_bytes);
 
         let actual = encoder
-            .encode_logs_from_view(&RawLogsData::new(&export_bytes), &metadata, None)
+            .encode_logs_from_view(&RawLogsData::new(&export_bytes), &metadata, "Log", None)
             .unwrap();
         assert_single_batch_equal(&expected, &actual);
     }
@@ -2696,9 +2721,9 @@ mod tests {
         let result =
             encode_log_batch_via_proto(&encoder, [log1, log2, log3].iter(), &metadata).unwrap();
 
-        // All should be in one batch with same event_name
+        // All should be in one batch with the configured routing table.
         assert_eq!(result.len(), 1);
-        assert_eq!(result[0].event_name, "user_action");
+        assert_eq!(result[0].event_name, "Log");
         assert!(!result[0].data.is_empty());
         // Should have 3 different schema IDs (semicolon-separated)
         assert_eq!(result[0].metadata.schema_ids.matches(';').count(), 2); // 3 schemas = 2 semicolons
@@ -2723,12 +2748,10 @@ mod tests {
         let metadata = make_metadata("test");
         let result = encode_log_batch_via_proto(&encoder, [log1, log2].iter(), &metadata).unwrap();
 
-        // Should create 2 separate batches
-        assert_eq!(result.len(), 2);
-
-        let event_names: Vec<&String> = result.iter().map(|batch| &batch.event_name).collect();
-        assert!(event_names.contains(&&"login".to_string()));
-        assert!(event_names.contains(&&"logout".to_string()));
+        // Routing is fixed by table_name, so different record event names coalesce.
+        assert_eq!(result.len(), 1);
+        assert_eq!(result[0].event_name, "Log");
+        assert_eq!(result[0].row_count, 2);
 
         assert!(result.iter().all(|batch| !batch.data.is_empty()));
     }
@@ -2796,28 +2819,14 @@ mod tests {
             encode_log_batch_via_proto(&encoder, [log1, log2, log3, log4].iter(), &metadata)
                 .unwrap();
 
-        // Should create 3 batches: "user_action", "system_alert", "Log"
-        assert_eq!(result.len(), 3);
+        // Routing is fixed by table_name, so all rows are emitted in one batch.
+        assert_eq!(result.len(), 1);
 
-        let user_action = result
-            .iter()
-            .find(|batch| batch.event_name == "user_action")
-            .unwrap();
-        let system_alert = result
-            .iter()
-            .find(|batch| batch.event_name == "system_alert")
-            .unwrap();
-        let log_batch = result
-            .iter()
-            .find(|batch| batch.event_name == "Log")
-            .unwrap();
-
-        assert!(!user_action.data.is_empty());
-        assert_eq!(user_action.metadata.schema_ids.matches(';').count(), 1); // 2 schemas = 1 semicolon
-        assert!(!system_alert.data.is_empty());
-        assert_eq!(system_alert.metadata.schema_ids.matches(';').count(), 0); // 1 schema = 0 semicolons
-        assert!(!log_batch.data.is_empty());
-        assert_eq!(log_batch.metadata.schema_ids.matches(';').count(), 0); // 1 schema = 0 semicolons
+        let batch = &result[0];
+        assert_eq!(batch.event_name, "Log");
+        assert_eq!(batch.row_count, 4);
+        assert!(!batch.data.is_empty());
+        assert_eq!(batch.metadata.schema_ids.matches(';').count(), 2); // 3 schemas = 2 semicolons
     }
 
     #[test]
@@ -2855,7 +2864,7 @@ mod tests {
 
         let metadata = make_metadata("testNamespace");
         let result = encoder
-            .encode_span_batch([span].iter(), &metadata, None)
+            .encode_span_batch([span].iter(), &metadata, "Span", None)
             .unwrap();
 
         assert_eq!(result.len(), 1);
@@ -2893,7 +2902,7 @@ mod tests {
 
         let metadata = make_metadata("test");
         let result = encoder
-            .encode_span_batch([span].iter(), &metadata, None)
+            .encode_span_batch([span].iter(), &metadata, "Span", None)
             .unwrap();
 
         assert_eq!(result.len(), 1);
@@ -2924,7 +2933,7 @@ mod tests {
 
         let metadata = make_metadata("test");
         let result = encoder
-            .encode_span_batch([span].iter(), &metadata, None)
+            .encode_span_batch([span].iter(), &metadata, "Span", None)
             .unwrap();
 
         assert_eq!(result.len(), 1);
@@ -2970,7 +2979,7 @@ mod tests {
 
         let metadata = make_metadata("test");
         let result = encoder
-            .encode_span_batch([span1, span2].iter(), &metadata, None)
+            .encode_span_batch([span1, span2].iter(), &metadata, "Span", None)
             .unwrap();
 
         assert_eq!(result.len(), 1);
@@ -3074,7 +3083,7 @@ mod tests {
         ];
 
         let span_result = encoder
-            .encode_span_batch(spans.iter(), &metadata, None)
+            .encode_span_batch(spans.iter(), &metadata, "Span", None)
             .unwrap();
 
         assert_eq!(span_result.len(), 1);
@@ -3135,7 +3144,7 @@ mod tests {
 
         use otap_df_pdata::views::otlp::bytes::logs::RawLogsData;
         let encoded = encoder
-            .encode_logs_from_view(&RawLogsData::new(&bytes), &metadata, None)
+            .encode_logs_from_view(&RawLogsData::new(&bytes), &metadata, "Log", None)
             .unwrap();
 
         assert_eq!(encoded.len(), 1);
@@ -3206,24 +3215,17 @@ mod tests {
         .encode_to_vec();
 
         let result = encoder
-            .encode_logs_from_view(&RawLogsData::new(&bytes), &metadata, None)
+            .encode_logs_from_view(&RawLogsData::new(&bytes), &metadata, "Log", None)
             .unwrap();
 
-        // Two event names → two batches
-        assert_eq!(result.len(), 2);
+        // Routing is fixed by table_name; all records land in one batch.
+        assert_eq!(result.len(), 1);
 
-        let alpha = result.iter().find(|b| b.event_name == "alpha").unwrap();
-        let beta = result.iter().find(|b| b.event_name == "beta").unwrap();
-
-        // Each batch should contain records from both resources
-        assert_eq!(alpha.row_count, 2);
-        assert_eq!(beta.row_count, 2);
-
-        // Timestamp ranges should span across resources
-        assert_eq!(alpha.metadata.start_time, 1_000);
-        assert_eq!(alpha.metadata.end_time, 3_000);
-        assert_eq!(beta.metadata.start_time, 2_000);
-        assert_eq!(beta.metadata.end_time, 4_000);
+        let batch = &result[0];
+        assert_eq!(batch.event_name, "Log");
+        assert_eq!(batch.row_count, 4);
+        assert_eq!(batch.metadata.start_time, 1_000);
+        assert_eq!(batch.metadata.end_time, 4_000);
     }
 
     // ==================== OBO (On Behalf Of) Per-Event Tests ====================
@@ -3256,7 +3258,7 @@ mod tests {
         };
         let result = encode_log_batch_via_proto_with_obo(
             &OtlpEncoder::new(),
-            [log].iter(),
+            [log.clone()].iter(),
             &metadata,
             Some(&obo_map),
         );
@@ -3275,7 +3277,7 @@ mod tests {
         };
         let result = encode_log_batch_via_proto_with_obo(
             &OtlpEncoder::new(),
-            [log].iter(),
+            [log.clone()].iter(),
             &metadata,
             Some(&obo_map),
         );
@@ -3294,7 +3296,7 @@ mod tests {
         };
         let result = encode_log_batch_via_proto_with_obo(
             &OtlpEncoder::new(),
-            [log].iter(),
+            [log.clone()].iter(),
             &metadata,
             Some(&obo_map),
         );
@@ -3312,7 +3314,7 @@ mod tests {
     fn test_obo_fields_in_log_schema() {
         let metadata = make_metadata("TestNamespace");
         let obo_map = make_obo_event_map(
-            "TestEvent",
+            "Log",
             "Microsoft.SomeService",
             Some(r#"<Config onBehalfFields="resourceId" priority="Normal"/>"#),
         );
@@ -3324,7 +3326,7 @@ mod tests {
         };
         let result = encode_log_batch_via_proto_with_obo(
             &OtlpEncoder::new(),
-            [log].iter(),
+            [log.clone()].iter(),
             &metadata,
             Some(&obo_map),
         );
@@ -3332,6 +3334,14 @@ mod tests {
         let batches = result.unwrap();
         assert_eq!(batches.len(), 1);
         assert_eq!(batches[0].row_count, 1);
+
+        let without_obo =
+            encode_log_batch_via_proto(&OtlpEncoder::new(), [log.clone()].iter(), &metadata)
+                .unwrap();
+        assert_ne!(
+            batches[0].metadata.schema_ids, without_obo[0].metadata.schema_ids,
+            "table-keyed OBO config should change the encoded schema"
+        );
     }
 
     #[test]
@@ -3353,7 +3363,7 @@ mod tests {
     #[test]
     fn test_obo_identity_only_no_annotations() {
         let metadata = make_metadata("TestNamespace");
-        let obo_map = make_obo_event_map("TestEvent", "Microsoft.SomeService", None);
+        let obo_map = make_obo_event_map("Log", "Microsoft.SomeService", None);
         let log = LogRecord {
             observed_time_unix_nano: 1_700_000_000_000_000_000,
             event_name: "TestEvent".to_string(),
@@ -3362,7 +3372,7 @@ mod tests {
         };
         let result = encode_log_batch_via_proto_with_obo(
             &OtlpEncoder::new(),
-            [log].iter(),
+            [log.clone()].iter(),
             &metadata,
             Some(&obo_map),
         );
@@ -3406,7 +3416,7 @@ mod tests {
     fn test_encode_log_batch_with_obo() {
         let metadata = make_metadata("TestNamespace");
         let obo_map = make_obo_event_map(
-            "TestEvent",
+            "Log",
             "Microsoft.BatchService",
             Some(r#"<Config onBehalfFields="resourceId"/>"#),
         );
@@ -3419,7 +3429,7 @@ mod tests {
         };
         let result = encode_log_batch_via_proto_with_obo(
             &OtlpEncoder::new(),
-            [log].iter(),
+            [log.clone()].iter(),
             &metadata,
             Some(&obo_map),
         );
@@ -3427,6 +3437,14 @@ mod tests {
         let batches = result.unwrap();
         assert_eq!(batches.len(), 1);
         assert_eq!(batches[0].row_count, 1);
+
+        let without_obo =
+            encode_log_batch_via_proto(&OtlpEncoder::new(), [log.clone()].iter(), &metadata)
+                .unwrap();
+        assert_ne!(
+            batches[0].metadata.schema_ids, without_obo[0].metadata.schema_ids,
+            "table-keyed OBO should be visible in the encoded schema"
+        );
     }
 
     #[test]
@@ -3447,7 +3465,7 @@ mod tests {
             end_time_unix_nano: 1_700_000_001_000_000_000,
             ..Default::default()
         };
-        let result = encoder.encode_span_batch([span].iter(), &metadata, Some(&obo_map));
+        let result = encoder.encode_span_batch([span].iter(), &metadata, "Span", Some(&obo_map));
         assert!(result.is_ok(), "encode_span_batch with OBO should succeed");
         let batches = result.unwrap();
         assert_eq!(batches.len(), 1);
@@ -3458,7 +3476,7 @@ mod tests {
     fn test_mixed_batch_obo_and_non_obo_events() {
         let metadata = make_metadata("TestNamespace");
         let obo_map = make_obo_event_map(
-            "OboEvent",
+            "Log",
             "Microsoft.OboService",
             Some(r#"<Config onBehalfFields="resourceId"/>"#),
         );
@@ -3484,9 +3502,10 @@ mod tests {
         let batches = result.unwrap();
         assert_eq!(
             batches.len(),
-            2,
-            "Should have separate batches for different event names"
+            1,
+            "Routing table is fixed; events share one batch"
         );
+        assert_eq!(batches[0].event_name, "Log");
     }
 
     #[test]
@@ -3507,7 +3526,7 @@ mod tests {
         let metadata = make_metadata("TestNamespace");
         let mut obo_map = HashMap::new();
         obo_map.insert(
-            "TestEvent".to_string(),
+            "Log".to_string(),
             OboEventConfig {
                 identity: "".to_string(),
                 annotations: Some("some annotations".to_string()),
@@ -3533,7 +3552,7 @@ mod tests {
         let metadata = make_metadata("TestNamespace");
         let mut obo_map = HashMap::new();
         obo_map.insert(
-            "TestEvent".to_string(),
+            "Log".to_string(),
             OboEventConfig {
                 identity: "   ".to_string(),
                 annotations: None,
@@ -3559,7 +3578,7 @@ mod tests {
         let metadata = make_metadata("TestNamespace");
         let mut obo_map = HashMap::new();
         obo_map.insert(
-            "TestEvent".to_string(),
+            "Log".to_string(),
             OboEventConfig {
                 identity: "Microsoft.TestService".to_string(),
                 annotations: Some("   ".to_string()),
@@ -3587,7 +3606,7 @@ mod tests {
     fn test_common_schema_part_b_name_drives_obo_lookup() {
         let metadata = make_metadata("TestNamespace");
         let obo_map = make_obo_event_map(
-            "CommonSchemaEvent",
+            "Log",
             "Microsoft.CommonSchemaService",
             Some(r#"<Config onBehalfFields="resourceId"/>"#),
         );
@@ -3613,10 +3632,11 @@ mod tests {
         .unwrap();
 
         assert_eq!(with_obo.len(), 1);
-        assert_eq!(with_obo[0].event_name, "CommonSchemaEvent");
+        assert_eq!(with_obo[0].event_name, "Log");
+        assert_eq!(with_obo[0].row_count, 1);
         assert_ne!(
             with_obo[0].metadata.schema_ids, without_obo[0].metadata.schema_ids,
-            "Common Schema PartB.name should select the OBO config for that event"
+            "OBO config should apply when the routing table matches the OBO map key"
         );
     }
 
