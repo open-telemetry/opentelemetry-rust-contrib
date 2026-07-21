@@ -156,8 +156,19 @@ pub struct GenevaClient {
     obo_event_map: Option<OboEventMap>,
 }
 
+/// Stored client pieces shared by every constructor (all of `Self` except the
+/// uploader and encoder), derived once so the constructors can't drift.
+struct ClientParts {
+    log_table_name: Arc<str>,
+    span_table_name: Arc<str>,
+    metadata_fields: MetadataFields,
+    obo_event_map: Option<OboEventMap>,
+}
+
 impl GenevaClient {
-    pub fn new(cfg: GenevaClientConfig) -> Result<Self, String> {
+    /// Derive the shared uploader config + stored parts; constructors differ
+    /// only in how they build the `GenevaUploader` from the returned config.
+    fn derive_parts(cfg: &GenevaClientConfig) -> (GenevaUploaderConfig, ClientParts) {
         let log_table_name: Arc<str> = cfg
             .logs
             .default_event_name
@@ -171,6 +182,54 @@ impl GenevaClient {
             .unwrap_or("Span")
             .into();
 
+        let source_identity = format!(
+            "Tenant={}/Role={}/RoleInstance={}",
+            cfg.tenant, cfg.role_name, cfg.role_instance
+        );
+        let config_version = format!("Ver{}v0", cfg.config_major_version);
+
+        // Metadata fields that will appear as Bond schema fields in Geneva.
+        let metadata_fields = MetadataFields::new(
+            cfg.environment.clone(),
+            config_version.clone(),
+            cfg.tenant.clone(),
+            cfg.role_name.clone(),
+            cfg.role_instance.clone(),
+            cfg.namespace.clone(),
+            config_version,
+        );
+
+        let uploader_config = GenevaUploaderConfig {
+            namespace: metadata_fields.namespace.clone(),
+            source_identity,
+            environment: metadata_fields.env_name.clone(),
+            config_version: metadata_fields.event_version.clone(),
+        };
+
+        (
+            uploader_config,
+            ClientParts {
+                log_table_name,
+                span_table_name,
+                metadata_fields,
+                obo_event_map: cfg.obo_event_map.clone(),
+            },
+        )
+    }
+
+    /// Assemble the final client from a built uploader and the shared parts.
+    fn assemble(uploader: GenevaUploader, parts: ClientParts) -> Self {
+        Self {
+            uploader: Arc::new(uploader),
+            encoder: OtlpEncoder::new(),
+            metadata_fields: parts.metadata_fields,
+            log_table_name: parts.log_table_name,
+            span_table_name: parts.span_table_name,
+            obo_event_map: parts.obo_event_map,
+        }
+    }
+
+    pub fn new(cfg: GenevaClientConfig) -> Result<Self, String> {
         info!(
             name: "client.new",
             target: "geneva-uploader",
@@ -210,11 +269,14 @@ impl GenevaClient {
             #[cfg(feature = "mock_auth")]
             AuthMethod::MockAuth => {}
         }
+
+        let (uploader_config, parts) = Self::derive_parts(&cfg);
+
         let config_client_config = GenevaConfigClientConfig {
             endpoint: cfg.endpoint,
-            environment: cfg.environment.clone(),
+            environment: cfg.environment,
             account: cfg.account,
-            namespace: cfg.namespace.clone(),
+            namespace: cfg.namespace,
             region: cfg.region,
             config_major_version: cfg.config_major_version,
             auth_method: cfg.auth_method,
@@ -233,31 +295,6 @@ impl GenevaClient {
                 format!("GenevaConfigClient init failed: {e}")
             })?);
 
-        let source_identity = format!(
-            "Tenant={}/Role={}/RoleInstance={}",
-            cfg.tenant, cfg.role_name, cfg.role_instance
-        );
-
-        let config_version = format!("Ver{}v0", cfg.config_major_version);
-
-        // Create metadata fields that will appear as Bond schema fields in Geneva
-        let metadata_fields = MetadataFields::new(
-            cfg.environment,
-            config_version.clone(),
-            cfg.tenant,
-            cfg.role_name,
-            cfg.role_instance,
-            cfg.namespace,
-            config_version,
-        );
-
-        let uploader_config = GenevaUploaderConfig {
-            namespace: metadata_fields.namespace.clone(),
-            source_identity,
-            environment: metadata_fields.env_name.clone(),
-            config_version: metadata_fields.event_version.clone(),
-        };
-
         let uploader =
             GenevaUploader::from_config_client(config_client, uploader_config).map_err(|e| {
                 debug!(
@@ -275,14 +312,7 @@ impl GenevaClient {
             "GenevaClient initialized successfully"
         );
 
-        Ok(Self {
-            uploader: Arc::new(uploader),
-            encoder: OtlpEncoder::new(),
-            metadata_fields,
-            log_table_name,
-            span_table_name,
-            obo_event_map: cfg.obo_event_map,
-        })
+        Ok(Self::assemble(uploader, parts))
     }
 
     /// Agent-fed construction: the host supplies the GIG credential via
@@ -302,39 +332,7 @@ impl GenevaClient {
             "Initializing GenevaClient (agent-fed credential source)"
         );
 
-        let log_table_name: Arc<str> = cfg
-            .logs
-            .default_event_name
-            .as_deref()
-            .unwrap_or("Log")
-            .into();
-        let span_table_name: Arc<str> = cfg
-            .spans
-            .default_event_name
-            .as_deref()
-            .unwrap_or("Span")
-            .into();
-
-        let source_identity = format!(
-            "Tenant={}/Role={}/RoleInstance={}",
-            cfg.tenant, cfg.role_name, cfg.role_instance
-        );
-        let config_version = format!("Ver{}v0", cfg.config_major_version);
-        let metadata_fields = MetadataFields::new(
-            cfg.environment.clone(),
-            config_version.clone(),
-            cfg.tenant.clone(),
-            cfg.role_name.clone(),
-            cfg.role_instance.clone(),
-            cfg.namespace.clone(),
-            config_version,
-        );
-        let uploader_config = GenevaUploaderConfig {
-            namespace: metadata_fields.namespace.clone(),
-            source_identity,
-            environment: metadata_fields.env_name.clone(),
-            config_version: metadata_fields.event_version.clone(),
-        };
+        let (uploader_config, parts) = Self::derive_parts(&cfg);
 
         let uploader = GenevaUploader::from_agent_fed(source, uploader_config).map_err(|e| {
             debug!(
@@ -346,14 +344,7 @@ impl GenevaClient {
             format!("GenevaUploader init failed: {e}")
         })?;
 
-        Ok(Self {
-            uploader: Arc::new(uploader),
-            encoder: OtlpEncoder::new(),
-            metadata_fields,
-            log_table_name,
-            span_table_name,
-            obo_event_map: cfg.obo_event_map,
-        })
+        Ok(Self::assemble(uploader, parts))
     }
 
     /// Encode logs from any [`LogsDataView`] implementation into LZ4-chunked
@@ -608,5 +599,63 @@ mod tests {
 
         assert_eq!(batches.len(), 1);
         assert_eq!(batches[0].event_name, "AppTrace");
+    }
+
+    #[test]
+    fn with_agent_fed_source_builds_usable_client() {
+        #[derive(Debug)]
+        struct StubSource;
+        impl AgentFedCredentialSource for StubSource {
+            fn current(&self) -> AgentFedCredentialFuture<'_> {
+                Box::pin(async {
+                    Some(AgentFedCredential {
+                        token: "secret-token".to_string(),
+                        endpoint: "https://ingest.example".to_string(),
+                        moniker: "moniker".to_string(),
+                    })
+                })
+            }
+        }
+
+        let client = GenevaClient::with_agent_fed_source(
+            build_config(Some("AppLog"), None),
+            Arc::new(StubSource),
+        )
+        .expect("agent-fed client should initialize");
+
+        // Prove the agent-fed client is usable end-to-end for encoding, just
+        // like a config-service client.
+        let request = ExportLogsServiceRequest {
+            resource_logs: vec![ResourceLogs {
+                scope_logs: vec![ScopeLogs {
+                    log_records: vec![LogRecord::default()],
+                    ..Default::default()
+                }],
+                ..Default::default()
+            }],
+        };
+        let bytes = request.encode_to_vec();
+        let view = RawLogsData::new(&bytes);
+        let batches = client
+            .encode_and_compress_logs(&view)
+            .expect("log encoding should succeed");
+        assert_eq!(batches.len(), 1);
+        assert_eq!(batches[0].event_name, "AppLog");
+    }
+
+    #[test]
+    fn agent_fed_credential_debug_redacts_token() {
+        let cred = AgentFedCredential {
+            token: "top-secret".to_string(),
+            endpoint: "https://ingest.example".to_string(),
+            moniker: "moniker".to_string(),
+        };
+        let rendered = format!("{cred:?}");
+        assert!(
+            !rendered.contains("top-secret"),
+            "token must be redacted: {rendered}"
+        );
+        assert!(rendered.contains("<redacted>"));
+        assert!(rendered.contains("moniker"));
     }
 }

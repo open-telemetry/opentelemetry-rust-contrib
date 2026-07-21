@@ -124,6 +124,58 @@ pub(crate) enum IngestionSource {
     AgentFed(Arc<dyn crate::client::AgentFedCredentialSource>),
 }
 
+/// Credential + routing resolved for a single upload, independent of source.
+struct ResolvedIngestion {
+    token: String,
+    gig_endpoint: String,
+    moniker: String,
+    endpoint_query_param: String,
+}
+
+impl IngestionSource {
+    /// Resolve the per-upload credential and routing. Centralizes the
+    /// source-specific branching (and the agent-fed endpoint-claim fallback)
+    /// here so `upload` sees a single uniform shape and never branches.
+    async fn resolve(&self) -> Result<ResolvedIngestion> {
+        match self {
+            IngestionSource::ConfigClient(config_client) => {
+                let (auth_info, moniker_info, endpoint_query_param) =
+                    config_client.get_ingestion_info().await?;
+                Ok(ResolvedIngestion {
+                    token: auth_info.auth_token,
+                    gig_endpoint: auth_info.endpoint,
+                    moniker: moniker_info.name,
+                    endpoint_query_param,
+                })
+            }
+            IngestionSource::AgentFed(source) => {
+                let cred = source.current().await.ok_or_else(|| {
+                    GenevaUploaderError::ConfigClient(
+                        "agent-fed credential not yet provisioned by host".to_string(),
+                    )
+                })?;
+                // The GIG ingestion gateway rejects the upload (HTTP 403,
+                // "Token must have 'Endpoint' claim set to ...") unless the
+                // request's `endpoint` query parameter matches the `Endpoint`
+                // claim embedded in the auth token. The native GCS config-service
+                // path derives that value from the token itself (see
+                // get_ingestion_info -> extract_endpoint_from_token), so the
+                // agent-fed path must do the same. Some valid tokens legitimately
+                // omit the claim; mirror the GCS path and fall back to the
+                // credential's own endpoint rather than rejecting the upload.
+                let endpoint_query_param = extract_endpoint_from_token(&cred.token)
+                    .unwrap_or_else(|_| cred.endpoint.clone());
+                Ok(ResolvedIngestion {
+                    token: cred.token,
+                    gig_endpoint: cred.endpoint,
+                    moniker: cred.moniker,
+                    endpoint_query_param,
+                })
+            }
+        }
+    }
+}
+
 /// Client for uploading data to Geneva Ingestion Gateway (GIG)
 #[derive(Debug, Clone)]
 pub(crate) struct GenevaUploader {
@@ -284,43 +336,14 @@ impl GenevaUploader {
         );
 
         // `endpoint_query_param` becomes the `endpoint=` query param (see
-        // `create_upload_uri`).
-        let (auth_token, gig_endpoint, moniker, endpoint_query_param) = match &self.source {
-            IngestionSource::ConfigClient(config_client) => {
-                let (auth_info, moniker_info, monitoring_endpoint) =
-                    config_client.get_ingestion_info().await?;
-                (
-                    auth_info.auth_token,
-                    auth_info.endpoint,
-                    moniker_info.name,
-                    monitoring_endpoint,
-                )
-            }
-            IngestionSource::AgentFed(source) => {
-                let cred = source.current().await.ok_or_else(|| {
-                    GenevaUploaderError::ConfigClient(
-                        "agent-fed credential not yet provisioned by host".to_string(),
-                    )
-                })?;
-                // The GIG ingestion gateway rejects the upload (HTTP 403,
-                // "Token must have 'Endpoint' claim set to ...") unless the
-                // request's `endpoint` query parameter matches the `Endpoint`
-                // claim embedded in the auth token. The native GCS config-service
-                // path derives that value from the token itself (see
-                // get_ingestion_info -> extract_endpoint_from_token), so the
-                // agent-fed path must do the same. Some valid tokens legitimately
-                // omit the claim; mirror the GCS path and fall back to the
-                // credential's own endpoint rather than rejecting the upload.
-                let endpoint_query_param = extract_endpoint_from_token(&cred.token)
-                    .unwrap_or_else(|_| cred.endpoint.clone());
-                (
-                    cred.token,
-                    cred.endpoint,
-                    cred.moniker,
-                    endpoint_query_param,
-                )
-            }
-        };
+        // `create_upload_uri`). Both credential sources resolve to the same
+        // shape via `IngestionSource::resolve`, so this path stays branch-free.
+        let ResolvedIngestion {
+            token: auth_token,
+            gig_endpoint,
+            moniker,
+            endpoint_query_param,
+        } = self.source.resolve().await?;
         let data_size = data.len();
         let upload_uri = self.create_upload_uri(
             &endpoint_query_param,
@@ -600,6 +623,15 @@ mod tests {
         GenevaUploader::from_agent_fed(source, uploader_config).expect("agent-fed uploader builds")
     }
 
+    /// Build a minimal JWT (`header.payload.signature`) whose payload carries
+    /// the given `Endpoint` claim. Only the payload is meaningful to
+    /// `extract_endpoint_from_token`; the header and signature are placeholders.
+    fn agent_fed_token_with_endpoint(endpoint: &str) -> String {
+        use base64::{engine::general_purpose::URL_SAFE_NO_PAD, Engine as _};
+        let payload = URL_SAFE_NO_PAD.encode(format!(r#"{{"Endpoint":"{endpoint}"}}"#));
+        format!("hdr.{payload}.sig")
+    }
+
     #[tokio::test]
     async fn agent_fed_upload_uses_host_token_and_skips_gcs() {
         use wiremock::matchers::{header, method, path};
@@ -684,6 +716,68 @@ mod tests {
         assert!(
             resp.is_err(),
             "upload must error when the host has not provisioned a credential"
+        );
+    }
+
+    #[tokio::test]
+    async fn agent_fed_upload_endpoint_query_uses_token_claim() {
+        use wiremock::matchers::{method, path, query_param};
+        use wiremock::{Mock, MockServer, ResponseTemplate};
+
+        let mock_server = MockServer::start().await;
+        // The token carries an `Endpoint` claim that differs from the
+        // credential endpoint; the `endpoint=` query param must be derived from
+        // that claim, overriding the credential endpoint. The mock only matches
+        // (and returns 202) when `endpoint=` equals the claim, so a successful
+        // upload proves the routing.
+        let token = agent_fed_token_with_endpoint("https://claim.endpoint.example");
+        Mock::given(method("POST"))
+            .and(path("/api/v1/ingestion/ingest"))
+            .and(query_param("endpoint", "https://claim.endpoint.example"))
+            .respond_with(ResponseTemplate::new(202).set_body_string(r#"{"ticket":"t"}"#))
+            .expect(1)
+            .mount(&mock_server)
+            .await;
+
+        let source = Arc::new(TestAgentFedSource::new(&token, &mock_server.uri(), "m"));
+        let uploader = agent_fed_uploader(source);
+        let metadata = make_test_metadata();
+        let resp = uploader
+            .upload(vec![1, 2, 3], "Log", &metadata, 1, None)
+            .await;
+        assert!(
+            resp.is_ok(),
+            "`endpoint=` must come from the token's Endpoint claim: {resp:?}"
+        );
+    }
+
+    #[tokio::test]
+    async fn agent_fed_upload_endpoint_query_falls_back_to_cred_endpoint() {
+        use wiremock::matchers::{method, path, query_param};
+        use wiremock::{Mock, MockServer, ResponseTemplate};
+
+        let mock_server = MockServer::start().await;
+        // A claimless token has no `Endpoint` claim, so the `endpoint=` query
+        // param must fall back to the credential's own endpoint. The mock only
+        // matches when `endpoint=` equals that endpoint.
+        let endpoint = mock_server.uri();
+        Mock::given(method("POST"))
+            .and(path("/api/v1/ingestion/ingest"))
+            .and(query_param("endpoint", endpoint.as_str()))
+            .respond_with(ResponseTemplate::new(202).set_body_string(r#"{"ticket":"t"}"#))
+            .expect(1)
+            .mount(&mock_server)
+            .await;
+
+        let source = Arc::new(TestAgentFedSource::new("claimless-token", &endpoint, "m"));
+        let uploader = agent_fed_uploader(source);
+        let metadata = make_test_metadata();
+        let resp = uploader
+            .upload(vec![1, 2, 3], "Log", &metadata, 1, None)
+            .await;
+        assert!(
+            resp.is_ok(),
+            "`endpoint=` must fall back to the credential endpoint: {resp:?}"
         );
     }
 }
