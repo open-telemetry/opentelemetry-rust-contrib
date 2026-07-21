@@ -712,6 +712,42 @@ mod tests {
         }
     }
 
+    fn double_attr(key: &str, value: f64) -> KeyValue {
+        KeyValue {
+            key: key.to_string(),
+            key_strindex: 0,
+            value: Some(opentelemetry_proto::tonic::common::v1::AnyValue {
+                value: Some(
+                    opentelemetry_proto::tonic::common::v1::any_value::Value::DoubleValue(value),
+                ),
+            }),
+        }
+    }
+
+    fn bool_attr(key: &str, value: bool) -> KeyValue {
+        KeyValue {
+            key: key.to_string(),
+            key_strindex: 0,
+            value: Some(opentelemetry_proto::tonic::common::v1::AnyValue {
+                value: Some(
+                    opentelemetry_proto::tonic::common::v1::any_value::Value::BoolValue(value),
+                ),
+            }),
+        }
+    }
+
+    fn bytes_attr(key: &str, value: Vec<u8>) -> KeyValue {
+        KeyValue {
+            key: key.to_string(),
+            key_strindex: 0,
+            value: Some(opentelemetry_proto::tonic::common::v1::AnyValue {
+                value: Some(
+                    opentelemetry_proto::tonic::common::v1::any_value::Value::BytesValue(value),
+                ),
+            }),
+        }
+    }
+
     fn build_span_request(
         resource_attrs: Vec<KeyValue>,
         scope_name: Option<&str>,
@@ -1046,6 +1082,137 @@ mod tests {
 
         assert_eq!(batches.len(), 1);
         assert_eq!(batches[0].event_name, "IntTrace");
+    }
+
+    #[test]
+    fn span_routing_value_from_attributes_handles_all_value_types() {
+        let attrs = vec![
+            string_attr("s", "sv"),
+            int_attr("i", 7),
+            double_attr("d", 2.5),
+            bool_attr("b", true),
+            bytes_attr("raw", b"xyz".to_vec()),
+        ];
+
+        assert_eq!(
+            span_routing_value_from_attributes(&attrs, "s").as_deref(),
+            Some("sv")
+        );
+        assert_eq!(
+            span_routing_value_from_attributes(&attrs, "i").as_deref(),
+            Some("7")
+        );
+        assert_eq!(
+            span_routing_value_from_attributes(&attrs, "d").as_deref(),
+            Some("2.5")
+        );
+        assert_eq!(
+            span_routing_value_from_attributes(&attrs, "b").as_deref(),
+            Some("true")
+        );
+        // Unsupported value types (bytes/array/kvlist) and missing keys yield None.
+        assert_eq!(span_routing_value_from_attributes(&attrs, "raw"), None);
+        assert_eq!(span_routing_value_from_attributes(&attrs, "absent"), None);
+        // Blank/whitespace string values are treated as absent.
+        let blank = vec![string_attr("s", "   ")];
+        assert_eq!(span_routing_value_from_attributes(&blank, "s"), None);
+    }
+
+    #[test]
+    fn span_routing_value_from_scope_reads_name_version_and_attributes() {
+        let scope = InstrumentationScope {
+            name: "scope-a".to_string(),
+            version: "1.2.3".to_string(),
+            attributes: vec![string_attr("cluster", "clusterA")],
+            ..Default::default()
+        };
+
+        assert_eq!(
+            span_routing_value_from_scope(Some(&scope), SCOPE_NAME_ROUTING_KEY).as_deref(),
+            Some("scope-a")
+        );
+        assert_eq!(
+            span_routing_value_from_scope(Some(&scope), SCOPE_VERSION_ROUTING_KEY).as_deref(),
+            Some("1.2.3")
+        );
+        assert_eq!(
+            span_routing_value_from_scope(Some(&scope), "cluster").as_deref(),
+            Some("clusterA")
+        );
+        assert_eq!(span_routing_value_from_scope(Some(&scope), "absent"), None);
+        // A missing scope yields None.
+        assert_eq!(
+            span_routing_value_from_scope(None, SCOPE_NAME_ROUTING_KEY),
+            None
+        );
+        // Blank scope name/version are treated as absent.
+        let blank = InstrumentationScope {
+            name: "  ".to_string(),
+            version: String::new(),
+            ..Default::default()
+        };
+        assert_eq!(
+            span_routing_value_from_scope(Some(&blank), SCOPE_NAME_ROUTING_KEY),
+            None
+        );
+        assert_eq!(
+            span_routing_value_from_scope(Some(&blank), SCOPE_VERSION_ROUTING_KEY),
+            None
+        );
+    }
+
+    #[test]
+    fn span_routing_value_from_resource_reads_attributes_or_none() {
+        let resource = Resource {
+            attributes: vec![string_attr("region", "eastus")],
+            ..Default::default()
+        };
+
+        assert_eq!(
+            span_routing_value_from_resource(Some(&resource), "region").as_deref(),
+            Some("eastus")
+        );
+        assert_eq!(
+            span_routing_value_from_resource(Some(&resource), "absent"),
+            None
+        );
+        // A missing resource yields None.
+        assert_eq!(span_routing_value_from_resource(None, "region"), None);
+    }
+
+    #[test]
+    fn resolve_span_event_name_falls_back_and_passes_through() {
+        let span = Span {
+            attributes: vec![string_attr("cluster", "clusterA")],
+            ..Default::default()
+        };
+
+        // No mapping configured -> default table name.
+        assert_eq!(
+            resolve_span_event_name(None, None, &span, "Span", None),
+            "Span"
+        );
+
+        let mapping = make_span_event_name_mapping(
+            SpanEventNameRoutingKey::SpanAttribute("cluster".to_string()),
+            &[("clusterA", Some("")), ("clusterB", Some("Premium"))],
+        );
+
+        // An empty destination passes the source value through unchanged.
+        assert_eq!(
+            resolve_span_event_name(None, None, &span, "Span", Some(&mapping)),
+            "clusterA"
+        );
+
+        // The routing attribute is absent -> fall back to the default table name.
+        let other = Span {
+            attributes: vec![string_attr("region", "eastus")],
+            ..Default::default()
+        };
+        assert_eq!(
+            resolve_span_event_name(None, None, &other, "Span", Some(&mapping)),
+            "Span"
+        );
     }
 
     #[test]

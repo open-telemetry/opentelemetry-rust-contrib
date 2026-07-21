@@ -2756,6 +2756,159 @@ mod tests {
         assert_eq!(converted.events.get("SpanB").cloned().flatten(), None);
     }
 
+    // Builds an `FfiLogsEventNameMapping` from owned specs (keeping the backing
+    // CStrings alive for the duration of the conversion) and converts it. A `None`
+    // source/destination/name is passed as a null pointer.
+    fn convert_logs_with(
+        kind: u32,
+        name: Option<&str>,
+        entries_spec: &[(Option<&str>, Option<&str>)],
+    ) -> Result<Option<LogsEventNameMapping>, String> {
+        let name_c = name.map(|n| CString::new(n).unwrap());
+        let sources: Vec<Option<CString>> = entries_spec
+            .iter()
+            .map(|(s, _)| s.map(|v| CString::new(v).unwrap()))
+            .collect();
+        let dests: Vec<Option<CString>> = entries_spec
+            .iter()
+            .map(|(_, d)| d.map(|v| CString::new(v).unwrap()))
+            .collect();
+        let entries: Vec<FfiLogsEventNameMapEntry> = sources
+            .iter()
+            .zip(dests.iter())
+            .map(|(s, d)| FfiLogsEventNameMapEntry {
+                source_value: s.as_ref().map_or(ptr::null(), |v| v.as_ptr()),
+                destination_event_name: d.as_ref().map_or(ptr::null(), |v| v.as_ptr()),
+            })
+            .collect();
+        let mapping = FfiLogsEventNameMapping {
+            routing_key_kind: kind,
+            routing_key_name: name_c.as_ref().map_or(ptr::null(), |n| n.as_ptr()),
+            entries: entries.as_ptr(),
+            count: entries.len(),
+        };
+        unsafe { convert_logs_event_name_mapping(&mapping as *const FfiLogsEventNameMapping) }
+    }
+
+    fn convert_spans_with(
+        kind: u32,
+        name: Option<&str>,
+        entries_spec: &[(Option<&str>, Option<&str>)],
+    ) -> Result<Option<SpanEventNameMapping>, String> {
+        let name_c = name.map(|n| CString::new(n).unwrap());
+        let sources: Vec<Option<CString>> = entries_spec
+            .iter()
+            .map(|(s, _)| s.map(|v| CString::new(v).unwrap()))
+            .collect();
+        let dests: Vec<Option<CString>> = entries_spec
+            .iter()
+            .map(|(_, d)| d.map(|v| CString::new(v).unwrap()))
+            .collect();
+        let entries: Vec<FfiSpansEventNameMapEntry> = sources
+            .iter()
+            .zip(dests.iter())
+            .map(|(s, d)| FfiSpansEventNameMapEntry {
+                source_value: s.as_ref().map_or(ptr::null(), |v| v.as_ptr()),
+                destination_event_name: d.as_ref().map_or(ptr::null(), |v| v.as_ptr()),
+            })
+            .collect();
+        let mapping = FfiSpansEventNameMapping {
+            routing_key_kind: kind,
+            routing_key_name: name_c.as_ref().map_or(ptr::null(), |n| n.as_ptr()),
+            entries: entries.as_ptr(),
+            count: entries.len(),
+        };
+        unsafe { convert_spans_event_name_mapping(&mapping as *const FfiSpansEventNameMapping) }
+    }
+
+    #[test]
+    fn test_convert_logs_event_name_mapping_attribute_kinds_success() {
+        let entries = [(Some("clusterA"), Some("TableA"))];
+
+        let r1 = convert_logs_with(1, Some("res.key"), &entries)
+            .unwrap()
+            .unwrap();
+        assert!(
+            matches!(r1.routing_key, LogsEventNameRoutingKey::ResourceAttribute(ref k) if k == "res.key")
+        );
+
+        let r2 = convert_logs_with(2, Some("scope.key"), &entries)
+            .unwrap()
+            .unwrap();
+        assert!(
+            matches!(r2.routing_key, LogsEventNameRoutingKey::ScopeAttribute(ref k) if k == "scope.key")
+        );
+
+        let r3 = convert_logs_with(3, Some("rec.key"), &entries)
+            .unwrap()
+            .unwrap();
+        assert!(
+            matches!(r3.routing_key, LogsEventNameRoutingKey::LogRecordAttribute(ref k) if k == "rec.key")
+        );
+        assert_eq!(
+            r3.events.get("clusterA").cloned().flatten().as_deref(),
+            Some("TableA")
+        );
+    }
+
+    #[test]
+    fn test_convert_logs_event_name_mapping_attribute_kinds_require_name() {
+        let entries = [(Some("clusterA"), Some("TableA"))];
+        for kind in [1u32, 2, 3] {
+            let err = convert_logs_with(kind, None, &entries).unwrap_err();
+            assert!(err.contains("is required"), "kind {kind}: {err}");
+        }
+    }
+
+    #[test]
+    fn test_convert_logs_event_name_mapping_invalid_kind() {
+        let entries = [(Some("clusterA"), Some("TableA"))];
+        let err = convert_logs_with(99, None, &entries).unwrap_err();
+        assert!(err.contains("invalid value"), "{err}");
+    }
+
+    #[test]
+    fn test_convert_logs_event_name_mapping_rejects_null_source_value() {
+        let entries = [(None, Some("TableA"))];
+        let err = convert_logs_with(0, None, &entries).unwrap_err();
+        assert!(err.contains("is null"), "{err}");
+    }
+
+    #[test]
+    fn test_convert_spans_event_name_mapping_resource_and_scope_kinds_success() {
+        let entries = [(Some("clusterA"), Some("TableA"))];
+
+        let r1 = convert_spans_with(1, Some("res.key"), &entries)
+            .unwrap()
+            .unwrap();
+        assert!(
+            matches!(r1.routing_key, SpanEventNameRoutingKey::ResourceAttribute(ref k) if k == "res.key")
+        );
+
+        let r2 = convert_spans_with(2, Some("scope.key"), &entries)
+            .unwrap()
+            .unwrap();
+        assert!(
+            matches!(r2.routing_key, SpanEventNameRoutingKey::ScopeAttribute(ref k) if k == "scope.key")
+        );
+    }
+
+    #[test]
+    fn test_convert_spans_event_name_mapping_attribute_kinds_require_name() {
+        let entries = [(Some("clusterA"), Some("TableA"))];
+        for kind in [1u32, 2, 3] {
+            let err = convert_spans_with(kind, None, &entries).unwrap_err();
+            assert!(err.contains("is required"), "kind {kind}: {err}");
+        }
+    }
+
+    #[test]
+    fn test_convert_spans_event_name_mapping_rejects_null_source_value() {
+        let entries = [(None, Some("TableA"))];
+        let err = convert_spans_with(3, Some("cluster"), &entries).unwrap_err();
+        assert!(err.contains("is null"), "{err}");
+    }
+
     #[test]
     #[cfg(feature = "mock_auth")]
     fn test_encode_spans_event_name_mapping_splits_batches() {

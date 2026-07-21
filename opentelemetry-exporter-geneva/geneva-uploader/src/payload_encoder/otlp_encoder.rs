@@ -2237,6 +2237,16 @@ mod tests {
         }
     }
 
+    fn bytes_attr(key: &str, value: Vec<u8>) -> KeyValue {
+        KeyValue {
+            key: key.to_string(),
+            key_strindex: 0,
+            value: Some(AnyValue {
+                value: Some(Value::BytesValue(value)),
+            }),
+        }
+    }
+
     /// Wraps raw LogRecord proto bytes into a minimal ExportLogsServiceRequest encoding.
     /// Useful for injecting hand-crafted or otherwise non-prost-encodable bytes.
     fn wrap_log_record_bytes(log_bytes: &[u8]) -> Vec<u8> {
@@ -4065,6 +4075,37 @@ mod tests {
             None,
         )
         .expect("blank routing value should encode successfully");
+
+        assert_eq!(batches.len(), 1);
+        assert_eq!(batches[0].event_name, "Log");
+    }
+
+    #[test]
+    fn test_event_name_mapping_unsupported_value_type_and_decoy_key_fall_back_to_default() {
+        // A decoy attribute with a different key is skipped, and an unsupported (bytes)
+        // value type on the routing key is treated as absent, so routing falls back.
+        let metadata = make_metadata("TestNamespace");
+        let mapping = make_event_name_mapping(
+            LogsEventNameRoutingKey::LogRecordAttribute("code".to_string()),
+            &[("clusterA", Some("PremiumLog"))],
+        );
+        let logs = [LogRecord {
+            observed_time_unix_nano: 1,
+            attributes: vec![
+                string_attr("other", "decoy"),
+                bytes_attr("code", b"raw".to_vec()),
+            ],
+            ..Default::default()
+        }];
+
+        let batches = encode_log_batch_via_proto_with_mapping_and_obo(
+            &OtlpEncoder::new(),
+            logs.iter(),
+            &metadata,
+            Some(&mapping),
+            None,
+        )
+        .expect("unsupported routing value should encode successfully");
 
         assert_eq!(batches.len(), 1);
         assert_eq!(batches[0].event_name, "Log");
