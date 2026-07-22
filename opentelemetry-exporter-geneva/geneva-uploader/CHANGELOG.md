@@ -4,6 +4,7 @@
 
 ### Added
 - New `tls-rustls` feature flag enables a pure-Rust TLS backend (rustls + p12-keystore) as an alternative to the default `tls-native` (native-tls / OpenSSL) backend. The two flags are additive (so `--all-features` builds compile cleanly); if both are enabled simultaneously, `tls-rustls` takes precedence at runtime. No built-in crypto provider (e.g. ring) is compiled in; consumers **must** install a `rustls::crypto::CryptoProvider` (e.g. `rustls-symcrypt`) at process start. The uploader returns a clear error if no provider is found.
+- Agent-fed credential source: `GenevaClient::with_agent_fed_source` builds an uploader that pulls a host-provisioned GIG token and routing (endpoint, moniker) from an `AgentFedCredentialSource` on each upload, skipping the GCS config-service handshake. New public API: `AgentFedCredentialSource`, `AgentFedCredential`, `AgentFedCredentialFuture`.
 
 ### Changed
 - Bump opentelemetry-proto version to 0.32.
