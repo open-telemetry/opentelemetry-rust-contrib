@@ -284,6 +284,7 @@ impl GenevaClient {
         } = cfg;
 
         let spans_present = spans.is_some();
+        let logs_present = logs.is_some();
         let (log_default_event_name, log_event_name_mapping) = match logs {
             Some(logs) => (logs.default_event_name, logs.event_name_mapping),
             None => (None, None),
@@ -322,6 +323,14 @@ impl GenevaClient {
                     default_event_name = %log_default_event_name.as_deref().unwrap_or("<none>"),
                     routing_key = %routing_key_desc,
                     event_mappings = %events_desc,
+                    "Configured logs event name routing"
+                );
+            }
+            None if logs_present => {
+                info!(
+                    name: "client.new.logs_config",
+                    target: "geneva-uploader",
+                    default_event_name = %log_default_event_name.as_deref().unwrap_or("<none>"),
                     "Configured logs event name routing"
                 );
             }
