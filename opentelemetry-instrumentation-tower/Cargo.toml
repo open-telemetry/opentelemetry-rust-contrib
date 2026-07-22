@@ -13,8 +13,10 @@ readme = "README.md"
 include = ["src/", "benches/"]
 
 [features]
-default = []
-axum = ["dep:axum"]
+default = ["http-server", "http-client"]
+http-server = []
+http-client = []
+axum = ["dep:axum", "http-server"]
 
 [dependencies]
 axum = { features = ["matched-path", "macros"], version = "0.8", default-features = false, optional = true }
@@ -35,7 +37,11 @@ tower = { version = "0.5", features = ["util"] }
 tower-test = { version = "0.4" }
 
 [[bench]]
-name = "middleware"
+name = "http_server"
+harness = false
+
+[[bench]]
+name = "http_client"
 harness = false
 
 [lints]

@@ -1,6 +1,6 @@
 //! Example: Custom Route Extraction with Match Tables
 //!
-//! This example demonstrates how to use `HTTPLayerBuilder::with_route_extractor_fn()`
+//! This example demonstrates how to use `http::server::LayerBuilder::with_route_extractor_fn()`
 //! to implement custom route normalization logic that reduces cardinality by replacing
 //! known dynamic path segments with placeholders.
 //!
@@ -15,7 +15,7 @@ use axum::extract::Path;
 use axum::routing::get;
 use axum::Router;
 use opentelemetry::global;
-use opentelemetry_instrumentation_tower::HTTPLayerBuilder;
+use opentelemetry_instrumentation_tower::http::server::LayerBuilder;
 use opentelemetry_otlp::{MetricExporter, SpanExporter};
 use opentelemetry_sdk::{
     metrics::{PeriodicReader, SdkMeterProvider},
@@ -119,7 +119,7 @@ async fn main() {
 
     // Create the HTTP layer with a custom route extractor.
     // The closure captures the known_usernames set and uses it to normalize routes.
-    let otel_layer = HTTPLayerBuilder::builder()
+    let otel_layer = LayerBuilder::builder()
         .with_route_extractor_fn({
             let usernames = known_usernames.clone();
             move |req: &http::Request<_>| normalize_route(usernames.clone(), req.uri().path())

@@ -15,27 +15,39 @@
 [![Slack](https://img.shields.io/badge/slack-@cncf/otel/rust-brightgreen.svg?logo=slack)](https://cloud-native.slack.com/archives/C03GDP0H023)
 
 [OpenTelemetry](https://opentelemetry.io/) HTTP metrics and tracing middleware
-for [Tower](https://docs.rs/tower)-compatible Rust HTTP servers (Axum, Hyper,
-Tonic, etc.). The middleware emits the standard `http.server.*` metrics and a
-server span per request, following the OpenTelemetry
+for [Tower](https://docs.rs/tower)-compatible Rust HTTP servers and clients
+(Axum, Hyper, reqwest, etc.). The middleware emits the standard `http.server.*`
+and `http.client.*` metrics and a span per request, following the OpenTelemetry
 [HTTP semantic conventions](https://opentelemetry.io/docs/specs/semconv/http/).
 
 ## Quick start
 
-With the default `axum` feature, applying the middleware is a single layer call:
+With the default `axum` feature, applying the server middleware is a single
+layer call:
 
 ```rust
 use axum::{routing::get, Router};
-use opentelemetry_instrumentation_tower::HTTPLayer;
+use opentelemetry_instrumentation_tower::http;
 
 let app: Router = Router::new()
     .route("/", get(|| async { "hello" }))
     // Apply *after* the routes so the matched route template is available.
-    .layer(HTTPLayer::new());
+    .layer(http::server::Layer::new());
+```
+
+Instrument an outgoing client stack:
+
+```rust
+use opentelemetry_instrumentation_tower::http;
+use tower::ServiceBuilder;
+
+let client = ServiceBuilder::new()
+    .layer(http::client::Layer::new())
+    .service(inner_client);
 ```
 
 See the [API documentation](https://docs.rs/opentelemetry-instrumentation-tower)
-for emitted metrics, span attributes, customization via `HTTPLayerBuilder`, and
+for emitted metrics, span attributes, customization via the layer builders, and
 cardinality guidance.
 
 ## Examples
