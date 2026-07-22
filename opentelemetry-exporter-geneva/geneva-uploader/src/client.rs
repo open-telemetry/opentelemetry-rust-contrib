@@ -21,6 +21,8 @@ use opentelemetry_proto::tonic::resource::v1::Resource;
 use opentelemetry_proto::tonic::trace::v1::{ResourceSpans, Span};
 use otap_df_pdata_views::views::logs::LogsDataView;
 use std::fmt;
+use std::future::Future;
+use std::pin::Pin;
 use std::sync::Arc;
 use std::time::Duration;
 use tracing::{debug, info};
@@ -73,6 +75,49 @@ pub struct TracesConfig {
     pub default_event_name: Option<String>,
     pub event_name_mapping: Option<SpanEventNameMapping>,
 }
+
+/// Agent-fed credential source: the host agent resolves the
+/// GIG token + endpoint + moniker and supplies them here, so the uploader skips
+/// its own GCS config-service handshake. Queried per upload, so host token
+/// rotation is observed without reconstructing the client.
+pub trait AgentFedCredentialSource: Send + Sync + std::fmt::Debug {
+    /// The current credential, or `None` if the host has not provisioned one yet.
+    ///
+    /// Async so an agent-fed source can resolve the token through an awaitable
+    /// capability (e.g. otap's `bearer_token_provider`, whose `get_token` may
+    /// perform a credential call on a cache miss) by awaiting it, rather than
+    /// polling the future once and dropping it if it is not immediately ready.
+    /// Returning a boxed future (instead of `async fn`) keeps the trait
+    /// object-safe for `Arc<dyn AgentFedCredentialSource>`.
+    fn current(&self) -> AgentFedCredentialFuture<'_>;
+}
+
+/// Future returned by [`AgentFedCredentialSource::current`].
+pub type AgentFedCredentialFuture<'a> =
+    Pin<Box<dyn Future<Output = Option<AgentFedCredential>> + Send + 'a>>;
+
+/// A host-provided GIG credential snapshot (see [`AgentFedCredentialSource`]).
+#[derive(Clone)]
+pub struct AgentFedCredential {
+    /// GIG bearer token (sent as `Authorization: Bearer`).
+    pub token: String,
+    /// GIG ingestion endpoint (base URL the upload POSTs to).
+    pub endpoint: String,
+    /// Account moniker for the upload.
+    pub moniker: String,
+}
+
+impl std::fmt::Debug for AgentFedCredential {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        // Redact the bearer token; expose only the non-secret routing fields.
+        f.debug_struct("AgentFedCredential")
+            .field("token", &"<redacted>")
+            .field("endpoint", &self.endpoint)
+            .field("moniker", &self.moniker)
+            .finish()
+    }
+}
+
 /// Error type returned by [`GenevaClient::upload_batch`].
 ///
 /// Provides enough information for callers to implement retry strategies:
@@ -191,204 +236,156 @@ fn resolve_span_event_name(
         .unwrap_or_else(|| table_name.to_string())
 }
 
+/// Stored client pieces shared by every constructor (all of `Self` except the
+/// uploader and encoder), derived once so the constructors can't drift.
+struct ClientParts {
+    log_table_name: Arc<str>,
+    log_event_name_mapping: Option<LogsEventNameMapping>,
+    span_table_name: Arc<str>,
+    span_event_name_mapping: Option<SpanEventNameMapping>,
+    metadata_fields: MetadataFields,
+    obo_event_map: Option<OboEventMap>,
+}
+
 impl GenevaClient {
-    pub fn new(cfg: GenevaClientConfig) -> Result<Self, String> {
+    /// Validate any configured event-name mappings before building the client.
+    fn validate_event_name_mappings(cfg: &GenevaClientConfig) -> Result<(), String> {
+        if let Some(mapping) = cfg
+            .logs
+            .as_ref()
+            .and_then(|logs| logs.event_name_mapping.as_ref())
+        {
+            mapping.validate()?;
+        }
+        if let Some(mapping) = cfg
+            .spans
+            .as_ref()
+            .and_then(|spans| spans.event_name_mapping.as_ref())
+        {
+            mapping.validate()?;
+        }
+        Ok(())
+    }
+
+    /// Derive the shared uploader config + stored parts; constructors differ
+    /// only in how they build the `GenevaUploader` from the returned config.
+    fn derive_parts(cfg: GenevaClientConfig) -> (GenevaUploaderConfig, ClientParts) {
         let GenevaClientConfig {
-            endpoint,
             environment,
-            account,
             namespace,
-            region,
             config_major_version,
-            auth_method,
             tenant,
             role_name,
             role_instance,
-            msi_resource,
             logs,
             spans,
             obo_event_map,
+            ..
         } = cfg;
 
-        let log_table_name: Arc<str> = logs
-            .as_ref()
-            .and_then(|logs| logs.default_event_name.as_deref())
-            .unwrap_or("Log")
-            .into();
-        let span_table_name: Arc<str> = spans
-            .as_ref()
-            .and_then(|spans| spans.default_event_name.as_deref())
-            .unwrap_or("Span")
-            .into();
-
-        info!(
-            name: "client.new",
-            target: "geneva-uploader",
-            endpoint = %endpoint,
-            namespace = %namespace,
-            account = %account,
-            "Initializing GenevaClient"
-        );
-
-        if let Some(mapping) = logs
-            .as_ref()
-            .and_then(|logs| logs.event_name_mapping.as_ref())
-        {
-            mapping.validate()?;
-        }
-
-        if let Some(mapping) = spans
-            .as_ref()
-            .and_then(|spans| spans.event_name_mapping.as_ref())
-        {
-            mapping.validate()?;
-        }
-
-        let default_event_name = logs
-            .as_ref()
-            .and_then(|logs| logs.default_event_name.as_deref())
-            .unwrap_or("<none>");
-
-        if let Some(mapping) = logs
-            .as_ref()
-            .and_then(|logs| logs.event_name_mapping.as_ref())
-        {
-            let routing_key_desc = match &mapping.routing_key {
-                LogsEventNameRoutingKey::EventName => "event_name".to_string(),
-                LogsEventNameRoutingKey::ResourceAttribute(attr) => {
-                    format!("resource_attribute({})", attr)
-                }
-                LogsEventNameRoutingKey::ScopeAttribute(attr) => {
-                    format!("scope_attribute({})", attr)
-                }
-                LogsEventNameRoutingKey::LogRecordAttribute(attr) => {
-                    format!("log_record_attribute({})", attr)
-                }
-            };
-            let events_desc = mapping
-                .events
-                .iter()
-                .map(|(k, v)| format!("{}→{}", k, v.as_deref().unwrap_or("<source>")))
-                .collect::<Vec<_>>()
-                .join(", ");
-            info!(
-                name: "client.new.logs_config",
-                target: "geneva-uploader",
-                default_event_name = %default_event_name,
-                routing_key = %routing_key_desc,
-                event_mappings = %events_desc,
-                "Configured logs event name routing"
-            );
-        } else {
-            info!(
-                name: "client.new.logs_config",
-                target: "geneva-uploader",
-                "Logs config not initialized; using default values for log events"
-            );
-        }
-
-        let spans_default_event_name = spans
-            .as_ref()
-            .and_then(|spans| spans.default_event_name.as_deref())
-            .unwrap_or("<none>");
-
-        if let Some(mapping) = spans
-            .as_ref()
-            .and_then(|spans| spans.event_name_mapping.as_ref())
-        {
-            let routing_key_desc = match &mapping.routing_key {
-                SpanEventNameRoutingKey::ResourceAttribute(attr) => {
-                    format!("resource_attribute({})", attr)
-                }
-                SpanEventNameRoutingKey::ScopeAttribute(attr) => {
-                    format!("scope_attribute({})", attr)
-                }
-                SpanEventNameRoutingKey::SpanAttribute(attr) => {
-                    format!("span_attribute({})", attr)
-                }
-            };
-            let events_desc = mapping
-                .events
-                .iter()
-                .map(|(k, v)| format!("{}→{}", k, v.as_deref().unwrap_or("<source>")))
-                .collect::<Vec<_>>()
-                .join(", ");
-            info!(
-                name: "client.new.spans_config",
-                target: "geneva-uploader",
-                default_event_name = %spans_default_event_name,
-                routing_key = %routing_key_desc,
-                event_mappings = %events_desc,
-                "Configured spans event name routing"
-            );
-        } else if spans.is_some() {
-            info!(
-                name: "client.new.spans_config",
-                target: "geneva-uploader",
-                default_event_name = %spans_default_event_name,
-                "Configured spans event name routing"
-            );
-        } else {
-            info!(
-                name: "client.new.spans_config",
-                target: "geneva-uploader",
-                "Spans config not initialized; using default values for span events"
-            );
-        }
-
-        // Validate MSI resource presence for managed identity variants
-        match auth_method {
-            AuthMethod::SystemManagedIdentity
-            | AuthMethod::UserManagedIdentity { .. }
-            | AuthMethod::UserManagedIdentityByObjectId { .. }
-            | AuthMethod::UserManagedIdentityByResourceId { .. } => {
-                if msi_resource.is_none() {
-                    debug!(
-                        name: "client.new.validate_msi_resource",
-                        target: "geneva-uploader",
-                        "Validation failed: msi_resource must be provided for managed identity auth"
-                    );
-                    return Err(
-                        "msi_resource must be provided for managed identity auth".to_string()
-                    );
-                }
-            }
-            AuthMethod::Certificate { .. } => {}
-            AuthMethod::WorkloadIdentity { .. } => {}
-            #[cfg(feature = "mock_auth")]
-            AuthMethod::MockAuth => {}
-        }
-        let config_client_config = GenevaConfigClientConfig {
-            endpoint,
-            environment: environment.clone(),
-            account,
-            namespace: namespace.clone(),
-            region,
-            config_major_version,
-            auth_method,
-            msi_resource,
-            #[cfg(test)]
-            test_root_ca_pem: None,
+        let spans_present = spans.is_some();
+        let (log_default_event_name, log_event_name_mapping) = match logs {
+            Some(logs) => (logs.default_event_name, logs.event_name_mapping),
+            None => (None, None),
         };
-        let config_client =
-            Arc::new(GenevaConfigClient::new(config_client_config).map_err(|e| {
-                debug!(
-                    name: "client.new.config_client_init",
+        let (span_default_event_name, span_event_name_mapping) = match spans {
+            Some(spans) => (spans.default_event_name, spans.event_name_mapping),
+            None => (None, None),
+        };
+
+        let log_table_name: Arc<str> = log_default_event_name.as_deref().unwrap_or("Log").into();
+        let span_table_name: Arc<str> = span_default_event_name.as_deref().unwrap_or("Span").into();
+
+        match log_event_name_mapping.as_ref() {
+            Some(mapping) => {
+                let routing_key_desc = match &mapping.routing_key {
+                    LogsEventNameRoutingKey::EventName => "event_name".to_string(),
+                    LogsEventNameRoutingKey::ResourceAttribute(attr) => {
+                        format!("resource_attribute({})", attr)
+                    }
+                    LogsEventNameRoutingKey::ScopeAttribute(attr) => {
+                        format!("scope_attribute({})", attr)
+                    }
+                    LogsEventNameRoutingKey::LogRecordAttribute(attr) => {
+                        format!("log_record_attribute({})", attr)
+                    }
+                };
+                let events_desc = mapping
+                    .events
+                    .iter()
+                    .map(|(k, v)| format!("{}→{}", k, v.as_deref().unwrap_or("<source>")))
+                    .collect::<Vec<_>>()
+                    .join(", ");
+                info!(
+                    name: "client.new.logs_config",
                     target: "geneva-uploader",
-                    error = %e,
-                    "GenevaConfigClient init failed"
+                    default_event_name = %log_default_event_name.as_deref().unwrap_or("<none>"),
+                    routing_key = %routing_key_desc,
+                    event_mappings = %events_desc,
+                    "Configured logs event name routing"
                 );
-                format!("GenevaConfigClient init failed: {e}")
-            })?);
+            }
+            None => {
+                info!(
+                    name: "client.new.logs_config",
+                    target: "geneva-uploader",
+                    "Logs config not initialized; using default values for log events"
+                );
+            }
+        }
+
+        match span_event_name_mapping.as_ref() {
+            Some(mapping) => {
+                let routing_key_desc = match &mapping.routing_key {
+                    SpanEventNameRoutingKey::ResourceAttribute(attr) => {
+                        format!("resource_attribute({})", attr)
+                    }
+                    SpanEventNameRoutingKey::ScopeAttribute(attr) => {
+                        format!("scope_attribute({})", attr)
+                    }
+                    SpanEventNameRoutingKey::SpanAttribute(attr) => {
+                        format!("span_attribute({})", attr)
+                    }
+                };
+                let events_desc = mapping
+                    .events
+                    .iter()
+                    .map(|(k, v)| format!("{}→{}", k, v.as_deref().unwrap_or("<source>")))
+                    .collect::<Vec<_>>()
+                    .join(", ");
+                info!(
+                    name: "client.new.spans_config",
+                    target: "geneva-uploader",
+                    default_event_name = %span_default_event_name.as_deref().unwrap_or("<none>"),
+                    routing_key = %routing_key_desc,
+                    event_mappings = %events_desc,
+                    "Configured spans event name routing"
+                );
+            }
+            None if spans_present => {
+                info!(
+                    name: "client.new.spans_config",
+                    target: "geneva-uploader",
+                    default_event_name = %span_default_event_name.as_deref().unwrap_or("<none>"),
+                    "Configured spans event name routing"
+                );
+            }
+            None => {
+                info!(
+                    name: "client.new.spans_config",
+                    target: "geneva-uploader",
+                    "Spans config not initialized; using default values for span events"
+                );
+            }
+        }
 
         let source_identity = format!(
             "Tenant={}/Role={}/RoleInstance={}",
             tenant, role_name, role_instance
         );
-
         let config_version = format!("Ver{}v0", config_major_version);
 
-        // Create metadata fields that will appear as Bond schema fields in Geneva
+        // Metadata fields that will appear as Bond schema fields in Geneva.
         let metadata_fields = MetadataFields::new(
             environment,
             config_version.clone(),
@@ -405,6 +402,93 @@ impl GenevaClient {
             environment: metadata_fields.env_name.clone(),
             config_version: metadata_fields.event_version.clone(),
         };
+
+        (
+            uploader_config,
+            ClientParts {
+                log_table_name,
+                log_event_name_mapping,
+                span_table_name,
+                span_event_name_mapping,
+                metadata_fields,
+                obo_event_map,
+            },
+        )
+    }
+
+    /// Assemble the final client from a built uploader and the shared parts.
+    fn assemble(uploader: GenevaUploader, parts: ClientParts) -> Self {
+        Self {
+            uploader: Arc::new(uploader),
+            encoder: OtlpEncoder::new(),
+            metadata_fields: parts.metadata_fields,
+            log_table_name: parts.log_table_name,
+            log_event_name_mapping: parts.log_event_name_mapping,
+            span_table_name: parts.span_table_name,
+            span_event_name_mapping: parts.span_event_name_mapping,
+            obo_event_map: parts.obo_event_map,
+        }
+    }
+
+    pub fn new(cfg: GenevaClientConfig) -> Result<Self, String> {
+        info!(
+            name: "client.new",
+            target: "geneva-uploader",
+            endpoint = %cfg.endpoint,
+            namespace = %cfg.namespace,
+            account = %cfg.account,
+            "Initializing GenevaClient"
+        );
+
+        Self::validate_event_name_mappings(&cfg)?;
+
+        // Validate MSI resource presence for managed identity variants
+        match cfg.auth_method {
+            AuthMethod::SystemManagedIdentity
+            | AuthMethod::UserManagedIdentity { .. }
+            | AuthMethod::UserManagedIdentityByObjectId { .. }
+            | AuthMethod::UserManagedIdentityByResourceId { .. } => {
+                if cfg.msi_resource.is_none() {
+                    debug!(
+                        name: "client.new.validate_msi_resource",
+                        target: "geneva-uploader",
+                        "Validation failed: msi_resource must be provided for managed identity auth"
+                    );
+                    return Err(
+                        "msi_resource must be provided for managed identity auth".to_string()
+                    );
+                }
+            }
+            AuthMethod::Certificate { .. } => {}
+            AuthMethod::WorkloadIdentity { .. } => {}
+            #[cfg(feature = "mock_auth")]
+            AuthMethod::MockAuth => {}
+        }
+
+        let config_client_config = GenevaConfigClientConfig {
+            endpoint: cfg.endpoint.clone(),
+            environment: cfg.environment.clone(),
+            account: cfg.account.clone(),
+            namespace: cfg.namespace.clone(),
+            region: cfg.region.clone(),
+            config_major_version: cfg.config_major_version,
+            auth_method: cfg.auth_method.clone(),
+            msi_resource: cfg.msi_resource.clone(),
+            #[cfg(test)]
+            test_root_ca_pem: None,
+        };
+        let config_client =
+            Arc::new(GenevaConfigClient::new(config_client_config).map_err(|e| {
+                debug!(
+                    name: "client.new.config_client_init",
+                    target: "geneva-uploader",
+                    error = %e,
+                    "GenevaConfigClient init failed"
+                );
+                format!("GenevaConfigClient init failed: {e}")
+            })?);
+
+        let (uploader_config, parts) = Self::derive_parts(cfg);
 
         let uploader =
             GenevaUploader::from_config_client(config_client, uploader_config).map_err(|e| {
@@ -423,16 +507,41 @@ impl GenevaClient {
             "GenevaClient initialized successfully"
         );
 
-        Ok(Self {
-            uploader: Arc::new(uploader),
-            encoder: OtlpEncoder::new(),
-            metadata_fields,
-            log_table_name,
-            log_event_name_mapping: logs.and_then(|logs| logs.event_name_mapping),
-            span_table_name,
-            span_event_name_mapping: spans.and_then(|spans| spans.event_name_mapping),
-            obo_event_map,
-        })
+        Ok(Self::assemble(uploader, parts))
+    }
+
+    /// Agent-fed construction: the host supplies the GIG credential via
+    /// `source`, so the uploader skips the GCS config-service handshake entirely.
+    /// `cfg.auth_method` / `cfg.msi_resource` are ignored (no `GenevaConfigClient`
+    /// is created). The source is queried per upload, so host token rotation is
+    /// observed without rebuilding the client.
+    pub fn with_agent_fed_source(
+        cfg: GenevaClientConfig,
+        source: Arc<dyn AgentFedCredentialSource>,
+    ) -> Result<Self, String> {
+        info!(
+            name: "client.new.agent_fed",
+            target: "geneva-uploader",
+            namespace = %cfg.namespace,
+            account = %cfg.account,
+            "Initializing GenevaClient (agent-fed credential source)"
+        );
+
+        Self::validate_event_name_mappings(&cfg)?;
+
+        let (uploader_config, parts) = Self::derive_parts(cfg);
+
+        let uploader = GenevaUploader::from_agent_fed(source, uploader_config).map_err(|e| {
+            debug!(
+                name: "client.new.agent_fed.uploader_init",
+                target: "geneva-uploader",
+                error = %e,
+                "GenevaUploader (agent-fed) init failed"
+            );
+            format!("GenevaUploader init failed: {e}")
+        })?;
+
+        Ok(Self::assemble(uploader, parts))
     }
 
     /// Encode logs from any [`LogsDataView`] implementation into LZ4-chunked
@@ -1310,7 +1419,6 @@ mod tests {
                 ..Default::default()
             }],
         };
-
         let bytes = request.encode_to_vec();
         let view = RawLogsData::new(&bytes);
         let batches = client
@@ -1360,5 +1468,63 @@ mod tests {
 
         assert_eq!(batches.len(), 1);
         assert_eq!(batches[0].event_name, "Span");
+    }
+
+    #[test]
+    fn with_agent_fed_source_builds_usable_client() {
+        #[derive(Debug)]
+        struct StubSource;
+        impl AgentFedCredentialSource for StubSource {
+            fn current(&self) -> AgentFedCredentialFuture<'_> {
+                Box::pin(async {
+                    Some(AgentFedCredential {
+                        token: "secret-token".to_string(),
+                        endpoint: "https://ingest.example".to_string(),
+                        moniker: "moniker".to_string(),
+                    })
+                })
+            }
+        }
+
+        let client = GenevaClient::with_agent_fed_source(
+            build_config(Some("AppLog"), None),
+            Arc::new(StubSource),
+        )
+        .expect("agent-fed client should initialize");
+
+        // Prove the agent-fed client is usable end-to-end for encoding, just
+        // like a config-service client.
+        let request = ExportLogsServiceRequest {
+            resource_logs: vec![ResourceLogs {
+                scope_logs: vec![ScopeLogs {
+                    log_records: vec![LogRecord::default()],
+                    ..Default::default()
+                }],
+                ..Default::default()
+            }],
+        };
+        let bytes = request.encode_to_vec();
+        let view = RawLogsData::new(&bytes);
+        let batches = client
+            .encode_and_compress_logs(&view)
+            .expect("log encoding should succeed");
+        assert_eq!(batches.len(), 1);
+        assert_eq!(batches[0].event_name, "AppLog");
+    }
+
+    #[test]
+    fn agent_fed_credential_debug_redacts_token() {
+        let cred = AgentFedCredential {
+            token: "top-secret".to_string(),
+            endpoint: "https://ingest.example".to_string(),
+            moniker: "moniker".to_string(),
+        };
+        let rendered = format!("{cred:?}");
+        assert!(
+            !rendered.contains("top-secret"),
+            "token must be redacted: {rendered}"
+        );
+        assert!(rendered.contains("<redacted>"));
+        assert!(rendered.contains("moniker"));
     }
 }
