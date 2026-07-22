@@ -24,6 +24,8 @@ pub(crate) enum GenevaUploaderError {
     SerdeJson(#[from] serde_json::Error),
     #[error("Config service error: {0}")]
     ConfigClient(String),
+    #[error("Agent-fed credential not provisioned: {0}")]
+    CredentialNotProvisioned(String),
     #[allow(dead_code)]
     #[error("Upload failed with status {status}: {message}")]
     UploadFailed {
@@ -150,8 +152,8 @@ impl IngestionSource {
             }
             IngestionSource::AgentFed(source) => {
                 let cred = source.current().await.ok_or_else(|| {
-                    GenevaUploaderError::ConfigClient(
-                        "agent-fed credential not yet provisioned by host".to_string(),
+                    GenevaUploaderError::CredentialNotProvisioned(
+                        "host has not provisioned a credential yet".to_string(),
                     )
                 })?;
                 // The GIG ingestion gateway rejects the upload (HTTP 403,
@@ -713,9 +715,10 @@ mod tests {
         let uploader = agent_fed_uploader(Arc::new(EmptyAgentFedSource));
         let metadata = make_test_metadata();
         let resp = uploader.upload(vec![1], "Log", &metadata, 1, None).await;
+        let err = resp.expect_err("upload must error when no credential is provisioned");
         assert!(
-            resp.is_err(),
-            "upload must error when the host has not provisioned a credential"
+            matches!(err, GenevaUploaderError::CredentialNotProvisioned(_)),
+            "expected CredentialNotProvisioned, got: {err:?}"
         );
     }
 

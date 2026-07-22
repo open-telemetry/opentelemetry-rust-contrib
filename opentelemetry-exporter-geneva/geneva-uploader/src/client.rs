@@ -168,7 +168,7 @@ struct ClientParts {
 impl GenevaClient {
     /// Derive the shared uploader config + stored parts; constructors differ
     /// only in how they build the `GenevaUploader` from the returned config.
-    fn derive_parts(cfg: &GenevaClientConfig) -> (GenevaUploaderConfig, ClientParts) {
+    fn derive_parts(cfg: GenevaClientConfig) -> (GenevaUploaderConfig, ClientParts) {
         let log_table_name: Arc<str> = cfg
             .logs
             .default_event_name
@@ -190,12 +190,12 @@ impl GenevaClient {
 
         // Metadata fields that will appear as Bond schema fields in Geneva.
         let metadata_fields = MetadataFields::new(
-            cfg.environment.clone(),
+            cfg.environment,
             config_version.clone(),
-            cfg.tenant.clone(),
-            cfg.role_name.clone(),
-            cfg.role_instance.clone(),
-            cfg.namespace.clone(),
+            cfg.tenant,
+            cfg.role_name,
+            cfg.role_instance,
+            cfg.namespace,
             config_version,
         );
 
@@ -212,7 +212,7 @@ impl GenevaClient {
                 log_table_name,
                 span_table_name,
                 metadata_fields,
-                obo_event_map: cfg.obo_event_map.clone(),
+                obo_event_map: cfg.obo_event_map,
             },
         )
     }
@@ -270,17 +270,15 @@ impl GenevaClient {
             AuthMethod::MockAuth => {}
         }
 
-        let (uploader_config, parts) = Self::derive_parts(&cfg);
-
         let config_client_config = GenevaConfigClientConfig {
-            endpoint: cfg.endpoint,
-            environment: cfg.environment,
-            account: cfg.account,
-            namespace: cfg.namespace,
-            region: cfg.region,
+            endpoint: cfg.endpoint.clone(),
+            environment: cfg.environment.clone(),
+            account: cfg.account.clone(),
+            namespace: cfg.namespace.clone(),
+            region: cfg.region.clone(),
             config_major_version: cfg.config_major_version,
-            auth_method: cfg.auth_method,
-            msi_resource: cfg.msi_resource,
+            auth_method: cfg.auth_method.clone(),
+            msi_resource: cfg.msi_resource.clone(),
             #[cfg(test)]
             test_root_ca_pem: None,
         };
@@ -294,6 +292,8 @@ impl GenevaClient {
                 );
                 format!("GenevaConfigClient init failed: {e}")
             })?);
+
+        let (uploader_config, parts) = Self::derive_parts(cfg);
 
         let uploader =
             GenevaUploader::from_config_client(config_client, uploader_config).map_err(|e| {
@@ -332,7 +332,7 @@ impl GenevaClient {
             "Initializing GenevaClient (agent-fed credential source)"
         );
 
-        let (uploader_config, parts) = Self::derive_parts(&cfg);
+        let (uploader_config, parts) = Self::derive_parts(cfg);
 
         let uploader = GenevaUploader::from_agent_fed(source, uploader_config).map_err(|e| {
             debug!(
