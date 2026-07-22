@@ -13,18 +13,18 @@
   - With `axum` feature: Uses `AxumMatchedPathExtractor` (route templates, low cardinality)
   - Without `axum` feature: Uses `NoRouteExtractor` (method only, safest)
 * Route extraction now provides both span names and `http.route` metric attribute from the same source
+* Added `HTTPLayerBuilder::with_tracing(bool)` and `HTTPLayerBuilder::with_metrics(bool)` to enable or disable each signal for a layer (both default to enabled). Disabling tracing does not stop context propagation: incoming trace headers are still extracted and the current context still flows to the inner service.
 
 ### Changed
 
-* **BREAKING**: Removed public `with_meter()` method. The middleware now uses global meter and tracer providers by
-  default via `opentelemetry::global::meter()` and `opentelemetry::global::tracer()`. The `with_meter()` method is
-  retained as a non-public test utility to allow injecting custom meters without relying on global state.
+* **BREAKING**: Replaced `with_meter()` with global providers plus per-layer `with_tracing(bool)`/`with_metrics(bool)` toggles. The middleware always uses the global meter and tracer providers; configure the backend once via the OpenTelemetry global providers.
 * **BREAKING**: Renamed types. Use the new names:
     - `HTTPMetricsLayer` → `HTTPLayer`
     - `HTTPMetricsService` → `HTTPService`
-    - `HTTPMetricsResponseFuture` → `HTTPResponseFuture`
+    - `HTTPMetricsResponseFuture` → `ResponseFuture`
     - `HTTPMetricsLayerBuilder` → `HTTPLayerBuilder`
 * Added OpenTelemetry trace support
+* Tower instrumentation now sets the OpenTelemetry semantic conventions schema URL on its instrumentation scope
 * **BREAKING**: Update default  `http.server.request.duration` histogram boundaries to OTel semantic conventions.
 * **BREAKING**: Remove `with_request_duration_bounds` builder method.
   Alternate histogram bucket boundaries can be applied with the standard OpenTelemetry Views; see `examples` directory in crate for usage.
@@ -77,7 +77,7 @@ let layer = HTTPMetricsLayerBuilder::builder()
 After:
 
 ```rust
-use opentelemetry_instrumentation_tower::HTTPLayer;
+use opentelemetry_instrumentation_tower::{HTTPLayer, HTTPLayerBuilder};
 
 // Set global providers
 global::set_meter_provider(meter_provider);
@@ -85,6 +85,13 @@ global::set_tracer_provider(tracer_provider); // for tracing support
 
 // Then create the layer - simple API using global providers
 let layer = HTTPLayer::new();
+
+// Or disable a signal for this layer (both are enabled by default)
+let layer = HTTPLayerBuilder::builder()
+    .with_tracing(false)
+    .with_metrics(true)
+    .build()
+    .unwrap();
 ```
 
 #### Type Name Changes
