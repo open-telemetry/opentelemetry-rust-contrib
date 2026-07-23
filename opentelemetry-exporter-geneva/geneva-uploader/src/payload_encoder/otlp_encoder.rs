@@ -543,17 +543,16 @@ impl<'a> LogRecordParts<'a> {
             Self::from_canonical(record, role, role_instance, ctx.routing.table_name)
         };
 
-        let routing_event_name = match ctx.routing.scope_routing {
+        let routing_event_name: Option<Cow<'a, str>> = match ctx.routing.scope_routing {
             LogScopeRouting::None => None,
-            LogScopeRouting::Fixed(name) => Some(name.clone()),
-            LogScopeRouting::PerRecord(mapping) => Some(resolve_log_record_routing_event_name(
-                record,
-                mapping,
-                ctx.routing.table_name,
+            // Scope-invariant name: borrow it instead of cloning per record.
+            LogScopeRouting::Fixed(name) => Some(Cow::Borrowed(name.as_str())),
+            LogScopeRouting::PerRecord(mapping) => Some(Cow::Owned(
+                resolve_log_record_routing_event_name(record, mapping, ctx.routing.table_name),
             )),
         };
         if let Some(routing_event_name) = routing_event_name {
-            parts.routing_event_name = Cow::Owned(routing_event_name);
+            parts.routing_event_name = routing_event_name;
         }
 
         parts.obo_config =

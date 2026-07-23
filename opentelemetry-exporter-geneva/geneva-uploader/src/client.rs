@@ -20,6 +20,7 @@ use opentelemetry_proto::tonic::common::v1::{
 use opentelemetry_proto::tonic::resource::v1::Resource;
 use opentelemetry_proto::tonic::trace::v1::{ResourceSpans, Span};
 use otap_df_pdata_views::views::logs::LogsDataView;
+use std::borrow::Cow;
 use std::fmt;
 use std::future::Future;
 use std::pin::Pin;
@@ -257,17 +258,24 @@ fn resolve_span_scope_routing<'a>(
 }
 
 /// Resolve the routed event name for a single span given its scope's routing.
-fn resolve_span_event_name_in_scope(
-    scope_routing: &SpanScopeRouting<'_>,
+///
+/// Returns a [`Cow`] so the common paths (a resource-/scope-level `Fixed` name,
+/// or the no-mapping default) borrow the scope-invariant name instead of
+/// allocating per span; only a per-span mapping hit owns a new `String`.
+fn resolve_span_event_name_in_scope<'a>(
+    scope_routing: &'a SpanScopeRouting<'a>,
     span: &Span,
-    table_name: &str,
-) -> String {
+    table_name: &'a str,
+) -> Cow<'a, str> {
     match scope_routing {
-        SpanScopeRouting::Fixed(name) => name.clone(),
+        SpanScopeRouting::Fixed(name) => Cow::Borrowed(name.as_str()),
         SpanScopeRouting::PerSpan { mapping, key } => {
-            span_routing_value_from_attributes(&span.attributes, key)
+            match span_routing_value_from_attributes(&span.attributes, key)
                 .and_then(|value| resolve_mapped_destination(&mapping.events, &value))
-                .unwrap_or_else(|| table_name.to_string())
+            {
+                Some(name) => Cow::Owned(name),
+                None => Cow::Borrowed(table_name),
+            }
         }
     }
 }
@@ -283,7 +291,7 @@ fn resolve_span_event_name(
     event_name_mapping: Option<&SpanEventNameMapping>,
 ) -> String {
     let scope_routing = resolve_span_scope_routing(resource, scope, table_name, event_name_mapping);
-    resolve_span_event_name_in_scope(&scope_routing, span, table_name)
+    resolve_span_event_name_in_scope(&scope_routing, span, table_name).into_owned()
 }
 
 /// Stored client pieces shared by every constructor (all of `Self` except the
@@ -697,9 +705,10 @@ impl GenevaClient {
                         self.span_table_name.as_ref(),
                     );
 
-                    match group_index.get(&event_name) {
+                    match group_index.get(event_name.as_ref()) {
                         Some(&idx) => routed_groups[idx].1.push(span),
                         None => {
+                            let event_name = event_name.into_owned();
                             group_index.insert(event_name.clone(), routed_groups.len());
                             routed_groups.push((event_name, vec![span]));
                         }
@@ -1083,6 +1092,43 @@ mod tests {
 
         assert_eq!(batches.len(), 1);
         assert_eq!(batches[0].event_name, "AppTrace");
+    }
+
+    #[test]
+    fn encode_and_compress_spans_no_mapping_shares_default_name_across_spans() {
+        // No routing mapping: every span in the scope resolves to the default
+        // table name via a borrowed Cow. Multiple spans must collapse into one
+        // batch under that name without per-span ownership.
+        let client = build_client(None, Some("AppTrace"));
+
+        let spans = vec![ResourceSpans {
+            scope_spans: vec![ScopeSpans {
+                spans: vec![
+                    Span {
+                        name: "span-1".to_string(),
+                        ..Default::default()
+                    },
+                    Span {
+                        name: "span-2".to_string(),
+                        ..Default::default()
+                    },
+                    Span {
+                        name: "span-3".to_string(),
+                        ..Default::default()
+                    },
+                ],
+                ..Default::default()
+            }],
+            ..Default::default()
+        }];
+
+        let batches = client
+            .encode_and_compress_spans(&spans)
+            .expect("span encoding should succeed");
+
+        assert_eq!(batches.len(), 1);
+        assert_eq!(batches[0].event_name, "AppTrace");
+        assert_eq!(batches[0].row_count, 3);
     }
 
     #[test]
