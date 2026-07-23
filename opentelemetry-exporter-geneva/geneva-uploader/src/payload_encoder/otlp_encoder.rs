@@ -221,6 +221,30 @@ pub(crate) fn resolve_mapped_destination(
     }
 }
 
+/// A primitive attribute value eligible for event-name routing. Non-primitive
+/// kinds (bytes/array/kvlist) are not routable.
+pub(crate) enum RoutingPrimitive<'a> {
+    Str(&'a str),
+    Int(i64),
+    Double(f64),
+    Bool(bool),
+}
+
+/// Stringify a routing primitive using the shared routing rules: string values
+/// are treated as absent when blank/whitespace and otherwise passed through;
+/// numeric/bool values are formatted via `to_string`.
+///
+/// Kept in one place so the logs path (over pdata-view traits) and the spans
+/// path (over proto types in `client.rs`) can't drift on value handling.
+pub(crate) fn stringify_routing_primitive(value: RoutingPrimitive<'_>) -> Option<String> {
+    match value {
+        RoutingPrimitive::Str(s) => (!s.trim().is_empty()).then(|| s.to_string()),
+        RoutingPrimitive::Int(v) => Some(v.to_string()),
+        RoutingPrimitive::Double(v) => Some(v.to_string()),
+        RoutingPrimitive::Bool(v) => Some(v.to_string()),
+    }
+}
+
 fn routing_value_from_attributes<'a, A, I>(attributes: I, key: &str) -> Option<String>
 where
     A: AttributeView + 'a,
@@ -238,11 +262,17 @@ where
         return match value.value_type() {
             ValueType::String => value
                 .as_string()
-                .and_then(non_blank_utf8)
-                .map(str::to_owned),
-            ValueType::Int64 => value.as_int64().map(|v| v.to_string()),
-            ValueType::Double => value.as_double().map(|v| v.to_string()),
-            ValueType::Bool => value.as_bool().map(|v| v.to_string()),
+                .and_then(|b| std::str::from_utf8(b).ok())
+                .and_then(|s| stringify_routing_primitive(RoutingPrimitive::Str(s))),
+            ValueType::Int64 => value
+                .as_int64()
+                .and_then(|v| stringify_routing_primitive(RoutingPrimitive::Int(v))),
+            ValueType::Double => value
+                .as_double()
+                .and_then(|v| stringify_routing_primitive(RoutingPrimitive::Double(v))),
+            ValueType::Bool => value
+                .as_bool()
+                .and_then(|v| stringify_routing_primitive(RoutingPrimitive::Bool(v))),
             _ => None,
         };
     }
@@ -254,39 +284,37 @@ where
     SV: InstrumentationScopeView,
 {
     match key {
-        SCOPE_NAME_ROUTING_KEY => scope.name().and_then(non_blank_utf8).map(str::to_owned),
-        SCOPE_VERSION_ROUTING_KEY => scope.version().and_then(non_blank_utf8).map(str::to_owned),
+        SCOPE_NAME_ROUTING_KEY => scope
+            .name()
+            .and_then(|b| std::str::from_utf8(b).ok())
+            .and_then(|s| stringify_routing_primitive(RoutingPrimitive::Str(s))),
+        SCOPE_VERSION_ROUTING_KEY => scope
+            .version()
+            .and_then(|b| std::str::from_utf8(b).ok())
+            .and_then(|s| stringify_routing_primitive(RoutingPrimitive::Str(s))),
         _ => routing_value_from_attributes(scope.attributes(), key),
     }
 }
 
-fn resolve_log_routing_event_name<R, RV, SV>(
-    record: &R,
-    resource: Option<&RV>,
-    scope: Option<&SV>,
-    table_name: &str,
-    event_name_mapping: Option<&LogsEventNameMapping>,
-) -> Option<String>
-where
-    R: LogRecordView,
-    RV: ResourceView,
-    SV: InstrumentationScopeView,
-{
-    let mapping = event_name_mapping?;
-    let routing_value = match &mapping.routing_key {
-        LogsEventNameRoutingKey::EventName => normalized_event_name(record).map(str::to_owned),
-        LogsEventNameRoutingKey::ResourceAttribute(key) => {
-            resource.and_then(|res| routing_value_from_attributes(res.attributes(), key.as_str()))
-        }
-        LogsEventNameRoutingKey::ScopeAttribute(key) => {
-            scope.and_then(|scope| routing_value_from_scope(scope, key.as_str()))
-        }
-        LogsEventNameRoutingKey::LogRecordAttribute(key) => {
-            routing_value_from_attributes(record.attributes(), key.as_str())
-        }
-    };
+/// Log routing resolved once per instrumentation scope.
+enum LogScopeRouting<'a> {
+    /// No routing mapping configured; records use the configured table name.
+    None,
+    /// The routed event name is constant for every record in the scope (a
+    /// resource-/scope-level routing key). Resolved once.
+    Fixed(String),
+    /// Routing depends on each record (`EventName` or `LogRecordAttribute`).
+    PerRecord(&'a LogsEventNameMapping),
+}
 
-    if let Some(source_value) = routing_value.as_deref() {
+/// Resolve a mapped source value to the final event name, falling back to the
+/// configured table name when the source is absent or unmapped.
+fn resolve_log_event_name_from_value(
+    mapping: &LogsEventNameMapping,
+    source_value: Option<&str>,
+    table_name: &str,
+) -> String {
+    if let Some(source_value) = source_value {
         if let Some(mapped_event_name) = resolve_mapped_destination(&mapping.events, source_value) {
             debug!(
                 name: "otlp_encoder.log_event_routing",
@@ -295,7 +323,7 @@ where
                 routed_event_name = %mapped_event_name,
                 "Resolved log event routing from mapping"
             );
-            return Some(mapped_event_name);
+            return mapped_event_name;
         }
 
         debug!(
@@ -305,7 +333,7 @@ where
             fallback_event_name = %table_name,
             "No mapping entry for routing source; using fallback event name"
         );
-        return Some(table_name.to_string());
+        return table_name.to_string();
     }
 
     debug!(
@@ -314,7 +342,73 @@ where
         fallback_event_name = %table_name,
         "Routing source value not found on log record; using fallback event name"
     );
-    Some(table_name.to_string())
+    table_name.to_string()
+}
+
+/// Resolve the scope-invariant part of log routing exactly once per scope.
+///
+/// Resource-/scope-level routing keys resolve to a value that is constant across
+/// every record in the scope, so their destination event name is computed here
+/// and reused. `EventName`/`LogRecordAttribute` routing is deferred per record.
+fn resolve_log_scope_routing<'a, RV, SV>(
+    resource: Option<&RV>,
+    scope: Option<&SV>,
+    table_name: &str,
+    event_name_mapping: Option<&'a LogsEventNameMapping>,
+) -> LogScopeRouting<'a>
+where
+    RV: ResourceView,
+    SV: InstrumentationScopeView,
+{
+    let Some(mapping) = event_name_mapping else {
+        return LogScopeRouting::None;
+    };
+
+    match &mapping.routing_key {
+        LogsEventNameRoutingKey::ResourceAttribute(key) => {
+            let value = resource
+                .and_then(|res| routing_value_from_attributes(res.attributes(), key.as_str()));
+            LogScopeRouting::Fixed(resolve_log_event_name_from_value(
+                mapping,
+                value.as_deref(),
+                table_name,
+            ))
+        }
+        LogsEventNameRoutingKey::ScopeAttribute(key) => {
+            let value = scope.and_then(|scope| routing_value_from_scope(scope, key.as_str()));
+            LogScopeRouting::Fixed(resolve_log_event_name_from_value(
+                mapping,
+                value.as_deref(),
+                table_name,
+            ))
+        }
+        LogsEventNameRoutingKey::EventName | LogsEventNameRoutingKey::LogRecordAttribute(_) => {
+            LogScopeRouting::PerRecord(mapping)
+        }
+    }
+}
+
+/// Resolve the routed event name for a single record whose scope routing depends
+/// on per-record data (`EventName` or `LogRecordAttribute`).
+fn resolve_log_record_routing_event_name<R>(
+    record: &R,
+    mapping: &LogsEventNameMapping,
+    table_name: &str,
+) -> String
+where
+    R: LogRecordView,
+{
+    let routing_value = match &mapping.routing_key {
+        LogsEventNameRoutingKey::EventName => normalized_event_name(record).map(str::to_owned),
+        LogsEventNameRoutingKey::LogRecordAttribute(key) => {
+            routing_value_from_attributes(record.attributes(), key.as_str())
+        }
+        // Resource-/scope-level keys are precomputed in `resolve_log_scope_routing`.
+        LogsEventNameRoutingKey::ResourceAttribute(_)
+        | LogsEventNameRoutingKey::ScopeAttribute(_) => None,
+    };
+
+    resolve_log_event_name_from_value(mapping, routing_value.as_deref(), table_name)
 }
 
 /// Look up an event in the OBO map, handling .NET-style anchored regex format.
@@ -343,127 +437,6 @@ pub(crate) fn lookup_obo_config<'a>(
 struct RoleOverrides {
     role: Option<String>,
     role_instance: Option<String>,
-}
-
-#[cfg(test)]
-struct EmptyResourceView;
-
-#[cfg(test)]
-struct EmptyScopeView;
-
-#[cfg(test)]
-struct EmptyAttributeView;
-
-#[cfg(test)]
-struct EmptyAnyValue;
-
-#[cfg(test)]
-impl ResourceView for EmptyResourceView {
-    type Attribute<'a>
-        = EmptyAttributeView
-    where
-        Self: 'a;
-    type AttributesIter<'a>
-        = std::iter::Empty<EmptyAttributeView>
-    where
-        Self: 'a;
-
-    fn attributes(&self) -> Self::AttributesIter<'_> {
-        std::iter::empty()
-    }
-
-    fn dropped_attributes_count(&self) -> u32 {
-        0
-    }
-}
-
-#[cfg(test)]
-impl InstrumentationScopeView for EmptyScopeView {
-    type Attribute<'a>
-        = EmptyAttributeView
-    where
-        Self: 'a;
-    type AttributeIter<'a>
-        = std::iter::Empty<EmptyAttributeView>
-    where
-        Self: 'a;
-
-    fn name(&self) -> Option<&[u8]> {
-        None
-    }
-
-    fn version(&self) -> Option<&[u8]> {
-        None
-    }
-
-    fn attributes(&self) -> Self::AttributeIter<'_> {
-        std::iter::empty()
-    }
-
-    fn dropped_attributes_count(&self) -> u32 {
-        0
-    }
-}
-
-#[cfg(test)]
-impl AttributeView for EmptyAttributeView {
-    type Val<'val>
-        = EmptyAnyValue
-    where
-        Self: 'val;
-
-    fn key(&self) -> &[u8] {
-        b""
-    }
-
-    fn value(&self) -> Option<Self::Val<'_>> {
-        None
-    }
-}
-
-#[cfg(test)]
-impl<'a> AnyValueView<'a> for EmptyAnyValue {
-    type KeyValue = EmptyAttributeView;
-    type ArrayIter<'arr>
-        = std::iter::Empty<EmptyAnyValue>
-    where
-        Self: 'arr;
-    type KeyValueIter<'kv>
-        = std::iter::Empty<EmptyAttributeView>
-    where
-        Self: 'kv;
-
-    fn value_type(&self) -> ValueType {
-        ValueType::Empty
-    }
-
-    fn as_string(&self) -> Option<&[u8]> {
-        None
-    }
-
-    fn as_bool(&self) -> Option<bool> {
-        None
-    }
-
-    fn as_int64(&self) -> Option<i64> {
-        None
-    }
-
-    fn as_double(&self) -> Option<f64> {
-        None
-    }
-
-    fn as_bytes(&self) -> Option<&[u8]> {
-        None
-    }
-
-    fn as_array(&self) -> Option<Self::ArrayIter<'_>> {
-        None
-    }
-
-    fn as_kvlist(&self) -> Option<Self::KeyValueIter<'_>> {
-        None
-    }
 }
 
 impl RoleOverrides {
@@ -513,26 +486,16 @@ impl DynamicField {
     }
 }
 
-struct LogRoutingContext<'a, RV, SV>
-where
-    RV: ResourceView,
-    SV: InstrumentationScopeView,
-{
+struct LogRoutingContext<'a> {
     table_name: &'a str,
     resource_role: &'a RoleOverrides,
-    resource: Option<&'a RV>,
-    scope: Option<&'a SV>,
-    event_name_mapping: Option<&'a LogsEventNameMapping>,
+    scope_routing: &'a LogScopeRouting<'a>,
     obo_event_map: Option<&'a OboEventMap>,
 }
 
-struct LogEncodeContext<'a, RV, SV>
-where
-    RV: ResourceView,
-    SV: InstrumentationScopeView,
-{
+struct LogEncodeContext<'a> {
     metadata_fields: &'a MetadataFields,
-    routing: LogRoutingContext<'a, RV, SV>,
+    routing: LogRoutingContext<'a>,
 }
 
 struct LogRecordParts<'a> {
@@ -555,11 +518,9 @@ struct LogRecordParts<'a> {
 }
 
 impl<'a> LogRecordParts<'a> {
-    fn new<R, RV, SV>(record: &'a R, ctx: &LogEncodeContext<'a, RV, SV>) -> Self
+    fn new<R>(record: &'a R, ctx: &LogEncodeContext<'a>) -> Self
     where
         R: LogRecordView,
-        RV: ResourceView,
-        SV: InstrumentationScopeView,
     {
         let role = ctx
             .routing
@@ -582,13 +543,16 @@ impl<'a> LogRecordParts<'a> {
             Self::from_canonical(record, role, role_instance, ctx.routing.table_name)
         };
 
-        if let Some(routing_event_name) = resolve_log_routing_event_name(
-            record,
-            ctx.routing.resource,
-            ctx.routing.scope,
-            ctx.routing.table_name,
-            ctx.routing.event_name_mapping,
-        ) {
+        let routing_event_name = match ctx.routing.scope_routing {
+            LogScopeRouting::None => None,
+            LogScopeRouting::Fixed(name) => Some(name.clone()),
+            LogScopeRouting::PerRecord(mapping) => Some(resolve_log_record_routing_event_name(
+                record,
+                mapping,
+                ctx.routing.table_name,
+            )),
+        };
+        if let Some(routing_event_name) = routing_event_name {
             parts.routing_event_name = Cow::Owned(routing_event_name);
         }
 
@@ -1209,11 +1173,9 @@ impl LogBatchAccumulator {
     }
 
     /// Encode a single log record and append it to the appropriate batch.
-    fn push<R, RV, SV>(&mut self, record: &R, ctx: &LogEncodeContext<'_, RV, SV>)
+    fn push<R>(&mut self, record: &R, ctx: &LogEncodeContext<'_>)
     where
         R: LogRecordView,
-        RV: ResourceView,
-        SV: InstrumentationScopeView,
     {
         let parts = LogRecordParts::new(record, ctx);
         let timestamp = parts.timestamp;
@@ -1389,14 +1351,18 @@ impl OtlpEncoder {
                 .unwrap_or_default();
             for scope_logs in resource_logs.scopes() {
                 let scope = scope_logs.scope();
+                let scope_routing = resolve_log_scope_routing(
+                    resource.as_ref(),
+                    scope.as_ref(),
+                    table_name,
+                    event_name_mapping,
+                );
                 let ctx = LogEncodeContext {
                     metadata_fields,
                     routing: LogRoutingContext {
                         table_name,
                         resource_role: &resource_role,
-                        resource: resource.as_ref(),
-                        scope: scope.as_ref(),
-                        event_name_mapping,
+                        scope_routing: &scope_routing,
                         obo_event_map,
                     },
                 };
@@ -1574,14 +1540,13 @@ impl OtlpEncoder {
             String::new(),
         );
         let role_overrides = RoleOverrides::default();
+        let scope_routing = LogScopeRouting::None;
         let ctx = LogEncodeContext {
             metadata_fields: &metadata_fields,
             routing: LogRoutingContext {
                 table_name: CS_LOG_TYPENAME,
                 resource_role: &role_overrides,
-                resource: None::<&EmptyResourceView>,
-                scope: None::<&EmptyScopeView>,
-                event_name_mapping: None,
+                scope_routing: &scope_routing,
                 obo_event_map: None,
             },
         };
@@ -1598,14 +1563,13 @@ impl OtlpEncoder {
         metadata_fields: &MetadataFields,
     ) -> Vec<u8> {
         let role_overrides = RoleOverrides::default();
+        let scope_routing = LogScopeRouting::None;
         let ctx = LogEncodeContext {
             metadata_fields,
             routing: LogRoutingContext {
                 table_name: CS_LOG_TYPENAME,
                 resource_role: &role_overrides,
-                resource: None::<&EmptyResourceView>,
-                scope: None::<&EmptyScopeView>,
-                event_name_mapping: None,
+                scope_routing: &scope_routing,
                 obo_event_map: None,
             },
         };
@@ -3850,6 +3814,47 @@ mod tests {
 
         assert_eq!(batches.len(), 1);
         assert_eq!(batches[0].event_name, "PremiumLog");
+    }
+
+    #[test]
+    fn test_resource_attribute_routing_shared_across_records_in_scope() {
+        // The resource-level routing key is scope-invariant, so it is resolved
+        // once per scope and reused for every record; multiple records in one
+        // scope must all land in a single batch under the resolved event name.
+        let metadata = make_metadata("TestNamespace");
+        let mapping = make_event_name_mapping(
+            LogsEventNameRoutingKey::ResourceAttribute("cluster".to_string()),
+            &[("clusterB", Some("PremiumLog"))],
+        );
+        let logs = [
+            LogRecord {
+                observed_time_unix_nano: 1,
+                ..Default::default()
+            },
+            LogRecord {
+                observed_time_unix_nano: 2,
+                ..Default::default()
+            },
+            LogRecord {
+                observed_time_unix_nano: 3,
+                ..Default::default()
+            },
+        ];
+
+        let batches = encode_log_batch_with_resource_scope_attrs_mapping_and_obo(
+            &OtlpEncoder::new(),
+            logs.iter(),
+            vec![string_attr("cluster", "clusterB")],
+            Vec::new(),
+            &metadata,
+            Some(&mapping),
+            None,
+        )
+        .expect("resource-attribute mapping should encode successfully");
+
+        assert_eq!(batches.len(), 1);
+        assert_eq!(batches[0].event_name, "PremiumLog");
+        assert_eq!(batches[0].row_count, 3);
     }
 
     #[test]

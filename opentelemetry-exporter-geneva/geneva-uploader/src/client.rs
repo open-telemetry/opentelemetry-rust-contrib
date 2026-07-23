@@ -7,8 +7,8 @@ use crate::ingestion_service::uploader::{
 };
 use crate::payload_encoder::otlp_encoder::OtlpEncoder;
 use crate::payload_encoder::otlp_encoder::{
-    lookup_obo_config, resolve_mapped_destination, MetadataFields, SCOPE_NAME_ROUTING_KEY,
-    SCOPE_VERSION_ROUTING_KEY,
+    lookup_obo_config, resolve_mapped_destination, stringify_routing_primitive, MetadataFields,
+    RoutingPrimitive, SCOPE_NAME_ROUTING_KEY, SCOPE_VERSION_ROUTING_KEY,
 };
 pub use crate::payload_encoder::otlp_encoder::{
     LogsEventNameMapping, LogsEventNameRoutingKey, OboEventConfig, OboEventMap,
@@ -178,11 +178,17 @@ fn span_routing_value_from_attributes(attributes: &[KeyValue], key: &str) -> Opt
         let value = attr.value.as_ref()?.value.as_ref()?;
         return match value {
             ProtoAnyValue::StringValue(value) => {
-                (!value.trim().is_empty()).then(|| value.to_string())
+                stringify_routing_primitive(RoutingPrimitive::Str(value))
             }
-            ProtoAnyValue::IntValue(value) => Some(value.to_string()),
-            ProtoAnyValue::DoubleValue(value) => Some(value.to_string()),
-            ProtoAnyValue::BoolValue(value) => Some(value.to_string()),
+            ProtoAnyValue::IntValue(value) => {
+                stringify_routing_primitive(RoutingPrimitive::Int(*value))
+            }
+            ProtoAnyValue::DoubleValue(value) => {
+                stringify_routing_primitive(RoutingPrimitive::Double(*value))
+            }
+            ProtoAnyValue::BoolValue(value) => {
+                stringify_routing_primitive(RoutingPrimitive::Bool(*value))
+            }
             _ => None,
         };
     }
@@ -195,9 +201,9 @@ fn span_routing_value_from_scope(
 ) -> Option<String> {
     let scope = scope?;
     match key {
-        SCOPE_NAME_ROUTING_KEY => (!scope.name.trim().is_empty()).then(|| scope.name.clone()),
+        SCOPE_NAME_ROUTING_KEY => stringify_routing_primitive(RoutingPrimitive::Str(&scope.name)),
         SCOPE_VERSION_ROUTING_KEY => {
-            (!scope.version.trim().is_empty()).then(|| scope.version.clone())
+            stringify_routing_primitive(RoutingPrimitive::Str(&scope.version))
         }
         _ => span_routing_value_from_attributes(&scope.attributes, key),
     }
@@ -207,6 +213,68 @@ fn span_routing_value_from_resource(resource: Option<&Resource>, key: &str) -> O
     resource.and_then(|resource| span_routing_value_from_attributes(&resource.attributes, key))
 }
 
+/// Span routing resolved once per instrumentation scope.
+enum SpanScopeRouting<'a> {
+    /// The routed event name is constant for every span in the scope (no mapping
+    /// configured, or a resource-/scope-level routing key). Resolved once.
+    Fixed(String),
+    /// Routing depends on each span's own attributes; only `SpanAttribute` keys
+    /// need per-span resolution.
+    PerSpan {
+        mapping: &'a SpanEventNameMapping,
+        key: &'a str,
+    },
+}
+
+/// Resolve the scope-invariant part of span routing exactly once per scope.
+///
+/// For resource-/scope-level routing keys the source value is constant across
+/// every span in the scope, so the destination event name is computed here and
+/// reused; only `SpanAttribute` routing is deferred to per-span resolution.
+fn resolve_span_scope_routing<'a>(
+    resource: Option<&Resource>,
+    scope: Option<&InstrumentationScope>,
+    table_name: &str,
+    event_name_mapping: Option<&'a SpanEventNameMapping>,
+) -> SpanScopeRouting<'a> {
+    let Some(mapping) = event_name_mapping else {
+        return SpanScopeRouting::Fixed(table_name.to_string());
+    };
+
+    match &mapping.routing_key {
+        SpanEventNameRoutingKey::ResourceAttribute(key) => SpanScopeRouting::Fixed(
+            span_routing_value_from_resource(resource, key)
+                .and_then(|value| resolve_mapped_destination(&mapping.events, &value))
+                .unwrap_or_else(|| table_name.to_string()),
+        ),
+        SpanEventNameRoutingKey::ScopeAttribute(key) => SpanScopeRouting::Fixed(
+            span_routing_value_from_scope(scope, key)
+                .and_then(|value| resolve_mapped_destination(&mapping.events, &value))
+                .unwrap_or_else(|| table_name.to_string()),
+        ),
+        SpanEventNameRoutingKey::SpanAttribute(key) => SpanScopeRouting::PerSpan { mapping, key },
+    }
+}
+
+/// Resolve the routed event name for a single span given its scope's routing.
+fn resolve_span_event_name_in_scope(
+    scope_routing: &SpanScopeRouting<'_>,
+    span: &Span,
+    table_name: &str,
+) -> String {
+    match scope_routing {
+        SpanScopeRouting::Fixed(name) => name.clone(),
+        SpanScopeRouting::PerSpan { mapping, key } => {
+            span_routing_value_from_attributes(&span.attributes, key)
+                .and_then(|value| resolve_mapped_destination(&mapping.events, &value))
+                .unwrap_or_else(|| table_name.to_string())
+        }
+    }
+}
+
+/// Resolve span routing for a single span end-to-end. Retained for unit tests;
+/// the hot path precomputes scope routing via [`resolve_span_scope_routing`].
+#[cfg(test)]
 fn resolve_span_event_name(
     resource: Option<&Resource>,
     scope: Option<&InstrumentationScope>,
@@ -214,26 +282,8 @@ fn resolve_span_event_name(
     table_name: &str,
     event_name_mapping: Option<&SpanEventNameMapping>,
 ) -> String {
-    let Some(mapping) = event_name_mapping else {
-        return table_name.to_string();
-    };
-
-    let routing_value = match &mapping.routing_key {
-        SpanEventNameRoutingKey::ResourceAttribute(key) => {
-            span_routing_value_from_resource(resource, key)
-        }
-        SpanEventNameRoutingKey::ScopeAttribute(key) => span_routing_value_from_scope(scope, key),
-        SpanEventNameRoutingKey::SpanAttribute(key) => {
-            span_routing_value_from_attributes(&span.attributes, key)
-        }
-    };
-
-    let Some(source_value) = routing_value else {
-        return table_name.to_string();
-    };
-
-    resolve_mapped_destination(&mapping.events, &source_value)
-        .unwrap_or_else(|| table_name.to_string())
+    let scope_routing = resolve_span_scope_routing(resource, scope, table_name, event_name_mapping);
+    resolve_span_event_name_in_scope(&scope_routing, span, table_name)
 }
 
 /// Stored client pieces shared by every constructor (all of `Self` except the
@@ -634,13 +684,17 @@ impl GenevaClient {
             let resource = resource_span.resource.as_ref();
             for scope_span in &resource_span.scope_spans {
                 let scope = scope_span.scope.as_ref();
+                let scope_routing = resolve_span_scope_routing(
+                    resource,
+                    scope,
+                    self.span_table_name.as_ref(),
+                    self.span_event_name_mapping.as_ref(),
+                );
                 for span in &scope_span.spans {
-                    let event_name = resolve_span_event_name(
-                        resource,
-                        scope,
+                    let event_name = resolve_span_event_name_in_scope(
+                        &scope_routing,
                         span,
                         self.span_table_name.as_ref(),
-                        self.span_event_name_mapping.as_ref(),
                     );
 
                     match group_index.get(&event_name) {
@@ -1054,6 +1108,53 @@ mod tests {
 
         assert_eq!(batches.len(), 1);
         assert_eq!(batches[0].event_name, "ResourceTrace");
+    }
+
+    #[test]
+    fn encode_and_compress_spans_resource_route_shared_across_spans_in_scope() {
+        // The resource-level routing key is scope-invariant, so it is resolved
+        // once per scope and reused for every span; multiple spans in one scope
+        // must all land in a single batch under the resolved event name.
+        let client = build_span_client(
+            Some("AppTrace"),
+            Some(make_span_event_name_mapping(
+                SpanEventNameRoutingKey::ResourceAttribute("cluster".to_string()),
+                &[("cluster-a", Some("ResourceTrace"))],
+            )),
+        );
+
+        let resource_spans = vec![ResourceSpans {
+            resource: Some(Resource {
+                attributes: vec![string_attr("cluster", "cluster-a")],
+                ..Default::default()
+            }),
+            scope_spans: vec![ScopeSpans {
+                scope: Some(InstrumentationScope {
+                    name: "scope-a".to_string(),
+                    ..Default::default()
+                }),
+                spans: vec![
+                    Span {
+                        name: "span-1".to_string(),
+                        ..Default::default()
+                    },
+                    Span {
+                        name: "span-2".to_string(),
+                        ..Default::default()
+                    },
+                ],
+                ..Default::default()
+            }],
+            ..Default::default()
+        }];
+
+        let batches = client
+            .encode_and_compress_spans(&resource_spans)
+            .expect("span encoding should succeed");
+
+        assert_eq!(batches.len(), 1);
+        assert_eq!(batches[0].event_name, "ResourceTrace");
+        assert_eq!(batches[0].row_count, 2);
     }
 
     #[test]

@@ -422,6 +422,102 @@ unsafe fn convert_obo_event_map(
     }
 }
 
+/// Shared accessor over the identically-shaped logs/spans mapping entry structs
+/// so the entry-conversion loop can be written once.
+trait FfiMapEntry {
+    fn source_value(&self) -> *const c_char;
+    fn destination_event_name(&self) -> *const c_char;
+}
+
+impl FfiMapEntry for FfiLogsEventNameMapEntry {
+    fn source_value(&self) -> *const c_char {
+        self.source_value
+    }
+    fn destination_event_name(&self) -> *const c_char {
+        self.destination_event_name
+    }
+}
+
+impl FfiMapEntry for FfiSpansEventNameMapEntry {
+    fn source_value(&self) -> *const c_char {
+        self.source_value
+    }
+    fn destination_event_name(&self) -> *const c_char {
+        self.destination_event_name
+    }
+}
+
+/// Reads a routing key name that is required for the given `kind`, sharing the
+/// null-check and non-blank validation across logs and spans conversion.
+///
+/// `ctx` is the mapping's field prefix (e.g. `"logs_event_name_mapping"`).
+///
+/// # Safety
+/// - `ptr` must be null or a valid null-terminated C string.
+unsafe fn required_routing_key_name(
+    ptr: *const c_char,
+    kind: c_uint,
+    ctx: &str,
+) -> Result<String, String> {
+    if ptr.is_null() {
+        return Err(format!(
+            "{ctx}.routing_key_name is required for routing_key_kind={kind}"
+        ));
+    }
+    unsafe { c_str_to_non_blank_string(ptr, &format!("{ctx}.routing_key_name")) }
+}
+
+/// Converts an FFI mapping-entry array into the Rust-side `events` map, sharing
+/// the validation and string-decoding loop across logs and spans conversion.
+///
+/// `ctx` is the mapping's field prefix (e.g. `"logs_event_name_mapping"`).
+///
+/// # Safety
+/// - `entries_ptr` must be null or valid for reads of `count` elements.
+/// - All non-null string pointers inside each entry must be valid
+///   null-terminated C strings.
+unsafe fn convert_mapping_entries<E: FfiMapEntry>(
+    entries_ptr: *const E,
+    count: usize,
+    ctx: &str,
+) -> Result<std::collections::HashMap<String, Option<String>>, String> {
+    if entries_ptr.is_null() || count == 0 {
+        return Err(format!(
+            "{ctx}.entries must be non-null with count > 0 when a mapping is provided"
+        ));
+    }
+
+    let entries = unsafe { std::slice::from_raw_parts(entries_ptr, count) };
+    let mut events = std::collections::HashMap::with_capacity(entries.len());
+
+    for (i, entry) in entries.iter().enumerate() {
+        if entry.source_value().is_null() {
+            return Err(format!("{ctx}.entries[{i}].source_value is null"));
+        }
+        let source_value = unsafe {
+            c_str_to_non_blank_string(
+                entry.source_value(),
+                &format!("{ctx}.entries[{i}].source_value"),
+            )?
+        };
+
+        let destination_event_name = if entry.destination_event_name().is_null() {
+            None
+        } else {
+            Some(unsafe {
+                c_str_to_string(
+                    entry.destination_event_name(),
+                    &format!("{ctx}.entries[{i}].destination_event_name"),
+                )?
+            })
+        };
+
+        events.insert(source_value, destination_event_name);
+    }
+
+    Ok(events)
+}
+
 /// Converts an FFI logs event-name mapping to the Rust-side `LogsEventNameMapping`.
 ///
 /// Returns `Ok(None)` only when `ffi_mapping` is null (routing not configured).
@@ -450,48 +546,15 @@ unsafe fn convert_logs_event_name_mapping(
             }
             LogsEventNameRoutingKey::EventName
         }
-        1 => {
-            if mapping_ref.routing_key_name.is_null() {
-                return Err(
-                    "logs_event_name_mapping.routing_key_name is required for routing_key_kind=1"
-                        .to_string(),
-                );
-            }
-            LogsEventNameRoutingKey::ResourceAttribute(unsafe {
-                c_str_to_non_blank_string(
-                    mapping_ref.routing_key_name,
-                    "logs_event_name_mapping.routing_key_name",
-                )?
-            })
-        }
-        2 => {
-            if mapping_ref.routing_key_name.is_null() {
-                return Err(
-                    "logs_event_name_mapping.routing_key_name is required for routing_key_kind=2"
-                        .to_string(),
-                );
-            }
-            LogsEventNameRoutingKey::ScopeAttribute(unsafe {
-                c_str_to_non_blank_string(
-                    mapping_ref.routing_key_name,
-                    "logs_event_name_mapping.routing_key_name",
-                )?
-            })
-        }
-        3 => {
-            if mapping_ref.routing_key_name.is_null() {
-                return Err(
-                    "logs_event_name_mapping.routing_key_name is required for routing_key_kind=3"
-                        .to_string(),
-                );
-            }
-            LogsEventNameRoutingKey::LogRecordAttribute(unsafe {
-                c_str_to_non_blank_string(
-                    mapping_ref.routing_key_name,
-                    "logs_event_name_mapping.routing_key_name",
-                )?
-            })
-        }
+        1 => LogsEventNameRoutingKey::ResourceAttribute(unsafe {
+            required_routing_key_name(mapping_ref.routing_key_name, 1, "logs_event_name_mapping")?
+        }),
+        2 => LogsEventNameRoutingKey::ScopeAttribute(unsafe {
+            required_routing_key_name(mapping_ref.routing_key_name, 2, "logs_event_name_mapping")?
+        }),
+        3 => LogsEventNameRoutingKey::LogRecordAttribute(unsafe {
+            required_routing_key_name(mapping_ref.routing_key_name, 3, "logs_event_name_mapping")?
+        }),
         other => {
             return Err(format!(
                 "logs_event_name_mapping.routing_key_kind has invalid value: {other}"
@@ -499,42 +562,13 @@ unsafe fn convert_logs_event_name_mapping(
         }
     };
 
-    if mapping_ref.entries.is_null() || mapping_ref.count == 0 {
-        return Err(
-            "logs_event_name_mapping.entries must be non-null with count > 0 when a mapping is provided"
-                .to_string(),
-        );
-    }
-
-    let entries = unsafe { std::slice::from_raw_parts(mapping_ref.entries, mapping_ref.count) };
-    let mut events = std::collections::HashMap::with_capacity(entries.len());
-
-    for (i, entry) in entries.iter().enumerate() {
-        if entry.source_value.is_null() {
-            return Err(format!(
-                "logs_event_name_mapping.entries[{i}].source_value is null"
-            ));
-        }
-        let source_value = unsafe {
-            c_str_to_non_blank_string(
-                entry.source_value,
-                &format!("logs_event_name_mapping.entries[{i}].source_value"),
-            )?
-        };
-
-        let destination_event_name = if entry.destination_event_name.is_null() {
-            None
-        } else {
-            Some(unsafe {
-                c_str_to_string(
-                    entry.destination_event_name,
-                    &format!("logs_event_name_mapping.entries[{i}].destination_event_name"),
-                )?
-            })
-        };
-
-        events.insert(source_value, destination_event_name);
-    }
+    let events = unsafe {
+        convert_mapping_entries(
+            mapping_ref.entries,
+            mapping_ref.count,
+            "logs_event_name_mapping",
+        )?
+    };
 
     Ok(Some(LogsEventNameMapping {
         routing_key,
@@ -561,48 +595,15 @@ unsafe fn convert_spans_event_name_mapping(
     let mapping_ref = unsafe { &*ffi_mapping };
 
     let routing_key = match mapping_ref.routing_key_kind {
-        1 => {
-            if mapping_ref.routing_key_name.is_null() {
-                return Err(
-                    "spans_event_name_mapping.routing_key_name is required for routing_key_kind=1"
-                        .to_string(),
-                );
-            }
-            SpanEventNameRoutingKey::ResourceAttribute(unsafe {
-                c_str_to_non_blank_string(
-                    mapping_ref.routing_key_name,
-                    "spans_event_name_mapping.routing_key_name",
-                )?
-            })
-        }
-        2 => {
-            if mapping_ref.routing_key_name.is_null() {
-                return Err(
-                    "spans_event_name_mapping.routing_key_name is required for routing_key_kind=2"
-                        .to_string(),
-                );
-            }
-            SpanEventNameRoutingKey::ScopeAttribute(unsafe {
-                c_str_to_non_blank_string(
-                    mapping_ref.routing_key_name,
-                    "spans_event_name_mapping.routing_key_name",
-                )?
-            })
-        }
-        3 => {
-            if mapping_ref.routing_key_name.is_null() {
-                return Err(
-                    "spans_event_name_mapping.routing_key_name is required for routing_key_kind=3"
-                        .to_string(),
-                );
-            }
-            SpanEventNameRoutingKey::SpanAttribute(unsafe {
-                c_str_to_non_blank_string(
-                    mapping_ref.routing_key_name,
-                    "spans_event_name_mapping.routing_key_name",
-                )?
-            })
-        }
+        1 => SpanEventNameRoutingKey::ResourceAttribute(unsafe {
+            required_routing_key_name(mapping_ref.routing_key_name, 1, "spans_event_name_mapping")?
+        }),
+        2 => SpanEventNameRoutingKey::ScopeAttribute(unsafe {
+            required_routing_key_name(mapping_ref.routing_key_name, 2, "spans_event_name_mapping")?
+        }),
+        3 => SpanEventNameRoutingKey::SpanAttribute(unsafe {
+            required_routing_key_name(mapping_ref.routing_key_name, 3, "spans_event_name_mapping")?
+        }),
         other => {
             return Err(format!(
                 "spans_event_name_mapping.routing_key_kind has invalid value: {other}"
@@ -610,42 +611,13 @@ unsafe fn convert_spans_event_name_mapping(
         }
     };
 
-    if mapping_ref.entries.is_null() || mapping_ref.count == 0 {
-        return Err(
-            "spans_event_name_mapping.entries must be non-null with count > 0 when a mapping is provided"
-                .to_string(),
-        );
-    }
-
-    let entries = unsafe { std::slice::from_raw_parts(mapping_ref.entries, mapping_ref.count) };
-    let mut events = std::collections::HashMap::with_capacity(entries.len());
-
-    for (i, entry) in entries.iter().enumerate() {
-        if entry.source_value.is_null() {
-            return Err(format!(
-                "spans_event_name_mapping.entries[{i}].source_value is null"
-            ));
-        }
-        let source_value = unsafe {
-            c_str_to_non_blank_string(
-                entry.source_value,
-                &format!("spans_event_name_mapping.entries[{i}].source_value"),
-            )?
-        };
-
-        let destination_event_name = if entry.destination_event_name.is_null() {
-            None
-        } else {
-            Some(unsafe {
-                c_str_to_string(
-                    entry.destination_event_name,
-                    &format!("spans_event_name_mapping.entries[{i}].destination_event_name"),
-                )?
-            })
-        };
-
-        events.insert(source_value, destination_event_name);
-    }
+    let events = unsafe {
+        convert_mapping_entries(
+            mapping_ref.entries,
+            mapping_ref.count,
+            "spans_event_name_mapping",
+        )?
+    };
 
     Ok(Some(SpanEventNameMapping {
         routing_key,
