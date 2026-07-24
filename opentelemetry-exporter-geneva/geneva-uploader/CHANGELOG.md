@@ -7,6 +7,9 @@
 - Agent-fed credential source: `GenevaClient::with_agent_fed_source` builds an uploader that pulls a host-provisioned GIG token and routing (endpoint, moniker) from an `AgentFedCredentialSource` on each upload, skipping the GCS config-service handshake. New public API: `AgentFedCredentialSource`, `AgentFedCredential`, `AgentFedCredentialFuture`.
 
 ### Changed
+- Minimize bearer-token memory remanence by storing resolved credentials in
+  zeroizing secret containers and backing sensitive `Authorization` headers
+  with application-owned memory that is zeroized when released.
 - Bump opentelemetry-proto version to 0.32.
 - Bump pinned `otel-arrow` rev for `otap-df-pdata` and `otap-df-pdata-views`
   to `4f522d2e` so consumers can unify on a single `otap-df-pdata-views`

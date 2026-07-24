@@ -10,6 +10,7 @@ use crate::payload_encoder::otlp_encoder::{lookup_obo_config, MetadataFields};
 pub use crate::payload_encoder::otlp_encoder::{OboEventConfig, OboEventMap};
 use opentelemetry_proto::tonic::trace::v1::ResourceSpans;
 use otap_df_pdata_views::views::logs::LogsDataView;
+use secrecy::{ExposeSecret, SecretString};
 use std::fmt;
 use std::future::Future;
 use std::pin::Pin;
@@ -88,11 +89,37 @@ pub type AgentFedCredentialFuture<'a> =
 #[derive(Clone)]
 pub struct AgentFedCredential {
     /// GIG bearer token (sent as `Authorization: Bearer`).
-    pub token: String,
+    token: SecretString,
     /// GIG ingestion endpoint (base URL the upload POSTs to).
     pub endpoint: String,
     /// Account moniker for the upload.
     pub moniker: String,
+}
+
+impl AgentFedCredential {
+    /// Creates an agent-fed credential with zeroizing token storage.
+    #[must_use]
+    pub fn new(
+        token: impl Into<SecretString>,
+        endpoint: impl Into<String>,
+        moniker: impl Into<String>,
+    ) -> Self {
+        Self {
+            token: token.into(),
+            endpoint: endpoint.into(),
+            moniker: moniker.into(),
+        }
+    }
+
+    /// Exposes the bearer token for explicit credential processing.
+    #[must_use]
+    pub fn expose_token(&self) -> &str {
+        self.token.expose_secret()
+    }
+
+    pub(crate) fn into_parts(self) -> (SecretString, String, String) {
+        (self.token, self.endpoint, self.moniker)
+    }
 }
 
 impl std::fmt::Debug for AgentFedCredential {
@@ -537,6 +564,8 @@ mod tests {
         GenevaClient::new(build_config(logs, spans)).expect("client should initialize")
     }
 
+    /// Scenario: A configured event-name override is present or absent.
+    /// Guarantees: Configuration wins when present and the signal default is used otherwise.
     #[test]
     fn default_event_name_unwrap_or_prefers_override_and_falls_back() {
         let configured = maybe_event_name(true);
@@ -554,6 +583,8 @@ mod tests {
         }
     }
 
+    /// Scenario: Log encoding has a configured default event name.
+    /// Guarantees: The emitted batch uses the configured log event name.
     #[test]
     fn encode_and_compress_logs_uses_configured_default_event_name() {
         let client = build_client(Some("AppLog"), None);
@@ -578,6 +609,8 @@ mod tests {
         assert_eq!(batches[0].event_name, "AppLog");
     }
 
+    /// Scenario: Span encoding has a configured default event name.
+    /// Guarantees: The emitted batch uses the configured span event name.
     #[test]
     fn encode_and_compress_spans_uses_configured_default_event_name() {
         let client = build_client(None, Some("AppTrace"));
@@ -601,6 +634,8 @@ mod tests {
         assert_eq!(batches[0].event_name, "AppTrace");
     }
 
+    /// Scenario: An agent-fed source is used to initialize a Geneva client.
+    /// Guarantees: The safer credential constructor remains usable by source implementations.
     #[test]
     fn with_agent_fed_source_builds_usable_client() {
         #[derive(Debug)]
@@ -608,11 +643,11 @@ mod tests {
         impl AgentFedCredentialSource for StubSource {
             fn current(&self) -> AgentFedCredentialFuture<'_> {
                 Box::pin(async {
-                    Some(AgentFedCredential {
-                        token: "secret-token".to_string(),
-                        endpoint: "https://ingest.example".to_string(),
-                        moniker: "moniker".to_string(),
-                    })
+                    Some(AgentFedCredential::new(
+                        "secret-token",
+                        "https://ingest.example",
+                        "moniker",
+                    ))
                 })
             }
         }
@@ -643,13 +678,12 @@ mod tests {
         assert_eq!(batches[0].event_name, "AppLog");
     }
 
+    /// Scenario: An agent-fed credential is rendered with Debug.
+    /// Guarantees: The bearer token is redacted while routing remains inspectable.
     #[test]
     fn agent_fed_credential_debug_redacts_token() {
-        let cred = AgentFedCredential {
-            token: "top-secret".to_string(),
-            endpoint: "https://ingest.example".to_string(),
-            moniker: "moniker".to_string(),
-        };
+        let cred = AgentFedCredential::new("top-secret", "https://ingest.example", "moniker");
+        assert_eq!(cred.expose_token(), "top-secret");
         let rendered = format!("{cred:?}");
         assert!(
             !rendered.contains("top-secret"),
