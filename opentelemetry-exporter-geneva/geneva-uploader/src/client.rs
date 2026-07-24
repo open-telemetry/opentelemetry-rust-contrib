@@ -369,18 +369,12 @@ impl GenevaClient {
                         format!("log_record_attribute({})", attr)
                     }
                 };
-                let events_desc = mapping
-                    .events
-                    .iter()
-                    .map(|(k, v)| format!("{}→{}", k, v.as_deref().unwrap_or("<source>")))
-                    .collect::<Vec<_>>()
-                    .join(", ");
                 info!(
                     name: "client.new.logs_config",
                     target: "geneva-uploader",
                     default_event_name = %log_default_event_name.as_deref().unwrap_or("<none>"),
                     routing_key = %routing_key_desc,
-                    event_mappings = %events_desc,
+                    event_mapping_count = mapping.events.len(),
                     "Configured logs event name routing"
                 );
             }
@@ -414,18 +408,12 @@ impl GenevaClient {
                         format!("span_attribute({})", attr)
                     }
                 };
-                let events_desc = mapping
-                    .events
-                    .iter()
-                    .map(|(k, v)| format!("{}→{}", k, v.as_deref().unwrap_or("<source>")))
-                    .collect::<Vec<_>>()
-                    .join(", ");
                 info!(
                     name: "client.new.spans_config",
                     target: "geneva-uploader",
                     default_event_name = %span_default_event_name.as_deref().unwrap_or("<none>"),
                     routing_key = %routing_key_desc,
-                    event_mappings = %events_desc,
+                    event_mapping_count = mapping.events.len(),
                     "Configured spans event name routing"
                 );
             }
@@ -684,6 +672,35 @@ impl GenevaClient {
             "Encoding and compressing resource spans"
         );
 
+        // Routing is optional: when no span mapping is configured every span
+        // goes to the default table, so skip the grouping bookkeeping entirely
+        // and encode a single batch.
+        let Some(span_event_name_mapping) = self.span_event_name_mapping.as_ref() else {
+            let all_spans: Vec<&Span> = spans
+                .iter()
+                .flat_map(|resource_span| &resource_span.scope_spans)
+                .flat_map(|scope_span| &scope_span.spans)
+                .collect();
+            return self
+                .encoder
+                .encode_span_batch(
+                    all_spans,
+                    &self.metadata_fields,
+                    self.span_table_name.as_ref(),
+                    self.obo_event_map.as_ref(),
+                )
+                .map_err(|e| {
+                    debug!(
+                        name: "client.encode_and_compress_spans.error",
+                        target: "geneva-uploader",
+                        error = %e,
+                        event_name = %self.span_table_name,
+                        "Span compression failed"
+                    );
+                    format!("Compression failed: {e}")
+                });
+        };
+
         let mut routed_groups: Vec<(String, Vec<&Span>)> = Vec::new();
         let mut group_index: std::collections::HashMap<String, usize> =
             std::collections::HashMap::new();
@@ -696,7 +713,7 @@ impl GenevaClient {
                     resource,
                     scope,
                     self.span_table_name.as_ref(),
-                    self.span_event_name_mapping.as_ref(),
+                    Some(span_event_name_mapping),
                 );
                 for span in &scope_span.spans {
                     let event_name = resolve_span_event_name_in_scope(

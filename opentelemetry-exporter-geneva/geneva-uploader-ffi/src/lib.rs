@@ -512,7 +512,17 @@ unsafe fn convert_mapping_entries<E: FfiMapEntry>(
             })
         };
 
-        events.insert(source_value, destination_event_name);
+        match events.entry(source_value) {
+            std::collections::hash_map::Entry::Occupied(occupied) => {
+                return Err(format!(
+                    "{ctx}.entries[{i}].source_value is a duplicate of an earlier entry: '{}'",
+                    occupied.key()
+                ));
+            }
+            std::collections::hash_map::Entry::Vacant(vacant) => {
+                vacant.insert(destination_event_name);
+            }
+        }
     }
 
     Ok(events)
@@ -2592,6 +2602,37 @@ mod tests {
             unsafe { convert_logs_event_name_mapping(&mapping as *const FfiLogsEventNameMapping) };
         assert!(result.is_err());
         assert!(result.unwrap_err().contains("entries must be non-null"));
+    }
+
+    #[test]
+    fn test_convert_logs_event_name_mapping_rejects_duplicate_source_value() {
+        let source_a = CString::new("clusterA").unwrap();
+        let source_dup = CString::new("clusterA").unwrap();
+        let dest_a = CString::new("TableA").unwrap();
+        let dest_b = CString::new("TableB").unwrap();
+        let routing_key_name = CString::new("cluster").unwrap();
+
+        let entries = [
+            FfiLogsEventNameMapEntry {
+                source_value: source_a.as_ptr(),
+                destination_event_name: dest_a.as_ptr(),
+            },
+            FfiLogsEventNameMapEntry {
+                source_value: source_dup.as_ptr(),
+                destination_event_name: dest_b.as_ptr(),
+            },
+        ];
+        let mapping = FfiLogsEventNameMapping {
+            routing_key_kind: 3,
+            routing_key_name: routing_key_name.as_ptr(),
+            entries: entries.as_ptr(),
+            count: entries.len(),
+        };
+
+        let result =
+            unsafe { convert_logs_event_name_mapping(&mapping as *const FfiLogsEventNameMapping) };
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("duplicate"));
     }
 
     #[test]
