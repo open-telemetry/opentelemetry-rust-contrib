@@ -204,20 +204,21 @@ pub(crate) const SCOPE_VERSION_ROUTING_KEY: &str = "scope.version";
 /// Resolves a routing `source_value` against a mapping's `events` table.
 ///
 /// Returns:
-/// - `Some(destination)` when the source value has a non-empty destination,
+/// - `Some(destination)` when the source value has a non-empty destination
+///   (borrowed from the `events` table, so the common lookup allocates nothing),
 /// - `Some(source_value)` when the source value maps to `None`/empty (passthrough),
 /// - `None` when there is no entry for the source value (caller falls back to the
 ///   configured default/table name).
 ///
 /// Shared by logs and spans routing to keep the lookup semantics identical.
-pub(crate) fn resolve_mapped_destination(
-    events: &HashMap<String, Option<String>>,
+pub(crate) fn resolve_mapped_destination<'a>(
+    events: &'a HashMap<String, Option<String>>,
     source_value: &str,
-) -> Option<String> {
+) -> Option<Cow<'a, str>> {
     let mapped = events.get(source_value)?;
     match mapped.as_deref() {
-        Some(destination) if !destination.trim().is_empty() => Some(destination.to_string()),
-        _ => Some(source_value.to_string()),
+        Some(destination) if !destination.trim().is_empty() => Some(Cow::Borrowed(destination)),
+        _ => Some(Cow::Owned(source_value.to_string())),
     }
 }
 
@@ -309,11 +310,11 @@ enum LogScopeRouting<'a> {
 
 /// Resolve a mapped source value to the final event name, falling back to the
 /// configured table name when the source is absent or unmapped.
-fn resolve_log_event_name_from_value(
-    mapping: &LogsEventNameMapping,
+fn resolve_log_event_name_from_value<'a>(
+    mapping: &'a LogsEventNameMapping,
     source_value: Option<&str>,
-    table_name: &str,
-) -> String {
+    table_name: &'a str,
+) -> Cow<'a, str> {
     if let Some(source_value) = source_value {
         if let Some(mapped_event_name) = resolve_mapped_destination(&mapping.events, source_value) {
             debug!(
@@ -333,7 +334,7 @@ fn resolve_log_event_name_from_value(
             fallback_event_name = %table_name,
             "No mapping entry for routing source; using fallback event name"
         );
-        return table_name.to_string();
+        return Cow::Borrowed(table_name);
     }
 
     debug!(
@@ -342,7 +343,7 @@ fn resolve_log_event_name_from_value(
         fallback_event_name = %table_name,
         "Routing source value not found on log record; using fallback event name"
     );
-    table_name.to_string()
+    Cow::Borrowed(table_name)
 }
 
 /// Resolve the scope-invariant part of log routing exactly once per scope.
@@ -368,19 +369,17 @@ where
         LogsEventNameRoutingKey::ResourceAttribute(key) => {
             let value = resource
                 .and_then(|res| routing_value_from_attributes(res.attributes(), key.as_str()));
-            LogScopeRouting::Fixed(resolve_log_event_name_from_value(
-                mapping,
-                value.as_deref(),
-                table_name,
-            ))
+            LogScopeRouting::Fixed(
+                resolve_log_event_name_from_value(mapping, value.as_deref(), table_name)
+                    .into_owned(),
+            )
         }
         LogsEventNameRoutingKey::ScopeAttribute(key) => {
             let value = scope.and_then(|scope| routing_value_from_scope(scope, key.as_str()));
-            LogScopeRouting::Fixed(resolve_log_event_name_from_value(
-                mapping,
-                value.as_deref(),
-                table_name,
-            ))
+            LogScopeRouting::Fixed(
+                resolve_log_event_name_from_value(mapping, value.as_deref(), table_name)
+                    .into_owned(),
+            )
         }
         LogsEventNameRoutingKey::EventName | LogsEventNameRoutingKey::LogRecordAttribute(_) => {
             LogScopeRouting::PerRecord(mapping)
@@ -390,11 +389,11 @@ where
 
 /// Resolve the routed event name for a single record whose scope routing depends
 /// on per-record data (`EventName` or `LogRecordAttribute`).
-fn resolve_log_record_routing_event_name<R>(
+fn resolve_log_record_routing_event_name<'a, R>(
     record: &R,
-    mapping: &LogsEventNameMapping,
-    table_name: &str,
-) -> String
+    mapping: &'a LogsEventNameMapping,
+    table_name: &'a str,
+) -> Cow<'a, str>
 where
     R: LogRecordView,
 {
@@ -547,8 +546,10 @@ impl<'a> LogRecordParts<'a> {
             LogScopeRouting::None => None,
             // Scope-invariant name: borrow it instead of cloning per record.
             LogScopeRouting::Fixed(name) => Some(Cow::Borrowed(name.as_str())),
-            LogScopeRouting::PerRecord(mapping) => Some(Cow::Owned(
-                resolve_log_record_routing_event_name(record, mapping, ctx.routing.table_name),
+            LogScopeRouting::PerRecord(mapping) => Some(resolve_log_record_routing_event_name(
+                record,
+                mapping,
+                ctx.routing.table_name,
             )),
         };
         if let Some(routing_event_name) = routing_event_name {

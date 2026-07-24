@@ -246,11 +246,13 @@ fn resolve_span_scope_routing<'a>(
         SpanEventNameRoutingKey::ResourceAttribute(key) => SpanScopeRouting::Fixed(
             span_routing_value_from_resource(resource, key)
                 .and_then(|value| resolve_mapped_destination(&mapping.events, &value))
+                .map(Cow::into_owned)
                 .unwrap_or_else(|| table_name.to_string()),
         ),
         SpanEventNameRoutingKey::ScopeAttribute(key) => SpanScopeRouting::Fixed(
             span_routing_value_from_scope(scope, key)
                 .and_then(|value| resolve_mapped_destination(&mapping.events, &value))
+                .map(Cow::into_owned)
                 .unwrap_or_else(|| table_name.to_string()),
         ),
         SpanEventNameRoutingKey::SpanAttribute(key) => SpanScopeRouting::PerSpan { mapping, key },
@@ -273,7 +275,7 @@ fn resolve_span_event_name_in_scope<'a>(
             match span_routing_value_from_attributes(&span.attributes, key)
                 .and_then(|value| resolve_mapped_destination(&mapping.events, &value))
             {
-                Some(name) => Cow::Owned(name),
+                Some(name) => name,
                 None => Cow::Borrowed(table_name),
             }
         }
