@@ -6,21 +6,25 @@ use crate::ingestion_service::uploader::{
     GenevaUploader, GenevaUploaderConfig, GenevaUploaderError,
 };
 use crate::payload_encoder::otlp_encoder::OtlpEncoder;
-use crate::payload_encoder::otlp_encoder::{
-    lookup_obo_config, resolve_mapped_destination, stringify_routing_primitive, MetadataFields,
-    RoutingPrimitive, SCOPE_NAME_ROUTING_KEY, SCOPE_VERSION_ROUTING_KEY,
+use crate::payload_encoder::otlp_encoder::{lookup_obo_config, MetadataFields};
+pub use crate::payload_encoder::otlp_encoder::{OboEventConfig, OboEventMap};
+#[cfg(test)]
+use crate::payload_encoder::routing::{
+    resolve_span_event_name, span_routing_value_from_attributes, span_routing_value_from_resource,
+    span_routing_value_from_scope, SCOPE_NAME_ROUTING_KEY, SCOPE_VERSION_ROUTING_KEY,
 };
-pub use crate::payload_encoder::otlp_encoder::{
-    LogsEventNameMapping, LogsEventNameRoutingKey, OboEventConfig, OboEventMap,
-    SpanEventNameMapping, SpanEventNameRoutingKey,
+use crate::payload_encoder::routing::{
+    resolve_span_event_name_in_scope, resolve_span_scope_routing,
 };
-use opentelemetry_proto::tonic::common::v1::{
-    any_value::Value as ProtoAnyValue, InstrumentationScope, KeyValue,
+pub use crate::payload_encoder::routing::{
+    LogsEventNameMapping, LogsEventNameRoutingKey, SpanEventNameMapping, SpanEventNameRoutingKey,
 };
+#[cfg(test)]
+use opentelemetry_proto::tonic::common::v1::{InstrumentationScope, KeyValue};
+#[cfg(test)]
 use opentelemetry_proto::tonic::resource::v1::Resource;
 use opentelemetry_proto::tonic::trace::v1::{ResourceSpans, Span};
 use otap_df_pdata_views::views::logs::LogsDataView;
-use std::borrow::Cow;
 use std::fmt;
 use std::future::Future;
 use std::pin::Pin;
@@ -169,131 +173,6 @@ pub struct GenevaClient {
     span_table_name: Arc<str>,
     span_event_name_mapping: Option<SpanEventNameMapping>,
     obo_event_map: Option<OboEventMap>,
-}
-
-fn span_routing_value_from_attributes(attributes: &[KeyValue], key: &str) -> Option<String> {
-    for attr in attributes {
-        if attr.key != key {
-            continue;
-        }
-        let value = attr.value.as_ref()?.value.as_ref()?;
-        return match value {
-            ProtoAnyValue::StringValue(value) => {
-                stringify_routing_primitive(RoutingPrimitive::Str(value))
-            }
-            ProtoAnyValue::IntValue(value) => {
-                stringify_routing_primitive(RoutingPrimitive::Int(*value))
-            }
-            ProtoAnyValue::DoubleValue(value) => {
-                stringify_routing_primitive(RoutingPrimitive::Double(*value))
-            }
-            ProtoAnyValue::BoolValue(value) => {
-                stringify_routing_primitive(RoutingPrimitive::Bool(*value))
-            }
-            _ => None,
-        };
-    }
-    None
-}
-
-fn span_routing_value_from_scope(
-    scope: Option<&InstrumentationScope>,
-    key: &str,
-) -> Option<String> {
-    let scope = scope?;
-    match key {
-        SCOPE_NAME_ROUTING_KEY => stringify_routing_primitive(RoutingPrimitive::Str(&scope.name)),
-        SCOPE_VERSION_ROUTING_KEY => {
-            stringify_routing_primitive(RoutingPrimitive::Str(&scope.version))
-        }
-        _ => span_routing_value_from_attributes(&scope.attributes, key),
-    }
-}
-
-fn span_routing_value_from_resource(resource: Option<&Resource>, key: &str) -> Option<String> {
-    resource.and_then(|resource| span_routing_value_from_attributes(&resource.attributes, key))
-}
-
-/// Span routing resolved once per instrumentation scope.
-enum SpanScopeRouting<'a> {
-    /// The routed event name is constant for every span in the scope (no mapping
-    /// configured, or a resource-/scope-level routing key). Resolved once.
-    Fixed(String),
-    /// Routing depends on each span's own attributes; only `SpanAttribute` keys
-    /// need per-span resolution.
-    PerSpan {
-        mapping: &'a SpanEventNameMapping,
-        key: &'a str,
-    },
-}
-
-/// Resolve the scope-invariant part of span routing exactly once per scope.
-///
-/// For resource-/scope-level routing keys the source value is constant across
-/// every span in the scope, so the destination event name is computed here and
-/// reused; only `SpanAttribute` routing is deferred to per-span resolution.
-fn resolve_span_scope_routing<'a>(
-    resource: Option<&Resource>,
-    scope: Option<&InstrumentationScope>,
-    table_name: &str,
-    event_name_mapping: Option<&'a SpanEventNameMapping>,
-) -> SpanScopeRouting<'a> {
-    let Some(mapping) = event_name_mapping else {
-        return SpanScopeRouting::Fixed(table_name.to_string());
-    };
-
-    match &mapping.routing_key {
-        SpanEventNameRoutingKey::ResourceAttribute(key) => SpanScopeRouting::Fixed(
-            span_routing_value_from_resource(resource, key)
-                .and_then(|value| resolve_mapped_destination(&mapping.events, &value))
-                .map(Cow::into_owned)
-                .unwrap_or_else(|| table_name.to_string()),
-        ),
-        SpanEventNameRoutingKey::ScopeAttribute(key) => SpanScopeRouting::Fixed(
-            span_routing_value_from_scope(scope, key)
-                .and_then(|value| resolve_mapped_destination(&mapping.events, &value))
-                .map(Cow::into_owned)
-                .unwrap_or_else(|| table_name.to_string()),
-        ),
-        SpanEventNameRoutingKey::SpanAttribute(key) => SpanScopeRouting::PerSpan { mapping, key },
-    }
-}
-
-/// Resolve the routed event name for a single span given its scope's routing.
-///
-/// Returns a [`Cow`] so the common paths (a resource-/scope-level `Fixed` name,
-/// or the no-mapping default) borrow the scope-invariant name instead of
-/// allocating per span; only a per-span mapping hit owns a new `String`.
-fn resolve_span_event_name_in_scope<'a>(
-    scope_routing: &'a SpanScopeRouting<'a>,
-    span: &Span,
-    table_name: &'a str,
-) -> Cow<'a, str> {
-    match scope_routing {
-        SpanScopeRouting::Fixed(name) => Cow::Borrowed(name.as_str()),
-        SpanScopeRouting::PerSpan { mapping, key } => {
-            match span_routing_value_from_attributes(&span.attributes, key)
-                .and_then(|value| resolve_mapped_destination(&mapping.events, &value))
-            {
-                Some(name) => name,
-                None => Cow::Borrowed(table_name),
-            }
-        }
-    }
-}
-
-/// Resolve span routing for a single span end-to-end. Retained for unit tests;
-/// the hot path precomputes scope routing via [`resolve_span_scope_routing`].
-#[cfg(test)]
-fn resolve_span_event_name(
-    resource: Option<&Resource>,
-    scope: Option<&InstrumentationScope>,
-    span: &Span,
-    table_name: &str,
-    event_name_mapping: Option<&SpanEventNameMapping>,
-) -> String {
-    let scope_routing = resolve_span_scope_routing(resource, scope, table_name, event_name_mapping);
-    resolve_span_event_name_in_scope(&scope_routing, span, table_name).into_owned()
 }
 
 /// Stored client pieces shared by every constructor (all of `Self` except the
