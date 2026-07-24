@@ -178,14 +178,19 @@ pub(crate) enum RoutingPrimitive<'a> {
 /// are treated as absent when blank/whitespace and otherwise passed through;
 /// numeric/bool values are formatted via `to_string`.
 ///
+/// Returns a [`Cow`] so string values are borrowed (zero allocation) while only
+/// numeric/bool values, which must be formatted, own a new `String`. Callers on
+/// the proto-span path retain the borrow through the map lookup; the pdata log
+/// path owns via [`Cow::into_owned`] (see `routing_value_from_attributes`).
+///
 /// Kept in one place so the logs path (over pdata-view traits) and the spans
 /// path (over proto types) can't drift on value handling.
-pub(crate) fn stringify_routing_primitive(value: RoutingPrimitive<'_>) -> Option<String> {
+pub(crate) fn stringify_routing_primitive(value: RoutingPrimitive<'_>) -> Option<Cow<'_, str>> {
     match value {
-        RoutingPrimitive::Str(s) => (!s.trim().is_empty()).then(|| s.to_string()),
-        RoutingPrimitive::Int(v) => Some(v.to_string()),
-        RoutingPrimitive::Double(v) => Some(v.to_string()),
-        RoutingPrimitive::Bool(v) => Some(v.to_string()),
+        RoutingPrimitive::Str(s) => (!s.trim().is_empty()).then_some(Cow::Borrowed(s)),
+        RoutingPrimitive::Int(v) => Some(Cow::Owned(v.to_string())),
+        RoutingPrimitive::Double(v) => Some(Cow::Owned(v.to_string())),
+        RoutingPrimitive::Bool(v) => Some(Cow::Owned(v.to_string())),
     }
 }
 
@@ -207,20 +212,28 @@ where
         }
         let value = attr.value()?;
 
+        // The pdata view traits tie borrowed string bytes to `value`, a
+        // per-iteration temporary, so the routing value cannot outlive this
+        // function and must be owned here (unlike the proto-span path, which
+        // borrows from the input attributes).
         return match value.value_type() {
             ValueType::String => value
                 .as_string()
                 .and_then(|b| std::str::from_utf8(b).ok())
-                .and_then(|s| stringify_routing_primitive(RoutingPrimitive::Str(s))),
+                .and_then(|s| stringify_routing_primitive(RoutingPrimitive::Str(s)))
+                .map(Cow::into_owned),
             ValueType::Int64 => value
                 .as_int64()
-                .and_then(|v| stringify_routing_primitive(RoutingPrimitive::Int(v))),
+                .and_then(|v| stringify_routing_primitive(RoutingPrimitive::Int(v)))
+                .map(Cow::into_owned),
             ValueType::Double => value
                 .as_double()
-                .and_then(|v| stringify_routing_primitive(RoutingPrimitive::Double(v))),
+                .and_then(|v| stringify_routing_primitive(RoutingPrimitive::Double(v)))
+                .map(Cow::into_owned),
             ValueType::Bool => value
                 .as_bool()
-                .and_then(|v| stringify_routing_primitive(RoutingPrimitive::Bool(v))),
+                .and_then(|v| stringify_routing_primitive(RoutingPrimitive::Bool(v)))
+                .map(Cow::into_owned),
             _ => None,
         };
     }
@@ -235,11 +248,13 @@ where
         SCOPE_NAME_ROUTING_KEY => scope
             .name()
             .and_then(|b| std::str::from_utf8(b).ok())
-            .and_then(|s| stringify_routing_primitive(RoutingPrimitive::Str(s))),
+            .and_then(|s| stringify_routing_primitive(RoutingPrimitive::Str(s)))
+            .map(Cow::into_owned),
         SCOPE_VERSION_ROUTING_KEY => scope
             .version()
             .and_then(|b| std::str::from_utf8(b).ok())
-            .and_then(|s| stringify_routing_primitive(RoutingPrimitive::Str(s))),
+            .and_then(|s| stringify_routing_primitive(RoutingPrimitive::Str(s)))
+            .map(Cow::into_owned),
         _ => routing_value_from_attributes(scope.attributes(), key),
     }
 }
@@ -361,10 +376,10 @@ where
 // Span routing (over the tonic proto `Span` types)
 // ---------------------------------------------------------------------------
 
-pub(crate) fn span_routing_value_from_attributes(
-    attributes: &[KeyValue],
+pub(crate) fn span_routing_value_from_attributes<'a>(
+    attributes: &'a [KeyValue],
     key: &str,
-) -> Option<String> {
+) -> Option<Cow<'a, str>> {
     for attr in attributes {
         if attr.key != key {
             continue;
@@ -389,10 +404,10 @@ pub(crate) fn span_routing_value_from_attributes(
     None
 }
 
-pub(crate) fn span_routing_value_from_scope(
-    scope: Option<&InstrumentationScope>,
+pub(crate) fn span_routing_value_from_scope<'a>(
+    scope: Option<&'a InstrumentationScope>,
     key: &str,
-) -> Option<String> {
+) -> Option<Cow<'a, str>> {
     let scope = scope?;
     match key {
         SCOPE_NAME_ROUTING_KEY => stringify_routing_primitive(RoutingPrimitive::Str(&scope.name)),
@@ -403,10 +418,10 @@ pub(crate) fn span_routing_value_from_scope(
     }
 }
 
-pub(crate) fn span_routing_value_from_resource(
-    resource: Option<&Resource>,
+pub(crate) fn span_routing_value_from_resource<'a>(
+    resource: Option<&'a Resource>,
     key: &str,
-) -> Option<String> {
+) -> Option<Cow<'a, str>> {
     resource.and_then(|resource| span_routing_value_from_attributes(&resource.attributes, key))
 }
 
