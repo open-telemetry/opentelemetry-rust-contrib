@@ -557,11 +557,10 @@ impl GenevaClient {
         // goes to the default table, so skip the grouping bookkeeping entirely
         // and encode a single batch.
         let Some(span_event_name_mapping) = self.span_event_name_mapping.as_ref() else {
-            let all_spans: Vec<&Span> = spans
+            let all_spans = spans
                 .iter()
                 .flat_map(|resource_span| &resource_span.scope_spans)
-                .flat_map(|scope_span| &scope_span.spans)
-                .collect();
+                .flat_map(|scope_span| &scope_span.spans);
             return self
                 .encoder
                 .encode_span_batch(
