@@ -73,6 +73,56 @@ typedef struct {
     size_t count;                        /* Number of entries */
 } GenevaOboEventMap;
 
+/* Logs event-name routing key kinds */
+#define GENEVA_LOGS_ROUTING_KEY_EVENT_NAME 0
+#define GENEVA_LOGS_ROUTING_KEY_RESOURCE_ATTRIBUTE 1
+#define GENEVA_LOGS_ROUTING_KEY_SCOPE_ATTRIBUTE 2
+#define GENEVA_LOGS_ROUTING_KEY_LOG_RECORD_ATTRIBUTE 3
+
+/* One logs event-name mapping entry.
+   source_value is required.
+   destination_event_name can be NULL or empty to reuse source_value. */
+typedef struct {
+    const char* source_value;
+    const char* destination_event_name;
+} GenevaLogsEventNameMapEntry;
+
+/* Logs event-name mapping configuration.
+   - routing_key_kind is one of GENEVA_LOGS_ROUTING_KEY_* constants.
+   - routing_key_name is required for attribute-based kinds (1/2/3).
+   - routing_key_name must be NULL when routing_key_kind is EVENT_NAME (0).
+   - entries/count define the source->destination mapping table. */
+typedef struct {
+    uint32_t routing_key_kind;
+    const char* routing_key_name;
+    const GenevaLogsEventNameMapEntry* entries;
+    size_t count;
+} GenevaLogsEventNameMapping;
+
+/* Spans event-name routing key kinds */
+#define GENEVA_SPANS_ROUTING_KEY_RESOURCE_ATTRIBUTE 1
+#define GENEVA_SPANS_ROUTING_KEY_SCOPE_ATTRIBUTE 2
+#define GENEVA_SPANS_ROUTING_KEY_SPAN_ATTRIBUTE 3
+
+/* One spans event-name mapping entry.
+   source_value is required.
+   destination_event_name can be NULL or empty to reuse source_value. */
+typedef struct {
+    const char* source_value;
+    const char* destination_event_name;
+} GenevaSpansEventNameMapEntry;
+
+/* Spans event-name mapping configuration.
+   - routing_key_kind is one of GENEVA_SPANS_ROUTING_KEY_* constants.
+   - routing_key_name is required for attribute-based kinds (1/2/3).
+   - entries/count define the source->destination mapping table. */
+typedef struct {
+    uint32_t routing_key_kind;
+    const char* routing_key_name;
+    const GenevaSpansEventNameMapEntry* entries;
+    size_t count;
+} GenevaSpansEventNameMapping;
+
 /* Configuration structure for Geneva client (C-compatible, tagged union)
  *
  * IMPORTANT - Resource/Scope Configuration:
@@ -106,6 +156,10 @@ typedef struct {
     GenevaAuthConfig auth; /* Active member selected by auth_method */
     const char* msi_resource; /* Azure AD resource URI for MSI auth (auth methods 0, 3, 4, 5). Not used for auth methods 1, 2. Nullable. */
     const GenevaOboEventMap* obo_map; /* Optional OBO event map (can be NULL for no OBO). */
+    const char* logs_default_event_name; /* Optional logs default event/table name. Nullable. */
+    const GenevaLogsEventNameMapping* logs_event_name_mapping; /* Optional logs event-name routing config. Nullable. */
+    const char* spans_default_event_name; /* Optional spans default event/table name. Nullable. */
+    const GenevaSpansEventNameMapping* spans_event_name_mapping; /* Optional spans event-name routing config. Nullable. */
 } GenevaConfig;
 
 /* Create a new Geneva client.

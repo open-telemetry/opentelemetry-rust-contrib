@@ -11,7 +11,10 @@ use std::sync::OnceLock;
 use tokio::runtime::Runtime;
 
 use geneva_uploader::client::{EncodedBatch, GenevaClient, GenevaClientConfig, UploadError};
-use geneva_uploader::{AuthMethod, LogsConfig, TracesConfig};
+use geneva_uploader::{
+    AuthMethod, LogsConfig, LogsEventNameMapping, LogsEventNameRoutingKey, SpanEventNameMapping,
+    SpanEventNameRoutingKey, TracesConfig,
+};
 use opentelemetry_proto::tonic::collector::trace::v1::ExportTraceServiceRequest;
 use prost::Message;
 use std::path::PathBuf;
@@ -186,6 +189,69 @@ pub struct GenevaConfig {
     pub auth: GenevaAuthConfig, // Active member selected by auth_method
     pub msi_resource: *const c_char, // Azure AD resource URI for MSI auth (auth methods 0, 3, 4, 5). Not used for auth methods 1, 2. Nullable.
     pub obo_map: *const FfiOboEventMap, // Optional OBO event map. Nullable.
+    pub logs_default_event_name: *const c_char, // Optional default destination table for logs. Nullable.
+    pub logs_event_name_mapping: *const FfiLogsEventNameMapping, // Optional logs routing map. Nullable.
+    pub spans_default_event_name: *const c_char, // Optional default destination table for spans. Nullable.
+    pub spans_event_name_mapping: *const FfiSpansEventNameMapping, // Optional spans routing map. Nullable.
+}
+
+/// FFI-safe logs event-name mapping routing kinds.
+///
+/// - 0 = EventName
+/// - 1 = ResourceAttribute
+/// - 2 = ScopeAttribute
+/// - 3 = LogRecordAttribute
+pub type FfiLogsRoutingKeyKind = c_uint;
+
+/// FFI-safe logs event-name mapping entry.
+#[repr(C)]
+pub struct FfiLogsEventNameMapEntry {
+    /// Source value from the selected routing key.
+    pub source_value: *const c_char,
+    /// Destination event name; when null or empty, source value is reused.
+    pub destination_event_name: *const c_char,
+}
+
+/// FFI-safe logs event-name mapping config.
+#[repr(C)]
+pub struct FfiLogsEventNameMapping {
+    /// One of FfiLogsRoutingKeyKind values.
+    pub routing_key_kind: FfiLogsRoutingKeyKind,
+    /// Attribute key for kinds 1/2/3; ignored for kind 0.
+    pub routing_key_name: *const c_char,
+    /// Pointer to array of mapping entries.
+    pub entries: *const FfiLogsEventNameMapEntry,
+    /// Number of entries in `entries`.
+    pub count: usize,
+}
+
+/// FFI-safe spans routing kinds.
+///
+/// - 1 = ResourceAttribute
+/// - 2 = ScopeAttribute
+/// - 3 = SpanAttribute
+pub type FfiSpansRoutingKeyKind = c_uint;
+
+/// FFI-safe spans event-name mapping entry.
+#[repr(C)]
+pub struct FfiSpansEventNameMapEntry {
+    /// Source value from the selected routing key.
+    pub source_value: *const c_char,
+    /// Destination event name; when null or empty, source value is reused.
+    pub destination_event_name: *const c_char,
+}
+
+/// FFI-safe spans event-name mapping config.
+#[repr(C)]
+pub struct FfiSpansEventNameMapping {
+    /// One of FfiSpansRoutingKeyKind values.
+    pub routing_key_kind: FfiSpansRoutingKeyKind,
+    /// Attribute key for kinds 1/2/3.
+    pub routing_key_name: *const c_char,
+    /// Pointer to array of mapping entries.
+    pub entries: *const FfiSpansEventNameMapEntry,
+    /// Number of entries in `entries`.
+    pub count: usize,
 }
 
 /// FFI-safe OBO event configuration
@@ -257,6 +323,20 @@ unsafe fn c_str_to_string(ptr: *const c_char, field_name: &str) -> Result<String
         Ok(s) => Ok(s.to_string()),
         Err(_) => Err(format!("Invalid UTF-8 in field '{field_name}'")),
     }
+}
+
+/// Converts a C string to a Rust String, rejecting null, invalid UTF-8, and blank
+/// (empty or whitespace-only) values. Used for routing fields where a blank value
+/// would be silently unroutable.
+unsafe fn c_str_to_non_blank_string(
+    ptr: *const c_char,
+    field_name: &str,
+) -> Result<String, String> {
+    let value = unsafe { c_str_to_string(ptr, field_name)? };
+    if value.trim().is_empty() {
+        return Err(format!("Field '{field_name}' must not be blank"));
+    }
+    Ok(value)
 }
 
 /// Writes error message to caller-provided buffer if available
@@ -340,6 +420,219 @@ unsafe fn convert_obo_event_map(
     } else {
         Ok(Some(obo_map))
     }
+}
+
+/// Shared accessor over the identically-shaped logs/spans mapping entry structs
+/// so the entry-conversion loop can be written once.
+trait FfiMapEntry {
+    fn source_value(&self) -> *const c_char;
+    fn destination_event_name(&self) -> *const c_char;
+}
+
+impl FfiMapEntry for FfiLogsEventNameMapEntry {
+    fn source_value(&self) -> *const c_char {
+        self.source_value
+    }
+    fn destination_event_name(&self) -> *const c_char {
+        self.destination_event_name
+    }
+}
+
+impl FfiMapEntry for FfiSpansEventNameMapEntry {
+    fn source_value(&self) -> *const c_char {
+        self.source_value
+    }
+    fn destination_event_name(&self) -> *const c_char {
+        self.destination_event_name
+    }
+}
+
+/// Reads a routing key name that is required for the given `kind`, sharing the
+/// null-check and non-blank validation across logs and spans conversion.
+///
+/// `ctx` is the mapping's field prefix (e.g. `"logs_event_name_mapping"`).
+///
+/// # Safety
+/// - `ptr` must be null or a valid null-terminated C string.
+unsafe fn required_routing_key_name(
+    ptr: *const c_char,
+    kind: c_uint,
+    ctx: &str,
+) -> Result<String, String> {
+    if ptr.is_null() {
+        return Err(format!(
+            "{ctx}.routing_key_name is required for routing_key_kind={kind}"
+        ));
+    }
+    unsafe { c_str_to_non_blank_string(ptr, &format!("{ctx}.routing_key_name")) }
+}
+
+/// Converts an FFI mapping-entry array into the Rust-side `events` map, sharing
+/// the validation and string-decoding loop across logs and spans conversion.
+///
+/// `ctx` is the mapping's field prefix (e.g. `"logs_event_name_mapping"`).
+///
+/// # Safety
+/// - `entries_ptr` must be null or valid for reads of `count` elements.
+/// - All non-null string pointers inside each entry must be valid
+///   null-terminated C strings.
+unsafe fn convert_mapping_entries<E: FfiMapEntry>(
+    entries_ptr: *const E,
+    count: usize,
+    ctx: &str,
+) -> Result<std::collections::HashMap<String, Option<String>>, String> {
+    if entries_ptr.is_null() || count == 0 {
+        return Err(format!(
+            "{ctx}.entries must be non-null with count > 0 when a mapping is provided"
+        ));
+    }
+
+    let entries = unsafe { std::slice::from_raw_parts(entries_ptr, count) };
+    let mut events = std::collections::HashMap::with_capacity(entries.len());
+
+    for (i, entry) in entries.iter().enumerate() {
+        if entry.source_value().is_null() {
+            return Err(format!("{ctx}.entries[{i}].source_value is null"));
+        }
+        let source_value = unsafe {
+            c_str_to_non_blank_string(
+                entry.source_value(),
+                &format!("{ctx}.entries[{i}].source_value"),
+            )?
+        };
+
+        let destination_event_name = if entry.destination_event_name().is_null() {
+            None
+        } else {
+            Some(unsafe {
+                c_str_to_string(
+                    entry.destination_event_name(),
+                    &format!("{ctx}.entries[{i}].destination_event_name"),
+                )?
+            })
+        };
+
+        match events.entry(source_value) {
+            std::collections::hash_map::Entry::Occupied(occupied) => {
+                return Err(format!(
+                    "{ctx}.entries[{i}].source_value is a duplicate of an earlier entry: '{}'",
+                    occupied.key()
+                ));
+            }
+            std::collections::hash_map::Entry::Vacant(vacant) => {
+                vacant.insert(destination_event_name);
+            }
+        }
+    }
+
+    Ok(events)
+}
+
+/// Converts an FFI logs event-name mapping to the Rust-side `LogsEventNameMapping`.
+///
+/// Returns `Ok(None)` only when `ffi_mapping` is null (routing not configured).
+/// A non-null mapping is fully validated: the routing kind and key name must be
+/// consistent, and `entries` must be non-null with `count > 0`.
+///
+/// # Safety
+/// - `ffi_mapping` must be null or point to a valid `FfiLogsEventNameMapping`
+/// - All non-null string pointers inside the mapping must be valid null-terminated C strings
+unsafe fn convert_logs_event_name_mapping(
+    ffi_mapping: *const FfiLogsEventNameMapping,
+) -> Result<Option<LogsEventNameMapping>, String> {
+    if ffi_mapping.is_null() {
+        return Ok(None);
+    }
+
+    let mapping_ref = unsafe { &*ffi_mapping };
+
+    let routing_key = match mapping_ref.routing_key_kind {
+        0 => {
+            if !mapping_ref.routing_key_name.is_null() {
+                return Err(
+                    "logs_event_name_mapping.routing_key_name must not be provided when routing_key_kind=0"
+                        .to_string(),
+                );
+            }
+            LogsEventNameRoutingKey::EventName
+        }
+        1 => LogsEventNameRoutingKey::ResourceAttribute(unsafe {
+            required_routing_key_name(mapping_ref.routing_key_name, 1, "logs_event_name_mapping")?
+        }),
+        2 => LogsEventNameRoutingKey::ScopeAttribute(unsafe {
+            required_routing_key_name(mapping_ref.routing_key_name, 2, "logs_event_name_mapping")?
+        }),
+        3 => LogsEventNameRoutingKey::LogRecordAttribute(unsafe {
+            required_routing_key_name(mapping_ref.routing_key_name, 3, "logs_event_name_mapping")?
+        }),
+        other => {
+            return Err(format!(
+                "logs_event_name_mapping.routing_key_kind has invalid value: {other}"
+            ));
+        }
+    };
+
+    let events = unsafe {
+        convert_mapping_entries(
+            mapping_ref.entries,
+            mapping_ref.count,
+            "logs_event_name_mapping",
+        )?
+    };
+
+    Ok(Some(LogsEventNameMapping {
+        routing_key,
+        events,
+    }))
+}
+
+/// Converts an FFI spans event-name mapping to the Rust-side `SpanEventNameMapping`.
+///
+/// Returns `Ok(None)` only when `ffi_mapping` is null (routing not configured).
+/// A non-null mapping is fully validated: the routing kind and key name must be
+/// consistent, and `entries` must be non-null with `count > 0`.
+///
+/// # Safety
+/// - `ffi_mapping` must be null or point to a valid `FfiSpansEventNameMapping`
+/// - All non-null string pointers inside the mapping must be valid null-terminated C strings
+unsafe fn convert_spans_event_name_mapping(
+    ffi_mapping: *const FfiSpansEventNameMapping,
+) -> Result<Option<SpanEventNameMapping>, String> {
+    if ffi_mapping.is_null() {
+        return Ok(None);
+    }
+
+    let mapping_ref = unsafe { &*ffi_mapping };
+
+    let routing_key = match mapping_ref.routing_key_kind {
+        1 => SpanEventNameRoutingKey::ResourceAttribute(unsafe {
+            required_routing_key_name(mapping_ref.routing_key_name, 1, "spans_event_name_mapping")?
+        }),
+        2 => SpanEventNameRoutingKey::ScopeAttribute(unsafe {
+            required_routing_key_name(mapping_ref.routing_key_name, 2, "spans_event_name_mapping")?
+        }),
+        3 => SpanEventNameRoutingKey::SpanAttribute(unsafe {
+            required_routing_key_name(mapping_ref.routing_key_name, 3, "spans_event_name_mapping")?
+        }),
+        other => {
+            return Err(format!(
+                "spans_event_name_mapping.routing_key_kind has invalid value: {other}"
+            ));
+        }
+    };
+
+    let events = unsafe {
+        convert_mapping_entries(
+            mapping_ref.entries,
+            mapping_ref.count,
+            "spans_event_name_mapping",
+        )?
+    };
+
+    Ok(Some(SpanEventNameMapping {
+        routing_key,
+        events,
+    }))
 }
 
 /// Creates a new Geneva client with explicit result semantics (no TLS needed).
@@ -574,6 +867,51 @@ pub unsafe extern "C" fn geneva_client_new(
         None
     };
 
+    let logs_default_event_name = if !config.logs_default_event_name.is_null() {
+        match unsafe { c_str_to_string(config.logs_default_event_name, "logs_default_event_name") }
+        {
+            Ok(s) => Some(s),
+            Err(e) => {
+                unsafe { write_error_if_provided(err_msg_out, err_msg_len, &e) };
+                return GenevaError::InvalidConfig;
+            }
+        }
+    } else {
+        None
+    };
+
+    let logs_event_name_mapping =
+        match unsafe { convert_logs_event_name_mapping(config.logs_event_name_mapping) } {
+            Ok(mapping) => mapping,
+            Err(e) => {
+                unsafe { write_error_if_provided(err_msg_out, err_msg_len, &e) };
+                return GenevaError::InvalidConfig;
+            }
+        };
+
+    let spans_default_event_name = if !config.spans_default_event_name.is_null() {
+        match unsafe {
+            c_str_to_string(config.spans_default_event_name, "spans_default_event_name")
+        } {
+            Ok(s) => Some(s),
+            Err(e) => {
+                unsafe { write_error_if_provided(err_msg_out, err_msg_len, &e) };
+                return GenevaError::InvalidConfig;
+            }
+        }
+    } else {
+        None
+    };
+
+    let spans_event_name_mapping =
+        match unsafe { convert_spans_event_name_mapping(config.spans_event_name_mapping) } {
+            Ok(mapping) => mapping,
+            Err(e) => {
+                unsafe { write_error_if_provided(err_msg_out, err_msg_len, &e) };
+                return GenevaError::InvalidConfig;
+            }
+        };
+
     // Validate and convert the optional OBO event map (UTF-8 checked per-field).
     let obo_event_map = match unsafe { convert_obo_event_map(config.obo_map) } {
         Ok(map) => map,
@@ -596,12 +934,14 @@ pub unsafe extern "C" fn geneva_client_new(
         role_name,
         role_instance,
         msi_resource,
-        logs: LogsConfig {
-            default_event_name: None,
-        },
-        spans: TracesConfig {
-            default_event_name: None,
-        },
+        logs: Some(LogsConfig {
+            default_event_name: logs_default_event_name,
+            event_name_mapping: logs_event_name_mapping,
+        }),
+        spans: Some(TracesConfig {
+            default_event_name: spans_default_event_name,
+            event_name_mapping: spans_event_name_mapping,
+        }),
         obo_event_map,
     };
 
@@ -1633,6 +1973,14 @@ mod tests {
 
     #[cfg(feature = "mock_auth")]
     fn make_mock_handle() -> Box<GenevaClientHandle> {
+        make_mock_handle_with_logs(LogsConfig {
+            default_event_name: None,
+            event_name_mapping: None,
+        })
+    }
+
+    #[cfg(feature = "mock_auth")]
+    fn make_mock_handle_with_logs(logs: LogsConfig) -> Box<GenevaClientHandle> {
         let cfg = GenevaClientConfig {
             endpoint: "https://example.invalid".to_string(),
             environment: "test".to_string(),
@@ -1645,12 +1993,39 @@ mod tests {
             role_name: "testrole".to_string(),
             role_instance: "testinstance".to_string(),
             msi_resource: None,
-            logs: LogsConfig {
+            logs: Some(logs),
+            spans: Some(TracesConfig {
                 default_event_name: None,
-            },
-            spans: TracesConfig {
+                event_name_mapping: None,
+            }),
+            obo_event_map: None,
+        };
+        let client = GenevaClient::new(cfg).expect("failed to create GenevaClient with MockAuth");
+        Box::new(GenevaClientHandle {
+            magic: GENEVA_HANDLE_MAGIC,
+            client,
+        })
+    }
+
+    #[cfg(feature = "mock_auth")]
+    fn make_mock_handle_with_spans(spans: TracesConfig) -> Box<GenevaClientHandle> {
+        let cfg = GenevaClientConfig {
+            endpoint: "https://example.invalid".to_string(),
+            environment: "test".to_string(),
+            account: "test".to_string(),
+            namespace: "testns".to_string(),
+            region: "testregion".to_string(),
+            config_major_version: 1,
+            auth_method: AuthMethod::MockAuth,
+            tenant: "testtenant".to_string(),
+            role_name: "testrole".to_string(),
+            role_instance: "testinstance".to_string(),
+            msi_resource: None,
+            logs: Some(LogsConfig {
                 default_event_name: None,
-            },
+                event_name_mapping: None,
+            }),
+            spans: Some(spans),
             obo_event_map: None,
         };
         let client = GenevaClient::new(cfg).expect("failed to create GenevaClient with MockAuth");
@@ -1814,6 +2189,10 @@ mod tests {
                 // The union is never accessed for SystemManagedIdentity (auth_method 0).
                 auth: std::mem::zeroed(),
                 msi_resource: ptr::null(),
+                logs_default_event_name: ptr::null(),
+                logs_event_name_mapping: ptr::null(),
+                spans_default_event_name: ptr::null(),
+                spans_event_name_mapping: ptr::null(),
                 obo_map: ptr::null(),
             };
 
@@ -1849,6 +2228,10 @@ mod tests {
                 role_instance: role_instance.as_ptr(),
                 auth: std::mem::zeroed(), // Union not accessed for invalid auth method
                 msi_resource: ptr::null(),
+                logs_default_event_name: ptr::null(),
+                logs_event_name_mapping: ptr::null(),
+                spans_default_event_name: ptr::null(),
+                spans_event_name_mapping: ptr::null(),
                 obo_map: ptr::null(),
             };
 
@@ -1889,6 +2272,10 @@ mod tests {
                     },
                 },
                 msi_resource: ptr::null(),
+                logs_default_event_name: ptr::null(),
+                logs_event_name_mapping: ptr::null(),
+                spans_default_event_name: ptr::null(),
+                spans_event_name_mapping: ptr::null(),
                 obo_map: ptr::null(),
             };
 
@@ -1928,6 +2315,10 @@ mod tests {
                     },
                 },
                 msi_resource: ptr::null(),
+                logs_default_event_name: ptr::null(),
+                logs_event_name_mapping: ptr::null(),
+                spans_default_event_name: ptr::null(),
+                spans_event_name_mapping: ptr::null(),
                 obo_map: ptr::null(),
             };
 
@@ -1967,6 +2358,10 @@ mod tests {
                     },
                 },
                 msi_resource: ptr::null(),
+                logs_default_event_name: ptr::null(),
+                logs_event_name_mapping: ptr::null(),
+                spans_default_event_name: ptr::null(),
+                spans_event_name_mapping: ptr::null(),
                 obo_map: ptr::null(),
             };
 
@@ -2006,6 +2401,10 @@ mod tests {
                     },
                 },
                 msi_resource: ptr::null(),
+                logs_default_event_name: ptr::null(),
+                logs_event_name_mapping: ptr::null(),
+                spans_default_event_name: ptr::null(),
+                spans_event_name_mapping: ptr::null(),
                 obo_map: ptr::null(),
             };
 
@@ -2048,6 +2447,10 @@ mod tests {
                     },
                 },
                 msi_resource: ptr::null(),
+                logs_default_event_name: ptr::null(),
+                logs_event_name_mapping: ptr::null(),
+                spans_default_event_name: ptr::null(),
+                spans_event_name_mapping: ptr::null(),
                 obo_map: ptr::null(),
             };
 
@@ -2092,6 +2495,10 @@ mod tests {
                     },
                 },
                 msi_resource: ptr::null(),
+                logs_default_event_name: ptr::null(),
+                logs_event_name_mapping: ptr::null(),
+                spans_default_event_name: ptr::null(),
+                spans_event_name_mapping: ptr::null(),
                 obo_map: ptr::null(),
             };
 
@@ -2114,6 +2521,550 @@ mod tests {
     fn test_batches_free_with_null() {
         unsafe {
             geneva_batches_free(ptr::null_mut());
+        }
+    }
+
+    #[test]
+    fn test_convert_logs_event_name_mapping_event_name_success() {
+        let source_a = CString::new("EventA").unwrap();
+        let source_b = CString::new("EventB").unwrap();
+        let dest_a = CString::new("TableA").unwrap();
+
+        let entries = [
+            FfiLogsEventNameMapEntry {
+                source_value: source_a.as_ptr(),
+                destination_event_name: dest_a.as_ptr(),
+            },
+            FfiLogsEventNameMapEntry {
+                source_value: source_b.as_ptr(),
+                destination_event_name: ptr::null(),
+            },
+        ];
+        let mapping = FfiLogsEventNameMapping {
+            routing_key_kind: 0,
+            routing_key_name: ptr::null(),
+            entries: entries.as_ptr(),
+            count: entries.len(),
+        };
+
+        let converted =
+            unsafe { convert_logs_event_name_mapping(&mapping as *const FfiLogsEventNameMapping) }
+                .expect("conversion should succeed")
+                .expect("mapping should be present");
+
+        match converted.routing_key {
+            LogsEventNameRoutingKey::EventName => {}
+            _ => panic!("expected EventName routing key"),
+        }
+        assert_eq!(
+            converted.events.get("EventA").cloned().flatten().as_deref(),
+            Some("TableA")
+        );
+        assert_eq!(converted.events.get("EventB").cloned().flatten(), None);
+    }
+
+    #[test]
+    fn test_convert_logs_event_name_mapping_event_name_rejects_routing_key_name() {
+        let source = CString::new("EventA").unwrap();
+        let dest = CString::new("TableA").unwrap();
+        let invalid_key_name = CString::new("scope.name").unwrap();
+
+        let entries = [FfiLogsEventNameMapEntry {
+            source_value: source.as_ptr(),
+            destination_event_name: dest.as_ptr(),
+        }];
+        let mapping = FfiLogsEventNameMapping {
+            routing_key_kind: 0,
+            routing_key_name: invalid_key_name.as_ptr(),
+            entries: entries.as_ptr(),
+            count: entries.len(),
+        };
+
+        let result =
+            unsafe { convert_logs_event_name_mapping(&mapping as *const FfiLogsEventNameMapping) };
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("must not be provided"));
+    }
+
+    #[test]
+    fn test_convert_logs_event_name_mapping_rejects_zero_count_with_valid_kind() {
+        let key_name = CString::new("cluster").unwrap();
+        // Non-null mapping, valid attribute kind, but no entries: must be rejected
+        // (not silently treated as "routing disabled").
+        let mapping = FfiLogsEventNameMapping {
+            routing_key_kind: 1,
+            routing_key_name: key_name.as_ptr(),
+            entries: ptr::null(),
+            count: 0,
+        };
+
+        let result =
+            unsafe { convert_logs_event_name_mapping(&mapping as *const FfiLogsEventNameMapping) };
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("entries must be non-null"));
+    }
+
+    #[test]
+    fn test_convert_logs_event_name_mapping_rejects_duplicate_source_value() {
+        let source_a = CString::new("clusterA").unwrap();
+        let source_dup = CString::new("clusterA").unwrap();
+        let dest_a = CString::new("TableA").unwrap();
+        let dest_b = CString::new("TableB").unwrap();
+        let routing_key_name = CString::new("cluster").unwrap();
+
+        let entries = [
+            FfiLogsEventNameMapEntry {
+                source_value: source_a.as_ptr(),
+                destination_event_name: dest_a.as_ptr(),
+            },
+            FfiLogsEventNameMapEntry {
+                source_value: source_dup.as_ptr(),
+                destination_event_name: dest_b.as_ptr(),
+            },
+        ];
+        let mapping = FfiLogsEventNameMapping {
+            routing_key_kind: 3,
+            routing_key_name: routing_key_name.as_ptr(),
+            entries: entries.as_ptr(),
+            count: entries.len(),
+        };
+
+        let result =
+            unsafe { convert_logs_event_name_mapping(&mapping as *const FfiLogsEventNameMapping) };
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("duplicate"));
+    }
+
+    #[test]
+    fn test_convert_logs_event_name_mapping_rejects_blank_source_value() {
+        let blank_source = CString::new("   ").unwrap();
+        let dest = CString::new("TableA").unwrap();
+
+        let entries = [FfiLogsEventNameMapEntry {
+            source_value: blank_source.as_ptr(),
+            destination_event_name: dest.as_ptr(),
+        }];
+        let mapping = FfiLogsEventNameMapping {
+            routing_key_kind: 0,
+            routing_key_name: ptr::null(),
+            entries: entries.as_ptr(),
+            count: entries.len(),
+        };
+
+        let result =
+            unsafe { convert_logs_event_name_mapping(&mapping as *const FfiLogsEventNameMapping) };
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("must not be blank"));
+    }
+
+    #[test]
+    fn test_convert_spans_event_name_mapping_rejects_blank_routing_key_name() {
+        let blank_key = CString::new(" ").unwrap();
+        let source = CString::new("SpanA").unwrap();
+        let dest = CString::new("TableA").unwrap();
+
+        let entries = [FfiSpansEventNameMapEntry {
+            source_value: source.as_ptr(),
+            destination_event_name: dest.as_ptr(),
+        }];
+        let mapping = FfiSpansEventNameMapping {
+            routing_key_kind: 3,
+            routing_key_name: blank_key.as_ptr(),
+            entries: entries.as_ptr(),
+            count: entries.len(),
+        };
+
+        let result = unsafe {
+            convert_spans_event_name_mapping(&mapping as *const FfiSpansEventNameMapping)
+        };
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("must not be blank"));
+    }
+
+    #[test]
+    fn test_convert_spans_event_name_mapping_rejects_zero_count_with_valid_kind() {
+        let key_name = CString::new("cluster").unwrap();
+        // Non-null mapping, valid attribute kind, but no entries: must be rejected.
+        let mapping = FfiSpansEventNameMapping {
+            routing_key_kind: 3,
+            routing_key_name: key_name.as_ptr(),
+            entries: ptr::null(),
+            count: 0,
+        };
+
+        let result = unsafe {
+            convert_spans_event_name_mapping(&mapping as *const FfiSpansEventNameMapping)
+        };
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("entries must be non-null"));
+    }
+
+    #[test]
+    fn test_convert_spans_event_name_mapping_rejects_invalid_kind() {
+        let source = CString::new("SpanA").unwrap();
+        // routing_key_kind=0 is invalid for spans (no event-name concept).
+        let entries = [FfiSpansEventNameMapEntry {
+            source_value: source.as_ptr(),
+            destination_event_name: ptr::null(),
+        }];
+        let mapping = FfiSpansEventNameMapping {
+            routing_key_kind: 0,
+            routing_key_name: ptr::null(),
+            entries: entries.as_ptr(),
+            count: entries.len(),
+        };
+
+        let result = unsafe {
+            convert_spans_event_name_mapping(&mapping as *const FfiSpansEventNameMapping)
+        };
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("invalid value"));
+    }
+
+    #[test]
+    fn test_convert_logs_event_name_mapping_null_returns_none() {
+        let result = unsafe { convert_logs_event_name_mapping(ptr::null()) }
+            .expect("null mapping should be Ok");
+        assert!(result.is_none());
+    }
+
+    #[test]
+    fn test_convert_spans_event_name_mapping_span_attribute_success() {
+        let source_a = CString::new("SpanA").unwrap();
+        let source_b = CString::new("SpanB").unwrap();
+        let dest_a = CString::new("TableA").unwrap();
+        let routing_key = CString::new("cluster").unwrap();
+
+        let entries = [
+            FfiSpansEventNameMapEntry {
+                source_value: source_a.as_ptr(),
+                destination_event_name: dest_a.as_ptr(),
+            },
+            FfiSpansEventNameMapEntry {
+                source_value: source_b.as_ptr(),
+                destination_event_name: ptr::null(),
+            },
+        ];
+        let mapping = FfiSpansEventNameMapping {
+            routing_key_kind: 3,
+            routing_key_name: routing_key.as_ptr(),
+            entries: entries.as_ptr(),
+            count: entries.len(),
+        };
+
+        let converted = unsafe {
+            convert_spans_event_name_mapping(&mapping as *const FfiSpansEventNameMapping)
+        }
+        .expect("conversion should succeed")
+        .expect("mapping should be present");
+
+        match converted.routing_key {
+            SpanEventNameRoutingKey::SpanAttribute(ref key) => assert_eq!(key, "cluster"),
+            _ => panic!("expected SpanAttribute routing key"),
+        }
+        assert_eq!(
+            converted.events.get("SpanA").cloned().flatten().as_deref(),
+            Some("TableA")
+        );
+        assert_eq!(converted.events.get("SpanB").cloned().flatten(), None);
+    }
+
+    // Builds an `FfiLogsEventNameMapping` from owned specs (keeping the backing
+    // CStrings alive for the duration of the conversion) and converts it. A `None`
+    // source/destination/name is passed as a null pointer.
+    fn convert_logs_with(
+        kind: u32,
+        name: Option<&str>,
+        entries_spec: &[(Option<&str>, Option<&str>)],
+    ) -> Result<Option<LogsEventNameMapping>, String> {
+        let name_c = name.map(|n| CString::new(n).unwrap());
+        let sources: Vec<Option<CString>> = entries_spec
+            .iter()
+            .map(|(s, _)| s.map(|v| CString::new(v).unwrap()))
+            .collect();
+        let dests: Vec<Option<CString>> = entries_spec
+            .iter()
+            .map(|(_, d)| d.map(|v| CString::new(v).unwrap()))
+            .collect();
+        let entries: Vec<FfiLogsEventNameMapEntry> = sources
+            .iter()
+            .zip(dests.iter())
+            .map(|(s, d)| FfiLogsEventNameMapEntry {
+                source_value: s.as_ref().map_or(ptr::null(), |v| v.as_ptr()),
+                destination_event_name: d.as_ref().map_or(ptr::null(), |v| v.as_ptr()),
+            })
+            .collect();
+        let mapping = FfiLogsEventNameMapping {
+            routing_key_kind: kind,
+            routing_key_name: name_c.as_ref().map_or(ptr::null(), |n| n.as_ptr()),
+            entries: entries.as_ptr(),
+            count: entries.len(),
+        };
+        unsafe { convert_logs_event_name_mapping(&mapping as *const FfiLogsEventNameMapping) }
+    }
+
+    fn convert_spans_with(
+        kind: u32,
+        name: Option<&str>,
+        entries_spec: &[(Option<&str>, Option<&str>)],
+    ) -> Result<Option<SpanEventNameMapping>, String> {
+        let name_c = name.map(|n| CString::new(n).unwrap());
+        let sources: Vec<Option<CString>> = entries_spec
+            .iter()
+            .map(|(s, _)| s.map(|v| CString::new(v).unwrap()))
+            .collect();
+        let dests: Vec<Option<CString>> = entries_spec
+            .iter()
+            .map(|(_, d)| d.map(|v| CString::new(v).unwrap()))
+            .collect();
+        let entries: Vec<FfiSpansEventNameMapEntry> = sources
+            .iter()
+            .zip(dests.iter())
+            .map(|(s, d)| FfiSpansEventNameMapEntry {
+                source_value: s.as_ref().map_or(ptr::null(), |v| v.as_ptr()),
+                destination_event_name: d.as_ref().map_or(ptr::null(), |v| v.as_ptr()),
+            })
+            .collect();
+        let mapping = FfiSpansEventNameMapping {
+            routing_key_kind: kind,
+            routing_key_name: name_c.as_ref().map_or(ptr::null(), |n| n.as_ptr()),
+            entries: entries.as_ptr(),
+            count: entries.len(),
+        };
+        unsafe { convert_spans_event_name_mapping(&mapping as *const FfiSpansEventNameMapping) }
+    }
+
+    #[test]
+    fn test_convert_logs_event_name_mapping_attribute_kinds_success() {
+        let entries = [(Some("clusterA"), Some("TableA"))];
+
+        let r1 = convert_logs_with(1, Some("res.key"), &entries)
+            .unwrap()
+            .unwrap();
+        assert!(
+            matches!(r1.routing_key, LogsEventNameRoutingKey::ResourceAttribute(ref k) if k == "res.key")
+        );
+
+        let r2 = convert_logs_with(2, Some("scope.key"), &entries)
+            .unwrap()
+            .unwrap();
+        assert!(
+            matches!(r2.routing_key, LogsEventNameRoutingKey::ScopeAttribute(ref k) if k == "scope.key")
+        );
+
+        let r3 = convert_logs_with(3, Some("rec.key"), &entries)
+            .unwrap()
+            .unwrap();
+        assert!(
+            matches!(r3.routing_key, LogsEventNameRoutingKey::LogRecordAttribute(ref k) if k == "rec.key")
+        );
+        assert_eq!(
+            r3.events.get("clusterA").cloned().flatten().as_deref(),
+            Some("TableA")
+        );
+    }
+
+    #[test]
+    fn test_convert_logs_event_name_mapping_attribute_kinds_require_name() {
+        let entries = [(Some("clusterA"), Some("TableA"))];
+        for kind in [1u32, 2, 3] {
+            let err = convert_logs_with(kind, None, &entries).unwrap_err();
+            assert!(err.contains("is required"), "kind {kind}: {err}");
+        }
+    }
+
+    #[test]
+    fn test_convert_logs_event_name_mapping_invalid_kind() {
+        let entries = [(Some("clusterA"), Some("TableA"))];
+        let err = convert_logs_with(99, None, &entries).unwrap_err();
+        assert!(err.contains("invalid value"), "{err}");
+    }
+
+    #[test]
+    fn test_convert_logs_event_name_mapping_rejects_null_source_value() {
+        let entries = [(None, Some("TableA"))];
+        let err = convert_logs_with(0, None, &entries).unwrap_err();
+        assert!(err.contains("is null"), "{err}");
+    }
+
+    #[test]
+    fn test_convert_spans_event_name_mapping_resource_and_scope_kinds_success() {
+        let entries = [(Some("clusterA"), Some("TableA"))];
+
+        let r1 = convert_spans_with(1, Some("res.key"), &entries)
+            .unwrap()
+            .unwrap();
+        assert!(
+            matches!(r1.routing_key, SpanEventNameRoutingKey::ResourceAttribute(ref k) if k == "res.key")
+        );
+
+        let r2 = convert_spans_with(2, Some("scope.key"), &entries)
+            .unwrap()
+            .unwrap();
+        assert!(
+            matches!(r2.routing_key, SpanEventNameRoutingKey::ScopeAttribute(ref k) if k == "scope.key")
+        );
+    }
+
+    #[test]
+    fn test_convert_spans_event_name_mapping_attribute_kinds_require_name() {
+        let entries = [(Some("clusterA"), Some("TableA"))];
+        for kind in [1u32, 2, 3] {
+            let err = convert_spans_with(kind, None, &entries).unwrap_err();
+            assert!(err.contains("is required"), "kind {kind}: {err}");
+        }
+    }
+
+    #[test]
+    fn test_convert_spans_event_name_mapping_rejects_null_source_value() {
+        let entries = [(None, Some("TableA"))];
+        let err = convert_spans_with(3, Some("cluster"), &entries).unwrap_err();
+        assert!(err.contains("is null"), "{err}");
+    }
+
+    #[test]
+    #[cfg(feature = "mock_auth")]
+    fn test_encode_spans_event_name_mapping_splits_batches() {
+        let spans = TracesConfig {
+            default_event_name: Some("AppTrace".to_string()),
+            event_name_mapping: Some(SpanEventNameMapping {
+                routing_key: SpanEventNameRoutingKey::SpanAttribute("cluster".to_string()),
+                events: std::collections::HashMap::from([
+                    ("A".to_string(), Some("TraceA".to_string())),
+                    ("B".to_string(), Some("TraceB".to_string())),
+                ]),
+            }),
+        };
+
+        let handle_box = make_mock_handle_with_spans(spans);
+        let handle_ptr: *mut GenevaClientHandle = Box::into_raw(handle_box);
+
+        let request = ExportTraceServiceRequest {
+            resource_spans: vec![opentelemetry_proto::tonic::trace::v1::ResourceSpans {
+                scope_spans: vec![opentelemetry_proto::tonic::trace::v1::ScopeSpans {
+                    spans: vec![
+                        opentelemetry_proto::tonic::trace::v1::Span {
+                            attributes: vec![opentelemetry_proto::tonic::common::v1::KeyValue {
+                                key: "cluster".to_string(),
+                                key_strindex: 0,
+                                value: Some(opentelemetry_proto::tonic::common::v1::AnyValue {
+                                    value: Some(
+                                        opentelemetry_proto::tonic::common::v1::any_value::Value::StringValue(
+                                            "A".to_string(),
+                                        ),
+                                    ),
+                                }),
+                            }],
+                            ..Default::default()
+                        },
+                        opentelemetry_proto::tonic::trace::v1::Span {
+                            attributes: vec![opentelemetry_proto::tonic::common::v1::KeyValue {
+                                key: "cluster".to_string(),
+                                key_strindex: 0,
+                                value: Some(opentelemetry_proto::tonic::common::v1::AnyValue {
+                                    value: Some(
+                                        opentelemetry_proto::tonic::common::v1::any_value::Value::StringValue(
+                                            "B".to_string(),
+                                        ),
+                                    ),
+                                }),
+                            }],
+                            ..Default::default()
+                        },
+                    ],
+                    ..Default::default()
+                }],
+                ..Default::default()
+            }],
+        };
+
+        let bytes = request.encode_to_vec();
+        let mut out: *mut EncodedBatchesHandle = ptr::null_mut();
+        let rc = unsafe {
+            geneva_encode_and_compress_spans(
+                handle_ptr,
+                bytes.as_ptr(),
+                bytes.len(),
+                &mut out,
+                ptr::null_mut(),
+                0,
+            )
+        };
+        assert_eq!(rc as u32, GenevaError::Success as u32);
+        assert!(!out.is_null());
+        unsafe {
+            assert_eq!(geneva_batches_len(out), 2);
+            geneva_batches_free(out);
+            let _ = Box::from_raw(handle_ptr);
+        }
+    }
+
+    #[test]
+    #[cfg(feature = "mock_auth")]
+    fn test_encode_log_records_event_name_mapping_splits_batches() {
+        unsafe {
+            let mut events = std::collections::HashMap::new();
+            events.insert("EventA".to_string(), Some("TableA".to_string()));
+            events.insert("EventB".to_string(), Some("TableB".to_string()));
+
+            let logs = LogsConfig {
+                default_event_name: None,
+                event_name_mapping: Some(LogsEventNameMapping {
+                    routing_key: LogsEventNameRoutingKey::EventName,
+                    events,
+                }),
+            };
+
+            let mut handle_box = make_mock_handle_with_logs(logs);
+            let handle_ptr: *mut GenevaClientHandle = &mut *handle_box;
+
+            let mut out: *mut EncodedBatchesHandle = ptr::null_mut();
+
+            let event_a = CString::new("EventA").unwrap();
+            let event_b = CString::new("EventB").unwrap();
+            let mut records = Vec::new();
+            for i in 0..10 {
+                let event_name = if i % 2 == 0 {
+                    event_a.as_ptr()
+                } else {
+                    event_b.as_ptr()
+                };
+                records.push(GenevaLogRecordC {
+                    event_name,
+                    time_unix_nano: 0,
+                    observed_time_unix_nano: (i + 1) as u64,
+                    severity_number: 9,
+                    severity_text: ptr::null(),
+                    body: ptr::null(),
+                    trace_id: [0u8; 16],
+                    trace_id_present: 0,
+                    span_id: [0u8; 8],
+                    span_id_present: 0,
+                    flags: 0,
+                    flags_present: 0,
+                    attr_keys: ptr::null(),
+                    attr_values: ptr::null(),
+                    attr_count: 0,
+                });
+            }
+
+            let rc = geneva_encode_and_compress_log_records(
+                handle_ptr,
+                records.as_ptr(),
+                records.len(),
+                &mut out,
+                ptr::null_mut(),
+                0,
+            );
+            assert_eq!(rc as u32, GenevaError::Success as u32);
+            assert!(!out.is_null());
+            assert_eq!(
+                geneva_batches_len(out),
+                2,
+                "records should route into two destination tables"
+            );
+
+            geneva_batches_free(out);
         }
     }
 
@@ -2177,12 +3128,14 @@ mod tests {
             role_name: "testrole".to_string(),
             role_instance: "testinstance".to_string(),
             msi_resource: None,
-            logs: LogsConfig {
+            logs: Some(LogsConfig {
                 default_event_name: None,
-            },
-            spans: TracesConfig {
+                event_name_mapping: None,
+            }),
+            spans: Some(TracesConfig {
                 default_event_name: None,
-            },
+                event_name_mapping: None,
+            }),
             obo_event_map: None,
         };
         let client = GenevaClient::new(cfg).expect("failed to create GenevaClient with MockAuth");
@@ -2306,12 +3259,14 @@ mod tests {
             role_name: "testrole".to_string(),
             role_instance: "testinstance".to_string(),
             msi_resource: None,
-            logs: LogsConfig {
+            logs: Some(LogsConfig {
                 default_event_name: None,
-            },
-            spans: TracesConfig {
+                event_name_mapping: None,
+            }),
+            spans: Some(TracesConfig {
                 default_event_name: None,
-            },
+                event_name_mapping: None,
+            }),
             obo_event_map: None,
         };
         let client = GenevaClient::new(cfg).expect("failed to create GenevaClient with MockAuth");
@@ -2473,12 +3428,14 @@ mod tests {
             role_name: "testrole".to_string(),
             role_instance: "testinstance".to_string(),
             msi_resource: None,
-            logs: LogsConfig {
+            logs: Some(LogsConfig {
                 default_event_name: None,
-            },
-            spans: TracesConfig {
+                event_name_mapping: None,
+            }),
+            spans: Some(TracesConfig {
                 default_event_name: None,
-            },
+                event_name_mapping: None,
+            }),
             obo_event_map: None,
         };
         let client = GenevaClient::new(cfg).expect("failed to create GenevaClient with MockAuth");
@@ -2600,12 +3557,14 @@ mod tests {
             role_name: "testrole".to_string(),
             role_instance: "testinstance".to_string(),
             msi_resource: None,
-            logs: LogsConfig {
+            logs: Some(LogsConfig {
                 default_event_name: None,
-            },
-            spans: TracesConfig {
+                event_name_mapping: None,
+            }),
+            spans: Some(TracesConfig {
                 default_event_name: None,
-            },
+                event_name_mapping: None,
+            }),
             obo_event_map: None,
         };
 
@@ -2773,12 +3732,14 @@ mod tests {
             role_name: "testrole".to_string(),
             role_instance: "testinstance".to_string(),
             msi_resource: None,
-            logs: LogsConfig {
+            logs: Some(LogsConfig {
                 default_event_name: None,
-            },
-            spans: TracesConfig {
+                event_name_mapping: None,
+            }),
+            spans: Some(TracesConfig {
                 default_event_name: None,
-            },
+                event_name_mapping: None,
+            }),
             obo_event_map: None,
         };
 
@@ -3090,6 +4051,10 @@ mod tests {
                 // The union is never accessed for SystemManagedIdentity (auth_method 0).
                 auth: std::mem::zeroed(),
                 msi_resource: ptr::null(),
+                logs_default_event_name: ptr::null(),
+                logs_event_name_mapping: ptr::null(),
+                spans_default_event_name: ptr::null(),
+                spans_event_name_mapping: ptr::null(),
                 obo_map: &obo_map as *const FfiOboEventMap,
             };
 

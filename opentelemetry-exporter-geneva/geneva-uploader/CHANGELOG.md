@@ -4,7 +4,11 @@
 
 ### Added
 - New `tls-rustls` feature flag enables a pure-Rust TLS backend (rustls + p12-keystore) as an alternative to the default `tls-native` (native-tls / OpenSSL) backend. The two flags are additive (so `--all-features` builds compile cleanly); if both are enabled simultaneously, `tls-rustls` takes precedence at runtime. No built-in crypto provider (e.g. ring) is compiled in; consumers **must** install a `rustls::crypto::CryptoProvider` (e.g. `rustls-symcrypt`) at process start. The uploader returns a clear error if no provider is found.
+- Attribute-based event/table-name routing for logs and spans. `LogsConfig` and `TracesConfig` gained an optional `event_name_mapping` field (`LogsEventNameMapping` / `SpanEventNameMapping`) that routes each record to a destination event/table based on a `routing_key` (logs: event name, resource/scope/log-record attribute; spans: resource/scope/span attribute; plus the reserved `scope.name` / `scope.version` keys) and a source→destination `events` map. Unmapped source values fall back to the configured default event name; entries with an empty destination pass the source value through unchanged. Records/spans are split into one encoded batch per resolved destination. Invalid mappings (empty `events`, blank source keys, or a blank attribute routing-key name) are rejected by `GenevaClient::new`.
 - Agent-fed credential source: `GenevaClient::with_agent_fed_source` builds an uploader that pulls a host-provisioned GIG token and routing (endpoint, moniker) from an `AgentFedCredentialSource` on each upload, skipping the GCS config-service handshake. New public API: `AgentFedCredentialSource`, `AgentFedCredential`, `AgentFedCredentialFuture`.
+
+### Fixed
+- Corrected a misleading startup log message: when `logs.default_event_name` is set without an `event_name_mapping`, `GenevaClient::new` now logs `Configured logs event name routing [default_event_name=...]` instead of `Logs config not initialized; using default values for log events`. The default was always applied correctly; only the log line was wrong. This makes the logs message symmetric with the equivalent spans message.
 
 ### Changed
 - Bump opentelemetry-proto version to 0.32.
@@ -13,6 +17,7 @@
   version and avoid duplicate `LogsDataView` trait errors. API-compatible;
   the view trait signatures are unchanged.
 - `GenevaClientConfig` now applies signal-specific defaults consistently on emitted batches: when `logs.default_event_name` / `spans.default_event_name` is set, encoded batches use that value as `event_name`; when unset, they fall back to `Log` and `Span` respectively.
+- **Breaking:** `GenevaClientConfig.logs` and `.spans` changed from `LogsConfig` / `TracesConfig` to `Option<LogsConfig>` / `Option<TracesConfig>`. Pass `None` to use the default `Log` / `Span` table names.
 
 ## [0.5.0] - 2026-04-13
 

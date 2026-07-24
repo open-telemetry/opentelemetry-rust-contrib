@@ -130,12 +130,14 @@ async fn init_client() -> Result<(GenevaClient, Option<String>), Box<dyn std::er
             role_name: std::env::var("GENEVA_ROLE").unwrap_or_else(|_| "test".to_string()),
             role_instance: std::env::var("GENEVA_INSTANCE").unwrap_or_else(|_| "test".to_string()),
             msi_resource: None,
-            logs: LogsConfig {
+            logs: Some(LogsConfig {
                 default_event_name: None,
-            },
-            spans: TracesConfig {
+                event_name_mapping: None,
+            }),
+            spans: Some(TracesConfig {
                 default_event_name: None,
-            },
+                event_name_mapping: None,
+            }),
             obo_event_map: None,
         };
 
@@ -156,12 +158,14 @@ async fn init_client() -> Result<(GenevaClient, Option<String>), Box<dyn std::er
             role_name: "test".to_string(),
             role_instance: "test".to_string(),
             msi_resource: None,
-            logs: LogsConfig {
+            logs: Some(LogsConfig {
                 default_event_name: None,
-            },
-            spans: TracesConfig {
+                event_name_mapping: None,
+            }),
+            spans: Some(TracesConfig {
                 default_event_name: None,
-            },
+                event_name_mapping: None,
+            }),
             obo_event_map: None,
         };
 
@@ -218,12 +222,14 @@ async fn init_client() -> Result<(GenevaClient, Option<String>), Box<dyn std::er
             role_name: "test".to_string(),
             role_instance: "test".to_string(),
             msi_resource: None,
-            logs: LogsConfig {
+            logs: Some(LogsConfig {
                 default_event_name: None,
-            },
-            spans: TracesConfig {
+                event_name_mapping: None,
+            }),
+            spans: Some(TracesConfig {
                 default_event_name: None,
-            },
+                event_name_mapping: None,
+            }),
             obo_event_map: None,
         };
 
