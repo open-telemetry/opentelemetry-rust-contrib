@@ -13,7 +13,6 @@ concurrency:
 jobs:
   semver:
     runs-on: ubuntu-latest
-    continue-on-error: true
     timeout-minutes: 10
     steps:
       - name: Harden the runner (Audit all outbound calls)
@@ -28,5 +27,23 @@ jobs:
         with:
           toolchain: stable
       - uses: obi1kenobi/cargo-semver-checks-action@6b69fcf40e9b5fb17adeb57e4b6ecd020649a239 # v2.9
+        id: semver
+        # Informational only: components in this repo are alpha/beta and
+        # breaking changes are expected. Keep the job green either way.
+        continue-on-error: true
         with:
           exclude: opentelemetry-config
+      - name: Surface findings as a warning
+        if: steps.semver.outcome == 'failure'
+        run: echo "::warning::cargo-semver-checks found semver-breaking API changes (informational only — see the job summary for details)"
+      - name: Write findings to job summary
+        if: steps.semver.outcome == 'failure'
+        run: |
+          {
+            echo "## cargo-semver-checks findings (informational)"
+            echo "Breaking API changes exist relative to the latest published crates.io versions."
+            echo "These persist until the affected crates are released with an appropriate version bump."
+            echo '```'
+            cargo semver-checks check-release --exclude opentelemetry-config 2>&1 | grep -E -A 12 "^--- failure" || echo "See the cargo-semver-checks step logs for details."
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
