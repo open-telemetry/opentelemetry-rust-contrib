@@ -344,6 +344,12 @@ mod tests {
             }
 
             let request = String::from_utf8_lossy(&request);
+            if request.trim().is_empty() {
+                // Some failure-path tests (for example, untrusted CA) can
+                // establish/tear down the socket without sending an HTTP
+                // request body. Do not fail those tests on an empty request.
+                return;
+            }
             assert!(
                 request.starts_with("GET /api/agent/v3/mockenv/mockacct/MonitoringStorageKeys/?"),
                 "unexpected request: {request}",
@@ -862,5 +868,123 @@ mod tests {
         let token_len = ingestion_info.auth_token.len();
         println!("Auth token length: {token_len}");
         println!("Moniker name: {}", moniker.name);
+    }
+
+    mod extract_endpoint_from_token_tests {
+        use crate::config_service::client::{extract_endpoint_from_token, GenevaConfigClientError};
+        use base64::{engine::general_purpose, Engine as _};
+
+        /// Build a JWT-shaped `header.payload.signature` string. Only the payload
+        /// segment is decoded by `extract_endpoint_from_token`, so the header and
+        /// signature are arbitrary placeholders.
+        fn make_jwt(payload: &str) -> String {
+            let header = general_purpose::URL_SAFE_NO_PAD.encode(br#"{"alg":"none"}"#);
+            let signature = general_purpose::URL_SAFE_NO_PAD.encode(b"sig");
+            format!("{header}.{payload}.{signature}")
+        }
+
+        fn encode_payload(bytes: &[u8]) -> String {
+            general_purpose::URL_SAFE_NO_PAD.encode(bytes)
+        }
+
+        #[test]
+        fn extracts_endpoint_claim_from_valid_token() {
+            let token = make_jwt(&encode_payload(
+                br#"{"Endpoint":"https://ingest.example.com"}"#,
+            ));
+            assert_eq!(
+                extract_endpoint_from_token(&token).unwrap(),
+                "https://ingest.example.com"
+            );
+        }
+
+        #[test]
+        fn handles_padding_restoration_for_various_payload_lengths() {
+            // Endpoint values of different byte lengths yield payloads whose
+            // length % 4 differs, exercising the padding-restoration branches
+            // (and, when padding is added, the URL_SAFE decode fallback).
+            for endpoint in [
+                "https://a.example",
+                "https://ab.example",
+                "https://abc.example",
+            ] {
+                let json = format!(r#"{{"Endpoint":"{endpoint}"}}"#);
+                let token = make_jwt(&encode_payload(json.as_bytes()));
+                assert_eq!(extract_endpoint_from_token(&token).unwrap(), endpoint);
+            }
+        }
+
+        #[test]
+        fn rejects_token_without_three_segments() {
+            let err = extract_endpoint_from_token("only.two").unwrap_err();
+            assert!(
+                matches!(err, GenevaConfigClientError::JwtTokenError(ref m) if m.contains("Invalid JWT token format")),
+                "unexpected error: {err:?}"
+            );
+        }
+
+        #[test]
+        fn rejects_payload_with_invalid_length() {
+            // A payload whose length % 4 == 1 can never be valid base64.
+            let token = make_jwt("abcde"); // len 5 -> % 4 == 1
+            let err = extract_endpoint_from_token(&token).unwrap_err();
+            assert!(
+                matches!(err, GenevaConfigClientError::JwtTokenError(ref m) if m.contains("Invalid JWT payload length")),
+                "unexpected error: {err:?}"
+            );
+        }
+
+        #[test]
+        fn rejects_payload_that_is_not_valid_base64() {
+            // '!' is outside every base64 alphabet; length 4 avoids the % 4 == 1 guard.
+            let token = make_jwt("ab!c");
+            let err = extract_endpoint_from_token(&token).unwrap_err();
+            assert!(
+                matches!(err, GenevaConfigClientError::JwtTokenError(ref m) if m.contains("Failed to decode JWT")),
+                "unexpected error: {err:?}"
+            );
+        }
+
+        #[test]
+        fn rejects_payload_with_invalid_utf8() {
+            // Bytes that base64-decode cleanly but are not valid UTF-8.
+            let token = make_jwt(&encode_payload(&[0xff, 0xfe, 0xfd]));
+            let err = extract_endpoint_from_token(&token).unwrap_err();
+            assert!(
+                matches!(err, GenevaConfigClientError::JwtTokenError(ref m) if m.contains("Invalid UTF-8")),
+                "unexpected error: {err:?}"
+            );
+        }
+
+        #[test]
+        fn rejects_payload_that_is_not_json() {
+            let token = make_jwt(&encode_payload(b"not json at all"));
+            let err = extract_endpoint_from_token(&token).unwrap_err();
+            assert!(
+                matches!(err, GenevaConfigClientError::SerdeJson(_)),
+                "unexpected error: {err:?}"
+            );
+        }
+
+        #[test]
+        fn rejects_json_without_endpoint_claim() {
+            let token = make_jwt(&encode_payload(br#"{"NotEndpoint":"x"}"#));
+            let err = extract_endpoint_from_token(&token).unwrap_err();
+            assert!(
+                matches!(err, GenevaConfigClientError::JwtTokenError(ref m) if m.contains("No Endpoint claim")),
+                "unexpected error: {err:?}"
+            );
+        }
+
+        #[test]
+        fn ignores_non_string_endpoint_claim() {
+            // `Endpoint` present but not a string -> as_str() is None -> no claim.
+            let token = make_jwt(&encode_payload(br#"{"Endpoint":123}"#));
+            let err = extract_endpoint_from_token(&token).unwrap_err();
+            assert!(
+                matches!(err, GenevaConfigClientError::JwtTokenError(ref m) if m.contains("No Endpoint claim")),
+                "unexpected error: {err:?}"
+            );
+        }
     }
 }

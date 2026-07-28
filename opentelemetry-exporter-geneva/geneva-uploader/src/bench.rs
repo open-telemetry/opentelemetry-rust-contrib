@@ -190,7 +190,13 @@ mod benchmarks {
                     b.iter(|| {
                         let view = RawLogsData::new(black_box(request_bytes.as_slice()));
                         let res = encoder
-                            .encode_logs_from_view(black_box(&view), black_box(&metadata), None)
+                            .encode_logs_from_view(
+                                black_box(&view),
+                                black_box(&metadata),
+                                "Log",
+                                None,
+                                None,
+                            )
                             .unwrap();
                         black_box(res);
                     });
@@ -222,7 +228,13 @@ mod benchmarks {
                     b.iter(|| {
                         let view = RawLogsData::new(black_box(request_bytes.as_slice()));
                         let res = encoder
-                            .encode_logs_from_view(black_box(&view), black_box(&metadata), None)
+                            .encode_logs_from_view(
+                                black_box(&view),
+                                black_box(&metadata),
+                                "Log",
+                                None,
+                                None,
+                            )
                             .unwrap();
                         black_box(res);
                     });
@@ -249,7 +261,13 @@ mod benchmarks {
             b.iter(|| {
                 let view = RawLogsData::new(black_box(mixed_request_bytes.as_slice()));
                 let res = encoder
-                    .encode_logs_from_view(black_box(&view), black_box(&metadata), None)
+                    .encode_logs_from_view(
+                        black_box(&view),
+                        black_box(&metadata),
+                        "Log",
+                        None,
+                        None,
+                    )
                     .unwrap();
                 black_box(res);
             });

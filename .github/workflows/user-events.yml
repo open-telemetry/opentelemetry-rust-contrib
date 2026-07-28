@@ -1,0 +1,69 @@
+name: user_events Integration
+
+env:
+  CI: true
+
+permissions:
+  contents: read
+
+on:
+  pull_request:
+    paths:
+      - 'opentelemetry-user-events-logs/**'
+      - 'opentelemetry-user-events-metrics/**'
+      - 'opentelemetry-user-events-trace/**'
+      - 'Cargo.toml'
+      - '.github/workflows/user-events.yml'
+  merge_group:
+  push:
+    branches:
+      - main
+    paths:
+      - 'opentelemetry-user-events-logs/**'
+      - 'opentelemetry-user-events-metrics/**'
+      - 'opentelemetry-user-events-trace/**'
+      - 'Cargo.toml'
+      - '.github/workflows/user-events.yml'
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  user-events-integration-test:
+    runs-on: ubuntu-latest
+    steps:
+    - name: Harden the runner (Audit all outbound calls)
+      uses: step-security/harden-runner@9af89fc71515a100421586dfdb3dc9c984fbf411 # v2.19.4
+      with:
+        egress-policy: audit
+    - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+      with:
+        submodules: true
+    - uses: dtolnay/rust-toolchain@fa04a1451ff1842e2626ccb99004d0195b455a88
+      with:
+        toolchain: stable
+        components: llvm-tools-preview
+    - name: cargo install cargo-llvm-cov
+      uses: taiki-e/install-action@16b05812d776ae1dfaabc8277e421fb6d2506419 # v2.82.7
+      with:
+        tool: cargo-llvm-cov
+    - name: Check user_events kernel support
+      run: |
+        sudo cat /sys/kernel/tracing/user_events_status || { echo "user_events not supported on this runner"; exit 1; }
+    - name: Run user_events integration tests (trace)
+      run: sudo -E $HOME/.cargo/bin/cargo llvm-cov --no-report --manifest-path opentelemetry-user-events-trace/Cargo.toml --all-features -- --ignored --nocapture --test-threads=1
+    - name: Run user_events integration tests (logs)
+      run: sudo -E $HOME/.cargo/bin/cargo llvm-cov --no-report --manifest-path opentelemetry-user-events-logs/Cargo.toml --all-features -- --ignored --nocapture --test-threads=1
+    - name: Run user_events integration tests (metrics)
+      run: sudo -E $HOME/.cargo/bin/cargo llvm-cov --no-report --manifest-path opentelemetry-user-events-metrics/Cargo.toml --all-features -- --ignored --nocapture --test-threads=1
+    - name: Generate lcov report
+      run: sudo -E $HOME/.cargo/bin/cargo llvm-cov report --lcov --output-path lcov.info
+    - name: Make lcov.info readable for codecov upload
+      run: sudo chmod a+r lcov.info
+    - name: Upload to codecov.io
+      uses: codecov/codecov-action@fb8b3582c8e4def4969c97caa2f19720cb33a72f # v6.0.2
+      with:
+        files: lcov.info
+        flags: user-events-integration
+        fail_ci_if_error: false
