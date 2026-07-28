@@ -687,13 +687,13 @@ where
         let this = self.project();
         let _guard = this.otel_cx.clone().attach();
         let result = std::task::ready!(this.inner.poll(cx));
-        if let Some(fin) = this.finalization.take() {
-            finalize_request(
-                &result,
-                fin.request_data,
-                &fin.layer_state,
-                &fin.response_extractor,
-            );
+        if let Some(RequestFinalization {
+            request_data,
+            layer_state,
+            response_extractor,
+        }) = this.finalization.take()
+        {
+            finalize_request(&result, request_data, &layer_state, &response_extractor);
         }
         Poll::Ready(result)
     }
