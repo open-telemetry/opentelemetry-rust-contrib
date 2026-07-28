@@ -28,8 +28,6 @@ This kernel feature is supported started in Linux kernel 5.18 onwards. The featu
 
 [![Crates.io: opentelemetry-user-events-metrics](https://img.shields.io/crates/v/opentelemetry-user-events-metrics.svg)](https://crates.io/crates/opentelemetry-user-events-metrics)
 [![Documentation](https://docs.rs/opentelemetry-user-events-metrics/badge.svg)](https://docs.rs/opentelemetry-user-events-metrics)
-[![LICENSE](https://img.shields.io/crates/l/opentelemetry-user-events-metrics)](./LICENSE)
-[![GitHub Actions CI](https://github.com/open-telemetry/opentelemetry-rust-contrib/workflows/CI/badge.svg)](https://github.com/open-telemetry/opentelemetry-rust-contrib/actions?query=workflow%3ACI+branch%3Amain)
 [![Slack](https://img.shields.io/badge/slack-@cncf/otel/rust-brightgreen.svg?logo=slack)](https://cloud-native.slack.com/archives/C03GDP0H023)
 
 ## OpenTelemetry Overview

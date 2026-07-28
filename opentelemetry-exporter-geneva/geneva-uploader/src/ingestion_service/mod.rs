@@ -111,13 +111,12 @@ mod tests {
         let blob_size = ctx.data.len();
         println!("✅ Loaded blob ({blob_size} bytes)");
         // below call is only for logging purposes, to get endpoint and auth info.
-        let (auth_info, _, _) = ctx
-            .uploader
-            .config_client
-            .get_ingestion_info()
-            .await
-            .unwrap();
-        println!("🚀 Uploading to: {}", auth_info.endpoint);
+        if let crate::ingestion_service::uploader::IngestionSource::ConfigClient(config_client) =
+            &ctx.uploader.source
+        {
+            let (auth_info, _, _) = config_client.get_ingestion_info().await.unwrap();
+            println!("🚀 Uploading to: {}", auth_info.endpoint);
+        }
 
         let start = Instant::now();
 

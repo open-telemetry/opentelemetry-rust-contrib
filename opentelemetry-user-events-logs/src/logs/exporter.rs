@@ -13,6 +13,11 @@ use std::{cell::RefCell, str, time::SystemTime};
 
 thread_local! { static EBW: RefCell<EventBuilder> = RefCell::new(EventBuilder::new());}
 
+fn format_event_time(event_time: SystemTime) -> String {
+    chrono::DateTime::<chrono::Utc>::from(event_time)
+        .to_rfc3339_opts(chrono::SecondsFormat::AutoSi, true)
+}
+
 /// Trait for event name callback
 pub trait EventNameCallback: Send + Sync {
     /// Returns the event name for the given log record
@@ -209,8 +214,7 @@ where
             .timestamp()
             .or(log_record.observed_timestamp())
             .unwrap_or_else(SystemTime::now);
-        let time: String =
-            chrono::DateTime::to_rfc3339(&chrono::DateTime::<chrono::Utc>::from(event_time));
+        let time = format_event_time(event_time);
 
         cs_a_count += 1; // for event_time
                          // Add time to PartA
@@ -489,6 +493,7 @@ fn val_to_any_value(val: &Value) -> AnyValue {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::time::Duration;
 
     #[test]
     fn exporter_debug() {
@@ -498,5 +503,16 @@ mod tests {
             format!("{exporter:?}"),
             "user_events log exporter (provider name: test_provider)"
         );
+    }
+
+    #[test]
+    fn format_event_time_uses_z_for_utc() {
+        let event_time = SystemTime::UNIX_EPOCH + Duration::from_millis(1_704_112_496_789);
+
+        let formatted = format_event_time(event_time);
+
+        assert_eq!(formatted, "2024-01-01T12:34:56.789Z");
+        assert!(formatted.ends_with('Z'));
+        assert!(!formatted.ends_with("+00:00"));
     }
 }

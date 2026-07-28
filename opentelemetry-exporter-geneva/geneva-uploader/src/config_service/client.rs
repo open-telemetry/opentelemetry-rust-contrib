@@ -840,8 +840,12 @@ impl GenevaConfigClient {
                 Ok(ep) => ep,
                 Err(err) => {
                     // Fallback: some tokens legitimately omit the Endpoint claim; use server endpoint.
-                    #[cfg(debug_assertions)]
-                    eprintln!("[geneva][debug] token Endpoint claim missing or unparsable: {err}");
+                    tracing::debug!(
+                        name: "config_client.get_ingestion_info.endpoint_claim_missing",
+                        target: "geneva-uploader",
+                        error = %err,
+                        "Token Endpoint claim missing or unparsable; using server endpoint"
+                    );
                     fresh_ingestion_gateway_info.endpoint.clone()
                 }
             };
@@ -1022,7 +1026,7 @@ fn get_os_type() -> &'static str {
     }
 }
 
-fn extract_endpoint_from_token(token: &str) -> Result<String> {
+pub(crate) fn extract_endpoint_from_token(token: &str) -> Result<String> {
     let parts: Vec<&str> = token.split('.').collect();
     if parts.len() != 3 {
         return Err(GenevaConfigClientError::JwtTokenError(
@@ -1170,8 +1174,8 @@ fn build_rustls_client_config(
 
     #[cfg(test)]
     if let Some(root_ca_pem) = _test_root_ca_pem {
-        let mut reader = std::io::BufReader::new(root_ca_pem);
-        for cert in rustls_pemfile::certs(&mut reader) {
+        use rustls_pki_types::pem::PemObject;
+        for cert in rustls_pki_types::CertificateDer::pem_slice_iter(root_ca_pem) {
             let cert = cert.map_err(|e| GenevaConfigClientError::Certificate(e.to_string()))?;
             roots
                 .add(cert)

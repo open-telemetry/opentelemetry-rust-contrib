@@ -13,8 +13,6 @@ Community supported Resource detectors implementations for applications instrume
 
 [![Crates.io: opentelemetry-resource-detectors](https://img.shields.io/crates/v/opentelemetry-resource-detectors.svg)](https://crates.io/crates/opentelemetry-resource-detectors)
 [![Documentation](https://docs.rs/opentelemetry-resource-detectors/badge.svg)](https://docs.rs/opentelemetry-resource-detectors)
-[![LICENSE](https://img.shields.io/crates/l/opentelemetry-resource-detectors)](./LICENSE)
-[![GitHub Actions CI](https://github.com/open-telemetry/opentelemetry-rust-contrib/workflows/CI/badge.svg)](https://github.com/open-telemetry/opentelemetry-rust-contrib/actions?query=workflow%3ACI+branch%3Amain)
 [![Slack](https://img.shields.io/badge/slack-@cncf/otel/rust-brightgreen.svg?logo=slack)](https://cloud-native.slack.com/archives/C03GDP0H023)
 
 ## Overview
