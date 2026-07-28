@@ -11,9 +11,10 @@
 - Corrected a misleading startup log message: when `logs.default_event_name` is set without an `event_name_mapping`, `GenevaClient::new` now logs `Configured logs event name routing [default_event_name=...]` instead of `Logs config not initialized; using default values for log events`. The default was always applied correctly; only the log line was wrong. This makes the logs message symmetric with the equivalent spans message.
 
 ### Changed
-- Minimize bearer-token memory remanence by storing resolved credentials in
-  zeroizing secret containers and backing sensitive `Authorization` headers
-  with application-owned memory that is zeroized when released.
+- Minimize GIG ingestion bearer-token memory remanence by storing resolved
+  credentials in zeroizing secret containers and backing sensitive
+  `Authorization` headers with application-owned memory that is zeroized when
+  released.
 - Bump opentelemetry-proto version to 0.32.
 - Bump pinned `otel-arrow` rev for `otap-df-pdata` and `otap-df-pdata-views`
   to `4f522d2e` so consumers can unify on a single `otap-df-pdata-views`
