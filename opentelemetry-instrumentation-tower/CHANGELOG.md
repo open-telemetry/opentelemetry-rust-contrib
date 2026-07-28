@@ -2,6 +2,10 @@
 
 ## vNext
 
+## v0.18.0
+
+Released 2026-Jul-28
+
 ### Added
 
 * Configurable route extraction with built-in extractors:
@@ -22,7 +26,7 @@
 * **BREAKING**: Renamed types. Use the new names:
     - `HTTPMetricsLayer` → `HTTPLayer`
     - `HTTPMetricsService` → `HTTPService`
-    - `HTTPMetricsResponseFuture` → `HTTPResponseFuture`
+    - `HTTPMetricsResponseFuture` → `ResponseFuture`
     - `HTTPMetricsLayerBuilder` → `HTTPLayerBuilder`
 * Added OpenTelemetry trace support
 * **BREAKING**: Update default  `http.server.request.duration` histogram boundaries to OTel semantic conventions.
@@ -92,7 +96,7 @@ let layer = HTTPLayer::new();
 - Replace `HTTPMetricsLayerBuilder` with `HTTPLayerBuilder`
 - Replace `HTTPMetricsLayer` with `HTTPLayer`
 - Replace `HTTPMetricsService` with `HTTPService`
-- Replace `HTTPMetricsResponseFuture` with `HTTPResponseFuture`
+- Replace `HTTPMetricsResponseFuture` with `ResponseFuture`
 
 ## v0.17.0
 
