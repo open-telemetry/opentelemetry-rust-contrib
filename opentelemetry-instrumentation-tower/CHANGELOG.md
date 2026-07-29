@@ -8,6 +8,7 @@ Released 2026-Jul-28
 
 ### Added
 
+* Added OpenTelemetry trace support
 * Configurable route extraction with built-in extractors:
   - `NoRouteExtractor` - No route, uses only HTTP method (e.g., `GET`), safest for cardinality
   - `PathExtractor` - Uses the URL path without query params (e.g., `/users/123`)
@@ -28,7 +29,6 @@ Released 2026-Jul-28
     - `HTTPMetricsService` → `HTTPService`
     - `HTTPMetricsResponseFuture` → `ResponseFuture`
     - `HTTPMetricsLayerBuilder` → `HTTPLayerBuilder`
-* Added OpenTelemetry trace support
 * **BREAKING**: Update default  `http.server.request.duration` histogram boundaries to OTel semantic conventions.
 * **BREAKING**: Remove `with_request_duration_bounds` builder method.
   Alternate histogram bucket boundaries can be applied with the standard OpenTelemetry Views; see `examples` directory in crate for usage.
