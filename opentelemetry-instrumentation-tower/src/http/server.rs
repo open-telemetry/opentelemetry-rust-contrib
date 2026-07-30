@@ -21,30 +21,23 @@ use pin_project_lite::pin_project;
 use tower_layer::Layer as TowerLayer;
 use tower_service::Service as TowerService;
 
-use crate::common::attributes::{
-    method_kv, split_and_format_protocol_version, url_scheme_kv, HTTP_RESPONSE_STATUS_CODE_LABEL,
-    HTTP_ROUTE_LABEL, NETWORK_PROTOCOL_NAME_LABEL, NETWORK_PROTOCOL_VERSION_LABEL,
-};
+use crate::common::attributes::{method_kv, split_and_format_protocol_version, url_scheme_kv};
 use crate::http::extractors::{
     DefaultRouteExtractor, NoOpExtractor, RequestAttributeExtractor, ResponseAttributeExtractor,
     RouteExtractor,
 };
 use crate::Result;
 
-const HTTP_SERVER_DURATION_METRIC: &str = semconv::metric::HTTP_SERVER_REQUEST_DURATION;
 const HTTP_SERVER_DURATION_UNIT: &str = "s";
 
 const OTEL_DEFAULT_HTTP_SERVER_DURATION_BOUNDS: [f64; 14] = [
     0.005, 0.01, 0.025, 0.05, 0.075, 0.1, 0.25, 0.5, 0.75, 1.0, 2.5, 5.0, 7.5, 10.0,
 ];
 
-const HTTP_SERVER_ACTIVE_REQUESTS_METRIC: &str = semconv::metric::HTTP_SERVER_ACTIVE_REQUESTS;
 const HTTP_SERVER_ACTIVE_REQUESTS_UNIT: &str = "{request}";
 
-const HTTP_SERVER_REQUEST_BODY_SIZE_METRIC: &str = semconv::metric::HTTP_SERVER_REQUEST_BODY_SIZE;
 const HTTP_SERVER_REQUEST_BODY_SIZE_UNIT: &str = "By";
 
-const HTTP_SERVER_RESPONSE_BODY_SIZE_METRIC: &str = semconv::metric::HTTP_SERVER_RESPONSE_BODY_SIZE;
 const HTTP_SERVER_RESPONSE_BODY_SIZE_UNIT: &str = "By";
 
 /// State scoped to the entire middleware [`Layer`].
@@ -267,23 +260,23 @@ impl<RouteExt, ReqExt, ResExt> LayerBuilder<RouteExt, ReqExt, ResExt> {
     fn make_state(meter: Meter, req_dur_bounds: Vec<f64>) -> LayerState {
         LayerState {
             server_request_duration: meter
-                .f64_histogram(Cow::from(HTTP_SERVER_DURATION_METRIC))
+                .f64_histogram(Cow::from(semconv::metric::HTTP_SERVER_REQUEST_DURATION))
                 .with_description("Duration of HTTP server requests.")
                 .with_unit(Cow::from(HTTP_SERVER_DURATION_UNIT))
                 .with_boundaries(req_dur_bounds)
                 .build(),
             server_active_requests: meter
-                .i64_up_down_counter(Cow::from(HTTP_SERVER_ACTIVE_REQUESTS_METRIC))
+                .i64_up_down_counter(Cow::from(semconv::metric::HTTP_SERVER_ACTIVE_REQUESTS))
                 .with_description("Number of active HTTP server requests.")
                 .with_unit(Cow::from(HTTP_SERVER_ACTIVE_REQUESTS_UNIT))
                 .build(),
             server_request_body_size: meter
-                .u64_histogram(HTTP_SERVER_REQUEST_BODY_SIZE_METRIC)
+                .u64_histogram(semconv::metric::HTTP_SERVER_REQUEST_BODY_SIZE)
                 .with_description("Size of HTTP server request bodies.")
                 .with_unit(HTTP_SERVER_REQUEST_BODY_SIZE_UNIT)
                 .build(),
             server_response_body_size: meter
-                .u64_histogram(HTTP_SERVER_RESPONSE_BODY_SIZE_METRIC)
+                .u64_histogram(semconv::metric::HTTP_SERVER_RESPONSE_BODY_SIZE)
                 .with_description("Size of HTTP server response bodies.")
                 .with_unit(HTTP_SERVER_RESPONSE_BODY_SIZE_UNIT)
                 .build(),
@@ -398,8 +391,9 @@ where
             .and_then(|value| value.to_str().ok()?.parse::<u64>().ok());
 
         let (protocol, version) = split_and_format_protocol_version(req.version());
-        let protocol_name_kv = KeyValue::new(NETWORK_PROTOCOL_NAME_LABEL, protocol);
-        let protocol_version_kv = KeyValue::new(NETWORK_PROTOCOL_VERSION_LABEL, version);
+        let protocol_name_kv = KeyValue::new(semconv::attribute::NETWORK_PROTOCOL_NAME, protocol);
+        let protocol_version_kv =
+            KeyValue::new(semconv::attribute::NETWORK_PROTOCOL_VERSION, version);
 
         let url_scheme_kv = url_scheme_kv(req.uri());
 
@@ -410,7 +404,7 @@ where
         let route = self.route_extractor.extract_route(&req);
         let route_kv_opt = route
             .as_ref()
-            .map(|r| KeyValue::new(HTTP_ROUTE_LABEL, r.clone()));
+            .map(|r| KeyValue::new(semconv::attribute::HTTP_ROUTE, r.clone()));
 
         // Build span name: "{method} {route}" or just "{method}"
         let span_name = match &route {
@@ -427,10 +421,10 @@ where
         });
 
         let mut span_attributes = vec![
-            KeyValue::new(semconv::trace::HTTP_REQUEST_METHOD, method.clone()),
+            KeyValue::new(semconv::attribute::HTTP_REQUEST_METHOD, method.clone()),
             url_scheme_kv.clone(),
             KeyValue::new(semconv::attribute::URL_PATH, req.uri().path().to_string()),
-            KeyValue::new(semconv::trace::URL_FULL, req.uri().to_string()),
+            KeyValue::new(semconv::attribute::URL_FULL, req.uri().to_string()),
         ];
 
         if let Some(user_agent) = req
@@ -439,13 +433,13 @@ where
             .and_then(|v| v.to_str().ok())
         {
             span_attributes.push(KeyValue::new(
-                semconv::trace::USER_AGENT_ORIGINAL,
+                semconv::attribute::USER_AGENT_ORIGINAL,
                 user_agent.to_string(),
             ));
         }
 
         if let Some(r) = &route {
-            span_attributes.push(KeyValue::new(HTTP_ROUTE_LABEL, r.clone()));
+            span_attributes.push(KeyValue::new(semconv::attribute::HTTP_ROUTE, r.clone()));
         }
 
         span_attributes.extend(custom_request_attributes.clone());
@@ -520,7 +514,7 @@ fn finalize_request<ResBody, E, ResExt>(
         Ok(response) => {
             let http_status = response.status();
             let status_code_kv = KeyValue::new(
-                HTTP_RESPONSE_STATUS_CODE_LABEL,
+                semconv::attribute::HTTP_RESPONSE_STATUS_CODE,
                 i64::from(http_status.as_u16()),
             );
 
@@ -614,7 +608,6 @@ mod tests {
     use crate::http::extractors::{NoRouteExtractor, PathExtractor};
     use crate::Error;
 
-    use crate::common::attributes::{HTTP_REQUEST_METHOD_LABEL, URL_SCHEME_LABEL};
     use http::{Request, Response, StatusCode};
     use opentelemetry::global::BoxedTracer;
     use opentelemetry::metrics::MeterProvider;
@@ -712,19 +705,19 @@ mod tests {
         );
         // Build expected attributes
         let expected_attributes = vec![
-            KeyValue::new(semconv::trace::HTTP_REQUEST_METHOD, "GET".to_string()),
-            KeyValue::new(semconv::trace::URL_SCHEME, "http".to_string()),
-            KeyValue::new(semconv::trace::URL_PATH, "/api/users/123".to_string()),
+            KeyValue::new(semconv::attribute::HTTP_REQUEST_METHOD, "GET".to_string()),
+            KeyValue::new(semconv::attribute::URL_SCHEME, "http".to_string()),
+            KeyValue::new(semconv::attribute::URL_PATH, "/api/users/123".to_string()),
             KeyValue::new(
-                semconv::trace::URL_FULL,
+                semconv::attribute::URL_FULL,
                 "http://example.com/api/users/123".to_string(),
             ),
             KeyValue::new(
-                semconv::trace::USER_AGENT_ORIGINAL,
+                semconv::attribute::USER_AGENT_ORIGINAL,
                 "tower-test-client/1.0".to_string(),
             ),
-            KeyValue::new(semconv::trace::HTTP_ROUTE, "/api/users/123".to_string()),
-            KeyValue::new(semconv::trace::HTTP_RESPONSE_STATUS_CODE, 200),
+            KeyValue::new(semconv::attribute::HTTP_ROUTE, "/api/users/123".to_string()),
+            KeyValue::new(semconv::attribute::HTTP_RESPONSE_STATUS_CODE, 200),
         ];
 
         assert_eq!(http_span.attributes, expected_attributes);
@@ -777,7 +770,7 @@ mod tests {
 
         let duration_metric = scope_metrics
             .metrics()
-            .find(|m| m.name() == HTTP_SERVER_DURATION_METRIC)
+            .find(|m| m.name() == semconv::metric::HTTP_SERVER_REQUEST_DURATION)
             .expect("Duration metric should exist");
 
         if let AggregatedMetrics::F64(MetricData::Histogram(histogram)) = duration_metric.data() {
@@ -796,31 +789,31 @@ mod tests {
 
             let protocol_name = attributes
                 .iter()
-                .find(|kv| kv.key.as_str() == NETWORK_PROTOCOL_NAME_LABEL)
+                .find(|kv| kv.key.as_str() == semconv::attribute::NETWORK_PROTOCOL_NAME)
                 .expect("Protocol name should be present");
             assert_eq!(protocol_name.value.as_str(), "http");
 
             let protocol_version = attributes
                 .iter()
-                .find(|kv| kv.key.as_str() == NETWORK_PROTOCOL_VERSION_LABEL)
+                .find(|kv| kv.key.as_str() == semconv::attribute::NETWORK_PROTOCOL_VERSION)
                 .expect("Protocol version should be present");
             assert_eq!(protocol_version.value.as_str(), "1.1");
 
             let url_scheme = attributes
                 .iter()
-                .find(|kv| kv.key.as_str() == URL_SCHEME_LABEL)
+                .find(|kv| kv.key.as_str() == semconv::attribute::URL_SCHEME)
                 .expect("URL scheme should be present");
             assert_eq!(url_scheme.value.as_str(), "https");
 
             let method = attributes
                 .iter()
-                .find(|kv| kv.key.as_str() == HTTP_REQUEST_METHOD_LABEL)
+                .find(|kv| kv.key.as_str() == semconv::attribute::HTTP_REQUEST_METHOD)
                 .expect("HTTP method should be present");
             assert_eq!(method.value.as_str(), "GET");
 
             let status_code = attributes
                 .iter()
-                .find(|kv| kv.key.as_str() == HTTP_RESPONSE_STATUS_CODE_LABEL)
+                .find(|kv| kv.key.as_str() == semconv::attribute::HTTP_RESPONSE_STATUS_CODE)
                 .expect("Status code should be present");
             if let opentelemetry::Value::I64(code) = &status_code.value {
                 assert_eq!(*code, 200);
@@ -833,7 +826,7 @@ mod tests {
 
         let request_body_size_metric = scope_metrics
             .metrics()
-            .find(|m| m.name() == HTTP_SERVER_REQUEST_BODY_SIZE_METRIC);
+            .find(|m| m.name() == semconv::metric::HTTP_SERVER_REQUEST_BODY_SIZE);
 
         if let Some(metric) = request_body_size_metric {
             if let AggregatedMetrics::F64(MetricData::Histogram(histogram)) = metric.data() {
@@ -851,7 +844,7 @@ mod tests {
 
                 let method = attributes
                     .iter()
-                    .find(|kv| kv.key.as_str() == HTTP_REQUEST_METHOD_LABEL)
+                    .find(|kv| kv.key.as_str() == semconv::attribute::HTTP_REQUEST_METHOD)
                     .expect("HTTP method should be present in request body size");
                 assert_eq!(method.value.as_str(), "GET");
             }
@@ -860,7 +853,7 @@ mod tests {
         // Test response body size metric
         let response_body_size_metric = scope_metrics
             .metrics()
-            .find(|m| m.name() == HTTP_SERVER_RESPONSE_BODY_SIZE_METRIC);
+            .find(|m| m.name() == semconv::metric::HTTP_SERVER_RESPONSE_BODY_SIZE);
 
         if let Some(metric) = response_body_size_metric {
             if let AggregatedMetrics::F64(MetricData::Histogram(histogram)) = metric.data() {
@@ -878,7 +871,7 @@ mod tests {
 
                 let method = attributes
                     .iter()
-                    .find(|kv| kv.key.as_str() == HTTP_REQUEST_METHOD_LABEL)
+                    .find(|kv| kv.key.as_str() == semconv::attribute::HTTP_REQUEST_METHOD)
                     .expect("HTTP method should be present in response body size");
                 assert_eq!(method.value.as_str(), "GET");
             }
@@ -887,7 +880,7 @@ mod tests {
         // Test active requests metric
         let active_requests_metric = scope_metrics
             .metrics()
-            .find(|m| m.name() == HTTP_SERVER_ACTIVE_REQUESTS_METRIC);
+            .find(|m| m.name() == semconv::metric::HTTP_SERVER_ACTIVE_REQUESTS);
 
         if let Some(metric) = active_requests_metric {
             if let AggregatedMetrics::I64(MetricData::Sum(sum)) = metric.data() {
@@ -902,13 +895,13 @@ mod tests {
 
                 let method = attributes
                     .iter()
-                    .find(|kv| kv.key.as_str() == HTTP_REQUEST_METHOD_LABEL)
+                    .find(|kv| kv.key.as_str() == semconv::attribute::HTTP_REQUEST_METHOD)
                     .expect("HTTP method should be present in active requests");
                 assert_eq!(method.value.as_str(), "GET");
 
                 let url_scheme = attributes
                     .iter()
-                    .find(|kv| kv.key.as_str() == URL_SCHEME_LABEL)
+                    .find(|kv| kv.key.as_str() == semconv::attribute::URL_SCHEME)
                     .expect("URL scheme should be present in active requests");
                 assert_eq!(url_scheme.value.as_str(), "https");
             }

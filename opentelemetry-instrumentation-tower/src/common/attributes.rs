@@ -1,16 +1,7 @@
-//! Common HTTP attribute constants and helpers.
+//! Common HTTP attribute helpers.
 
 use opentelemetry::KeyValue;
 use opentelemetry_semantic_conventions as semconv;
-
-pub(crate) const NETWORK_PROTOCOL_NAME_LABEL: &str = semconv::attribute::NETWORK_PROTOCOL_NAME;
-pub(crate) const NETWORK_PROTOCOL_VERSION_LABEL: &str =
-    semconv::attribute::NETWORK_PROTOCOL_VERSION;
-pub(crate) const URL_SCHEME_LABEL: &str = semconv::attribute::URL_SCHEME;
-pub(crate) const HTTP_REQUEST_METHOD_LABEL: &str = semconv::attribute::HTTP_REQUEST_METHOD;
-pub(crate) const HTTP_ROUTE_LABEL: &str = semconv::attribute::HTTP_ROUTE;
-pub(crate) const HTTP_RESPONSE_STATUS_CODE_LABEL: &str =
-    semconv::attribute::HTTP_RESPONSE_STATUS_CODE;
 
 /// Maps common HTTP methods to a `&'static str` so the resulting `KeyValue`
 /// stores the method as a static string (no heap allocation, allocation-free
@@ -36,8 +27,11 @@ pub(crate) fn method_as_static(m: &http::Method) -> Option<&'static str> {
 /// to a `&'static str` for an allocation-free clone in the hot path.
 pub(crate) fn method_kv(method: &http::Method) -> KeyValue {
     match method_as_static(method) {
-        Some(s) => KeyValue::new(HTTP_REQUEST_METHOD_LABEL, s),
-        None => KeyValue::new(HTTP_REQUEST_METHOD_LABEL, method.as_str().to_owned()),
+        Some(s) => KeyValue::new(semconv::attribute::HTTP_REQUEST_METHOD, s),
+        None => KeyValue::new(
+            semconv::attribute::HTTP_REQUEST_METHOD,
+            method.as_str().to_owned(),
+        ),
     }
 }
 
@@ -45,10 +39,10 @@ pub(crate) fn method_kv(method: &http::Method) -> KeyValue {
 /// schemes to a `&'static str`.
 pub(crate) fn url_scheme_kv(uri: &http::Uri) -> KeyValue {
     match uri.scheme_str() {
-        Some("http") => KeyValue::new(URL_SCHEME_LABEL, "http"),
-        Some("https") => KeyValue::new(URL_SCHEME_LABEL, "https"),
-        Some(other) => KeyValue::new(URL_SCHEME_LABEL, other.to_owned()),
-        None => KeyValue::new(URL_SCHEME_LABEL, ""),
+        Some("http") => KeyValue::new(semconv::attribute::URL_SCHEME, "http"),
+        Some("https") => KeyValue::new(semconv::attribute::URL_SCHEME, "https"),
+        Some(other) => KeyValue::new(semconv::attribute::URL_SCHEME, other.to_owned()),
+        None => KeyValue::new(semconv::attribute::URL_SCHEME, ""),
     }
 }
 
