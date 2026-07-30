@@ -954,8 +954,6 @@ mod tests {
         assert!(err.contains("attribute name must not be blank"));
     }
 
-    /// Scenario: A configured event-name override is present or absent.
-    /// Guarantees: Configuration wins when present and the signal default is used otherwise.
     #[test]
     fn default_event_name_unwrap_or_prefers_override_and_falls_back() {
         let configured = maybe_event_name(true);
@@ -973,8 +971,6 @@ mod tests {
         }
     }
 
-    /// Scenario: Log encoding has a configured default event name.
-    /// Guarantees: The emitted batch uses the configured log event name.
     #[test]
     fn encode_and_compress_logs_uses_configured_default_event_name() {
         let client = build_client(Some("AppLog"), None);
@@ -999,8 +995,6 @@ mod tests {
         assert_eq!(batches[0].event_name, "AppLog");
     }
 
-    /// Scenario: Span encoding has a configured default event name.
-    /// Guarantees: The emitted batch uses the configured span event name.
     #[test]
     fn encode_and_compress_spans_uses_configured_default_event_name() {
         let client = build_client(None, Some("AppTrace"));
@@ -1024,8 +1018,6 @@ mod tests {
         assert_eq!(batches[0].event_name, "AppTrace");
     }
 
-    /// Scenario: An agent-fed source is used to initialize a Geneva client.
-    /// Guarantees: The safer credential constructor remains usable by source implementations.
     #[test]
     fn encode_and_compress_spans_no_mapping_shares_default_name_across_spans() {
         // No routing mapping: every span in the scope resolves to the default
@@ -1558,6 +1550,8 @@ mod tests {
         assert_eq!(batches[0].event_name, "Span");
     }
 
+    /// Scenario: An agent-fed source initializes a Geneva client with a protected token.
+    /// Guarantees: Source implementations can construct credentials through the hardened API.
     #[test]
     fn with_agent_fed_source_builds_usable_client() {
         #[derive(Debug)]

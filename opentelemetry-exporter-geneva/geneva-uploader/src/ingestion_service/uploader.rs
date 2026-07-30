@@ -140,12 +140,10 @@ struct ResolvedIngestion {
 /// Builds a sensitive header whose application-owned buffer is zeroized after
 /// the last request/header clone is dropped. The HTTP/TLS stack may still copy
 /// the bytes into transport-owned buffers.
-fn bearer_authorization_header(token: &SecretString) -> Result<header::HeaderValue> {
-    let token = token.expose_secret().as_bytes();
-    let mut value = Zeroizing::new(Vec::with_capacity(b"Bearer ".len() + token.len()));
-    value.extend_from_slice(b"Bearer ");
-    value.extend_from_slice(token);
-
+fn header_value_from_zeroizing_buffer(value: Zeroizing<Vec<u8>>) -> Result<header::HeaderValue> {
+    // `HeaderValue::from_maybe_shared` avoids copying only for `http`'s
+    // internal `Bytes` type. Passing the zeroizing buffer directly would
+    // copy the token into non-zeroizing header storage.
     let mut header =
         header::HeaderValue::from_maybe_shared(Bytes::from_owner(value)).map_err(|error| {
             GenevaUploaderError::InternalError(format!(
@@ -154,6 +152,14 @@ fn bearer_authorization_header(token: &SecretString) -> Result<header::HeaderVal
         })?;
     header.set_sensitive(true);
     Ok(header)
+}
+
+fn bearer_authorization_header(token: &SecretString) -> Result<header::HeaderValue> {
+    let token = token.expose_secret().as_bytes();
+    let mut value = Zeroizing::new(Vec::with_capacity(b"Bearer ".len() + token.len()));
+    value.extend_from_slice(b"Bearer ");
+    value.extend_from_slice(token);
+    header_value_from_zeroizing_buffer(value)
 }
 
 impl IngestionSource {
@@ -501,8 +507,6 @@ mod tests {
         }
     }
 
-    /// Scenario: Upload routing includes an OBO identity without annotations.
-    /// Guarantees: The identity is encoded and the annotation parameter is omitted.
     #[test]
     fn test_upload_uri_with_obo_identity() {
         let uploader = make_uploader();
@@ -533,8 +537,6 @@ mod tests {
         );
     }
 
-    /// Scenario: Upload routing includes an OBO identity and XML annotations.
-    /// Guarantees: Both values are present and annotations are URL-encoded.
     #[test]
     fn test_upload_uri_with_obo_annotations() {
         let uploader = make_uploader();
@@ -571,8 +573,6 @@ mod tests {
         );
     }
 
-    /// Scenario: Upload routing has no OBO configuration.
-    /// Guarantees: Neither OBO query parameter is emitted.
     #[test]
     fn test_upload_uri_without_obo() {
         let uploader = make_uploader();
@@ -665,17 +665,19 @@ mod tests {
         format!("hdr.{payload}.sig")
     }
 
-    /// Scenario: A bearer token is converted into an HTTP Authorization header.
-    /// Guarantees: The exact value is preserved and marked sensitive.
+    /// Scenario: A zeroizing bearer buffer is converted into an Authorization header.
+    /// Guarantees: The header reuses the original allocation and remains marked sensitive.
     #[test]
-    fn bearer_authorization_header_is_sensitive() {
-        let token = SecretString::from("secret-token");
-        let header = bearer_authorization_header(&token).expect("valid bearer header");
+    fn bearer_authorization_header_reuses_zeroizing_buffer() {
+        let value = Zeroizing::new(b"Bearer secret-token".to_vec());
+        let original_buffer = value.as_ptr();
+        let header = header_value_from_zeroizing_buffer(value).expect("valid bearer header");
 
         assert_eq!(
             header.to_str().expect("ASCII header"),
             "Bearer secret-token"
         );
+        assert_eq!(header.as_bytes().as_ptr(), original_buffer);
         assert!(header.is_sensitive());
     }
 

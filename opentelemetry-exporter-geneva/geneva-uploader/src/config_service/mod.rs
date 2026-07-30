@@ -77,8 +77,6 @@ mod tests {
         Uuid::new_v4().to_string()
     }
 
-    /// Scenario: A config-service client is built with representative fields.
-    /// Guarantees: Construction preserves the configured authentication and routing values.
     #[test]
     fn config_fields() {
         let config = GenevaConfigClientConfig {
@@ -516,8 +514,6 @@ mod tests {
         assert_eq!(token_endpoint, jwt_endpoint);
     }
 
-    /// Scenario: Local managed-identity token acquisition returns a service error.
-    /// Guarantees: The config-service request is skipped and the MSI error is preserved.
     #[tokio::test(flavor = "current_thread")]
     async fn user_managed_identity_by_resource_id_returns_error_on_local_msi_failure() {
         let _env_lock = ENV_LOCK.lock().await;
@@ -574,8 +570,6 @@ mod tests {
         }
     }
 
-    /// Scenario: The config service presents a certificate from an untrusted CA.
-    /// Guarantees: TLS validation rejects the connection.
     #[tokio::test]
     async fn tls_rejects_untrusted_runtime_generated_ca() {
         #[cfg(feature = "tls-rustls")]
@@ -670,8 +664,6 @@ mod tests {
         tls_server.handle.join().unwrap();
     }
 
-    /// Scenario: The config service responds with HTTP 403.
-    /// Guarantees: The client surfaces the response status as a request failure.
     #[cfg_attr(target_os = "macos", ignore)] // cert generated not compatible with macOS
     #[tokio::test]
     async fn error_handling_with_non_success_status() {
@@ -719,8 +711,6 @@ mod tests {
         }
     }
 
-    /// Scenario: A successful response omits ingestion gateway information.
-    /// Guarantees: The client reports the missing authentication data.
     #[cfg_attr(target_os = "macos", ignore)] // cert generated not compatible with macOS
     #[tokio::test]
     async fn missing_ingestion_gateway_info() {
@@ -773,8 +763,6 @@ mod tests {
         }
     }
 
-    /// Scenario: Certificate authentication references a nonexistent PKCS#12 file.
-    /// Guarantees: Client initialization fails without attempting an upload.
     #[cfg_attr(target_os = "macos", ignore)] // cert generated not compatible with macOS
     #[tokio::test]
     async fn invalid_certificate_path() {
