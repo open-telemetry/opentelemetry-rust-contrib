@@ -26,17 +26,17 @@ With the default `axum` feature, applying the middleware is a single layer call:
 
 ```rust
 use axum::{routing::get, Router};
-use opentelemetry_instrumentation_tower::HTTPLayer;
+use opentelemetry_instrumentation_tower::http;
 
 let app: Router = Router::new()
     .route("/", get(|| async { "hello" }))
     // Apply *after* the routes so the matched route template is available.
-    .layer(HTTPLayer::new());
+    .layer(http::server::Layer::new());
 ```
 
 See the [API documentation](https://docs.rs/opentelemetry-instrumentation-tower)
-for emitted metrics, span attributes, customization via `HTTPLayerBuilder`, and
-cardinality guidance.
+for emitted metrics, span attributes, customization via
+`http::server::LayerBuilder`, and cardinality guidance.
 
 ## Examples
 
