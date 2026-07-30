@@ -4,6 +4,13 @@
 
 ### Added
 
+* HTTP client instrumentation layer (`http::client::Layer`) producing a
+  `SpanKind::Client` span and the standard `http.client.*` metrics, and
+  injecting the current trace context into outgoing request headers.
+  Tracing and metrics can be toggled per layer via `with_tracing(bool)` and
+  `with_metrics(bool)` (both enabled by default).
+* Cargo features to select which layers are compiled: `http-server` and
+  `http-client` (both enabled by default).
 * Configurable route extraction with built-in extractors:
   - `NoRouteExtractor` - No route, uses only HTTP method (e.g., `GET`), safest for cardinality
   - `PathExtractor` - Uses the URL path without query params (e.g., `/users/123`)
@@ -12,18 +19,21 @@
 * Default route extractor depends on features:
   - With `axum` feature: Uses `AxumMatchedPathExtractor` (route templates, low cardinality)
   - Without `axum` feature: Uses `NoRouteExtractor` (method only, safest)
+  - The **client** layer always defaults to `NoRouteExtractor` (method-only span names); the
+    `axum` matched-path extractor only applies to server routing.
 * Route extraction now provides both span names and `http.route` metric attribute from the same source
 * Distributed tracing for the HTTP server layer (`SpanKind::Server` spans), in addition to the existing HTTP server metrics
 
 ### Changed
 
-* **BREAKING**: Reorganized the public API into an `http::server` module with
-  unprefixed `Layer`, `LayerBuilder`, `Service`, and `ResponseFuture` types, and
-  moved the extractors into `http::extractors`. The previous `HTTPMetricsLayer` /
-  `HTTPMetricsService` / `HTTPMetricsResponseFuture` / `HTTPMetricsLayerBuilder`
-  types are replaced by `http::server::{Layer, Service, ResponseFuture, LayerBuilder}`.
-* **BREAKING**: Removed the public `with_meter()` builder method. The layer now
-  uses the global meter and tracer providers via `opentelemetry::global::meter()`
+* **BREAKING**: Reorganized the public API into `http::server` and `http::client`
+  modules with unprefixed `Layer`, `LayerBuilder`, `Service`, and `ResponseFuture`
+  types, and moved the extractors into `http::extractors`. The previous
+  `HTTPMetricsLayer` / `HTTPMetricsService` / `HTTPMetricsResponseFuture` /
+  `HTTPMetricsLayerBuilder` types are replaced by
+  `http::server::{Layer, Service, ResponseFuture, LayerBuilder}`.
+* **BREAKING**: Removed the public `with_meter()` builder method. The layers now
+  use the global meter and tracer providers via `opentelemetry::global::meter()`
   and `opentelemetry::global::tracer()`.
 * **BREAKING**: Updated the default `http.server.request.duration` histogram
   boundaries to the OpenTelemetry semantic-conventions defaults.
