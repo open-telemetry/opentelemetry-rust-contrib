@@ -25,6 +25,7 @@ pub(crate) fn method_as_static(m: &http::Method) -> Option<&'static str> {
 
 /// Builds the `http.request.method` [`KeyValue`], promoting well-known methods
 /// to a `&'static str` for an allocation-free clone in the hot path.
+#[inline]
 pub(crate) fn method_kv(method: &http::Method) -> KeyValue {
     match method_as_static(method) {
         Some(s) => KeyValue::new(semconv::attribute::HTTP_REQUEST_METHOD, s),
@@ -37,6 +38,7 @@ pub(crate) fn method_kv(method: &http::Method) -> KeyValue {
 
 /// Builds the `url.scheme` [`KeyValue`], promoting the common `http`/`https`
 /// schemes to a `&'static str`.
+#[inline]
 pub(crate) fn url_scheme_kv(uri: &http::Uri) -> KeyValue {
     match uri.scheme_str() {
         Some("http") => KeyValue::new(semconv::attribute::URL_SCHEME, "http"),
@@ -48,6 +50,7 @@ pub(crate) fn url_scheme_kv(uri: &http::Uri) -> KeyValue {
 
 /// Splits an HTTP version into its `network.protocol.name` and
 /// `network.protocol.version` values.
+#[inline]
 pub(crate) fn split_and_format_protocol_version(
     http_version: http::Version,
 ) -> (&'static str, &'static str) {
