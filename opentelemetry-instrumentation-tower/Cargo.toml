@@ -41,5 +41,10 @@ name = "http_server"
 harness = false
 required-features = ["http-server"]
 
+[[bench]]
+name = "http_client"
+harness = false
+required-features = ["http-client"]
+
 [lints]
 workspace = true
