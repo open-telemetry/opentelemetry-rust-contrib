@@ -37,7 +37,7 @@ xray-exporter = [
 ]
 xray-daemon-client = ["xray-exporter"]
 xray-stdout-client = ["xray-exporter"]
-subsegment-nesting = []
+xray-subsegment-nesting = ["xray-exporter"]
 
 [dependencies]
 http = { version = "1.4.0", optional = true }
@@ -54,7 +54,7 @@ regex = {version = "1.0", optional = true}
 rand = {version = "0.9", optional = true}
 
 [dev-dependencies]
-opentelemetry-aws = {path = ".", features = ["xray-exporter", "subsegment-nesting", "xray-daemon-client"] }
+opentelemetry-aws = {path = ".", features = ["xray-exporter", "xray-subsegment-nesting", "xray-daemon-client"] }
 opentelemetry_sdk = { workspace = true, features = ["testing"] }
 opentelemetry-http = { workspace = true }
 opentelemetry-stdout = { workspace = true, features = ["trace"] }

@@ -81,8 +81,7 @@
 //! | `xray-exporter` | Enables this module |
 //! | `xray-daemon-client` | Enables the [`daemon_client`] sub-module with [`XrayDaemonClient`] for sending segments to the X-Ray daemon over UDP |
 //! | `xray-stdout-client` | Enables the [`stdout_client`] sub-module with [`StdoutClient`] for writing segments to stdout (useful for debugging) |
-//! | `subsegment-nesting` | Enables the use of subsegment nesting via [`SegmentTranslator::always_nest_subsegments`] |
-//! | `internal-logs` | Enables internal `tracing` instrumentation throughout the module |
+//! | `xray-subsegment-nesting` | Enables the use of subsegment nesting via [`SegmentTranslator::always_nest_subsegments`] |
 //!
 //! [`XrayDaemonClient`]: daemon_client::XrayDaemonClient
 //! [`StdoutClient`]: stdout_client::StdoutClient
