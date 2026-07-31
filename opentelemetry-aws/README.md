@@ -68,12 +68,12 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 | Feature | Default | Description |
 |---------|---------|-------------|
 | `trace` | Yes | X-Ray propagator and ID generator |
+| `internal-logs` | Yes | Internal instrumentation via the `tracing` crate |
 | `xray-exporter` | No | X-Ray span exporter with `SegmentTranslator` and `SegmentDocumentExporter` trait |
 | `xray-daemon-client` | No | `XrayDaemonClient` — UDP client for the [X-Ray daemon] |
 | `xray-stdout-client` | No | `StdoutClient` — writes segment documents to stdout (useful for debugging) |
-| `subsegment-nesting` | No | Enables subsegment nesting within parent segments during translation |
+| `xray-subsegment-nesting` | No | Enables subsegment nesting within parent segments during translation |
 | `detector-aws-lambda` | No | AWS Lambda resource detector |
-| `internal-logs` | Yes | Internal instrumentation via the `tracing` crate |
 
 [`OpenTelemetry`]: https://crates.io/crates/opentelemetry
 [X-Ray daemon]: https://docs.aws.amazon.com/xray/latest/devguide/xray-daemon.html
