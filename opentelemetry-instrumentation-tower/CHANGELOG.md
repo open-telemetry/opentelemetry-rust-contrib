@@ -2,17 +2,22 @@
 
 ## vNext
 
+## v0.18.0
+
+Released 2026-Jul-28
+
 ### Added
 
+* Added OpenTelemetry trace support
 * Configurable route extraction with built-in extractors:
-  - `NoRouteExtractor` - No route, uses only HTTP method (e.g., `GET`), safest for cardinality
+  - `NoRouteExtractor` - No route, safest for cardinality
   - `PathExtractor` - Uses the URL path without query params (e.g., `/users/123`)
   - `AxumMatchedPathExtractor` - Uses Axum's `MatchedPath` for route templates (requires `axum` feature)
   - `FnRouteExtractor` - Custom function-based extraction via `with_route_extractor_fn()`
 * Default route extractor depends on features:
   - With `axum` feature: Uses `AxumMatchedPathExtractor` (route templates, low cardinality)
-  - Without `axum` feature: Uses `NoRouteExtractor` (method only, safest)
-* Route extraction now provides both span names and `http.route` metric attribute from the same source
+  - Without `axum` feature: Uses `NoRouteExtractor` (safest)
+* If a route is extracted, the same value is used for both the `http.route` attribute and the tracing span name. If no route is extracted, the span name is the HTTP method only, per semantic conventions.
 
 ### Changed
 
@@ -22,9 +27,8 @@
 * **BREAKING**: Renamed types. Use the new names:
     - `HTTPMetricsLayer` → `HTTPLayer`
     - `HTTPMetricsService` → `HTTPService`
-    - `HTTPMetricsResponseFuture` → `HTTPResponseFuture`
+    - `HTTPMetricsResponseFuture` → `ResponseFuture`
     - `HTTPMetricsLayerBuilder` → `HTTPLayerBuilder`
-* Added OpenTelemetry trace support
 * **BREAKING**: Update default  `http.server.request.duration` histogram boundaries to OTel semantic conventions.
 * **BREAKING**: Remove `with_request_duration_bounds` builder method.
   Alternate histogram bucket boundaries can be applied with the standard OpenTelemetry Views; see `examples` directory in crate for usage.
@@ -92,7 +96,7 @@ let layer = HTTPLayer::new();
 - Replace `HTTPMetricsLayerBuilder` with `HTTPLayerBuilder`
 - Replace `HTTPMetricsLayer` with `HTTPLayer`
 - Replace `HTTPMetricsService` with `HTTPService`
-- Replace `HTTPMetricsResponseFuture` with `HTTPResponseFuture`
+- Replace `HTTPMetricsResponseFuture` with `ResponseFuture`
 
 ## v0.17.0
 
