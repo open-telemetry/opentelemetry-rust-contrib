@@ -127,7 +127,7 @@ jobs:
 
       - name: Stop weaver live-check
         if: always()
-        uses: open-telemetry/weaver/.github/actions/weaver-live-check-stop@9b84f5cd76cb98e8aaf37bc58936b31fe0ddbab4 # v0.24.0
+        uses: open-telemetry/weaver/.github/actions/weaver-live-check-stop@26c685ff52b925056ff1d53476c6022638c01220 # v0.25.1
         with:
           fail-on: violation
 
