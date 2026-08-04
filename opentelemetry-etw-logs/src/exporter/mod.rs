@@ -121,17 +121,18 @@ impl ETWExporter {
 
             part_b::populate_part_b(event, log_record, otel_level, event_id);
 
-            // Write event to ETW
-            let result = event.write(&self.provider, None, None);
-
-            // event.write() above returns 0 for success or a Win32 error from EventWrite for failure.
-            // A nonzero result is an expected, transient runtime condition (e.g. buffer pressure from an
-            // active session), not a programming error. Microsoft documents the code as diagnostic-only:
-            // production code should keep running even if an event cannot be written. Log it and continue
-            // rather than panicking.
-            if result != 0 {
-                otel_debug!(name: "EtwLogs.WriteFailed", error_code = result);
-            }
+            // Write event to ETW.
+            //
+            // event.write() returns 0 for success or a Win32 error from EventWrite for failure.
+            // A nonzero result is an expected, transient runtime condition (e.g. buffer pressure from
+            // an active session), not a programming error. Microsoft documents the code as
+            // diagnostic-only: production code should keep running even if an event cannot be written,
+            // so the failed event is simply dropped.
+            //
+            // We intentionally do not log or assert here. Emitting logs from the exporter's export path
+            // can re-enter the log pipeline and cause an infinite loop / stack overflow, and asserting
+            // would terminate the host process in debug and debug-assertions-enabled builds.
+            let _ = event.write(&self.provider, None, None);
         })
     }
 

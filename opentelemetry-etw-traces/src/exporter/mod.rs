@@ -11,7 +11,7 @@ mod part_c;
 
 pub(crate) use options::Options;
 
-use opentelemetry::{otel_debug, Key};
+use opentelemetry::Key;
 use opentelemetry_sdk::error::{OTelSdkError, OTelSdkResult};
 use opentelemetry_sdk::trace::SpanData;
 use std::borrow::Cow;
@@ -126,17 +126,18 @@ impl ETWExporter {
             // Part B: span payload (_typeName, name, kind, startTime, parentId, links, statusMessage, success)
             part_b::populate_part_b(event, span_data, field_tag);
 
-            // Write event to ETW
-            let result = event.write(&self.provider, None, None);
-
+            // Write event to ETW.
+            //
             // event.write() returns 0 for success or a Win32 error from EventWrite for failure.
-            // A nonzero result is an expected, transient runtime condition (e.g. buffer pressure from an
-            // active session), not a programming error. Microsoft documents the code as diagnostic-only:
-            // production code should keep running even if an event cannot be written. Log it and continue
-            // rather than panicking.
-            if result != 0 {
-                otel_debug!(name: "EtwTraces.WriteFailed", error_code = result);
-            }
+            // A nonzero result is an expected, transient runtime condition (e.g. buffer pressure from
+            // an active session), not a programming error. Microsoft documents the code as
+            // diagnostic-only: production code should keep running even if an event cannot be written,
+            // so the failed event is simply dropped.
+            //
+            // We intentionally do not log or assert here. Emitting logs from the exporter's export path
+            // can re-enter the log pipeline and cause an infinite loop / stack overflow, and asserting
+            // would terminate the host process in debug and debug-assertions-enabled builds.
+            let _ = event.write(&self.provider, None, None);
         });
     }
 
