@@ -11,58 +11,37 @@
   `with_metrics(bool)` (both enabled by default).
 * Cargo features to select which layers are compiled: `http-server` and
   `http-client` (both enabled by default).
-* Configurable route extraction with built-in extractors:
-  - `NoRouteExtractor` - No route, uses only HTTP method (e.g., `GET`), safest for cardinality
-  - `PathExtractor` - Uses the URL path without query params (e.g., `/users/123`)
-  - `AxumMatchedPathExtractor` - Uses Axum's `MatchedPath` for route templates (requires `axum` feature)
-  - `FnRouteExtractor` - Custom function-based extraction via `with_route_extractor_fn()`
-* Default route extractor depends on features:
-  - With `axum` feature: Uses `AxumMatchedPathExtractor` (route templates, low cardinality)
-  - Without `axum` feature: Uses `NoRouteExtractor` (method only, safest)
-  - The **client** layer always defaults to `NoRouteExtractor` (method-only span names); the
-    `axum` matched-path extractor only applies to server routing.
-* Route extraction now provides both span names and `http.route` metric attribute from the same source
-* Distributed tracing for the HTTP server layer (`SpanKind::Server` spans), in addition to the existing HTTP server metrics
+* The **client** layer always defaults to `NoRouteExtractor` (method-only span
+  names); the `axum` matched-path extractor only applies to server routing.
 
 ### Changed
 
 * **BREAKING**: Reorganized the public API into `http::server` and `http::client`
   modules with unprefixed `Layer`, `LayerBuilder`, `Service`, and `ResponseFuture`
-  types, and moved the extractors into `http::extractors`. The previous
-  `HTTPMetricsLayer` / `HTTPMetricsService` / `HTTPMetricsResponseFuture` /
-  `HTTPMetricsLayerBuilder` types are replaced by
+  types, and moved the extractors into `http::extractors`. The `HTTPLayer` /
+  `HTTPService` / `HTTPLayerBuilder` / `ResponseFuture` types introduced in
+  v0.18.0 are replaced by
   `http::server::{Layer, Service, ResponseFuture, LayerBuilder}`.
-* **BREAKING**: Removed the public `with_meter()` builder method. The layers now
-  use the global meter and tracer providers via `opentelemetry::global::meter()`
-  and `opentelemetry::global::tracer()`.
-* **BREAKING**: Updated the default `http.server.request.duration` histogram
-  boundaries to the OpenTelemetry semantic-conventions defaults.
-* **BREAKING**: Removed the `with_request_duration_bounds` builder method.
-  Customize histogram boundaries with OpenTelemetry Views instead; see the
-  `examples` directory in the crate for usage.
 
 ### Migration Guide
 
 #### Type and module changes
 
-The former flat, `HTTPMetrics*`-prefixed types now live under `http::server`:
+The former flat, `HTTP*`-prefixed types now live under `http::server`:
 
-- `HTTPMetricsLayer` → `http::server::Layer`
-- `HTTPMetricsLayerBuilder` → `http::server::LayerBuilder`
-- `HTTPMetricsService` → `http::server::Service`
-- `HTTPMetricsResponseFuture` → `http::server::ResponseFuture`
+- `HTTPLayer` → `http::server::Layer`
+- `HTTPLayerBuilder` → `http::server::LayerBuilder`
+- `HTTPService` → `http::server::Service`
+- `ResponseFuture` → `http::server::ResponseFuture`
 
 Route and attribute extractors moved to `http::extractors`.
 
 Before:
 
 ```rust
-use opentelemetry_instrumentation_tower::HTTPMetricsLayerBuilder;
+use opentelemetry_instrumentation_tower::HTTPLayerBuilder;
 
-let layer = HTTPMetricsLayerBuilder::builder()
-    .with_meter(meter)
-    .build()
-    .unwrap();
+let layer = HTTPLayerBuilder::builder().build().unwrap();
 ```
 
 After:
@@ -70,11 +49,6 @@ After:
 ```rust
 use opentelemetry_instrumentation_tower::http::server;
 
-// Configure the global providers once, before building the layer.
-global::set_meter_provider(meter_provider);
-global::set_tracer_provider(tracer_provider); // for tracing support
-
-// Simplest form — reads the global providers.
 let layer = server::Layer::new();
 ```
 
@@ -106,6 +80,102 @@ let layer = LayerBuilder::builder()
     .build()
     .unwrap();
 ```
+
+## v0.18.0
+
+Released 2026-Jul-28
+
+### Added
+
+* Added OpenTelemetry trace support
+* Configurable route extraction with built-in extractors:
+  - `NoRouteExtractor` - No route, safest for cardinality
+  - `PathExtractor` - Uses the URL path without query params (e.g., `/users/123`)
+  - `AxumMatchedPathExtractor` - Uses Axum's `MatchedPath` for route templates (requires `axum` feature)
+  - `FnRouteExtractor` - Custom function-based extraction via `with_route_extractor_fn()`
+* Default route extractor depends on features:
+  - With `axum` feature: Uses `AxumMatchedPathExtractor` (route templates, low cardinality)
+  - Without `axum` feature: Uses `NoRouteExtractor` (safest)
+* If a route is extracted, the same value is used for both the `http.route` attribute and the tracing span name. If no route is extracted, the span name is the HTTP method only, per semantic conventions.
+
+### Changed
+
+* **BREAKING**: Removed public `with_meter()` method. The middleware now uses global meter and tracer providers by
+  default via `opentelemetry::global::meter()` and `opentelemetry::global::tracer()`. The `with_meter()` method is
+  retained as a non-public test utility to allow injecting custom meters without relying on global state.
+* **BREAKING**: Renamed types. Use the new names:
+    - `HTTPMetricsLayer` → `HTTPLayer`
+    - `HTTPMetricsService` → `HTTPService`
+    - `HTTPMetricsResponseFuture` → `ResponseFuture`
+    - `HTTPMetricsLayerBuilder` → `HTTPLayerBuilder`
+* **BREAKING**: Update default  `http.server.request.duration` histogram boundaries to OTel semantic conventions.
+* **BREAKING**: Remove `with_request_duration_bounds` builder method.
+  Alternate histogram bucket boundaries can be applied with the standard OpenTelemetry Views; see `examples` directory in crate for usage.
+
+### Migration Guide
+
+#### Route Extraction Configuration
+
+```rust
+use opentelemetry_instrumentation_tower::{
+    HTTPLayerBuilder,
+    NoRouteExtractor,
+    PathExtractor,
+};
+
+// No route (default without axum feature) - span name: "GET"
+let layer = HTTPLayerBuilder::builder()
+    .with_route_extractor(NoRouteExtractor)
+    .build()
+    .unwrap();
+
+// Path (strips query params) - span name: "GET /users/123"
+let layer = HTTPLayerBuilder::builder()
+    .with_route_extractor(PathExtractor)
+    .build()
+    .unwrap();
+
+// Custom function - return Some(route) or None for method-only
+let layer = HTTPLayerBuilder::builder()
+    .with_route_extractor_fn(|req: &http::Request<_>| {
+        Some(req.uri().path().to_owned())
+    })
+    .build()
+    .unwrap();
+```
+
+#### API Changes
+
+Before:
+
+```rust
+use opentelemetry_instrumentation_tower::HTTPMetricsLayerBuilder;
+
+let layer = HTTPMetricsLayerBuilder::builder()
+.with_meter(meter)
+.build()
+.unwrap();
+```
+
+After:
+
+```rust
+use opentelemetry_instrumentation_tower::HTTPLayer;
+
+// Set global providers
+global::set_meter_provider(meter_provider);
+global::set_tracer_provider(tracer_provider); // for tracing support
+
+// Then create the layer - simple API using global providers
+let layer = HTTPLayer::new();
+```
+
+#### Type Name Changes
+
+- Replace `HTTPMetricsLayerBuilder` with `HTTPLayerBuilder`
+- Replace `HTTPMetricsLayer` with `HTTPLayer`
+- Replace `HTTPMetricsService` with `HTTPService`
+- Replace `HTTPMetricsResponseFuture` with `ResponseFuture`
 
 ## v0.17.0
 
