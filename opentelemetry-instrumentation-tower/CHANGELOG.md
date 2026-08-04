@@ -4,27 +4,40 @@
 
 ### Added
 
+* `HTTPLayerBuilder::with_tracing(bool)` and `HTTPLayerBuilder::with_metrics(bool)`
+  to enable or disable each signal for a layer (both default to enabled).
+  Disabling tracing does not stop context propagation: incoming trace headers are
+  still extracted and the current context still flows to the inner service.
+* The instrumentation scope now carries the OpenTelemetry semantic conventions
+  schema URL.
+
+## v0.18.0
+
+Released 2026-Jul-28
+
+### Added
+
+* Added OpenTelemetry trace support
 * Configurable route extraction with built-in extractors:
-  - `NoRouteExtractor` - No route, uses only HTTP method (e.g., `GET`), safest for cardinality
+  - `NoRouteExtractor` - No route, safest for cardinality
   - `PathExtractor` - Uses the URL path without query params (e.g., `/users/123`)
   - `AxumMatchedPathExtractor` - Uses Axum's `MatchedPath` for route templates (requires `axum` feature)
   - `FnRouteExtractor` - Custom function-based extraction via `with_route_extractor_fn()`
 * Default route extractor depends on features:
   - With `axum` feature: Uses `AxumMatchedPathExtractor` (route templates, low cardinality)
-  - Without `axum` feature: Uses `NoRouteExtractor` (method only, safest)
-* Route extraction now provides both span names and `http.route` metric attribute from the same source
-* Added `HTTPLayerBuilder::with_tracing(bool)` and `HTTPLayerBuilder::with_metrics(bool)` to enable or disable each signal for a layer (both default to enabled). Disabling tracing does not stop context propagation: incoming trace headers are still extracted and the current context still flows to the inner service.
+  - Without `axum` feature: Uses `NoRouteExtractor` (safest)
+* If a route is extracted, the same value is used for both the `http.route` attribute and the tracing span name. If no route is extracted, the span name is the HTTP method only, per semantic conventions.
 
 ### Changed
 
-* **BREAKING**: Replaced `with_meter()` with global providers plus per-layer `with_tracing(bool)`/`with_metrics(bool)` toggles. The middleware always uses the global meter and tracer providers; configure the backend once via the OpenTelemetry global providers.
+* **BREAKING**: Removed public `with_meter()` method. The middleware now uses global meter and tracer providers by
+  default via `opentelemetry::global::meter()` and `opentelemetry::global::tracer()`. The `with_meter()` method is
+  retained as a non-public test utility to allow injecting custom meters without relying on global state.
 * **BREAKING**: Renamed types. Use the new names:
     - `HTTPMetricsLayer` → `HTTPLayer`
     - `HTTPMetricsService` → `HTTPService`
     - `HTTPMetricsResponseFuture` → `ResponseFuture`
     - `HTTPMetricsLayerBuilder` → `HTTPLayerBuilder`
-* Added OpenTelemetry trace support
-* Tower instrumentation now sets the OpenTelemetry semantic conventions schema URL on its instrumentation scope
 * **BREAKING**: Update default  `http.server.request.duration` histogram boundaries to OTel semantic conventions.
 * **BREAKING**: Remove `with_request_duration_bounds` builder method.
   Alternate histogram bucket boundaries can be applied with the standard OpenTelemetry Views; see `examples` directory in crate for usage.
@@ -77,7 +90,7 @@ let layer = HTTPMetricsLayerBuilder::builder()
 After:
 
 ```rust
-use opentelemetry_instrumentation_tower::{HTTPLayer, HTTPLayerBuilder};
+use opentelemetry_instrumentation_tower::HTTPLayer;
 
 // Set global providers
 global::set_meter_provider(meter_provider);
@@ -85,13 +98,6 @@ global::set_tracer_provider(tracer_provider); // for tracing support
 
 // Then create the layer - simple API using global providers
 let layer = HTTPLayer::new();
-
-// Or disable a signal for this layer (both are enabled by default)
-let layer = HTTPLayerBuilder::builder()
-    .with_tracing(false)
-    .with_metrics(true)
-    .build()
-    .unwrap();
 ```
 
 #### Type Name Changes
@@ -99,7 +105,7 @@ let layer = HTTPLayerBuilder::builder()
 - Replace `HTTPMetricsLayerBuilder` with `HTTPLayerBuilder`
 - Replace `HTTPMetricsLayer` with `HTTPLayer`
 - Replace `HTTPMetricsService` with `HTTPService`
-- Replace `HTTPMetricsResponseFuture` with `HTTPResponseFuture`
+- Replace `HTTPMetricsResponseFuture` with `ResponseFuture`
 
 ## v0.17.0
 

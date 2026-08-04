@@ -4,6 +4,7 @@
 
 ### Added
 - Forwarded `tls-native` (default) and `tls-rustls` feature flags from `geneva-uploader`. Build with `--no-default-features --features tls-rustls` to use the pure-Rust TLS backend (required for FIPS / OpenSSL-free deployments that install a custom `rustls::crypto::CryptoProvider`).
+- Attribute-based event/table-name routing for logs and spans exposed over the C ABI. `GenevaConfig` gained `logs_default_event_name`, `logs_event_name_mapping`, `spans_default_event_name`, and `spans_event_name_mapping` fields (appended after `obo_map`). The `GenevaLogsEventNameMapping` / `GenevaSpansEventNameMapping` structs describe a `routing_key_kind` (+ optional `routing_key_name`) and a source→destination `entries` table. A null mapping pointer disables routing; a non-null mapping is fully validated (routing-kind/name consistency, non-null entries with `count > 0`, non-blank routing-key names and source values).
 
 ### Changed
 - Bump opentelemetry-proto version to 0.32.

@@ -142,12 +142,14 @@ async fn main() {
         role_name,
         role_instance,
         msi_resource: None,
-        logs: LogsConfig {
+        logs: Some(LogsConfig {
             default_event_name: None,
-        },
-        spans: TracesConfig {
+            event_name_mapping: None,
+        }),
+        spans: Some(TracesConfig {
             default_event_name: None,
-        },
+            event_name_mapping: None,
+        }),
         obo_event_map: None,
     })
     .expect("Failed to create GenevaClient");
