@@ -125,10 +125,12 @@ impl ETWExporter {
             let result = event.write(&self.provider, None, None);
 
             // event.write() above returns 0 for success or a Win32 error from EventWrite for failure.
-            // The return value is for diagnostic purposes only and should generally be ignored in retail builds.
-            match result {
-                0 => (),
-                _ => debug_assert!(false, "Failed to write event to ETW. ETW reason: {result}"),
+            // A nonzero result is an expected, transient runtime condition (e.g. buffer pressure from an
+            // active session), not a programming error. Microsoft documents the code as diagnostic-only:
+            // production code should keep running even if an event cannot be written. Log it and continue
+            // rather than panicking.
+            if result != 0 {
+                otel_debug!(name: "EtwLogs.WriteFailed", error_code = result);
             }
         })
     }
