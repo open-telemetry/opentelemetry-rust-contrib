@@ -20,6 +20,7 @@ mod tests {
         },
     };
     use rcgen::generate_simple_self_signed;
+    use secrecy::ExposeSecret;
     use std::io::{Read, Write};
     use std::net::TcpListener;
     use std::path::PathBuf;
@@ -390,6 +391,8 @@ mod tests {
         (response.to_string(), jwt_endpoint, valid_token)
     }
 
+    /// Scenario: Certificate auth retrieves ingestion routing from a mock config service.
+    /// Guarantees: The returned token and routing preserve the service response.
     #[cfg_attr(target_os = "macos", ignore)] // cert generated not compatible with macOS
     #[tokio::test]
     async fn get_ingestion_info_mocked() {
@@ -428,7 +431,8 @@ mod tests {
             client.get_ingestion_info().await.unwrap();
 
         assert_eq!(ingestion_info.endpoint, "https://mock.ingestion.endpoint");
-        assert_eq!(ingestion_info.auth_token, valid_token);
+        assert_eq!(ingestion_info.auth_token.expose_secret(), valid_token);
+        assert!(!format!("{ingestion_info:?}").contains(valid_token));
         assert_eq!(
             ingestion_info.auth_token_expiry_time,
             "2030-01-01T00:00:00Z"
@@ -440,6 +444,8 @@ mod tests {
         assert_eq!(token_endpoint, jwt_endpoint);
     }
 
+    /// Scenario: A resource-ID managed identity authenticates to the config service.
+    /// Guarantees: The resolved ingestion token remains correct after secret wrapping.
     #[tokio::test(flavor = "current_thread")]
     async fn user_managed_identity_by_resource_id_uses_local_msi_res_id_endpoint() {
         let _env_lock = ENV_LOCK.lock().await;
@@ -503,7 +509,7 @@ mod tests {
             client.get_ingestion_info().await.unwrap();
 
         assert_eq!(ingestion_info.endpoint, "https://mock.ingestion.endpoint");
-        assert_eq!(ingestion_info.auth_token, valid_token);
+        assert_eq!(ingestion_info.auth_token.expose_secret(), valid_token);
         assert_eq!(moniker_info.name, "mock-diag-moniker");
         assert_eq!(token_endpoint, jwt_endpoint);
     }
@@ -607,6 +613,8 @@ mod tests {
         tls_server.handle.join().unwrap();
     }
 
+    /// Scenario: A trusted runtime-generated CA secures the config-service response.
+    /// Guarantees: The secret-wrapped token and routing survive TLS retrieval.
     #[tokio::test]
     async fn tls_accepts_runtime_generated_ca() {
         #[cfg(feature = "tls-rustls")]
@@ -645,7 +653,7 @@ mod tests {
             client.get_ingestion_info().await.unwrap();
 
         assert_eq!(ingestion_info.endpoint, "https://mock.ingestion.endpoint");
-        assert_eq!(ingestion_info.auth_token, valid_token);
+        assert_eq!(ingestion_info.auth_token.expose_secret(), valid_token);
         assert_eq!(
             ingestion_info.auth_token_expiry_time,
             "2030-01-01T00:00:00Z"
@@ -802,6 +810,8 @@ mod tests {
     // cargo test get_ingestion_info_real_server -- --ignored
     // ```
     use std::env;
+    /// Scenario: An operator explicitly runs the real config-service smoke test.
+    /// Guarantees: Returned secret-wrapped credentials are non-empty without logging them.
     #[tokio::test]
     #[ignore] // This test is ignored by default to prevent running in CI pipelines
     async fn get_ingestion_info_real_server() {
@@ -854,7 +864,7 @@ mod tests {
             "Endpoint should not be empty"
         );
         assert!(
-            !ingestion_info.auth_token.is_empty(),
+            !ingestion_info.auth_token.expose_secret().is_empty(),
             "Auth token should not be empty"
         );
         assert!(!moniker.name.is_empty(), "Moniker name should not be empty");
@@ -865,7 +875,7 @@ mod tests {
 
         println!("Successfully connected to real server");
         println!("Endpoint: {}", ingestion_info.endpoint);
-        let token_len = ingestion_info.auth_token.len();
+        let token_len = ingestion_info.auth_token.expose_secret().len();
         println!("Auth token length: {token_len}");
         println!("Moniker name: {}", moniker.name);
     }
