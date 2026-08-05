@@ -2,6 +2,10 @@
 
 ## vNext
 
+## v0.20.1
+
+Released 2026-Aug-05
+
 - **DEPRECATED**: This crate is now deprecated and will be removed from this
   repository in a future release. Datadog ships a first-party integration,
   [`dd-trace-rs`](https://github.com/DataDog/dd-trace-rs), built on top of
