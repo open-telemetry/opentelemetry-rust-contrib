@@ -25,7 +25,7 @@ native-tls = { version = "0.2", optional = true }
 rustls = { version = "0.23", default-features = false, features = ["std", "tls12"], optional = true }
 rustls-pki-types = { version = "1.9", features = ["std"], optional = true }
 rustls-native-certs = { version = "0.8", optional = true }
-p12-keystore = { version = "0.2", optional = true }
+p12-keystore = { version = "0.3", optional = true }
 thiserror = "2.0"
 chrono = "0.4"
 url = "2.2"
