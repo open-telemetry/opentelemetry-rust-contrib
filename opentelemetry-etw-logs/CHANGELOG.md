@@ -2,13 +2,6 @@
 
 ## vNext
 
-- A failed ETW event write (`EventBuilder::write` returning a
-  nonzero Win32 error) no longer triggers a `debug_assert!` panic. ETW write
-  failures are expected, transient runtime conditions (e.g. buffer pressure from
-  an active session) that Microsoft documents as diagnostic-only, so the failed
-  event is now silently dropped and the exporter continues, instead of
-  terminating the process in debug or `debug-assertions`-enabled builds.
-
 ## v0.11.0
 
 - Bump opentelemetry and opentelemetry_sdk versions to 0.32
