@@ -2,6 +2,10 @@
 
 ## vNext
 
+## v0.29.1
+
+Released 2026-Aug-05
+
 - **DEPRECATED**: This crate is now deprecated and will be removed from this
   repository in a future release. The crate has been unmaintained, and no
   committed maintainer stepped up in response to
