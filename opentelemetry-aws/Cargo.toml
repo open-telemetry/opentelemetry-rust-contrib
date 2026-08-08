@@ -23,7 +23,13 @@ default = ["trace", "internal-logs"]
 internal-logs = ["dep:tracing"]
 
 trace = ["http", "opentelemetry/trace", "opentelemetry_sdk/trace"]
-detector-aws-lambda = ["dep:opentelemetry-semantic-conventions"]
+
+_detector = ["dep:opentelemetry_sdk", "dep:opentelemetry-semantic-conventions"]
+_detector-http = ["dep:ureq", "dep:serde", "dep:thiserror"]
+detector-aws-lambda = ["_detector"]
+detector-aws-ec2 = ["_detector", "_detector-http"]
+detector-aws-ecs = ["_detector", "_detector-http"]
+detector-aws-eks = ["_detector", "_detector-http"]
 
 xray-exporter = [
     "opentelemetry/trace",
@@ -52,6 +58,7 @@ serde_json = {version = "1.0", optional = true}
 thiserror = {version = "2.0", optional = true}
 regex = {version = "1.0", optional = true}
 rand = {version = "0.9", optional = true}
+ureq = { version = "3.2", default-features = false, features = ["json"], optional = true }
 
 [dev-dependencies]
 opentelemetry-aws = {path = ".", features = ["xray-exporter", "subsegment-nesting", "xray-daemon-client"] }
