@@ -2,6 +2,85 @@
 
 ## vNext
 
+### Added
+
+* HTTP client instrumentation layer (`http::client::Layer`) producing a
+  `SpanKind::Client` span and the standard `http.client.*` metrics, and
+  injecting the current trace context into outgoing request headers.
+  Tracing and metrics can be toggled per layer via `with_tracing(bool)` and
+  `with_metrics(bool)` (both enabled by default).
+* Cargo features to select which layers are compiled: `http-server` and
+  `http-client` (both enabled by default).
+* The **client** layer always defaults to `NoRouteExtractor` (method-only span
+  names); the `axum` matched-path extractor only applies to server routing.
+
+### Changed
+
+* **BREAKING**: Reorganized the public API into `http::server` and `http::client`
+  modules with unprefixed `Layer`, `LayerBuilder`, `Service`, and `ResponseFuture`
+  types, and moved the extractors into `http::extractors`. The `HTTPLayer` /
+  `HTTPService` / `HTTPLayerBuilder` / `ResponseFuture` types introduced in
+  v0.18.0 are replaced by
+  `http::server::{Layer, Service, ResponseFuture, LayerBuilder}`.
+
+### Migration Guide
+
+#### Type and module changes
+
+The former flat, `HTTP*`-prefixed types now live under `http::server`:
+
+- `HTTPLayer` → `http::server::Layer`
+- `HTTPLayerBuilder` → `http::server::LayerBuilder`
+- `HTTPService` → `http::server::Service`
+- `ResponseFuture` → `http::server::ResponseFuture`
+
+Route and attribute extractors moved to `http::extractors`.
+
+Before:
+
+```rust
+use opentelemetry_instrumentation_tower::HTTPLayerBuilder;
+
+let layer = HTTPLayerBuilder::builder().build().unwrap();
+```
+
+After:
+
+```rust
+use opentelemetry_instrumentation_tower::http::server;
+
+let layer = server::Layer::new();
+```
+
+#### Route extraction configuration
+
+```rust
+use opentelemetry_instrumentation_tower::http::{
+    extractors::{NoRouteExtractor, PathExtractor},
+    server::LayerBuilder,
+};
+
+// No route (default without axum feature) - span name: "GET"
+let layer = LayerBuilder::builder()
+    .with_route_extractor(NoRouteExtractor)
+    .build()
+    .unwrap();
+
+// Path (strips query params) - span name: "GET /users/123"
+let layer = LayerBuilder::builder()
+    .with_route_extractor(PathExtractor)
+    .build()
+    .unwrap();
+
+// Custom function - return Some(route) or None for method-only
+let layer = LayerBuilder::builder()
+    .with_route_extractor_fn(|req: &http::Request<_>| {
+        Some(req.uri().path().to_owned())
+    })
+    .build()
+    .unwrap();
+```
+
 ## v0.18.0
 
 Released 2026-Jul-28
