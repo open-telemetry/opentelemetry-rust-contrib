@@ -1,7 +1,7 @@
 use axum::routing::{get, post, put, Router};
 use bytes::Bytes;
 use opentelemetry::global;
-use opentelemetry_instrumentation_tower::HTTPLayerBuilder;
+use opentelemetry_instrumentation_tower::http::server::LayerBuilder;
 use opentelemetry_otlp::{MetricExporter, SpanExporter};
 use opentelemetry_sdk::metrics::Aggregation::ExplicitBucketHistogram;
 use opentelemetry_sdk::metrics::{Instrument, Stream};
@@ -106,7 +106,7 @@ async fn main() {
         global::set_tracer_provider(provider);
     }
 
-    let otel_service_layer = HTTPLayerBuilder::builder().build().unwrap();
+    let otel_service_layer = LayerBuilder::builder().build().unwrap();
 
     let app = Router::new()
         .route("/", get(handle))
