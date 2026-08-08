@@ -2,6 +2,15 @@
 
 ## vNext
 
+### Added
+
+* `HTTPLayerBuilder::with_tracing(bool)` and `HTTPLayerBuilder::with_metrics(bool)`
+  to enable or disable each signal for a layer (both default to enabled).
+  Disabling tracing does not stop context propagation: incoming trace headers are
+  still extracted and the current context still flows to the inner service.
+* The instrumentation scope now carries the OpenTelemetry semantic conventions
+  schema URL.
+
 ## v0.18.0
 
 Released 2026-Jul-28
