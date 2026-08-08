@@ -2,7 +2,10 @@ use crate::config_service::client::{
     extract_endpoint_from_token, GenevaConfigClient, GenevaConfigClientError,
 };
 use crate::payload_encoder::central_blob::BatchMetadata;
+use bytes::Bytes;
 use reqwest::{header, Client};
+use secrecy::zeroize::Zeroizing;
+use secrecy::{ExposeSecret, SecretString};
 use serde::Deserialize;
 use serde_json::Value;
 use std::collections::HashMap;
@@ -128,10 +131,35 @@ pub(crate) enum IngestionSource {
 
 /// Credential + routing resolved for a single upload, independent of source.
 struct ResolvedIngestion {
-    token: String,
+    token: SecretString,
     gig_endpoint: String,
     moniker: String,
     endpoint_query_param: String,
+}
+
+/// Builds a sensitive header whose application-owned buffer is zeroized after
+/// the last request/header clone is dropped. The HTTP/TLS stack may still copy
+/// the bytes into transport-owned buffers.
+fn header_value_from_zeroizing_buffer(value: Zeroizing<Vec<u8>>) -> Result<header::HeaderValue> {
+    // `HeaderValue::from_maybe_shared` avoids copying only for `http`'s
+    // internal `Bytes` type. Passing the zeroizing buffer directly would
+    // copy the token into non-zeroizing header storage.
+    let mut header =
+        header::HeaderValue::from_maybe_shared(Bytes::from_owner(value)).map_err(|error| {
+            GenevaUploaderError::InternalError(format!(
+                "Invalid bearer token for Authorization header: {error}"
+            ))
+        })?;
+    header.set_sensitive(true);
+    Ok(header)
+}
+
+fn bearer_authorization_header(token: &SecretString) -> Result<header::HeaderValue> {
+    let token = token.expose_secret().as_bytes();
+    let mut value = Zeroizing::new(Vec::with_capacity(b"Bearer ".len() + token.len()));
+    value.extend_from_slice(b"Bearer ");
+    value.extend_from_slice(token);
+    header_value_from_zeroizing_buffer(value)
 }
 
 impl IngestionSource {
@@ -165,12 +193,13 @@ impl IngestionSource {
                 // agent-fed path must do the same. Some valid tokens legitimately
                 // omit the claim; mirror the GCS path and fall back to the
                 // credential's own endpoint rather than rejecting the upload.
-                let endpoint_query_param = extract_endpoint_from_token(&cred.token)
+                let endpoint_query_param = extract_endpoint_from_token(cred.expose_token())
                     .unwrap_or_else(|_| cred.endpoint.clone());
+                let (token, gig_endpoint, moniker) = cred.into_parts();
                 Ok(ResolvedIngestion {
-                    token: cred.token,
-                    gig_endpoint: cred.endpoint,
-                    moniker: cred.moniker,
+                    token,
+                    gig_endpoint,
+                    moniker,
                     endpoint_query_param,
                 })
             }
@@ -366,10 +395,12 @@ impl GenevaUploader {
             "Posting to ingestion gateway"
         );
 
+        let authorization_header = bearer_authorization_header(&auth_token)?;
+        drop(auth_token);
         let response = self
             .http_client
             .post(&full_url)
-            .header(header::AUTHORIZATION, format!("Bearer {auth_token}"))
+            .header(header::AUTHORIZATION, authorization_header)
             .body(data)
             .send()
             .await?;
@@ -596,11 +627,11 @@ mod tests {
 
     impl crate::client::AgentFedCredentialSource for TestAgentFedSource {
         fn current(&self) -> crate::client::AgentFedCredentialFuture<'_> {
-            let cred = crate::client::AgentFedCredential {
-                token: self.token.lock().unwrap().clone(),
-                endpoint: self.endpoint.clone(),
-                moniker: self.moniker.clone(),
-            };
+            let cred = crate::client::AgentFedCredential::new(
+                self.token.lock().unwrap().clone(),
+                self.endpoint.clone(),
+                self.moniker.clone(),
+            );
             Box::pin(async move { Some(cred) })
         }
     }
@@ -634,6 +665,24 @@ mod tests {
         format!("hdr.{payload}.sig")
     }
 
+    /// Scenario: A zeroizing bearer buffer is converted into an Authorization header.
+    /// Guarantees: The header reuses the original allocation and remains marked sensitive.
+    #[test]
+    fn bearer_authorization_header_reuses_zeroizing_buffer() {
+        let value = Zeroizing::new(b"Bearer secret-token".to_vec());
+        let original_buffer = value.as_ptr();
+        let header = header_value_from_zeroizing_buffer(value).expect("valid bearer header");
+
+        assert_eq!(
+            header.to_str().expect("ASCII header"),
+            "Bearer secret-token"
+        );
+        assert_eq!(header.as_bytes().as_ptr(), original_buffer);
+        assert!(header.is_sensitive());
+    }
+
+    /// Scenario: An agent-fed upload uses a claimless host credential.
+    /// Guarantees: The uploader skips GCS and sends the host token directly.
     #[tokio::test]
     async fn agent_fed_upload_uses_host_token_and_skips_gcs() {
         use wiremock::matchers::{header, method, path};
@@ -670,6 +719,8 @@ mod tests {
         // mock_server drop verifies exactly one POST carrying the host token.
     }
 
+    /// Scenario: The host rotates its agent-fed bearer token between uploads.
+    /// Guarantees: Each upload resolves and sends the currently provisioned token.
     #[tokio::test]
     async fn agent_fed_upload_reflects_token_rotation() {
         use wiremock::matchers::{header, method, path};
@@ -710,6 +761,8 @@ mod tests {
         // Both `.expect(1)` mocks verify each token was used exactly once.
     }
 
+    /// Scenario: The agent-fed source has no credential provisioned.
+    /// Guarantees: Upload fails with the specific not-provisioned error.
     #[tokio::test]
     async fn agent_fed_upload_errors_when_not_provisioned() {
         let uploader = agent_fed_uploader(Arc::new(EmptyAgentFedSource));
@@ -722,6 +775,8 @@ mod tests {
         );
     }
 
+    /// Scenario: The agent-fed token carries an Endpoint claim.
+    /// Guarantees: The claim overrides the credential endpoint query value.
     #[tokio::test]
     async fn agent_fed_upload_endpoint_query_uses_token_claim() {
         use wiremock::matchers::{method, path, query_param};
@@ -754,6 +809,8 @@ mod tests {
         );
     }
 
+    /// Scenario: The agent-fed token omits an Endpoint claim.
+    /// Guarantees: The query value falls back to the credential endpoint.
     #[tokio::test]
     async fn agent_fed_upload_endpoint_query_falls_back_to_cred_endpoint() {
         use wiremock::matchers::{method, path, query_param};
