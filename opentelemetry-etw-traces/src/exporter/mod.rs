@@ -126,15 +126,12 @@ impl ETWExporter {
             // Part B: span payload (_typeName, name, kind, startTime, parentId, links, statusMessage, success)
             part_b::populate_part_b(event, span_data, field_tag);
 
-            // Write event to ETW
-            let result = event.write(&self.provider, None, None);
-
-            // event.write() returns 0 for success or a Win32 error from EventWrite for failure.
-            // The return value is for diagnostic purposes only and should generally be ignored in retail builds.
-            match result {
-                0 => (),
-                _ => debug_assert!(false, "Failed to write event to ETW. ETW reason: {result}"),
-            }
+            // event.write() returns 0 on success or a diagnostic-only Win32 error on failure. Failures
+            // are expected, transient conditions (e.g. buffer pressure from an active session), so the
+            // event is simply dropped. We don't log or assert here: logging from the export path can
+            // re-enter the log pipeline (infinite loop / stack overflow), and asserting would crash
+            // debug and debug-assertions-enabled builds. Data loss here is better tracked via future metrics.
+            let _ = event.write(&self.provider, None, None);
         });
     }
 

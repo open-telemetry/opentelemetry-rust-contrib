@@ -10,7 +10,10 @@ use std::sync::OnceLock;
 /// Detect the `service.instance.id` resource attribute.
 ///
 /// The [OpenTelemetry specification] recommends `service.instance.id` be a
-/// random UUIDv4 when no inherently unique identifier is available.
+/// random UUID when no inherently unique identifier is available. This detector
+/// generates a UUIDv7, which embeds a millisecond-precision timestamp in the
+/// first 48 bits followed by random data, so IDs sort chronologically on
+/// backends that index by this field.
 ///
 /// The id is generated once and reused for the lifetime of the process, so every
 /// resource built from this detector shares the same instance id.
@@ -21,7 +24,7 @@ pub struct ServiceInstanceIdResourceDetector;
 
 fn instance_id() -> &'static str {
     static INSTANCE_ID: OnceLock<String> = OnceLock::new();
-    INSTANCE_ID.get_or_init(uuid::v4)
+    INSTANCE_ID.get_or_init(uuid::v7)
 }
 
 impl ResourceDetector for ServiceInstanceIdResourceDetector {

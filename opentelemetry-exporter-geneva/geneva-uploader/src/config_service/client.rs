@@ -5,6 +5,8 @@ use reqwest::{
     header::{HeaderMap, HeaderValue, ACCEPT, AUTHORIZATION, USER_AGENT},
     Client, Url,
 };
+use secrecy::zeroize::Zeroizing;
+use secrecy::{ExposeSecret, SecretString};
 use serde::Deserialize;
 use std::time::Duration;
 use thiserror::Error;
@@ -184,7 +186,7 @@ pub(crate) struct IngestionGatewayInfo {
     #[serde(rename = "Endpoint")]
     pub(crate) endpoint: String,
     #[serde(rename = "AuthToken")]
-    pub(crate) auth_token: String,
+    pub(crate) auth_token: SecretString,
     #[serde(rename = "AuthTokenExpiryTime")]
     pub(crate) auth_token_expiry_time: String,
 }
@@ -854,16 +856,21 @@ impl GenevaConfigClient {
                     GenevaConfigClientError::InternalError("Failed to parse token expiry".into())
                 })?;
 
-        let token_endpoint =
-            match extract_endpoint_from_token(&fresh_ingestion_gateway_info.auth_token) {
-                Ok(ep) => ep,
-                Err(err) => {
-                    // Fallback: some tokens legitimately omit the Endpoint claim; use server endpoint.
-                    #[cfg(debug_assertions)]
-                    eprintln!("[geneva][debug] token Endpoint claim missing or unparsable: {err}");
-                    fresh_ingestion_gateway_info.endpoint.clone()
-                }
-            };
+        let token_endpoint = match extract_endpoint_from_token(
+            fresh_ingestion_gateway_info.auth_token.expose_secret(),
+        ) {
+            Ok(ep) => ep,
+            Err(err) => {
+                // Fallback: some tokens legitimately omit the Endpoint claim; use server endpoint.
+                tracing::debug!(
+                    name: "config_client.get_ingestion_info.endpoint_claim_missing",
+                    target: "geneva-uploader",
+                    error = %err,
+                    "Token Endpoint claim missing or unparsable; using server endpoint"
+                );
+                fresh_ingestion_gateway_info.endpoint.clone()
+            }
+        };
 
         // Now update the cache with exclusive write access
         let mut guard = self
@@ -967,6 +974,7 @@ impl GenevaConfigClient {
         let body = response.text().await?;
 
         if status.is_success() {
+            let body = Zeroizing::new(body);
             debug!(
                 name: "config_client.fetch_ingestion_info.response",
                 target: "geneva-uploader",
@@ -1041,7 +1049,7 @@ fn get_os_type() -> &'static str {
     }
 }
 
-fn extract_endpoint_from_token(token: &str) -> Result<String> {
+pub(crate) fn extract_endpoint_from_token(token: &str) -> Result<String> {
     let parts: Vec<&str> = token.split('.').collect();
     if parts.len() != 3 {
         return Err(GenevaConfigClientError::JwtTokenError(
@@ -1193,8 +1201,8 @@ fn build_rustls_client_config(
 
     #[cfg(test)]
     if let Some(root_ca_pem) = _test_root_ca_pem {
-        let mut reader = std::io::BufReader::new(root_ca_pem);
-        for cert in rustls_pemfile::certs(&mut reader) {
+        use rustls_pki_types::pem::PemObject;
+        for cert in rustls_pki_types::CertificateDer::pem_slice_iter(root_ca_pem) {
             let cert = cert.map_err(|e| GenevaConfigClientError::Certificate(e.to_string()))?;
             roots
                 .add(cert)
