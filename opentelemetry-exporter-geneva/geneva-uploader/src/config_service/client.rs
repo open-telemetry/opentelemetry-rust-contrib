@@ -19,7 +19,7 @@ use native_tls::{Identity, Protocol};
 use std::fmt;
 use std::fmt::Write;
 use std::fs;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::RwLock;
 
 // Azure Identity imports for MSI and Workload Identity authentication
@@ -220,6 +220,88 @@ struct GenevaResponse {
 #[derive(Debug, Deserialize)]
 struct MsiTokenResponse {
     access_token: String,
+}
+
+/// Parses the Azure Arc key file path from a `WWW-Authenticate: Basic realm=<path>` header.
+fn parse_arc_key_path(www_authenticate: &str) -> Option<PathBuf> {
+    let realm = www_authenticate.split("realm=").nth(1)?.trim();
+    if realm.is_empty() {
+        return None;
+    }
+    Some(PathBuf::from(realm))
+}
+
+/// Returns the platform-specific directory where the Azure Connected Machine Agent writes
+/// managed identity key files.
+fn arc_tokens_dir() -> Result<PathBuf> {
+    #[cfg(windows)]
+    {
+        let program_data = std::env::var("ProgramData").map_err(|_| {
+            GenevaConfigClientError::MsiAuth(
+                "ProgramData environment variable is not set; cannot locate the Azure Arc tokens directory".to_string(),
+            )
+        })?;
+        Ok(PathBuf::from(program_data)
+            .join("AzureConnectedMachineAgent")
+            .join("Tokens"))
+    }
+    #[cfg(not(windows))]
+    {
+        Ok(PathBuf::from("/var/opt/azcmagent/tokens"))
+    }
+}
+
+/// Validates that an Azure Arc key file path is safe to read: it must reside directly in the
+/// platform's Arc tokens directory, use the `.key` extension, and be no larger than a small
+/// fixed limit. This guards against a spoofed or compromised identity endpoint pointing the
+/// client at an arbitrary file whose contents would then be sent back as credentials.
+fn validate_arc_key_path(path: &Path) -> Result<()> {
+    if path.extension().and_then(|e| e.to_str()) != Some("key") {
+        return Err(GenevaConfigClientError::MsiAuth(format!(
+            "Azure Arc key file '{}' does not have the expected '.key' extension",
+            path.display()
+        )));
+    }
+
+    let expected_dir = arc_tokens_dir()?;
+    let parent = path.parent().ok_or_else(|| {
+        GenevaConfigClientError::MsiAuth(format!(
+            "Azure Arc key file '{}' has no parent directory",
+            path.display()
+        ))
+    })?;
+
+    let matches = {
+        #[cfg(windows)]
+        {
+            // Windows paths are case-insensitive.
+            parent.to_string_lossy().to_lowercase() == expected_dir.to_string_lossy().to_lowercase()
+        }
+        #[cfg(not(windows))]
+        {
+            parent == expected_dir.as_path()
+        }
+    };
+    if !matches {
+        return Err(GenevaConfigClientError::MsiAuth(format!(
+            "Azure Arc key file '{}' is not located in the expected Arc tokens directory '{}'",
+            path.display(),
+            expected_dir.display()
+        )));
+    }
+
+    // Arc key files are small; reject anything unexpectedly large to bound file disclosure.
+    const MAX_ARC_KEY_BYTES: u64 = 4096;
+    if let Ok(meta) = fs::metadata(path) {
+        if meta.len() > MAX_ARC_KEY_BYTES {
+            return Err(GenevaConfigClientError::MsiAuth(format!(
+                "Azure Arc key file '{}' exceeds the maximum allowed size of {MAX_ARC_KEY_BYTES} bytes",
+                path.display()
+            )));
+        }
+    }
+
+    Ok(())
 }
 
 #[allow(dead_code)]
@@ -580,6 +662,17 @@ impl GenevaConfigClient {
             scope_candidates.push(format!("{base}/"));
         }
 
+        // Azure Arc-enabled servers expose managed identity through a challenge-response endpoint
+        // that `azure_identity` 1.0 explicitly rejects ("Azure Arc managed identity isn't
+        // supported"). Arc only supports the system-assigned identity, so try the Arc flow first
+        // for that auth method; when not running on Arc this returns None and we fall through to
+        // the standard `azure_identity` credential below.
+        if matches!(self.config.auth_method, AuthMethod::SystemManagedIdentity) {
+            if let Some(token) = self.try_get_arc_managed_identity_token(base).await? {
+                return Ok(token);
+            }
+        }
+
         let user_assigned_id = match &self.config.auth_method {
             AuthMethod::SystemManagedIdentity => None,
             AuthMethod::UserManagedIdentity { client_id } => {
@@ -670,10 +763,9 @@ impl GenevaConfigClient {
             GenevaConfigClientError::MsiAuth(format!("IDENTITY_ENDPOINT is not a valid URL: {e}"))
         })?;
 
-        // `azure_identity` 0.29 treats IDENTITY_ENDPOINT + IDENTITY_HEADER as the App Service
+        // `azure_identity` treats IDENTITY_ENDPOINT + IDENTITY_HEADER as the App Service
         // local endpoint and does not forward `UserAssignedId::ResourceId` as `msi_res_id`.
         // See https://github.com/Azure/azure-sdk-for-rust/issues/2407.
-        // TODO: Re-evaluate this workaround when upgrading azure_identity beyond 0.29.
         // Selecting a user-assigned identity by Azure resource ID against this local endpoint
         // requires sending `msi_res_id` directly, so this branch issues the request explicitly.
         let response = self
@@ -744,6 +836,174 @@ impl GenevaConfigClient {
             name: "config_client.get_local_msi_token.success",
             target: "geneva-uploader",
             "Successfully acquired Local Managed Identity token"
+        );
+        Ok(Some(token_response.access_token))
+    }
+
+    /// Acquires a managed identity token on Azure Arc-enabled servers using the Arc
+    /// challenge-response protocol.
+    ///
+    /// `azure_identity` 1.0 refuses to run on Azure Arc (`ManagedIdentityCredential::new`
+    /// returns "Azure Arc managed identity isn't supported"), so the flow is implemented here.
+    /// Azure Arc only supports the system-assigned managed identity.
+    ///
+    /// The protocol is:
+    /// 1. Issue an unauthenticated GET to `IDENTITY_ENDPOINT`; Arc responds with `401` and a
+    ///    `WWW-Authenticate: Basic realm=<key-file-path>` header.
+    /// 2. Read the secret from that key file (written by the Azure Connected Machine Agent with
+    ///    restricted permissions).
+    /// 3. Repeat the GET with `Authorization: Basic <secret>` to obtain the token.
+    ///
+    /// Returns `Ok(None)` when the process is not running on Azure Arc, so the caller can fall
+    /// back to the standard `azure_identity` credential.
+    async fn try_get_arc_managed_identity_token(
+        &self,
+        msi_resource: &str,
+    ) -> Result<Option<String>> {
+        // Azure Arc is identified by IDENTITY_ENDPOINT + IMDS_ENDPOINT without IDENTITY_HEADER
+        // (IDENTITY_HEADER present indicates App Service / Service Fabric). This mirrors the
+        // detection logic in `azure_identity`.
+        let Ok(identity_endpoint) = std::env::var("IDENTITY_ENDPOINT") else {
+            return Ok(None);
+        };
+        if identity_endpoint.is_empty() {
+            return Ok(None);
+        }
+        if std::env::var("IDENTITY_HEADER").is_ok_and(|h| !h.is_empty()) {
+            return Ok(None);
+        }
+        if !std::env::var("IMDS_ENDPOINT").is_ok_and(|v| !v.is_empty()) {
+            return Ok(None);
+        }
+
+        let endpoint_url = Url::parse(&identity_endpoint).map_err(|e| {
+            GenevaConfigClientError::MsiAuth(format!("IDENTITY_ENDPOINT is not a valid URL: {e}"))
+        })?;
+
+        debug!(
+            name: "config_client.get_arc_msi_token",
+            target: "geneva-uploader",
+            "Azure Arc environment detected; acquiring managed identity token via Arc challenge-response flow"
+        );
+
+        // The Azure Arc HIMDS endpoint only accepts this api-version; using a newer IMDS/App
+        // Service value (e.g. 2018-02-01 / 2020-06-01) results in `400 Bad Request`. This matches
+        // the value used by the official Azure Identity SDKs (Python, Go, .NET).
+        const ARC_API_VERSION: &str = "2019-11-01";
+
+        // Step 1: unauthenticated request to obtain the WWW-Authenticate challenge.
+        let challenge = self
+            .http_client
+            .get(endpoint_url.clone())
+            .header("Metadata", "true")
+            .query(&[("api-version", ARC_API_VERSION), ("resource", msi_resource)])
+            .send()
+            .await
+            .map_err(|e| {
+                debug!(
+                    name: "config_client.get_arc_msi_token.challenge_error",
+                    target: "geneva-uploader",
+                    error = %e,
+                    "Azure Arc identity challenge request failed"
+                );
+                GenevaConfigClientError::Http(e)
+            })?;
+
+        // Arc returns 401 with the key file path in WWW-Authenticate; any other status is unexpected.
+        if challenge.status() != reqwest::StatusCode::UNAUTHORIZED {
+            let status = challenge.status();
+            let body = challenge.text().await.unwrap_or_default();
+            return Err(GenevaConfigClientError::MsiAuth(format!(
+                "Azure Arc identity endpoint returned unexpected status {status} for the challenge request (expected 401 Unauthorized): {body}"
+            )));
+        }
+
+        let www_authenticate = challenge
+            .headers()
+            .get(reqwest::header::WWW_AUTHENTICATE)
+            .and_then(|v| v.to_str().ok())
+            .ok_or_else(|| {
+                GenevaConfigClientError::MsiAuth(
+                    "Azure Arc identity endpoint did not return a WWW-Authenticate challenge header"
+                        .to_string(),
+                )
+            })?;
+
+        let key_path = parse_arc_key_path(www_authenticate).ok_or_else(|| {
+            GenevaConfigClientError::MsiAuth(format!(
+                "Could not parse Azure Arc key file path from WWW-Authenticate header: {www_authenticate}"
+            ))
+        })?;
+
+        // Security: the key path is supplied by the endpoint response. Validate that it lives in
+        // the OS-specific Arc tokens directory, uses the `.key` extension, and is small before
+        // reading it, so a spoofed/compromised endpoint cannot coerce us into disclosing an
+        // arbitrary file (the file contents are echoed back to the endpoint as credentials).
+        validate_arc_key_path(&key_path)?;
+
+        let secret = fs::read_to_string(&key_path).map_err(|e| {
+            GenevaConfigClientError::MsiAuth(format!(
+                "Failed to read Azure Arc identity key file '{}': {e}. The process must run with sufficient privileges to read the Arc token file.",
+                key_path.display()
+            ))
+        })?;
+        // Strip a possible UTF-8 BOM (not removed by `trim`) and surrounding whitespace so the
+        // `Authorization` header value is exactly the secret; a stray BOM/newline yields a 400.
+        let secret = secret.trim_start_matches('\u{feff}').trim();
+
+        // Step 2: authenticated request using the secret from the key file.
+        let response = self
+            .http_client
+            .get(endpoint_url)
+            .header("Metadata", "true")
+            .header(AUTHORIZATION, format!("Basic {secret}"))
+            .query(&[("api-version", ARC_API_VERSION), ("resource", msi_resource)])
+            .send()
+            .await
+            .map_err(|e| {
+                debug!(
+                    name: "config_client.get_arc_msi_token.http_error",
+                    target: "geneva-uploader",
+                    error = %e,
+                    "Azure Arc identity token request failed"
+                );
+                GenevaConfigClientError::Http(e)
+            })?;
+
+        if !response.status().is_success() {
+            let status = response.status();
+            let body = response.text().await.unwrap_or_default();
+            error!(
+                name: "config_client.get_arc_msi_token.failed",
+                target: "geneva-uploader",
+                status = %status.as_u16(),
+                api_version = %ARC_API_VERSION,
+                resource = %msi_resource,
+                endpoint = %identity_endpoint,
+                body_len = body.len(),
+                body = %body,
+                "Azure Arc identity token request returned non-success status"
+            );
+            return Err(GenevaConfigClientError::MsiAuth(format!(
+                "Azure Arc identity token request failed with status {status} (api-version={ARC_API_VERSION}, resource={msi_resource}): {body}"
+            )));
+        }
+
+        let body = response.text().await.map_err(GenevaConfigClientError::Http)?;
+        let token_response: MsiTokenResponse = serde_json::from_str(&body).map_err(|e| {
+            debug!(
+                name: "config_client.get_arc_msi_token.parse_error",
+                target: "geneva-uploader",
+                error = %e,
+                "Failed to parse Azure Arc identity token response"
+            );
+            GenevaConfigClientError::SerdeJson(e)
+        })?;
+
+        info!(
+            name: "config_client.get_arc_msi_token.success",
+            target: "geneva-uploader",
+            "Successfully acquired Azure Arc managed identity token"
         );
         Ok(Some(token_response.access_token))
     }
@@ -923,6 +1183,7 @@ impl GenevaConfigClient {
         match &self.config.auth_method {
             AuthMethod::WorkloadIdentity { .. } => {
                 let token = self.get_workload_identity_token().await?;
+                log_bearer_token_claims(&token, "WorkloadIdentity");
                 request = request.header(AUTHORIZATION, format!("Bearer {}", token));
             }
             AuthMethod::SystemManagedIdentity
@@ -930,6 +1191,7 @@ impl GenevaConfigClient {
             | AuthMethod::UserManagedIdentityByObjectId { .. }
             | AuthMethod::UserManagedIdentityByResourceId { .. } => {
                 let token = self.get_msi_token().await?;
+                log_bearer_token_claims(&token, "ManagedIdentity");
                 request = request.header(AUTHORIZATION, format!("Bearer {}", token));
             }
             AuthMethod::Certificate { .. } => { /* mTLS only */ }
@@ -1005,16 +1267,29 @@ impl GenevaConfigClient {
                 "No primary diag moniker found in storage accounts".to_string(),
             ))
         } else {
+            // Emit status, url, and body on separate short lines so long-line truncation in
+            // remote consoles (e.g. PowerShell remoting) cannot drop the body. Search logs for
+            // `GCS-ERROR`. Note: GCS `401` responses frequently have an empty body.
+            let status_code = status.as_u16();
             debug!(
                 name: "config_client.fetch_ingestion_info.error_status",
                 target: "geneva-uploader",
-                status = status.as_u16(),
-                body = %body,
-                "Config service returned error"
+                "GCS-ERROR status = {status_code}"
+            );
+            debug!(
+                name: "config_client.fetch_ingestion_info.error_status",
+                target: "geneva-uploader",
+                "GCS-ERROR url = {url}"
+            );
+            debug!(
+                name: "config_client.fetch_ingestion_info.error_status",
+                target: "geneva-uploader",
+                "GCS-ERROR body_len = {} body = {body}",
+                body.len()
             );
             Err(GenevaConfigClientError::RequestFailed {
-                status: status.as_u16(),
-                message: body,
+                status: status_code,
+                message: format!("{body} [url={url}]"),
             })
         }
     }
@@ -1088,6 +1363,153 @@ pub(crate) fn extract_endpoint_from_token(token: &str) -> Result<String> {
         "No Endpoint claim in JWT token".to_string(),
     ))
 }
+
+/// Decodes the **non-secret** identity claims from a bearer JWT and logs them so the exact
+/// identity being presented to the Geneva Config Service (GCS) can be compared against the
+/// account's onboarding/authorization records.
+///
+/// This is a diagnostics aid for GCS `401`/`403` responses, where the token was minted
+/// successfully but GCS rejects the identity or its audience. The common culprits are:
+/// - `aud` (audience) not matching what GCS validates for the account (`msi_resource` wrong).
+/// - `oid`/`appid` (the identity) not registered as an authorized ingestion identity.
+/// - `tid` (tenant) not matching the account's expected tenant.
+///
+/// Only the JWT **payload** claims are decoded and logged. The signature segment (which is what
+/// makes the token a usable credential) is never touched or logged, so this does not leak a
+/// usable secret.
+///
+/// Each claim is emitted on its **own short log line** (event name
+/// `config_client.bearer_token.claim`) so that long-line truncation/wrapping in remote consoles
+/// (e.g. PowerShell remoting) cannot drop the important fields. Search your logs for
+/// `BEARER-CLAIM` to find them.
+fn log_bearer_token_claims(token: &str, source: &str) {
+    // Decode one base64url JWT segment (header or payload) into JSON. Azure AD uses URL-safe
+    // base64 without padding; fall back to padded/standard variants.
+    let decode_segment = |segment: &str| -> Option<serde_json::Value> {
+        let padded = match segment.len() % 4 {
+            2 => format!("{segment}=="),
+            3 => format!("{segment}="),
+            _ => segment.to_string(),
+        };
+        general_purpose::URL_SAFE_NO_PAD
+            .decode(&padded)
+            .or_else(|_| general_purpose::URL_SAFE.decode(&padded))
+            .or_else(|_| general_purpose::STANDARD.decode(&padded))
+            .ok()
+            .and_then(|bytes| serde_json::from_slice(&bytes).ok())
+    };
+
+    // A JWT is `header.payload.signature`; we only ever decode header + payload, never signature.
+    let mut segments = token.split('.');
+    let header_b64 = segments.next();
+    let Some(payload_b64) = segments.next() else {
+        debug!(
+            name: "config_client.bearer_token.claim",
+            target: "geneva-uploader",
+            "BEARER-CLAIM token is not a JWT (no payload segment); cannot decode claims"
+        );
+        return;
+    };
+
+    // Decode the JWT header (first segment): `typ`/`alg`/`kid` help confirm the token shape.
+    if let Some(header) = header_b64.and_then(decode_segment) {
+        let hget = |k: &str| -> String {
+            header
+                .get(k)
+                .and_then(|v| v.as_str())
+                .map(|s| s.to_string())
+                .unwrap_or_else(|| "<missing>".to_string())
+        };
+        debug!(
+            name: "config_client.bearer_token.claim",
+            target: "geneva-uploader",
+            "BEARER-CLAIM header.typ = {}", hget("typ")
+        );
+        debug!(
+            name: "config_client.bearer_token.claim",
+            target: "geneva-uploader",
+            "BEARER-CLAIM header.alg = {}", hget("alg")
+        );
+        debug!(
+            name: "config_client.bearer_token.claim",
+            target: "geneva-uploader",
+            "BEARER-CLAIM header.kid = {}", hget("kid")
+        );
+    }
+
+    let claims: serde_json::Value = match decode_segment(payload_b64) {
+        Some(v) => v,
+        None => {
+            debug!(
+                name: "config_client.bearer_token.claim",
+                target: "geneva-uploader",
+                "BEARER-CLAIM failed to decode/parse JWT payload; cannot show claims"
+            );
+            return;
+        }
+    };
+
+    // Render a single claim as a display string ("<missing>" when absent); arrays are joined.
+    let render = |key: &str| -> String {
+        match claims.get(key) {
+            None => "<missing>".to_string(),
+            Some(serde_json::Value::String(s)) => s.clone(),
+            Some(serde_json::Value::Array(arr)) => arr
+                .iter()
+                .map(|v| match v {
+                    serde_json::Value::String(s) => s.clone(),
+                    other => other.to_string(),
+                })
+                .collect::<Vec<_>>()
+                .join(","),
+            Some(other) => other.to_string(),
+        }
+    };
+
+    // Emit the marker + the claims that matter for a GCS 401/403, one short line each:
+    //   aud   -> must match the audience GCS validates for this account (driven by `msi_resource`)
+    //   appid -> the app/client id of the identity presenting the token
+    //   oid   -> object id of the identity; this is what must be onboarded/authorized in GCS
+    //   tid   -> tenant id; must match the account's expected tenant
+    //   iss   -> token issuer (AAD authority)
+    debug!(
+        name: "config_client.bearer_token.claim",
+        target: "geneva-uploader",
+        "BEARER-CLAIM ===== token from {source}: compare aud vs msi_resource, oid/appid vs account's authorized identities ====="
+    );
+    for key in [
+        "aud",
+        "appid",
+        "azp",
+        "oid",
+        "sub",
+        "tid",
+        "iss",
+        "idtyp",
+        // `ver` is the token version: "1.0" (v1, iss=sts.windows.net) or "2.0" (v2,
+        // iss=login.microsoftonline.com/.../v2.0). GCS validators are sometimes version-specific,
+        // so a v1 token can fail validation ("Unable to validate Authorization header") even when
+        // the audience is correct. HIMDS/Arc issues v1 tokens by default.
+        "ver",
+        "roles",
+        "exp",
+        // `xms_mirid` is the managed-identity *resource ID* claim. Geneva GCS resource-ID /
+        // resource-type ACLs match on THIS claim, whereas Object-ID ACLs match on `oid`/`tid`.
+        // Printing it shows whether a resource-based ACL can apply to this token, and exactly what
+        // resource ID to authorize. Arc system-assigned MIs typically include it.
+        "xms_mirid",
+        // `xms_az_rid` / `xms_tcdt` occasionally carry related resource info depending on issuer.
+        "xms_az_rid",
+    ] {
+        let value = render(key);
+        debug!(
+            name: "config_client.bearer_token.claim",
+            target: "geneva-uploader",
+            "BEARER-CLAIM {key} = {value}"
+        );
+    }
+}
+
 
 #[cfg(all(feature = "tls-native", not(feature = "tls-rustls")))]
 fn configure_native_tls_connector(
@@ -1210,3 +1632,47 @@ fn build_rustls_client_config(
 
     Ok(config)
 }
+
+#[cfg(test)]
+mod arc_helper_tests {
+    use super::{parse_arc_key_path, validate_arc_key_path};
+
+    #[test]
+    fn parse_arc_key_path_extracts_realm() {
+        let header = "Basic realm=/var/opt/azcmagent/tokens/abc123.key";
+        let path = parse_arc_key_path(header).expect("path should parse");
+        assert_eq!(
+            path.to_string_lossy(),
+            "/var/opt/azcmagent/tokens/abc123.key"
+        );
+    }
+
+    #[test]
+    fn parse_arc_key_path_rejects_missing_realm() {
+        assert!(parse_arc_key_path("Basic").is_none());
+        assert!(parse_arc_key_path("Basic realm=").is_none());
+    }
+
+    #[test]
+    fn validate_arc_key_path_rejects_non_key_extension() {
+        // A path outside the tokens dir and/or without a `.key` extension must be rejected,
+        // preventing a spoofed endpoint from coercing an arbitrary file read.
+        #[cfg(windows)]
+        let bad = std::path::PathBuf::from("C:\\Windows\\win.ini");
+        #[cfg(not(windows))]
+        let bad = std::path::PathBuf::from("/etc/passwd");
+        assert!(validate_arc_key_path(&bad).is_err());
+    }
+
+    #[test]
+    fn validate_arc_key_path_rejects_key_outside_tokens_dir() {
+        #[cfg(windows)]
+        let bad = std::path::PathBuf::from("C:\\Temp\\evil.key");
+        #[cfg(not(windows))]
+        let bad = std::path::PathBuf::from("/tmp/evil.key");
+        assert!(validate_arc_key_path(&bad).is_err());
+    }
+}
+
+
+
