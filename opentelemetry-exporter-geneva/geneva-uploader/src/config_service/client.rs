@@ -222,6 +222,32 @@ struct GenevaResponse {
     tag_id: String,
 }
 
+fn select_primary_account(
+    accounts: Vec<StorageAccountKey>,
+    account_group: &str,
+) -> Result<StorageAccountKey> {
+    let mut matches = accounts.into_iter().filter(|account| {
+        account.is_primary_moniker
+            && account
+                .account_group_name
+                .eq_ignore_ascii_case(account_group)
+    });
+
+    let Some(account) = matches.next() else {
+        return Err(GenevaConfigClientError::MonikerNotFound(format!(
+            "No primary moniker found for diagnostics account group '{account_group}'"
+        )));
+    };
+
+    if matches.next().is_some() {
+        return Err(GenevaConfigClientError::MonikerNotFound(format!(
+            "Multiple primary monikers found for diagnostics account group '{account_group}'"
+        )));
+    }
+
+    Ok(account)
+}
+
 #[derive(Debug, Deserialize)]
 struct MsiTokenResponse {
     access_token: String,
@@ -244,6 +270,7 @@ pub(crate) struct GenevaConfigClient {
     // TODO: revisit if the lock can be removed
     cached_data: RwLock<Option<CachedAuthData>>,
     precomputed_url_prefix: String,
+    diagnostics_account_group: String,
     agent_identity: String,
     agent_version: String,
 }
@@ -253,6 +280,7 @@ impl fmt::Debug for GenevaConfigClient {
         f.debug_struct("GenevaConfigClient")
             .field("config", &self.config)
             .field("precomputed_url_prefix", &self.precomputed_url_prefix)
+            .field("diagnostics_account_group", &self.diagnostics_account_group)
             .field("agent_identity", &self.agent_identity)
             .field("agent_version", &self.agent_version)
             .finish()
@@ -449,12 +477,14 @@ impl GenevaConfigClient {
         ).map_err(|e| GenevaConfigClientError::InternalError(format!("Failed to write URL: {e}")))?;
 
         let http_client = client_builder.build()?;
+        let diagnostics_account_group = format!("{}diag", config.namespace);
 
         Ok(Self {
             config,
             http_client,
             cached_data: RwLock::new(None),
             precomputed_url_prefix: pre_url,
+            diagnostics_account_group,
             agent_identity: agent_identity.to_string(), // TODO make this configurable
             agent_version: "1.0".to_string(),           // TODO make this configurable
         })
@@ -994,33 +1024,33 @@ impl GenevaConfigClient {
                 }
             };
 
-            for account in parsed.storage_account_keys {
-                if account.is_primary_moniker && account.account_moniker_name.contains("diag") {
-                    // Move (not clone) the strings out of the StorageAccountKey; no extra allocation
-                    let account_moniker_name = account.account_moniker_name;
-                    let account_group_name = account.account_group_name;
-                    let moniker_info = MonikerInfo {
-                        name: account_moniker_name,
-                        account_group: account_group_name,
-                    };
-                    info!(
-                        name: "config_client.fetch_ingestion_info.success",
-                        target: "geneva-uploader",
-                        moniker = %moniker_info.name,
-                        "Successfully retrieved ingestion info"
-                    );
-                    return Ok((parsed.ingestion_gateway_info, moniker_info));
-                }
-            }
+            let account = select_primary_account(
+                parsed.storage_account_keys,
+                &self.diagnostics_account_group,
+            )
+            .map_err(|error| {
+                debug!(
+                    name: "config_client.fetch_ingestion_info.account_group_error",
+                    target: "geneva-uploader",
+                    account_group = %self.diagnostics_account_group,
+                    error = %error,
+                    "Failed to resolve diagnostics account group"
+                );
+                error
+            })?;
 
-            debug!(
-                name: "config_client.fetch_ingestion_info.no_diag_moniker",
+            let moniker_info = MonikerInfo {
+                name: account.account_moniker_name,
+                account_group: account.account_group_name,
+            };
+            info!(
+                name: "config_client.fetch_ingestion_info.success",
                 target: "geneva-uploader",
-                "No primary diag moniker found in storage accounts"
+                moniker = %moniker_info.name,
+                account_group = %moniker_info.account_group,
+                "Successfully retrieved ingestion info"
             );
-            Err(GenevaConfigClientError::MonikerNotFound(
-                "No primary diag moniker found in storage accounts".to_string(),
-            ))
+            Ok((parsed.ingestion_gateway_info, moniker_info))
         } else {
             debug!(
                 name: "config_client.fetch_ingestion_info.error_status",
@@ -1230,4 +1260,63 @@ fn build_rustls_client_config(
         .map_err(|e| GenevaConfigClientError::Certificate(e.to_string()))?;
 
     Ok(config)
+}
+
+#[cfg(test)]
+mod account_selection_tests {
+    use super::*;
+
+    fn account(group: &str, moniker: &str, is_primary: bool) -> StorageAccountKey {
+        StorageAccountKey {
+            account_moniker_name: moniker.to_string(),
+            account_group_name: group.to_string(),
+            is_primary_moniker: is_primary,
+        }
+    }
+
+    #[test]
+    fn selects_primary_from_exact_account_group() {
+        let selected = select_primary_account(
+            vec![
+                account("other", "contains-diag", true),
+                account("nsdiag", "secondary", false),
+                account("NsDiag", "primary", true),
+            ],
+            "nsdiag",
+        )
+        .expect("matching primary should be selected");
+
+        assert_eq!(selected.account_group_name, "NsDiag");
+        assert_eq!(selected.account_moniker_name, "primary");
+    }
+
+    #[test]
+    fn rejects_missing_primary_for_account_group() {
+        let error = select_primary_account(
+            vec![
+                account("nsdiag", "secondary", false),
+                account("other", "contains-diag", true),
+            ],
+            "nsdiag",
+        )
+        .expect_err("a secondary or unrelated moniker must not be selected");
+
+        assert!(error.to_string().contains("No primary moniker found"));
+    }
+
+    #[test]
+    fn rejects_ambiguous_primary_for_account_group() {
+        let error = select_primary_account(
+            vec![
+                account("nsdiag", "primary-a", true),
+                account("NSDIAG", "primary-b", true),
+            ],
+            "nsdiag",
+        )
+        .expect_err("multiple primaries must not be response-order-dependent");
+
+        assert!(error
+            .to_string()
+            .contains("Multiple primary monikers found"));
+    }
 }

@@ -1,6 +1,6 @@
 ### GenevaConfigClient Flow (Certificate-Based Authentication)
 
-The diagram below illustrates how the `GenevaConfigClient` is initialized with a client certificate (in PKCS#12 format) and then used to fetch ingestion information from the Geneva Config Service using mutual TLS (mTLS). It includes the flow for loading the certificate, handling cached tokens, making authenticated requests, and parsing the response (including primary diagnostic monikers).
+The diagram below illustrates how the `GenevaConfigClient` is initialized with a client certificate (in PKCS#12 format) and then used to fetch ingestion information from the Geneva Config Service using mutual TLS (mTLS). It includes the flow for loading the certificate, handling cached tokens, making authenticated requests, and parsing the response. The client resolves the ingestion moniker from the primary `StorageAccountKeys` entry whose `AccountGroupName` exactly matches `<namespace>diag` (case-insensitively); physical moniker names are not used to infer the account group.
 
 ```mermaid
 sequenceDiagram

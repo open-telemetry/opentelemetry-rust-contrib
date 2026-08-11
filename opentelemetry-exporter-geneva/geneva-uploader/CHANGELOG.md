@@ -11,6 +11,11 @@
 ### Fixed
 - Corrected a misleading startup log message: when `logs.default_event_name` is set without an `event_name_mapping`, `GenevaClient::new` now logs `Configured logs event name routing [default_event_name=...]` instead of `Logs config not initialized; using default values for log events`. The default was always applied correctly; only the log line was wrong. This makes the logs message symmetric with the equivalent spans message.
 
+### Fixed
+- Resolve the GCS ingestion moniker from the primary entry for the exact
+  `<namespace>diag` account group instead of selecting the first physical
+  moniker whose name contains `diag`.
+
 ### Changed
 - Certificate authentication is disabled by default. Enable `certificate-auth` explicitly, or use managed identity, workload identity, or agent-fed authentication.
 - Minimize GIG ingestion bearer-token memory remanence by storing resolved

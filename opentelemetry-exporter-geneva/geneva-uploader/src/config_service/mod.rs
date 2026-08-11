@@ -421,8 +421,18 @@ mod tests {
             },
             "StorageAccountKeys": [
                 {
+                    "AccountMonikerName": "wrong-diag-moniker",
+                    "AccountGroupName": "unrelated-group",
+                    "IsPrimaryMoniker": true
+                },
+                {
+                    "AccountMonikerName": "mock-diag-secondary",
+                    "AccountGroupName": "mocknsdiag",
+                    "IsPrimaryMoniker": false
+                },
+                {
                     "AccountMonikerName": "mock-diag-moniker",
-                    "AccountGroupName": "mock-diag-group",
+                    "AccountGroupName": "MockNsDiag",
                     "IsPrimaryMoniker": true
                 }
             ],
@@ -482,7 +492,7 @@ mod tests {
 
         // Check moniker info
         assert_eq!(moniker_info.name, "mock-diag-moniker");
-        assert_eq!(moniker_info.account_group, "mock-diag-group");
+        assert_eq!(moniker_info.account_group, "MockNsDiag");
         assert_eq!(token_endpoint, jwt_endpoint);
     }
 
@@ -703,7 +713,7 @@ mod tests {
             "2030-01-01T00:00:00Z"
         );
         assert_eq!(moniker_info.name, "mock-diag-moniker");
-        assert_eq!(moniker_info.account_group, "mock-diag-group");
+        assert_eq!(moniker_info.account_group, "MockNsDiag");
         assert_eq!(token_endpoint, jwt_endpoint);
         tls_server.handle.join().unwrap();
     }
