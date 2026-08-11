@@ -8,11 +8,24 @@
 
 ### Changed
 - Updated `azure_core` dependency from 0.29 to 1.0 and `azure_identity` to 1.0. `azure_core` 1.0 no longer exposes a `reqwest_native_tls` feature; the native-TLS backend is now selected solely through the crate's own `tls-native` feature (`reqwest/native-tls`), which the shared `reqwest` client picks up transitively.
+- Attribute-based event/table-name routing for logs and spans. `LogsConfig` and `TracesConfig` gained an optional `event_name_mapping` field (`LogsEventNameMapping` / `SpanEventNameMapping`) that routes each record to a destination event/table based on a `routing_key` (logs: event name, resource/scope/log-record attribute; spans: resource/scope/span attribute; plus the reserved `scope.name` / `scope.version` keys) and a source→destination `events` map. Unmapped source values fall back to the configured default event name; entries with an empty destination pass the source value through unchanged. Records/spans are split into one encoded batch per resolved destination. Invalid mappings (empty `events`, blank source keys, or a blank attribute routing-key name) are rejected by `GenevaClient::new`.
+- Agent-fed credential source: `GenevaClient::with_agent_fed_source` builds an uploader that pulls a host-provisioned GIG token and routing (endpoint, moniker) from an `AgentFedCredentialSource` on each upload, skipping the GCS config-service handshake. New public API: `AgentFedCredentialSource`, `AgentFedCredential`, `AgentFedCredentialFuture`.
+
+### Fixed
+- Corrected a misleading startup log message: when `logs.default_event_name` is set without an `event_name_mapping`, `GenevaClient::new` now logs `Configured logs event name routing [default_event_name=...]` instead of `Logs config not initialized; using default values for log events`. The default was always applied correctly; only the log line was wrong. This makes the logs message symmetric with the equivalent spans message.
+
+### Changed
+- Minimize GIG ingestion bearer-token memory remanence by storing resolved
+  credentials in zeroizing secret containers and backing sensitive
+  `Authorization` headers with application-owned memory that is zeroized when
+  released.
 - Bump opentelemetry-proto version to 0.32.
 - Bump pinned `otel-arrow` rev for `otap-df-pdata` and `otap-df-pdata-views`
   to `4f522d2e` so consumers can unify on a single `otap-df-pdata-views`
   version and avoid duplicate `LogsDataView` trait errors. API-compatible;
   the view trait signatures are unchanged.
+- `GenevaClientConfig` now applies signal-specific defaults consistently on emitted batches: when `logs.default_event_name` / `spans.default_event_name` is set, encoded batches use that value as `event_name`; when unset, they fall back to `Log` and `Span` respectively.
+- **Breaking:** `GenevaClientConfig.logs` and `.spans` changed from `LogsConfig` / `TracesConfig` to `Option<LogsConfig>` / `Option<TracesConfig>`. Pass `None` to use the default `Log` / `Span` table names.
 
 ## [0.5.0] - 2026-04-13
 
