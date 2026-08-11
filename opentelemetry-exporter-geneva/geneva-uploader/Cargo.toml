@@ -25,7 +25,7 @@ native-tls = { version = "0.2", optional = true }
 rustls = { version = "0.23", default-features = false, features = ["std", "tls12"], optional = true }
 rustls-pemfile = { version = "2", optional = true }
 rustls-native-certs = { version = "0.8", optional = true }
-p12-keystore = { version = "0.2", optional = true }
+p12-keystore = { version = "0.2", optional = true, default-features = false }
 thiserror = "2.0"
 chrono = "0.4"
 url = "2.2"
@@ -63,9 +63,13 @@ tls-rustls = [
     "dep:rustls",
     "dep:rustls-pemfile",
     "dep:rustls-native-certs",
-    "dep:p12-keystore",
     "reqwest/rustls-tls-native-roots-no-provider",
 ]
+# Enables password-protected PKCS#12 client certificate authentication. This is
+# intentionally disabled by default so builds that use managed identity,
+# workload identity, or another non-certificate method do not compile PKCS#12
+# parsing and cryptographic dependencies.
+certificate-auth = ["dep:p12-keystore"]
 default = ["tls-native"]
 
 [dev-dependencies]

@@ -29,6 +29,7 @@ prost = "0.14"
 default = ["tls-native"]
 tls-native = ["geneva-uploader/tls-native"]
 tls-rustls = ["geneva-uploader/tls-rustls"]
+certificate-auth = ["geneva-uploader/certificate-auth"]
 mock_auth = ["geneva-uploader/mock_auth"]
 otlp_bytes = ["dep:otap-df-pdata"]
 
