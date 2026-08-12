@@ -298,7 +298,8 @@ impl GenevaConfigClient {
         match &config.auth_method {
             // TODO: Certificate auth would be removed in favor of managed identity.,
             // This is for testing, so we can use self-signed certs, and password in plain text.
-            AuthMethod::Certificate { .. } => {
+            #[cfg_attr(not(feature = "certificate-auth"), allow(unused_variables))]
+            AuthMethod::Certificate { path, password } => {
                 #[cfg(not(feature = "certificate-auth"))]
                 return Err(GenevaConfigClientError::Certificate(
                     "certificate authentication is disabled; rebuild with the `certificate-auth` feature or use managed identity, workload identity, or agent-fed authentication"
@@ -307,9 +308,6 @@ impl GenevaConfigClient {
 
                 #[cfg(feature = "certificate-auth")]
                 {
-                    let AuthMethod::Certificate { path, password } = &config.auth_method else {
-                        unreachable!("certificate authentication match arm changed unexpectedly")
-                    };
                     info!(
                         name: "config_client.new.certificate_auth",
                         target: "geneva-uploader",

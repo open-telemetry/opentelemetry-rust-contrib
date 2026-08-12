@@ -68,9 +68,9 @@ tls-rustls = [
     "reqwest/rustls-tls-native-roots-no-provider",
 ]
 # Enables password-protected PKCS#12 client certificate authentication. This is
-# intentionally disabled by default so builds that use managed identity,
-# workload identity, or another non-certificate method do not compile PKCS#12
-# parsing and cryptographic dependencies.
+# intentionally disabled by default. p12-keystore is used only by the rustls
+# certificate path, but Cargo features cannot enable a dependency from the
+# intersection of certificate-auth and tls-rustls, so this feature owns it.
 certificate-auth = ["dep:p12-keystore"]
 default = ["tls-native"]
 
