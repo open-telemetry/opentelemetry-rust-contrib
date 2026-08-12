@@ -3,6 +3,7 @@ pub(crate) mod client;
 #[cfg(test)]
 mod tests {
     use crate::config_service::client::{AuthMethod, GenevaConfigClient, GenevaConfigClientConfig};
+    #[cfg(feature = "certificate-auth")]
     use openssl::{
         asn1::Asn1Time,
         bn::{BigNum, MsbOption},
@@ -19,14 +20,20 @@ mod tests {
             X509NameBuilder, X509,
         },
     };
+    #[cfg(feature = "certificate-auth")]
     use rcgen::generate_simple_self_signed;
     use secrecy::ExposeSecret;
+    #[cfg(feature = "certificate-auth")]
     use std::io::{Read, Write};
+    #[cfg(feature = "certificate-auth")]
     use std::net::TcpListener;
     use std::path::PathBuf;
+    #[cfg(feature = "certificate-auth")]
     use std::thread;
+    #[cfg(feature = "certificate-auth")]
     use tempfile::NamedTempFile;
     use tokio::sync::Mutex;
+    #[cfg(feature = "certificate-auth")]
     use uuid::Uuid;
     use wiremock::matchers::{header, method, path, query_param, query_param_is_missing};
     use wiremock::{Mock, MockServer, ResponseTemplate};
@@ -36,7 +43,7 @@ mod tests {
 
     /// Install a rustls CryptoProvider for tests that use certificate auth.
     /// In production, callers must install their own provider (e.g. rustls-symcrypt).
-    #[cfg(feature = "tls-rustls")]
+    #[cfg(all(feature = "certificate-auth", feature = "tls-rustls"))]
     fn ensure_crypto_provider() {
         let _ = rustls::crypto::ring::default_provider().install_default();
     }
@@ -73,6 +80,7 @@ mod tests {
         }
     }
 
+    #[cfg(feature = "certificate-auth")]
     fn generate_test_password() -> String {
         Uuid::new_v4().to_string()
     }
@@ -102,6 +110,29 @@ mod tests {
         }
     }
 
+    #[cfg(not(feature = "certificate-auth"))]
+    #[test]
+    fn certificate_auth_reports_disabled_feature() {
+        let config = GenevaConfigClientConfig {
+            endpoint: "https://example.com".to_string(),
+            environment: "env".to_string(),
+            account: "acct".to_string(),
+            namespace: "ns".to_string(),
+            region: "region".to_string(),
+            config_major_version: 1,
+            auth_method: AuthMethod::Certificate {
+                path: PathBuf::from("client.p12"),
+                password: "password".to_string(),
+            },
+            msi_resource: None,
+            test_root_ca_pem: None,
+        };
+
+        let error = GenevaConfigClient::new(config).unwrap_err();
+        assert!(error.to_string().contains("`certificate-auth` feature"));
+    }
+
+    #[cfg(feature = "certificate-auth")]
     fn generate_self_signed_p12() -> (NamedTempFile, String) {
         let password = generate_test_password();
 
@@ -137,6 +168,7 @@ mod tests {
         (file, password)
     }
 
+    #[cfg(feature = "certificate-auth")]
     struct GeneratedTlsMaterial {
         client_p12_file: NamedTempFile,
         client_password: String,
@@ -145,11 +177,13 @@ mod tests {
         server_key: PKey<Private>,
     }
 
+    #[cfg(feature = "certificate-auth")]
     struct LocalTlsConfigService {
         endpoint: String,
         handle: thread::JoinHandle<()>,
     }
 
+    #[cfg(feature = "certificate-auth")]
     fn build_pkcs12_der(cert: &X509, key: &PKey<Private>, password: &str) -> Vec<u8> {
         Pkcs12::builder()
             .name("alias")
@@ -161,6 +195,7 @@ mod tests {
             .unwrap()
     }
 
+    #[cfg(feature = "certificate-auth")]
     fn build_pkcs12(cert: &X509, key: &PKey<Private>, password: &str) -> NamedTempFile {
         let pkcs12 = build_pkcs12_der(cert, key, password);
         let mut file = NamedTempFile::new().unwrap();
@@ -168,12 +203,14 @@ mod tests {
         file
     }
 
+    #[cfg(feature = "certificate-auth")]
     fn build_serial_number() -> openssl::asn1::Asn1Integer {
         let mut serial = BigNum::new().unwrap();
         serial.rand(159, MsbOption::MAYBE_ZERO, false).unwrap();
         serial.to_asn1_integer().unwrap()
     }
 
+    #[cfg(feature = "certificate-auth")]
     fn build_subject_name(common_name: &str) -> openssl::x509::X509Name {
         let mut name_builder = X509NameBuilder::new().unwrap();
         name_builder
@@ -182,6 +219,7 @@ mod tests {
         name_builder.build()
     }
 
+    #[cfg(feature = "certificate-auth")]
     fn generate_ca() -> (X509, PKey<Private>) {
         let key = PKey::from_rsa(Rsa::generate(2048).unwrap()).unwrap();
         let subject_name = build_subject_name("GenevaUploader Test CA");
@@ -219,6 +257,7 @@ mod tests {
         (builder.build(), key)
     }
 
+    #[cfg(feature = "certificate-auth")]
     fn generate_signed_leaf(
         ca_cert: &X509,
         ca_key: &PKey<Private>,
@@ -284,6 +323,7 @@ mod tests {
         (builder.build(), key)
     }
 
+    #[cfg(feature = "certificate-auth")]
     fn generate_ca_signed_tls_material() -> GeneratedTlsMaterial {
         let (ca_cert, ca_key) = generate_ca();
         let (server_cert, server_signing_key) =
@@ -303,6 +343,7 @@ mod tests {
         }
     }
 
+    #[cfg(feature = "certificate-auth")]
     fn spawn_tls_config_service(
         response_body: String,
         server_cert: X509,
@@ -393,6 +434,7 @@ mod tests {
 
     /// Scenario: Certificate auth retrieves ingestion routing from a mock config service.
     /// Guarantees: The returned token and routing preserve the service response.
+    #[cfg(feature = "certificate-auth")]
     #[cfg_attr(target_os = "macos", ignore)] // cert generated not compatible with macOS
     #[tokio::test]
     async fn get_ingestion_info_mocked() {
@@ -570,6 +612,7 @@ mod tests {
         }
     }
 
+    #[cfg(feature = "certificate-auth")]
     #[tokio::test]
     async fn tls_rejects_untrusted_runtime_generated_ca() {
         #[cfg(feature = "tls-rustls")]
@@ -615,6 +658,7 @@ mod tests {
 
     /// Scenario: A trusted runtime-generated CA secures the config-service response.
     /// Guarantees: The secret-wrapped token and routing survive TLS retrieval.
+    #[cfg(feature = "certificate-auth")]
     #[tokio::test]
     async fn tls_accepts_runtime_generated_ca() {
         #[cfg(feature = "tls-rustls")]
@@ -664,6 +708,7 @@ mod tests {
         tls_server.handle.join().unwrap();
     }
 
+    #[cfg(feature = "certificate-auth")]
     #[cfg_attr(target_os = "macos", ignore)] // cert generated not compatible with macOS
     #[tokio::test]
     async fn error_handling_with_non_success_status() {
@@ -711,6 +756,7 @@ mod tests {
         }
     }
 
+    #[cfg(feature = "certificate-auth")]
     #[cfg_attr(target_os = "macos", ignore)] // cert generated not compatible with macOS
     #[tokio::test]
     async fn missing_ingestion_gateway_info() {
@@ -763,6 +809,7 @@ mod tests {
         }
     }
 
+    #[cfg(feature = "certificate-auth")]
     #[cfg_attr(target_os = "macos", ignore)] // cert generated not compatible with macOS
     #[tokio::test]
     async fn invalid_certificate_path() {
@@ -809,9 +856,11 @@ mod tests {
     // export GENEVA_CERT_PASSWORD="your-certificate-password" // Empty string if no password
     // cargo test get_ingestion_info_real_server -- --ignored
     // ```
+    #[cfg(feature = "certificate-auth")]
     use std::env;
     /// Scenario: An operator explicitly runs the real config-service smoke test.
     /// Guarantees: Returned secret-wrapped credentials are non-empty without logging them.
+    #[cfg(feature = "certificate-auth")]
     #[tokio::test]
     #[ignore] // This test is ignored by default to prevent running in CI pipelines
     async fn get_ingestion_info_real_server() {

@@ -14,10 +14,15 @@ use tracing::{debug, error, info};
 use uuid::Uuid;
 
 use chrono::{DateTime, Utc};
-#[cfg(all(feature = "tls-native", not(feature = "tls-rustls")))]
+#[cfg(all(
+    feature = "certificate-auth",
+    feature = "tls-native",
+    not(feature = "tls-rustls")
+))]
 use native_tls::{Identity, Protocol};
 use std::fmt;
 use std::fmt::Write;
+#[cfg(feature = "certificate-auth")]
 use std::fs;
 use std::path::PathBuf;
 use std::sync::RwLock;
@@ -284,6 +289,7 @@ impl GenevaConfigClient {
         let agent_identity = "GenevaUploader";
         let agent_version = "0.1";
 
+        #[cfg_attr(not(feature = "certificate-auth"), allow(unused_mut))]
         let mut client_builder = Client::builder()
             .http1_only()
             .timeout(Duration::from_secs(30)) //TODO - make this configurable
@@ -292,77 +298,88 @@ impl GenevaConfigClient {
         match &config.auth_method {
             // TODO: Certificate auth would be removed in favor of managed identity.,
             // This is for testing, so we can use self-signed certs, and password in plain text.
+            #[cfg_attr(not(feature = "certificate-auth"), allow(unused_variables))]
             AuthMethod::Certificate { path, password } => {
-                info!(
-                    name: "config_client.new.certificate_auth",
-                    target: "geneva-uploader",
-                    "Using Certificate authentication"
-                );
-                // Read the PKCS#12 file
-                let p12_bytes = fs::read(path).map_err(|e| {
-                    debug!(
-                        name: "config_client.new.certificate_read_error",
+                #[cfg(not(feature = "certificate-auth"))]
+                return Err(GenevaConfigClientError::Certificate(
+                    "certificate authentication is disabled; rebuild with the `certificate-auth` feature or use managed identity, workload identity, or agent-fed authentication"
+                        .to_string(),
+                ));
+
+                #[cfg(feature = "certificate-auth")]
+                {
+                    info!(
+                        name: "config_client.new.certificate_auth",
                         target: "geneva-uploader",
-                        error = %e,
-                        "Failed to read certificate file"
+                        "Using Certificate authentication"
                     );
-                    GenevaConfigClientError::Certificate(e.to_string())
-                })?;
-
-                #[cfg(all(feature = "tls-native", not(feature = "tls-rustls")))]
-                {
-                    let identity = Identity::from_pkcs12(&p12_bytes, password).map_err(|e| {
+                    // Read the PKCS#12 file
+                    let p12_bytes = fs::read(path).map_err(|e| {
                         debug!(
-                            name: "config_client.new.certificate_parse_error",
+                            name: "config_client.new.certificate_read_error",
                             target: "geneva-uploader",
                             error = %e,
-                            "Failed to parse PKCS#12 certificate"
+                            "Failed to read certificate file"
                         );
                         GenevaConfigClientError::Certificate(e.to_string())
                     })?;
-                    // TODO - use use_native_tls instead of preconfigured_tls once we no longer
-                    // need TLS 1.2 as the exclusive protocol.
-                    let tls_connector = configure_native_tls_connector(
-                        native_tls::TlsConnector::builder(),
-                        identity,
-                        #[cfg(test)]
-                        config.test_root_ca_pem.as_deref(),
-                        #[cfg(not(test))]
-                        None,
-                    )?
-                    .build()
-                    .map_err(|e| {
-                        debug!(
-                            name: "config_client.new.tls_connector_error",
-                            target: "geneva-uploader",
-                            error = %e,
-                            "Failed to build TLS connector"
-                        );
-                        GenevaConfigClientError::Certificate(e.to_string())
-                    })?;
-                    client_builder = client_builder.use_preconfigured_tls(tls_connector);
-                }
 
-                #[cfg(feature = "tls-rustls")]
-                {
-                    let tls_config = build_rustls_client_config(
-                        &p12_bytes,
-                        password,
-                        #[cfg(test)]
-                        config.test_root_ca_pem.as_deref(),
-                        #[cfg(not(test))]
-                        None,
-                    )
-                    .map_err(|e| {
-                        debug!(
-                            name: "config_client.new.tls_connector_error",
-                            target: "geneva-uploader",
-                            error = %e,
-                            "Failed to build rustls client config"
-                        );
-                        e
-                    })?;
-                    client_builder = client_builder.use_preconfigured_tls(tls_config);
+                    #[cfg(all(feature = "tls-native", not(feature = "tls-rustls")))]
+                    {
+                        let identity =
+                            Identity::from_pkcs12(&p12_bytes, password).map_err(|e| {
+                                debug!(
+                                    name: "config_client.new.certificate_parse_error",
+                                    target: "geneva-uploader",
+                                    error = %e,
+                                    "Failed to parse PKCS#12 certificate"
+                                );
+                                GenevaConfigClientError::Certificate(e.to_string())
+                            })?;
+                        // TODO - use use_native_tls instead of preconfigured_tls once we no longer
+                        // need TLS 1.2 as the exclusive protocol.
+                        let tls_connector = configure_native_tls_connector(
+                            native_tls::TlsConnector::builder(),
+                            identity,
+                            #[cfg(test)]
+                            config.test_root_ca_pem.as_deref(),
+                            #[cfg(not(test))]
+                            None,
+                        )?
+                        .build()
+                        .map_err(|e| {
+                            debug!(
+                                name: "config_client.new.tls_connector_error",
+                                target: "geneva-uploader",
+                                error = %e,
+                                "Failed to build TLS connector"
+                            );
+                            GenevaConfigClientError::Certificate(e.to_string())
+                        })?;
+                        client_builder = client_builder.use_preconfigured_tls(tls_connector);
+                    }
+
+                    #[cfg(feature = "tls-rustls")]
+                    {
+                        let tls_config = build_rustls_client_config(
+                            &p12_bytes,
+                            password,
+                            #[cfg(test)]
+                            config.test_root_ca_pem.as_deref(),
+                            #[cfg(not(test))]
+                            None,
+                        )
+                        .map_err(|e| {
+                            debug!(
+                                name: "config_client.new.tls_connector_error",
+                                target: "geneva-uploader",
+                                error = %e,
+                                "Failed to build rustls client config"
+                            );
+                            e
+                        })?;
+                        client_builder = client_builder.use_preconfigured_tls(tls_config);
+                    }
                 }
             }
             AuthMethod::WorkloadIdentity { .. } => {
@@ -1089,7 +1106,11 @@ pub(crate) fn extract_endpoint_from_token(token: &str) -> Result<String> {
     ))
 }
 
-#[cfg(all(feature = "tls-native", not(feature = "tls-rustls")))]
+#[cfg(all(
+    feature = "certificate-auth",
+    feature = "tls-native",
+    not(feature = "tls-rustls")
+))]
 fn configure_native_tls_connector(
     mut builder: native_tls::TlsConnectorBuilder,
     identity: native_tls::Identity,
@@ -1110,7 +1131,7 @@ fn configure_native_tls_connector(
     Ok(builder)
 }
 
-#[cfg(feature = "tls-rustls")]
+#[cfg(all(feature = "certificate-auth", feature = "tls-rustls"))]
 fn build_rustls_client_config(
     p12_bytes: &[u8],
     password: &str,
