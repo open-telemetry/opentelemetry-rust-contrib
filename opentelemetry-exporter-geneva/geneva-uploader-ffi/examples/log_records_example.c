@@ -10,6 +10,7 @@
  *   GENEVA_ENVIRONMENT           e.g. Test
  *   GENEVA_ACCOUNT               e.g. myaccount
  *   GENEVA_NAMESPACE             e.g. mynamespace
+ *   GENEVA_ACCOUNT_GROUP         e.g. mynamespacediag (optional for a single-group response)
  *   GENEVA_REGION                e.g. eastus
  *   GENEVA_CONFIG_MAJOR_VERSION  e.g. 2
  *
@@ -57,6 +58,7 @@ int main(void) {
     const char* environment   = getenv("GENEVA_ENVIRONMENT");
     const char* account       = getenv("GENEVA_ACCOUNT");
     const char* namespaceName = getenv("GENEVA_NAMESPACE");
+    const char* accountGroup  = getenv("GENEVA_ACCOUNT_GROUP");
     const char* region        = getenv("GENEVA_REGION");
     const char* cfg_ver_str   = getenv("GENEVA_CONFIG_MAJOR_VERSION");
 
@@ -103,6 +105,7 @@ int main(void) {
         .environment          = environment,
         .account              = account,
         .namespace_name       = namespaceName,
+        .account_group        = accountGroup,
         .region               = region,
         .config_major_version = (uint32_t)cfg_ver,
         .auth_method          = auth_method,

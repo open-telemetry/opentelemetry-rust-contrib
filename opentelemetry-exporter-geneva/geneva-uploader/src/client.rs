@@ -26,6 +26,7 @@ use opentelemetry_proto::tonic::resource::v1::Resource;
 use opentelemetry_proto::tonic::trace::v1::{ResourceSpans, Span};
 use otap_df_pdata_views::views::logs::LogsDataView;
 use secrecy::{ExposeSecret, SecretString};
+use std::collections::HashMap;
 use std::fmt;
 use std::future::Future;
 use std::pin::Pin;
@@ -38,6 +39,7 @@ use tracing::{debug, info};
 #[derive(Debug, Clone, PartialEq)]
 pub struct EncodedBatch {
     pub event_name: String,
+    pub account_group: String,
     pub(crate) data: Vec<u8>,
     pub(crate) metadata: crate::payload_encoder::central_blob::BatchMetadata,
     pub row_count: usize,
@@ -58,6 +60,7 @@ pub struct GenevaClientConfig {
     pub environment: String,
     pub account: String,
     pub namespace: String,
+    pub account_routing: AccountRouting,
     pub region: String,
     pub config_major_version: u32,
     pub auth_method: AuthMethod,
@@ -68,6 +71,50 @@ pub struct GenevaClientConfig {
     pub logs: Option<LogsConfig>,
     pub spans: Option<TracesConfig>,
     pub obo_event_map: Option<OboEventMap>, // Per-event OBO config (None = no OBO)
+}
+
+/// Maps each final Geneva event name to one logical GCS account group.
+#[derive(Clone, Debug)]
+pub struct AccountRouting {
+    pub default_group: String,
+    pub groups_by_event: HashMap<String, String>,
+}
+
+impl AccountRouting {
+    pub fn new(default_group: impl Into<String>) -> Self {
+        Self {
+            default_group: default_group.into(),
+            groups_by_event: HashMap::new(),
+        }
+    }
+
+    pub fn with_event_group(
+        mut self,
+        event_name: impl Into<String>,
+        account_group: impl Into<String>,
+    ) -> Self {
+        self.groups_by_event
+            .insert(event_name.into(), account_group.into());
+        self
+    }
+
+    fn validate(&self) -> Result<(), String> {
+        if self.default_group.trim().is_empty() {
+            return Err("account_routing.default_group must not be empty".to_string());
+        }
+        for (event, group) in &self.groups_by_event {
+            if event.trim().is_empty() || group.trim().is_empty() {
+                return Err("account_routing event and group names must not be empty".to_string());
+            }
+        }
+        Ok(())
+    }
+
+    fn group_for_event(&self, event_name: &str) -> &str {
+        self.groups_by_event
+            .get(event_name)
+            .map_or(self.default_group.as_str(), String::as_str)
+    }
 }
 
 #[derive(Clone, Debug)]
@@ -109,8 +156,8 @@ pub struct AgentFedCredential {
     token: SecretString,
     /// GIG ingestion endpoint (base URL the upload POSTs to).
     pub endpoint: String,
-    /// Account moniker for the upload.
-    pub moniker: String,
+    /// Primary physical moniker for every logical account group.
+    pub primary_monikers: HashMap<String, String>,
 }
 
 impl AgentFedCredential {
@@ -119,12 +166,12 @@ impl AgentFedCredential {
     pub fn new(
         token: impl Into<SecretString>,
         endpoint: impl Into<String>,
-        moniker: impl Into<String>,
+        primary_monikers: HashMap<String, String>,
     ) -> Self {
         Self {
             token: token.into(),
             endpoint: endpoint.into(),
-            moniker: moniker.into(),
+            primary_monikers,
         }
     }
 
@@ -134,8 +181,8 @@ impl AgentFedCredential {
         self.token.expose_secret()
     }
 
-    pub(crate) fn into_parts(self) -> (SecretString, String, String) {
-        (self.token, self.endpoint, self.moniker)
+    pub(crate) fn into_parts(self) -> (SecretString, String, HashMap<String, String>) {
+        (self.token, self.endpoint, self.primary_monikers)
     }
 }
 
@@ -145,7 +192,7 @@ impl std::fmt::Debug for AgentFedCredential {
         f.debug_struct("AgentFedCredential")
             .field("token", &"<redacted>")
             .field("endpoint", &self.endpoint)
-            .field("moniker", &self.moniker)
+            .field("account_groups", &self.primary_monikers.keys())
             .finish()
     }
 }
@@ -200,6 +247,7 @@ pub struct GenevaClient {
     span_table_name: Arc<str>,
     span_event_name_mapping: Option<SpanEventNameMapping>,
     obo_event_map: Option<OboEventMap>,
+    account_routing: AccountRouting,
 }
 
 /// Stored client pieces shared by every constructor (all of `Self` except the
@@ -211,11 +259,13 @@ struct ClientParts {
     span_event_name_mapping: Option<SpanEventNameMapping>,
     metadata_fields: MetadataFields,
     obo_event_map: Option<OboEventMap>,
+    account_routing: AccountRouting,
 }
 
 impl GenevaClient {
     /// Validate any configured event-name mappings before building the client.
     fn validate_event_name_mappings(cfg: &GenevaClientConfig) -> Result<(), String> {
+        cfg.account_routing.validate()?;
         if let Some(mapping) = cfg
             .logs
             .as_ref()
@@ -246,6 +296,7 @@ impl GenevaClient {
             logs,
             spans,
             obo_event_map,
+            account_routing,
             ..
         } = cfg;
 
@@ -375,6 +426,7 @@ impl GenevaClient {
                 span_event_name_mapping,
                 metadata_fields,
                 obo_event_map,
+                account_routing,
             },
         )
     }
@@ -390,6 +442,7 @@ impl GenevaClient {
             span_table_name: parts.span_table_name,
             span_event_name_mapping: parts.span_event_name_mapping,
             obo_event_map: parts.obo_event_map,
+            account_routing: parts.account_routing,
         }
     }
 
@@ -549,7 +602,8 @@ impl GenevaClient {
             "Encoding and compressing logs"
         );
 
-        self.encoder
+        let mut batches = self
+            .encoder
             .encode_logs_from_view(
                 view,
                 &self.metadata_fields,
@@ -565,7 +619,9 @@ impl GenevaClient {
                     "Logs compression failed"
                 );
                 format!("Compression failed: {e}")
-            })
+            })?;
+        self.assign_account_groups(&mut batches);
+        Ok(batches)
     }
 
     /// Encode OTLP spans into LZ4 chunked compressed batches.
@@ -588,7 +644,7 @@ impl GenevaClient {
                 .iter()
                 .flat_map(|resource_span| &resource_span.scope_spans)
                 .flat_map(|scope_span| &scope_span.spans);
-            return self
+            let mut batches = self
                 .encoder
                 .encode_span_batch(
                     all_spans,
@@ -605,7 +661,9 @@ impl GenevaClient {
                         "Span compression failed"
                     );
                     format!("Compression failed: {e}")
-                });
+                })?;
+            self.assign_account_groups(&mut batches);
+            return Ok(batches);
         };
 
         let mut routed_groups: Vec<(String, Vec<&Span>)> = Vec::new();
@@ -664,7 +722,17 @@ impl GenevaClient {
             batches.extend(encoded);
         }
 
+        self.assign_account_groups(&mut batches);
         Ok(batches)
+    }
+
+    fn assign_account_groups(&self, batches: &mut [EncodedBatch]) {
+        for batch in batches {
+            batch.account_group = self
+                .account_routing
+                .group_for_event(&batch.event_name)
+                .to_string();
+        }
     }
 
     /// Upload a single compressed batch.
@@ -686,6 +754,7 @@ impl GenevaClient {
             .upload(
                 batch.data.clone(),
                 &batch.event_name,
+                &batch.account_group,
                 &batch.metadata,
                 batch.row_count,
                 obo_config,
@@ -740,6 +809,7 @@ mod tests {
             environment: "Test".to_string(),
             account: "acct".to_string(),
             namespace: "ns".to_string(),
+            account_routing: AccountRouting::new("test-group"),
             region: "eastus".to_string(),
             config_major_version: 2,
             auth_method: AuthMethod::WorkloadIdentity {
@@ -898,6 +968,53 @@ mod tests {
             Err(err) => err,
         };
         assert!(err.contains("events must be non-empty"));
+    }
+
+    #[test]
+    fn new_rejects_invalid_account_routing() {
+        let mut cfg = build_config(None, None);
+        cfg.account_routing = AccountRouting::new("   ");
+
+        let err = match GenevaClient::new(cfg) {
+            Ok(_) => panic!("blank default account group must be rejected"),
+            Err(err) => err,
+        };
+        assert!(err.contains("default_group must not be empty"));
+
+        let mut cfg = build_config(None, None);
+        cfg.account_routing = AccountRouting::new("default").with_event_group("Log", "  ");
+
+        let err = match GenevaClient::new(cfg) {
+            Ok(_) => panic!("blank mapped account group must be rejected"),
+            Err(err) => err,
+        };
+        assert!(err.contains("event and group names must not be empty"));
+    }
+
+    #[test]
+    fn encoded_batches_route_final_event_name_to_account_group() {
+        let mut cfg = build_config(Some("SecurityEvent"), None);
+        cfg.account_routing =
+            AccountRouting::new("diagnostics").with_event_group("SecurityEvent", "security");
+        let client = GenevaClient::new(cfg).expect("client should initialize");
+
+        let request = ExportLogsServiceRequest {
+            resource_logs: vec![ResourceLogs {
+                scope_logs: vec![ScopeLogs {
+                    log_records: vec![LogRecord::default()],
+                    ..Default::default()
+                }],
+                ..Default::default()
+            }],
+        };
+        let bytes = request.encode_to_vec();
+        let batches = client
+            .encode_and_compress_logs(&RawLogsData::new(&bytes))
+            .expect("log encoding should succeed");
+
+        assert_eq!(batches.len(), 1);
+        assert_eq!(batches[0].event_name, "SecurityEvent");
+        assert_eq!(batches[0].account_group, "security");
     }
 
     #[test]
@@ -1475,6 +1592,7 @@ mod tests {
             environment: "Test".to_string(),
             account: "acct".to_string(),
             namespace: "ns".to_string(),
+            account_routing: AccountRouting::new("test-group"),
             region: "eastus".to_string(),
             config_major_version: 2,
             auth_method: AuthMethod::WorkloadIdentity {
@@ -1516,6 +1634,7 @@ mod tests {
             environment: "Test".to_string(),
             account: "acct".to_string(),
             namespace: "ns".to_string(),
+            account_routing: AccountRouting::new("test-group"),
             region: "eastus".to_string(),
             config_major_version: 2,
             auth_method: AuthMethod::WorkloadIdentity {
@@ -1562,7 +1681,7 @@ mod tests {
                     Some(AgentFedCredential::new(
                         "secret-token",
                         "https://ingest.example",
-                        "moniker",
+                        HashMap::from([("test-group".to_string(), "moniker".to_string())]),
                     ))
                 })
             }
@@ -1598,7 +1717,11 @@ mod tests {
     /// Guarantees: The bearer token is redacted while routing remains inspectable.
     #[test]
     fn agent_fed_credential_debug_redacts_token() {
-        let cred = AgentFedCredential::new("top-secret", "https://ingest.example", "moniker");
+        let cred = AgentFedCredential::new(
+            "top-secret",
+            "https://ingest.example",
+            HashMap::from([("test-group".to_string(), "moniker".to_string())]),
+        );
         assert_eq!(cred.expose_token(), "top-secret");
         let rendered = format!("{cred:?}");
         assert!(
@@ -1606,6 +1729,6 @@ mod tests {
             "token must be redacted: {rendered}"
         );
         assert!(rendered.contains("<redacted>"));
-        assert!(rendered.contains("moniker"));
+        assert!(rendered.contains("test-group"));
     }
 }

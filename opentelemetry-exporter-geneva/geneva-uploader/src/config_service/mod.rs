@@ -427,7 +427,7 @@ mod tests {
                 },
                 {
                     "AccountMonikerName": "mock-diag-secondary",
-                    "AccountGroupName": "mocknsdiag",
+                    "AccountGroupName": "MockNsDiag",
                     "IsPrimaryMoniker": false
                 },
                 {
@@ -491,8 +491,10 @@ mod tests {
         );
 
         // Check moniker info
-        assert_eq!(moniker_info.name, "mock-diag-moniker");
-        assert_eq!(moniker_info.account_group, "MockNsDiag");
+        assert_eq!(
+            moniker_info.get("MockNsDiag").map(String::as_str),
+            Some("mock-diag-moniker")
+        );
         assert_eq!(token_endpoint, jwt_endpoint);
     }
 
@@ -562,7 +564,10 @@ mod tests {
 
         assert_eq!(ingestion_info.endpoint, "https://mock.ingestion.endpoint");
         assert_eq!(ingestion_info.auth_token.expose_secret(), valid_token);
-        assert_eq!(moniker_info.name, "mock-diag-moniker");
+        assert_eq!(
+            moniker_info.get("MockNsDiag").map(String::as_str),
+            Some("mock-diag-moniker")
+        );
         assert_eq!(token_endpoint, jwt_endpoint);
     }
 
@@ -712,8 +717,10 @@ mod tests {
             ingestion_info.auth_token_expiry_time,
             "2030-01-01T00:00:00Z"
         );
-        assert_eq!(moniker_info.name, "mock-diag-moniker");
-        assert_eq!(moniker_info.account_group, "MockNsDiag");
+        assert_eq!(
+            moniker_info.get("MockNsDiag").map(String::as_str),
+            Some("mock-diag-moniker")
+        );
         assert_eq!(token_endpoint, jwt_endpoint);
         tls_server.handle.join().unwrap();
     }
@@ -926,17 +933,16 @@ mod tests {
             !ingestion_info.auth_token.expose_secret().is_empty(),
             "Auth token should not be empty"
         );
-        assert!(!moniker.name.is_empty(), "Moniker name should not be empty");
         assert!(
-            !moniker.account_group.is_empty(),
-            "Moniker account group should not be empty"
+            !moniker.is_empty(),
+            "Primary moniker map should not be empty"
         );
 
         println!("Successfully connected to real server");
         println!("Endpoint: {}", ingestion_info.endpoint);
         let token_len = ingestion_info.auth_token.expose_secret().len();
         println!("Auth token length: {token_len}");
-        println!("Moniker name: {}", moniker.name);
+        println!("Primary account groups: {:?}", moniker.keys());
     }
 
     mod extract_endpoint_from_token_tests {

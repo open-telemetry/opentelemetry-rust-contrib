@@ -20,6 +20,7 @@ use chrono::{DateTime, Utc};
     not(feature = "tls-rustls")
 ))]
 use native_tls::{Identity, Protocol};
+use std::collections::HashMap;
 use std::fmt;
 use std::fmt::Write;
 #[cfg(feature = "certificate-auth")]
@@ -192,13 +193,6 @@ pub(crate) struct IngestionGatewayInfo {
 }
 
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
-pub(crate) struct MonikerInfo {
-    pub name: String,
-    pub account_group: String,
-}
-
-#[allow(dead_code)]
 #[derive(Debug, Deserialize)]
 struct StorageAccountKey {
     #[serde(rename = "AccountMonikerName")]
@@ -222,30 +216,41 @@ struct GenevaResponse {
     tag_id: String,
 }
 
-fn select_primary_account(
-    accounts: Vec<StorageAccountKey>,
-    account_group: &str,
-) -> Result<StorageAccountKey> {
-    let mut matches = accounts.into_iter().filter(|account| {
-        account.is_primary_moniker
-            && account
-                .account_group_name
-                .eq_ignore_ascii_case(account_group)
-    });
-
-    let Some(account) = matches.next() else {
-        return Err(GenevaConfigClientError::MonikerNotFound(format!(
-            "No primary moniker found for diagnostics account group '{account_group}'"
-        )));
-    };
-
-    if matches.next().is_some() {
-        return Err(GenevaConfigClientError::MonikerNotFound(format!(
-            "Multiple primary monikers found for diagnostics account group '{account_group}'"
-        )));
+fn select_primary_monikers(accounts: Vec<StorageAccountKey>) -> Result<HashMap<String, String>> {
+    let mut groups: HashMap<String, Vec<StorageAccountKey>> = HashMap::new();
+    for account in accounts {
+        groups
+            .entry(account.account_group_name.clone())
+            .or_default()
+            .push(account);
+    }
+    if groups.is_empty() {
+        return Err(GenevaConfigClientError::MonikerNotFound(
+            "GCS returned no account groups".to_string(),
+        ));
     }
 
-    Ok(account)
+    let mut primary_monikers = HashMap::with_capacity(groups.len());
+    for (group, entries) in groups {
+        let mut primaries = entries.into_iter().filter(|entry| entry.is_primary_moniker);
+        let primary = primaries.next().ok_or_else(|| {
+            GenevaConfigClientError::MonikerNotFound(format!(
+                "No primary moniker found for account group '{group}'"
+            ))
+        })?;
+        if primaries.next().is_some() {
+            return Err(GenevaConfigClientError::MonikerNotFound(format!(
+                "Multiple primary monikers found for account group '{group}'"
+            )));
+        }
+        if primary.account_moniker_name.trim().is_empty() {
+            return Err(GenevaConfigClientError::MonikerNotFound(format!(
+                "Primary moniker for account group '{group}' is empty"
+            )));
+        }
+        primary_monikers.insert(group, primary.account_moniker_name);
+    }
+    Ok(primary_monikers)
 }
 
 #[derive(Debug, Deserialize)]
@@ -256,7 +261,7 @@ struct MsiTokenResponse {
 #[allow(dead_code)]
 struct CachedAuthData {
     // Store the complete token and moniker info
-    auth_info: (IngestionGatewayInfo, MonikerInfo),
+    auth_info: (IngestionGatewayInfo, HashMap<String, String>),
     // Store the endpoint from token for quick access
     token_endpoint: String,
     // Store expiry separately for quick access
@@ -270,7 +275,6 @@ pub(crate) struct GenevaConfigClient {
     // TODO: revisit if the lock can be removed
     cached_data: RwLock<Option<CachedAuthData>>,
     precomputed_url_prefix: String,
-    diagnostics_account_group: String,
     agent_identity: String,
     agent_version: String,
 }
@@ -280,7 +284,6 @@ impl fmt::Debug for GenevaConfigClient {
         f.debug_struct("GenevaConfigClient")
             .field("config", &self.config)
             .field("precomputed_url_prefix", &self.precomputed_url_prefix)
-            .field("diagnostics_account_group", &self.diagnostics_account_group)
             .field("agent_identity", &self.agent_identity)
             .field("agent_version", &self.agent_version)
             .finish()
@@ -477,14 +480,11 @@ impl GenevaConfigClient {
         ).map_err(|e| GenevaConfigClientError::InternalError(format!("Failed to write URL: {e}")))?;
 
         let http_client = client_builder.build()?;
-        let diagnostics_account_group = format!("{}diag", config.namespace);
-
         Ok(Self {
             config,
             http_client,
             cached_data: RwLock::new(None),
             precomputed_url_prefix: pre_url,
-            diagnostics_account_group,
             agent_identity: agent_identity.to_string(), // TODO make this configurable
             agent_version: "1.0".to_string(),           // TODO make this configurable
         })
@@ -841,7 +841,7 @@ impl GenevaConfigClient {
     #[allow(dead_code)]
     pub(crate) async fn get_ingestion_info(
         &self,
-    ) -> Result<(IngestionGatewayInfo, MonikerInfo, String)> {
+    ) -> Result<(IngestionGatewayInfo, HashMap<String, String>, String)> {
         debug!(
             name: "config_client.get_ingestion_info",
             target: "geneva-uploader",
@@ -875,7 +875,7 @@ impl GenevaConfigClient {
         }
         // Cache miss or expired token, fetch fresh data
         // Perform actual fetch before acquiring write lock to minimize lock contention
-        let (fresh_ingestion_gateway_info, fresh_moniker_info) =
+        let (fresh_ingestion_gateway_info, fresh_primary_monikers) =
             self.fetch_ingestion_info().await?;
 
         let token_expiry =
@@ -920,7 +920,7 @@ impl GenevaConfigClient {
         *guard = Some(CachedAuthData {
             auth_info: (
                 fresh_ingestion_gateway_info.clone(),
-                fresh_moniker_info.clone(),
+                fresh_primary_monikers.clone(),
             ),
             token_endpoint: token_endpoint.clone(),
             token_expiry,
@@ -928,13 +928,15 @@ impl GenevaConfigClient {
 
         Ok((
             fresh_ingestion_gateway_info,
-            fresh_moniker_info,
+            fresh_primary_monikers,
             token_endpoint,
         ))
     }
 
     /// Internal method that actually fetches data from Geneva Config Service
-    async fn fetch_ingestion_info(&self) -> Result<(IngestionGatewayInfo, MonikerInfo)> {
+    async fn fetch_ingestion_info(
+        &self,
+    ) -> Result<(IngestionGatewayInfo, HashMap<String, String>)> {
         info!(
             name: "config_client.fetch_ingestion_info",
             target: "geneva-uploader",
@@ -1024,33 +1026,14 @@ impl GenevaConfigClient {
                 }
             };
 
-            let account = select_primary_account(
-                parsed.storage_account_keys,
-                &self.diagnostics_account_group,
-            )
-            .map_err(|error| {
-                debug!(
-                    name: "config_client.fetch_ingestion_info.account_group_error",
-                    target: "geneva-uploader",
-                    account_group = %self.diagnostics_account_group,
-                    error = %error,
-                    "Failed to resolve diagnostics account group"
-                );
-                error
-            })?;
-
-            let moniker_info = MonikerInfo {
-                name: account.account_moniker_name,
-                account_group: account.account_group_name,
-            };
+            let primary_monikers = select_primary_monikers(parsed.storage_account_keys)?;
             info!(
                 name: "config_client.fetch_ingestion_info.success",
                 target: "geneva-uploader",
-                moniker = %moniker_info.name,
-                account_group = %moniker_info.account_group,
+                account_group_count = primary_monikers.len(),
                 "Successfully retrieved ingestion info"
             );
-            Ok((parsed.ingestion_gateway_info, moniker_info))
+            Ok((parsed.ingestion_gateway_info, primary_monikers))
         } else {
             debug!(
                 name: "config_client.fetch_ingestion_info.error_status",
@@ -1275,30 +1258,27 @@ mod account_selection_tests {
     }
 
     #[test]
-    fn selects_primary_from_exact_account_group() {
-        let selected = select_primary_account(
-            vec![
-                account("other", "contains-diag", true),
-                account("nsdiag", "secondary", false),
-                account("NsDiag", "primary", true),
-            ],
-            "nsdiag",
-        )
-        .expect("matching primary should be selected");
+    fn selects_one_primary_for_every_exact_account_group() {
+        let selected = select_primary_monikers(vec![
+            account("other", "contains-diag", true),
+            account("NsDiag", "secondary", false),
+            account("NsDiag", "primary", true),
+        ])
+        .expect("all groups should be resolved");
 
-        assert_eq!(selected.account_group_name, "NsDiag");
-        assert_eq!(selected.account_moniker_name, "primary");
+        assert_eq!(selected.get("NsDiag").map(String::as_str), Some("primary"));
+        assert_eq!(
+            selected.get("other").map(String::as_str),
+            Some("contains-diag")
+        );
     }
 
     #[test]
     fn rejects_missing_primary_for_account_group() {
-        let error = select_primary_account(
-            vec![
-                account("nsdiag", "secondary", false),
-                account("other", "contains-diag", true),
-            ],
-            "nsdiag",
-        )
+        let error = select_primary_monikers(vec![
+            account("nsdiag", "secondary", false),
+            account("other", "contains-diag", true),
+        ])
         .expect_err("a secondary or unrelated moniker must not be selected");
 
         assert!(error.to_string().contains("No primary moniker found"));
@@ -1306,17 +1286,26 @@ mod account_selection_tests {
 
     #[test]
     fn rejects_ambiguous_primary_for_account_group() {
-        let error = select_primary_account(
-            vec![
-                account("nsdiag", "primary-a", true),
-                account("NSDIAG", "primary-b", true),
-            ],
-            "nsdiag",
-        )
+        let error = select_primary_monikers(vec![
+            account("nsdiag", "primary-a", true),
+            account("nsdiag", "primary-b", true),
+        ])
         .expect_err("multiple primaries must not be response-order-dependent");
 
         assert!(error
             .to_string()
             .contains("Multiple primary monikers found"));
+    }
+
+    #[test]
+    fn preserves_case_distinct_account_groups() {
+        let selected = select_primary_monikers(vec![
+            account("NsDiag", "upper", true),
+            account("nsdiag", "lower", true),
+        ])
+        .expect("case-distinct groups must remain distinct");
+
+        assert_eq!(selected.get("NsDiag").map(String::as_str), Some("upper"));
+        assert_eq!(selected.get("nsdiag").map(String::as_str), Some("lower"));
     }
 }

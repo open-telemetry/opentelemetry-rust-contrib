@@ -971,6 +971,7 @@ impl LogBatchAccumulator {
 
             blobs.push(EncodedBatch {
                 event_name: batch_event_name.to_string(),
+                account_group: String::new(),
                 data: compressed,
                 metadata: BatchMetadata {
                     start_time: if batch_data.metadata.start_time == u64::MAX {
@@ -1193,6 +1194,7 @@ impl OtlpEncoder {
 
         Ok(vec![EncodedBatch {
             event_name: table_name.to_string(),
+            account_group: String::new(),
             data: compressed,
             metadata: batch_metadata,
             row_count: events_count,
