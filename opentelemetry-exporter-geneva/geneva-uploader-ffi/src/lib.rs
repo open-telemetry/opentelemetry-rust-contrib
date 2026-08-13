@@ -3471,7 +3471,7 @@ mod tests {
 
         // Upload all batches
         for i in 0..len {
-            let mut error = [0_i8; 512];
+            let mut error = [0 as c_char; 512];
             let result = unsafe {
                 geneva_upload_batch_sync(
                     handle_ptr,
