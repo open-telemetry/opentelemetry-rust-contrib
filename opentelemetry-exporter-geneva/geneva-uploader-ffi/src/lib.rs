@@ -3218,7 +3218,7 @@ mod tests {
     #[cfg(all(feature = "mock_auth", feature = "otlp_bytes"))]
     fn test_encode_and_upload_with_mock_server() {
         use otlp_builder::builder::build_otlp_logs_minimal;
-        use wiremock::matchers::method;
+        use wiremock::matchers::{method, query_param};
         use wiremock::{Mock, MockServer, ResponseTemplate};
 
         // Start mock server on the shared runtime used by the FFI code
@@ -3252,9 +3252,11 @@ mod tests {
 
             // Mock ingestion service (POST)
             Mock::given(method("POST"))
+                .and(query_param("moniker", "testdiagaccount"))
                 .respond_with(
                     ResponseTemplate::new(202).set_body_string(r#"{"ticket":"accepted"}"#),
                 )
+                .expect(1)
                 .mount(&mock_server)
                 .await;
         });
@@ -3265,7 +3267,7 @@ mod tests {
             environment: "test".to_string(),
             account: "test".to_string(),
             namespace: "testns".to_string(),
-            account_routing: AccountRouting::new("testgroup"),
+            account_routing: AccountRouting::new("test-group"),
             region: "testregion".to_string(),
             config_major_version: 1,
             auth_method: AuthMethod::MockAuth,
@@ -3319,8 +3321,7 @@ mod tests {
         let len = unsafe { geneva_batches_len(batches_ptr) };
         assert!(len >= 1, "expected at least one encoded batch");
 
-        // Attempt upload (ignore return code; we will assert via recorded requests)
-        let _ = unsafe {
+        let upload_result = unsafe {
             geneva_upload_batch_sync(
                 handle_ptr,
                 batches_ptr as *const _,
@@ -3331,6 +3332,12 @@ mod tests {
                 ptr::null_mut(),
             )
         };
+        assert_eq!(
+            upload_result as u32,
+            GenevaError::Success as u32,
+            "upload failed"
+        );
+        runtime().block_on(mock_server.verify());
 
         // Cleanup: free batches and client
         unsafe {
