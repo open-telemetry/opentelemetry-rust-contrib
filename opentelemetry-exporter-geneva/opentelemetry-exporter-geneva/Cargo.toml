@@ -25,6 +25,7 @@ otap-df-pdata-views = { git = "https://github.com/open-telemetry/otel-arrow", re
 default = ["tls-native"]
 tls-native = ["geneva-uploader/tls-native"]
 tls-rustls = ["geneva-uploader/tls-rustls"]
+certificate-auth = ["geneva-uploader/certificate-auth"]
 
 [dev-dependencies]
 opentelemetry-appender-tracing = { version = "0.32" }
