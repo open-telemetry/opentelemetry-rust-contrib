@@ -14,15 +14,9 @@ pub(super) fn blocking_client(timeout: std::time::Duration) -> ureq::Agent {
         .into()
 }
 
-#[cfg(feature = "detector-aws-eks")]
-#[cfg_attr(not(feature = "internal-logs"), allow(unused_variables))]
-pub(super) fn log_debug(detector: &'static str, error: &dyn std::error::Error) {
-    #[cfg(feature = "internal-logs")]
-    tracing::debug!(%detector, %error, "Detector error");
-}
-
 /// Converts a `Result` into an `Option`, reporting the error via [`log_debug`].
 #[cfg(feature = "detector-aws-eks")]
+#[cfg_attr(not(feature = "internal-logs"), allow(unused_variables))]
 pub(super) fn debug_on_error<T, E: std::error::Error>(
     detector: &'static str,
     result: Result<T, E>,
@@ -30,13 +24,15 @@ pub(super) fn debug_on_error<T, E: std::error::Error>(
     match result {
         Ok(value) => Some(value),
         Err(error) => {
-            log_debug(detector, &error);
+            #[cfg(feature = "internal-logs")]
+            tracing::debug!(%detector, %error, "Detector error");
             None
         }
     }
 }
 
 /// Converts a `Result` into an `Option`, reporting the error via [`log_warn`].
+#[cfg_attr(not(feature = "internal-logs"), allow(unused_variables))]
 pub(super) fn warn_on_error<T, E: std::error::Error>(
     detector: &'static str,
     result: Result<T, E>,

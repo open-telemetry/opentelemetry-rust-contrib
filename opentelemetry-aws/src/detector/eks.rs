@@ -23,6 +23,8 @@ const MIN_CONTAINER_ID_LEN: usize = 32;
 const MAX_CONTAINER_ID_LEN: usize = 64;
 /// IMDSv2 instance tag exposing the EKS cluster name, relative to `/latest/meta-data/`.
 const EKS_CLUSTER_NAME_TAG_PATH: &str = "tags/instance/aws:eks:cluster-name";
+/// The environment variable we expect to contain the cluster name.
+const EKS_CLUSTER_NAME_ENV_VAR: &str = "AWS_CLUSTER_NAME";
 
 /// EKS resource detector (`detector-aws-eks` feature).
 ///
@@ -177,21 +179,22 @@ impl ResourceDetector for EksResourceDetector {
             .as_ref()
             .and_then(|imds| debug_on_error(DETECTOR, imds.get(EKS_CLUSTER_NAME_TAG_PATH)))
             .and_then(non_empty)
-            .or_else(|| std::env::var("AWS_CLUSTER_NAME").ok());
+            .or_else(|| std::env::var(EKS_CLUSTER_NAME_ENV_VAR).ok())
+            .ok_or(EksError::ClusterNameNotFound);
 
         // AWS probe: a service-account mount only proves Kubernetes, which GKE,
         // AKS and self-managed clusters have too. Something has to tie the pod
         // to AWS before `cloud.platform` may claim EKS.
-        if cluster_name.is_none() && region.is_none() {
+        let Some(cluster_name) = warn_on_error(DETECTOR, cluster_name) else {
             // Kubernetes, but nothing says EKS: return empty resource
             return Resource::builder_empty().build();
-        }
+        };
 
         // The cluster ARN needs a partition, which costs an extra IMDS request,
         // so it is only fetched once the rest of the ARN is known.
         // If partition is not retrievable from IMDS, assume "aws".
-        let cluster_arn = match (&cluster_name, &region, &account_id) {
-            (Some(cluster_name), Some(region), Some(account_id)) => {
+        let cluster_arn = match (&region, &account_id) {
+            (Some(region), Some(account_id)) => {
                 let partition = imds
                     .as_ref()
                     .and_then(|imds| warn_on_error(DETECTOR, imds.get("services/partition")))
@@ -216,7 +219,7 @@ impl ResourceDetector for EksResourceDetector {
             opt_kv(semco::K8S_POD_UID, std::env::var("POD_UID").ok()),
             // Node name — requires the downward API to expose spec.nodeName as NODE_NAME
             opt_kv(semco::K8S_NODE_NAME, std::env::var("NODE_NAME").ok()),
-            opt_kv(semco::K8S_CLUSTER_NAME, cluster_name),
+            Some(KeyValue::new(semco::K8S_CLUSTER_NAME, cluster_name)),
             opt_kv(semco::AWS_EKS_CLUSTER_ARN, cluster_arn),
             // Container ID — from cgroup, then from the mount table
             opt_kv(
@@ -253,6 +256,8 @@ enum EksError {
     EmptyNamespace,
     #[error("Could not extract the container id from {CGROUP_FILE_PATH} or {MOUNTINFO_FILE_PATH}")]
     NoContainerId,
+    #[error("Could not find the cluster name, neither in the AWS EC2 tags through IMDS nor from the `{EKS_CLUSTER_NAME_ENV_VAR}` environment variable")]
+    ClusterNameNotFound,
 }
 
 /// Reads and trims the service-account namespace file, erroring if the result is empty.
