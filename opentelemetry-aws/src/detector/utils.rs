@@ -14,7 +14,7 @@ pub(super) fn blocking_client(timeout: std::time::Duration) -> ureq::Agent {
         .into()
 }
 
-/// Converts a `Result` into an `Option`, reporting the error via [`log_debug`].
+/// Converts a `Result` into an `Option`, reporting the error via [`tracing::debug`].
 #[cfg(feature = "detector-aws-eks")]
 #[cfg_attr(not(feature = "internal-logs"), allow(unused_variables))]
 pub(super) fn debug_on_error<T, E: std::error::Error>(
@@ -31,7 +31,23 @@ pub(super) fn debug_on_error<T, E: std::error::Error>(
     }
 }
 
-/// Converts a `Result` into an `Option`, reporting the error via [`log_warn`].
+/// Converts a `Result` into an `Option`, reporting the error via [`tracing::info`].
+#[cfg_attr(not(feature = "internal-logs"), allow(unused_variables))]
+pub(super) fn info_on_error<T, E: std::error::Error>(
+    detector: &'static str,
+    result: Result<T, E>,
+) -> Option<T> {
+    match result {
+        Ok(value) => Some(value),
+        Err(error) => {
+            #[cfg(feature = "internal-logs")]
+            tracing::info!(%detector, %error, "Detector error");
+            None
+        }
+    }
+}
+
+/// Converts a `Result` into an `Option`, reporting the error via [`tracing::warn`].
 #[cfg_attr(not(feature = "internal-logs"), allow(unused_variables))]
 pub(super) fn warn_on_error<T, E: std::error::Error>(
     detector: &'static str,
@@ -136,7 +152,7 @@ mod tests {
     }
 
     // Tests for opt_kv_array
-
+    #[cfg(feature = "detector-aws-ecs")]
     #[test]
     fn opt_kv_array_some() {
         let kv = opt_kv_array("array.key", Some("v".to_owned()));
@@ -146,7 +162,7 @@ mod tests {
         let expected = Value::Array(Array::from(vec![StringValue::from("v")]));
         assert_eq!(kv.value, expected);
     }
-
+    #[cfg(feature = "detector-aws-ecs")]
     #[test]
     fn opt_kv_array_none() {
         // None input

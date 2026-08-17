@@ -10,7 +10,7 @@ use thiserror::Error;
 
 use super::{
     imds::{ImdsClient, ImdsError, ImdsProvider},
-    utils::{blocking_client, opt_kv, opt_kv_array, warn_on_error},
+    utils::{blocking_client, info_on_error, opt_kv, opt_kv_array, warn_on_error},
 };
 
 /// Name reported in internal logs emitted by this detector.
@@ -124,7 +124,7 @@ impl EcsResourceDetector {
     ) -> Resource {
         // Platform probe: the metadata URI is injected by the ECS agent, so its
         // absence is the normal case off-platform and only worth a debug event.
-        let Some(ecs_metadata) = warn_on_error(DETECTOR, ecs) else {
+        let Some(ecs_metadata) = info_on_error(DETECTOR, ecs) else {
             // Not ECS, return empty resource
             return Resource::builder_empty().build();
         };

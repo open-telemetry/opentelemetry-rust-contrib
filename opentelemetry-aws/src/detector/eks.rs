@@ -8,7 +8,7 @@ use thiserror::Error;
 
 use super::{
     imds::{ImdsClient, ImdsError, ImdsProvider},
-    utils::{debug_on_error, non_empty, opt_kv, warn_on_error},
+    utils::{debug_on_error, info_on_error, non_empty, opt_kv, warn_on_error},
 };
 
 /// Name reported in internal logs emitted by this detector.
@@ -155,7 +155,7 @@ impl EksResourceDetector {
         // Kubernetes probe: without the service-account mount, this is not a
         // pod at all. An unreadable file is the normal case off-Kubernetes and
         // so is only worth a debug event.
-        let Some(namespace) = warn_on_error(DETECTOR, get_namespace(namespace_path)) else {
+        let Some(namespace) = info_on_error(DETECTOR, get_namespace(namespace_path)) else {
             // Not Kubernetes, return empty resource
             return Resource::builder_empty().build();
         };
