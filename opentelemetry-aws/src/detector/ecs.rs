@@ -9,7 +9,7 @@ use ureq::{Agent as HttpClient, Error as HttpClientError};
 use thiserror::Error;
 
 use super::{
-    imds::ImdsClient,
+    imds::{ImdsClient, ImdsError, ImdsProvider},
     utils::{blocking_client, opt_kv, opt_kv_array, warn_on_error},
 };
 
@@ -113,9 +113,18 @@ pub struct EcsResourceDetector;
 
 impl ResourceDetector for EcsResourceDetector {
     fn detect(&self) -> Resource {
+        Self::detect_from(EcsMetadataClient::new(), ImdsClient::new)
+    }
+}
+
+impl EcsResourceDetector {
+    fn detect_from<E: EcsMetadataProvider, I: ImdsProvider>(
+        ecs: Result<E, EcsMetadataError>,
+        imds: impl FnOnce() -> Result<I, ImdsError>,
+    ) -> Resource {
         // Platform probe: the metadata URI is injected by the ECS agent, so its
         // absence is the normal case off-platform and only worth a debug event.
-        let Some(ecs_metadata) = warn_on_error(DETECTOR, EcsMetadataClient::new()) else {
+        let Some(ecs_metadata) = warn_on_error(DETECTOR, ecs) else {
             // Not ECS, return empty resource
             return Resource::builder_empty().build();
         };
@@ -226,7 +235,7 @@ impl ResourceDetector for EcsResourceDetector {
         // IMDS is unreachable on Fargate, so it is only probed once the EC2
         // launch type is confirmed, to avoid a guaranteed 1s stall otherwise.
         let ec2_host_attributes = is_ec2_launch_type
-            .then(|| warn_on_error(DETECTOR, ImdsClient::new()))
+            .then(|| warn_on_error(DETECTOR, imds()))
             .flatten()
             .and_then(|imds| {
                 let document = warn_on_error(DETECTOR, imds.get_identity_document())?;
@@ -413,6 +422,12 @@ enum EcsMetadataError {
     JsonResponseRead(#[source] HttpClientError),
 }
 
+/// Abstraction over the ECS metadata client, used to inject fakes in tests.
+trait EcsMetadataProvider {
+    fn get_task_metadata(&self) -> Result<EcsTaskMetadata, EcsMetadataError>;
+    fn get_container_metadata(&self) -> Result<EcsContainerMetadata, EcsMetadataError>;
+}
+
 /// HTTP client and ECS metadata base URI read from the environment.
 struct EcsMetadataClient {
     client: HttpClient,
@@ -453,7 +468,9 @@ impl EcsMetadataClient {
             .read_json()
             .map_err(EcsMetadataError::JsonResponseRead)
     }
+}
 
+impl EcsMetadataProvider for EcsMetadataClient {
     /// Fetches the root endpoint (current container metadata).
     fn get_container_metadata(&self) -> Result<EcsContainerMetadata, EcsMetadataError> {
         self.get_json(None)
@@ -515,6 +532,469 @@ struct EcsTaskMetadata {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::detector::imds::{tests::FakeImdsClient, ImdsError};
+    use opentelemetry::{Array, StringValue, Value};
+
+    // ── Fake ECS metadata client ──────────────────────────────────────────────
+
+    /// Test-only fake that returns canned ECS metadata responses.
+    ///
+    /// Both the task and container payloads are stored as JSON `&str` values
+    /// and deserialized on each call, exercising the `serde` impl alongside
+    /// the detector logic.
+    struct FakeEcsMetadataClient {
+        task: &'static str,
+        container: &'static str,
+    }
+
+    impl FakeEcsMetadataClient {
+        fn new() -> Self {
+            Self {
+                task: "",
+                container: "",
+            }
+        }
+
+        fn with_task(mut self, json: &'static str) -> Self {
+            self.task = json;
+            self
+        }
+
+        fn with_container(mut self, json: &'static str) -> Self {
+            self.container = json;
+            self
+        }
+    }
+
+    impl EcsMetadataProvider for FakeEcsMetadataClient {
+        fn get_task_metadata(&self) -> Result<EcsTaskMetadata, EcsMetadataError> {
+            serde_json::from_str(self.task)
+                .map_err(HttpClientError::Json)
+                .map_err(EcsMetadataError::JsonResponseRead)
+        }
+
+        fn get_container_metadata(&self) -> Result<EcsContainerMetadata, EcsMetadataError> {
+            serde_json::from_str(self.container)
+                .map_err(HttpClientError::Json)
+                .map_err(EcsMetadataError::JsonResponseRead)
+        }
+    }
+
+    // ── JSON fixtures ─────────────────────────────────────────────────────────
+
+    /// Fargate task — cluster already given as a full ARN, AZ present.
+    const FARGATE_TASK: &str = r#"
+        {
+            "Cluster":          "arn:aws:ecs:us-east-1:123456789012:cluster/my-cluster",
+            "TaskARN":          "arn:aws:ecs:us-east-1:123456789012:task/my-cluster/abc123def456",
+            "Family":           "my-family",
+            "Revision":         "3",
+            "AvailabilityZone": "us-east-1b",
+            "LaunchType":       "FARGATE"
+        }
+    "#;
+
+    /// EC2 task — cluster given as a bare name (should be expanded to ARN), no AZ.
+    const EC2_TASK: &str = r#"
+        {
+            "Cluster":  "my-cluster",
+            "TaskARN":  "arn:aws:ecs:us-east-1:123456789012:task/my-cluster/abc123def456",
+            "Family":   "my-family",
+            "Revision": "3",
+            "LaunchType": "EC2"
+        }
+    "#;
+
+    /// Task with no TaskARN — ARN-derived attrs (region, account.id, task.id,
+    /// cluster ARN expansion) should all be absent.
+    const TASK_NO_ARN: &str = r#"
+        {
+            "Cluster":          "my-cluster",
+            "Family":           "my-family",
+            "AvailabilityZone": "us-east-1b",
+            "LaunchType":       "FARGATE"
+        }
+    "#;
+
+    /// Container using the `awslogs` log driver — log group / stream attrs expected.
+    const CONTAINER_WITH_AWSLOGS: &str = r#"
+        {
+            "ContainerARN": "arn:aws:ecs:us-east-1:123456789012:container/abc",
+            "DockerId":     "deadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeef",
+            "Name":         "my-container",
+            "Image":        "nginx:1.21",
+            "ImageID":      "sha256:aabbcc",
+            "LogDriver":    "awslogs",
+            "LogOptions": {
+                "awslogs-group":  "/ecs/my-group",
+                "awslogs-stream": "my-stream"
+            }
+        }
+    "#;
+
+    /// Container using a non-awslogs driver — log attrs should be absent.
+    const CONTAINER_NO_LOGS: &str = r#"
+        {
+            "ContainerARN": "arn:aws:ecs:us-east-1:123456789012:container/abc",
+            "DockerId":     "deadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeef",
+            "Name":         "my-container",
+            "Image":        "nginx:1.21",
+            "LogDriver":    "json-file",
+            "LogOptions": {
+                "awslogs-group":  "/ecs/my-group",
+                "awslogs-stream": "my-stream"
+            }
+        }
+    "#;
+
+    /// IMDS instance identity document for an EC2-backed ECS task.
+    /// account_id / region are not consumed by the ECS detector (it derives
+    /// those from the task ARN), but they are present here to keep the fixture
+    /// realistic.
+    const EC2_IMDS_DOC: &str = r#"
+        {
+            "accountId":        "123456789012",
+            "region":           "us-east-1",
+            "availabilityZone": "us-east-1a",
+            "instanceId":       "i-0ec2instance",
+            "instanceType":     "m5.large",
+            "imageId":          "ami-0abcdef",
+            "architecture":     "x86_64"
+        }
+    "#;
+
+    // ── helpers ───────────────────────────────────────────────────────────────
+
+    fn str_array(v: &str) -> Value {
+        Value::Array(Array::from(vec![StringValue::from(v.to_string())]))
+    }
+
+    // ── Construction failure → empty resource ─────────────────────────────────
+
+    #[test]
+    fn detect_from_ecs_construction_failure_returns_empty() {
+        let resource = EcsResourceDetector::detect_from::<FakeEcsMetadataClient, FakeImdsClient>(
+            Err(EcsMetadataError::NoMetadataUriEnvVar),
+            || panic!("IMDS closure must not be called"),
+        );
+        assert_eq!(resource, Resource::builder_empty().build());
+    }
+
+    // ── Fargate: IMDS closure not invoked ─────────────────────────────────────
+
+    #[test]
+    fn detect_from_fargate_does_not_invoke_imds() {
+        let ecs = FakeEcsMetadataClient::new()
+            .with_task(FARGATE_TASK)
+            .with_container(CONTAINER_NO_LOGS);
+
+        let imds = || -> Result<FakeImdsClient, _> {
+            panic!("IMDS closure must not be called on Fargate")
+        };
+
+        let resource = EcsResourceDetector::detect_from(Ok(ecs), imds);
+
+        let expected = Resource::builder_empty()
+            .with_attributes([
+                KeyValue::new(semco::CLOUD_PROVIDER, "aws"),
+                KeyValue::new(semco::CLOUD_PLATFORM, "aws_ecs"),
+                KeyValue::new(
+                    semco::AWS_ECS_CLUSTER_ARN,
+                    "arn:aws:ecs:us-east-1:123456789012:cluster/my-cluster",
+                ),
+                KeyValue::new(
+                    semco::AWS_ECS_TASK_ARN,
+                    "arn:aws:ecs:us-east-1:123456789012:task/my-cluster/abc123def456",
+                ),
+                KeyValue::new(semco::AWS_ECS_TASK_FAMILY, "my-family"),
+                KeyValue::new(semco::AWS_ECS_TASK_REVISION, "3"),
+                KeyValue::new(semco::CLOUD_AVAILABILITY_ZONE, "us-east-1b"),
+                KeyValue::new(semco::AWS_ECS_LAUNCHTYPE, "fargate"),
+                KeyValue::new(
+                    semco::AWS_ECS_CONTAINER_ARN,
+                    "arn:aws:ecs:us-east-1:123456789012:container/abc",
+                ),
+                KeyValue::new(
+                    semco::CLOUD_RESOURCE_ID,
+                    "arn:aws:ecs:us-east-1:123456789012:container/abc",
+                ),
+                KeyValue::new(
+                    semco::CONTAINER_ID,
+                    "deadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeef",
+                ),
+                KeyValue::new(semco::CONTAINER_NAME, "my-container"),
+                KeyValue::new(semco::CONTAINER_IMAGE_NAME, "nginx"),
+                KeyValue::new(semco::CONTAINER_IMAGE_TAGS, str_array("1.21")),
+                KeyValue::new(semco::CLOUD_REGION, "us-east-1"),
+                KeyValue::new(semco::CLOUD_ACCOUNT_ID, "123456789012"),
+                KeyValue::new(semco::AWS_ECS_TASK_ID, "abc123def456"),
+            ])
+            .build();
+
+        assert_eq!(resource, expected);
+    }
+
+    // ── EC2 launch type: IMDS closure invoked → host.* attributes ─────────────
+
+    #[test]
+    fn detect_from_ec2_launch_type_queries_imds() {
+        let ecs = FakeEcsMetadataClient::new()
+            .with_task(EC2_TASK)
+            .with_container(CONTAINER_NO_LOGS);
+
+        let imds = || {
+            Ok(FakeImdsClient::new()
+                .with_document(EC2_IMDS_DOC)
+                .with_get("hostname", "ip-10-0-0-5.ec2.internal"))
+        };
+
+        let resource = EcsResourceDetector::detect_from(Ok(ecs), imds);
+
+        let expected = Resource::builder_empty()
+            .with_attributes([
+                KeyValue::new(semco::CLOUD_PROVIDER, "aws"),
+                KeyValue::new(semco::CLOUD_PLATFORM, "aws_ecs"),
+                // task attrs
+                KeyValue::new(
+                    semco::AWS_ECS_CLUSTER_ARN,
+                    "arn:aws:ecs:us-east-1:123456789012:cluster/my-cluster",
+                ),
+                KeyValue::new(
+                    semco::AWS_ECS_TASK_ARN,
+                    "arn:aws:ecs:us-east-1:123456789012:task/my-cluster/abc123def456",
+                ),
+                KeyValue::new(semco::AWS_ECS_TASK_FAMILY, "my-family"),
+                KeyValue::new(semco::AWS_ECS_TASK_REVISION, "3"),
+                KeyValue::new(semco::AWS_ECS_LAUNCHTYPE, "ec2"),
+                // container attrs
+                KeyValue::new(
+                    semco::AWS_ECS_CONTAINER_ARN,
+                    "arn:aws:ecs:us-east-1:123456789012:container/abc",
+                ),
+                KeyValue::new(
+                    semco::CLOUD_RESOURCE_ID,
+                    "arn:aws:ecs:us-east-1:123456789012:container/abc",
+                ),
+                KeyValue::new(
+                    semco::CONTAINER_ID,
+                    "deadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeef",
+                ),
+                KeyValue::new(semco::CONTAINER_NAME, "my-container"),
+                KeyValue::new(semco::CONTAINER_IMAGE_NAME, "nginx"),
+                KeyValue::new(semco::CONTAINER_IMAGE_TAGS, str_array("1.21")),
+                // ARN-derived attrs
+                KeyValue::new(semco::CLOUD_REGION, "us-east-1"),
+                KeyValue::new(semco::CLOUD_ACCOUNT_ID, "123456789012"),
+                KeyValue::new(semco::AWS_ECS_TASK_ID, "abc123def456"),
+                // IMDS host attrs
+                KeyValue::new(semco::HOST_ARCH, "amd64"),
+                KeyValue::new(semco::CLOUD_AVAILABILITY_ZONE, "us-east-1a"),
+                KeyValue::new(semco::HOST_ID, "i-0ec2instance"),
+                KeyValue::new(semco::HOST_TYPE, "m5.large"),
+                KeyValue::new(semco::HOST_IMAGE_ID, "ami-0abcdef"),
+                KeyValue::new(semco::HOST_NAME, "ip-10-0-0-5.ec2.internal"),
+            ])
+            .build();
+
+        assert_eq!(resource, expected);
+    }
+
+    // ── EC2 launch type: IMDS fails → no host.* ───────────────────────────────
+
+    #[test]
+    fn detect_from_ec2_launch_type_imds_failure_omits_host_attrs() {
+        let ecs = FakeEcsMetadataClient::new()
+            .with_task(EC2_TASK)
+            .with_container(CONTAINER_NO_LOGS);
+
+        let imds = || -> Result<FakeImdsClient, _> { Err(ImdsError::EmptyAuthToken) };
+
+        let resource = EcsResourceDetector::detect_from(Ok(ecs), imds);
+
+        let expected = Resource::builder_empty()
+            .with_attributes([
+                KeyValue::new(semco::CLOUD_PROVIDER, "aws"),
+                KeyValue::new(semco::CLOUD_PLATFORM, "aws_ecs"),
+                KeyValue::new(
+                    semco::AWS_ECS_CLUSTER_ARN,
+                    "arn:aws:ecs:us-east-1:123456789012:cluster/my-cluster",
+                ),
+                KeyValue::new(
+                    semco::AWS_ECS_TASK_ARN,
+                    "arn:aws:ecs:us-east-1:123456789012:task/my-cluster/abc123def456",
+                ),
+                KeyValue::new(semco::AWS_ECS_TASK_FAMILY, "my-family"),
+                KeyValue::new(semco::AWS_ECS_TASK_REVISION, "3"),
+                KeyValue::new(semco::AWS_ECS_LAUNCHTYPE, "ec2"),
+                KeyValue::new(
+                    semco::AWS_ECS_CONTAINER_ARN,
+                    "arn:aws:ecs:us-east-1:123456789012:container/abc",
+                ),
+                KeyValue::new(
+                    semco::CLOUD_RESOURCE_ID,
+                    "arn:aws:ecs:us-east-1:123456789012:container/abc",
+                ),
+                KeyValue::new(
+                    semco::CONTAINER_ID,
+                    "deadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeef",
+                ),
+                KeyValue::new(semco::CONTAINER_NAME, "my-container"),
+                KeyValue::new(semco::CONTAINER_IMAGE_NAME, "nginx"),
+                KeyValue::new(semco::CONTAINER_IMAGE_TAGS, str_array("1.21")),
+                KeyValue::new(semco::CLOUD_REGION, "us-east-1"),
+                KeyValue::new(semco::CLOUD_ACCOUNT_ID, "123456789012"),
+                KeyValue::new(semco::AWS_ECS_TASK_ID, "abc123def456"),
+                // No HOST_* attributes
+            ])
+            .build();
+
+        assert_eq!(resource, expected);
+    }
+
+    // ── awslogs driver → log attrs present ────────────────────────────────────
+
+    #[test]
+    fn detect_from_awslogs_driver_produces_log_attrs() {
+        let ecs = FakeEcsMetadataClient::new()
+            .with_task(FARGATE_TASK)
+            .with_container(CONTAINER_WITH_AWSLOGS);
+
+        let imds = || -> Result<FakeImdsClient, _> { panic!("should not be called") };
+
+        let resource = EcsResourceDetector::detect_from(Ok(ecs), imds);
+
+        let expected = Resource::builder_empty()
+            .with_attributes([
+                KeyValue::new(semco::CLOUD_PROVIDER, "aws"),
+                KeyValue::new(semco::CLOUD_PLATFORM, "aws_ecs"),
+                KeyValue::new(
+                    semco::AWS_ECS_CLUSTER_ARN,
+                    "arn:aws:ecs:us-east-1:123456789012:cluster/my-cluster",
+                ),
+                KeyValue::new(
+                    semco::AWS_ECS_TASK_ARN,
+                    "arn:aws:ecs:us-east-1:123456789012:task/my-cluster/abc123def456",
+                ),
+                KeyValue::new(semco::AWS_ECS_TASK_FAMILY, "my-family"),
+                KeyValue::new(semco::AWS_ECS_TASK_REVISION, "3"),
+                KeyValue::new(semco::CLOUD_AVAILABILITY_ZONE, "us-east-1b"),
+                KeyValue::new(semco::AWS_ECS_LAUNCHTYPE, "fargate"),
+                KeyValue::new(
+                    semco::AWS_ECS_CONTAINER_ARN,
+                    "arn:aws:ecs:us-east-1:123456789012:container/abc",
+                ),
+                KeyValue::new(
+                    semco::CLOUD_RESOURCE_ID,
+                    "arn:aws:ecs:us-east-1:123456789012:container/abc",
+                ),
+                KeyValue::new(
+                    semco::CONTAINER_ID,
+                    "deadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeef",
+                ),
+                KeyValue::new(semco::CONTAINER_NAME, "my-container"),
+                KeyValue::new(semco::CONTAINER_IMAGE_NAME, "nginx"),
+                KeyValue::new(semco::CONTAINER_IMAGE_TAGS, str_array("1.21")),
+                KeyValue::new(semco::CONTAINER_IMAGE_ID, "sha256:aabbcc"),
+                KeyValue::new(semco::AWS_LOG_GROUP_NAMES, str_array("/ecs/my-group")),
+                KeyValue::new(
+                    semco::AWS_LOG_GROUP_ARNS,
+                    str_array(
+                        "arn:aws:logs:us-east-1:123456789012:log-group:/ecs/my-group:*",
+                    ),
+                ),
+                KeyValue::new(semco::AWS_LOG_STREAM_NAMES, str_array("my-stream")),
+                KeyValue::new(
+                    semco::AWS_LOG_STREAM_ARNS,
+                    str_array(
+                        "arn:aws:logs:us-east-1:123456789012:log-group:/ecs/my-group:log-stream:my-stream",
+                    ),
+                ),
+                KeyValue::new(semco::CLOUD_REGION, "us-east-1"),
+                KeyValue::new(semco::CLOUD_ACCOUNT_ID, "123456789012"),
+                KeyValue::new(semco::AWS_ECS_TASK_ID, "abc123def456"),
+            ])
+            .build();
+
+        assert_eq!(resource, expected);
+    }
+
+    // ── non-awslogs driver → log attrs absent ─────────────────────────────────
+
+    #[test]
+    fn detect_from_non_awslogs_driver_omits_log_attrs() {
+        let ecs = FakeEcsMetadataClient::new()
+            .with_task(FARGATE_TASK)
+            .with_container(CONTAINER_NO_LOGS);
+
+        let imds = || -> Result<FakeImdsClient, _> { panic!("should not be called") };
+
+        let resource = EcsResourceDetector::detect_from(Ok(ecs), imds);
+
+        let expected = Resource::builder_empty()
+            .with_attributes([
+                KeyValue::new(semco::CLOUD_PROVIDER, "aws"),
+                KeyValue::new(semco::CLOUD_PLATFORM, "aws_ecs"),
+                KeyValue::new(
+                    semco::AWS_ECS_CLUSTER_ARN,
+                    "arn:aws:ecs:us-east-1:123456789012:cluster/my-cluster",
+                ),
+                KeyValue::new(
+                    semco::AWS_ECS_TASK_ARN,
+                    "arn:aws:ecs:us-east-1:123456789012:task/my-cluster/abc123def456",
+                ),
+                KeyValue::new(semco::AWS_ECS_TASK_FAMILY, "my-family"),
+                KeyValue::new(semco::AWS_ECS_TASK_REVISION, "3"),
+                KeyValue::new(semco::CLOUD_AVAILABILITY_ZONE, "us-east-1b"),
+                KeyValue::new(semco::AWS_ECS_LAUNCHTYPE, "fargate"),
+                KeyValue::new(
+                    semco::AWS_ECS_CONTAINER_ARN,
+                    "arn:aws:ecs:us-east-1:123456789012:container/abc",
+                ),
+                KeyValue::new(
+                    semco::CLOUD_RESOURCE_ID,
+                    "arn:aws:ecs:us-east-1:123456789012:container/abc",
+                ),
+                KeyValue::new(
+                    semco::CONTAINER_ID,
+                    "deadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeef",
+                ),
+                KeyValue::new(semco::CONTAINER_NAME, "my-container"),
+                KeyValue::new(semco::CONTAINER_IMAGE_NAME, "nginx"),
+                KeyValue::new(semco::CONTAINER_IMAGE_TAGS, str_array("1.21")),
+                KeyValue::new(semco::CLOUD_REGION, "us-east-1"),
+                KeyValue::new(semco::CLOUD_ACCOUNT_ID, "123456789012"),
+                KeyValue::new(semco::AWS_ECS_TASK_ID, "abc123def456"),
+            ])
+            .build();
+
+        assert_eq!(resource, expected);
+    }
+
+    // ── Absent task ARN → ARN-derived attrs omitted ───────────────────────────
+
+    #[test]
+    fn detect_from_missing_task_arn_omits_arn_derived_attrs() {
+        let ecs = FakeEcsMetadataClient::new()
+            .with_task(TASK_NO_ARN)
+            .with_container("{}");
+
+        let imds = || -> Result<FakeImdsClient, _> { panic!("should not be called") };
+
+        let resource = EcsResourceDetector::detect_from(Ok(ecs), imds);
+
+        let expected = Resource::builder_empty()
+            .with_attributes([
+                KeyValue::new(semco::CLOUD_PROVIDER, "aws"),
+                KeyValue::new(semco::CLOUD_PLATFORM, "aws_ecs"),
+                // cluster ARN not synthesised: bare name + no task ARN → omitted
+                KeyValue::new(semco::AWS_ECS_TASK_FAMILY, "my-family"),
+                KeyValue::new(semco::CLOUD_AVAILABILITY_ZONE, "us-east-1b"),
+                KeyValue::new(semco::AWS_ECS_LAUNCHTYPE, "fargate"),
+            ])
+            .build();
+
+        assert_eq!(resource, expected);
+    }
 
     // ── Arn::parse ────────────────────────────────────────────────────────────
 

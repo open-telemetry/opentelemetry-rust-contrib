@@ -3,7 +3,7 @@ use opentelemetry_sdk::{resource::ResourceDetector, Resource};
 use opentelemetry_semantic_conventions::attribute as semco;
 
 use super::{
-    imds::ImdsClient,
+    imds::{ImdsClient, ImdsError, ImdsProvider},
     utils::{opt_kv, warn_on_error},
 };
 
@@ -77,10 +77,16 @@ pub struct Ec2ResourceDetector;
 
 impl ResourceDetector for Ec2ResourceDetector {
     fn detect(&self) -> Resource {
+        Self::detect_from(ImdsClient::new())
+    }
+}
+
+impl Ec2ResourceDetector {
+    fn detect_from<P: ImdsProvider>(imds: Result<P, ImdsError>) -> Resource {
         // Platform probe. A session token only proves that *something* answers
         // at the link-local address; a parsable identity document is what
         // proves it is IMDSv2. Both failures are routine off-platform.
-        let Some(imds) = warn_on_error(DETECTOR, ImdsClient::new()) else {
+        let Some(imds) = warn_on_error(DETECTOR, imds) else {
             // Not EC2, return empty resource
             return Resource::builder_empty().build();
         };
@@ -112,5 +118,140 @@ impl ResourceDetector for Ec2ResourceDetector {
         Resource::builder_empty()
             .with_attributes(attribute_options.into_iter().flatten())
             .build()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::detector::imds::tests::FakeImdsClient;
+
+    // ── IMDS JSON fixtures ────────────────────────────────────────────────────
+
+    /// Identity document with all relevant fields.
+    const FULL_DOC: &str = r#"
+        {
+            "accountId":        "123456789012",
+            "region":           "us-east-1",
+            "availabilityZone": "us-east-1a",
+            "instanceId":       "i-0abcdef1234567890",
+            "instanceType":     "m5.xlarge",
+            "imageId":          "ami-0abcdef1234567890",
+            "architecture":     "x86_64"
+        }
+    "#;
+
+    /// Sparse document — only instanceId and arm64 architecture; all other
+    /// fields absent, so only host.id, host.arch and host.name should appear.
+    const SPARSE_DOC_ARM64: &str = r#"
+        {
+            "instanceId":   "i-0abcdef1234567890",
+            "architecture": "arm64"
+        }
+    "#;
+
+    /// Document with an unknown architecture — host.arch must be omitted.
+    const DOC_UNKNOWN_ARCH: &str = r#"
+        {
+            "accountId":    "123456789012",
+            "region":       "us-west-2",
+            "instanceId":   "i-0aaa",
+            "architecture": "mips"
+        }
+    "#;
+
+    // ── Happy path ────────────────────────────────────────────────────────────
+
+    #[test]
+    fn detect_from_full_document_and_hostname() {
+        let fake = FakeImdsClient::new()
+            .with_document(FULL_DOC)
+            .with_get("hostname", "ip-10-0-1-2.ec2.internal");
+
+        let resource = Ec2ResourceDetector::detect_from(Ok(fake));
+
+        let expected = Resource::builder_empty()
+            .with_attributes([
+                KeyValue::new(semco::CLOUD_PROVIDER, "aws"),
+                KeyValue::new(semco::CLOUD_PLATFORM, "aws_ec2"),
+                KeyValue::new(semco::HOST_ARCH, "amd64"),
+                KeyValue::new(semco::CLOUD_ACCOUNT_ID, "123456789012"),
+                KeyValue::new(semco::CLOUD_REGION, "us-east-1"),
+                KeyValue::new(semco::CLOUD_AVAILABILITY_ZONE, "us-east-1a"),
+                KeyValue::new(semco::HOST_ID, "i-0abcdef1234567890"),
+                KeyValue::new(semco::HOST_TYPE, "m5.xlarge"),
+                KeyValue::new(semco::HOST_IMAGE_ID, "ami-0abcdef1234567890"),
+                KeyValue::new(semco::HOST_NAME, "ip-10-0-1-2.ec2.internal"),
+            ])
+            .build();
+
+        assert_eq!(resource, expected);
+    }
+
+    // ── Construction failure → empty resource ─────────────────────────────────
+
+    #[test]
+    fn detect_from_construction_failure_returns_empty() {
+        let resource =
+            Ec2ResourceDetector::detect_from::<FakeImdsClient>(Err(ImdsError::EmptyAuthToken));
+
+        assert_eq!(resource, Resource::builder_empty().build());
+    }
+
+    // ── Identity document error → empty resource ──────────────────────────────
+
+    #[test]
+    fn detect_from_document_error_returns_empty() {
+        let fake = FakeImdsClient::new();
+        let resource = Ec2ResourceDetector::detect_from(Ok(fake));
+
+        assert_eq!(resource, Resource::builder_empty().build());
+    }
+
+    // ── Partial document: missing fields omitted ──────────────────────────────
+
+    #[test]
+    fn detect_from_partial_document_omits_missing_fields() {
+        let fake = FakeImdsClient::new()
+            .with_document(SPARSE_DOC_ARM64)
+            .with_get("hostname", "ip-10-0-0-1.ec2.internal");
+
+        let resource = Ec2ResourceDetector::detect_from(Ok(fake));
+
+        let expected = Resource::builder_empty()
+            .with_attributes([
+                KeyValue::new(semco::CLOUD_PROVIDER, "aws"),
+                KeyValue::new(semco::CLOUD_PLATFORM, "aws_ec2"),
+                KeyValue::new(semco::HOST_ARCH, "arm64"),
+                KeyValue::new(semco::HOST_ID, "i-0abcdef1234567890"),
+                KeyValue::new(semco::HOST_NAME, "ip-10-0-0-1.ec2.internal"),
+            ])
+            .build();
+
+        assert_eq!(resource, expected);
+    }
+
+    // ── Unknown arch omitted, hostname GET error omitted ──────────────────────
+
+    #[test]
+    fn detect_from_unknown_arch_omitted() {
+        // GET IMDS/hostname will return a 404 NotFound
+        let fake = FakeImdsClient::new().with_document(DOC_UNKNOWN_ARCH);
+
+        let resource = Ec2ResourceDetector::detect_from(Ok(fake));
+
+        let expected = Resource::builder_empty()
+            .with_attributes([
+                KeyValue::new(semco::CLOUD_PROVIDER, "aws"),
+                KeyValue::new(semco::CLOUD_PLATFORM, "aws_ec2"),
+                KeyValue::new(semco::CLOUD_ACCOUNT_ID, "123456789012"),
+                KeyValue::new(semco::CLOUD_REGION, "us-west-2"),
+                KeyValue::new(semco::HOST_ID, "i-0aaa"),
+                // No HOST_NAME
+                // No HOST_ARCH
+            ])
+            .build();
+
+        assert_eq!(resource, expected);
     }
 }

@@ -1,3 +1,5 @@
+use std::path::Path;
+
 use opentelemetry::KeyValue;
 use opentelemetry_sdk::{resource::ResourceDetector, Resource};
 use opentelemetry_semantic_conventions::attribute as semco;
@@ -5,7 +7,7 @@ use opentelemetry_semantic_conventions::attribute as semco;
 use thiserror::Error;
 
 use super::{
-    imds::ImdsClient,
+    imds::{ImdsClient, ImdsError, ImdsProvider},
     utils::{debug_on_error, non_empty, opt_kv, warn_on_error},
 };
 
@@ -134,17 +136,33 @@ pub struct EksResourceDetector;
 
 impl ResourceDetector for EksResourceDetector {
     fn detect(&self) -> Resource {
+        Self::detect_from(
+            ImdsClient::new(),
+            Path::new(K8S_NAMESPACE_FILE_PATH),
+            Path::new(CGROUP_FILE_PATH),
+            Path::new(MOUNTINFO_FILE_PATH),
+        )
+    }
+}
+
+impl EksResourceDetector {
+    fn detect_from<P: ImdsProvider>(
+        imds: Result<P, ImdsError>,
+        namespace_path: &Path,
+        cgroup_path: &Path,
+        mountinfo_path: &Path,
+    ) -> Resource {
         // Kubernetes probe: without the service-account mount, this is not a
         // pod at all. An unreadable file is the normal case off-Kubernetes and
         // so is only worth a debug event.
-        let Some(namespace) = warn_on_error(DETECTOR, get_namespace()) else {
+        let Some(namespace) = warn_on_error(DETECTOR, get_namespace(namespace_path)) else {
             // Not Kubernetes, return empty resource
             return Resource::builder_empty().build();
         };
 
         // The node-level attributes come from IMDS, with environment variables as
         // a fallback for the EKS-on-Fargate case where IMDS is unreachable.
-        let imds = debug_on_error(DETECTOR, ImdsClient::new());
+        let imds = debug_on_error(DETECTOR, imds);
 
         let document = imds
             .as_ref()
@@ -224,7 +242,7 @@ impl ResourceDetector for EksResourceDetector {
             // Container ID — from cgroup, then from the mount table
             opt_kv(
                 semco::CONTAINER_ID,
-                warn_on_error(DETECTOR, get_container_id()),
+                warn_on_error(DETECTOR, get_container_id(cgroup_path, mountinfo_path)),
             ),
             opt_kv(
                 semco::HOST_NAME,
@@ -261,10 +279,10 @@ enum EksError {
 }
 
 /// Reads and trims the service-account namespace file, erroring if the result is empty.
-fn get_namespace() -> Result<String, EksError> {
-    let namespace = std::fs::read_to_string(K8S_NAMESPACE_FILE_PATH)
+fn get_namespace(path: &Path) -> Result<String, EksError> {
+    let namespace = std::fs::read_to_string(path)
         .map_err(|error| EksError::FsError {
-            path: K8S_NAMESPACE_FILE_PATH.to_owned(),
+            path: path.to_string_lossy().into_owned(),
             error,
         })?
         .trim()
@@ -281,13 +299,13 @@ fn get_namespace() -> Result<String, EksError> {
 ///
 /// The files, extraction rules and accepted ID shape mirror `ContainerResourceDetector`
 /// in `opentelemetry-resource-detectors` to ensure both detectors agree on `container.id`.
-fn get_container_id() -> Result<String, EksError> {
-    if let Ok(content) = std::fs::read_to_string(CGROUP_FILE_PATH) {
+fn get_container_id(cgroup_path: &Path, mountinfo_path: &Path) -> Result<String, EksError> {
+    if let Ok(content) = std::fs::read_to_string(cgroup_path) {
         if let Some(id) = content.lines().find_map(container_id_from_cgroup_line) {
             return Ok(id.to_owned());
         }
     }
-    if let Ok(content) = std::fs::read_to_string(MOUNTINFO_FILE_PATH) {
+    if let Ok(content) = std::fs::read_to_string(mountinfo_path) {
         if let Some(id) = content.lines().find_map(container_id_from_mountinfo_line) {
             return Ok(id.to_owned());
         }
@@ -358,11 +376,29 @@ fn is_valid_container_id(candidate: &str) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::detector::imds::{tests::FakeImdsClient, ImdsError};
+    use sealed_test::prelude::*;
+    use std::io::Write;
 
     // A 64-char all-lowercase hex string used as the canonical container ID in tests.
     const ID64: &str = "aabbccddeeff00112233445566778899aabbccddeeff00112233445566778899";
     // A 32-char all-lowercase hex string.
     const ID32: &str = "aabbccddeeff00112233445566778899";
+
+    // ── IMDS JSON fixture ─────────────────────────────────────────────────────
+
+    /// Relevant instance identity document for an EKS node.
+    const FULL_IMDS_DOC: &str = r#"
+        {
+            "accountId":        "123456789012",
+            "region":           "us-east-1",
+            "availabilityZone": "us-east-1c",
+            "instanceId":       "i-0node",
+            "instanceType":     "m5.large",
+            "imageId":          "ami-0nodeimage",
+            "architecture":     "x86_64"
+        }
+    "#;
 
     // ---------------------------------------------------------------------------
     // is_valid_container_id
@@ -519,5 +555,241 @@ mod tests {
         let root = "/docker/containers/not-a-valid-hex-id/hostname";
         let line = mountinfo_line(root, "/etc/hostname");
         assert_eq!(container_id_from_mountinfo_line(&line), None);
+    }
+
+    // ── detect_from helpers ───────────────────────────────────────────────────
+
+    /// Creates a temp file with the given content and returns its path.
+    fn temp_file(content: &str) -> (tempfile::NamedTempFile, std::path::PathBuf) {
+        let mut f = tempfile::NamedTempFile::new().unwrap();
+        write!(f, "{content}").unwrap();
+        let path = f.path().to_path_buf();
+        (f, path)
+    }
+
+    // ── Not Kubernetes → empty resource ──────────────────────────────────────
+
+    #[sealed_test]
+    fn detect_from_no_namespace_file_returns_empty() {
+        let resource = EksResourceDetector::detect_from(
+            Ok(FakeImdsClient::new()),
+            Path::new("/nonexistent/path/to/namespace"),
+            Path::new("/nonexistent/cgroup"),
+            Path::new("/nonexistent/mountinfo"),
+        );
+        assert_eq!(resource, Resource::builder_empty().build());
+    }
+
+    // ── Kubernetes but no AWS tie → empty resource ────────────────────────────
+
+    #[sealed_test]
+    fn detect_from_no_aws_tie_returns_empty() {
+        let (_ns_file, ns_path) = temp_file("default");
+        let (_cgroup_file, cgroup_path) = temp_file("0::/\n");
+        let (_mi_file, mi_path) = temp_file("");
+
+        // IMDS fails, no AWS_CLUSTER_NAME → second probe fails
+        temp_env::with_vars(
+            [
+                ("AWS_CLUSTER_NAME", None::<&str>),
+                ("AWS_REGION", None::<&str>),
+                ("AWS_ACCOUNT_ID", None::<&str>),
+            ],
+            || {
+                let resource = EksResourceDetector::detect_from(
+                    Err::<FakeImdsClient, _>(ImdsError::EmptyAuthToken),
+                    &ns_path,
+                    &cgroup_path,
+                    &mi_path,
+                );
+                assert_eq!(resource, Resource::builder_empty().build());
+            },
+        );
+    }
+
+    // ── Happy path with IMDS: full attrs ─────────────────────────────────────
+
+    #[sealed_test]
+    fn detect_from_happy_path_with_imds() {
+        let (_ns_file, ns_path) = temp_file("kube-system");
+        // cgroup with a valid container ID
+        let (_cgroup_file, cgroup_path) =
+            temp_file(&format!("11:memory:/kubepods/besteffort/podabc/{ID64}\n"));
+        let (_mi_file, mi_path) = temp_file("");
+
+        let fake = FakeImdsClient::new()
+            .with_document(FULL_IMDS_DOC)
+            .with_get(EKS_CLUSTER_NAME_TAG_PATH, "my-eks-cluster")
+            .with_get("services/partition", "aws")
+            .with_get("hostname", "ip-10-0-1-5.ec2.internal");
+
+        temp_env::with_vars(
+            [
+                ("HOSTNAME", Some("my-pod-xyz")),
+                ("POD_UID", Some("pod-uid-123")),
+                ("NODE_NAME", Some("ip-10-0-1-5")),
+                ("AWS_CLUSTER_NAME", None::<&str>),
+                ("AWS_REGION", None::<&str>),
+                ("AWS_ACCOUNT_ID", None::<&str>),
+            ],
+            || {
+                let resource =
+                    EksResourceDetector::detect_from(Ok(fake), &ns_path, &cgroup_path, &mi_path);
+
+                let expected = Resource::builder_empty()
+                    .with_attributes([
+                        KeyValue::new(semco::CLOUD_PROVIDER, "aws"),
+                        KeyValue::new(semco::CLOUD_PLATFORM, "aws_eks"),
+                        KeyValue::new(semco::HOST_ARCH, "amd64"),
+                        KeyValue::new(semco::CLOUD_AVAILABILITY_ZONE, "us-east-1c"),
+                        KeyValue::new(semco::HOST_ID, "i-0node"),
+                        KeyValue::new(semco::HOST_TYPE, "m5.large"),
+                        KeyValue::new(semco::HOST_IMAGE_ID, "ami-0nodeimage"),
+                        KeyValue::new(semco::K8S_NAMESPACE_NAME, "kube-system"),
+                        KeyValue::new(semco::K8S_POD_NAME, "my-pod-xyz"),
+                        KeyValue::new(semco::K8S_POD_UID, "pod-uid-123"),
+                        KeyValue::new(semco::K8S_NODE_NAME, "ip-10-0-1-5"),
+                        KeyValue::new(semco::K8S_CLUSTER_NAME, "my-eks-cluster"),
+                        KeyValue::new(
+                            semco::AWS_EKS_CLUSTER_ARN,
+                            "arn:aws:eks:us-east-1:123456789012:cluster/my-eks-cluster",
+                        ),
+                        KeyValue::new(semco::CONTAINER_ID, ID64),
+                        KeyValue::new(semco::HOST_NAME, "ip-10-0-1-5.ec2.internal"),
+                        KeyValue::new(semco::CLOUD_REGION, "us-east-1"),
+                        KeyValue::new(semco::CLOUD_ACCOUNT_ID, "123456789012"),
+                    ])
+                    .build();
+
+                assert_eq!(resource, expected);
+            },
+        );
+    }
+
+    // ── Fargate fallback: IMDS fails, env vars supply region/account/cluster ──
+
+    #[sealed_test]
+    fn detect_from_fargate_fallback_via_env_vars() {
+        let (_ns_file, ns_path) = temp_file("default");
+        let (_cgroup_file, cgroup_path) = temp_file("0::/\n");
+        let (_mi_file, mi_path) = temp_file("");
+
+        temp_env::with_vars(
+            [
+                ("AWS_CLUSTER_NAME", Some("fargate-cluster")),
+                ("AWS_REGION", Some("eu-west-1")),
+                ("AWS_ACCOUNT_ID", Some("999888777666")),
+                ("HOSTNAME", Some("fargate-pod-abc")),
+                ("POD_UID", None::<&str>),
+                ("NODE_NAME", None::<&str>),
+            ],
+            || {
+                let resource = EksResourceDetector::detect_from(
+                    Err::<FakeImdsClient, _>(ImdsError::EmptyAuthToken),
+                    &ns_path,
+                    &cgroup_path,
+                    &mi_path,
+                );
+
+                // Partition falls back to "aws" when IMDS unavailable
+                let expected = Resource::builder_empty()
+                    .with_attributes([
+                        KeyValue::new(semco::CLOUD_PROVIDER, "aws"),
+                        KeyValue::new(semco::CLOUD_PLATFORM, "aws_eks"),
+                        KeyValue::new(semco::K8S_NAMESPACE_NAME, "default"),
+                        KeyValue::new(semco::K8S_POD_NAME, "fargate-pod-abc"),
+                        KeyValue::new(semco::K8S_CLUSTER_NAME, "fargate-cluster"),
+                        KeyValue::new(
+                            semco::AWS_EKS_CLUSTER_ARN,
+                            "arn:aws:eks:eu-west-1:999888777666:cluster/fargate-cluster",
+                        ),
+                        KeyValue::new(semco::CLOUD_REGION, "eu-west-1"),
+                        KeyValue::new(semco::CLOUD_ACCOUNT_ID, "999888777666"),
+                    ])
+                    .build();
+
+                assert_eq!(resource, expected);
+            },
+        );
+    }
+
+    // ── container.id: cgroup file first, then mountinfo ───────────────────────
+
+    #[sealed_test]
+    fn detect_from_container_id_from_mountinfo_when_cgroup_empty() {
+        let (_ns_file, ns_path) = temp_file("default");
+        // cgroup v2: only "0::/" — no container ID
+        let (_cgroup_file, cgroup_path) = temp_file("0::/\n");
+        // mountinfo with a valid container ID in /etc/hostname mount
+        let root = format!("/docker/containers/{ID64}/hostname");
+        let mountinfo_line_str = format!("36 35 0:33 {root} /etc/hostname rw - ext4 /dev/sda1 rw");
+        let (_mi_file, mi_path) = temp_file(&mountinfo_line_str);
+
+        let fake = FakeImdsClient::new()
+            .with_document(FULL_IMDS_DOC)
+            .with_get(EKS_CLUSTER_NAME_TAG_PATH, "my-cluster")
+            .with_get("services/partition", "aws");
+
+        temp_env::with_vars(
+            [
+                ("HOSTNAME", None::<&str>),
+                ("POD_UID", None::<&str>),
+                ("NODE_NAME", None::<&str>),
+                ("AWS_CLUSTER_NAME", None::<&str>),
+                ("AWS_REGION", None::<&str>),
+                ("AWS_ACCOUNT_ID", None::<&str>),
+            ],
+            || {
+                let resource =
+                    EksResourceDetector::detect_from(Ok(fake), &ns_path, &cgroup_path, &mi_path);
+
+                let attributes: std::collections::HashMap<_, _> = resource
+                    .iter()
+                    .map(|(k, v)| (k.as_str().to_owned(), v.clone()))
+                    .collect();
+
+                assert_eq!(
+                    attributes.get(semco::CONTAINER_ID).map(|v| v.as_str()),
+                    Some(ID64.into())
+                );
+            },
+        );
+    }
+
+    #[sealed_test]
+    fn detect_from_container_id_absent_when_no_cgroup_or_mountinfo() {
+        let (_ns_file, ns_path) = temp_file("default");
+        let (_cgroup_file, cgroup_path) = temp_file("0::/\n");
+        let (_mi_file, mi_path) = temp_file(""); // no container ID
+
+        let fake = FakeImdsClient::new()
+            .with_document(FULL_IMDS_DOC)
+            .with_get(EKS_CLUSTER_NAME_TAG_PATH, "my-cluster")
+            .with_get("services/partition", "aws");
+
+        temp_env::with_vars(
+            [
+                ("HOSTNAME", None::<&str>),
+                ("POD_UID", None::<&str>),
+                ("NODE_NAME", None::<&str>),
+                ("AWS_CLUSTER_NAME", None::<&str>),
+                ("AWS_REGION", None::<&str>),
+                ("AWS_ACCOUNT_ID", None::<&str>),
+            ],
+            || {
+                let resource =
+                    EksResourceDetector::detect_from(Ok(fake), &ns_path, &cgroup_path, &mi_path);
+
+                let attributes: std::collections::HashMap<_, _> = resource
+                    .iter()
+                    .map(|(k, v)| (k.as_str().to_owned(), v.clone()))
+                    .collect();
+
+                assert!(
+                    attributes.get(semco::CONTAINER_ID).is_none(),
+                    "container.id should be absent when cgroup and mountinfo carry none"
+                );
+            },
+        );
     }
 }

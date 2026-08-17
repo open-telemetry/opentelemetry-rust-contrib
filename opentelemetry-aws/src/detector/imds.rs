@@ -52,6 +52,12 @@ pub(super) enum ImdsError {
     JsonResponseRead(#[source] HttpClientError),
 }
 
+/// Abstraction over the IMDSv2 client, used to inject fakes in tests.
+pub(super) trait ImdsProvider {
+    fn get(&self, path: &str) -> Result<String, ImdsError>;
+    fn get_identity_document(&self) -> Result<InstanceIdentityDocument, ImdsError>;
+}
+
 /// IMDSv2 session holding an HTTP client and an acquired session token.
 pub(super) struct ImdsClient {
     client: HttpClient,
@@ -88,14 +94,6 @@ impl ImdsClient {
             .map_err(|error| ImdsError::GetRequest { url, error })
     }
 
-    /// GETs a metadata path under `/latest/meta-data/` and returns the response body as a `String`.
-    pub(super) fn get(&self, path: &str) -> Result<String, ImdsError> {
-        self.get_response(&format!("meta-data/{path}"))?
-            .body_mut()
-            .read_to_string()
-            .map_err(ImdsError::TextResponseRead)
-    }
-
     /// GETs a path under `/latest/` and deserializes the JSON response body.
     fn get_json<T: serde::de::DeserializeOwned>(&self, path: &str) -> Result<T, ImdsError> {
         self.get_response(path)?
@@ -103,9 +101,19 @@ impl ImdsClient {
             .read_json()
             .map_err(ImdsError::JsonResponseRead)
     }
+}
+
+impl ImdsProvider for ImdsClient {
+    /// GETs a metadata path under `/latest/meta-data/` and returns the response body as a `String`.
+    fn get(&self, path: &str) -> Result<String, ImdsError> {
+        self.get_response(&format!("meta-data/{path}"))?
+            .body_mut()
+            .read_to_string()
+            .map_err(ImdsError::TextResponseRead)
+    }
 
     /// GETs `/latest/dynamic/instance-identity/document` and deserializes it.
-    pub(super) fn get_identity_document(&self) -> Result<InstanceIdentityDocument, ImdsError> {
+    fn get_identity_document(&self) -> Result<InstanceIdentityDocument, ImdsError> {
         self.get_json(IMDS_IDENTITY_DOCUMENT_PATH)
     }
 }
@@ -145,48 +153,91 @@ impl InstanceIdentityDocument {
 }
 
 #[cfg(test)]
-mod tests {
+pub(super) mod tests {
+    use std::collections::HashMap;
+
     use super::*;
+
+    // ── Fake IMDS client ──────────────────────────────────────────────────────
+
+    /// Test-only fake that returns canned responses.
+    ///
+    /// Data is stored as JSON `&str` and deserialized on
+    /// each call to exercises the `serde` impl alongside the detectors
+    /// logic.
+    pub struct FakeImdsClient {
+        document: &'static str,
+        gets: HashMap<&'static str, &'static str>,
+    }
+
+    impl FakeImdsClient {
+        pub fn new() -> Self {
+            Self {
+                document: "",
+                gets: HashMap::new(),
+            }
+        }
+
+        pub fn with_document(mut self, json: &'static str) -> Self {
+            self.document = json;
+            self
+        }
+
+        /// Add/Overrides the value returned for a specific GET path.
+        pub fn with_get(mut self, path: &'static str, value: &'static str) -> Self {
+            self.gets.insert(path, value);
+            self
+        }
+    }
+
+    impl ImdsProvider for FakeImdsClient {
+        fn get(&self, path: &str) -> Result<String, ImdsError> {
+            self.gets
+                .get(&path)
+                .map(|&s| s.to_owned())
+                .ok_or(ImdsError::GetRequest {
+                    url: path.to_owned(),
+                    error: HttpClientError::StatusCode(404),
+                })
+        }
+
+        fn get_identity_document(&self) -> Result<InstanceIdentityDocument, ImdsError> {
+            serde_json::from_str(self.document)
+                .map_err(HttpClientError::Json)
+                .map_err(ImdsError::TextResponseRead)
+        }
+    }
+
+    // ── host_arch mapping ─────────────────────────────────────────────────────
+
+    const DOC_X86_64: &str = r#"{ "architecture": "x86_64" }"#;
+    const DOC_ARM64: &str = r#"{ "architecture": "arm64"  }"#;
+    const DOC_I386: &str = r#"{ "architecture": "i386"   }"#;
+    const DOC_MIPS: &str = r#"{ "architecture": "mips"   }"#;
+    const DOC_EMPTY_ARCH: &str = r#"{ "architecture": ""    }"#;
+    const DOC_NO_ARCH: &str = r#"{}"#;
 
     #[test]
     fn host_arch_known_mappings() {
-        let x86_64 = InstanceIdentityDocument {
-            architecture: Some("x86_64".to_owned()),
-            ..Default::default()
-        };
-        assert_eq!(x86_64.host_arch(), Some("amd64"));
+        let doc: InstanceIdentityDocument = serde_json::from_str(DOC_X86_64).unwrap();
+        assert_eq!(doc.host_arch(), Some("amd64"));
 
-        let arm64 = InstanceIdentityDocument {
-            architecture: Some("arm64".to_owned()),
-            ..Default::default()
-        };
-        assert_eq!(arm64.host_arch(), Some("arm64"));
+        let doc: InstanceIdentityDocument = serde_json::from_str(DOC_ARM64).unwrap();
+        assert_eq!(doc.host_arch(), Some("arm64"));
 
-        let i386 = InstanceIdentityDocument {
-            architecture: Some("i386".to_owned()),
-            ..Default::default()
-        };
-        assert_eq!(i386.host_arch(), Some("x86"));
+        let doc: InstanceIdentityDocument = serde_json::from_str(DOC_I386).unwrap();
+        assert_eq!(doc.host_arch(), Some("x86"));
     }
 
     #[test]
     fn host_arch_unknown_or_absent() {
-        let none = InstanceIdentityDocument {
-            architecture: None,
-            ..Default::default()
-        };
-        assert_eq!(none.host_arch(), None);
+        let doc: InstanceIdentityDocument = serde_json::from_str(DOC_NO_ARCH).unwrap();
+        assert_eq!(doc.host_arch(), None);
 
-        let mips = InstanceIdentityDocument {
-            architecture: Some("mips".to_owned()),
-            ..Default::default()
-        };
-        assert_eq!(mips.host_arch(), None);
+        let doc: InstanceIdentityDocument = serde_json::from_str(DOC_MIPS).unwrap();
+        assert_eq!(doc.host_arch(), None);
 
-        let empty = InstanceIdentityDocument {
-            architecture: Some("".to_owned()),
-            ..Default::default()
-        };
-        assert_eq!(empty.host_arch(), None);
+        let doc: InstanceIdentityDocument = serde_json::from_str(DOC_EMPTY_ARCH).unwrap();
+        assert_eq!(doc.host_arch(), None);
     }
 }
