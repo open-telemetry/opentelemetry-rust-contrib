@@ -831,7 +831,9 @@ impl GenevaConfigClient {
     /// Uses mutual TLS (mTLS) with client certificate authentication
     ///
     /// # Returns
-    /// * `Result<IngestionGatewayInfo, MonikerInfo>` - Ingestion gateway information, with storage monikers or an error
+    /// * `Result<(IngestionGatewayInfo, HashMap<String, String>, String)>` - Ingestion
+    ///   gateway information, the logical-account-group to primary-moniker map, and
+    ///   the endpoint query parameter, or an error
     ///
     /// # Errors
     /// * `GenevaConfigClientError::Http` - If the HTTP request fails

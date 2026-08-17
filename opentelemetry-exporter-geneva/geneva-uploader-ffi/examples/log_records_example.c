@@ -10,7 +10,7 @@
  *   GENEVA_ENVIRONMENT           e.g. Test
  *   GENEVA_ACCOUNT               e.g. myaccount
  *   GENEVA_NAMESPACE             e.g. mynamespace
- *   GENEVA_ACCOUNT_GROUP         e.g. mynamespacediag (optional for a single-group response)
+ *   GENEVA_ACCOUNT_GROUP         e.g. mynamespacediag (default logical account group)
  *   GENEVA_REGION                e.g. eastus
  *   GENEVA_CONFIG_MAJOR_VERSION  e.g. 2
  *
@@ -62,12 +62,13 @@ int main(void) {
     const char* region        = getenv("GENEVA_REGION");
     const char* cfg_ver_str   = getenv("GENEVA_CONFIG_MAJOR_VERSION");
 
-    if (!endpoint || !environment || !account || !namespaceName || !region || !cfg_ver_str) {
+    if (!endpoint || !environment || !account || !namespaceName || !accountGroup || !region || !cfg_ver_str) {
         fprintf(stderr, "Missing required environment variables:\n"
                         "  GENEVA_ENDPOINT\n"
                         "  GENEVA_ENVIRONMENT\n"
                         "  GENEVA_ACCOUNT\n"
                         "  GENEVA_NAMESPACE\n"
+                        "  GENEVA_ACCOUNT_GROUP\n"
                         "  GENEVA_REGION\n"
                         "  GENEVA_CONFIG_MAJOR_VERSION\n");
         return 1;

@@ -29,6 +29,11 @@ pub(crate) enum GenevaUploaderError {
     ConfigClient(String),
     #[error("Agent-fed credential not provisioned: {0}")]
     CredentialNotProvisioned(String),
+    #[error("Account group '{requested}' was not resolved; available groups: {available:?}")]
+    AccountGroupNotResolved {
+        requested: String,
+        available: Vec<String>,
+    },
     #[allow(dead_code)]
     #[error("Upload failed with status {status}: {message}")]
     UploadFailed {
@@ -377,9 +382,12 @@ impl GenevaUploader {
             endpoint_query_param,
         } = self.source.resolve().await?;
         let moniker = primary_monikers.get(account_group).ok_or_else(|| {
-            GenevaUploaderError::InternalError(format!(
-                "No primary moniker is available for account group '{account_group}'"
-            ))
+            let mut available: Vec<_> = primary_monikers.keys().cloned().collect();
+            available.sort();
+            GenevaUploaderError::AccountGroupNotResolved {
+                requested: account_group.to_string(),
+                available,
+            }
         })?;
         let data_size = data.len();
         let upload_uri = self.create_upload_uri(
@@ -782,6 +790,33 @@ mod tests {
             matches!(err, GenevaUploaderError::CredentialNotProvisioned(_)),
             "expected CredentialNotProvisioned, got: {err:?}"
         );
+    }
+
+    /// Scenario: A batch targets a logical group absent from the current credential.
+    /// Guarantees: The permanent routing error names the requested group and reports
+    /// available groups in deterministic order without attempting an upload.
+    #[tokio::test]
+    async fn agent_fed_upload_reports_unresolved_account_group() {
+        let source = Arc::new(TestAgentFedSource::new(
+            "token",
+            "https://unused.example",
+            "moniker",
+        ));
+        let uploader = agent_fed_uploader(source);
+        let metadata = make_test_metadata();
+
+        let error = uploader
+            .upload(vec![1], "Log", "missing-group", &metadata, 1, None)
+            .await
+            .expect_err("an unknown logical account group must fail");
+
+        assert!(matches!(
+            error,
+            GenevaUploaderError::AccountGroupNotResolved {
+                requested,
+                available,
+            } if requested == "missing-group" && available == ["test-group"]
+        ));
     }
 
     /// Scenario: The agent-fed token carries an Endpoint claim.

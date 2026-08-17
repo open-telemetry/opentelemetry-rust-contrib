@@ -995,10 +995,8 @@ pub unsafe extern "C" fn geneva_client_new(
         environment,
         account,
         namespace,
-        account_routing: AccountRouting {
-            default_group: account_group,
-            groups_by_event: account_group_mapping,
-        },
+        account_routing: AccountRouting::new(account_group)
+            .with_event_groups(account_group_mapping),
         region,
         config_major_version: config.config_major_version,
         auth_method,

@@ -74,10 +74,16 @@ pub struct GenevaClientConfig {
 }
 
 /// Maps each final Geneva event name to one logical GCS account group.
+///
+/// Overrides are matched after event-name mapping, so `groups_by_event` keys
+/// must be destination event names rather than source names. Events without an
+/// exact override silently use `default_group`. Give streams that require
+/// different routing distinct destination event names so they cannot fall
+/// through to the default group unintentionally.
 #[derive(Clone, Debug)]
 pub struct AccountRouting {
-    pub default_group: String,
-    pub groups_by_event: HashMap<String, String>,
+    default_group: String,
+    groups_by_event: HashMap<String, String>,
 }
 
 impl AccountRouting {
@@ -95,6 +101,11 @@ impl AccountRouting {
     ) -> Self {
         self.groups_by_event
             .insert(event_name.into(), account_group.into());
+        self
+    }
+
+    pub fn with_event_groups(mut self, map: HashMap<String, String>) -> Self {
+        self.groups_by_event.extend(map);
         self
     }
 
@@ -205,6 +216,8 @@ impl std::fmt::Debug for AgentFedCredential {
 ///   server errors (429, 5xx) from permanent client errors (4xx).
 /// - [`Transport`](UploadError::Transport) indicates a network-level failure
 ///   (timeout, connection refused, DNS) that is typically retriable.
+/// - [`AccountGroupNotResolved`](UploadError::AccountGroupNotResolved) indicates
+///   a permanent routing configuration error.
 /// - [`Other`](UploadError::Other) covers config-service or internal errors.
 #[derive(Debug)]
 pub enum UploadError {
@@ -216,6 +229,13 @@ pub enum UploadError {
     },
     /// Network/transport failure (timeout, connection refused, DNS, etc.)
     Transport(String),
+    /// The configured logical account group was not present in the resolved
+    /// primary-moniker map. This is not retriable without a configuration or
+    /// credential update.
+    AccountGroupNotResolved {
+        requested: String,
+        available: Vec<String>,
+    },
     /// Config service or other internal error.
     Other(String),
 }
@@ -229,6 +249,13 @@ impl fmt::Display for UploadError {
                 write!(f, "upload failed with status {status}: {message}")
             }
             Self::Transport(msg) => write!(f, "transport error: {msg}"),
+            Self::AccountGroupNotResolved {
+                requested,
+                available,
+            } => write!(
+                f,
+                "account group '{requested}' was not resolved; available groups: {available:?}"
+            ),
             Self::Other(msg) => write!(f, "{msg}"),
         }
     }
@@ -726,6 +753,8 @@ impl GenevaClient {
         Ok(batches)
     }
 
+    /// Assigns logical account groups from final, post-mapping event names.
+    /// Events without an exact override silently fall back to the default group.
     fn assign_account_groups(&self, batches: &mut [EncodedBatch]) {
         for batch in batches {
             batch.account_group = self
@@ -787,6 +816,13 @@ impl GenevaClient {
                         message,
                     },
                     GenevaUploaderError::Http(msg) => UploadError::Transport(msg),
+                    GenevaUploaderError::AccountGroupNotResolved {
+                        requested,
+                        available,
+                    } => UploadError::AccountGroupNotResolved {
+                        requested,
+                        available,
+                    },
                     other => UploadError::Other(other.to_string()),
                 }
             })
@@ -989,6 +1025,18 @@ mod tests {
             Err(err) => err,
         };
         assert!(err.contains("event and group names must not be empty"));
+    }
+
+    #[test]
+    fn account_routing_bulk_builder_extends_event_groups() {
+        let routing = AccountRouting::new("default").with_event_groups(HashMap::from([
+            ("SecurityEvent".to_string(), "security".to_string()),
+            ("AuditEvent".to_string(), "audit".to_string()),
+        ]));
+
+        assert_eq!(routing.group_for_event("SecurityEvent"), "security");
+        assert_eq!(routing.group_for_event("AuditEvent"), "audit");
+        assert_eq!(routing.group_for_event("UnmappedEvent"), "default");
     }
 
     #[test]
