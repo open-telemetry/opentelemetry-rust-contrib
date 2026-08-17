@@ -4,7 +4,7 @@ use opentelemetry_semantic_conventions::attribute as semco;
 
 use super::{
     imds::{ImdsClient, ImdsError, ImdsProvider},
-    utils::{opt_kv, warn_on_error},
+    utils::{info_on_error, opt_kv, warn_on_error},
 };
 
 /// Name reported in internal logs emitted by this detector.
@@ -83,14 +83,12 @@ impl ResourceDetector for Ec2ResourceDetector {
 
 impl Ec2ResourceDetector {
     fn detect_from<P: ImdsProvider>(imds: Result<P, ImdsError>) -> Resource {
-        // Platform probe. A session token only proves that *something* answers
-        // at the link-local address; a parsable identity document is what
-        // proves it is IMDSv2. Both failures are routine off-platform.
-        let Some(imds) = warn_on_error(DETECTOR, imds) else {
-            // Not EC2, return empty resource
+        // Platform probe.
+        let Some(imds) = info_on_error(DETECTOR, imds) else {
+            // Not EC2/IMDSv2, return empty resource
             return Resource::builder_empty().build();
         };
-        let Some(document) = warn_on_error(DETECTOR, imds.get_identity_document()) else {
+        let Some(document) = info_on_error(DETECTOR, imds.get_identity_document()) else {
             // Not EC2, return empty resource
             return Resource::builder_empty().build();
         };
