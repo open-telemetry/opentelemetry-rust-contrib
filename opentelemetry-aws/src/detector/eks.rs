@@ -786,7 +786,7 @@ mod tests {
                     .collect();
 
                 assert!(
-                    attributes.get(semco::CONTAINER_ID).is_none(),
+                    !attributes.contains_key(semco::CONTAINER_ID),
                     "container.id should be absent when cgroup and mountinfo carry none"
                 );
             },
