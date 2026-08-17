@@ -33,7 +33,9 @@
         Progress: 449360 ops completed (449360 successful, 100.0%) in 30.01s = 14976.14 ops/sec
 
 */
-use geneva_uploader::{AuthMethod, GenevaClient, GenevaClientConfig, LogsConfig, TracesConfig};
+use geneva_uploader::{
+    AccountRouting, AuthMethod, GenevaClient, GenevaClientConfig, LogsConfig, TracesConfig,
+};
 use opentelemetry_proto::tonic::collector::logs::v1::ExportLogsServiceRequest;
 use opentelemetry_proto::tonic::common::v1::any_value::Value;
 use opentelemetry_proto::tonic::common::v1::{AnyValue, KeyValue};
@@ -114,6 +116,7 @@ async fn init_client() -> Result<(GenevaClient, Option<String>), Box<dyn std::er
             environment: std::env::var("GENEVA_ENV").unwrap_or_else(|_| "test".to_string()),
             account: std::env::var("GENEVA_ACCOUNT").unwrap_or_else(|_| "test".to_string()),
             namespace: std::env::var("GENEVA_NAMESPACE").unwrap_or_else(|_| "test".to_string()),
+            account_routing: AccountRouting::new(std::env::var("GENEVA_ACCOUNT_GROUP")?),
             region: std::env::var("GENEVA_REGION").unwrap_or_else(|_| "test".to_string()),
             config_major_version: std::env::var("GENEVA_CONFIG_MAJOR_VERSION")
                 .ok()
@@ -151,6 +154,7 @@ async fn init_client() -> Result<(GenevaClient, Option<String>), Box<dyn std::er
             environment: "test".to_string(),
             account: "test".to_string(),
             namespace: "test".to_string(),
+            account_routing: AccountRouting::new("testgroup"),
             region: "test".to_string(),
             config_major_version: 1,
             auth_method: AuthMethod::MockAuth,
@@ -215,6 +219,7 @@ async fn init_client() -> Result<(GenevaClient, Option<String>), Box<dyn std::er
             environment: "test".to_string(),
             account: "test".to_string(),
             namespace: "test".to_string(),
+            account_routing: AccountRouting::new("testgroup"),
             region: "test".to_string(),
             config_major_version: 1,
             auth_method: AuthMethod::MockAuth,

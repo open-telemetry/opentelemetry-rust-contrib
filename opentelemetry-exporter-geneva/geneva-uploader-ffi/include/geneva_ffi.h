@@ -21,6 +21,17 @@ typedef struct EncodedBatchesHandle EncodedBatchesHandle;
 #define GENEVA_AUTH_USER_MANAGED_IDENTITY_BY_OBJECT_ID 4
 #define GENEVA_AUTH_USER_MANAGED_IDENTITY_BY_RESOURCE_ID 5
 
+/* Maps a final event name to a logical account group. */
+typedef struct {
+    const char* event_name;
+    const char* account_group;
+} GenevaAccountGroupMapEntry;
+
+typedef struct {
+    const GenevaAccountGroupMapEntry* entries;
+    size_t count;
+} GenevaAccountGroupMapping;
+
 /* Configuration for certificate auth (valid only when auth_method == GENEVA_AUTH_CERTIFICATE) */
 typedef struct {
     const char* cert_path;      /* Path to certificate file */
@@ -147,6 +158,8 @@ typedef struct {
     const char* environment;
     const char* account;
     const char* namespace_name;
+    const char* account_group; /* Required default logical GCS account group. */
+    const GenevaAccountGroupMapping* account_group_mapping; /* Optional final event-name to logical account-group overrides. */
     const char* region;
     uint32_t config_major_version;
     uint32_t auth_method; /* 0 = System MSI, 1 = Certificate, 2 = Workload Identity, 3 = User MSI by client ID, 4 = User MSI by object ID, 5 = User MSI by resource ID */
