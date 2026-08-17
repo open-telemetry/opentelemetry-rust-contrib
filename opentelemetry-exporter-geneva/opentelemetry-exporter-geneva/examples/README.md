@@ -237,7 +237,7 @@ Expected log output should show:
 | `GENEVA_ENVIRONMENT` | Environment name in Geneva | `Test` |
 | `GENEVA_ACCOUNT` | Geneva monitoring account | `PipelineAgent2Demo` |
 | `GENEVA_NAMESPACE` | Geneva namespace | `PAdemo2` |
-| `GENEVA_ACCOUNT_GROUP` | Logical GCS account group; may be omitted only when GCS returns one group | `pademo2diag` |
+| `GENEVA_ACCOUNT_GROUP` | Logical GCS account group (required) | `pademo2diag` |
 | `GENEVA_REGION` | Azure region | `eastus` |
 | `GENEVA_CONFIG_MAJOR_VERSION` | Config schema version | `2` |
 | `MONITORING_GCS_AUTH_ID_TYPE` | Authentication type | `AuthWorkloadIdentity` |
