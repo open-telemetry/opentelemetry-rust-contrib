@@ -156,12 +156,12 @@ pub struct SegmentDocument<'a> {
     #[serde(skip_serializing_if = "VectorMap::is_empty")]
     metadata: VectorMap<&'a str, AnyValue<'a>>,
 
-    #[cfg(feature = "subsegment-nesting")]
+    #[cfg(feature = "xray-subsegment-nesting")]
     /// Array of subsegment objects
     #[serde(skip_serializing_if = "Vec::is_empty")]
     subsegments: Vec<SegmentDocument<'a>>,
 
-    #[cfg(feature = "subsegment-nesting")]
+    #[cfg(feature = "xray-subsegment-nesting")]
     /// Array of subsegment IDs that identifies subsegments with the same parent that completed prior to this subsegment
     #[serde(skip_serializing_if = "Vec::is_empty")]
     precursor_ids: Vec<Id>,
@@ -279,9 +279,9 @@ pub(crate) struct DocumentBuilder<'a, DBT: DocumentBuilderType> {
     error_details: ErrorDetailsBuilder<'a>,
     annotations: VectorMap<Cow<'a, str>, AnnotationValue<'a>>,
     metadata: VectorMap<&'a str, AnyValue<'a>>,
-    #[cfg(feature = "subsegment-nesting")]
+    #[cfg(feature = "xray-subsegment-nesting")]
     subsegments: Vec<SubsegmentDocumentBuilder<'a>>,
-    #[cfg(feature = "subsegment-nesting")]
+    #[cfg(feature = "xray-subsegment-nesting")]
     precursor_ids: Vec<Id>,
 }
 
@@ -291,7 +291,7 @@ pub(crate) type SegmentDocumentBuilder<'a> = DocumentBuilder<'a, builder_type::S
 /// Builder for X-Ray subsegment documents.
 pub(crate) type SubsegmentDocumentBuilder<'a> = DocumentBuilder<'a, builder_type::Subsegment>;
 
-#[cfg(feature = "subsegment-nesting")]
+#[cfg(feature = "xray-subsegment-nesting")]
 /// Core identifying and timing information for segment/subsegment builders.
 #[derive(Debug, Clone, Copy)]
 pub(crate) struct DocumentBuilderHeader {
@@ -343,7 +343,7 @@ impl<'a, DBT: DocumentBuilderType> DocumentBuilder<'a, DBT> {
         &mut self.error_details
     }
 
-    #[cfg(feature = "subsegment-nesting")]
+    #[cfg(feature = "xray-subsegment-nesting")]
     pub fn header(&self) -> DocumentBuilderHeader {
         DocumentBuilderHeader {
             id: self.id,
@@ -441,7 +441,7 @@ impl<'a, DBT: DocumentBuilderType> DocumentBuilder<'a, DBT> {
         self
     }
 
-    #[cfg(feature = "subsegment-nesting")]
+    #[cfg(feature = "xray-subsegment-nesting")]
     /// Adds a subsegment to the segment by consuming a [SubsegmentBuilder].
     pub fn subsegment(
         &mut self,
@@ -464,7 +464,7 @@ impl<'a, DBT: DocumentBuilderType> DocumentBuilder<'a, DBT> {
 
         DBT::verify_constraints(&self)?;
 
-        #[cfg(feature = "subsegment-nesting")]
+        #[cfg(feature = "xray-subsegment-nesting")]
         let subsegments = self
             .subsegments
             .into_iter()
@@ -490,9 +490,9 @@ impl<'a, DBT: DocumentBuilderType> DocumentBuilder<'a, DBT> {
             sql: self.sql.build(),
             annotations: self.annotations,
             metadata: self.metadata,
-            #[cfg(feature = "subsegment-nesting")]
+            #[cfg(feature = "xray-subsegment-nesting")]
             subsegments,
-            #[cfg(feature = "subsegment-nesting")]
+            #[cfg(feature = "xray-subsegment-nesting")]
             precursor_ids: self.precursor_ids,
         })
     }
@@ -568,7 +568,7 @@ impl<'a> SubsegmentDocumentBuilder<'a> {
         Ok(self)
     }
 
-    #[cfg(feature = "subsegment-nesting")]
+    #[cfg(feature = "xray-subsegment-nesting")]
     /// Adds precursor IDs.
     ///
     /// Sets IDs of subsegments with the same parent that completed before this one.
