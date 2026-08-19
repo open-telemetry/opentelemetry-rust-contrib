@@ -5,6 +5,8 @@ use reqwest::{
     header::{HeaderMap, HeaderValue, ACCEPT, AUTHORIZATION, USER_AGENT},
     Client, Url,
 };
+use secrecy::zeroize::Zeroizing;
+use secrecy::{ExposeSecret, SecretString};
 use serde::Deserialize;
 use std::time::Duration;
 use thiserror::Error;
@@ -12,10 +14,16 @@ use tracing::{debug, error, info};
 use uuid::Uuid;
 
 use chrono::{DateTime, Utc};
-#[cfg(all(feature = "tls-native", not(feature = "tls-rustls")))]
+#[cfg(all(
+    feature = "certificate-auth",
+    feature = "tls-native",
+    not(feature = "tls-rustls")
+))]
 use native_tls::{Identity, Protocol};
+use std::collections::HashMap;
 use std::fmt;
 use std::fmt::Write;
+#[cfg(feature = "certificate-auth")]
 use std::fs;
 use std::path::PathBuf;
 use std::sync::RwLock;
@@ -179,16 +187,9 @@ pub(crate) struct IngestionGatewayInfo {
     #[serde(rename = "Endpoint")]
     pub(crate) endpoint: String,
     #[serde(rename = "AuthToken")]
-    pub(crate) auth_token: String,
+    pub(crate) auth_token: SecretString,
     #[serde(rename = "AuthTokenExpiryTime")]
     pub(crate) auth_token_expiry_time: String,
-}
-
-#[allow(dead_code)]
-#[derive(Debug, Clone)]
-pub(crate) struct MonikerInfo {
-    pub name: String,
-    pub account_group: String,
 }
 
 #[allow(dead_code)]
@@ -215,6 +216,43 @@ struct GenevaResponse {
     tag_id: String,
 }
 
+fn select_primary_monikers(accounts: Vec<StorageAccountKey>) -> Result<HashMap<String, String>> {
+    let mut groups: HashMap<String, Vec<StorageAccountKey>> = HashMap::new();
+    for account in accounts {
+        groups
+            .entry(account.account_group_name.clone())
+            .or_default()
+            .push(account);
+    }
+    if groups.is_empty() {
+        return Err(GenevaConfigClientError::MonikerNotFound(
+            "GCS returned no account groups".to_string(),
+        ));
+    }
+
+    let mut primary_monikers = HashMap::with_capacity(groups.len());
+    for (group, entries) in groups {
+        let mut primaries = entries.into_iter().filter(|entry| entry.is_primary_moniker);
+        let primary = primaries.next().ok_or_else(|| {
+            GenevaConfigClientError::MonikerNotFound(format!(
+                "No primary moniker found for account group '{group}'"
+            ))
+        })?;
+        if primaries.next().is_some() {
+            return Err(GenevaConfigClientError::MonikerNotFound(format!(
+                "Multiple primary monikers found for account group '{group}'"
+            )));
+        }
+        if primary.account_moniker_name.trim().is_empty() {
+            return Err(GenevaConfigClientError::MonikerNotFound(format!(
+                "Primary moniker for account group '{group}' is empty"
+            )));
+        }
+        primary_monikers.insert(group, primary.account_moniker_name);
+    }
+    Ok(primary_monikers)
+}
+
 #[derive(Debug, Deserialize)]
 struct MsiTokenResponse {
     access_token: String,
@@ -223,7 +261,7 @@ struct MsiTokenResponse {
 #[allow(dead_code)]
 struct CachedAuthData {
     // Store the complete token and moniker info
-    auth_info: (IngestionGatewayInfo, MonikerInfo),
+    auth_info: (IngestionGatewayInfo, HashMap<String, String>),
     // Store the endpoint from token for quick access
     token_endpoint: String,
     // Store expiry separately for quick access
@@ -282,6 +320,7 @@ impl GenevaConfigClient {
         let agent_identity = "GenevaUploader";
         let agent_version = "0.1";
 
+        #[cfg_attr(not(feature = "certificate-auth"), allow(unused_mut))]
         let mut client_builder = Client::builder()
             .http1_only()
             .timeout(Duration::from_secs(30)) //TODO - make this configurable
@@ -290,77 +329,88 @@ impl GenevaConfigClient {
         match &config.auth_method {
             // TODO: Certificate auth would be removed in favor of managed identity.,
             // This is for testing, so we can use self-signed certs, and password in plain text.
+            #[cfg_attr(not(feature = "certificate-auth"), allow(unused_variables))]
             AuthMethod::Certificate { path, password } => {
-                info!(
-                    name: "config_client.new.certificate_auth",
-                    target: "geneva-uploader",
-                    "Using Certificate authentication"
-                );
-                // Read the PKCS#12 file
-                let p12_bytes = fs::read(path).map_err(|e| {
-                    debug!(
-                        name: "config_client.new.certificate_read_error",
+                #[cfg(not(feature = "certificate-auth"))]
+                return Err(GenevaConfigClientError::Certificate(
+                    "certificate authentication is disabled; rebuild with the `certificate-auth` feature or use managed identity, workload identity, or agent-fed authentication"
+                        .to_string(),
+                ));
+
+                #[cfg(feature = "certificate-auth")]
+                {
+                    info!(
+                        name: "config_client.new.certificate_auth",
                         target: "geneva-uploader",
-                        error = %e,
-                        "Failed to read certificate file"
+                        "Using Certificate authentication"
                     );
-                    GenevaConfigClientError::Certificate(e.to_string())
-                })?;
-
-                #[cfg(all(feature = "tls-native", not(feature = "tls-rustls")))]
-                {
-                    let identity = Identity::from_pkcs12(&p12_bytes, password).map_err(|e| {
+                    // Read the PKCS#12 file
+                    let p12_bytes = fs::read(path).map_err(|e| {
                         debug!(
-                            name: "config_client.new.certificate_parse_error",
+                            name: "config_client.new.certificate_read_error",
                             target: "geneva-uploader",
                             error = %e,
-                            "Failed to parse PKCS#12 certificate"
+                            "Failed to read certificate file"
                         );
                         GenevaConfigClientError::Certificate(e.to_string())
                     })?;
-                    // TODO - use use_native_tls instead of preconfigured_tls once we no longer
-                    // need TLS 1.2 as the exclusive protocol.
-                    let tls_connector = configure_native_tls_connector(
-                        native_tls::TlsConnector::builder(),
-                        identity,
-                        #[cfg(test)]
-                        config.test_root_ca_pem.as_deref(),
-                        #[cfg(not(test))]
-                        None,
-                    )?
-                    .build()
-                    .map_err(|e| {
-                        debug!(
-                            name: "config_client.new.tls_connector_error",
-                            target: "geneva-uploader",
-                            error = %e,
-                            "Failed to build TLS connector"
-                        );
-                        GenevaConfigClientError::Certificate(e.to_string())
-                    })?;
-                    client_builder = client_builder.use_preconfigured_tls(tls_connector);
-                }
 
-                #[cfg(feature = "tls-rustls")]
-                {
-                    let tls_config = build_rustls_client_config(
-                        &p12_bytes,
-                        password,
-                        #[cfg(test)]
-                        config.test_root_ca_pem.as_deref(),
-                        #[cfg(not(test))]
-                        None,
-                    )
-                    .map_err(|e| {
-                        debug!(
-                            name: "config_client.new.tls_connector_error",
-                            target: "geneva-uploader",
-                            error = %e,
-                            "Failed to build rustls client config"
-                        );
-                        e
-                    })?;
-                    client_builder = client_builder.use_preconfigured_tls(tls_config);
+                    #[cfg(all(feature = "tls-native", not(feature = "tls-rustls")))]
+                    {
+                        let identity =
+                            Identity::from_pkcs12(&p12_bytes, password).map_err(|e| {
+                                debug!(
+                                    name: "config_client.new.certificate_parse_error",
+                                    target: "geneva-uploader",
+                                    error = %e,
+                                    "Failed to parse PKCS#12 certificate"
+                                );
+                                GenevaConfigClientError::Certificate(e.to_string())
+                            })?;
+                        // TODO - use use_native_tls instead of preconfigured_tls once we no longer
+                        // need TLS 1.2 as the exclusive protocol.
+                        let tls_connector = configure_native_tls_connector(
+                            native_tls::TlsConnector::builder(),
+                            identity,
+                            #[cfg(test)]
+                            config.test_root_ca_pem.as_deref(),
+                            #[cfg(not(test))]
+                            None,
+                        )?
+                        .build()
+                        .map_err(|e| {
+                            debug!(
+                                name: "config_client.new.tls_connector_error",
+                                target: "geneva-uploader",
+                                error = %e,
+                                "Failed to build TLS connector"
+                            );
+                            GenevaConfigClientError::Certificate(e.to_string())
+                        })?;
+                        client_builder = client_builder.use_preconfigured_tls(tls_connector);
+                    }
+
+                    #[cfg(feature = "tls-rustls")]
+                    {
+                        let tls_config = build_rustls_client_config(
+                            &p12_bytes,
+                            password,
+                            #[cfg(test)]
+                            config.test_root_ca_pem.as_deref(),
+                            #[cfg(not(test))]
+                            None,
+                        )
+                        .map_err(|e| {
+                            debug!(
+                                name: "config_client.new.tls_connector_error",
+                                target: "geneva-uploader",
+                                error = %e,
+                                "Failed to build rustls client config"
+                            );
+                            e
+                        })?;
+                        client_builder = client_builder.use_preconfigured_tls(tls_config);
+                    }
                 }
             }
             AuthMethod::WorkloadIdentity { .. } => {
@@ -430,7 +480,6 @@ impl GenevaConfigClient {
         ).map_err(|e| GenevaConfigClientError::InternalError(format!("Failed to write URL: {e}")))?;
 
         let http_client = client_builder.build()?;
-
         Ok(Self {
             config,
             http_client,
@@ -782,7 +831,9 @@ impl GenevaConfigClient {
     /// Uses mutual TLS (mTLS) with client certificate authentication
     ///
     /// # Returns
-    /// * `Result<IngestionGatewayInfo, MonikerInfo>` - Ingestion gateway information, with storage monikers or an error
+    /// * `Result<(IngestionGatewayInfo, HashMap<String, String>, String)>` - Ingestion
+    ///   gateway information, the logical-account-group to primary-moniker map, and
+    ///   the endpoint query parameter, or an error
     ///
     /// # Errors
     /// * `GenevaConfigClientError::Http` - If the HTTP request fails
@@ -792,7 +843,7 @@ impl GenevaConfigClient {
     #[allow(dead_code)]
     pub(crate) async fn get_ingestion_info(
         &self,
-    ) -> Result<(IngestionGatewayInfo, MonikerInfo, String)> {
+    ) -> Result<(IngestionGatewayInfo, HashMap<String, String>, String)> {
         debug!(
             name: "config_client.get_ingestion_info",
             target: "geneva-uploader",
@@ -826,7 +877,7 @@ impl GenevaConfigClient {
         }
         // Cache miss or expired token, fetch fresh data
         // Perform actual fetch before acquiring write lock to minimize lock contention
-        let (fresh_ingestion_gateway_info, fresh_moniker_info) =
+        let (fresh_ingestion_gateway_info, fresh_primary_monikers) =
             self.fetch_ingestion_info().await?;
 
         let token_expiry =
@@ -835,20 +886,21 @@ impl GenevaConfigClient {
                     GenevaConfigClientError::InternalError("Failed to parse token expiry".into())
                 })?;
 
-        let token_endpoint =
-            match extract_endpoint_from_token(&fresh_ingestion_gateway_info.auth_token) {
-                Ok(ep) => ep,
-                Err(err) => {
-                    // Fallback: some tokens legitimately omit the Endpoint claim; use server endpoint.
-                    tracing::debug!(
-                        name: "config_client.get_ingestion_info.endpoint_claim_missing",
-                        target: "geneva-uploader",
-                        error = %err,
-                        "Token Endpoint claim missing or unparsable; using server endpoint"
-                    );
-                    fresh_ingestion_gateway_info.endpoint.clone()
-                }
-            };
+        let token_endpoint = match extract_endpoint_from_token(
+            fresh_ingestion_gateway_info.auth_token.expose_secret(),
+        ) {
+            Ok(ep) => ep,
+            Err(err) => {
+                // Fallback: some tokens legitimately omit the Endpoint claim; use server endpoint.
+                tracing::debug!(
+                    name: "config_client.get_ingestion_info.endpoint_claim_missing",
+                    target: "geneva-uploader",
+                    error = %err,
+                    "Token Endpoint claim missing or unparsable; using server endpoint"
+                );
+                fresh_ingestion_gateway_info.endpoint.clone()
+            }
+        };
 
         // Now update the cache with exclusive write access
         let mut guard = self
@@ -870,7 +922,7 @@ impl GenevaConfigClient {
         *guard = Some(CachedAuthData {
             auth_info: (
                 fresh_ingestion_gateway_info.clone(),
-                fresh_moniker_info.clone(),
+                fresh_primary_monikers.clone(),
             ),
             token_endpoint: token_endpoint.clone(),
             token_expiry,
@@ -878,13 +930,15 @@ impl GenevaConfigClient {
 
         Ok((
             fresh_ingestion_gateway_info,
-            fresh_moniker_info,
+            fresh_primary_monikers,
             token_endpoint,
         ))
     }
 
     /// Internal method that actually fetches data from Geneva Config Service
-    async fn fetch_ingestion_info(&self) -> Result<(IngestionGatewayInfo, MonikerInfo)> {
+    async fn fetch_ingestion_info(
+        &self,
+    ) -> Result<(IngestionGatewayInfo, HashMap<String, String>)> {
         info!(
             name: "config_client.fetch_ingestion_info",
             target: "geneva-uploader",
@@ -952,6 +1006,7 @@ impl GenevaConfigClient {
         let body = response.text().await?;
 
         if status.is_success() {
+            let body = Zeroizing::new(body);
             debug!(
                 name: "config_client.fetch_ingestion_info.response",
                 target: "geneva-uploader",
@@ -973,33 +1028,14 @@ impl GenevaConfigClient {
                 }
             };
 
-            for account in parsed.storage_account_keys {
-                if account.is_primary_moniker && account.account_moniker_name.contains("diag") {
-                    // Move (not clone) the strings out of the StorageAccountKey; no extra allocation
-                    let account_moniker_name = account.account_moniker_name;
-                    let account_group_name = account.account_group_name;
-                    let moniker_info = MonikerInfo {
-                        name: account_moniker_name,
-                        account_group: account_group_name,
-                    };
-                    info!(
-                        name: "config_client.fetch_ingestion_info.success",
-                        target: "geneva-uploader",
-                        moniker = %moniker_info.name,
-                        "Successfully retrieved ingestion info"
-                    );
-                    return Ok((parsed.ingestion_gateway_info, moniker_info));
-                }
-            }
-
-            debug!(
-                name: "config_client.fetch_ingestion_info.no_diag_moniker",
+            let primary_monikers = select_primary_monikers(parsed.storage_account_keys)?;
+            info!(
+                name: "config_client.fetch_ingestion_info.success",
                 target: "geneva-uploader",
-                "No primary diag moniker found in storage accounts"
+                account_group_count = primary_monikers.len(),
+                "Successfully retrieved ingestion info"
             );
-            Err(GenevaConfigClientError::MonikerNotFound(
-                "No primary diag moniker found in storage accounts".to_string(),
-            ))
+            Ok((parsed.ingestion_gateway_info, primary_monikers))
         } else {
             debug!(
                 name: "config_client.fetch_ingestion_info.error_status",
@@ -1085,7 +1121,11 @@ pub(crate) fn extract_endpoint_from_token(token: &str) -> Result<String> {
     ))
 }
 
-#[cfg(all(feature = "tls-native", not(feature = "tls-rustls")))]
+#[cfg(all(
+    feature = "certificate-auth",
+    feature = "tls-native",
+    not(feature = "tls-rustls")
+))]
 fn configure_native_tls_connector(
     mut builder: native_tls::TlsConnectorBuilder,
     identity: native_tls::Identity,
@@ -1106,7 +1146,7 @@ fn configure_native_tls_connector(
     Ok(builder)
 }
 
-#[cfg(feature = "tls-rustls")]
+#[cfg(all(feature = "certificate-auth", feature = "tls-rustls"))]
 fn build_rustls_client_config(
     p12_bytes: &[u8],
     password: &str,
@@ -1205,4 +1245,69 @@ fn build_rustls_client_config(
         .map_err(|e| GenevaConfigClientError::Certificate(e.to_string()))?;
 
     Ok(config)
+}
+
+#[cfg(test)]
+mod account_selection_tests {
+    use super::*;
+
+    fn account(group: &str, moniker: &str, is_primary: bool) -> StorageAccountKey {
+        StorageAccountKey {
+            account_moniker_name: moniker.to_string(),
+            account_group_name: group.to_string(),
+            is_primary_moniker: is_primary,
+        }
+    }
+
+    #[test]
+    fn selects_one_primary_for_every_exact_account_group() {
+        let selected = select_primary_monikers(vec![
+            account("other", "contains-diag", true),
+            account("NsDiag", "secondary", false),
+            account("NsDiag", "primary", true),
+        ])
+        .expect("all groups should be resolved");
+
+        assert_eq!(selected.get("NsDiag").map(String::as_str), Some("primary"));
+        assert_eq!(
+            selected.get("other").map(String::as_str),
+            Some("contains-diag")
+        );
+    }
+
+    #[test]
+    fn rejects_missing_primary_for_account_group() {
+        let error = select_primary_monikers(vec![
+            account("nsdiag", "secondary", false),
+            account("other", "contains-diag", true),
+        ])
+        .expect_err("a secondary or unrelated moniker must not be selected");
+
+        assert!(error.to_string().contains("No primary moniker found"));
+    }
+
+    #[test]
+    fn rejects_ambiguous_primary_for_account_group() {
+        let error = select_primary_monikers(vec![
+            account("nsdiag", "primary-a", true),
+            account("nsdiag", "primary-b", true),
+        ])
+        .expect_err("multiple primaries must not be response-order-dependent");
+
+        assert!(error
+            .to_string()
+            .contains("Multiple primary monikers found"));
+    }
+
+    #[test]
+    fn preserves_case_distinct_account_groups() {
+        let selected = select_primary_monikers(vec![
+            account("NsDiag", "upper", true),
+            account("nsdiag", "lower", true),
+        ])
+        .expect("case-distinct groups must remain distinct");
+
+        assert_eq!(selected.get("NsDiag").map(String::as_str), Some("upper"));
+        assert_eq!(selected.get("nsdiag").map(String::as_str), Some("lower"));
+    }
 }

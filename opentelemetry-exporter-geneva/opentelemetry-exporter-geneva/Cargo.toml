@@ -14,7 +14,7 @@ opentelemetry_sdk = { version = "0.32", default-features = false, features = ["l
 opentelemetry-proto = { version = "0.32", default-features = false, features = ["logs", "trace"] }
 geneva-uploader = { path = "../geneva-uploader", version = "0.5.0", default-features = false }
 futures = "0.3"
-otap-df-pdata-views = { git = "https://github.com/open-telemetry/otel-arrow", rev = "4f522d2e" }
+otap-df-pdata-views = { git = "https://github.com/open-telemetry/otel-arrow", rev = "a8e27f29d859ed987277498d1126603c0e25a10b" }
 
 [features]
 # TLS backend selection is forwarded to geneva-uploader. `tls-native` (default)
@@ -25,6 +25,7 @@ otap-df-pdata-views = { git = "https://github.com/open-telemetry/otel-arrow", re
 default = ["tls-native"]
 tls-native = ["geneva-uploader/tls-native"]
 tls-rustls = ["geneva-uploader/tls-rustls"]
+certificate-auth = ["geneva-uploader/certificate-auth"]
 
 [dev-dependencies]
 opentelemetry-appender-tracing = { version = "0.32" }

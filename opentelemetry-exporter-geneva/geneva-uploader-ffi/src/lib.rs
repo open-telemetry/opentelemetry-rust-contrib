@@ -12,8 +12,8 @@ use tokio::runtime::Runtime;
 
 use geneva_uploader::client::{EncodedBatch, GenevaClient, GenevaClientConfig, UploadError};
 use geneva_uploader::{
-    AuthMethod, LogsConfig, LogsEventNameMapping, LogsEventNameRoutingKey, SpanEventNameMapping,
-    SpanEventNameRoutingKey, TracesConfig,
+    AccountRouting, AuthMethod, LogsConfig, LogsEventNameMapping, LogsEventNameRoutingKey,
+    SpanEventNameMapping, SpanEventNameRoutingKey, TracesConfig,
 };
 use opentelemetry_proto::tonic::collector::trace::v1::ExportTraceServiceRequest;
 use prost::Message;
@@ -180,6 +180,8 @@ pub struct GenevaConfig {
     pub environment: *const c_char,
     pub account: *const c_char,
     pub namespace_name: *const c_char,
+    pub account_group: *const c_char, // Required default logical GCS account group.
+    pub account_group_mapping: *const FfiAccountGroupMapping, // Optional final event-name to account-group overrides.
     pub region: *const c_char,
     pub config_major_version: c_uint,
     pub auth_method: c_uint,
@@ -193,6 +195,19 @@ pub struct GenevaConfig {
     pub logs_event_name_mapping: *const FfiLogsEventNameMapping, // Optional logs routing map. Nullable.
     pub spans_default_event_name: *const c_char, // Optional default destination table for spans. Nullable.
     pub spans_event_name_mapping: *const FfiSpansEventNameMapping, // Optional spans routing map. Nullable.
+}
+
+/// Maps one final Geneva event name to one logical GCS account group.
+#[repr(C)]
+pub struct FfiAccountGroupMapEntry {
+    pub event_name: *const c_char,
+    pub account_group: *const c_char,
+}
+
+#[repr(C)]
+pub struct FfiAccountGroupMapping {
+    pub entries: *const FfiAccountGroupMapEntry,
+    pub count: usize,
 }
 
 /// FFI-safe logs event-name mapping routing kinds.
@@ -420,6 +435,44 @@ unsafe fn convert_obo_event_map(
     } else {
         Ok(Some(obo_map))
     }
+}
+
+unsafe fn convert_account_group_mapping(
+    ffi_map: *const FfiAccountGroupMapping,
+) -> Result<std::collections::HashMap<String, String>, String> {
+    if ffi_map.is_null() {
+        return Ok(std::collections::HashMap::new());
+    }
+    let map_ref = unsafe { &*ffi_map };
+    if map_ref.count == 0 {
+        return Ok(std::collections::HashMap::new());
+    }
+    if map_ref.entries.is_null() {
+        return Err("account_group_mapping.entries must not be null when count is non-zero".into());
+    }
+
+    let entries = unsafe { std::slice::from_raw_parts(map_ref.entries, map_ref.count) };
+    let mut result = std::collections::HashMap::with_capacity(entries.len());
+    for (index, entry) in entries.iter().enumerate() {
+        let event_name = unsafe {
+            c_str_to_string(
+                entry.event_name,
+                &format!("account_group_mapping.entries[{index}].event_name"),
+            )
+        }?;
+        let account_group = unsafe {
+            c_str_to_string(
+                entry.account_group,
+                &format!("account_group_mapping.entries[{index}].account_group"),
+            )
+        }?;
+        if result.insert(event_name.clone(), account_group).is_some() {
+            return Err(format!(
+                "duplicate event name '{event_name}' in account_group_mapping"
+            ));
+        }
+    }
+    Ok(result)
 }
 
 /// Shared accessor over the identically-shaped logs/spans mapping entry structs
@@ -716,6 +769,21 @@ pub unsafe extern "C" fn geneva_client_new(
             return GenevaError::InvalidConfig;
         }
     };
+    let account_group = match unsafe { c_str_to_string(config.account_group, "account_group") } {
+        Ok(s) => s,
+        Err(e) => {
+            unsafe { write_error_if_provided(err_msg_out, err_msg_len, &e) };
+            return GenevaError::InvalidConfig;
+        }
+    };
+    let account_group_mapping =
+        match unsafe { convert_account_group_mapping(config.account_group_mapping) } {
+            Ok(mapping) => mapping,
+            Err(e) => {
+                unsafe { write_error_if_provided(err_msg_out, err_msg_len, &e) };
+                return GenevaError::InvalidConfig;
+            }
+        };
     let region = match unsafe { c_str_to_string(config.region, "region") } {
         Ok(s) => s,
         Err(e) => {
@@ -927,6 +995,8 @@ pub unsafe extern "C" fn geneva_client_new(
         environment,
         account,
         namespace,
+        account_routing: AccountRouting::new(account_group)
+            .with_event_groups(account_group_mapping),
         region,
         config_major_version: config.config_major_version,
         auth_method,
@@ -1986,6 +2056,7 @@ mod tests {
             environment: "test".to_string(),
             account: "test".to_string(),
             namespace: "testns".to_string(),
+            account_routing: AccountRouting::new("test-group"),
             region: "testregion".to_string(),
             config_major_version: 1,
             auth_method: AuthMethod::MockAuth,
@@ -2014,6 +2085,7 @@ mod tests {
             environment: "test".to_string(),
             account: "test".to_string(),
             namespace: "testns".to_string(),
+            account_routing: AccountRouting::new("test-group"),
             region: "testregion".to_string(),
             config_major_version: 1,
             auth_method: AuthMethod::MockAuth,
@@ -2168,6 +2240,7 @@ mod tests {
             let environment = CString::new("test").unwrap();
             let account = CString::new("testaccount").unwrap();
             let namespace = CString::new("testns").unwrap();
+            let account_group = CString::new("testgroup").unwrap();
             let region = CString::new("testregion").unwrap();
             let tenant = CString::new("testtenant").unwrap();
             let role_name = CString::new("testrole").unwrap();
@@ -2178,6 +2251,8 @@ mod tests {
                 environment: environment.as_ptr(),
                 account: account.as_ptr(),
                 namespace_name: namespace.as_ptr(),
+                account_group: account_group.as_ptr(),
+                account_group_mapping: ptr::null(),
                 region: region.as_ptr(),
                 config_major_version: 1,
                 auth_method: 0, // SystemManagedIdentity - union not used
@@ -2210,6 +2285,7 @@ mod tests {
             let environment = CString::new("test").unwrap();
             let account = CString::new("testaccount").unwrap();
             let namespace = CString::new("testns").unwrap();
+            let account_group = CString::new("testgroup").unwrap();
             let region = CString::new("testregion").unwrap();
             let tenant = CString::new("testtenant").unwrap();
             let role_name = CString::new("testrole").unwrap();
@@ -2220,6 +2296,8 @@ mod tests {
                 environment: environment.as_ptr(),
                 account: account.as_ptr(),
                 namespace_name: namespace.as_ptr(),
+                account_group: account_group.as_ptr(),
+                account_group_mapping: ptr::null(),
                 region: region.as_ptr(),
                 config_major_version: 1,
                 auth_method: 99, // Invalid auth method - union not used
@@ -2249,6 +2327,7 @@ mod tests {
             let environment = CString::new("test").unwrap();
             let account = CString::new("testaccount").unwrap();
             let namespace = CString::new("testns").unwrap();
+            let account_group = CString::new("testgroup").unwrap();
             let region = CString::new("testregion").unwrap();
             let tenant = CString::new("testtenant").unwrap();
             let role_name = CString::new("testrole").unwrap();
@@ -2259,6 +2338,8 @@ mod tests {
                 environment: environment.as_ptr(),
                 account: account.as_ptr(),
                 namespace_name: namespace.as_ptr(),
+                account_group: account_group.as_ptr(),
+                account_group_mapping: ptr::null(),
                 region: region.as_ptr(),
                 config_major_version: 1,
                 auth_method: 1, // Certificate auth
@@ -2293,6 +2374,7 @@ mod tests {
             let environment = CString::new("test").unwrap();
             let account = CString::new("testaccount").unwrap();
             let namespace = CString::new("testns").unwrap();
+            let account_group = CString::new("testgroup").unwrap();
             let region = CString::new("testregion").unwrap();
             let tenant = CString::new("testtenant").unwrap();
             let role_name = CString::new("testrole").unwrap();
@@ -2303,6 +2385,8 @@ mod tests {
                 environment: environment.as_ptr(),
                 account: account.as_ptr(),
                 namespace_name: namespace.as_ptr(),
+                account_group: account_group.as_ptr(),
+                account_group_mapping: ptr::null(),
                 region: region.as_ptr(),
                 config_major_version: 1,
                 auth_method: 2, // Workload Identity
@@ -2336,6 +2420,7 @@ mod tests {
             let environment = CString::new("test").unwrap();
             let account = CString::new("testaccount").unwrap();
             let namespace = CString::new("testns").unwrap();
+            let account_group = CString::new("testgroup").unwrap();
             let region = CString::new("testregion").unwrap();
             let tenant = CString::new("testtenant").unwrap();
             let role_name = CString::new("testrole").unwrap();
@@ -2346,6 +2431,8 @@ mod tests {
                 environment: environment.as_ptr(),
                 account: account.as_ptr(),
                 namespace_name: namespace.as_ptr(),
+                account_group: account_group.as_ptr(),
+                account_group_mapping: ptr::null(),
                 region: region.as_ptr(),
                 config_major_version: 1,
                 auth_method: 3, // User Managed Identity by client ID
@@ -2379,6 +2466,7 @@ mod tests {
             let environment = CString::new("test").unwrap();
             let account = CString::new("testaccount").unwrap();
             let namespace = CString::new("testns").unwrap();
+            let account_group = CString::new("testgroup").unwrap();
             let region = CString::new("testregion").unwrap();
             let tenant = CString::new("testtenant").unwrap();
             let role_name = CString::new("testrole").unwrap();
@@ -2389,6 +2477,8 @@ mod tests {
                 environment: environment.as_ptr(),
                 account: account.as_ptr(),
                 namespace_name: namespace.as_ptr(),
+                account_group: account_group.as_ptr(),
+                account_group_mapping: ptr::null(),
                 region: region.as_ptr(),
                 config_major_version: 1,
                 auth_method: 4, // User Managed Identity by object ID
@@ -2425,6 +2515,7 @@ mod tests {
             let environment = CString::new("test").unwrap();
             let account = CString::new("testaccount").unwrap();
             let namespace = CString::new("testns").unwrap();
+            let account_group = CString::new("testgroup").unwrap();
             let region = CString::new("testregion").unwrap();
             let tenant = CString::new("testtenant").unwrap();
             let role_name = CString::new("testrole").unwrap();
@@ -2435,6 +2526,8 @@ mod tests {
                 environment: environment.as_ptr(),
                 account: account.as_ptr(),
                 namespace_name: namespace.as_ptr(),
+                account_group: account_group.as_ptr(),
+                account_group_mapping: ptr::null(),
                 region: region.as_ptr(),
                 config_major_version: 1,
                 auth_method: 5, // User Managed Identity by resource ID
@@ -2471,6 +2564,7 @@ mod tests {
             let environment = CString::new("test").unwrap();
             let account = CString::new("testaccount").unwrap();
             let namespace = CString::new("testns").unwrap();
+            let account_group = CString::new("testgroup").unwrap();
             let region = CString::new("testregion").unwrap();
             let tenant = CString::new("testtenant").unwrap();
             let role_name = CString::new("testrole").unwrap();
@@ -2482,6 +2576,8 @@ mod tests {
                 environment: environment.as_ptr(),
                 account: account.as_ptr(),
                 namespace_name: namespace.as_ptr(),
+                account_group: account_group.as_ptr(),
+                account_group_mapping: ptr::null(),
                 region: region.as_ptr(),
                 config_major_version: 1,
                 auth_method: 1, // Certificate auth
@@ -2522,6 +2618,52 @@ mod tests {
         unsafe {
             geneva_batches_free(ptr::null_mut());
         }
+    }
+
+    #[test]
+    fn test_convert_account_group_mapping_success() {
+        let event = CString::new("SecurityEvent").unwrap();
+        let group = CString::new("security").unwrap();
+        let entries = [FfiAccountGroupMapEntry {
+            event_name: event.as_ptr(),
+            account_group: group.as_ptr(),
+        }];
+        let mapping = FfiAccountGroupMapping {
+            entries: entries.as_ptr(),
+            count: entries.len(),
+        };
+
+        let converted =
+            unsafe { convert_account_group_mapping(&mapping) }.expect("conversion should succeed");
+        assert_eq!(
+            converted.get("SecurityEvent").map(String::as_str),
+            Some("security")
+        );
+    }
+
+    #[test]
+    fn test_convert_account_group_mapping_rejects_duplicate_event() {
+        let event = CString::new("SecurityEvent").unwrap();
+        let security = CString::new("security").unwrap();
+        let audit = CString::new("audit").unwrap();
+        let entries = [
+            FfiAccountGroupMapEntry {
+                event_name: event.as_ptr(),
+                account_group: security.as_ptr(),
+            },
+            FfiAccountGroupMapEntry {
+                event_name: event.as_ptr(),
+                account_group: audit.as_ptr(),
+            },
+        ];
+        let mapping = FfiAccountGroupMapping {
+            entries: entries.as_ptr(),
+            count: entries.len(),
+        };
+
+        let error = unsafe { convert_account_group_mapping(&mapping) }
+            .expect_err("duplicate events must be rejected");
+        assert!(error.contains("duplicate event name"));
     }
 
     #[test]
@@ -3074,7 +3216,7 @@ mod tests {
     #[cfg(all(feature = "mock_auth", feature = "otlp_bytes"))]
     fn test_encode_and_upload_with_mock_server() {
         use otlp_builder::builder::build_otlp_logs_minimal;
-        use wiremock::matchers::method;
+        use wiremock::matchers::{method, query_param};
         use wiremock::{Mock, MockServer, ResponseTemplate};
 
         // Start mock server on the shared runtime used by the FFI code
@@ -3097,7 +3239,7 @@ mod tests {
                         }},
                         "StorageAccountKeys": [{{
                             "AccountMonikerName": "testdiagaccount",
-                            "AccountGroupName": "testgroup",
+                            "AccountGroupName": "test-group",
                             "IsPrimaryMoniker": true
                         }}],
                         "TagId": "test"
@@ -3108,9 +3250,11 @@ mod tests {
 
             // Mock ingestion service (POST)
             Mock::given(method("POST"))
+                .and(query_param("moniker", "testdiagaccount"))
                 .respond_with(
                     ResponseTemplate::new(202).set_body_string(r#"{"ticket":"accepted"}"#),
                 )
+                .expect(1)
                 .mount(&mock_server)
                 .await;
         });
@@ -3121,6 +3265,7 @@ mod tests {
             environment: "test".to_string(),
             account: "test".to_string(),
             namespace: "testns".to_string(),
+            account_routing: AccountRouting::new("test-group"),
             region: "testregion".to_string(),
             config_major_version: 1,
             auth_method: AuthMethod::MockAuth,
@@ -3174,8 +3319,7 @@ mod tests {
         let len = unsafe { geneva_batches_len(batches_ptr) };
         assert!(len >= 1, "expected at least one encoded batch");
 
-        // Attempt upload (ignore return code; we will assert via recorded requests)
-        let _ = unsafe {
+        let upload_result = unsafe {
             geneva_upload_batch_sync(
                 handle_ptr,
                 batches_ptr as *const _,
@@ -3186,6 +3330,12 @@ mod tests {
                 ptr::null_mut(),
             )
         };
+        assert_eq!(
+            upload_result as u32,
+            GenevaError::Success as u32,
+            "upload failed"
+        );
+        runtime().block_on(mock_server.verify());
 
         // Cleanup: free batches and client
         unsafe {
@@ -3229,7 +3379,7 @@ mod tests {
                         }},
                         "StorageAccountKeys": [{{
                             "AccountMonikerName": "testdiagaccount",
-                            "AccountGroupName": "testgroup",
+                            "AccountGroupName": "test-group",
                             "IsPrimaryMoniker": true
                         }}],
                         "TagId": "test"
@@ -3252,6 +3402,7 @@ mod tests {
             environment: "test".to_string(),
             account: "test".to_string(),
             namespace: "testns".to_string(),
+            account_routing: AccountRouting::new("test-group"),
             region: "testregion".to_string(),
             config_major_version: 1,
             auth_method: AuthMethod::MockAuth,
@@ -3325,17 +3476,26 @@ mod tests {
 
         // Upload all batches
         for i in 0..len {
-            let _ = unsafe {
+            let mut error = [0 as c_char; 512];
+            let result = unsafe {
                 geneva_upload_batch_sync(
                     handle_ptr,
                     batches_ptr as *const _,
                     i,
-                    ptr::null_mut(),
-                    0,
+                    error.as_mut_ptr(),
+                    error.len(),
                     ptr::null_mut(),
                     ptr::null_mut(),
                 )
             };
+            let message = unsafe { CStr::from_ptr(error.as_ptr()) }
+                .to_string_lossy()
+                .into_owned();
+            assert_eq!(
+                result as u32,
+                GenevaError::Success as u32,
+                "batch upload failed: {message}"
+            );
         }
 
         // Verify requests use the fixed Log table name in their URLs.
@@ -3421,6 +3581,7 @@ mod tests {
             environment: "test".to_string(),
             account: "test".to_string(),
             namespace: "testns".to_string(),
+            account_routing: AccountRouting::new("test-group"),
             region: "testregion".to_string(),
             config_major_version: 1,
             auth_method: AuthMethod::MockAuth,
@@ -3550,6 +3711,7 @@ mod tests {
             environment: "test".to_string(),
             account: "test".to_string(),
             namespace: "testns".to_string(),
+            account_routing: AccountRouting::new("test-group"),
             region: "testregion".to_string(),
             config_major_version: 1,
             auth_method: AuthMethod::MockAuth,
@@ -3725,6 +3887,7 @@ mod tests {
             environment: "test".to_string(),
             account: "test".to_string(),
             namespace: "testns".to_string(),
+            account_routing: AccountRouting::new("test-group"),
             region: "testregion".to_string(),
             config_major_version: 1,
             auth_method: AuthMethod::MockAuth,
@@ -4040,6 +4203,8 @@ mod tests {
                 environment: environment.as_ptr(),
                 account: account.as_ptr(),
                 namespace_name: namespace.as_ptr(),
+                account_group: ptr::null(),
+                account_group_mapping: ptr::null(),
                 region: region.as_ptr(),
                 config_major_version: 1,
                 auth_method: 0, // SystemManagedIdentity - union not used

@@ -6,9 +6,9 @@
 
 mod attribute_processing;
 
-#[cfg(feature = "subsegment-nesting")]
+#[cfg(feature = "xray-subsegment-nesting")]
 mod document_builder_tree;
-#[cfg(feature = "subsegment-nesting")]
+#[cfg(feature = "xray-subsegment-nesting")]
 use document_builder_tree::DocumentBuilderHeaderTree;
 
 pub(crate) mod error;
@@ -122,7 +122,7 @@ pub struct SegmentTranslator {
     metadata_all_attrs: bool,
     log_group_names: Vec<String>,
     skip_timestamp_validation: bool,
-    #[cfg(feature = "subsegment-nesting")]
+    #[cfg(feature = "xray-subsegment-nesting")]
     always_nest_subsegments: bool,
     resource: Option<Resource>,
     dispatch_table: DispatchTable,
@@ -192,7 +192,7 @@ impl SegmentTranslator {
             metadata_all_attrs: Default::default(),
             log_group_names: Default::default(),
             skip_timestamp_validation: Default::default(),
-            #[cfg(feature = "subsegment-nesting")]
+            #[cfg(feature = "xray-subsegment-nesting")]
             always_nest_subsegments: Default::default(),
             resource: Default::default(),
             dispatch_table: Default::default(),
@@ -275,7 +275,7 @@ impl SegmentTranslator {
         self
     }
 
-    #[cfg(feature = "subsegment-nesting")]
+    #[cfg(feature = "xray-subsegment-nesting")]
     /// Enables nesting of subsegments within their parent segments.
     ///
     /// When enabled, subsegments are nested within their parent segments or subsegments
@@ -544,14 +544,14 @@ impl SegmentTranslator {
         #[cfg(feature = "internal-logs")]
         tracing::debug!("Received {} spans", batch.len());
 
-        #[cfg(feature = "subsegment-nesting")]
+        #[cfg(feature = "xray-subsegment-nesting")]
         if self.always_nest_subsegments {
             self._translate_spans_nested(batch)
         } else {
             self._translate_spans_simple(batch)
         }
 
-        #[cfg(not(feature = "subsegment-nesting"))]
+        #[cfg(not(feature = "xray-subsegment-nesting"))]
         self._translate_spans_simple(batch)
     }
 
@@ -579,7 +579,7 @@ impl SegmentTranslator {
             .collect()
     }
 
-    #[cfg(feature = "subsegment-nesting")]
+    #[cfg(feature = "xray-subsegment-nesting")]
     fn _translate_spans_nested<'span, 'translator: 'span>(
         &'translator self,
         batch: &'span [SpanData],
