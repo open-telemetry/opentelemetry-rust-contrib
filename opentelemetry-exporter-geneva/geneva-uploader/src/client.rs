@@ -636,7 +636,6 @@ impl GenevaClient {
                 &self.metadata_fields,
                 self.log_table_name.as_ref(),
                 self.log_event_name_mapping.as_ref(),
-                self.obo_event_map.as_ref(),
             )
             .map_err(|e| {
                 debug!(
@@ -677,7 +676,6 @@ impl GenevaClient {
                     all_spans,
                     &self.metadata_fields,
                     self.span_table_name.as_ref(),
-                    self.obo_event_map.as_ref(),
                 )
                 .map_err(|e| {
                     debug!(
@@ -730,12 +728,7 @@ impl GenevaClient {
         for (event_name, group_spans) in routed_groups {
             let encoded = self
                 .encoder
-                .encode_span_batch(
-                    group_spans,
-                    &self.metadata_fields,
-                    &event_name,
-                    self.obo_event_map.as_ref(),
-                )
+                .encode_span_batch(group_spans, &self.metadata_fields, &event_name)
                 .map_err(|e| {
                     debug!(
                         name: "client.encode_and_compress_spans.error",
