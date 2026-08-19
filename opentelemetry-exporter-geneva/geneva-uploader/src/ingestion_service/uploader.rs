@@ -29,6 +29,11 @@ pub(crate) enum GenevaUploaderError {
     ConfigClient(String),
     #[error("Agent-fed credential not provisioned: {0}")]
     CredentialNotProvisioned(String),
+    #[error("Account group '{requested}' was not resolved; available groups: {available:?}")]
+    AccountGroupNotResolved {
+        requested: String,
+        available: Vec<String>,
+    },
     #[allow(dead_code)]
     #[error("Upload failed with status {status}: {message}")]
     UploadFailed {
@@ -133,7 +138,7 @@ pub(crate) enum IngestionSource {
 struct ResolvedIngestion {
     token: SecretString,
     gig_endpoint: String,
-    moniker: String,
+    primary_monikers: HashMap<String, String>,
     endpoint_query_param: String,
 }
 
@@ -169,12 +174,12 @@ impl IngestionSource {
     async fn resolve(&self) -> Result<ResolvedIngestion> {
         match self {
             IngestionSource::ConfigClient(config_client) => {
-                let (auth_info, moniker_info, endpoint_query_param) =
+                let (auth_info, primary_monikers, endpoint_query_param) =
                     config_client.get_ingestion_info().await?;
                 Ok(ResolvedIngestion {
                     token: auth_info.auth_token,
                     gig_endpoint: auth_info.endpoint,
-                    moniker: moniker_info.name,
+                    primary_monikers,
                     endpoint_query_param,
                 })
             }
@@ -195,11 +200,11 @@ impl IngestionSource {
                 // credential's own endpoint rather than rejecting the upload.
                 let endpoint_query_param = extract_endpoint_from_token(cred.expose_token())
                     .unwrap_or_else(|_| cred.endpoint.clone());
-                let (token, gig_endpoint, moniker) = cred.into_parts();
+                let (token, gig_endpoint, primary_monikers) = cred.into_parts();
                 Ok(ResolvedIngestion {
                     token,
                     gig_endpoint,
-                    moniker,
+                    primary_monikers,
                     endpoint_query_param,
                 })
             }
@@ -354,6 +359,7 @@ impl GenevaUploader {
         &self,
         data: Vec<u8>,
         event_name: &str,
+        account_group: &str,
         metadata: &BatchMetadata,
         row_count: usize,
         obo_config: Option<&crate::payload_encoder::otlp_encoder::OboEventConfig>,
@@ -372,13 +378,21 @@ impl GenevaUploader {
         let ResolvedIngestion {
             token: auth_token,
             gig_endpoint,
-            moniker,
+            primary_monikers,
             endpoint_query_param,
         } = self.source.resolve().await?;
+        let moniker = primary_monikers.get(account_group).ok_or_else(|| {
+            let mut available: Vec<_> = primary_monikers.keys().cloned().collect();
+            available.sort();
+            GenevaUploaderError::AccountGroupNotResolved {
+                requested: account_group.to_string(),
+                available,
+            }
+        })?;
         let data_size = data.len();
         let upload_uri = self.create_upload_uri(
             &endpoint_query_param,
-            &moniker,
+            moniker,
             data_size,
             event_name,
             metadata,
@@ -392,6 +406,7 @@ impl GenevaUploader {
             target: "geneva-uploader",
             event_name = %event_name,
             moniker = %moniker,
+            account_group = %account_group,
             "Posting to ingestion gateway"
         );
 
@@ -630,7 +645,7 @@ mod tests {
             let cred = crate::client::AgentFedCredential::new(
                 self.token.lock().unwrap().clone(),
                 self.endpoint.clone(),
-                self.moniker.clone(),
+                HashMap::from([("test-group".to_string(), self.moniker.clone())]),
             );
             Box::pin(async move { Some(cred) })
         }
@@ -713,7 +728,7 @@ mod tests {
         let metadata = make_test_metadata();
 
         let resp = uploader
-            .upload(vec![1, 2, 3], "Log", &metadata, 1, None)
+            .upload(vec![1, 2, 3], "Log", "test-group", &metadata, 1, None)
             .await;
         assert!(resp.is_ok(), "agent-fed upload should succeed: {resp:?}");
         // mock_server drop verifies exactly one POST carrying the host token.
@@ -749,13 +764,13 @@ mod tests {
         let metadata = make_test_metadata();
 
         uploader
-            .upload(vec![1], "Log", &metadata, 1, None)
+            .upload(vec![1], "Log", "test-group", &metadata, 1, None)
             .await
             .expect("upload A");
         // Host rotates the credential; the next upload must use the new token.
         source.set_token(token_b);
         uploader
-            .upload(vec![2], "Log", &metadata, 1, None)
+            .upload(vec![2], "Log", "test-group", &metadata, 1, None)
             .await
             .expect("upload B");
         // Both `.expect(1)` mocks verify each token was used exactly once.
@@ -767,12 +782,41 @@ mod tests {
     async fn agent_fed_upload_errors_when_not_provisioned() {
         let uploader = agent_fed_uploader(Arc::new(EmptyAgentFedSource));
         let metadata = make_test_metadata();
-        let resp = uploader.upload(vec![1], "Log", &metadata, 1, None).await;
+        let resp = uploader
+            .upload(vec![1], "Log", "test-group", &metadata, 1, None)
+            .await;
         let err = resp.expect_err("upload must error when no credential is provisioned");
         assert!(
             matches!(err, GenevaUploaderError::CredentialNotProvisioned(_)),
             "expected CredentialNotProvisioned, got: {err:?}"
         );
+    }
+
+    /// Scenario: A batch targets a logical group absent from the current credential.
+    /// Guarantees: The permanent routing error names the requested group and reports
+    /// available groups in deterministic order without attempting an upload.
+    #[tokio::test]
+    async fn agent_fed_upload_reports_unresolved_account_group() {
+        let source = Arc::new(TestAgentFedSource::new(
+            "token",
+            "https://unused.example",
+            "moniker",
+        ));
+        let uploader = agent_fed_uploader(source);
+        let metadata = make_test_metadata();
+
+        let error = uploader
+            .upload(vec![1], "Log", "missing-group", &metadata, 1, None)
+            .await
+            .expect_err("an unknown logical account group must fail");
+
+        assert!(matches!(
+            error,
+            GenevaUploaderError::AccountGroupNotResolved {
+                requested,
+                available,
+            } if requested == "missing-group" && available == ["test-group"]
+        ));
     }
 
     /// Scenario: The agent-fed token carries an Endpoint claim.
@@ -801,7 +845,7 @@ mod tests {
         let uploader = agent_fed_uploader(source);
         let metadata = make_test_metadata();
         let resp = uploader
-            .upload(vec![1, 2, 3], "Log", &metadata, 1, None)
+            .upload(vec![1, 2, 3], "Log", "test-group", &metadata, 1, None)
             .await;
         assert!(
             resp.is_ok(),
@@ -833,7 +877,7 @@ mod tests {
         let uploader = agent_fed_uploader(source);
         let metadata = make_test_metadata();
         let resp = uploader
-            .upload(vec![1, 2, 3], "Log", &metadata, 1, None)
+            .upload(vec![1, 2, 3], "Log", "test-group", &metadata, 1, None)
             .await;
         assert!(
             resp.is_ok(),

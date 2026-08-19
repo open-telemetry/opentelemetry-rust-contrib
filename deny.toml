@@ -34,4 +34,8 @@ ignore = [
     # quick-xml 0.26.0; dev-only via pprof -> inferno. No upstream fix yet.
     "RUSTSEC-2026-0194",
     "RUSTSEC-2026-0195",
+    # h2 0.3.27; transitively required by awc and actix-http. The fix is only
+    # available in h2 0.4.16+, which Actix does not support yet:
+    # https://github.com/actix/actix-web/issues/4199
+    "RUSTSEC-2026-0258",
 ]
