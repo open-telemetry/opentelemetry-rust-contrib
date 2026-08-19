@@ -12,4 +12,4 @@ pub use id_generator::XrayIdGenerator;
 pub use xray_extractor::XrayExtractor;
 
 #[cfg(feature = "trace")]
-pub use xray_propagator::XrayPropagator;
+pub use xray_propagator::{MissingSampledBehavior, XrayPropagator};

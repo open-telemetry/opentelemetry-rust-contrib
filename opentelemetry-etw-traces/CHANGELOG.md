@@ -2,6 +2,11 @@
 
 ## vNext
 
+## v0.1.1
+- Do not panic on debug builds when transient errors are returned by `EventBuilder::write`.
+  [#737](https://github.com/open-telemetry/opentelemetry-rust-contrib/pull/737)
+
+
 ## v0.1.0
 
 Released 2026-Mar-11
