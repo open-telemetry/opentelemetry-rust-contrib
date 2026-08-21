@@ -32,14 +32,14 @@ async fn main() {
         .with_reader(reader)
         .with_resource(get_resource())
         .build();
-    global::set_meter_provider(meter_provider);
+    global::set_meter_provider(meter_provider.clone());
 
     let span_exporter = SpanExporter::builder().with_tonic().build().unwrap();
     let tracer_provider = SdkTracerProvider::builder()
         .with_batch_exporter(span_exporter)
         .with_resource(get_resource())
         .build();
-    global::set_tracer_provider(tracer_provider);
+    global::set_tracer_provider(tracer_provider.clone());
 
     let connector = hyper_util::client::legacy::connect::HttpConnector::new();
     let hyper_client = Client::builder(TokioExecutor::new()).build::<_, Empty<Bytes>>(connector);
@@ -62,4 +62,7 @@ async fn main() {
 
     let res = client.call(req).await.unwrap();
     println!("response: {}", res.status());
+
+    let _ = tracer_provider.shutdown();
+    let _ = meter_provider.shutdown();
 }
