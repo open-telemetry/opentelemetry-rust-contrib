@@ -1201,4 +1201,88 @@ mod tests {
         assert_eq!(spans.len(), 1, "Expected one HTTP span");
         assert_eq!(spans[0].name, "GET");
     }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn test_with_tracing_false_produces_no_spans() {
+        let trace_exporter = InMemorySpanExporterBuilder::new().build();
+        let tracer_provider = SdkTracerProvider::builder()
+            .with_simple_exporter(trace_exporter.clone())
+            .build();
+
+        let layer = LayerBuilder::builder()
+            .with_route_extractor(PathExtractor)
+            .with_tracer_provider(tracer_provider.clone())
+            .with_tracing(false)
+            .build()
+            .unwrap();
+
+        let service = tower::service_fn(|_req: Request<String>| async {
+            Ok::<_, std::convert::Infallible>(
+                Response::builder()
+                    .status(StatusCode::OK)
+                    .body(String::from("OK"))
+                    .unwrap(),
+            )
+        });
+
+        let mut service = layer.layer(service);
+
+        let request = Request::builder()
+            .method("GET")
+            .uri("http://example.com/test")
+            .body("test".to_string())
+            .unwrap();
+
+        let _response = service.call(request).await.unwrap();
+
+        tracer_provider.force_flush().unwrap();
+
+        let spans = trace_exporter.get_finished_spans().unwrap();
+        assert!(
+            spans.is_empty(),
+            "Expected no spans when tracing is disabled"
+        );
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn test_with_metrics_false_produces_no_metrics() {
+        let exporter = InMemoryMetricExporter::default();
+        let reader = PeriodicReader::builder(exporter.clone())
+            .with_interval(Duration::from_millis(100))
+            .build();
+        let meter_provider = SdkMeterProvider::builder().with_reader(reader).build();
+
+        let layer = LayerBuilder::builder()
+            .with_meter_provider(meter_provider.clone())
+            .with_metrics(false)
+            .build()
+            .unwrap();
+
+        let service = tower::service_fn(|_req: Request<String>| async {
+            Ok::<_, std::convert::Infallible>(
+                Response::builder()
+                    .status(StatusCode::OK)
+                    .body(String::from("OK"))
+                    .unwrap(),
+            )
+        });
+
+        let mut service = layer.layer(service);
+
+        let request = Request::builder()
+            .method("GET")
+            .uri("https://example.com/test")
+            .body("test body".to_string())
+            .unwrap();
+
+        let _response = service.call(request).await.unwrap();
+
+        tokio::time::sleep(Duration::from_millis(500)).await;
+
+        let metrics = exporter.get_finished_metrics().unwrap();
+        assert!(
+            metrics.is_empty(),
+            "Expected no metrics when metrics is disabled"
+        );
+    }
 }
