@@ -2,7 +2,10 @@ use crate::config_service::client::{
     extract_endpoint_from_token, GenevaConfigClient, GenevaConfigClientError,
 };
 use crate::payload_encoder::central_blob::BatchMetadata;
+use bytes::Bytes;
 use reqwest::{header, Client};
+use secrecy::zeroize::Zeroizing;
+use secrecy::{ExposeSecret, SecretString};
 use serde::Deserialize;
 use serde_json::Value;
 use std::collections::HashMap;
@@ -26,6 +29,11 @@ pub(crate) enum GenevaUploaderError {
     ConfigClient(String),
     #[error("Agent-fed credential not provisioned: {0}")]
     CredentialNotProvisioned(String),
+    #[error("Account group '{requested}' was not resolved; available groups: {available:?}")]
+    AccountGroupNotResolved {
+        requested: String,
+        available: Vec<String>,
+    },
     #[allow(dead_code)]
     #[error("Upload failed with status {status}: {message}")]
     UploadFailed {
@@ -128,10 +136,35 @@ pub(crate) enum IngestionSource {
 
 /// Credential + routing resolved for a single upload, independent of source.
 struct ResolvedIngestion {
-    token: String,
+    token: SecretString,
     gig_endpoint: String,
-    moniker: String,
+    primary_monikers: HashMap<String, String>,
     endpoint_query_param: String,
+}
+
+/// Builds a sensitive header whose application-owned buffer is zeroized after
+/// the last request/header clone is dropped. The HTTP/TLS stack may still copy
+/// the bytes into transport-owned buffers.
+fn header_value_from_zeroizing_buffer(value: Zeroizing<Vec<u8>>) -> Result<header::HeaderValue> {
+    // `HeaderValue::from_maybe_shared` avoids copying only for `http`'s
+    // internal `Bytes` type. Passing the zeroizing buffer directly would
+    // copy the token into non-zeroizing header storage.
+    let mut header =
+        header::HeaderValue::from_maybe_shared(Bytes::from_owner(value)).map_err(|error| {
+            GenevaUploaderError::InternalError(format!(
+                "Invalid bearer token for Authorization header: {error}"
+            ))
+        })?;
+    header.set_sensitive(true);
+    Ok(header)
+}
+
+fn bearer_authorization_header(token: &SecretString) -> Result<header::HeaderValue> {
+    let token = token.expose_secret().as_bytes();
+    let mut value = Zeroizing::new(Vec::with_capacity(b"Bearer ".len() + token.len()));
+    value.extend_from_slice(b"Bearer ");
+    value.extend_from_slice(token);
+    header_value_from_zeroizing_buffer(value)
 }
 
 impl IngestionSource {
@@ -141,12 +174,12 @@ impl IngestionSource {
     async fn resolve(&self) -> Result<ResolvedIngestion> {
         match self {
             IngestionSource::ConfigClient(config_client) => {
-                let (auth_info, moniker_info, endpoint_query_param) =
+                let (auth_info, primary_monikers, endpoint_query_param) =
                     config_client.get_ingestion_info().await?;
                 Ok(ResolvedIngestion {
                     token: auth_info.auth_token,
                     gig_endpoint: auth_info.endpoint,
-                    moniker: moniker_info.name,
+                    primary_monikers,
                     endpoint_query_param,
                 })
             }
@@ -165,12 +198,13 @@ impl IngestionSource {
                 // agent-fed path must do the same. Some valid tokens legitimately
                 // omit the claim; mirror the GCS path and fall back to the
                 // credential's own endpoint rather than rejecting the upload.
-                let endpoint_query_param = extract_endpoint_from_token(&cred.token)
+                let endpoint_query_param = extract_endpoint_from_token(cred.expose_token())
                     .unwrap_or_else(|_| cred.endpoint.clone());
+                let (token, gig_endpoint, primary_monikers) = cred.into_parts();
                 Ok(ResolvedIngestion {
-                    token: cred.token,
-                    gig_endpoint: cred.endpoint,
-                    moniker: cred.moniker,
+                    token,
+                    gig_endpoint,
+                    primary_monikers,
                     endpoint_query_param,
                 })
             }
@@ -325,6 +359,7 @@ impl GenevaUploader {
         &self,
         data: Vec<u8>,
         event_name: &str,
+        account_group: &str,
         metadata: &BatchMetadata,
         row_count: usize,
         obo_config: Option<&crate::payload_encoder::otlp_encoder::OboEventConfig>,
@@ -343,13 +378,21 @@ impl GenevaUploader {
         let ResolvedIngestion {
             token: auth_token,
             gig_endpoint,
-            moniker,
+            primary_monikers,
             endpoint_query_param,
         } = self.source.resolve().await?;
+        let moniker = primary_monikers.get(account_group).ok_or_else(|| {
+            let mut available: Vec<_> = primary_monikers.keys().cloned().collect();
+            available.sort();
+            GenevaUploaderError::AccountGroupNotResolved {
+                requested: account_group.to_string(),
+                available,
+            }
+        })?;
         let data_size = data.len();
         let upload_uri = self.create_upload_uri(
             &endpoint_query_param,
-            &moniker,
+            moniker,
             data_size,
             event_name,
             metadata,
@@ -363,13 +406,16 @@ impl GenevaUploader {
             target: "geneva-uploader",
             event_name = %event_name,
             moniker = %moniker,
+            account_group = %account_group,
             "Posting to ingestion gateway"
         );
 
+        let authorization_header = bearer_authorization_header(&auth_token)?;
+        drop(auth_token);
         let response = self
             .http_client
             .post(&full_url)
-            .header(header::AUTHORIZATION, format!("Bearer {auth_token}"))
+            .header(header::AUTHORIZATION, authorization_header)
             .body(data)
             .send()
             .await?;
@@ -596,11 +642,11 @@ mod tests {
 
     impl crate::client::AgentFedCredentialSource for TestAgentFedSource {
         fn current(&self) -> crate::client::AgentFedCredentialFuture<'_> {
-            let cred = crate::client::AgentFedCredential {
-                token: self.token.lock().unwrap().clone(),
-                endpoint: self.endpoint.clone(),
-                moniker: self.moniker.clone(),
-            };
+            let cred = crate::client::AgentFedCredential::new(
+                self.token.lock().unwrap().clone(),
+                self.endpoint.clone(),
+                HashMap::from([("test-group".to_string(), self.moniker.clone())]),
+            );
             Box::pin(async move { Some(cred) })
         }
     }
@@ -634,6 +680,24 @@ mod tests {
         format!("hdr.{payload}.sig")
     }
 
+    /// Scenario: A zeroizing bearer buffer is converted into an Authorization header.
+    /// Guarantees: The header reuses the original allocation and remains marked sensitive.
+    #[test]
+    fn bearer_authorization_header_reuses_zeroizing_buffer() {
+        let value = Zeroizing::new(b"Bearer secret-token".to_vec());
+        let original_buffer = value.as_ptr();
+        let header = header_value_from_zeroizing_buffer(value).expect("valid bearer header");
+
+        assert_eq!(
+            header.to_str().expect("ASCII header"),
+            "Bearer secret-token"
+        );
+        assert_eq!(header.as_bytes().as_ptr(), original_buffer);
+        assert!(header.is_sensitive());
+    }
+
+    /// Scenario: An agent-fed upload uses a claimless host credential.
+    /// Guarantees: The uploader skips GCS and sends the host token directly.
     #[tokio::test]
     async fn agent_fed_upload_uses_host_token_and_skips_gcs() {
         use wiremock::matchers::{header, method, path};
@@ -664,12 +728,14 @@ mod tests {
         let metadata = make_test_metadata();
 
         let resp = uploader
-            .upload(vec![1, 2, 3], "Log", &metadata, 1, None)
+            .upload(vec![1, 2, 3], "Log", "test-group", &metadata, 1, None)
             .await;
         assert!(resp.is_ok(), "agent-fed upload should succeed: {resp:?}");
         // mock_server drop verifies exactly one POST carrying the host token.
     }
 
+    /// Scenario: The host rotates its agent-fed bearer token between uploads.
+    /// Guarantees: Each upload resolves and sends the currently provisioned token.
     #[tokio::test]
     async fn agent_fed_upload_reflects_token_rotation() {
         use wiremock::matchers::{header, method, path};
@@ -698,23 +764,27 @@ mod tests {
         let metadata = make_test_metadata();
 
         uploader
-            .upload(vec![1], "Log", &metadata, 1, None)
+            .upload(vec![1], "Log", "test-group", &metadata, 1, None)
             .await
             .expect("upload A");
         // Host rotates the credential; the next upload must use the new token.
         source.set_token(token_b);
         uploader
-            .upload(vec![2], "Log", &metadata, 1, None)
+            .upload(vec![2], "Log", "test-group", &metadata, 1, None)
             .await
             .expect("upload B");
         // Both `.expect(1)` mocks verify each token was used exactly once.
     }
 
+    /// Scenario: The agent-fed source has no credential provisioned.
+    /// Guarantees: Upload fails with the specific not-provisioned error.
     #[tokio::test]
     async fn agent_fed_upload_errors_when_not_provisioned() {
         let uploader = agent_fed_uploader(Arc::new(EmptyAgentFedSource));
         let metadata = make_test_metadata();
-        let resp = uploader.upload(vec![1], "Log", &metadata, 1, None).await;
+        let resp = uploader
+            .upload(vec![1], "Log", "test-group", &metadata, 1, None)
+            .await;
         let err = resp.expect_err("upload must error when no credential is provisioned");
         assert!(
             matches!(err, GenevaUploaderError::CredentialNotProvisioned(_)),
@@ -722,6 +792,35 @@ mod tests {
         );
     }
 
+    /// Scenario: A batch targets a logical group absent from the current credential.
+    /// Guarantees: The permanent routing error names the requested group and reports
+    /// available groups in deterministic order without attempting an upload.
+    #[tokio::test]
+    async fn agent_fed_upload_reports_unresolved_account_group() {
+        let source = Arc::new(TestAgentFedSource::new(
+            "token",
+            "https://unused.example",
+            "moniker",
+        ));
+        let uploader = agent_fed_uploader(source);
+        let metadata = make_test_metadata();
+
+        let error = uploader
+            .upload(vec![1], "Log", "missing-group", &metadata, 1, None)
+            .await
+            .expect_err("an unknown logical account group must fail");
+
+        assert!(matches!(
+            error,
+            GenevaUploaderError::AccountGroupNotResolved {
+                requested,
+                available,
+            } if requested == "missing-group" && available == ["test-group"]
+        ));
+    }
+
+    /// Scenario: The agent-fed token carries an Endpoint claim.
+    /// Guarantees: The claim overrides the credential endpoint query value.
     #[tokio::test]
     async fn agent_fed_upload_endpoint_query_uses_token_claim() {
         use wiremock::matchers::{method, path, query_param};
@@ -746,7 +845,7 @@ mod tests {
         let uploader = agent_fed_uploader(source);
         let metadata = make_test_metadata();
         let resp = uploader
-            .upload(vec![1, 2, 3], "Log", &metadata, 1, None)
+            .upload(vec![1, 2, 3], "Log", "test-group", &metadata, 1, None)
             .await;
         assert!(
             resp.is_ok(),
@@ -754,6 +853,8 @@ mod tests {
         );
     }
 
+    /// Scenario: The agent-fed token omits an Endpoint claim.
+    /// Guarantees: The query value falls back to the credential endpoint.
     #[tokio::test]
     async fn agent_fed_upload_endpoint_query_falls_back_to_cred_endpoint() {
         use wiremock::matchers::{method, path, query_param};
@@ -776,7 +877,7 @@ mod tests {
         let uploader = agent_fed_uploader(source);
         let metadata = make_test_metadata();
         let resp = uploader
-            .upload(vec![1, 2, 3], "Log", &metadata, 1, None)
+            .upload(vec![1, 2, 3], "Log", "test-group", &metadata, 1, None)
             .await;
         assert!(
             resp.is_ok(),

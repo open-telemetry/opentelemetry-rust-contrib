@@ -149,6 +149,7 @@ data:
   GENEVA_ENVIRONMENT: "Test"  # Your environment name
   GENEVA_ACCOUNT: "PipelineAgent2Demo"  # Your Geneva account
   GENEVA_NAMESPACE: "PAdemo2"  # Your Geneva namespace
+  GENEVA_ACCOUNT_GROUP: "pademo2diag"  # Logical GCS account group
   GENEVA_REGION: "eastus"  # Your Azure region
   GENEVA_CONFIG_MAJOR_VERSION: "2"
   MONITORING_GCS_AUTH_ID_TYPE: "AuthWorkloadIdentity"
@@ -236,6 +237,7 @@ Expected log output should show:
 | `GENEVA_ENVIRONMENT` | Environment name in Geneva | `Test` |
 | `GENEVA_ACCOUNT` | Geneva monitoring account | `PipelineAgent2Demo` |
 | `GENEVA_NAMESPACE` | Geneva namespace | `PAdemo2` |
+| `GENEVA_ACCOUNT_GROUP` | Logical GCS account group (required) | `pademo2diag` |
 | `GENEVA_REGION` | Azure region | `eastus` |
 | `GENEVA_CONFIG_MAJOR_VERSION` | Config schema version | `2` |
 | `MONITORING_GCS_AUTH_ID_TYPE` | Authentication type | `AuthWorkloadIdentity` |
@@ -357,4 +359,3 @@ az identity delete \
 
 - [Azure Workload Identity Documentation](https://azure.github.io/azure-workload-identity/)
 - [AKS Workload Identity Overview](https://learn.microsoft.com/azure/aks/workload-identity-overview)
-

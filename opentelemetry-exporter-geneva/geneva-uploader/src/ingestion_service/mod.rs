@@ -17,6 +17,7 @@ mod tests {
             pub data: Vec<u8>,
             pub uploader: GenevaUploader,
             pub event_name: String,
+            pub account_group: String,
         }
 
         pub async fn build_test_upload_context() -> TestUploadContext {
@@ -31,6 +32,8 @@ mod tests {
                 env::var("GENEVA_ENVIRONMENT").expect("GENEVA_ENVIRONMENT is required");
             let account = env::var("GENEVA_ACCOUNT").expect("GENEVA_ACCOUNT is required");
             let namespace = env::var("GENEVA_NAMESPACE").expect("GENEVA_NAMESPACE is required");
+            let account_group =
+                env::var("GENEVA_ACCOUNT_GROUP").expect("GENEVA_ACCOUNT_GROUP is required");
             let region = env::var("GENEVA_REGION").expect("GENEVA_REGION is required");
             let cert_path = std::path::PathBuf::from(
                 std::env::var("GENEVA_CERT_PATH").expect("GENEVA_CERT_PATH is required"),
@@ -83,6 +86,7 @@ mod tests {
                 data,
                 uploader,
                 event_name,
+                account_group,
             }
         }
     }
@@ -129,7 +133,14 @@ mod tests {
 
         let response = ctx
             .uploader
-            .upload(ctx.data, &ctx.event_name, &metadata, 1, None)
+            .upload(
+                ctx.data,
+                &ctx.event_name,
+                &ctx.account_group,
+                &metadata,
+                1,
+                None,
+            )
             .await
             .expect("Upload failed");
 
@@ -196,7 +207,14 @@ mod tests {
 
         let _ = ctx
             .uploader
-            .upload(ctx.data.clone(), &ctx.event_name, &warmup_metadata, 1, None)
+            .upload(
+                ctx.data.clone(),
+                &ctx.event_name,
+                &ctx.account_group,
+                &warmup_metadata,
+                1,
+                None,
+            )
             .await
             .expect("Warm-up upload failed");
         let warmup_elapsed = start_warmup.elapsed();
@@ -211,6 +229,7 @@ mod tests {
             let uploader = ctx.uploader.clone();
             let data = ctx.data.clone();
             let event_name = ctx.event_name.to_string();
+            let account_group = ctx.account_group.clone();
             let handle = tokio::spawn(async move {
                 let start = Instant::now();
 
@@ -222,7 +241,7 @@ mod tests {
                 };
 
                 let resp = uploader
-                    .upload(data, &event_name, &metadata, 1, None)
+                    .upload(data, &event_name, &account_group, &metadata, 1, None)
                     .await
                     .unwrap_or_else(|_| panic!("Upload {i} failed"));
                 let elapsed = start.elapsed();
