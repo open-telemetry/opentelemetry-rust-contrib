@@ -194,6 +194,7 @@ fn read_bond_string(cursor: &mut Cursor<&[u8]>) -> Result<String> {
     String::from_utf8(bytes.to_vec()).context("invalid UTF-8 string")
 }
 
+#[allow(clippy::chunks_exact_to_as_chunks)]
 fn read_bond_wstring(cursor: &mut Cursor<&[u8]>) -> Result<String> {
     let char_count = read_u32(cursor)? as usize;
     let bytes = read_exact(cursor, char_count * 2)?;
