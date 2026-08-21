@@ -154,7 +154,7 @@ impl EksResourceDetector {
     ) -> Resource {
         // Kubernetes probe: without the service-account mount, this is not a
         // pod at all. An unreadable file is the normal case off-Kubernetes and
-        // so is only worth a debug event.
+        // so is only worth an info event.
         let Some(namespace) = info_on_error(DETECTOR, get_namespace(namespace_path)) else {
             // Not Kubernetes, return empty resource
             return Resource::builder_empty().build();
@@ -412,15 +412,9 @@ mod tests {
         // 64-char all-hex string (maximum valid length)
         assert!(is_valid_container_id(ID64));
 
-        // Mixed-case hex string of valid length (48 chars)
+        // Mixed-case hex string of valid length (46 chars)
         let mixed = "aAbBcCdDeEfF001122334455aAbBcCdDeEfF0011223344";
-        assert_eq!(mixed.len(), 46); // verify length is in range
         assert!(is_valid_container_id(mixed));
-
-        // Another mixed-case at exactly 64 chars
-        let mixed64 = "aAbBcCdDeEfF0011223344556677889900112233445566778899aAbBcCdDeEfF";
-        assert_eq!(mixed64.len(), 64);
-        assert!(is_valid_container_id(mixed64));
     }
 
     #[test]

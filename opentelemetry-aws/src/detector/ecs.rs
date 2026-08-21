@@ -34,7 +34,7 @@ const AWSLOGS_DRIVER: &str = "awslogs";
 /// | `cloud.platform`          | hardcoded `"aws_ecs"`                                                       |
 /// | `cloud.region`            | task ARN region segment                                                     |
 /// | `cloud.account.id`        | task ARN account-id segment                                                 |
-/// | `cloud.availability_zone` | task metadata `AvailabilityZone`; falls back to the identity document `availabilityZone` on the EC2 launch type |
+/// | `cloud.availability_zone` | task metadata `AvailabilityZone` on Fargate; falls back to the identity document `availabilityZone` on the EC2 launch type, via IMDS |
 /// | `cloud.resource_id`       | container metadata `ContainerARN`                                           |
 /// | `aws.ecs.cluster.arn`     | task metadata `Cluster`, expanded to an ARN when it is a bare cluster name  |
 /// | `aws.ecs.task.arn`        | task metadata `TaskARN`                                                     |
@@ -81,10 +81,8 @@ const AWSLOGS_DRIVER: &str = "awslogs";
 /// `aws.log.*.arns` and a synthesised `aws.ecs.cluster.arn` are all omitted.
 ///
 /// On the EC2 launch type, the task metadata endpoint carries neither
-/// `host.*` nor `AvailabilityZone`, so `host.id`, `host.type`,
-/// `host.image.id`, `host.arch` and `host.name` are read from the EC2
-/// instance's own IMDSv2 endpoint instead, and `cloud.availability_zone`
-/// falls back to it too. IMDS is unreachable on Fargate, so it is only probed
+/// `host.*` nor `AvailabilityZone`, so they are read from the EC2 instance's IMDSv2
+/// endpoint instead. IMDS is unreachable on Fargate, so it is only probed
 /// once the EC2 launch type is confirmed from the task metadata, and all of
 /// these attributes are omitted otherwise.
 ///
