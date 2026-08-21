@@ -4,6 +4,7 @@
 
 ### Added
 - Forwarded `tls-native` (default) and `tls-rustls` feature flags from `geneva-uploader`. Build with `--no-default-features --features tls-rustls` to use the pure-Rust TLS backend (required for FIPS / OpenSSL-free deployments that install a custom `rustls::crypto::CryptoProvider`).
+- Forwarded the opt-in `certificate-auth` feature from `geneva-uploader`.
 
 ### Changed
 - Bump opentelemetry, opentelemetry_sdk, and opentelemetry-proto versions to 0.32.

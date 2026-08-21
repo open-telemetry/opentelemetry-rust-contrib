@@ -27,7 +27,7 @@ pub(crate) use segment_document::{
 
 pub use id::{Id, TraceId};
 
-#[cfg(feature = "subsegment-nesting")]
+#[cfg(feature = "xray-subsegment-nesting")]
 pub(crate) use segment_document::DocumentBuilderHeader;
 
 pub(crate) use value::{AnnotationValue, AnySlice, AnyValue, Namespace, Origin, StrList};

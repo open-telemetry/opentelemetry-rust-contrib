@@ -27,7 +27,7 @@
 //! ```
 
 use geneva_uploader::client::{GenevaClient, GenevaClientConfig};
-use geneva_uploader::{AuthMethod, LogsConfig, TracesConfig};
+use geneva_uploader::{AccountRouting, AuthMethod, LogsConfig, TracesConfig};
 use opentelemetry_appender_tracing::layer;
 use opentelemetry_exporter_geneva::GenevaExporter;
 use opentelemetry_sdk::logs::log_processor_with_async_runtime::BatchLogProcessor;
@@ -60,6 +60,7 @@ async fn main() {
     let environment = env::var("GENEVA_ENVIRONMENT").expect("GENEVA_ENVIRONMENT is required");
     let account = env::var("GENEVA_ACCOUNT").expect("GENEVA_ACCOUNT is required");
     let namespace = env::var("GENEVA_NAMESPACE").expect("GENEVA_NAMESPACE is required");
+    let account_group = env::var("GENEVA_ACCOUNT_GROUP").ok();
     let region = env::var("GENEVA_REGION").expect("GENEVA_REGION is required");
     let cert_path =
         PathBuf::from(env::var("GENEVA_CERT_PATH").expect("GENEVA_CERT_PATH is required"));
@@ -79,6 +80,9 @@ async fn main() {
         environment,
         account,
         namespace,
+        account_routing: AccountRouting::new(
+            account_group.expect("GENEVA_ACCOUNT_GROUP must be set"),
+        ),
         region,
         config_major_version,
         auth_method: AuthMethod::Certificate {

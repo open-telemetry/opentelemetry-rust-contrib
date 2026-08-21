@@ -70,10 +70,8 @@ See `../geneva-uploader-ffi/README.md` for details.
 `geneva-uploader` supports two TLS backends, selected at compile time via Cargo features (the flags are additive; if both are enabled, `tls-rustls` is used):
 
 - **`tls-native`** *(default)* — uses [`native-tls`] (which links against the
-  system OpenSSL/SChannel/Secure Transport). This is the historical behavior
-  and requires no additional setup.
-- **`tls-rustls`** — uses pure-Rust [`rustls`] together with [`p12-keystore`]
-  for parsing the PKCS#12 client certificate. Pick this when you need to ship
+  system OpenSSL/SChannel/Secure Transport).
+- **`tls-rustls`** — uses pure-Rust [`rustls`]. Pick this when you need to ship
   a binary without an OpenSSL runtime dependency, or when you want to plug in a
   FIPS-validated `CryptoProvider` such as
   [`rustls-symcrypt`](https://crates.io/crates/rustls-symcrypt).
@@ -94,6 +92,20 @@ To switch backends, disable defaults and select the desired feature:
 [dependencies]
 geneva-uploader = { version = "*", default-features = false, features = ["tls-rustls"] }
 ```
+
+PKCS#12 client certificate authentication is disabled by default. Enable the
+`certificate-auth` feature only when the selected authentication method uses a
+password-protected `.p12` file:
+
+```toml
+[dependencies]
+geneva-uploader = { version = "*", features = ["certificate-auth"] }
+```
+
+With `tls-rustls`, this opt-in feature uses [`p12-keystore`] without its legacy
+PBES1 support. PKCS#12 files encrypted with RC2 or DES are not supported. A
+build without `certificate-auth` returns a clear error if certificate
+authentication is requested.
 
 Both backends use the system trust store for server verification and pin the
 TLS version to 1.2 (matching Geneva's required protocol). The two feature flags
