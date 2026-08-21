@@ -34,4 +34,7 @@ ignore = [
     # quick-xml 0.26.0; dev-only via pprof -> inferno. No upstream fix yet.
     "RUSTSEC-2026-0194",
     "RUSTSEC-2026-0195",
+    # h2 0.3.27 via actix-web (opentelemetry-instrumentation-actix-web).
+    # Fix is in h2 >=0.4.16 but actix-web 4.x pins 0.3.x. No upstream fix yet.
+    "RUSTSEC-2026-0258",
 ]
