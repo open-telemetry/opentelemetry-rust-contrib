@@ -534,11 +534,9 @@ fn create_child_span(
     add_common_attributes(rng, "client", timing, &mut attributes);
 
     let mut events = SpanEvents::default();
-    let status;
-    let name;
 
     // Add type-specific attributes
-    match child_type {
+    let (name, status) = match child_type {
         ChildSpanType::AwsDynamoDb => {
             let operation = *["PutItem", "GetItem", "Query", "Scan"].choose(rng).unwrap();
             attributes.extend([
@@ -558,8 +556,7 @@ fn create_child_span(
                 KeyValue::new("http.response.status_code", Value::I64(200)),
                 KeyValue::new("peer.service", "DynamoDB"),
             ]);
-            name = format!("DynamoDB.{operation}").into();
-            status = Status::Ok;
+            (format!("DynamoDB.{operation}").into(), Status::Ok)
         }
         ChildSpanType::AwsS3 => {
             let operation = *["GetObject", "PutObject", "DeleteObject"]
@@ -583,8 +580,7 @@ fn create_child_span(
                 KeyValue::new("rpc.message.type", "RECEIVED"),
                 KeyValue::new("peer.service", "S3"),
             ]);
-            name = format!("S3.{operation}").into();
-            status = Status::Ok;
+            (format!("S3.{operation}").into(), Status::Ok)
         }
         ChildSpanType::AwsSqs => {
             let operation = *["SendMessage", "ReceiveMessage", "DeleteMessage"]
@@ -608,8 +604,7 @@ fn create_child_span(
                 KeyValue::new("http.response.status_code", Value::I64(200)),
                 KeyValue::new("peer.service", "SQS"),
             ]);
-            name = format!("SQS.{operation}").into();
-            status = Status::Ok;
+            (format!("SQS.{operation}").into(), Status::Ok)
         }
         ChildSpanType::HttpExternal => {
             let method = *["GET", "POST", "PUT", "DELETE"].choose(rng).unwrap();
@@ -636,8 +631,7 @@ fn create_child_span(
                 ),
                 KeyValue::new("rpc.message.type", "RECEIVED"),
             ]);
-            name = format!("{method} /api/resource").into();
-            status = Status::Ok;
+            (format!("{method} /api/resource").into(), Status::Ok)
         }
         ChildSpanType::SqlPostgres => {
             let operation = *["SELECT", "INSERT", "UPDATE", "DELETE"]
@@ -656,8 +650,7 @@ fn create_child_span(
                 ),
                 KeyValue::new("peer.service", "postgresql"),
             ]);
-            name = format!("{operation} table_name").into();
-            status = Status::Ok;
+            (format!("{operation} table_name").into(), Status::Ok)
         }
         ChildSpanType::SqlMysql => {
             let operation = *["SELECT", "INSERT", "UPDATE", "DELETE"]
@@ -676,8 +669,7 @@ fn create_child_span(
                 ),
                 KeyValue::new("peer.service", "mysql"),
             ]);
-            name = format!("{operation} orders").into();
-            status = Status::Ok;
+            (format!("{operation} orders").into(), Status::Ok)
         }
         ChildSpanType::HttpWithError => {
             let (status_code, exception_type, exception_message) = *[
@@ -724,12 +716,12 @@ fn create_child_span(
                 0,
             ));
 
-            name = "POST /endpoint".into();
-            status = if status_code >= 500 {
+            let status = if status_code >= 500 {
                 Status::error("Server error")
             } else {
                 Status::error("Client error")
             };
+            ("POST /endpoint".into(), status)
         }
         ChildSpanType::GenericRemote => {
             let method = *["GET", "POST"].choose(rng).unwrap();
@@ -742,10 +734,9 @@ fn create_child_span(
                 ),
                 KeyValue::new("http.response.status_code", Value::I64(200)),
             ]);
-            name = format!("{method} /api").into();
-            status = Status::Ok;
+            (format!("{method} /api").into(), Status::Ok)
         }
-    }
+    };
 
     SpanData {
         span_context,

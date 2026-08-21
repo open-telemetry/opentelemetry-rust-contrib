@@ -4,12 +4,79 @@
 
 ### Added
 
-* `HTTPLayerBuilder::with_tracing(bool)` and `HTTPLayerBuilder::with_metrics(bool)`
-  to enable or disable each signal for a layer (both default to enabled).
-  Disabling tracing does not stop context propagation: incoming trace headers are
-  still extracted and the current context still flows to the inner service.
+* `http::server::LayerBuilder::with_tracing(bool)` and
+  `http::server::LayerBuilder::with_metrics(bool)` to enable or disable each
+  signal for a layer (both default to enabled). Disabling tracing does not stop
+  context propagation: incoming trace headers are still extracted and the
+  current context still flows to the inner service.
 * The instrumentation scope now carries the OpenTelemetry semantic conventions
   schema URL.
+
+### Changed
+
+* **BREAKING**: Reorganized the public API into an `http::server` module with
+  unprefixed `Layer`, `LayerBuilder`, `Service`, and `ResponseFuture` types, and
+  moved the extractors into `http::extractors`. The `HTTPLayer` / `HTTPService` /
+  `HTTPLayerBuilder` / `ResponseFuture` types introduced in v0.18.0 are replaced
+  by `http::server::{Layer, Service, ResponseFuture, LayerBuilder}`.
+
+### Migration Guide
+
+#### Type and module changes
+
+The former flat, `HTTP*`-prefixed types now live under `http::server`:
+
+- `HTTPLayer` → `http::server::Layer`
+- `HTTPLayerBuilder` → `http::server::LayerBuilder`
+- `HTTPService` → `http::server::Service`
+- `ResponseFuture` → `http::server::ResponseFuture`
+
+Route and attribute extractors moved to `http::extractors`.
+
+Before:
+
+```rust
+use opentelemetry_instrumentation_tower::HTTPLayerBuilder;
+
+let layer = HTTPLayerBuilder::builder().build().unwrap();
+```
+
+After:
+
+```rust
+use opentelemetry_instrumentation_tower::http::server;
+
+let layer = server::Layer::new();
+```
+
+#### Route extraction configuration
+
+```rust
+use opentelemetry_instrumentation_tower::http::{
+    extractors::{NoRouteExtractor, PathExtractor},
+    server::LayerBuilder,
+};
+
+// No route (default without axum feature) - span name: "GET"
+let layer = LayerBuilder::builder()
+    .with_route_extractor(NoRouteExtractor)
+    .build()
+    .unwrap();
+
+// Path (strips query params) - span name: "GET /users/123"
+let layer = LayerBuilder::builder()
+    .with_route_extractor(PathExtractor)
+    .build()
+    .unwrap();
+
+// Custom function - return Some(route) or None for method-only
+let layer = LayerBuilder::builder()
+    .with_route_extractor_fn(|req: &http::Request<_>| {
+        Some(req.uri().path().to_owned())
+    })
+    .build()
+    .unwrap();
+```
 
 ## v0.18.0
 

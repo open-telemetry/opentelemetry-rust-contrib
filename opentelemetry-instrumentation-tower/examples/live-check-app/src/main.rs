@@ -12,7 +12,7 @@ use axum::{
     Router,
 };
 use opentelemetry::global;
-use opentelemetry_instrumentation_tower::HTTPLayerBuilder;
+use opentelemetry_instrumentation_tower::http::server::LayerBuilder;
 use opentelemetry_otlp::{MetricExporter, SpanExporter};
 use opentelemetry_sdk::{
     metrics::{PeriodicReader, SdkMeterProvider},
@@ -134,7 +134,7 @@ async fn main() {
     //   status codes: 200, 201, 204, 400, 401, 404, 500
     //   route shapes: literal, templated param, wildcard catch-all
     //   error shape:  handled 4xx/5xx + unhandled panic
-    let otel_layer = HTTPLayerBuilder::builder().build().unwrap();
+    let otel_layer = LayerBuilder::builder().build().unwrap();
 
     let app = Router::new()
         .route("/", get(root))

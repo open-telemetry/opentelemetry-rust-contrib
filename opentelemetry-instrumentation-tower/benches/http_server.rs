@@ -1,6 +1,6 @@
-//! Benchmarks for tower OpenTelemetry middleware overhead.
+//! Benchmarks for the tower OpenTelemetry HTTP **server** layer overhead.
 //!
-//! This benchmark measures the **pure instrumentation overhead** of the `HTTPLayer`
+//! This benchmark measures the **pure instrumentation overhead** of the `http::server::Layer`
 //! middleware. It uses tower's service utilities to call handlers directly, bypassing
 //! the network stack (TCP/HTTP parsing). This isolates the middleware cost and provides
 //! consistent, reproducible measurements.
@@ -11,15 +11,17 @@
 //! ## Scenarios
 //!
 //! - **Baseline**: No middleware (control measurement)
-//! - **No-op**: `HTTPLayer` present, but both tracer and meter are no-ops
-//! - **Tracing**: `HTTPLayer` with active tracer, no-op meter (all spans sampled)
+//! - **No-op**: `http::server::Layer` present, but both tracer and meter are no-ops
+//! - **Tracing**: `http::server::Layer` with active tracer, no-op meter (all spans sampled)
 //! - **Tracing (sampled-out)**: Same, but with `AlwaysOff` sampler (all spans dropped)
-//! - **Metrics**: `HTTPLayer` with active meter, no-op tracer (no spans created)
-//! - **Tracing + Metrics**: `HTTPLayer` with both active tracer and active meter
+//! - **Metrics**: `http::server::Layer` with active meter, no-op tracer (no spans created)
+//! - **Tracing + Metrics**: `http::server::Layer` with both active tracer and active meter
 //!
-//! Each scenario configures the layer via `with_tracing`/`with_metrics`, and
-//! where a real backend is needed it is installed as the OpenTelemetry global
-//! provider before the layer is built.
+//! Each tracing scenario sets the global `TracerProvider` before building the layer so
+//! that no tracer state leaks between scenarios.  Scenarios that do not need traces use
+//! `NoopTracerProvider` (a true no-op) to reset the global.  No meter reset is needed
+//! because the global meter is never set in tracing-only scenarios, leaving meter
+//! instruments as no-ops by default.
 //!
 //! ## Known Performance Characteristics
 //!
@@ -57,7 +59,7 @@
 //! ## Run
 //!
 //! ```sh
-//! cargo bench --bench middleware -p opentelemetry-instrumentation-tower
+//! cargo bench --bench http_server -p opentelemetry-instrumentation-tower
 //! ```
 //!
 //! ## Reference Numbers
@@ -79,7 +81,8 @@
 
 use criterion::{criterion_group, criterion_main, BenchmarkId, Criterion, Throughput};
 use opentelemetry::global;
-use opentelemetry_instrumentation_tower::HTTPLayerBuilder;
+use opentelemetry::trace::noop::NoopTracerProvider;
+use opentelemetry_instrumentation_tower::http::server::LayerBuilder;
 use opentelemetry_sdk::{
     metrics::{InMemoryMetricExporter, PeriodicReader, SdkMeterProvider},
     trace::{Sampler, SdkTracerProvider},
@@ -108,11 +111,47 @@ fn build_requests(n: u64) -> Vec<http::Request<String>> {
         .collect()
 }
 
-fn benchmark_middleware(c: &mut Criterion) {
+/// Setup tracer provider with no-op processor (measures instrumentation overhead only)
+fn setup_tracer() -> SdkTracerProvider {
+    // No exporter = no-op processing, just measures instrumentation overhead
+    let provider = SdkTracerProvider::builder().build();
+    global::set_tracer_provider(provider.clone());
+    provider
+}
+
+/// Setup tracer provider with AlwaysOff sampler (all spans are dropped).
+/// This measures the overhead of the non-sampled code path.
+fn setup_sampled_out_tracer() -> SdkTracerProvider {
+    let provider = SdkTracerProvider::builder()
+        .with_sampler(Sampler::AlwaysOff)
+        .build();
+    global::set_tracer_provider(provider.clone());
+    provider
+}
+
+/// Reset global tracer provider to a true no-op instance.
+/// Call this in scenarios that should not generate traces.
+fn noop_tracer() {
+    global::set_tracer_provider(NoopTracerProvider::new());
+}
+
+/// Setup meter provider with in-memory exporter (minimal I/O overhead)
+fn setup_meter() -> (SdkMeterProvider, InMemoryMetricExporter) {
+    let exporter = InMemoryMetricExporter::default();
+    // Use very long interval to ensure no timer-based exports during benchmark
+    let reader = PeriodicReader::builder(exporter.clone())
+        .with_interval(Duration::from_secs(3600))
+        .build();
+    let provider = SdkMeterProvider::builder().with_reader(reader).build();
+    global::set_meter_provider(provider.clone());
+    (provider, exporter)
+}
+
+fn benchmark_http_server(c: &mut Criterion) {
     // Use tokio runtime since Criterion's AsyncExecutor is implemented for tokio
     let rt = tokio::runtime::Runtime::new().unwrap();
 
-    let mut group = c.benchmark_group("tower-instrumentation");
+    let mut group = c.benchmark_group("tower-http-server");
     group.throughput(Throughput::Elements(1));
 
     // Scenario 1: Baseline - no middleware
@@ -131,14 +170,12 @@ fn benchmark_middleware(c: &mut Criterion) {
     });
 
     // Scenario 2: Middleware present, but both tracer and meter are no-ops.
-    // Measures the pure overhead of the HTTPLayer machinery (attribute extraction,
+    // Measures the pure overhead of the server::Layer machinery (attribute extraction,
     // context propagation hooks, etc.) when no real telemetry is produced.
     group.bench_function(BenchmarkId::new("request", "noop"), |b| {
-        let layer = HTTPLayerBuilder::builder()
-            .with_tracing(false)
-            .with_metrics(false)
-            .build()
-            .unwrap();
+        noop_tracer(); // reset any tracer left from a previous run
+                       // meter is not set, so meter instruments are already no-op
+        let layer = LayerBuilder::builder().build().unwrap();
         b.to_async(&rt).iter_custom(|iters| {
             let layer = layer.clone();
             async move {
@@ -157,14 +194,10 @@ fn benchmark_middleware(c: &mut Criterion) {
         });
     });
 
-    // Scenario 3: Tracing only (no-op meter)
+    // Scenario 3: Tracing only (global meter not set, so meter instruments are no-op)
     group.bench_function(BenchmarkId::new("request", "tracing"), |b| {
-        // No exporter = no-op processing, just measures instrumentation overhead.
-        global::set_tracer_provider(SdkTracerProvider::builder().build());
-        let layer = HTTPLayerBuilder::builder()
-            .with_metrics(false)
-            .build()
-            .unwrap();
+        let _tracer_provider = setup_tracer();
+        let layer = LayerBuilder::builder().build().unwrap();
         b.to_async(&rt).iter_custom(|iters| {
             let layer = layer.clone();
             async move {
@@ -183,17 +216,10 @@ fn benchmark_middleware(c: &mut Criterion) {
         });
     });
 
-    // Scenario 4: Tracing with AlwaysOff sampler (no-op meter)
+    // Scenario 4: Tracing with AlwaysOff sampler (global meter not set, so meter instruments are no-op)
     group.bench_function(BenchmarkId::new("request", "tracing-sampled-out"), |b| {
-        global::set_tracer_provider(
-            SdkTracerProvider::builder()
-                .with_sampler(Sampler::AlwaysOff)
-                .build(),
-        );
-        let layer = HTTPLayerBuilder::builder()
-            .with_metrics(false)
-            .build()
-            .unwrap();
+        let _tracer_provider = setup_sampled_out_tracer();
+        let layer = LayerBuilder::builder().build().unwrap();
         b.to_async(&rt).iter_custom(|iters| {
             let layer = layer.clone();
             async move {
@@ -212,18 +238,11 @@ fn benchmark_middleware(c: &mut Criterion) {
         });
     });
 
-    // Scenario 5: Metrics only (no-op tracer)
+    // Scenario 5: Metrics only (tracer reset to NoopTracerProvider)
     group.bench_function(BenchmarkId::new("request", "metrics"), |b| {
-        let _metric_exporter = InMemoryMetricExporter::default();
-        // Use very long interval to ensure no timer-based exports during benchmark.
-        let reader = PeriodicReader::builder(_metric_exporter.clone())
-            .with_interval(Duration::from_secs(3600))
-            .build();
-        global::set_meter_provider(SdkMeterProvider::builder().with_reader(reader).build());
-        let layer = HTTPLayerBuilder::builder()
-            .with_tracing(false)
-            .build()
-            .unwrap();
+        noop_tracer();
+        let (_meter_provider, _metric_exporter) = setup_meter();
+        let layer = LayerBuilder::builder().build().unwrap();
         b.to_async(&rt).iter_custom(|iters| {
             let layer = layer.clone();
             async move {
@@ -244,15 +263,9 @@ fn benchmark_middleware(c: &mut Criterion) {
 
     // Scenario 6: Both tracing + metrics
     group.bench_function(BenchmarkId::new("request", "tracing+metrics"), |b| {
-        // No exporter = no-op processing, just measures instrumentation overhead.
-        global::set_tracer_provider(SdkTracerProvider::builder().build());
-        let _metric_exporter = InMemoryMetricExporter::default();
-        // Use very long interval to ensure no timer-based exports during benchmark.
-        let reader = PeriodicReader::builder(_metric_exporter.clone())
-            .with_interval(Duration::from_secs(3600))
-            .build();
-        global::set_meter_provider(SdkMeterProvider::builder().with_reader(reader).build());
-        let layer = HTTPLayerBuilder::builder().build().unwrap();
+        let _tracer_provider = setup_tracer();
+        let (_meter_provider, _metric_exporter) = setup_meter();
+        let layer = LayerBuilder::builder().build().unwrap();
         b.to_async(&rt).iter_custom(|iters| {
             let layer = layer.clone();
             async move {
@@ -274,5 +287,5 @@ fn benchmark_middleware(c: &mut Criterion) {
     group.finish();
 }
 
-criterion_group!(benches, benchmark_middleware);
+criterion_group!(benches, benchmark_http_server);
 criterion_main!(benches);
