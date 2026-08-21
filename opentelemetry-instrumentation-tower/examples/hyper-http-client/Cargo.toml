@@ -1,0 +1,22 @@
+[package]
+name = "example-hyper-http-client"
+version = "0.1.0-alpha.0"
+edition = "2021"
+rust-version = "1.75.0"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[dependencies]
+opentelemetry_instrumentation_tower = { path = "../../", package = "opentelemetry-instrumentation-tower", features = ["http-client"], default-features = false }
+hyper = { version = "1", default-features = false }
+http-body-util = { version = "0.1", default-features = false }
+hyper-util = { version = "0.1", features = ["client", "client-legacy", "http1", "tokio"], default-features = false }
+opentelemetry = { workspace = true }
+opentelemetry_sdk = { workspace = true, features = ["spec_unstable_metrics_views"], default-features = false }
+opentelemetry-semantic-conventions = { workspace = true, features = ["semconv_experimental"], default-features = false }
+opentelemetry-otlp = { version = "0.32.0", features = ["grpc-tonic", "metrics", "trace"], default-features = false }
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "signal"], default-features = false }
+tower = { version = "0.5", features = ["util"], default-features = false }
+
+[lints]
+workspace = true

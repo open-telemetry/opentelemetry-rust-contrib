@@ -1,4 +1,4 @@
-//! Common HTTP attribute helpers shared by the server and client layers.
+//! Common HTTP attribute helpers.
 
 use opentelemetry::KeyValue;
 use opentelemetry_semantic_conventions as semconv;
