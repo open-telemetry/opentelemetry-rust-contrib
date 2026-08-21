@@ -163,7 +163,7 @@ pub(super) mod tests {
     /// Test-only fake that returns canned responses.
     ///
     /// Data is stored as JSON `&str` and deserialized on
-    /// each call to exercises the `serde` impl alongside the detectors
+    /// each call to exercise the `serde` impl alongside the detector
     /// logic.
     pub struct FakeImdsClient {
         document: &'static str,
@@ -204,7 +204,7 @@ pub(super) mod tests {
         fn get_identity_document(&self) -> Result<InstanceIdentityDocument, ImdsError> {
             serde_json::from_str(self.document)
                 .map_err(HttpClientError::Json)
-                .map_err(ImdsError::TextResponseRead)
+                .map_err(ImdsError::JsonResponseRead)
         }
     }
 
