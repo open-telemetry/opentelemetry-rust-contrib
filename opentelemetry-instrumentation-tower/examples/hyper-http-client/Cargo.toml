@@ -13,7 +13,6 @@ http-body-util = { version = "0.1", default-features = false }
 hyper-util = { version = "0.1", features = ["client", "client-legacy", "http1", "tokio"], default-features = false }
 opentelemetry = { workspace = true }
 opentelemetry_sdk = { workspace = true, default-features = false }
-opentelemetry-semantic-conventions = { workspace = true, features = ["semconv_experimental"], default-features = false }
 opentelemetry-otlp = { workspace = true, features = ["grpc-tonic", "metrics", "trace"] }
 tokio = { version = "1", features = ["rt-multi-thread", "macros", "signal"], default-features = false }
 tower = { version = "0.5", features = ["util"], default-features = false }
