@@ -674,6 +674,8 @@ mod tests {
         data::{AggregatedMetrics, MetricData},
         InMemoryMetricExporter, PeriodicReader,
     };
+    use opentelemetry_http::HeaderInjector;
+    use opentelemetry_sdk::propagation::TraceContextPropagator;
     use opentelemetry_sdk::trace::{InMemorySpanExporterBuilder, SdkTracerProvider};
     use std::result::Result;
     use std::time::Duration;
@@ -1283,6 +1285,73 @@ mod tests {
         assert!(
             metrics.is_empty(),
             "Expected no metrics when metrics is disabled"
+        );
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn test_with_tracing_false_still_propagates_context() {
+        let trace_exporter = InMemorySpanExporterBuilder::new().build();
+        let tracer_provider = SdkTracerProvider::builder()
+            .with_simple_exporter(trace_exporter.clone())
+            .build();
+
+        let tracer = Arc::new(BoxedTracer::new(Box::new(
+            tracer_provider.tracer("test_tracer"),
+        )));
+
+        // Set a real global propagator so the layer can extract context from headers.
+        global::set_text_map_propagator(TraceContextPropagator::new());
+
+        let layer = LayerBuilder::builder()
+            .with_route_extractor(PathExtractor)
+            .with_tracer_provider(tracer_provider.clone())
+            .with_tracing(false)
+            .build()
+            .unwrap();
+
+        // Create a parent span and inject its context into the request headers.
+        let parent_span = tracer.start("parent_operation");
+        let parent_cx = OtelContext::current_with_span(parent_span);
+
+        let mut request = http::Request::builder()
+            .method("GET")
+            .uri("http://example.com/test")
+            .body("test".to_string())
+            .unwrap();
+        global::get_text_map_propagator(|propagator| {
+            propagator.inject_context(&parent_cx, &mut HeaderInjector(request.headers_mut()));
+        });
+
+        let service = tower::service_fn(|_req: Request<String>| async {
+            // Even with tracing disabled, the extracted parent context must
+            // be available as the current context inside the handler.
+            let cx = OtelContext::current();
+            let span = cx.span();
+            let span_context = span.span_context();
+            assert!(
+                span_context.is_valid(),
+                "Context propagation should work even when tracing is disabled"
+            );
+
+            Ok::<_, std::convert::Infallible>(
+                Response::builder()
+                    .status(StatusCode::OK)
+                    .body(String::from("OK"))
+                    .unwrap(),
+            )
+        });
+
+        let mut service = layer.layer(service);
+
+        let _response = service.call(request).await.unwrap();
+
+        tracer_provider.force_flush().unwrap();
+
+        // No spans should be recorded by the layer (tracing disabled).
+        let spans = trace_exporter.get_finished_spans().unwrap();
+        assert!(
+            spans.is_empty(),
+            "Expected no spans when tracing is disabled"
         );
     }
 }
