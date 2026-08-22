@@ -175,7 +175,6 @@ fn benchmark_http_server(c: &mut Criterion) {
     // Scenario 1: Baseline - no middleware
     group.bench_function(BenchmarkId::new("request", "baseline"), |b| {
         let mut service = tower::service_fn(handler);
-        rt.block_on(service.ready()).unwrap();
         b.to_async(&rt).iter_batched(
             || build_request("http://example.com/users/123"),
             |req| {
