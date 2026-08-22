@@ -52,9 +52,10 @@ cardinality guidance.
 
 ## Examples
 
-Runnable examples (Axum, Hyper, custom route extractor) live in the
-[`examples/`](./examples) directory. They pin specific OpenTelemetry crate
-versions and may need adjustments when those versions change.
+Runnable examples (Axum server, Hyper server, Hyper client, reqwest client,
+custom route extractor) live in the [`examples/`](./examples) directory. They
+pin specific OpenTelemetry crate versions and may need adjustments when those
+versions change.
 
 ## Changelog
 
