@@ -13,8 +13,9 @@
   `http-client` (both enabled by default).
 * The **client** layer always defaults to `NoRouteExtractor` (method-only span
   names); the `axum` matched-path extractor only applies to server routing.
-* `hyper-http-client` example demonstrating the client layer with a Hyper
-  client and OTLP export.
+* `hyper-http-client` and `reqwest-http-client` examples demonstrating the
+  client layer with Hyper and reqwest clients via `tower-reqwest`, with OTLP
+  export.
 
 ### Changed
 

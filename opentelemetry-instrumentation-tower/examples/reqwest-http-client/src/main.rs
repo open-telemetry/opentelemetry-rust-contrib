@@ -4,7 +4,8 @@ use opentelemetry_otlp::{MetricExporter, SpanExporter};
 use opentelemetry_sdk::metrics::{PeriodicReader, SdkMeterProvider};
 use opentelemetry_sdk::trace::SdkTracerProvider;
 use std::sync::OnceLock;
-use tower::{service_fn, Service, ServiceBuilder};
+use tower::{Service, ServiceBuilder};
+use tower_reqwest::HttpClientService;
 
 const SERVICE_NAME: &str = "example-reqwest-http-client";
 
@@ -42,15 +43,7 @@ async fn main() {
 
     let mut client = ServiceBuilder::new()
         .layer(otel_layer)
-        .service(service_fn(move |req: http::Request<reqwest::Body>| {
-            let client = reqwest_client.clone();
-            async move {
-                let req: reqwest::Request = req.try_into()?;
-                let res: reqwest::Response = client.execute(req).await?;
-                let http_res: http::Response<reqwest::Body> = res.into();
-                Ok::<_, Box<dyn std::error::Error + Send + Sync>>(http_res)
-            }
-        }));
+        .service(HttpClientService::new(reqwest_client));
 
     let target_url = std::env::args()
         .nth(1)

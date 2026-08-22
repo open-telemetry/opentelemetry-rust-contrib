@@ -9,7 +9,8 @@ opentelemetry_instrumentation_tower = { path = "../../", package = "opentelemetr
 opentelemetry = { workspace = true }
 opentelemetry_sdk = { workspace = true, default-features = false }
 opentelemetry-otlp = { workspace = true, features = ["grpc-tonic", "metrics", "trace"] }
-reqwest = { version = "0.12" }
+reqwest = { version = "0.13" }
+tower-reqwest = { version = "0.6", default-features = false }
 http = { version = "1", default-features = false }
 tokio = { version = "1", features = ["rt-multi-thread", "macros"], default-features = false }
 tower = { version = "0.5", features = ["util"], default-features = false }

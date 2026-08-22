@@ -359,7 +359,6 @@ impl<S, ReqBody, ResBody, RouteExt, ReqExt, ResExt> TowerService<http::Request<R
     for Service<S, RouteExt, ReqExt, ResExt>
 where
     S: TowerService<http::Request<ReqBody>, Response = http::Response<ResBody>>,
-    S::Future: Send,
     S::Error: std::fmt::Debug,
     ResBody: http_body::Body,
     RouteExt: RouteExtractor<ReqBody>,
