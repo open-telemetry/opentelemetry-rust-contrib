@@ -1,0 +1,6 @@
+fn main() {}
+use tower_reqwest::HttpClientService;
+fn assert_send<T: Send>() {}
+fn test() {
+    assert_send::<tower_reqwest::adapters::reqwest::ExecuteRequestFuture<reqwest::Client>>();
+}
