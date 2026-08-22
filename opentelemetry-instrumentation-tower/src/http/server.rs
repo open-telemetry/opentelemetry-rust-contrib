@@ -667,6 +667,7 @@ mod tests {
 
     use http::{Request, Response, StatusCode};
     use opentelemetry::global::BoxedTracer;
+    use opentelemetry::trace::Span;
     use opentelemetry::trace::TracerProvider;
     use opentelemetry::trace::{FutureExt, TraceContextExt, Tracer};
     use opentelemetry_sdk::metrics::SdkMeterProvider;
@@ -678,6 +679,7 @@ mod tests {
     use opentelemetry_sdk::propagation::TraceContextPropagator;
     use opentelemetry_sdk::trace::{InMemorySpanExporterBuilder, SdkTracerProvider};
     use std::result::Result;
+    use std::sync::Mutex;
     use std::time::Duration;
     use tower::{ServiceBuilder, ServiceExt};
 
@@ -1311,6 +1313,7 @@ mod tests {
 
         // Create a parent span and inject its context into the request headers.
         let parent_span = tracer.start("parent_operation");
+        let parent_span_id = parent_span.span_context().span_id();
         let parent_cx = OtelContext::current_with_span(parent_span);
 
         let mut request = http::Request::builder()
@@ -1322,15 +1325,19 @@ mod tests {
             propagator.inject_context(&parent_cx, &mut HeaderInjector(request.headers_mut()));
         });
 
+        let expected_span_id = Arc::new(Mutex::new(parent_span_id));
+        let expected_span_id_clone = expected_span_id.clone();
+
         let service = tower::service_fn(|_req: Request<String>| async {
             // Even with tracing disabled, the extracted parent context must
             // be available as the current context inside the handler.
             let cx = OtelContext::current();
             let span = cx.span();
             let span_context = span.span_context();
-            assert!(
-                span_context.is_valid(),
-                "Context propagation should work even when tracing is disabled"
+            assert_eq!(
+                span_context.span_id(),
+                *expected_span_id_clone.lock().unwrap(),
+                "Handler should see the same parent span ID"
             );
 
             Ok::<_, std::convert::Infallible>(
