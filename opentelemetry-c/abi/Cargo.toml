@@ -1,0 +1,24 @@
+[package]
+name = "opentelemetry-c-abi"
+description = "Shared C-ABI types and internal vtable for the opentelemetry-c API/SDK split (internal)"
+version = "0.1.0"
+edition = "2021"
+rust-version = "1.75.0"
+homepage = "https://github.com/open-telemetry/opentelemetry-rust-contrib/tree/main/opentelemetry-c/abi"
+repository = "https://github.com/open-telemetry/opentelemetry-rust-contrib/tree/main/opentelemetry-c/abi"
+keywords = ["opentelemetry", "ffi", "c", "abi"]
+categories = ["development-tools::debugging", "api-bindings"]
+license = "Apache-2.0"
+publish = false
+
+# This crate is an rlib ONLY: it defines the shared `#[repr(C)]` value types and the
+# internal implementation vtable used across the API/SDK C-ABI boundary. It contains no
+# global state and NO `#[no_mangle]` exports, so linking it statically into both the API
+# and SDK cdylibs is harmless (no duplicate symbols, no duplicate global provider state).
+[lib]
+crate-type = ["rlib"]
+
+[dependencies]
+
+[lints]
+workspace = true
