@@ -9,6 +9,7 @@
   injecting the current trace context into outgoing request headers.
   Tracing and metrics can be toggled per layer via `with_tracing(bool)` and
   `with_metrics(bool)` (both enabled by default).
+  [#700](https://github.com/open-telemetry/opentelemetry-rust-contrib/pull/700)
 * `http::server::LayerBuilder::with_tracing(bool)` and
   `http::server::LayerBuilder::with_metrics(bool)` to enable or disable each
   signal for a layer (both default to enabled). Disabling tracing does not stop
@@ -16,13 +17,16 @@
   current context still flows to the inner service.
 * Cargo features to select which layers are compiled: `http-server` and
   `http-client` (both enabled by default).
+  [#700](https://github.com/open-telemetry/opentelemetry-rust-contrib/pull/700)
 * The **client** layer always defaults to `NoRouteExtractor` (method-only span
   names); the `axum` matched-path extractor only applies to server routing.
+  [#700](https://github.com/open-telemetry/opentelemetry-rust-contrib/pull/700)
 * The instrumentation scope now carries the OpenTelemetry semantic conventions
   schema URL.
 * `hyper-http-client` and `reqwest-http-client` examples demonstrating the
   client layer with Hyper and reqwest clients via `tower-reqwest`, with OTLP
   export.
+  [#700](https://github.com/open-telemetry/opentelemetry-rust-contrib/pull/700)
 
 ### Changed
 
