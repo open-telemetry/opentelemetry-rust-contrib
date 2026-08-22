@@ -58,9 +58,27 @@
 //!
 //! ## Run
 //!
-//! ```sh
+//! ```shell
 //! cargo bench --bench http_server -p opentelemetry-instrumentation-tower
 //! ```
+//!
+//! ### Minimize Benchmark Fluctuation
+//! As these benchmarks cover a very small codepath,
+//! measurements can fluctuate significantly between runs without any code changes.
+//!
+//! Minimize noise by increasing samples collected to 1000 (from the default 100):
+//! ```shell
+//! taskset -c 2,3 cargo bench --bench http_server -p opentelemetry-instrumentation-tower -- --sample-size 1000
+//! ```
+//!
+//! Further minimize noise from interrupts by avoiding CPU 0,
+//! or CPUs 0 and 1 on a machine with two logical cores per physical core:
+//! ```shell
+//! taskset -c 2,3 cargo bench --bench http_server -p opentelemetry-instrumentation-tower -- --sample-size 1000
+//! ```
+//!
+//! Despite these mitigations, Criterion often measures 3-6% changes in medians
+//! between consecutive runs without any code changes.
 //!
 //! ## Reference Numbers
 //!
@@ -68,18 +86,18 @@
 //!
 //! | Scenario             | Median   | vs baseline |
 //! | -------------------- | -------- | ----------- |
-//! | baseline             |   53 ns  | —           |
-//! | noop                 |  559 ns  | +506 ns     |
-//! | tracing              |  680 ns  | +627 ns     |
-//! | tracing-sampled-out  |  581 ns  | +528 ns     |
-//! | metrics              |  855 ns  | +802 ns     |
-//! | tracing + metrics    |  970 ns  | +917 ns     |
+//! | baseline             |   59 ns  | —           |
+//! | noop                 |  403 ns  | +344 ns     |
+//! | tracing              |  585 ns  | +526 ns     |
+//! | tracing-sampled-out  |  443 ns  | +384 ns     |
+//! | metrics              |  724 ns  | +665 ns     |
+//! | tracing + metrics    |  870 ns  | +811 ns     |
 //!
-//! Captured on: MacBook Pro, Apple M4 Pro (10P + 4E cores), 24 GB RAM,
-//! macOS 26.4.1, rustc 1.95.0, OpenTelemetry 0.32.
+//! Captured on: ThinkPad P14s, AMD Ryzen AI 9 HX PRO 470 (12C/24T), 54 GB RAM,
+//! Fedora Linux 44 (Workstation Edition), rustc 1.97.1, OpenTelemetry 0.32.
 //!
 
-use criterion::{criterion_group, criterion_main, BenchmarkId, Criterion, Throughput};
+use criterion::{criterion_group, criterion_main, BatchSize, BenchmarkId, Criterion, Throughput};
 use opentelemetry::global;
 use opentelemetry::trace::noop::NoopTracerProvider;
 use opentelemetry_instrumentation_tower::http::server::LayerBuilder;
@@ -97,18 +115,12 @@ async fn handler(_req: http::Request<String>) -> Result<http::Response<String>, 
     Ok(http::Response::new(String::new()))
 }
 
-/// Build requests outside the timed loop so request construction cost does not
-/// inflate the middleware overhead measurement.
-fn build_requests(n: u64) -> Vec<http::Request<String>> {
-    (0..n)
-        .map(|_| {
-            http::Request::builder()
-                .method("GET")
-                .uri("http://example.com/users/123")
-                .body(String::new())
-                .unwrap()
-        })
-        .collect()
+fn build_request() -> http::Request<String> {
+    http::Request::builder()
+        .method("GET")
+        .uri("http://example.com/users/123")
+        .body(String::new())
+        .unwrap()
 }
 
 /// Setup tracer provider with no-op processor (measures instrumentation overhead only)
@@ -156,17 +168,14 @@ fn benchmark_http_server(c: &mut Criterion) {
 
     // Scenario 1: Baseline - no middleware
     group.bench_function(BenchmarkId::new("request", "baseline"), |b| {
-        b.to_async(&rt).iter_custom(|iters| async move {
-            let mut service = tower::service_fn(handler);
-            let requests = build_requests(iters);
-
-            let start = std::time::Instant::now();
-            for req in requests {
-                let resp = service.ready().await.unwrap().call(req).await.unwrap();
-                black_box(resp);
-            }
-            start.elapsed()
-        });
+        let mut service = tower::service_fn(handler);
+        b.to_async(&rt).iter_batched(
+            || (service, build_request()),
+            |(mut service, req)| async move {
+                black_box(service.ready().await.unwrap().call(req).await.unwrap());
+            },
+            BatchSize::SmallInput,
+        );
     });
 
     // Scenario 2: Middleware present, but both tracer and meter are no-ops.
@@ -176,66 +185,54 @@ fn benchmark_http_server(c: &mut Criterion) {
         noop_tracer(); // reset any tracer left from a previous run
                        // meter is not set, so meter instruments are already no-op
         let layer = LayerBuilder::builder().build().unwrap();
-        b.to_async(&rt).iter_custom(|iters| {
-            let layer = layer.clone();
-            async move {
-                let mut service = ServiceBuilder::new()
-                    .layer(layer)
+        b.to_async(&rt).iter_batched(
+            || {
+                let service = ServiceBuilder::new()
+                    .layer(layer.clone())
                     .service(tower::service_fn(handler));
-                let requests = build_requests(iters);
-
-                let start = std::time::Instant::now();
-                for req in requests {
-                    let resp = service.ready().await.unwrap().call(req).await.unwrap();
-                    black_box(resp);
-                }
-                start.elapsed()
-            }
-        });
+                (service, build_request())
+            },
+            |(mut service, req)| async move {
+                black_box(service.ready().await.unwrap().call(req).await.unwrap());
+            },
+            BatchSize::SmallInput,
+        );
     });
 
     // Scenario 3: Tracing only (global meter not set, so meter instruments are no-op)
     group.bench_function(BenchmarkId::new("request", "tracing"), |b| {
         let _tracer_provider = setup_tracer();
         let layer = LayerBuilder::builder().build().unwrap();
-        b.to_async(&rt).iter_custom(|iters| {
-            let layer = layer.clone();
-            async move {
-                let mut service = ServiceBuilder::new()
-                    .layer(layer)
+        b.to_async(&rt).iter_batched(
+            || {
+                let service = ServiceBuilder::new()
+                    .layer(layer.clone())
                     .service(tower::service_fn(handler));
-                let requests = build_requests(iters);
-
-                let start = std::time::Instant::now();
-                for req in requests {
-                    let resp = service.ready().await.unwrap().call(req).await.unwrap();
-                    black_box(resp);
-                }
-                start.elapsed()
-            }
-        });
+                (service, build_request())
+            },
+            |(mut service, req)| async move {
+                black_box(service.ready().await.unwrap().call(req).await.unwrap());
+            },
+            BatchSize::SmallInput,
+        );
     });
 
     // Scenario 4: Tracing with AlwaysOff sampler (global meter not set, so meter instruments are no-op)
     group.bench_function(BenchmarkId::new("request", "tracing-sampled-out"), |b| {
         let _tracer_provider = setup_sampled_out_tracer();
         let layer = LayerBuilder::builder().build().unwrap();
-        b.to_async(&rt).iter_custom(|iters| {
-            let layer = layer.clone();
-            async move {
-                let mut service = ServiceBuilder::new()
-                    .layer(layer)
+        b.to_async(&rt).iter_batched(
+            || {
+                let service = ServiceBuilder::new()
+                    .layer(layer.clone())
                     .service(tower::service_fn(handler));
-                let requests = build_requests(iters);
-
-                let start = std::time::Instant::now();
-                for req in requests {
-                    let resp = service.ready().await.unwrap().call(req).await.unwrap();
-                    black_box(resp);
-                }
-                start.elapsed()
-            }
-        });
+                (service, build_request())
+            },
+            |(mut service, req)| async move {
+                black_box(service.ready().await.unwrap().call(req).await.unwrap());
+            },
+            BatchSize::SmallInput,
+        );
     });
 
     // Scenario 5: Metrics only (tracer reset to NoopTracerProvider)
@@ -243,22 +240,18 @@ fn benchmark_http_server(c: &mut Criterion) {
         noop_tracer();
         let (_meter_provider, _metric_exporter) = setup_meter();
         let layer = LayerBuilder::builder().build().unwrap();
-        b.to_async(&rt).iter_custom(|iters| {
-            let layer = layer.clone();
-            async move {
-                let mut service = ServiceBuilder::new()
-                    .layer(layer)
+        b.to_async(&rt).iter_batched(
+            || {
+                let service = ServiceBuilder::new()
+                    .layer(layer.clone())
                     .service(tower::service_fn(handler));
-                let requests = build_requests(iters);
-
-                let start = std::time::Instant::now();
-                for req in requests {
-                    let resp = service.ready().await.unwrap().call(req).await.unwrap();
-                    black_box(resp);
-                }
-                start.elapsed()
-            }
-        });
+                (service, build_request())
+            },
+            |(mut service, req)| async move {
+                black_box(service.ready().await.unwrap().call(req).await.unwrap());
+            },
+            BatchSize::SmallInput,
+        );
     });
 
     // Scenario 6: Both tracing + metrics
@@ -266,22 +259,18 @@ fn benchmark_http_server(c: &mut Criterion) {
         let _tracer_provider = setup_tracer();
         let (_meter_provider, _metric_exporter) = setup_meter();
         let layer = LayerBuilder::builder().build().unwrap();
-        b.to_async(&rt).iter_custom(|iters| {
-            let layer = layer.clone();
-            async move {
-                let mut service = ServiceBuilder::new()
-                    .layer(layer)
+        b.to_async(&rt).iter_batched(
+            || {
+                let service = ServiceBuilder::new()
+                    .layer(layer.clone())
                     .service(tower::service_fn(handler));
-                let requests = build_requests(iters);
-
-                let start = std::time::Instant::now();
-                for req in requests {
-                    let resp = service.ready().await.unwrap().call(req).await.unwrap();
-                    black_box(resp);
-                }
-                start.elapsed()
-            }
-        });
+                (service, build_request())
+            },
+            |(mut service, req)| async move {
+                black_box(service.ready().await.unwrap().call(req).await.unwrap());
+            },
+            BatchSize::SmallInput,
+        );
     });
 
     group.finish();
