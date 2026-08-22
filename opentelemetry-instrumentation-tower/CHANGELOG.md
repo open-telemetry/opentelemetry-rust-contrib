@@ -9,8 +9,10 @@
   signal for a layer (both default to enabled). Disabling tracing does not stop
   context propagation: incoming trace headers are still extracted and the
   current context still flows to the inner service.
+  [#679](https://github.com/open-telemetry/opentelemetry-rust-contrib/pull/679)
 * The instrumentation scope now carries the OpenTelemetry semantic conventions
   schema URL.
+  [#679](https://github.com/open-telemetry/opentelemetry-rust-contrib/pull/679)
 
 ### Changed
 
@@ -19,6 +21,7 @@
   moved the extractors into `http::extractors`. The `HTTPLayer` / `HTTPService` /
   `HTTPLayerBuilder` / `ResponseFuture` types introduced in v0.18.0 are replaced
   by `http::server::{Layer, Service, ResponseFuture, LayerBuilder}`.
+  [#717](https://github.com/open-telemetry/opentelemetry-rust-contrib/pull/717)
 
 ### Migration Guide
 
@@ -85,7 +88,9 @@ Released 2026-Jul-28
 ### Added
 
 * Added OpenTelemetry trace support
+  [#431](https://github.com/open-telemetry/opentelemetry-rust-contrib/pull/431)
 * Configurable route extraction with built-in extractors:
+  [#528](https://github.com/open-telemetry/opentelemetry-rust-contrib/pull/528)
   - `NoRouteExtractor` - No route, safest for cardinality
   - `PathExtractor` - Uses the URL path without query params (e.g., `/users/123`)
   - `AxumMatchedPathExtractor` - Uses Axum's `MatchedPath` for route templates (requires `axum` feature)
@@ -100,14 +105,19 @@ Released 2026-Jul-28
 * **BREAKING**: Removed public `with_meter()` method. The middleware now uses global meter and tracer providers by
   default via `opentelemetry::global::meter()` and `opentelemetry::global::tracer()`. The `with_meter()` method is
   retained as a non-public test utility to allow injecting custom meters without relying on global state.
+  [#431](https://github.com/open-telemetry/opentelemetry-rust-contrib/pull/431)
 * **BREAKING**: Renamed types. Use the new names:
     - `HTTPMetricsLayer` → `HTTPLayer`
     - `HTTPMetricsService` → `HTTPService`
     - `HTTPMetricsResponseFuture` → `ResponseFuture`
     - `HTTPMetricsLayerBuilder` → `HTTPLayerBuilder`
+  [#431](https://github.com/open-telemetry/opentelemetry-rust-contrib/pull/431)
+  [#714](https://github.com/open-telemetry/opentelemetry-rust-contrib/pull/714)
 * **BREAKING**: Update default  `http.server.request.duration` histogram boundaries to OTel semantic conventions.
+  [#525](https://github.com/open-telemetry/opentelemetry-rust-contrib/pull/525)
 * **BREAKING**: Remove `with_request_duration_bounds` builder method.
   Alternate histogram bucket boundaries can be applied with the standard OpenTelemetry Views; see `examples` directory in crate for usage.
+  [#525](https://github.com/open-telemetry/opentelemetry-rust-contrib/pull/525)
 
 ### Migration Guide
 
@@ -179,8 +189,10 @@ let layer = HTTPLayer::new();
 ### Changed
 
 * Update to OpenTelemetry v0.31
+  [#456](https://github.com/open-telemetry/opentelemetry-rust-contrib/pull/456)
 * Migrate to use `opentelemetry-semantic-conventions` package for metric names and attribute keys instead of hardcoded
   strings
+  [#435](https://github.com/open-telemetry/opentelemetry-rust-contrib/pull/435)
 * Add dependency on otel semantic conventions crate and use constants from it instead of hardcoded attribute names. The
   values are unchanged
     - `HTTP_SERVER_ACTIVE_REQUESTS_METRIC` now uses `semconv::metric::HTTP_SERVER_ACTIVE_REQUESTS`
@@ -196,10 +208,12 @@ let layer = HTTPLayer::new();
 ### Added
 
 * Add comprehensive test coverage for all HTTP server metrics with attribute validation
+  [#435](https://github.com/open-telemetry/opentelemetry-rust-contrib/pull/435)
 
 ## v0.16.0
 
 Initial release of OpenTelemetry Tower instrumentation middleware for HTTP metrics collection.
+[#248](https://github.com/open-telemetry/opentelemetry-rust-contrib/pull/248)
 
 ### Added
 
