@@ -2,6 +2,16 @@
 
 ## vNext
 
+### Added
+
+* `http::server::LayerBuilder::with_tracing(bool)` and
+  `http::server::LayerBuilder::with_metrics(bool)` to enable or disable each
+  signal for a layer (both default to enabled). Disabling tracing does not stop
+  context propagation: incoming trace headers are still extracted and the
+  current context still flows to the inner service.
+* The instrumentation scope now carries the OpenTelemetry semantic conventions
+  schema URL.
+
 ### Changed
 
 * **BREAKING**: Reorganized the public API into an `http::server` module with
