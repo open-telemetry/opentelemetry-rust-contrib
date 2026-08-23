@@ -11,9 +11,11 @@ use std::task::{Context, Poll};
 use std::time::Instant;
 
 use opentelemetry::global::{self, BoxedTracer};
-use opentelemetry::metrics::{Histogram, Meter, UpDownCounter};
-use opentelemetry::trace::{SpanKind, Status, TraceContextExt, Tracer};
+use opentelemetry::metrics::{Histogram, Meter, MeterProvider, NoopMeterProvider, UpDownCounter};
+use opentelemetry::trace::noop::NoopTracerProvider;
+use opentelemetry::trace::{SpanKind, Status, TraceContextExt, Tracer, TracerProvider};
 use opentelemetry::Context as OtelContext;
+use opentelemetry::InstrumentationScope;
 use opentelemetry::KeyValue;
 use opentelemetry_http::HeaderExtractor;
 use opentelemetry_semantic_conventions as semconv;
@@ -93,7 +95,10 @@ pub struct LayerBuilder<
     ReqExt = NoOpExtractor,
     ResExt = NoOpExtractor,
 > {
+    tracer: Option<Arc<BoxedTracer>>,
     meter: Option<Meter>,
+    tracing_enabled: bool,
+    metrics_enabled: bool,
     req_dur_bounds: Option<Vec<f64>>,
     route_extractor: RouteExt,
     request_extractor: ReqExt,
@@ -103,7 +108,10 @@ pub struct LayerBuilder<
 impl LayerBuilder {
     pub fn builder() -> Self {
         LayerBuilder {
+            tracer: None,
             meter: None,
+            tracing_enabled: true,
+            metrics_enabled: true,
             req_dur_bounds: Some(Vec::from(OTEL_DEFAULT_HTTP_SERVER_DURATION_BOUNDS)),
             route_extractor: DefaultRouteExtractor::default(),
             request_extractor: NoOpExtractor,
@@ -135,7 +143,10 @@ impl<RouteExt, ReqExt, ResExt> LayerBuilder<RouteExt, ReqExt, ResExt> {
         extractor: NewRoute,
     ) -> LayerBuilder<NewRoute, ReqExt, ResExt> {
         LayerBuilder {
+            tracer: self.tracer,
             meter: self.meter,
+            tracing_enabled: self.tracing_enabled,
+            metrics_enabled: self.metrics_enabled,
             req_dur_bounds: self.req_dur_bounds,
             route_extractor: extractor,
             request_extractor: self.request_extractor,
@@ -175,7 +186,10 @@ impl<RouteExt, ReqExt, ResExt> LayerBuilder<RouteExt, ReqExt, ResExt> {
         NewReqExt: RequestAttributeExtractor<B>,
     {
         LayerBuilder {
+            tracer: self.tracer,
             meter: self.meter,
+            tracing_enabled: self.tracing_enabled,
+            metrics_enabled: self.metrics_enabled,
             req_dur_bounds: self.req_dur_bounds,
             route_extractor: self.route_extractor,
             request_extractor: extractor,
@@ -192,7 +206,10 @@ impl<RouteExt, ReqExt, ResExt> LayerBuilder<RouteExt, ReqExt, ResExt> {
         NewResExt: ResponseAttributeExtractor<B>,
     {
         LayerBuilder {
+            tracer: self.tracer,
             meter: self.meter,
+            tracing_enabled: self.tracing_enabled,
+            metrics_enabled: self.metrics_enabled,
             req_dur_bounds: self.req_dur_bounds,
             route_extractor: self.route_extractor,
             request_extractor: self.request_extractor,
@@ -227,14 +244,24 @@ impl<RouteExt, ReqExt, ResExt> LayerBuilder<RouteExt, ReqExt, ResExt> {
             .req_dur_bounds
             .unwrap_or_else(|| Vec::from(OTEL_DEFAULT_HTTP_SERVER_DURATION_BOUNDS));
 
-        let tracer = Arc::new(global::tracer(crate::INSTRUMENTATION_NAME));
+        let tracer = if self.tracing_enabled {
+            self.tracer
+                .unwrap_or_else(|| Arc::new(global::tracer_with_scope(instrumentation_scope())))
+        } else {
+            Arc::new(BoxedTracer::new(Box::new(
+                NoopTracerProvider::new().tracer_with_scope(instrumentation_scope()),
+            )))
+        };
 
-        let meter: Meter = self
-            .meter
-            .unwrap_or_else(|| global::meter(crate::INSTRUMENTATION_NAME));
+        let meter: Meter = if self.metrics_enabled {
+            self.meter
+                .unwrap_or_else(|| global::meter_with_scope(instrumentation_scope()))
+        } else {
+            NoopMeterProvider::new().meter_with_scope(instrumentation_scope())
+        };
 
         Ok(Layer {
-            state: Arc::from(Self::make_state(meter, req_dur_bounds)),
+            state: Arc::from(make_state(meter, req_dur_bounds)),
             route_extractor: self.route_extractor,
             request_extractor: self.request_extractor,
             response_extractor: self.response_extractor,
@@ -242,45 +269,75 @@ impl<RouteExt, ReqExt, ResExt> LayerBuilder<RouteExt, ReqExt, ResExt> {
         })
     }
 
-    /// Override the meter used for metrics collection.
+    /// Enable or disable trace collection for this layer.
     ///
-    /// This method exists primarily for testing purposes, allowing tests to inject
-    /// a custom meter (e.g., backed by an in-memory exporter) without relying on
-    /// global state. Using global providers in tests can cause interference between
-    /// concurrent tests.
-    ///
-    /// In production, the default behavior of using the global meter provider
-    /// (via `opentelemetry::global::meter()`) is recommended.
-    #[cfg(test)]
-    fn with_meter(mut self, meter: Meter) -> Self {
-        self.meter = Some(meter);
+    /// Tracing is enabled by default. When disabled, the layer records no
+    /// spans, but context propagation is unaffected: incoming trace headers
+    /// are still extracted and the current context still flows to the inner
+    /// service.
+    pub fn with_tracing(mut self, enabled: bool) -> Self {
+        self.tracing_enabled = enabled;
         self
     }
 
-    fn make_state(meter: Meter, req_dur_bounds: Vec<f64>) -> LayerState {
-        LayerState {
-            server_request_duration: meter
-                .f64_histogram(Cow::from(semconv::metric::HTTP_SERVER_REQUEST_DURATION))
-                .with_description("Duration of HTTP server requests.")
-                .with_unit(Cow::from(HTTP_SERVER_DURATION_UNIT))
-                .with_boundaries(req_dur_bounds)
-                .build(),
-            server_active_requests: meter
-                .i64_up_down_counter(Cow::from(semconv::metric::HTTP_SERVER_ACTIVE_REQUESTS))
-                .with_description("Number of active HTTP server requests.")
-                .with_unit(Cow::from(HTTP_SERVER_ACTIVE_REQUESTS_UNIT))
-                .build(),
-            server_request_body_size: meter
-                .u64_histogram(semconv::metric::HTTP_SERVER_REQUEST_BODY_SIZE)
-                .with_description("Size of HTTP server request bodies.")
-                .with_unit(HTTP_SERVER_REQUEST_BODY_SIZE_UNIT)
-                .build(),
-            server_response_body_size: meter
-                .u64_histogram(semconv::metric::HTTP_SERVER_RESPONSE_BODY_SIZE)
-                .with_description("Size of HTTP server response bodies.")
-                .with_unit(HTTP_SERVER_RESPONSE_BODY_SIZE_UNIT)
-                .build(),
-        }
+    /// Enable or disable metrics collection for this layer.
+    ///
+    /// Metrics are enabled by default. When disabled, the layer records no
+    /// HTTP server metrics.
+    pub fn with_metrics(mut self, enabled: bool) -> Self {
+        self.metrics_enabled = enabled;
+        self
+    }
+
+    #[cfg(test)]
+    fn with_tracer_provider<P>(mut self, tracer_provider: P) -> Self
+    where
+        P: TracerProvider,
+        P::Tracer: opentelemetry::global::ObjectSafeTracer + Send + Sync + 'static,
+    {
+        self.tracer = Some(Arc::new(BoxedTracer::new(Box::new(
+            tracer_provider.tracer_with_scope(instrumentation_scope()),
+        ))));
+        self
+    }
+
+    #[cfg(test)]
+    fn with_meter_provider(mut self, meter_provider: impl MeterProvider) -> Self {
+        self.meter = Some(meter_provider.meter_with_scope(instrumentation_scope()));
+        self
+    }
+}
+
+fn instrumentation_scope() -> InstrumentationScope {
+    InstrumentationScope::builder(crate::INSTRUMENTATION_NAME)
+        .with_version(env!("CARGO_PKG_VERSION"))
+        .with_schema_url(opentelemetry_semantic_conventions::SCHEMA_URL)
+        .build()
+}
+
+fn make_state(meter: Meter, req_dur_bounds: Vec<f64>) -> LayerState {
+    LayerState {
+        server_request_duration: meter
+            .f64_histogram(Cow::from(semconv::metric::HTTP_SERVER_REQUEST_DURATION))
+            .with_description("Duration of HTTP server requests.")
+            .with_unit(Cow::from(HTTP_SERVER_DURATION_UNIT))
+            .with_boundaries(req_dur_bounds)
+            .build(),
+        server_active_requests: meter
+            .i64_up_down_counter(Cow::from(semconv::metric::HTTP_SERVER_ACTIVE_REQUESTS))
+            .with_description("Number of active HTTP server requests.")
+            .with_unit(Cow::from(HTTP_SERVER_ACTIVE_REQUESTS_UNIT))
+            .build(),
+        server_request_body_size: meter
+            .u64_histogram(semconv::metric::HTTP_SERVER_REQUEST_BODY_SIZE)
+            .with_description("Size of HTTP server request bodies.")
+            .with_unit(HTTP_SERVER_REQUEST_BODY_SIZE_UNIT)
+            .build(),
+        server_response_body_size: meter
+            .u64_histogram(semconv::metric::HTTP_SERVER_RESPONSE_BODY_SIZE)
+            .with_description("Size of HTTP server response bodies.")
+            .with_unit(HTTP_SERVER_RESPONSE_BODY_SIZE_UNIT)
+            .build(),
     }
 }
 
@@ -610,7 +667,6 @@ mod tests {
 
     use http::{Request, Response, StatusCode};
     use opentelemetry::global::BoxedTracer;
-    use opentelemetry::metrics::MeterProvider;
     use opentelemetry::trace::TracerProvider;
     use opentelemetry::trace::{FutureExt, TraceContextExt, Tracer};
     use opentelemetry_sdk::metrics::SdkMeterProvider;
@@ -637,11 +693,11 @@ mod tests {
             tracer_provider.tracer("test_tracer"),
         )));
 
-        let mut layer = LayerBuilder::builder()
+        let layer = LayerBuilder::builder()
             .with_route_extractor(PathExtractor)
+            .with_tracer_provider(tracer_provider.clone())
             .build()
             .unwrap();
-        layer.tracer = tracer.clone();
 
         let mut service = ServiceBuilder::new()
             .layer(layer)
@@ -734,9 +790,11 @@ mod tests {
             .with_interval(Duration::from_millis(100))
             .build();
         let meter_provider = SdkMeterProvider::builder().with_reader(reader).build();
-        let meter = meter_provider.meter("test");
 
-        let layer = LayerBuilder::builder().with_meter(meter).build().unwrap();
+        let layer = LayerBuilder::builder()
+            .with_meter_provider(meter_provider.clone())
+            .build()
+            .unwrap();
 
         let service = tower::service_fn(|_req: Request<String>| async {
             Ok::<_, std::convert::Infallible>(
@@ -915,15 +973,15 @@ mod tests {
             .with_simple_exporter(trace_exporter.clone())
             .build();
 
-        let tracer = Arc::new(BoxedTracer::new(Box::new(
+        let _tracer = Arc::new(BoxedTracer::new(Box::new(
             tracer_provider.tracer("test_tracer"),
         )));
 
-        let mut layer = LayerBuilder::builder()
+        let layer = LayerBuilder::builder()
             .with_route_extractor(PathExtractor)
+            .with_tracer_provider(tracer_provider.clone())
             .build()
             .unwrap();
-        layer.tracer = tracer.clone();
 
         let service = tower::service_fn(|_req: Request<String>| async {
             let cx = OtelContext::current();
@@ -964,15 +1022,15 @@ mod tests {
             .with_simple_exporter(trace_exporter.clone())
             .build();
 
-        let tracer = Arc::new(BoxedTracer::new(Box::new(
+        let _tracer = Arc::new(BoxedTracer::new(Box::new(
             tracer_provider.tracer("test_tracer"),
         )));
 
-        let mut layer = LayerBuilder::builder()
+        let layer = LayerBuilder::builder()
             .with_route_extractor(NoRouteExtractor)
+            .with_tracer_provider(tracer_provider.clone())
             .build()
             .unwrap();
-        layer.tracer = tracer.clone();
 
         let service = tower::service_fn(|_req: Request<String>| async {
             Ok::<_, std::convert::Infallible>(
@@ -1007,15 +1065,15 @@ mod tests {
             .with_simple_exporter(trace_exporter.clone())
             .build();
 
-        let tracer = Arc::new(BoxedTracer::new(Box::new(
+        let _tracer = Arc::new(BoxedTracer::new(Box::new(
             tracer_provider.tracer("test_tracer"),
         )));
 
-        let mut layer = LayerBuilder::builder()
+        let layer = LayerBuilder::builder()
             .with_route_extractor(PathExtractor)
+            .with_tracer_provider(tracer_provider.clone())
             .build()
             .unwrap();
-        layer.tracer = tracer.clone();
 
         let service = tower::service_fn(|_req: Request<String>| async {
             Ok::<_, std::convert::Infallible>(
@@ -1050,11 +1108,11 @@ mod tests {
             .with_simple_exporter(trace_exporter.clone())
             .build();
 
-        let tracer = Arc::new(BoxedTracer::new(Box::new(
+        let _tracer = Arc::new(BoxedTracer::new(Box::new(
             tracer_provider.tracer("test_tracer"),
         )));
 
-        let mut layer = LayerBuilder::builder()
+        let layer = LayerBuilder::builder()
             .with_route_extractor_fn(|req: &Request<String>| {
                 let path = req.uri().path();
                 let normalized = path
@@ -1070,9 +1128,9 @@ mod tests {
                     .join("/");
                 Some(normalized)
             })
+            .with_tracer_provider(tracer_provider.clone())
             .build()
             .unwrap();
-        layer.tracer = tracer.clone();
 
         let service = tower::service_fn(|_req: Request<String>| async {
             Ok::<_, std::convert::Infallible>(
@@ -1108,15 +1166,15 @@ mod tests {
             .with_simple_exporter(trace_exporter.clone())
             .build();
 
-        let tracer = Arc::new(BoxedTracer::new(Box::new(
+        let _tracer = Arc::new(BoxedTracer::new(Box::new(
             tracer_provider.tracer("test_tracer"),
         )));
 
-        let mut layer = LayerBuilder::builder()
+        let layer = LayerBuilder::builder()
             .with_route_extractor(AxumMatchedPathExtractor)
+            .with_tracer_provider(tracer_provider.clone())
             .build()
             .unwrap();
-        layer.tracer = tracer.clone();
 
         let service = tower::service_fn(|_req: Request<String>| async {
             Ok::<_, std::convert::Infallible>(
@@ -1142,5 +1200,89 @@ mod tests {
         let spans = trace_exporter.get_finished_spans().unwrap();
         assert_eq!(spans.len(), 1, "Expected one HTTP span");
         assert_eq!(spans[0].name, "GET");
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn test_with_tracing_false_produces_no_spans() {
+        let trace_exporter = InMemorySpanExporterBuilder::new().build();
+        let tracer_provider = SdkTracerProvider::builder()
+            .with_simple_exporter(trace_exporter.clone())
+            .build();
+
+        let layer = LayerBuilder::builder()
+            .with_route_extractor(PathExtractor)
+            .with_tracer_provider(tracer_provider.clone())
+            .with_tracing(false)
+            .build()
+            .unwrap();
+
+        let service = tower::service_fn(|_req: Request<String>| async {
+            Ok::<_, std::convert::Infallible>(
+                Response::builder()
+                    .status(StatusCode::OK)
+                    .body(String::from("OK"))
+                    .unwrap(),
+            )
+        });
+
+        let mut service = layer.layer(service);
+
+        let request = Request::builder()
+            .method("GET")
+            .uri("http://example.com/test")
+            .body("test".to_string())
+            .unwrap();
+
+        let _response = service.call(request).await.unwrap();
+
+        tracer_provider.force_flush().unwrap();
+
+        let spans = trace_exporter.get_finished_spans().unwrap();
+        assert!(
+            spans.is_empty(),
+            "Expected no spans when tracing is disabled"
+        );
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn test_with_metrics_false_produces_no_metrics() {
+        let exporter = InMemoryMetricExporter::default();
+        let reader = PeriodicReader::builder(exporter.clone())
+            .with_interval(Duration::from_millis(100))
+            .build();
+        let meter_provider = SdkMeterProvider::builder().with_reader(reader).build();
+
+        let layer = LayerBuilder::builder()
+            .with_meter_provider(meter_provider.clone())
+            .with_metrics(false)
+            .build()
+            .unwrap();
+
+        let service = tower::service_fn(|_req: Request<String>| async {
+            Ok::<_, std::convert::Infallible>(
+                Response::builder()
+                    .status(StatusCode::OK)
+                    .body(String::from("OK"))
+                    .unwrap(),
+            )
+        });
+
+        let mut service = layer.layer(service);
+
+        let request = Request::builder()
+            .method("GET")
+            .uri("https://example.com/test")
+            .body("test body".to_string())
+            .unwrap();
+
+        let _response = service.call(request).await.unwrap();
+
+        tokio::time::sleep(Duration::from_millis(500)).await;
+
+        let metrics = exporter.get_finished_metrics().unwrap();
+        assert!(
+            metrics.is_empty(),
+            "Expected no metrics when metrics is disabled"
+        );
     }
 }
