@@ -75,8 +75,7 @@ const EKS_CLUSTER_NAME_ENV_VAR: &str = "AWS_CLUSTER_NAME";
 /// 1. the service-account namespace file must be readable, which proves the
 ///    process runs in a Kubernetes pod;
 /// 2. something must tie that pod to AWS — either a parsable instance identity
-///    document from IMDSv2, or one of the `AWS_CLUSTER_NAME` and `AWS_REGION`
-///    environment variables.
+///    document from IMDSv2, or the `AWS_CLUSTER_NAME` environment variables.
 ///
 /// # `k8s.cluster.name` may require configuration
 ///
@@ -166,6 +165,10 @@ impl EksResourceDetector {
         let document = imds
             .as_ref()
             .and_then(|imds| warn_on_error(DETECTOR, imds.get_identity_document()));
+
+        // We are on an AWS EC2 instance if we were able to retrieve the Instance Identity doc
+        let on_aws_ec2_node = document.is_some();
+
         let (region, account_id, ec2_document_attributes) = document
             .map(|document| {
                 let host_arch = document
@@ -185,33 +188,34 @@ impl EksResourceDetector {
             })
             .unwrap_or_default();
 
-        // Region and account ID — identity document first, then env var
-        let region = region.or_else(|| std::env::var("AWS_REGION").ok());
-        let account_id = account_id.or_else(|| std::env::var("AWS_ACCOUNT_ID").ok());
-
-        // Cluster name — from the node's EKS instance tag if exposed through IMDS, then from an env var.
-        // The tag is absent unless instance tags in metadata are enabled, which
-        // is not the default, so its absence is not worth a warning.
-        let cluster_name = imds
-            .as_ref()
-            .and_then(|imds| debug_on_error(DETECTOR, imds.get(EKS_CLUSTER_NAME_TAG_PATH)))
-            .and_then(non_empty)
-            .or_else(|| std::env::var(EKS_CLUSTER_NAME_ENV_VAR).ok())
-            .ok_or(EksError::ClusterNameNotFound);
+        // Cluster name — from the node's EKS instance tag if exposed through IMDS (which is not the case by default),
+        // then from an env var.
+        let cluster_name = warn_on_error(
+            DETECTOR,
+            imds.as_ref()
+                .and_then(|imds| debug_on_error(DETECTOR, imds.get(EKS_CLUSTER_NAME_TAG_PATH)))
+                .and_then(non_empty)
+                .or_else(|| std::env::var(EKS_CLUSTER_NAME_ENV_VAR).ok())
+                .ok_or(EksError::ClusterNameNotFound),
+        );
 
         // AWS probe: a service-account mount only proves Kubernetes, which GKE,
         // AKS and self-managed clusters have too. Something has to tie the pod
-        // to AWS before `cloud.platform` may claim EKS.
-        let Some(cluster_name) = warn_on_error(DETECTOR, cluster_name) else {
+        // to AWS, or we return an empty response.
+        if !on_aws_ec2_node && cluster_name.is_none() {
             // Kubernetes, but nothing says EKS: return empty resource
             return Resource::builder_empty().build();
         };
 
+        // Region and account ID — identity document first, then env var
+        let region = region.or_else(|| std::env::var("AWS_REGION").ok());
+        let account_id = account_id.or_else(|| std::env::var("AWS_ACCOUNT_ID").ok());
+
         // The cluster ARN needs a partition, which costs an extra IMDS request,
         // so it is only fetched once the rest of the ARN is known.
         // If partition is not retrievable from IMDS, assume "aws".
-        let cluster_arn = match (&region, &account_id) {
-            (Some(region), Some(account_id)) => {
+        let cluster_arn = match (&region, &account_id, &cluster_name) {
+            (Some(region), Some(account_id), Some(cluster_name)) => {
                 let partition = imds
                     .as_ref()
                     .and_then(|imds| warn_on_error(DETECTOR, imds.get("services/partition")))
@@ -236,7 +240,7 @@ impl EksResourceDetector {
             opt_kv(semco::K8S_POD_UID, std::env::var("POD_UID").ok()),
             // Node name — requires the downward API to expose spec.nodeName as NODE_NAME
             opt_kv(semco::K8S_NODE_NAME, std::env::var("NODE_NAME").ok()),
-            Some(KeyValue::new(semco::K8S_CLUSTER_NAME, cluster_name)),
+            opt_kv(semco::K8S_CLUSTER_NAME, cluster_name),
             opt_kv(semco::AWS_EKS_CLUSTER_ARN, cluster_arn),
             // Container ID — from cgroup, then from the mount table
             opt_kv(
