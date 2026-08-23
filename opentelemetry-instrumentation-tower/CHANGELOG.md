@@ -4,7 +4,6 @@
 
 ### Added
 
-
 * `http::server::LayerBuilder::with_tracing(bool)` and
   `http::server::LayerBuilder::with_metrics(bool)` to enable or disable each
   signal for a layer (both default to enabled). Disabling tracing does not stop
