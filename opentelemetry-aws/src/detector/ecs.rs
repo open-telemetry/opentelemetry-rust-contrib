@@ -121,14 +121,13 @@ impl EcsResourceDetector {
         imds: impl FnOnce() -> Result<I, ImdsError>,
     ) -> Resource {
         // Platform probe: the metadata URI is injected by the ECS agent, so its
-        // absence is the normal case off-platform and only worth a debug event.
+        // absence is the normal case off-platform.
         let Some(ecs_metadata) = info_on_error(DETECTOR, ecs) else {
             // Not ECS, return empty resource
             return Resource::builder_empty().build();
         };
 
-        // Past this point the environment is known to be ECS, so anything that
-        // still fails is unexpected and reported as a warning.
+        // Past this point the environment is known to be ECS.
         let task = warn_on_error(DETECTOR, ecs_metadata.get_task_metadata());
         // Partition, region and account ID of the task ARN, from which every
         // other ARN is derived. Parsed before `task` is consumed below.
@@ -136,6 +135,7 @@ impl EcsResourceDetector {
             .as_ref()
             .and_then(|task| task.task_arn.as_deref())
             .and_then(Arn::parse);
+        
         // The task metadata endpoint only reports `AvailabilityZone` on the
         // Fargate launch type, so the EC2 launch type is detected here to
         // decide whether IMDS should be probed to fill the gap. Borrowed

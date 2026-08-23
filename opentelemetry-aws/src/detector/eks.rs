@@ -153,8 +153,7 @@ impl EksResourceDetector {
         mountinfo_path: &Path,
     ) -> Resource {
         // Kubernetes probe: without the service-account mount, this is not a
-        // pod at all. An unreadable file is the normal case off-Kubernetes and
-        // so is only worth an info event.
+        // pod at all. An unreadable file is the normal case off-Kubernetes.
         let Some(namespace) = info_on_error(DETECTOR, get_namespace(namespace_path)) else {
             // Not Kubernetes, return empty resource
             return Resource::builder_empty().build();
