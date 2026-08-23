@@ -830,6 +830,59 @@ mod tests {
     }
 
     #[tokio::test(flavor = "current_thread")]
+    async fn test_default_no_route_extractor_low_cardinality_span_names() {
+        let trace_exporter = InMemorySpanExporterBuilder::new().build();
+        let tracer_provider = SdkTracerProvider::builder()
+            .with_simple_exporter(trace_exporter.clone())
+            .build();
+        let tracer = Arc::new(BoxedTracer::new(Box::new(
+            tracer_provider.tracer("test_tracer"),
+        )));
+
+        // Default builder uses NoRouteExtractor, which returns None for every
+        // request. Span names should be method-only (e.g. "GET") regardless of
+        // the request path, and no http.route attribute should be set.
+        let mut layer = LayerBuilder::builder().build().unwrap();
+        layer.tracer = tracer.clone();
+
+        let mut service = ServiceBuilder::new()
+            .layer(layer)
+            .service(tower::service_fn(|_req: Request<String>| async {
+                Ok::<_, std::convert::Infallible>(
+                    Response::builder()
+                        .status(StatusCode::OK)
+                        .body(String::from("OK"))
+                        .unwrap(),
+                )
+            }));
+
+        let request = Request::builder()
+            .method("GET")
+            .uri("http://example.com/api/users/123")
+            .body("test".to_string())
+            .unwrap();
+        service.ready().await.unwrap().call(request).await.unwrap();
+
+        tracer_provider.force_flush().unwrap();
+
+        let spans = trace_exporter.get_finished_spans().unwrap();
+        assert_eq!(spans.len(), 1);
+
+        let span = &spans[0];
+        assert_eq!(
+            span.name, "GET",
+            "span name should be method-only, got: {}",
+            span.name
+        );
+        assert!(
+            span.attributes
+                .iter()
+                .all(|kv| kv.key.as_str() != semconv::attribute::HTTP_ROUTE),
+            "no http.route attribute should be set when using the default NoRouteExtractor"
+        );
+    }
+
+    #[tokio::test(flavor = "current_thread")]
     async fn test_with_metrics_disabled_records_no_metrics() {
         let exporter = InMemoryMetricExporter::default();
         let reader = PeriodicReader::builder(exporter.clone())
