@@ -216,12 +216,7 @@ impl EksResourceDetector {
         // If partition is not retrievable from IMDS, assume "aws".
         let cluster_arn = match (&region, &account_id, &cluster_name) {
             (Some(region), Some(account_id), Some(cluster_name)) => {
-                let partition = imds
-                    .as_ref()
-                    .and_then(|imds| warn_on_error(DETECTOR, imds.get("services/partition")))
-                    .and_then(non_empty)
-                    .unwrap_or_else(|| "aws".to_owned());
-
+                let partition = map_region_to_partition(region);
                 Some(format!(
                     "arn:{partition}:eks:{region}:{account_id}:cluster/{cluster_name}"
                 ))
@@ -374,6 +369,27 @@ fn container_id_from_mountinfo_line(line: &str) -> Option<&str> {
 fn is_valid_container_id(candidate: &str) -> bool {
     (MIN_CONTAINER_ID_LEN..=MAX_CONTAINER_ID_LEN).contains(&candidate.len())
         && candidate.bytes().all(|b| b.is_ascii_hexdigit())
+}
+
+/// Map the AWS Region string to the corresponding partition.
+///
+/// The authoritative region→partition rules are published by AWS in
+/// `botocore/data/partitions.json`.
+/// See https://github.com/boto/botocore/blob/develop/botocore/data/partitions.json
+fn map_region_to_partition(region: &str) -> &'static str {
+    // Specific prefixes must be tested before the generic single-word prefixes
+    // they share (e.g. "us-iso-" before "us-", "us-gov-" before "us-").
+    match region {
+        r if r.starts_with("eusc-") => "aws-eusc",
+        r if r.starts_with("cn-") => "aws-cn",
+        r if r.starts_with("us-gov-") => "aws-us-gov",
+        r if r.starts_with("us-iso-") => "aws-iso",
+        r if r.starts_with("us-isob-") => "aws-iso-b",
+        r if r.starts_with("us-isof-") => "aws-iso-f",
+        r if r.starts_with("eu-isoe-") => "aws-iso-e",
+        // Avoids the need for maintenance when a "regular" new region pops.
+        _ => "aws",
+    }
 }
 
 #[cfg(test)]
@@ -565,6 +581,87 @@ mod tests {
     }
 
     // ── Not Kubernetes → empty resource ──────────────────────────────────────
+
+    // ---------------------------------------------------------------------------
+    // map_region_to_partition
+    // ---------------------------------------------------------------------------
+
+    #[test]
+    fn partition_default_aws() {
+        // Standard commercial regions — several geographic prefixes.
+        for region in &[
+            "us-east-1",
+            "us-west-2",
+            "eu-west-1",
+            "eu-central-1",
+            "ap-southeast-2",
+            "ap-northeast-1",
+            "sa-east-1",
+            "ca-central-1",
+            "me-south-1",
+            "af-south-1",
+            "il-central-1",
+            "mx-central-1",
+        ] {
+            assert_eq!(
+                map_region_to_partition(region),
+                "aws",
+                "expected partition 'aws' for region '{region}'"
+            );
+        }
+    }
+
+    #[test]
+    fn partition_aws_cn() {
+        assert_eq!(map_region_to_partition("cn-north-1"), "aws-cn");
+        assert_eq!(map_region_to_partition("cn-northwest-1"), "aws-cn");
+    }
+
+    #[test]
+    fn partition_aws_us_gov() {
+        assert_eq!(map_region_to_partition("us-gov-east-1"), "aws-us-gov");
+        assert_eq!(map_region_to_partition("us-gov-west-1"), "aws-us-gov");
+    }
+
+    #[test]
+    fn partition_aws_eusc() {
+        assert_eq!(map_region_to_partition("eusc-de-east-1"), "aws-eusc");
+    }
+
+    #[test]
+    fn partition_aws_iso() {
+        assert_eq!(map_region_to_partition("us-iso-east-1"), "aws-iso");
+        assert_eq!(map_region_to_partition("us-iso-west-1"), "aws-iso");
+    }
+
+    #[test]
+    fn partition_aws_iso_b() {
+        assert_eq!(map_region_to_partition("us-isob-east-1"), "aws-iso-b");
+        assert_eq!(map_region_to_partition("us-isob-west-1"), "aws-iso-b");
+    }
+
+    #[test]
+    fn partition_aws_iso_e() {
+        assert_eq!(map_region_to_partition("eu-isoe-west-1"), "aws-iso-e");
+    }
+
+    #[test]
+    fn partition_aws_iso_f() {
+        assert_eq!(map_region_to_partition("us-isof-east-1"), "aws-iso-f");
+        assert_eq!(map_region_to_partition("us-isof-south-1"), "aws-iso-f");
+    }
+
+    #[test]
+    fn partition_fallback_for_unknown_and_empty() {
+        // Unknown strings fall back to the default partition.
+        assert_eq!(map_region_to_partition(""), "aws");
+        assert_eq!(map_region_to_partition("garbage"), "aws");
+        assert_eq!(map_region_to_partition("unknown-region-99"), "aws");
+    }
+
+    // ---------------------------------------------------------------------------
+    // detect_from
+    // ---------------------------------------------------------------------------
 
     #[sealed_test]
     fn detect_from_no_namespace_file_returns_empty() {
