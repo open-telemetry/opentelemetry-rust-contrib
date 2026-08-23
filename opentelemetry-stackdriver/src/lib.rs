@@ -58,6 +58,7 @@ use tonic::{transport::Channel, Code, Request};
 
 #[allow(clippy::derive_partial_eq_without_eq)] // tonic doesn't derive Eq for generated types
 #[allow(clippy::doc_overindented_list_items)]
+#[allow(clippy::result_large_err)] // large tonic Status error; generated code we don't hand-edit
 pub mod proto;
 
 #[cfg(feature = "propagator")]

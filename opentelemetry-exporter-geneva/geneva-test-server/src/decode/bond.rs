@@ -197,9 +197,10 @@ fn read_bond_string(cursor: &mut Cursor<&[u8]>) -> Result<String> {
 fn read_bond_wstring(cursor: &mut Cursor<&[u8]>) -> Result<String> {
     let char_count = read_u32(cursor)? as usize;
     let bytes = read_exact(cursor, char_count * 2)?;
-    let utf16 = bytes
-        .chunks_exact(2)
-        .map(|chunk| u16::from_le_bytes([chunk[0], chunk[1]]))
+    let (chunks, _) = bytes.as_chunks::<2>();
+    let utf16 = chunks
+        .iter()
+        .map(|&chunk| u16::from_le_bytes(chunk))
         .collect::<Vec<_>>();
     String::from_utf16(&utf16).context("invalid UTF-16 string")
 }

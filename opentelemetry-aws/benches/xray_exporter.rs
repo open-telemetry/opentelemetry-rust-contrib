@@ -513,6 +513,7 @@ fn create_parent_span(
 }
 
 /// Creates a child (Client) span based on the child span type
+#[allow(clippy::needless_late_init)]
 fn create_child_span(
     trace_id: TraceId,
     span_id: SpanId,
