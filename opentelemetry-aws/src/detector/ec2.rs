@@ -29,28 +29,13 @@ const DETECTOR: &str = "aws_ec2";
 /// | `host.arch`               | identity document `architecture`, mapped to `host.arch` values |
 /// | `host.name`               | `/latest/meta-data/hostname`                                   |
 ///
-/// All but `host.name` come from the instance identity document
-/// (`/latest/dynamic/instance-identity/document`), so detection costs three
-/// requests in total: the IMDSv2 token, the document and the hostname.
-///
 /// Values that cannot be found are skipped.
 ///
-/// # Feature flag
-///
-/// This type is only available when the `detector-aws-ec2` Cargo feature is
-/// enabled.
-///
-/// # Behavior
-///
-/// Detection is best-effort. Any IMDSv2 call that fails (network error, HTTP
-/// error, or JSON parse error) is silently skipped and the corresponding
-/// attribute is omitted from the returned [`Resource`].
+/// # Probing
 ///
 /// The platform probe is the acquisition of an IMDSv2 session token *and* the
 /// successful parse of the instance identity document. Unless both succeed the
-/// environment is assumed not to be EC2 and an empty [`Resource`] is returned,
-/// so that `cloud.provider` and `cloud.platform` are never asserted
-/// off-platform.
+/// environment is assumed not to be EC2 and an empty [`Resource`] is returned.
 ///
 /// # Blocking
 ///

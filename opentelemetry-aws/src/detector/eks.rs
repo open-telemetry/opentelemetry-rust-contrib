@@ -58,24 +58,15 @@ const EKS_CLUSTER_NAME_ENV_VAR: &str = "AWS_CLUSTER_NAME";
 ///
 /// Values that cannot be found are skipped.
 ///
-/// # Feature flag
+/// # Probing
 ///
-/// This type is only available when the `detector-aws-eks` Cargo feature is
-/// enabled.
-///
-/// # Behavior
-///
-/// Detection is best-effort. Any operation that fails (file read error, IMDSv2
-/// network error, missing environment variable) is silently skipped and the
-/// corresponding attribute is omitted from the returned [`Resource`].
-///
-/// Detection is gated on two probes, both of which must pass before
-/// `cloud.provider` and `cloud.platform` are asserted:
+/// Detection of EKS is gated on two probes:
 ///
 /// 1. the service-account namespace file must be readable, which proves the
 ///    process runs in a Kubernetes pod;
 /// 2. something must tie that pod to AWS — either a parsable instance identity
-///    document from IMDSv2, or the `AWS_CLUSTER_NAME` environment variables.
+///    document from IMDSv2, or a cluster name (from the EC2 instance tag via
+///    IMDSv2 or the `AWS_CLUSTER_NAME` environment variable).
 ///
 /// # `k8s.cluster.name` may require configuration
 ///
@@ -89,9 +80,7 @@ const EKS_CLUSTER_NAME_ENV_VAR: &str = "AWS_CLUSTER_NAME";
 /// alternative that does not depend on this detector.
 ///
 /// `aws.eks.cluster.arn` is built from the cluster name, so it inherits the
-/// same requirement, and additionally needs the region, the account ID and the
-/// partition. The partition is only available from IMDSv2, so the ARN is never
-/// reported when IMDS is unreachable, even if the cluster name is configured.
+/// same requirement, and additionally needs the region and the account ID.
 ///
 /// # `k8s.pod.uid` and `k8s.node.name` require the downward API
 ///
@@ -259,7 +248,8 @@ impl EksResourceDetector {
 }
 
 /// Errors that can arise during EKS detection: filesystem reads, an empty
-/// namespace file, or no container ID anywhere in the cgroup or mount files.
+/// namespace file, no container ID anywhere in the cgroup or mount files, or a
+/// cluster name that could not be found.
 #[derive(Debug, Error)]
 enum EksError {
     #[error("Cannot read file {path}: {error}")]

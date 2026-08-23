@@ -28,63 +28,43 @@ const AWSLOGS_DRIVER: &str = "awslogs";
 /// via the `ECS_CONTAINER_METADATA_URI_V4` environment variable and returns an
 /// OTel [`Resource`] with the following attributes:
 ///
-/// | OTel attribute            | Source                                                                      |
-/// |---------------------------|-----------------------------------------------------------------------------|
-/// | `cloud.provider`          | hardcoded `"aws"`                                                           |
-/// | `cloud.platform`          | hardcoded `"aws_ecs"`                                                       |
-/// | `cloud.region`            | task ARN region segment                                                     |
-/// | `cloud.account.id`        | task ARN account-id segment                                                 |
-/// | `cloud.availability_zone` | task metadata `AvailabilityZone` on Fargate; falls back to the identity document `availabilityZone` on the EC2 launch type, via IMDS |
-/// | `cloud.resource_id`       | container metadata `ContainerARN`                                           |
-/// | `aws.ecs.cluster.arn`     | task metadata `Cluster`, expanded to an ARN when it is a bare cluster name  |
-/// | `aws.ecs.task.arn`        | task metadata `TaskARN`                                                     |
-/// | `aws.ecs.task.id`         | last segment of the task ARN resource part                                  |
-/// | `aws.ecs.task.family`     | task metadata `Family`                                                      |
-/// | `aws.ecs.task.revision`   | task metadata `Revision`                                                    |
-/// | `aws.ecs.launchtype`      | task metadata `LaunchType`, lowercased (`ec2` or `fargate`)                 |
-/// | `aws.ecs.container.arn`   | container metadata `ContainerARN`                                           |
-/// | `container.id`            | container metadata `DockerId`                                               |
-/// | `container.name`          | container metadata `Name`                                                   |
-/// | `container.image.name`    | container metadata `Image`, without the tag and digest                      |
-/// | `container.image.tags`    | tag parsed from container metadata `Image`                                  |
-/// | `container.image.repo_digests` | container metadata `Image`, when it pins a digest                      |
-/// | `container.image.id`      | container metadata `ImageID`                                                |
-/// | `aws.log.group.names`     | `LogOptions.awslogs-group`, when `LogDriver` is `awslogs`                   |
-/// | `aws.log.group.arns`      | built from the log group, partition, account and CloudWatch region          |
-/// | `aws.log.stream.names`    | `LogOptions.awslogs-stream`, when `LogDriver` is `awslogs`                  |
-/// | `aws.log.stream.arns`     | built from the log group, log stream, partition, account and region         |
-/// | `host.id`                 | identity document `instanceId` (EC2 launch type only, via IMDS)             |
-/// | `host.type`               | identity document `instanceType` (EC2 launch type only, via IMDS)           |
-/// | `host.image.id`           | identity document `imageId` (EC2 launch type only, via IMDS)                |
-/// | `host.arch`               | identity document `architecture`, mapped to `host.arch` values (EC2 launch type only, via IMDS) |
-/// | `host.name`               | `/latest/meta-data/hostname` (EC2 launch type only, via IMDS)               |
+/// | OTel attribute                 | Source                                                                                           |
+/// |--------------------------------|--------------------------------------------------------------------------------------------------|
+/// | `cloud.provider`               | hardcoded `"aws"`                                                                                |
+/// | `cloud.platform`               | hardcoded `"aws_ecs"`                                                                            |
+/// | `cloud.region`                 | task ARN region segment                                                                          |
+/// | `cloud.account.id`             | task ARN account-id segment                                                                      |
+/// | `cloud.availability_zone`      | task metadata `AvailabilityZone` on Fargate; IMDS identity document `availabilityZone` on the EC2 launch type |
+/// | `cloud.resource_id`            | container metadata `ContainerARN`                                                                |
+/// | `aws.ecs.cluster.arn`          | task metadata `Cluster`, expanded to an ARN when it is a bare cluster name                       |
+/// | `aws.ecs.task.arn`             | task metadata `TaskARN`                                                                          |
+/// | `aws.ecs.task.id`              | last segment of the task ARN resource part                                                       |
+/// | `aws.ecs.task.family`          | task metadata `Family`                                                                           |
+/// | `aws.ecs.task.revision`        | task metadata `Revision`                                                                         |
+/// | `aws.ecs.launchtype`           | task metadata `LaunchType`, lowercased (`ec2` or `fargate`)                                      |
+/// | `aws.ecs.container.arn`        | container metadata `ContainerARN`                                                                |
+/// | `container.id`                 | container metadata `DockerId`                                                                    |
+/// | `container.name`               | container metadata `Name`                                                                        |
+/// | `container.image.name`         | container metadata `Image`, without the tag and digest                                           |
+/// | `container.image.tags`         | tag parsed from container metadata `Image`                                                       |
+/// | `container.image.repo_digests` | container metadata `Image`, when it pins a digest                                                |
+/// | `container.image.id`           | container metadata `ImageID`                                                                     |
+/// | `aws.log.group.names`          | `LogOptions.awslogs-group`, when `LogDriver` is `awslogs`                                        |
+/// | `aws.log.group.arns`           | built from the log group, partition, account and CloudWatch region                               |
+/// | `aws.log.stream.names`         | `LogOptions.awslogs-stream`, when `LogDriver` is `awslogs`                                       |
+/// | `aws.log.stream.arns`          | built from the log group, log stream, partition, account and region                              |
+/// | `host.id`                      | identity document `instanceId` (EC2 launch type only, via IMDS)                                  |
+/// | `host.type`                    | identity document `instanceType` (EC2 launch type only, via IMDS)                                |
+/// | `host.image.id`                | identity document `imageId` (EC2 launch type only, via IMDS)                                     |
+/// | `host.arch`                    | identity document `architecture`, mapped to `host.arch` values (EC2 launch type only, via IMDS)  |
+/// | `host.name`                    | `/latest/meta-data/hostname` (EC2 launch type only, via IMDS)                                    |
 ///
 /// Values that cannot be found are skipped.
 ///
-/// # Feature flag
-///
-/// This type is only available when the `detector-aws-ecs` Cargo feature is
-/// enabled.
-///
-/// # Behavior
-///
-/// Detection is best-effort. Any metadata request that fails (network error,
-/// HTTP error, or JSON parse error) is silently skipped and the corresponding
-/// attribute is omitted from the returned [`Resource`].
+/// # Probing
 ///
 /// If `ECS_CONTAINER_METADATA_URI_V4` is unset the environment is assumed not to
-/// be ECS and an empty [`Resource`] is returned, so that `cloud.provider` and
-/// `cloud.platform` are never asserted off-platform.
-///
-/// The ARN-derived attributes all come from the task ARN. When it is absent or
-/// malformed, `cloud.region`, `cloud.account.id`, `aws.ecs.task.id`, the
-/// `aws.log.*.arns` and a synthesised `aws.ecs.cluster.arn` are all omitted.
-///
-/// On the EC2 launch type, the task metadata endpoint carries neither
-/// `host.*` nor `AvailabilityZone`, so they are read from the EC2 instance's IMDSv2
-/// endpoint instead. IMDS is unreachable on Fargate, so it is only probed
-/// once the EC2 launch type is confirmed from the task metadata, and all of
-/// these attributes are omitted otherwise.
+/// be ECS and an empty [`Resource`] is returned.
 ///
 /// # Blocking
 ///
@@ -135,7 +115,7 @@ impl EcsResourceDetector {
             .as_ref()
             .and_then(|task| task.task_arn.as_deref())
             .and_then(Arn::parse);
-        
+
         // The task metadata endpoint only reports `AvailabilityZone` on the
         // Fargate launch type, so the EC2 launch type is detected here to
         // decide whether IMDS should be probed to fill the gap. Borrowed
