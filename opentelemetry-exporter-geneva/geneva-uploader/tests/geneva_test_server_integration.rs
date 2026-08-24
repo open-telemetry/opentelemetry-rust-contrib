@@ -1,5 +1,7 @@
 use geneva_test_server::testing::TestServer;
-use geneva_uploader::{AuthMethod, GenevaClient, GenevaClientConfig, LogsConfig, TracesConfig};
+use geneva_uploader::{
+    AccountRouting, AuthMethod, GenevaClient, GenevaClientConfig, LogsConfig, TracesConfig,
+};
 use opentelemetry_proto::tonic::collector::logs::v1::ExportLogsServiceRequest;
 use opentelemetry_proto::tonic::common::v1::{any_value::Value, AnyValue, KeyValue};
 use opentelemetry_proto::tonic::logs::v1::{LogRecord, ResourceLogs, ScopeLogs};
@@ -16,6 +18,7 @@ async fn uploader_batch_is_accepted_and_decoded_by_test_server() {
         environment: "testenv".to_string(),
         account: "testaccount".to_string(),
         namespace: "TestNamespace".to_string(),
+        account_routing: AccountRouting::new("diag-test-account-group"),
         region: "testregion".to_string(),
         config_major_version: 1,
         auth_method: AuthMethod::MockAuth,

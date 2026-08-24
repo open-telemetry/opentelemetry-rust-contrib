@@ -116,6 +116,7 @@ fn read_utf16le_string_u16(cursor: &mut Cursor<&[u8]>) -> Result<String> {
     read_utf16le_string(cursor, len)
 }
 
+#[allow(clippy::chunks_exact_to_as_chunks)]
 fn read_utf16le_string(cursor: &mut Cursor<&[u8]>, len: usize) -> Result<String> {
     let bytes = read_exact(cursor, len)?;
     if bytes.len() % 2 != 0 {
