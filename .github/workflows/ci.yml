@@ -56,7 +56,7 @@ jobs:
       run: rustup show active-toolchain
     - name: Install Rust beta
       if: ${{ matrix.rust == 'beta' }}
-      run: rustup toolchain install beta --profile minimal --component clippy
+      run: rustup toolchain install beta --profile minimal --component clippy,rustfmt
     - uses: arduino/setup-protoc@c65c819552d16ad3c9b72d9dfd5ba5237b9c906b # v3.0.0
       with:
         repo-token: ${{ secrets.GITHUB_TOKEN }}
