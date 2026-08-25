@@ -6,10 +6,8 @@ license = "Apache-2.0"
 edition = "2021"
 rust-version = "1.75.0"
 
-[workspace]
-
 [dependencies]
-opentelemetry-config = { path = "../../"}
-opentelemetry_sdk = "0.32.1"
+opentelemetry-config = { path = "../../" }
+opentelemetry_sdk = { workspace = true, features = ["metrics"] }
 serde = { version = "1.0", features = ["derive"] }
 serde_yaml = { version = "0.9.34" }
