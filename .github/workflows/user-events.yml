@@ -13,6 +13,7 @@ on:
       - 'opentelemetry-user-events-metrics/**'
       - 'opentelemetry-user-events-trace/**'
       - 'Cargo.toml'
+      - 'rust-toolchain.toml'
       - '.github/workflows/user-events.yml'
   merge_group:
   push:
@@ -23,6 +24,7 @@ on:
       - 'opentelemetry-user-events-metrics/**'
       - 'opentelemetry-user-events-trace/**'
       - 'Cargo.toml'
+      - 'rust-toolchain.toml'
       - '.github/workflows/user-events.yml'
 
 concurrency:
@@ -40,10 +42,10 @@ jobs:
     - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       with:
         submodules: true
-    - uses: dtolnay/rust-toolchain@2c7215f132e9ebf062739d9130488b56d53c060c
-      with:
-        toolchain: stable
-        components: llvm-tools-preview
+    - name: Resolve stable Rust pinned by rust-toolchain.toml
+      run: rustup show active-toolchain
+    - name: Install llvm-tools-preview for pinned stable Rust
+      run: rustup component add llvm-tools-preview
     - name: cargo install cargo-llvm-cov
       uses: taiki-e/install-action@16b05812d776ae1dfaabc8277e421fb6d2506419 # v2.82.7
       with:
