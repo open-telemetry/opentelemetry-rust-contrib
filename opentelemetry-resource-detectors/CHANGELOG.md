@@ -1,6 +1,8 @@
 # Changelog
 
-## vNext
+## v0.12.0
+
+Released 2026-Aug-27
 
 ### Added
 
