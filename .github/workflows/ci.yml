@@ -139,7 +139,7 @@ jobs:
           submodules: true
       - name: Resolve stable Rust pinned by rust-toolchain.toml
         run: rustup show active-toolchain
-      - uses: taiki-e/install-action@16b05812d776ae1dfaabc8277e421fb6d2506419 # v2.82.7
+      - uses: taiki-e/install-action@fcf5432d9f50d67e37ee6e29bdb7a224ff67b4a7 # v2.86.8
         with:
           tool: cargo-msrv
       # cargo-msrv verify runs `cargo check` in workspace context for each crate.
@@ -182,7 +182,7 @@ jobs:
           submodules: true
       - name: Install Rust 1.88.0
         run: rustup toolchain install 1.88.0 --profile minimal
-      - uses: taiki-e/install-action@16b05812d776ae1dfaabc8277e421fb6d2506419 # v2.82.7
+      - uses: taiki-e/install-action@fcf5432d9f50d67e37ee6e29bdb7a224ff67b4a7 # v2.86.8
         with:
           tool: cargo-msrv
       - name: Check MSRV for Geneva crates
@@ -241,7 +241,7 @@ jobs:
         with:
             repo-token: ${{ secrets.GITHUB_TOKEN }}
       - name: cargo install cargo-llvm-cov
-        uses: taiki-e/install-action@16b05812d776ae1dfaabc8277e421fb6d2506419 # v2.82.7
+        uses: taiki-e/install-action@fcf5432d9f50d67e37ee6e29bdb7a224ff67b4a7 # v2.86.8
         with:
           tool: cargo-llvm-cov
       - name: cargo generate-lockfile
@@ -267,7 +267,7 @@ jobs:
           submodules: true
       - name: Resolve stable Rust pinned by rust-toolchain.toml
         run: rustup show active-toolchain
-      - uses: taiki-e/install-action@16b05812d776ae1dfaabc8277e421fb6d2506419 # v2.82.7
+      - uses: taiki-e/install-action@fcf5432d9f50d67e37ee6e29bdb7a224ff67b4a7 # v2.86.8
         with:
           tool: cargo-machete
       - name: cargo machete
@@ -286,7 +286,7 @@ jobs:
           submodules: true
       - name: Resolve stable Rust pinned by rust-toolchain.toml
         run: rustup show active-toolchain
-      - uses: taiki-e/install-action@16b05812d776ae1dfaabc8277e421fb6d2506419 # v2.82.7
+      - uses: taiki-e/install-action@fcf5432d9f50d67e37ee6e29bdb7a224ff67b4a7 # v2.86.8
         with:
           tool: cargo-workspace-lints
       - name: cargo workspace-lints
