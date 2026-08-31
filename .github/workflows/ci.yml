@@ -20,10 +20,12 @@ jobs:
   test:
     strategy:
       matrix:
-        # test both stable and beta versions of Rust on ubuntu-latest
+        # `stable` means the version pinned in rust-toolchain.toml. The label is
+        # retained because branch rules require the existing check names.
+        # Beta uses the moving beta channel and is non-blocking.
         os: [ubuntu-latest]
         rust: [stable, beta]
-        # test only stable version of Rust on Windows and MacOS
+        # Run stable (pinned per rust-toolchain.toml) on additional platforms.
         include:
           - rust: stable
             os: windows-latest
@@ -35,7 +37,7 @@ jobs:
     continue-on-error: ${{ matrix.rust == 'beta' }}
     steps:
     - name: Harden the runner (Audit all outbound calls)
-      uses: step-security/harden-runner@bf7454d06d71f1098171f2acdf0cd4708d7b5920 # v2.20.0
+      uses: step-security/harden-runner@05e31511f85b41b11d1cf0ef85d0992719546e2c # v2.21.0
       with:
         egress-policy: audit
 
@@ -49,12 +51,12 @@ jobs:
     - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       with:
         submodules: true
-    - uses: dtolnay/rust-toolchain@2c7215f132e9ebf062739d9130488b56d53c060c
-      with:
-        toolchain: ${{ matrix.rust }}
-        components: rustfmt
-    - name: "Set rustup profile"
-      run: rustup set profile minimal
+    - name: Resolve stable Rust pinned by rust-toolchain.toml
+      if: ${{ matrix.rust == 'stable' }}
+      run: rustup show active-toolchain
+    - name: Install Rust beta
+      if: ${{ matrix.rust == 'beta' }}
+      run: rustup toolchain install beta --profile minimal --component clippy,rustfmt
     - uses: arduino/setup-protoc@c65c819552d16ad3c9b72d9dfd5ba5237b9c906b # v3.0.0
       with:
         repo-token: ${{ secrets.GITHUB_TOKEN }}
@@ -62,22 +64,30 @@ jobs:
       if: ${{ matrix.os == 'windows-latest'}}
       run: ./scripts/test.ps1
       shell: pwsh
+      env:
+        RUSTUP_TOOLCHAIN: ${{ matrix.rust == 'beta' && 'beta' || '' }}
     - name: Test (Unix)
       if: ${{ matrix.os != 'windows-latest'}}
       run: bash ./scripts/test.sh
+      env:
+        RUSTUP_TOOLCHAIN: ${{ matrix.rust == 'beta' && 'beta' || '' }}
+    - name: Lint with Rust beta
+      if: ${{ matrix.rust == 'beta' }}
+      run: cargo clippy --workspace --all-targets --all-features -- -Dwarnings
+      env:
+        RUSTUP_TOOLCHAIN: beta
   geneva-uploader-test-server-integration-test:
     runs-on: ubuntu-latest
     steps:
     - name: Harden the runner (Audit all outbound calls)
-      uses: step-security/harden-runner@bf7454d06d71f1098171f2acdf0cd4708d7b5920 # v2.20.0
+      uses: step-security/harden-runner@05e31511f85b41b11d1cf0ef85d0992719546e2c # v2.21.0
       with:
         egress-policy: audit
     - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       with:
         submodules: true
-    - uses: dtolnay/rust-toolchain@2c7215f132e9ebf062739d9130488b56d53c060c
-      with:
-        toolchain: stable
+    - name: Resolve stable Rust pinned by rust-toolchain.toml
+      run: rustup show active-toolchain
     - uses: arduino/setup-protoc@c65c819552d16ad3c9b72d9dfd5ba5237b9c906b # v3.0.0
       with:
         repo-token: ${{ secrets.GITHUB_TOKEN }}
@@ -91,17 +101,15 @@ jobs:
     runs-on: ${{ matrix.os }}
     steps:
     - name: Harden the runner (Audit all outbound calls)
-      uses: step-security/harden-runner@bf7454d06d71f1098171f2acdf0cd4708d7b5920 # v2.20.0
+      uses: step-security/harden-runner@05e31511f85b41b11d1cf0ef85d0992719546e2c # v2.21.0
       with:
         egress-policy: audit
 
     - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       with:
         submodules: true
-    - uses: dtolnay/rust-toolchain@2c7215f132e9ebf062739d9130488b56d53c060c
-      with:
-        toolchain: stable
-        components: rustfmt,clippy
+    - name: Resolve stable Rust pinned by rust-toolchain.toml
+      run: rustup show active-toolchain
     - uses: arduino/setup-protoc@c65c819552d16ad3c9b72d9dfd5ba5237b9c906b # v3.0.0
       with:
           repo-token: ${{ secrets.GITHUB_TOKEN }}
@@ -122,17 +130,16 @@ jobs:
     continue-on-error: true
     steps:
       - name: Harden the runner (Audit all outbound calls)
-        uses: step-security/harden-runner@bf7454d06d71f1098171f2acdf0cd4708d7b5920 # v2.20.0
+        uses: step-security/harden-runner@05e31511f85b41b11d1cf0ef85d0992719546e2c # v2.21.0
         with:
           egress-policy: audit
 
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           submodules: true
-      - uses: dtolnay/rust-toolchain@2c7215f132e9ebf062739d9130488b56d53c060c
-        with:
-          toolchain: stable
-      - uses: taiki-e/install-action@16b05812d776ae1dfaabc8277e421fb6d2506419 # v2.82.7
+      - name: Resolve stable Rust pinned by rust-toolchain.toml
+        run: rustup show active-toolchain
+      - uses: taiki-e/install-action@fcf5432d9f50d67e37ee6e29bdb7a224ff67b4a7 # v2.86.8
         with:
           tool: cargo-msrv
       # cargo-msrv verify runs `cargo check` in workspace context for each crate.
@@ -166,17 +173,16 @@ jobs:
     continue-on-error: true
     steps:
       - name: Harden the runner (Audit all outbound calls)
-        uses: step-security/harden-runner@bf7454d06d71f1098171f2acdf0cd4708d7b5920 # v2.20.0
+        uses: step-security/harden-runner@05e31511f85b41b11d1cf0ef85d0992719546e2c # v2.21.0
         with:
           egress-policy: audit
 
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           submodules: true
-      - uses: dtolnay/rust-toolchain@2c7215f132e9ebf062739d9130488b56d53c060c
-        with:
-          toolchain: 1.88.0
-      - uses: taiki-e/install-action@16b05812d776ae1dfaabc8277e421fb6d2506419 # v2.82.7
+      - name: Install Rust 1.88.0
+        run: rustup toolchain install 1.88.0 --profile minimal
+      - uses: taiki-e/install-action@fcf5432d9f50d67e37ee6e29bdb7a224ff67b4a7 # v2.86.8
         with:
           tool: cargo-msrv
       - name: Check MSRV for Geneva crates
@@ -188,7 +194,7 @@ jobs:
     continue-on-error: true # Prevent sudden announcement of a new advisory from failing ci
     steps:
       - name: Harden the runner (Audit all outbound calls)
-        uses: step-security/harden-runner@bf7454d06d71f1098171f2acdf0cd4708d7b5920 # v2.20.0
+        uses: step-security/harden-runner@05e31511f85b41b11d1cf0ef85d0992719546e2c # v2.21.0
         with:
           egress-policy: audit
 
@@ -201,13 +207,12 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Harden the runner (Audit all outbound calls)
-        uses: step-security/harden-runner@bf7454d06d71f1098171f2acdf0cd4708d7b5920 # v2.20.0
+        uses: step-security/harden-runner@05e31511f85b41b11d1cf0ef85d0992719546e2c # v2.21.0
         with:
           egress-policy: audit
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - uses: dtolnay/rust-toolchain@2c7215f132e9ebf062739d9130488b56d53c060c
-        with:
-          toolchain: stable
+      - name: Resolve stable Rust pinned by rust-toolchain.toml
+        run: rustup show active-toolchain
       - uses: arduino/setup-protoc@c65c819552d16ad3c9b72d9dfd5ba5237b9c906b # v3.0.0
         with:
             repo-token: ${{ secrets.GITHUB_TOKEN }}
@@ -221,22 +226,22 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Harden the runner (Audit all outbound calls)
-        uses: step-security/harden-runner@bf7454d06d71f1098171f2acdf0cd4708d7b5920 # v2.20.0
+        uses: step-security/harden-runner@05e31511f85b41b11d1cf0ef85d0992719546e2c # v2.21.0
         with:
           egress-policy: audit
 
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           submodules: true
-      - uses: dtolnay/rust-toolchain@2c7215f132e9ebf062739d9130488b56d53c060c
-        with:
-          toolchain: stable
-          components: llvm-tools-preview
+      - name: Resolve stable Rust pinned by rust-toolchain.toml
+        run: rustup show active-toolchain
+      - name: Install llvm-tools-preview for pinned stable Rust
+        run: rustup component add llvm-tools-preview
       - uses: arduino/setup-protoc@c65c819552d16ad3c9b72d9dfd5ba5237b9c906b # v3.0.0
         with:
             repo-token: ${{ secrets.GITHUB_TOKEN }}
       - name: cargo install cargo-llvm-cov
-        uses: taiki-e/install-action@16b05812d776ae1dfaabc8277e421fb6d2506419 # v2.82.7
+        uses: taiki-e/install-action@fcf5432d9f50d67e37ee6e29bdb7a224ff67b4a7 # v2.86.8
         with:
           tool: cargo-llvm-cov
       - name: cargo generate-lockfile
@@ -253,17 +258,16 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Harden the runner (Audit all outbound calls)
-        uses: step-security/harden-runner@bf7454d06d71f1098171f2acdf0cd4708d7b5920 # v2.20.0
+        uses: step-security/harden-runner@05e31511f85b41b11d1cf0ef85d0992719546e2c # v2.21.0
         with:
           egress-policy: audit
 
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           submodules: true
-      - uses: dtolnay/rust-toolchain@2c7215f132e9ebf062739d9130488b56d53c060c
-        with:
-          toolchain: stable
-      - uses: taiki-e/install-action@16b05812d776ae1dfaabc8277e421fb6d2506419 # v2.82.7
+      - name: Resolve stable Rust pinned by rust-toolchain.toml
+        run: rustup show active-toolchain
+      - uses: taiki-e/install-action@fcf5432d9f50d67e37ee6e29bdb7a224ff67b4a7 # v2.86.8
         with:
           tool: cargo-machete
       - name: cargo machete
@@ -273,17 +277,16 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Harden the runner (Audit all outbound calls)
-        uses: step-security/harden-runner@bf7454d06d71f1098171f2acdf0cd4708d7b5920 # v2.20.0
+        uses: step-security/harden-runner@05e31511f85b41b11d1cf0ef85d0992719546e2c # v2.21.0
         with:
           egress-policy: audit
 
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           submodules: true
-      - uses: dtolnay/rust-toolchain@2c7215f132e9ebf062739d9130488b56d53c060c
-        with:
-          toolchain: stable
-      - uses: taiki-e/install-action@16b05812d776ae1dfaabc8277e421fb6d2506419 # v2.82.7
+      - name: Resolve stable Rust pinned by rust-toolchain.toml
+        run: rustup show active-toolchain
+      - uses: taiki-e/install-action@fcf5432d9f50d67e37ee6e29bdb7a224ff67b4a7 # v2.86.8
         with:
           tool: cargo-workspace-lints
       - name: cargo workspace-lints
