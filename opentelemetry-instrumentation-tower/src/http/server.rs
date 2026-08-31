@@ -670,12 +670,12 @@ mod tests {
     use opentelemetry::trace::Span;
     use opentelemetry::trace::TracerProvider;
     use opentelemetry::trace::{FutureExt, TraceContextExt, Tracer};
+    use opentelemetry_http::HeaderInjector;
     use opentelemetry_sdk::metrics::SdkMeterProvider;
     use opentelemetry_sdk::metrics::{
         data::{AggregatedMetrics, MetricData},
         InMemoryMetricExporter, PeriodicReader,
     };
-    use opentelemetry_http::HeaderInjector;
     use opentelemetry_sdk::propagation::TraceContextPropagator;
     use opentelemetry_sdk::trace::{InMemorySpanExporterBuilder, SdkTracerProvider};
     use std::result::Result;
