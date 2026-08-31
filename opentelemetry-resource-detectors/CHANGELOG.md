@@ -1,12 +1,19 @@
 # Changelog
 
-## vNext
+## v0.12.0
+
+Released 2026-Aug-27
 
 ### Added
 
 - Add `ContainerResourceDetector` to detect `container.id` from `/proc/self/cgroup`, with fallback to `/proc/self/mountinfo`.
 - Add host.name attribute to `HostResourceDetector`
 - Add `ServiceInstanceIdResourceDetector` to generate a random UUIDv7 `service.instance.id`.
+
+### Changed
+
+- Depend on `opentelemetry` with `default-features = false`, so its default
+  features are no longer pulled into downstream builds.
 
 ## v0.11.0
 

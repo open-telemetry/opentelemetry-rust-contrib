@@ -13,6 +13,7 @@ on:
       - 'opentelemetry-etw-metrics/**'
       - 'opentelemetry-etw-traces/**'
       - 'Cargo.toml'
+      - 'rust-toolchain.toml'
       - '.github/workflows/etw.yml'
   merge_group:
   push:
@@ -23,6 +24,7 @@ on:
       - 'opentelemetry-etw-metrics/**'
       - 'opentelemetry-etw-traces/**'
       - 'Cargo.toml'
+      - 'rust-toolchain.toml'
       - '.github/workflows/etw.yml'
 
 concurrency:
@@ -34,18 +36,18 @@ jobs:
     runs-on: windows-latest
     steps:
     - name: Harden the runner (Audit all outbound calls)
-      uses: step-security/harden-runner@bf7454d06d71f1098171f2acdf0cd4708d7b5920 # v2.20.0
+      uses: step-security/harden-runner@05e31511f85b41b11d1cf0ef85d0992719546e2c # v2.21.0
       with:
         egress-policy: audit
     - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       with:
         submodules: true
-    - uses: dtolnay/rust-toolchain@2c7215f132e9ebf062739d9130488b56d53c060c
-      with:
-        toolchain: stable
-        components: llvm-tools-preview
+    - name: Resolve stable Rust pinned by rust-toolchain.toml
+      run: rustup show active-toolchain
+    - name: Install llvm-tools-preview for pinned stable Rust
+      run: rustup component add llvm-tools-preview
     - name: cargo install cargo-llvm-cov
-      uses: taiki-e/install-action@16b05812d776ae1dfaabc8277e421fb6d2506419 # v2.82.7
+      uses: taiki-e/install-action@fcf5432d9f50d67e37ee6e29bdb7a224ff67b4a7 # v2.86.8
       with:
         tool: cargo-llvm-cov
     - name: Run ETW integration tests (logs)
