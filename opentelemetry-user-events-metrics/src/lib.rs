@@ -132,61 +132,63 @@ mod tests {
             }
         }
 
-        /// Extract and validate data point from metric data (supports Sum and Gauge types)
-        /// Returns the attributes from the single data point after validation
+        /// Extracts the sorted attribute set of every data point in `metric`,
+        /// validating each value against `expected_value`.
+        ///
+        /// The exporter packs as many data points as fit into one event, so a
+        /// single payload legitimately carries several data points.
         pub fn extract_and_validate_metric_data(
             metric: &opentelemetry_proto::tonic::metrics::v1::Metric,
             expected_value: u64,
             request_index: usize,
-        ) -> Vec<opentelemetry::KeyValue> {
-            if let Some(data) = &metric.data {
-                // Use helper method to extract data points based on metric type
-                let data_points = extract_metric_data(data, request_index);
+        ) -> Vec<Vec<opentelemetry::KeyValue>> {
+            let Some(data) = &metric.data else {
+                panic!("Metric data is missing in request {}", request_index + 1);
+            };
 
-                // Validate exactly one data point
-                assert_eq!(
-                    data_points.len(),
-                    1,
-                    "Request {} should have exactly one data point",
-                    request_index + 1
-                );
+            let data_points = extract_metric_data(data, request_index);
+            assert!(
+                !data_points.is_empty(),
+                "Request {} should carry at least one data point",
+                request_index + 1
+            );
 
-                let data_point = &data_points[0];
-
-                // Validate counter value
-                if let Some(value) = &data_point.value {
-                    match value {
-                        opentelemetry_proto::tonic::metrics::v1::number_data_point::Value::AsInt(int_val) => {
-                            assert_eq!(*int_val as u64, expected_value,
-                                "Counter value should match expected value in request {}", request_index + 1);
+            data_points
+                .iter()
+                .map(|data_point| {
+                    // Validate counter value
+                    if let Some(value) = &data_point.value {
+                        match value {
+                            opentelemetry_proto::tonic::metrics::v1::number_data_point::Value::AsInt(int_val) => {
+                                assert_eq!(*int_val as u64, expected_value,
+                                    "Counter value should match expected value in request {}", request_index + 1);
+                            }
+                            _ => panic!("Expected integer value for u64 counter in request {}", request_index + 1),
                         }
-                        _ => panic!("Expected integer value for u64 counter in request {}", request_index + 1),
                     }
-                }
 
-                // Extract attributes from data point
-                let mut actual_attributes: Vec<opentelemetry::KeyValue> = Vec::new();
-                for attr in &data_point.attributes {
-                    if let Some(value) = &attr.value {
-                        if let Some(string_value) = &value.value {
-                            match string_value {
-                                opentelemetry_proto::tonic::common::v1::any_value::Value::StringValue(s) => {
-                                    actual_attributes.push(opentelemetry::KeyValue::new(attr.key.clone(), s.clone()));
-                                }
-                                _ => {
-                                    panic!("Unsupported attribute value type for key: {} in request {}", attr.key, request_index + 1);
+                    // Extract attributes from data point
+                    let mut actual_attributes: Vec<opentelemetry::KeyValue> = Vec::new();
+                    for attr in &data_point.attributes {
+                        if let Some(value) = &attr.value {
+                            if let Some(string_value) = &value.value {
+                                match string_value {
+                                    opentelemetry_proto::tonic::common::v1::any_value::Value::StringValue(s) => {
+                                        actual_attributes.push(opentelemetry::KeyValue::new(attr.key.clone(), s.clone()));
+                                    }
+                                    _ => {
+                                        panic!("Unsupported attribute value type for key: {} in request {}", attr.key, request_index + 1);
+                                    }
                                 }
                             }
                         }
                     }
-                }
 
-                // Sort attributes for consistent comparison
-                actual_attributes.sort_by(|a, b| a.key.as_str().cmp(b.key.as_str()));
-                actual_attributes
-            } else {
-                panic!("Metric data is missing in request {}", request_index + 1);
-            }
+                    // Sort attributes for consistent comparison
+                    actual_attributes.sort_by(|a, b| a.key.as_str().cmp(b.key.as_str()));
+                    actual_attributes
+                })
+                .collect()
         }
     }
 
@@ -258,11 +260,12 @@ mod tests {
         let expected_service_name = "metric-demo";
         let expected_meter_name = "user-event-test";
 
-        // STEP 1: Validate upfront that we have exactly 2 entries
+        // STEP 1: Both data points are small and share one metric, so the
+        // exporter must pack them into a single event.
         assert_eq!(
             decoded_metrics.len(),
-            2,
-            "Expected exactly 2 metrics payloads (one per data point)"
+            1,
+            "Expected a single batched payload carrying both data points"
         );
 
         // STEP 2: Do common validation on both entries (resource, scope, metric metadata)
@@ -339,7 +342,7 @@ mod tests {
             }
         }
 
-        // STEP 3: Validate that each entry has exactly one data point and collect attributes
+        // STEP 3: Collect the attribute set of every data point across all events
         let mut actual_attribute_sets = Vec::new();
 
         for (index, metrics_request) in decoded_metrics.iter().enumerate() {
@@ -350,12 +353,13 @@ mod tests {
                     for metric in &scope_metric.metrics {
                         if metric.name == expected_counter_name {
                             // Use helper method to extract and validate metric data
-                            let actual_attributes = test_utils::extract_and_validate_metric_data(
-                                metric,
-                                expected_value,
-                                index,
+                            actual_attribute_sets.extend(
+                                test_utils::extract_and_validate_metric_data(
+                                    metric,
+                                    expected_value,
+                                    index,
+                                ),
                             );
-                            actual_attribute_sets.push(actual_attributes);
                         }
                     }
                 }
@@ -429,8 +433,8 @@ mod tests {
 
         assert_eq!(
             decoded.len(),
-            2,
-            "Expected one event per data point (2 attribute sets)"
+            1,
+            "Expected both attribute sets to be packed into a single event"
         );
 
         let mut values: Vec<(u64, Vec<KeyValue>)> = Vec::new();
@@ -441,25 +445,25 @@ mod tests {
                         assert_eq!(m.name, "gauge_u64_test");
                         let data = m.data.as_ref().expect("metric data missing");
                         let dps = test_utils::extract_metric_data(data, 0);
-                        assert_eq!(dps.len(), 1, "expected 1 data point per event");
-                        let dp = &dps[0];
-                        let value = match dp.value.as_ref().expect("value missing") {
-                            opentelemetry_proto::tonic::metrics::v1::number_data_point::Value::AsInt(v) => *v as u64,
-                            _ => panic!("expected integer value for u64 gauge"),
-                        };
-                        let mut attrs: Vec<KeyValue> = dp
-                            .attributes
-                            .iter()
-                            .map(|a| {
-                                let v = match a.value.as_ref().and_then(|v| v.value.as_ref()) {
-                                    Some(opentelemetry_proto::tonic::common::v1::any_value::Value::StringValue(s)) => s.clone(),
-                                    _ => panic!("unexpected attribute value type"),
-                                };
-                                KeyValue::new(a.key.clone(), v)
-                            })
-                            .collect();
-                        attrs.sort_by(|a, b| a.key.as_str().cmp(b.key.as_str()));
-                        values.push((value, attrs));
+                        for dp in dps {
+                            let value = match dp.value.as_ref().expect("value missing") {
+                                opentelemetry_proto::tonic::metrics::v1::number_data_point::Value::AsInt(v) => *v as u64,
+                                _ => panic!("expected integer value for u64 gauge"),
+                            };
+                            let mut attrs: Vec<KeyValue> = dp
+                                .attributes
+                                .iter()
+                                .map(|a| {
+                                    let v = match a.value.as_ref().and_then(|v| v.value.as_ref()) {
+                                        Some(opentelemetry_proto::tonic::common::v1::any_value::Value::StringValue(s)) => s.clone(),
+                                        _ => panic!("unexpected attribute value type"),
+                                    };
+                                    KeyValue::new(a.key.clone(), v)
+                                })
+                                .collect();
+                            attrs.sort_by(|a, b| a.key.as_str().cmp(b.key.as_str()));
+                            values.push((value, attrs));
+                        }
                     }
                 }
             }
@@ -510,7 +514,11 @@ mod tests {
                 .expect("Failed to shutdown meter provider");
         });
 
-        assert_eq!(decoded.len(), 2, "Expected one event per attribute set");
+        assert_eq!(
+            decoded.len(),
+            1,
+            "Expected both attribute sets to be packed into a single event"
+        );
 
         let mut results: Vec<(i64, Vec<KeyValue>, bool)> = Vec::new();
         for req in &decoded {
@@ -524,25 +532,25 @@ mod tests {
                             _ => panic!("expected Sum data for updowncounter"),
                         };
                         assert!(!sum.is_monotonic, "updowncounter sum must be non-monotonic");
-                        assert_eq!(sum.data_points.len(), 1);
-                        let dp = &sum.data_points[0];
-                        let value = match dp.value.as_ref().expect("value missing") {
-                            opentelemetry_proto::tonic::metrics::v1::number_data_point::Value::AsInt(v) => *v,
-                            _ => panic!("expected integer value for i64 updowncounter"),
-                        };
-                        let mut attrs: Vec<KeyValue> = dp
-                            .attributes
-                            .iter()
-                            .map(|a| {
-                                let v = match a.value.as_ref().and_then(|v| v.value.as_ref()) {
-                                    Some(opentelemetry_proto::tonic::common::v1::any_value::Value::StringValue(s)) => s.clone(),
-                                    _ => panic!("unexpected attribute value type"),
-                                };
-                                KeyValue::new(a.key.clone(), v)
-                            })
-                            .collect();
-                        attrs.sort_by(|a, b| a.key.as_str().cmp(b.key.as_str()));
-                        results.push((value, attrs, sum.is_monotonic));
+                        for dp in &sum.data_points {
+                            let value = match dp.value.as_ref().expect("value missing") {
+                                opentelemetry_proto::tonic::metrics::v1::number_data_point::Value::AsInt(v) => *v,
+                                _ => panic!("expected integer value for i64 updowncounter"),
+                            };
+                            let mut attrs: Vec<KeyValue> = dp
+                                .attributes
+                                .iter()
+                                .map(|a| {
+                                    let v = match a.value.as_ref().and_then(|v| v.value.as_ref()) {
+                                        Some(opentelemetry_proto::tonic::common::v1::any_value::Value::StringValue(s)) => s.clone(),
+                                        _ => panic!("unexpected attribute value type"),
+                                    };
+                                    KeyValue::new(a.key.clone(), v)
+                                })
+                                .collect();
+                            attrs.sort_by(|a, b| a.key.as_str().cmp(b.key.as_str()));
+                            results.push((value, attrs, sum.is_monotonic));
+                        }
                     }
                 }
             }
