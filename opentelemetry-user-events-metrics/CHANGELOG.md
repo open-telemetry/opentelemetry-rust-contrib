@@ -2,6 +2,13 @@
 
 ## vNext
 
+- Pack multiple metric data points into each `user_events` write instead of
+  emitting one event per data point. The resource/scope/metric envelope is now
+  amortized across every data point that fits within the 64KB tracepoint limit,
+  which substantially reduces both the bytes written to the per-CPU perf ring
+  buffer and the number of writes per export cycle. Batching is per-metric: a
+  single event never mixes data points from different metrics or scopes.
+
 ## v0.13.0
 
 Released 2026-May-13
