@@ -31,6 +31,9 @@ to AWS's telemetry platform.
 | **X-Ray ID Generator** | `trace` | Generates X-Ray-compatible trace and span IDs (time-based trace IDs) |
 | **X-Ray Exporter** | `xray-exporter` | Exports OpenTelemetry spans as [X-Ray segment documents] |
 | **Lambda Resource Detector** | `detector-aws-lambda` | Detects AWS Lambda resource attributes from the environment |
+| **EC2 Resource Detector** | `detector-aws-ec2` | Detects AWS EC2 resource attributes via IMDSv2 |
+| **ECS Resource Detector** | `detector-aws-ecs` | Detects AWS ECS resource attributes via the task and container metadata endpoints |
+| **EKS Resource Detector** | `detector-aws-eks` | Detects AWS EKS resource attributes via the Kubernetes service-account mount and IMDSv2 |
 
 ## Quick Start
 
@@ -74,6 +77,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 | `xray-stdout-client` | No | `StdoutClient` — writes segment documents to stdout (useful for debugging) |
 | `xray-subsegment-nesting` | No | Enables subsegment nesting within parent segments during translation |
 | `detector-aws-lambda` | No | AWS Lambda resource detector |
+| `detector-aws-ec2` | No | AWS EC2 resource detector |
+| `detector-aws-ecs` | No | AWS ECS resource detector |
+| `detector-aws-eks` | No | AWS EKS resource detector |
 
 [`OpenTelemetry`]: https://crates.io/crates/opentelemetry
 [X-Ray daemon]: https://docs.aws.amazon.com/xray/latest/devguide/xray-daemon.html
