@@ -9,10 +9,9 @@
 
 ### Changed
 - Bump opentelemetry-proto version to 0.32.
-- Bump pinned `otel-arrow` rev for `otap-df-pdata` and `otap-df-pdata-views`
-  to `4f522d2e` so consumers can unify on a single `otap-df-pdata-views`
-  version and avoid duplicate `LogsDataView` trait errors. API-compatible;
-  the view trait signatures are unchanged.
+- Replace the Git-pinned `otap-df-pdata` and `otap-df-pdata-views`
+  dependencies with the published `otel-arrow-dfe-pdata` and
+  `otel-arrow-dfe-pdata-views` 0.53.0 crates.
 
 ## [0.5.0] - 2026-04-13
 

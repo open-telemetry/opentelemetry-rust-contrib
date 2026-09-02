@@ -27,10 +27,9 @@
   required and `account_group_mapping` supplies optional final-event-name
   overrides.
 - Bump opentelemetry-proto version to 0.32.
-- Bump pinned `otel-arrow` rev for `otap-df-pdata` and `otap-df-pdata-views`
-  to `4f522d2e` so consumers can unify on a single `otap-df-pdata-views`
-  version and avoid duplicate `LogsDataView` trait errors. API-compatible;
-  the view trait signatures are unchanged.
+- Replace the Git-pinned `otap-df-pdata` and `otap-df-pdata-views`
+  dependencies with the published `otel-arrow-dfe-pdata` and
+  `otel-arrow-dfe-pdata-views` 0.53.0 crates.
 - `GenevaClientConfig` now applies signal-specific defaults consistently on emitted batches: when `logs.default_event_name` / `spans.default_event_name` is set, encoded batches use that value as `event_name`; when unset, they fall back to `Log` and `Span` respectively.
 - **Breaking:** `GenevaClientConfig.logs` and `.spans` changed from `LogsConfig` / `TracesConfig` to `Option<LogsConfig>` / `Option<TracesConfig>`. Pass `None` to use the default `Log` / `Span` table names.
 
