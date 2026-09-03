@@ -45,6 +45,17 @@ mod tests {
         /// pipeline with a self-contained, in-process consumer (no external tools,
         /// no temp files, no `sudo` shell-outs).
         pub fn collect_otlp_metrics<F: FnOnce()>(emit: F) -> Vec<ExportMetricsServiceRequest> {
+            collect_otlp_metrics_with_pages(32, emit)
+        }
+
+        /// Same as [`collect_otlp_metrics`], but with a configurable per-CPU ring
+        /// buffer size. High-cardinality scenarios emit several hundred kilobytes
+        /// in a single export cycle and will silently lose records if the ring
+        /// buffer is left at the default 32 pages (128 KiB).
+        pub fn collect_otlp_metrics_with_pages<F: FnOnce()>(
+            page_count: usize,
+            emit: F,
+        ) -> Vec<ExportMetricsServiceRequest> {
             let need_permission = "Need permission to access tracefs/perf_events (run via sudo?)";
 
             let tracefs = TraceFS::open().expect(need_permission);
@@ -70,7 +81,7 @@ mod tests {
             });
 
             let mut session = RingBufSessionBuilder::new()
-                .with_page_count(32)
+                .with_page_count(page_count)
                 .with_tracepoint_events(RingBufBuilder::for_tracepoint())
                 .with_target_pid(std::process::id() as i32)
                 .build()
@@ -189,6 +200,172 @@ mod tests {
                     actual_attributes
                 })
                 .collect()
+        }
+
+        /// A decoded numeric data point value.
+        #[derive(Debug, Clone, Copy, PartialEq)]
+        pub enum Num {
+            I(i64),
+            D(f64),
+        }
+
+        /// Renders an OTLP `AnyValue` into a stable string form so tests can
+        /// assert on attribute values of any type without a match arm per type.
+        pub fn render_value(value: &opentelemetry_proto::tonic::common::v1::AnyValue) -> String {
+            use opentelemetry_proto::tonic::common::v1::any_value::Value;
+            match value.value.as_ref() {
+                Some(Value::StringValue(s)) => s.clone(),
+                Some(Value::BoolValue(b)) => b.to_string(),
+                Some(Value::IntValue(i)) => i.to_string(),
+                Some(Value::DoubleValue(d)) => d.to_string(),
+                Some(Value::ArrayValue(a)) => {
+                    let rendered: Vec<String> = a.values.iter().map(render_value).collect();
+                    format!("[{}]", rendered.join(","))
+                }
+                Some(Value::BytesValue(b)) => format!("{b:?}"),
+                Some(Value::KvlistValue(_)) => "<kvlist>".to_string(),
+                Some(other) => format!("{other:?}"),
+                None => "<empty>".to_string(),
+            }
+        }
+
+        /// Extracts a data point's attributes as sorted `(key, rendered value)`
+        /// pairs.
+        pub fn attrs_of(
+            attributes: &[opentelemetry_proto::tonic::common::v1::KeyValue],
+        ) -> Vec<(String, String)> {
+            let mut out: Vec<(String, String)> = attributes
+                .iter()
+                .map(|a| {
+                    let rendered = a.value.as_ref().map(render_value).unwrap_or_default();
+                    (a.key.clone(), rendered)
+                })
+                .collect();
+            out.sort();
+            out
+        }
+
+        /// Returns every occurrence of `name` across all events. A metric appears
+        /// once per event it was batched into, so this legitimately returns more
+        /// than one entry for a high-cardinality metric.
+        pub fn find_metrics<'a>(
+            requests: &'a [ExportMetricsServiceRequest],
+            name: &str,
+        ) -> Vec<&'a opentelemetry_proto::tonic::metrics::v1::Metric> {
+            requests
+                .iter()
+                .flat_map(|r| &r.resource_metrics)
+                .flat_map(|rm| &rm.scope_metrics)
+                .flat_map(|sm| &sm.metrics)
+                .filter(|m| m.name == name)
+                .collect()
+        }
+
+        /// Flattens every `NumberDataPoint` of `name` across all events into
+        /// `(sorted attributes, value)` pairs.
+        pub fn number_points(
+            requests: &[ExportMetricsServiceRequest],
+            name: &str,
+        ) -> Vec<(Vec<(String, String)>, Num)> {
+            use opentelemetry_proto::tonic::metrics::v1::metric::Data;
+            use opentelemetry_proto::tonic::metrics::v1::number_data_point::Value;
+
+            let mut out = Vec::new();
+            for metric in find_metrics(requests, name) {
+                let points = match metric.data.as_ref().expect("metric data missing") {
+                    Data::Sum(s) => &s.data_points,
+                    Data::Gauge(g) => &g.data_points,
+                    other => panic!("metric {name} is not a Sum or Gauge: {other:?}"),
+                };
+                for dp in points {
+                    let value = match dp.value.as_ref().expect("data point value missing") {
+                        Value::AsInt(i) => Num::I(*i),
+                        Value::AsDouble(d) => Num::D(*d),
+                    };
+                    out.push((attrs_of(&dp.attributes), value));
+                }
+            }
+            out
+        }
+
+        /// Flattens every `HistogramDataPoint` of `name` across all events.
+        pub fn histogram_points(
+            requests: &[ExportMetricsServiceRequest],
+            name: &str,
+        ) -> Vec<(
+            Vec<(String, String)>,
+            opentelemetry_proto::tonic::metrics::v1::HistogramDataPoint,
+        )> {
+            use opentelemetry_proto::tonic::metrics::v1::metric::Data;
+
+            let mut out = Vec::new();
+            for metric in find_metrics(requests, name) {
+                let Data::Histogram(h) = metric.data.as_ref().expect("metric data missing") else {
+                    panic!("metric {name} is not a Histogram");
+                };
+                for dp in &h.data_points {
+                    out.push((attrs_of(&dp.attributes), dp.clone()));
+                }
+            }
+            out
+        }
+
+        /// Asserts that no event exceeds the exporter's per-event size budget.
+        ///
+        /// This is the invariant the whole batching scheme rests on: a perf ring
+        /// buffer record length is a `__u16`, so an event that overshoots would be
+        /// silently unreadable rather than merely large. Because these payloads
+        /// came back out of the kernel, this also proves the bound end to end.
+        pub fn assert_all_events_within_size_limit(requests: &[ExportMetricsServiceRequest]) {
+            for (index, request) in requests.iter().enumerate() {
+                let len = request.encoded_len();
+                assert!(
+                    len <= crate::exporter::MAX_EVENT_SIZE,
+                    "event {} is {} bytes, over the {} byte limit",
+                    index,
+                    len,
+                    crate::exporter::MAX_EVENT_SIZE
+                );
+            }
+        }
+
+        /// Asserts that every event repeats the full resource and scope envelope.
+        ///
+        /// Batching amortizes the envelope across the data points inside one
+        /// event, but each event must remain independently decodable, so the
+        /// envelope must still be present in all of them.
+        pub fn assert_envelope_repeated(
+            requests: &[ExportMetricsServiceRequest],
+            expected_resource_attrs: &[(&str, &str)],
+            expected_scope_name: &str,
+        ) {
+            assert!(!requests.is_empty(), "expected at least one event");
+            for (index, request) in requests.iter().enumerate() {
+                assert_eq!(
+                    request.resource_metrics.len(),
+                    1,
+                    "event {index} should carry exactly one resource_metrics"
+                );
+                let rm = &request.resource_metrics[0];
+                let resource = rm.resource.as_ref().expect("resource missing");
+                let actual = attrs_of(&resource.attributes);
+                for (key, value) in expected_resource_attrs {
+                    assert!(
+                        actual.contains(&((*key).to_string(), (*value).to_string())),
+                        "event {index} is missing resource attribute {key}={value}, got {actual:?}"
+                    );
+                }
+                assert_eq!(
+                    rm.scope_metrics.len(),
+                    1,
+                    "event {index} should carry exactly one scope_metrics"
+                );
+                let scope = rm.scope_metrics[0].scope.as_ref().expect("scope missing");
+                assert_eq!(
+                    scope.name, expected_scope_name,
+                    "event {index} has the wrong scope name"
+                );
+            }
         }
     }
 
@@ -644,5 +821,804 @@ mod tests {
             .collect();
         actual_attrs.sort_by(|a, b| a.key.as_str().cmp(b.key.as_str()));
         assert_eq!(actual_attrs, vec![KeyValue::new("mykey1", "myvalue1")]);
+    }
+
+    /// Builds a provider whose resource carries a few attributes, mirroring a
+    /// realistic (small) Overlake-style resource.
+    fn test_provider() -> SdkMeterProvider {
+        SdkMeterProvider::builder()
+            .with_resource(
+                Resource::builder_empty()
+                    .with_attributes(vec![
+                        KeyValue::new("service.name", "metric-demo"),
+                        KeyValue::new("service.namespace", "demo-ns"),
+                        KeyValue::new("host.name", "test-host"),
+                    ])
+                    .build(),
+            )
+            .with_periodic_exporter(MetricsExporter::new())
+            .build()
+    }
+
+    const RESOURCE_ATTRS: &[(&str, &str)] = &[
+        ("service.name", "metric-demo"),
+        ("service.namespace", "demo-ns"),
+        ("host.name", "test-host"),
+    ];
+
+    /// High-cardinality end-to-end batching test.
+    ///
+    /// This is the test that actually proves the batching change against the
+    /// kernel rather than against a mock: 2000 distinct series are exported,
+    /// read back out of the perf ring buffer, and checked for exact
+    /// preservation. It also proves that a maximally packed event survives the
+    /// `__u16` perf record length limit, which is the reason `MAX_EVENT_SIZE`
+    /// exists at all.
+    #[ignore]
+    #[test]
+    fn integration_test_batching_high_cardinality() {
+        test_utils::check_user_events_available().expect("Kernel does not support user_events.");
+
+        const SERIES: usize = 2000;
+
+        let provider = test_provider();
+        let meter = provider.meter("user-event-test");
+        let counter = meter.u64_counter("counter_high_cardinality").build();
+
+        for i in 0..SERIES {
+            counter.add(
+                1,
+                &[
+                    KeyValue::new("partition", format!("p{i}")),
+                    KeyValue::new("region", "westus2"),
+                    KeyValue::new("cluster", "cluster-a"),
+                ],
+            );
+        }
+
+        // 2000 series is a few hundred KiB; the default 32-page ring buffer
+        // would drop records and make this test flaky.
+        let decoded = test_utils::collect_otlp_metrics_with_pages(1024, || {
+            provider
+                .shutdown()
+                .expect("Failed to shutdown meter provider");
+        });
+
+        test_utils::assert_all_events_within_size_limit(&decoded);
+        test_utils::assert_envelope_repeated(&decoded, RESOURCE_ATTRS, "user-event-test");
+
+        // Batching must collapse many data points into far fewer events. With
+        // ~60 byte data points and a 65360 byte budget this should be a ~1000x
+        // reduction; assert a very loose 10x so the test is about the behaviour,
+        // not about a particular encoding size.
+        assert!(
+            decoded.len() * 10 < SERIES,
+            "expected batching to produce far fewer than {} events, got {}",
+            SERIES,
+            decoded.len()
+        );
+
+        let points = test_utils::number_points(&decoded, "counter_high_cardinality");
+        assert_eq!(
+            points.len(),
+            SERIES,
+            "every data point must be exported exactly once"
+        );
+
+        let mut partitions: Vec<String> = points
+            .iter()
+            .map(|(attrs, value)| {
+                assert_eq!(*value, test_utils::Num::I(1), "unexpected counter value");
+                assert!(
+                    attrs.contains(&("region".to_string(), "westus2".to_string())),
+                    "data point lost its constant attributes: {attrs:?}"
+                );
+                attrs
+                    .iter()
+                    .find(|(k, _)| k == "partition")
+                    .map(|(_, v)| v.clone())
+                    .expect("partition attribute missing")
+            })
+            .collect();
+        partitions.sort();
+        partitions.dedup();
+        assert_eq!(
+            partitions.len(),
+            SERIES,
+            "data points were duplicated or dropped"
+        );
+    }
+
+    /// Every event except the last must be packed until the next data point no
+    /// longer fits. This guards against a regression that silently flushes early
+    /// and gives back the byte savings.
+    #[ignore]
+    #[test]
+    fn integration_test_batching_packs_events_to_capacity() {
+        use opentelemetry_proto::tonic::metrics::v1::metric::Data;
+        use prost::Message;
+
+        test_utils::check_user_events_available().expect("Kernel does not support user_events.");
+
+        let provider = test_provider();
+        let meter = provider.meter("user-event-test");
+        let counter = meter.u64_counter("counter_packing").build();
+
+        for i in 0..3000 {
+            counter.add(1, &[KeyValue::new("partition", format!("p{i:05}"))]);
+        }
+
+        let decoded = test_utils::collect_otlp_metrics_with_pages(1024, || {
+            provider
+                .shutdown()
+                .expect("Failed to shutdown meter provider");
+        });
+
+        assert!(
+            decoded.len() > 1,
+            "test needs enough data points to fill more than one event, got {} events",
+            decoded.len()
+        );
+        test_utils::assert_all_events_within_size_limit(&decoded);
+
+        // The most expensive data point anywhere in the export. If an event has
+        // at least this much room left over, the batcher could have fitted
+        // another point into it and flushed too early.
+        let point_cost = |dp: &opentelemetry_proto::tonic::metrics::v1::NumberDataPoint| {
+            let len = dp.encoded_len();
+            // field tag (1 byte, field number 1) + length delimiter + payload
+            1 + prost::length_delimiter_len(len) + len
+        };
+        let max_point_cost = decoded
+            .iter()
+            .flat_map(|r| &r.resource_metrics)
+            .flat_map(|rm| &rm.scope_metrics)
+            .flat_map(|sm| &sm.metrics)
+            .map(|m| {
+                let Data::Sum(sum) = m.data.as_ref().expect("metric data missing") else {
+                    panic!("expected Sum data");
+                };
+                sum.data_points.iter().map(point_cost).max().unwrap_or(0)
+            })
+            .max()
+            .expect("no data points were exported");
+
+        // Records from a single export can land in different per-CPU ring
+        // buffers if the exporter thread migrates, so the order they are read
+        // back in is not guaranteed. Assert an order-independent property
+        // instead: only the final (partial) event may be under-filled.
+        let underfilled = decoded
+            .iter()
+            .filter(|request| {
+                crate::exporter::MAX_EVENT_SIZE - request.encoded_len()
+                    >= max_point_cost + crate::exporter::SIZE_SLACK
+            })
+            .count();
+        assert!(
+            underfilled <= 1,
+            "{} of {} events had room for another data point; only the final partial event may be \
+             under-filled (largest data point costs {} bytes)",
+            underfilled,
+            decoded.len(),
+            max_point_cost
+        );
+    }
+
+    /// A single data point too large to ever fit in one event is dropped, and
+    /// crucially the surrounding data points are still exported.
+    #[ignore]
+    #[test]
+    fn integration_test_oversized_data_point_is_dropped_but_others_survive() {
+        test_utils::check_user_events_available().expect("Kernel does not support user_events.");
+
+        let provider = test_provider();
+        let meter = provider.meter("user-event-test");
+        let counter = meter.u64_counter("counter_oversized").build();
+
+        counter.add(1, &[KeyValue::new("partition", "small-a")]);
+        // Comfortably larger than MAX_EVENT_SIZE on its own.
+        counter.add(1, &[KeyValue::new("partition", "X".repeat(70_000))]);
+        counter.add(1, &[KeyValue::new("partition", "small-b")]);
+
+        let decoded = test_utils::collect_otlp_metrics_with_pages(1024, || {
+            // The dropped data point surfaces as an export error, which is the
+            // documented behaviour; the test asserts on what was exported.
+            let _ = provider.shutdown();
+        });
+
+        test_utils::assert_all_events_within_size_limit(&decoded);
+
+        let points = test_utils::number_points(&decoded, "counter_oversized");
+        let partitions: Vec<String> = points
+            .iter()
+            .map(|(attrs, _)| {
+                attrs
+                    .iter()
+                    .find(|(k, _)| k == "partition")
+                    .map(|(_, v)| v.clone())
+                    .expect("partition attribute missing")
+            })
+            .collect();
+
+        assert!(
+            partitions.iter().any(|p| p == "small-a"),
+            "small data point before the oversized one was lost: {partitions:?}"
+        );
+        assert!(
+            partitions.iter().any(|p| p == "small-b"),
+            "small data point after the oversized one was lost: {partitions:?}"
+        );
+        assert!(
+            !partitions.iter().any(|p| p.len() > 1000),
+            "oversized data point should have been dropped"
+        );
+    }
+
+    /// Batching is per-metric, so three instruments in one export cycle produce
+    /// three independent events, each carrying its own full envelope.
+    #[ignore]
+    #[test]
+    fn integration_test_multiple_metrics_in_one_cycle() {
+        test_utils::check_user_events_available().expect("Kernel does not support user_events.");
+
+        let provider = test_provider();
+        let meter = provider.meter("user-event-test");
+
+        meter
+            .u64_counter("multi_counter")
+            .build()
+            .add(7, &[KeyValue::new("k", "v")]);
+        meter
+            .u64_gauge("multi_gauge")
+            .build()
+            .record(11, &[KeyValue::new("k", "v")]);
+        meter
+            .f64_histogram("multi_histogram")
+            .build()
+            .record(2.5, &[KeyValue::new("k", "v")]);
+
+        let decoded = test_utils::collect_otlp_metrics(|| {
+            provider
+                .shutdown()
+                .expect("Failed to shutdown meter provider");
+        });
+
+        test_utils::assert_all_events_within_size_limit(&decoded);
+        test_utils::assert_envelope_repeated(&decoded, RESOURCE_ATTRS, "user-event-test");
+
+        assert_eq!(
+            decoded.len(),
+            3,
+            "expected one event per metric, got {}",
+            decoded.len()
+        );
+        for request in &decoded {
+            assert_eq!(
+                request.resource_metrics[0].scope_metrics[0].metrics.len(),
+                1,
+                "each event should carry exactly one metric"
+            );
+        }
+
+        assert_eq!(
+            test_utils::number_points(&decoded, "multi_counter"),
+            vec![(
+                vec![("k".to_string(), "v".to_string())],
+                test_utils::Num::I(7)
+            )]
+        );
+        assert_eq!(
+            test_utils::number_points(&decoded, "multi_gauge"),
+            vec![(
+                vec![("k".to_string(), "v".to_string())],
+                test_utils::Num::I(11)
+            )]
+        );
+        let hist = test_utils::histogram_points(&decoded, "multi_histogram");
+        assert_eq!(hist.len(), 1);
+        assert_eq!(hist[0].1.count, 1);
+        assert_eq!(hist[0].1.sum, Some(2.5));
+    }
+
+    /// Each instrumentation scope must be emitted in its own event with its own
+    /// scope metadata (name, version, schema URL).
+    #[ignore]
+    #[test]
+    fn integration_test_multiple_meters_keep_scope_metadata() {
+        use opentelemetry::InstrumentationScope;
+
+        test_utils::check_user_events_available().expect("Kernel does not support user_events.");
+
+        let provider = test_provider();
+
+        let meter_a = provider.meter_with_scope(
+            InstrumentationScope::builder("scope.a")
+                .with_version("1.2.3")
+                .with_schema_url("https://example.com/schema/a")
+                .build(),
+        );
+        let meter_b = provider.meter_with_scope(
+            InstrumentationScope::builder("scope.b")
+                .with_version("4.5.6")
+                .build(),
+        );
+
+        meter_a
+            .u64_counter("scoped_counter_a")
+            .build()
+            .add(1, &[KeyValue::new("k", "v")]);
+        meter_b
+            .u64_counter("scoped_counter_b")
+            .build()
+            .add(2, &[KeyValue::new("k", "v")]);
+
+        let decoded = test_utils::collect_otlp_metrics(|| {
+            provider
+                .shutdown()
+                .expect("Failed to shutdown meter provider");
+        });
+
+        test_utils::assert_all_events_within_size_limit(&decoded);
+        assert_eq!(decoded.len(), 2, "expected one event per scope");
+
+        let mut scopes: Vec<(String, String, String)> = decoded
+            .iter()
+            .map(|r| {
+                let sm = &r.resource_metrics[0].scope_metrics[0];
+                let scope = sm.scope.as_ref().expect("scope missing");
+                (
+                    scope.name.clone(),
+                    scope.version.clone(),
+                    sm.schema_url.clone(),
+                )
+            })
+            .collect();
+        scopes.sort();
+
+        assert_eq!(
+            scopes,
+            vec![
+                (
+                    "scope.a".to_string(),
+                    "1.2.3".to_string(),
+                    "https://example.com/schema/a".to_string()
+                ),
+                ("scope.b".to_string(), "4.5.6".to_string(), String::new()),
+            ]
+        );
+
+        assert_eq!(
+            test_utils::number_points(&decoded, "scoped_counter_a")[0].1,
+            test_utils::Num::I(1)
+        );
+        assert_eq!(
+            test_utils::number_points(&decoded, "scoped_counter_b")[0].1,
+            test_utils::Num::I(2)
+        );
+    }
+
+    /// Asynchronous instruments go through the same batching path as synchronous
+    /// ones, and must preserve monotonicity and aggregation temporality.
+    #[ignore]
+    #[test]
+    fn integration_test_observable_instruments() {
+        use opentelemetry_proto::tonic::metrics::v1::metric::Data;
+        use opentelemetry_proto::tonic::metrics::v1::AggregationTemporality;
+
+        test_utils::check_user_events_available().expect("Kernel does not support user_events.");
+
+        let provider = test_provider();
+        let meter = provider.meter("user-event-test");
+
+        let _obs_counter = meter
+            .u64_observable_counter("obs_counter")
+            .with_callback(|o| {
+                o.observe(100, &[KeyValue::new("k", "a")]);
+                o.observe(200, &[KeyValue::new("k", "b")]);
+            })
+            .build();
+        let _obs_udc = meter
+            .i64_observable_up_down_counter("obs_updowncounter")
+            .with_callback(|o| o.observe(-5, &[KeyValue::new("k", "a")]))
+            .build();
+        let _obs_gauge = meter
+            .u64_observable_gauge("obs_gauge")
+            .with_callback(|o| o.observe(42, &[KeyValue::new("k", "a")]))
+            .build();
+
+        let decoded = test_utils::collect_otlp_metrics(|| {
+            provider
+                .shutdown()
+                .expect("Failed to shutdown meter provider");
+        });
+
+        test_utils::assert_all_events_within_size_limit(&decoded);
+        test_utils::assert_envelope_repeated(&decoded, RESOURCE_ATTRS, "user-event-test");
+
+        let mut counter_points = test_utils::number_points(&decoded, "obs_counter");
+        counter_points.sort_by_key(|(attrs, _)| attrs.clone());
+        assert_eq!(
+            counter_points,
+            vec![
+                (
+                    vec![("k".to_string(), "a".to_string())],
+                    test_utils::Num::I(100)
+                ),
+                (
+                    vec![("k".to_string(), "b".to_string())],
+                    test_utils::Num::I(200)
+                ),
+            ]
+        );
+
+        assert_eq!(
+            test_utils::number_points(&decoded, "obs_updowncounter"),
+            vec![(
+                vec![("k".to_string(), "a".to_string())],
+                test_utils::Num::I(-5)
+            )]
+        );
+        assert_eq!(
+            test_utils::number_points(&decoded, "obs_gauge"),
+            vec![(
+                vec![("k".to_string(), "a".to_string())],
+                test_utils::Num::I(42)
+            )]
+        );
+
+        // Monotonicity and temporality must survive batching.
+        for metric in test_utils::find_metrics(&decoded, "obs_counter") {
+            let Data::Sum(sum) = metric.data.as_ref().unwrap() else {
+                panic!("obs_counter should be a Sum");
+            };
+            assert!(sum.is_monotonic, "observable counter must be monotonic");
+            assert_eq!(
+                sum.aggregation_temporality,
+                AggregationTemporality::Delta as i32,
+                "exporter declares Delta temporality"
+            );
+        }
+        for metric in test_utils::find_metrics(&decoded, "obs_updowncounter") {
+            let Data::Sum(sum) = metric.data.as_ref().unwrap() else {
+                panic!("obs_updowncounter should be a Sum");
+            };
+            assert!(
+                !sum.is_monotonic,
+                "observable updowncounter must be non-monotonic"
+            );
+        }
+        for metric in test_utils::find_metrics(&decoded, "obs_gauge") {
+            assert!(
+                matches!(metric.data.as_ref().unwrap(), Data::Gauge(_)),
+                "obs_gauge should be a Gauge"
+            );
+        }
+    }
+
+    /// Floating point instruments must round-trip as `AsDouble`, not be coerced
+    /// to integers.
+    #[ignore]
+    #[test]
+    fn integration_test_f64_instruments() {
+        test_utils::check_user_events_available().expect("Kernel does not support user_events.");
+
+        let provider = test_provider();
+        let meter = provider.meter("user-event-test");
+
+        let counter = meter.f64_counter("counter_f64").build();
+        counter.add(1.5, &[KeyValue::new("k", "a")]);
+        counter.add(2.25, &[KeyValue::new("k", "a")]);
+
+        let udc = meter.f64_up_down_counter("updown_f64").build();
+        udc.add(-0.5, &[KeyValue::new("k", "a")]);
+
+        let decoded = test_utils::collect_otlp_metrics(|| {
+            provider
+                .shutdown()
+                .expect("Failed to shutdown meter provider");
+        });
+
+        test_utils::assert_all_events_within_size_limit(&decoded);
+        assert_eq!(
+            test_utils::number_points(&decoded, "counter_f64"),
+            vec![(
+                vec![("k".to_string(), "a".to_string())],
+                test_utils::Num::D(3.75)
+            )]
+        );
+        assert_eq!(
+            test_utils::number_points(&decoded, "updown_f64"),
+            vec![(
+                vec![("k".to_string(), "a".to_string())],
+                test_utils::Num::D(-0.5)
+            )]
+        );
+    }
+
+    /// Attribute values of every supported type must survive encoding. The
+    /// batching path re-encodes data points individually, so this guards against
+    /// a type being lost or coerced during that step.
+    #[ignore]
+    #[test]
+    fn integration_test_attribute_value_types() {
+        use opentelemetry::{Array, StringValue, Value};
+
+        test_utils::check_user_events_available().expect("Kernel does not support user_events.");
+
+        let provider = test_provider();
+        let meter = provider.meter("user-event-test");
+        let counter = meter.u64_counter("counter_attr_types").build();
+
+        counter.add(
+            1,
+            &[
+                KeyValue::new("str", "text"),
+                KeyValue::new("bool", true),
+                KeyValue::new("int", 42i64),
+                KeyValue::new("double", 1.5f64),
+                KeyValue::new(
+                    "str_array",
+                    Value::Array(Array::String(vec![
+                        StringValue::from("a"),
+                        StringValue::from("b"),
+                    ])),
+                ),
+            ],
+        );
+
+        let decoded = test_utils::collect_otlp_metrics(|| {
+            provider
+                .shutdown()
+                .expect("Failed to shutdown meter provider");
+        });
+
+        test_utils::assert_all_events_within_size_limit(&decoded);
+        let points = test_utils::number_points(&decoded, "counter_attr_types");
+        assert_eq!(points.len(), 1);
+
+        let expected = vec![
+            ("bool".to_string(), "true".to_string()),
+            ("double".to_string(), "1.5".to_string()),
+            ("int".to_string(), "42".to_string()),
+            ("str".to_string(), "text".to_string()),
+            ("str_array".to_string(), "[a,b]".to_string()),
+        ];
+        assert_eq!(points[0].0, expected);
+    }
+
+    /// A data point with no attributes at all must still be exported.
+    #[ignore]
+    #[test]
+    fn integration_test_no_attributes() {
+        test_utils::check_user_events_available().expect("Kernel does not support user_events.");
+
+        let provider = test_provider();
+        let meter = provider.meter("user-event-test");
+        meter.u64_counter("counter_no_attrs").build().add(9, &[]);
+
+        let decoded = test_utils::collect_otlp_metrics(|| {
+            provider
+                .shutdown()
+                .expect("Failed to shutdown meter provider");
+        });
+
+        test_utils::assert_all_events_within_size_limit(&decoded);
+        assert_eq!(
+            test_utils::number_points(&decoded, "counter_no_attrs"),
+            vec![(Vec::new(), test_utils::Num::I(9))]
+        );
+    }
+
+    /// `force_flush` must export the current cycle, and because the exporter
+    /// declares Delta temporality a subsequent cycle must carry only what was
+    /// recorded since the previous export.
+    #[ignore]
+    #[test]
+    fn integration_test_force_flush_across_cycles_is_delta() {
+        test_utils::check_user_events_available().expect("Kernel does not support user_events.");
+
+        let provider = test_provider();
+        let meter = provider.meter("user-event-test");
+        let counter = meter.u64_counter("counter_delta").build();
+
+        counter.add(3, &[KeyValue::new("k", "a")]);
+        let first = test_utils::collect_otlp_metrics(|| {
+            provider.force_flush().expect("first force_flush failed");
+        });
+        assert_eq!(
+            test_utils::number_points(&first, "counter_delta"),
+            vec![(
+                vec![("k".to_string(), "a".to_string())],
+                test_utils::Num::I(3)
+            )]
+        );
+
+        counter.add(4, &[KeyValue::new("k", "a")]);
+        let second = test_utils::collect_otlp_metrics(|| {
+            provider.force_flush().expect("second force_flush failed");
+        });
+        assert_eq!(
+            test_utils::number_points(&second, "counter_delta"),
+            vec![(
+                vec![("k".to_string(), "a".to_string())],
+                test_utils::Num::I(4)
+            )],
+            "Delta temporality means the second cycle reports only the increment"
+        );
+
+        provider.shutdown().expect("shutdown failed");
+    }
+
+    /// An export cycle with nothing recorded must not emit any event.
+    #[ignore]
+    #[test]
+    fn integration_test_no_metrics_emits_no_events() {
+        test_utils::check_user_events_available().expect("Kernel does not support user_events.");
+
+        let provider = test_provider();
+        let _meter = provider.meter("user-event-test");
+
+        let decoded = test_utils::collect_otlp_metrics(|| {
+            provider
+                .shutdown()
+                .expect("Failed to shutdown meter provider");
+        });
+
+        assert!(
+            decoded.is_empty(),
+            "expected no events when nothing was recorded, got {}",
+            decoded.len()
+        );
+    }
+
+    /// Exponential histograms use a different data point type than every other
+    /// instrument, so they exercise a distinct arm of the batching code.
+    #[ignore]
+    #[test]
+    fn integration_test_exponential_histogram() {
+        use opentelemetry_proto::tonic::metrics::v1::metric::Data;
+        use opentelemetry_sdk::metrics::{Aggregation, Instrument, Stream};
+
+        test_utils::check_user_events_available().expect("Kernel does not support user_events.");
+
+        let view = |i: &Instrument| {
+            if i.name() == "exp_histogram" {
+                Some(
+                    Stream::builder()
+                        .with_aggregation(Aggregation::Base2ExponentialHistogram {
+                            max_size: 160,
+                            max_scale: 20,
+                            record_min_max: true,
+                        })
+                        .build()
+                        .unwrap(),
+                )
+            } else {
+                None
+            }
+        };
+
+        let provider = SdkMeterProvider::builder()
+            .with_resource(
+                Resource::builder_empty()
+                    .with_attributes(vec![
+                        KeyValue::new("service.name", "metric-demo"),
+                        KeyValue::new("service.namespace", "demo-ns"),
+                        KeyValue::new("host.name", "test-host"),
+                    ])
+                    .build(),
+            )
+            .with_periodic_exporter(MetricsExporter::new())
+            .with_view(view)
+            .build();
+
+        let meter = provider.meter("user-event-test");
+        let hist = meter.f64_histogram("exp_histogram").build();
+        for attr in ["a", "b"] {
+            let attrs = [KeyValue::new("k", attr)];
+            hist.record(1.0, &attrs);
+            hist.record(4.0, &attrs);
+            hist.record(16.0, &attrs);
+        }
+
+        let decoded = test_utils::collect_otlp_metrics(|| {
+            provider
+                .shutdown()
+                .expect("Failed to shutdown meter provider");
+        });
+
+        test_utils::assert_all_events_within_size_limit(&decoded);
+        test_utils::assert_envelope_repeated(&decoded, RESOURCE_ATTRS, "user-event-test");
+        assert_eq!(
+            decoded.len(),
+            1,
+            "both attribute sets should be packed into one event"
+        );
+
+        let metrics = test_utils::find_metrics(&decoded, "exp_histogram");
+        assert_eq!(metrics.len(), 1);
+        let Data::ExponentialHistogram(exp) = metrics[0].data.as_ref().unwrap() else {
+            panic!("expected ExponentialHistogram data");
+        };
+        assert_eq!(
+            exp.data_points.len(),
+            2,
+            "both attribute sets must be batched into the same event"
+        );
+        for dp in &exp.data_points {
+            assert_eq!(dp.count, 3);
+            assert_eq!(dp.sum, Some(21.0));
+            assert_eq!(dp.min, Some(1.0));
+            assert_eq!(dp.max, Some(16.0));
+        }
+    }
+
+    /// Histogram data points are much larger than number data points, so this
+    /// checks that batching stays correct (and within the size limit) for the
+    /// data point type most likely to overflow an event.
+    #[ignore]
+    #[test]
+    fn integration_test_histogram_batching_many_attribute_sets() {
+        test_utils::check_user_events_available().expect("Kernel does not support user_events.");
+
+        const SERIES: usize = 500;
+
+        let provider = test_provider();
+        let meter = provider.meter("user-event-test");
+        let hist = meter.f64_histogram("histogram_batched").build();
+
+        for i in 0..SERIES {
+            let attrs = [KeyValue::new("partition", format!("p{i:04}"))];
+            hist.record(1.0, &attrs);
+            hist.record(3.0, &attrs);
+        }
+
+        let decoded = test_utils::collect_otlp_metrics_with_pages(1024, || {
+            provider
+                .shutdown()
+                .expect("Failed to shutdown meter provider");
+        });
+
+        test_utils::assert_all_events_within_size_limit(&decoded);
+        test_utils::assert_envelope_repeated(&decoded, RESOURCE_ATTRS, "user-event-test");
+        assert!(
+            decoded.len() > 1,
+            "histogram data points are large enough that 500 series should span several events"
+        );
+
+        let points = test_utils::histogram_points(&decoded, "histogram_batched");
+        assert_eq!(
+            points.len(),
+            SERIES,
+            "every histogram data point must survive"
+        );
+
+        let mut partitions: Vec<String> = points
+            .iter()
+            .map(|(attrs, dp)| {
+                assert_eq!(dp.count, 2);
+                assert_eq!(dp.sum, Some(4.0));
+                assert_eq!(dp.min, Some(1.0));
+                assert_eq!(dp.max, Some(3.0));
+                assert_eq!(
+                    dp.bucket_counts.len(),
+                    dp.explicit_bounds.len() + 1,
+                    "bucket layout must survive batching"
+                );
+                assert_eq!(dp.bucket_counts.iter().sum::<u64>(), dp.count);
+                attrs
+                    .iter()
+                    .find(|(k, _)| k == "partition")
+                    .map(|(_, v)| v.clone())
+                    .expect("partition attribute missing")
+            })
+            .collect();
+        partitions.sort();
+        partitions.dedup();
+        assert_eq!(
+            partitions.len(),
+            SERIES,
+            "histogram data points were duplicated or dropped"
+        );
     }
 }
