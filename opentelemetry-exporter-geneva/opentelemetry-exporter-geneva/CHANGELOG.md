@@ -1,5 +1,10 @@
 # Changelog
 
+## [0.7.0] - 2026-09-03
+
+### Changed
+- Update `geneva-uploader` to 0.7.0 and `otel-arrow-dfe-pdata-views` to 0.54.1.
+
 ## [0.6.0] - 2026-09-03
 
 ### Added
