@@ -16,14 +16,35 @@ use prost::Message;
 use std::fmt::{Debug, Formatter};
 use std::pin::Pin;
 
-/// Upper bound on the encoded size of a single tracepoint event.
+/// Maximum number of protobuf payload bytes that may be written in a single
+/// tracepoint event.
 ///
-/// A perf ring buffer record carries its length in a `__u16`, so a record can
-/// never exceed 65535 bytes in total. The payload budget is set slightly below
-/// that to leave room for the perf record header and the tracepoint's own
-/// fields, so a maximally packed event is still guaranteed to be representable
-/// (and therefore readable) by a perf consumer.
-pub(crate) const MAX_EVENT_SIZE: usize = 65360;
+/// A `user_events` tracepoint consumed through perf goes through
+/// `user_event_perf()`, which copies the record into a per-CPU scratch buffer
+/// obtained from `perf_trace_buf_alloc()`. That buffer is `PERF_MAX_TRACE_SIZE`
+/// (8192) bytes. If the record does not fit, `perf_trace_buf_alloc()` returns
+/// NULL and `user_event_perf()` returns without submitting anything, so the
+/// write silently succeeds from userspace while the event never reaches the
+/// consumer.
+///
+/// The size the kernel accounts for is
+/// `ALIGN(sizeof(struct trace_entry) + bytes_written_after_the_write_index, 8)`:
+///
+/// | component                         | bytes |
+/// |-----------------------------------|-------|
+/// | `struct trace_entry`              | 8     |
+/// | `u32 protocol`                    | 4     |
+/// | `char[8] version`                 | 8     |
+/// | `__rel_loc` descriptor for buffer | 4     |
+/// | **fixed overhead**                | 24    |
+///
+/// which leaves `8192 - 24 = 8168` bytes for the payload itself. See
+/// `src/tracepoint/mod.rs` for the field layout this is derived from.
+///
+/// Note that a consumer reading the same tracepoint through ftrace rather than
+/// perf is bounded by the trace ring buffer's per-event limit (roughly one
+/// page) instead, which is smaller still.
+pub(crate) const MAX_EVENT_SIZE: usize = 8168;
 
 /// Safety margin, in bytes, reserved when deciding whether another data point
 /// fits into the current batch.
@@ -489,7 +510,8 @@ impl MetricsExporter {
 
     fn export_resource_metrics(&self, resource_metric: &ResourceMetrics) -> OTelSdkResult {
         // Custom transformation to protobuf structs is used instead of upstream
-        // transforms because the tracepoint has a 64kB size limit. Data points
+        // transforms because a tracepoint event has a hard size limit (see
+        // MAX_EVENT_SIZE). Data points
         // are packed into as few events as possible while respecting that limit,
         // so the resource/scope/metric envelope is amortized across many data
         // points instead of being repeated for every one.
