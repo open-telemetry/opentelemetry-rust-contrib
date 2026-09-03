@@ -138,6 +138,169 @@ pub use logs::ProcessorBuilder;
 #[cfg(feature = "experimental_eventname_callback")]
 pub use logs::EventNameCallback;
 
+/// Demonstrates that a log record larger than the kernel's per-event
+/// `user_events` limit is silently lost: the exporter reports success, no error
+/// surfaces through the OpenTelemetry API, and the record never reaches the
+/// consumer.
+///
+/// This exists to start a discussion and to gather data across kernels, not as
+/// a regression test. Everything here goes through the public OpenTelemetry
+/// Logs API, so it reflects what an application would actually experience.
+///
+/// Background: `user_event_perf()` in the kernel stages records through
+/// `perf_trace_buf_alloc()`, which refuses anything above `PERF_MAX_TRACE_SIZE`
+/// (8192) and returns without setting `*faulted`. The ftrace path fails the same
+/// silent way at a lower, page-sized bound. Because neither sets `*faulted`,
+/// `writev()` reports success, so `EventBuilder::write` returns 0 and the
+/// exporter treats the record as delivered. The exporter's only size check
+/// (`PAYLOAD_SIZE_EXCEEDED_ERROR`) fires above 64 KB, well past the real limit.
+///
+/// Run with:
+///   sudo -E cargo test --lib size_limit -- --ignored --nocapture --test-threads=1
+#[cfg(all(test, target_os = "linux"))]
+mod size_limit {
+    use crate::Processor;
+    use one_collect::perf_event::{RingBufBuilder, RingBufSessionBuilder};
+    use one_collect::tracefs::TraceFS;
+    use one_collect::Writable;
+    use opentelemetry_sdk::logs::{LoggerProviderBuilder, SdkLoggerProvider};
+    use opentelemetry_sdk::Resource;
+    use tracing::error;
+    use tracing_subscriber::{layer::SubscriberExt, EnvFilter, Layer};
+
+    const PROVIDER_NAME: &str = "otelsizelimit";
+    /// `tracing::error!` maps to EventHeader level 2, so the registered
+    /// tracepoint is `otelsizelimit_L2K1`.
+    const TRACEPOINT: &str = "otelsizelimit_L2K1";
+
+    /// Sizes of the log record's `message` attribute, in bytes.
+    const BODY_SIZES: &[usize] = &[
+        512, 1024, 2048, 4096, 6144, 7168, 8192, 12288, 16384, 32768, 65536,
+    ];
+
+    fn build_provider() -> SdkLoggerProvider {
+        let processor = Processor::builder(PROVIDER_NAME)
+            .build()
+            .expect("failed to build user_events processor");
+
+        LoggerProviderBuilder::default()
+            .with_resource(
+                Resource::builder()
+                    .with_service_name("size-limit-demo")
+                    .build(),
+            )
+            .with_log_processor(processor)
+            .build()
+    }
+
+    /// Emits one log record with a `message` attribute of `size` bytes while a
+    /// perf session is attached, and returns how many records the consumer
+    /// actually received.
+    ///
+    /// A fresh session per size keeps attribution unambiguous: whatever arrives
+    /// during the window belongs to this record.
+    fn emit_and_count(size: usize) -> usize {
+        let tracefs = TraceFS::open().expect("need root to open tracefs");
+        let mut tp_event = tracefs
+            .find_event("user_events", TRACEPOINT)
+            .expect("tracepoint not registered; is the provider built?");
+
+        let count = Writable::<usize>::new(0);
+        let sink = count.clone();
+        tp_event.add_callback(move |_data| {
+            sink.write(|c| *c += 1);
+            Ok(())
+        });
+
+        // 8 MiB per CPU, so ring buffer capacity is never the constraint.
+        let mut session = RingBufSessionBuilder::new()
+            .with_page_count(2048)
+            .with_tracepoint_events(RingBufBuilder::for_tracepoint())
+            .with_target_pid(std::process::id() as i32)
+            .build()
+            .expect("need root to create a perf session");
+        session.add_event(tp_event).expect("failed to add event");
+        session.enable().expect("failed to enable perf session");
+
+        // The user_events processor writes synchronously on emit, so the write
+        // has already happened by the time this returns.
+        let message = "x".repeat(size);
+        error!(name: "SizeLimitDemo", target: "size-limit-demo", message = %message);
+
+        // The ring buffer is drained only after the session is disabled;
+        // draining a live session blocks.
+        session.disable().expect("failed to disable perf session");
+        session.parse_all().expect("failed to drain ring buffer");
+
+        let mut received = 0;
+        count.read(|c| received = *c);
+        received
+    }
+
+    /// Emits log records of increasing size through the OpenTelemetry Logs API
+    /// and reports which ones actually reached the consumer.
+    ///
+    /// Every emit below reports success. On a kernel that enforces
+    /// `PERF_MAX_TRACE_SIZE`, the larger records are nonetheless discarded, and
+    /// this test fails at the first such size. That failure is the point: it is
+    /// the data loss an application would suffer without any error, log, or
+    /// counter indicating it happened.
+    #[ignore]
+    #[test]
+    fn large_log_records_are_silently_dropped() {
+        if let Ok(version) = std::fs::read_to_string("/proc/version") {
+            println!("kernel: {}", version.trim());
+        }
+        println!("page_size: {}", unsafe {
+            unsafe extern "C" {
+                fn sysconf(name: i32) -> i64;
+            }
+            // _SC_PAGESIZE is 30 on Linux.
+            sysconf(30)
+        });
+
+        let provider = build_provider();
+        let otel_layer =
+            opentelemetry_appender_tracing::layer::OpenTelemetryTracingBridge::new(&provider)
+                .with_filter(EnvFilter::new("error"));
+        let subscriber = tracing_subscriber::registry().with(otel_layer);
+        let _guard = tracing::subscriber::set_default(subscriber);
+
+        let mut results = Vec::new();
+        for &size in BODY_SIZES {
+            let delivered = emit_and_count(size);
+            results.push((size, delivered));
+        }
+
+        // Flushing reports success for every record above, including the ones
+        // the kernel discarded.
+        let flush = provider.force_flush();
+
+        println!("--- log records emitted via the OpenTelemetry Logs API ---");
+        println!("{:>10}  {:>9}  verdict", "body bytes", "delivered");
+        for (size, delivered) in &results {
+            let verdict = if *delivered > 0 { "ok" } else { "LOST" };
+            println!("{size:>10}  {delivered:>9}  {verdict}");
+        }
+        println!("force_flush() result: {flush:?}");
+
+        let lost: Vec<usize> = results
+            .iter()
+            .filter(|(_, delivered)| *delivered == 0)
+            .map(|(size, _)| *size)
+            .collect();
+        println!("silently lost sizes: {lost:?}");
+
+        assert!(
+            lost.is_empty(),
+            "these log records were reported as successfully exported but never \
+             reached the consumer: {lost:?}. No error was returned to the caller, \
+             no internal log was emitted, and no dropped-event counter was \
+             incremented on either side."
+        );
+    }
+}
+
 #[cfg(all(test, target_os = "linux"))]
 mod tests {
 
