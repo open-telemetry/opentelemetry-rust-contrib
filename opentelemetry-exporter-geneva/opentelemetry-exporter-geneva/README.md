@@ -23,7 +23,7 @@ Add the crate to your `Cargo.toml`:
 
 ```toml
 [dependencies]
-opentelemetry-exporter-geneva = "0.6.0"
+opentelemetry-exporter-geneva = "0.7.0"
 ```
 
 See `examples/basic.rs` for a logs example and `examples/trace_basic.rs` for
