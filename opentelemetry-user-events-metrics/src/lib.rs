@@ -3,6 +3,273 @@ mod tracepoint;
 
 pub use exporter::MetricsExporter;
 
+/// Empirical measurement of the maximum `user_events` event size that is
+/// actually delivered to a consumer, for both the perf and ftrace paths.
+///
+/// This module is an experiment, not a regression test. It exists to answer a
+/// specific question: the `eventheader` crate documents that "the system will
+/// ignore any event that is larger than 64KB", but `user_event_perf()` in the
+/// kernel stages records through `perf_trace_buf_alloc()`, which refuses
+/// anything above `PERF_MAX_TRACE_SIZE` (8192). Those two claims imply very
+/// different budgets for a batching exporter, so this measures the boundary
+/// directly instead of arguing from source.
+///
+/// Run with:
+///   sudo -E cargo test --lib size_experiment -- --ignored --nocapture --test-threads=1
+#[cfg(all(test, target_os = "linux"))]
+mod size_experiment {
+    use eventheader::_internal as ehi;
+    use std::fs;
+    use std::path::{Path, PathBuf};
+
+    /// Payload sizes to probe, in bytes. Chosen to bracket both candidate
+    /// bounds: the ftrace sub-buffer (~4 KiB), `PERF_MAX_TRACE_SIZE` (8192),
+    /// and the 64 KiB perf record / ABI ceiling.
+    const PROBE_SIZES: &[usize] = &[
+        512, 1024, 2048, 3072, 4000, 4048, 4072, 4096, 5120, 6144, 8000, 8144, 8168, 8176, 8192,
+        8208, 10240, 12288, 16384, 24576, 32768, 49152, 60000, 65000, 65360, 65500,
+    ];
+
+    /// Number of times each size is written, so a single transient drop is not
+    /// mistaken for a hard limit.
+    const REPEATS: usize = 3;
+
+    fn tracefs_root() -> PathBuf {
+        for candidate in ["/sys/kernel/tracing", "/sys/kernel/debug/tracing"] {
+            if Path::new(candidate).join("events").is_dir() {
+                return PathBuf::from(candidate);
+            }
+        }
+        panic!("tracefs is not mounted; run as root on a kernel with tracefs available");
+    }
+
+    /// Builds a payload of `size` bytes whose first 8 bytes encode `size`, so a
+    /// received event can be attributed back to the probe that produced it.
+    fn payload(size: usize) -> Vec<u8> {
+        let mut buffer = vec![0xABu8; size];
+        let tag = (size as u64).to_le_bytes();
+        let n = tag.len().min(size);
+        buffer[..n].copy_from_slice(&tag[..n]);
+        buffer
+    }
+
+    fn print_environment(root: &Path) {
+        println!("--- environment ---");
+        println!("page_size: {}", unsafe {
+            libc_sysconf_page_size().unwrap_or(0)
+        });
+        for file in ["buffer_subbuf_size_kb", "buffer_size_kb"] {
+            let path = root.join(file);
+            match fs::read_to_string(&path) {
+                Ok(v) => println!("{file}: {}", v.trim()),
+                Err(e) => println!("{file}: <unavailable: {e}>"),
+            }
+        }
+        match fs::read_to_string("/proc/sys/kernel/perf_event_paranoid") {
+            Ok(v) => println!("perf_event_paranoid: {}", v.trim()),
+            Err(e) => println!("perf_event_paranoid: <unavailable: {e}>"),
+        }
+        if let Ok(v) = fs::read_to_string("/proc/version") {
+            println!("kernel: {}", v.trim());
+        }
+    }
+
+    /// `sysconf(_SC_PAGESIZE)` without pulling in a new dependency.
+    unsafe fn libc_sysconf_page_size() -> Option<i64> {
+        unsafe extern "C" {
+            fn sysconf(name: i32) -> i64;
+        }
+        // _SC_PAGESIZE is 30 on Linux.
+        let value = unsafe { sysconf(30) };
+        if value > 0 {
+            Some(value)
+        } else {
+            None
+        }
+    }
+
+    /// Registers the `otlp_metrics` tracepoint and returns it. Registration is
+    /// what makes the event visible in tracefs, which both probes depend on.
+    fn register_tracepoint() -> std::pin::Pin<Box<ehi::TracepointState>> {
+        let trace_point = Box::pin(ehi::TracepointState::new(0));
+        // Safety: the tracepoint lives for the rest of the test process and is
+        // unregistered when dropped.
+        unsafe {
+            let result = crate::tracepoint::register(trace_point.as_ref());
+            assert_eq!(result, 0, "failed to register otlp_metrics tracepoint");
+        }
+        trace_point
+    }
+
+    fn report(label: &str, results: &[(usize, usize, usize)]) {
+        println!("--- {label} ---");
+        println!(
+            "{:>8}  {:>9}  {:>8}  {}",
+            "size", "delivered", "written", ""
+        );
+        let mut largest_ok = None;
+        let mut smallest_dropped = None;
+        for (size, delivered, written) in results {
+            let verdict = if *delivered == *written {
+                if largest_ok.is_none_or(|s| s < *size) {
+                    largest_ok = Some(*size);
+                }
+                "ok"
+            } else if *delivered == 0 {
+                if smallest_dropped.is_none() {
+                    smallest_dropped = Some(*size);
+                }
+                "DROPPED"
+            } else {
+                "PARTIAL"
+            };
+            println!("{size:>8}  {delivered:>9}  {written:>8}  {verdict}");
+        }
+        println!(
+            "{label}: largest fully delivered = {:?}, smallest fully dropped = {:?}",
+            largest_ok, smallest_dropped
+        );
+    }
+
+    /// Probes the perf delivery path using a one_collect perf ring buffer
+    /// session, which is how this crate's integration tests (and, as far as we
+    /// know, production consumers built on one_collect) read the tracepoint.
+    #[ignore]
+    #[test]
+    fn size_experiment_perf() {
+        use one_collect::perf_event::{RingBufBuilder, RingBufSessionBuilder};
+        use one_collect::tracefs::TraceFS;
+        use one_collect::Writable;
+
+        let root = tracefs_root();
+        print_environment(&root);
+
+        let trace_point = register_tracepoint();
+
+        let tracefs = TraceFS::open().expect("need root to open tracefs");
+        let mut event = tracefs
+            .find_event("user_events", "otlp_metrics")
+            .expect("otlp_metrics tracepoint not found after registration");
+        let buffer_ref = event.format().get_field_ref_unchecked("buffer");
+
+        let received = Writable::<Vec<usize>>::new(Vec::new());
+        let sink = received.clone();
+        event.add_callback(move |data| {
+            let buffer = data.format().get_data(buffer_ref, data.event_data());
+            // First 8 bytes carry the size the producer intended to write.
+            if buffer.len() >= 8 {
+                let mut tag = [0u8; 8];
+                tag.copy_from_slice(&buffer[..8]);
+                sink.write(|out| out.push(u64::from_le_bytes(tag) as usize));
+            }
+            Ok(())
+        });
+
+        // 8 MiB per CPU, far larger than the ~1 MiB this test writes, so ring
+        // buffer capacity cannot be confused for a per-event limit.
+        let mut session = RingBufSessionBuilder::new()
+            .with_page_count(2048)
+            .with_tracepoint_events(RingBufBuilder::for_tracepoint())
+            .with_target_pid(std::process::id() as i32)
+            .build()
+            .expect("need root to create a perf session");
+        session.add_event(event).expect("failed to add event");
+        session.enable().expect("failed to enable perf session");
+
+        assert!(
+            trace_point.enabled(),
+            "tracepoint should be enabled once the perf session is attached"
+        );
+
+        let mut write_codes = Vec::new();
+        for &size in PROBE_SIZES {
+            let buffer = payload(size);
+            for _ in 0..REPEATS {
+                let code = crate::tracepoint::write(&trace_point, &buffer);
+                write_codes.push((size, code));
+            }
+        }
+
+        session.disable().expect("failed to disable perf session");
+        session
+            .parse_all()
+            .expect("failed to drain perf ring buffer");
+
+        let mut delivered = Vec::new();
+        received.read(|v| delivered = v.clone());
+
+        println!("--- userspace write() return codes (0 == success) ---");
+        for (size, code) in &write_codes {
+            if *code != 0 {
+                println!("size {size}: write returned {code}");
+            }
+        }
+        println!("(only non-zero codes shown)");
+
+        let results: Vec<(usize, usize, usize)> = PROBE_SIZES
+            .iter()
+            .map(|&size| {
+                let count = delivered.iter().filter(|&&s| s == size).count();
+                (size, count, REPEATS)
+            })
+            .collect();
+        report("perf", &results);
+    }
+
+    /// Probes the ftrace delivery path by enabling the event through tracefs
+    /// and reading back the textual trace buffer. This is the path a consumer
+    /// that does not use perf would be on, and it is bounded by the ring buffer
+    /// sub-buffer size rather than by `PERF_MAX_TRACE_SIZE`.
+    #[ignore]
+    #[test]
+    fn size_experiment_ftrace() {
+        let root = tracefs_root();
+        print_environment(&root);
+
+        let trace_point = register_tracepoint();
+
+        let enable_path = root.join("events/user_events/otlp_metrics/enable");
+        fs::write(&enable_path, "1").unwrap_or_else(|e| {
+            panic!("failed to enable {}: {e}", enable_path.display());
+        });
+        fs::write(root.join("tracing_on"), "1").expect("failed to set tracing_on");
+
+        assert!(
+            trace_point.enabled(),
+            "tracepoint should be enabled once the ftrace event is enabled"
+        );
+
+        let trace_path = root.join("trace");
+        let mut results = Vec::new();
+        for &size in PROBE_SIZES {
+            let buffer = payload(size);
+            // Truncate the trace buffer so each probe is measured in isolation.
+            fs::write(&trace_path, "").expect("failed to clear trace buffer");
+
+            let mut written = 0;
+            for _ in 0..REPEATS {
+                let code = crate::tracepoint::write(&trace_point, &buffer);
+                if code == 0 {
+                    written += 1;
+                } else {
+                    println!("size {size}: write returned {code}");
+                }
+            }
+
+            let trace = fs::read_to_string(&trace_path).expect("failed to read trace buffer");
+            let delivered = trace
+                .lines()
+                .filter(|line| !line.trim_start().starts_with('#'))
+                .filter(|line| line.contains("otlp_metrics"))
+                .count();
+            results.push((size, delivered, written));
+        }
+
+        let _ = fs::write(&enable_path, "0");
+        report("ftrace", &results);
+    }
+}
+
 #[cfg(all(test, target_os = "linux"))]
 mod tests {
     use crate::MetricsExporter;
