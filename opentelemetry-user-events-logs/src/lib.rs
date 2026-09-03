@@ -195,20 +195,31 @@ mod size_limit {
 
     /// Emits one log record with a `message` attribute of `size` bytes while a
     /// perf session is attached, and returns how many records the consumer
-    /// actually received.
+    /// actually received along with the length of the last one.
+    ///
+    /// The record length is the total encoded event as the consumer sees it,
+    /// which is what the kernel limit actually applies to. It is always larger
+    /// than `size`: the difference is the EventHeader metadata, the event and
+    /// field names, the severity and timestamp fields, and the resource and
+    /// scope content. That overhead grows with the number of attributes, so a
+    /// body size that fits here will not necessarily fit for a richer record.
     ///
     /// A fresh session per size keeps attribution unambiguous: whatever arrives
     /// during the window belongs to this record.
-    fn emit_and_count(size: usize) -> usize {
+    fn emit_and_count(size: usize) -> (usize, Option<usize>) {
         let tracefs = TraceFS::open().expect("need root to open tracefs");
         let mut tp_event = tracefs
             .find_event("user_events", TRACEPOINT)
             .expect("tracepoint not registered; is the provider built?");
 
-        let count = Writable::<usize>::new(0);
+        let count = Writable::<(usize, Option<usize>)>::new((0, None));
         let sink = count.clone();
-        tp_event.add_callback(move |_data| {
-            sink.write(|c| *c += 1);
+        tp_event.add_callback(move |data| {
+            let len = data.event_data().len();
+            sink.write(|c| {
+                c.0 += 1;
+                c.1 = Some(len);
+            });
             Ok(())
         });
 
@@ -232,7 +243,7 @@ mod size_limit {
         session.disable().expect("failed to disable perf session");
         session.parse_all().expect("failed to drain ring buffer");
 
-        let mut received = 0;
+        let mut received = (0, None);
         count.read(|c| received = *c);
         received
     }
@@ -268,8 +279,8 @@ mod size_limit {
 
         let mut results = Vec::new();
         for &size in BODY_SIZES {
-            let delivered = emit_and_count(size);
-            results.push((size, delivered));
+            let (delivered, record_len) = emit_and_count(size);
+            results.push((size, delivered, record_len));
         }
 
         // Flushing reports success for every record above, including the ones
@@ -277,29 +288,77 @@ mod size_limit {
         let flush = provider.force_flush();
 
         println!("--- log records emitted via the OpenTelemetry Logs API ---");
-        println!("{:>10}  {:>9}  verdict", "body bytes", "delivered");
-        for (size, delivered) in &results {
+        println!(
+            "{:>10}  {:>11}  {:>8}  {:>9}  verdict",
+            "body bytes", "record bytes", "overhead", "delivered"
+        );
+        for (size, delivered, record_len) in &results {
             let verdict = if *delivered > 0 { "ok" } else { "LOST" };
-            println!("{size:>10}  {delivered:>9}  {verdict}");
+            match record_len {
+                Some(len) => println!(
+                    "{size:>10}  {len:>11}  {:>8}  {delivered:>9}  {verdict}",
+                    len - size
+                ),
+                None => println!(
+                    "{size:>10}  {:>11}  {:>8}  {delivered:>9}  {verdict}",
+                    "-", "-"
+                ),
+            }
         }
         println!("force_flush() result: {flush:?}");
 
         let lost: Vec<usize> = results
             .iter()
-            .filter(|(_, delivered)| *delivered == 0)
-            .map(|(size, _)| *size)
+            .filter(|(_, delivered, _)| *delivered == 0)
+            .map(|(size, _, _)| *size)
             .collect();
         println!("silently lost sizes: {lost:?}");
 
-        // Single greppable line, so results from different kernels can be
-        // compared at a glance when people paste them into the discussion.
         let largest_ok = results
             .iter()
-            .filter(|(_, delivered)| *delivered > 0)
-            .map(|(size, _)| *size)
+            .filter(|(_, delivered, _)| *delivered > 0)
+            .map(|(size, _, _)| *size)
             .max();
+
+        // The coarse sweep above only brackets the boundary. Bisect between the
+        // largest delivered and the smallest lost size to find the exact body
+        // size at which delivery stops, and the record length that corresponds
+        // to it. That record length -- not the body size -- is the quantity the
+        // kernel limit applies to, and it is what should be compared against
+        // PERF_MAX_TRACE_SIZE.
+        let mut cutoff: Option<(usize, Option<usize>)> = None;
+        if let (Some(mut lo), Some(hi)) = (largest_ok, lost.first().copied()) {
+            let mut hi = hi;
+            let mut lo_record = None;
+            while hi - lo > 1 {
+                let mid = lo + (hi - lo) / 2;
+                let (delivered, record_len) = emit_and_count(mid);
+                if delivered > 0 {
+                    lo = mid;
+                    lo_record = record_len;
+                } else {
+                    hi = mid;
+                }
+            }
+            if lo_record.is_none() {
+                lo_record = emit_and_count(lo).1;
+            }
+            cutoff = Some((lo, lo_record));
+            match lo_record {
+                Some(len) => println!(
+                    "exact boundary: body {lo} delivered (record {len} bytes, \
+                     {} bytes of non-body content); body {hi} lost",
+                    len - lo
+                ),
+                None => println!("exact boundary: body {lo} delivered; body {hi} lost"),
+            }
+        }
+
+        // Single greppable line, so results from different kernels can be
+        // compared at a glance when people paste them into the discussion.
         println!(
-            "SUMMARY arch={} page_size={} largest_delivered={:?} smallest_lost={:?}",
+            "SUMMARY arch={} page_size={} largest_delivered_body={:?} \
+             largest_delivered_record={:?} smallest_lost_body={:?}",
             std::env::consts::ARCH,
             unsafe {
                 unsafe extern "C" {
@@ -307,7 +366,8 @@ mod size_limit {
                 }
                 sysconf(30)
             },
-            largest_ok,
+            cutoff.map(|(body, _)| body).or(largest_ok),
+            cutoff.and_then(|(_, record)| record),
             lost.first().copied()
         );
 
