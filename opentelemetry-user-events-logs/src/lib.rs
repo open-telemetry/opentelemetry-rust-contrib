@@ -290,10 +290,16 @@ mod size_experiment {
             .find_event("user_events", TRACEPOINT)
             .expect("tracepoint not found after registration");
 
-        let count = Writable::<usize>::new(0);
-        let sink = count.clone();
-        tp_event.add_callback(move |_data| {
-            sink.write(|c| *c += 1);
+        // Record the raw record length of every delivered event. The
+        // EventHeader overhead is identical across probes (same event name,
+        // same two fields), so record length differs from probe to probe by
+        // exactly the difference in payload size, which makes it a reliable
+        // attribution key without having to decode the payload.
+        let lengths = Writable::<Vec<usize>>::new(Vec::new());
+        let sink = lengths.clone();
+        tp_event.add_callback(move |data| {
+            let len = data.event_data().len();
+            sink.write(|v| v.push(len));
             Ok(())
         });
 
@@ -314,8 +320,7 @@ mod size_experiment {
         );
 
         let mut eb = EventBuilder::new();
-        let mut results = Vec::new();
-        let mut seen = 0usize;
+        let mut write_results = Vec::new();
         for &size in PROBE_SIZES {
             let mut written = 0;
             let mut errno = 0;
@@ -327,17 +332,47 @@ mod size_experiment {
                     errno = code;
                 }
             }
-
-            // Drain after each size so deliveries are attributed to the probe
-            // that produced them without having to decode the payload.
-            session.parse_all().expect("failed to drain ring buffer");
-            let mut total = 0;
-            count.read(|c| total = *c);
-            results.push((size, total - seen, written, errno));
-            seen = total;
+            write_results.push((size, written, errno));
         }
 
+        // The ring buffer is drained only after the session is disabled;
+        // draining a live session blocks.
         session.disable().expect("failed to disable perf session");
+        session.parse_all().expect("failed to drain ring buffer");
+
+        let mut received = Vec::new();
+        lengths.read(|v| received = v.clone());
+
+        // Derive the fixed per-record overhead from the smallest probe, which
+        // is far below every candidate limit and so is always delivered.
+        let smallest = PROBE_SIZES[0];
+        let overhead = received
+            .iter()
+            .min()
+            .map(|min_len| min_len.saturating_sub(smallest))
+            .unwrap_or(0);
+        println!("derived per-record overhead: {overhead} bytes");
+
+        let results: Vec<(usize, usize, usize, i32)> = write_results
+            .iter()
+            .map(|&(size, written, errno)| {
+                let delivered = received
+                    .iter()
+                    .filter(|&&len| len.saturating_sub(overhead) == size)
+                    .count();
+                (size, delivered, written, errno)
+            })
+            .collect();
+
+        let attributed: usize = results.iter().map(|r| r.1).sum();
+        if attributed != received.len() {
+            println!(
+                "warning: {} of {} received records could not be attributed to a probe size",
+                received.len() - attributed,
+                received.len()
+            );
+        }
+
         report("perf", &results);
 
         // Guard against a broken capture setup reporting a bogus threshold: the
