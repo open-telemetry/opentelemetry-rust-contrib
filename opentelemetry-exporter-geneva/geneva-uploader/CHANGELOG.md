@@ -1,6 +1,6 @@
 # Changelog
 
-## [Unreleased]
+## [0.6.0] - 2026-09-03
 
 ### Added
 - New `tls-rustls` feature flag enables a pure-Rust TLS backend as an alternative to the default `tls-native` (native-tls / OpenSSL) backend. The two flags are additive (so `--all-features` builds compile cleanly); if both are enabled simultaneously, `tls-rustls` takes precedence at runtime. No built-in crypto provider (e.g. ring) is compiled in; consumers **must** install a `rustls::crypto::CryptoProvider` (e.g. `rustls-symcrypt`) at process start. The uploader returns a clear error if no provider is found.
