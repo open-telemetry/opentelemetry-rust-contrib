@@ -172,9 +172,13 @@ mod size_experiment {
     /// Sizes of the variable-length string field, in bytes. Chosen to bracket
     /// the ftrace sub-buffer bound (~4 KiB), `PERF_MAX_TRACE_SIZE` (8192), and
     /// the 64 KiB limit the exporter currently assumes.
+    /// All values are multiples of 8 so that record-length attribution on the
+    /// perf path is unambiguous, and the spacing is 8 bytes around each
+    /// candidate boundary so the threshold is pinned exactly.
     const PROBE_SIZES: &[usize] = &[
-        512, 1024, 2048, 3072, 4000, 4048, 4072, 4096, 5120, 6144, 7500, 8000, 8100, 8140, 8168,
-        8192, 8300, 10240, 12288, 16384, 24576, 32768, 49152, 60000, 65000, 65400,
+        512, 1024, 2048, 3072, 3968, 3976, 3984, 3992, 4000, 4008, 4016, 4024, 4032, 4040, 4048,
+        4056, 4064, 4072, 4096, 5120, 6144, 7168, 8000, 8016, 8032, 8048, 8064, 8080, 8088, 8096,
+        8104, 8112, 8120, 8128, 8136, 8144, 8168, 8192, 10240, 16384, 32768, 65400,
     ];
 
     /// Each size is written this many times so a single transient drop is not
@@ -353,12 +357,28 @@ mod size_experiment {
             .unwrap_or(0);
         println!("derived per-record overhead: {overhead} bytes");
 
+        // Print the raw length histogram so the attribution below can be
+        // checked against the unprocessed measurement.
+        let mut sorted = received.clone();
+        sorted.sort_unstable();
+        sorted.dedup();
+        println!("--- received record lengths (length, count, length - overhead) ---");
+        for len in &sorted {
+            let count = received.iter().filter(|&l| l == len).count();
+            println!("{len:>8}  {count:>3}  {}", len.saturating_sub(overhead));
+        }
+
+        // Attribute with a tolerance of one 8-byte alignment unit. Probe sizes
+        // are 8 bytes apart at their closest, so the mapping stays unique.
         let results: Vec<(usize, usize, usize, i32)> = write_results
             .iter()
             .map(|&(size, written, errno)| {
                 let delivered = received
                     .iter()
-                    .filter(|&&len| len.saturating_sub(overhead) == size)
+                    .filter(|&&len| {
+                        let payload = len.saturating_sub(overhead);
+                        payload >= size && payload - size < 8
+                    })
                     .count();
                 (size, delivered, written, errno)
             })

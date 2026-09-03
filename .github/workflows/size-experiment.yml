@@ -39,23 +39,6 @@ jobs:
       # WARN_ONCE, which fires at most once per boot per call site. Running the
       # probes in separate steps with a clear in between keeps the attribution
       # unambiguous.
-      - name: Probe perf delivery path (metrics)
-        run: |
-          sudo dmesg -C
-          sudo -E $(which cargo) test --manifest-path opentelemetry-user-events-metrics/Cargo.toml \
-            --lib size_experiment::size_experiment_perf -- --ignored --nocapture --test-threads=1
-      - name: Kernel log after metrics perf probe
-        if: always()
-        run: sudo dmesg || true
-      - name: Probe ftrace delivery path (metrics)
-        if: always()
-        run: |
-          sudo dmesg -C
-          sudo -E $(which cargo) test --manifest-path opentelemetry-user-events-metrics/Cargo.toml \
-            --lib size_experiment::size_experiment_ftrace -- --ignored --nocapture --test-threads=1
-      - name: Kernel log after metrics ftrace probe
-        if: always()
-        run: sudo dmesg || true
       - name: Probe perf delivery path (logs)
         if: always()
         run: |
@@ -72,5 +55,23 @@ jobs:
           sudo -E $(which cargo) test --manifest-path opentelemetry-user-events-logs/Cargo.toml \
             --lib size_experiment::size_experiment_ftrace -- --ignored --nocapture --test-threads=1
       - name: Kernel log after logs ftrace probe
+        if: always()
+        run: sudo dmesg || true
+      - name: Probe perf delivery path (metrics)
+        if: always()
+        run: |
+          sudo dmesg -C
+          sudo -E $(which cargo) test --manifest-path opentelemetry-user-events-metrics/Cargo.toml \
+            --lib size_experiment::size_experiment_perf -- --ignored --nocapture --test-threads=1
+      - name: Kernel log after metrics perf probe
+        if: always()
+        run: sudo dmesg || true
+      - name: Probe ftrace delivery path (metrics)
+        if: always()
+        run: |
+          sudo dmesg -C
+          sudo -E $(which cargo) test --manifest-path opentelemetry-user-events-metrics/Cargo.toml \
+            --lib size_experiment::size_experiment_ftrace -- --ignored --nocapture --test-threads=1
+      - name: Kernel log after metrics ftrace probe
         if: always()
         run: sudo dmesg || true
