@@ -4,10 +4,16 @@
 
 - Pack multiple metric data points into each `user_events` write instead of
   emitting one event per data point. The resource/scope/metric envelope is now
-  amortized across every data point that fits within the 64KB tracepoint limit,
-  which substantially reduces both the bytes written to the per-CPU perf ring
-  buffer and the number of writes per export cycle. Batching is per-metric: a
-  single event never mixes data points from different metrics or scopes.
+  amortized across every data point that fits within a single event, which
+  substantially reduces both the bytes written to the per-CPU perf ring buffer
+  and the number of writes per export cycle. Batching is per-metric: a single
+  event never mixes data points from different metrics or scopes.
+- Fixed the maximum tracepoint event size, which was previously set to 64KB.
+  When a `user_events` tracepoint is consumed through perf, the kernel copies
+  the record into a `PERF_MAX_TRACE_SIZE` (8192 byte) per-CPU buffer, and an
+  event that does not fit is dropped without any error being reported to the
+  writer. The limit is now derived from that bound. This had no effect before
+  batching, because a single data point never approached 64KB.
 
 ## v0.13.0
 
