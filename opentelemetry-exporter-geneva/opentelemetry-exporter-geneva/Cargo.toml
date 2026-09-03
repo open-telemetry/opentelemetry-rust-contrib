@@ -1,7 +1,7 @@
 [package]
 name = "opentelemetry-exporter-geneva"
 description = "OpenTelemetry exporter for Geneva logs and traces"
-version = "0.5.0"
+version = "0.6.0"
 edition = "2021"
 homepage = "https://github.com/open-telemetry/opentelemetry-rust-contrib/tree/main/opentelemetry-exporter-geneva/opentelemetry-exporter-geneva"
 repository = "https://github.com/open-telemetry/opentelemetry-rust-contrib/tree/main/opentelemetry-exporter-geneva/opentelemetry-exporter-geneva"
@@ -12,7 +12,7 @@ license = "Apache-2.0"
 [dependencies]
 opentelemetry_sdk = { version = "0.32", default-features = false, features = ["logs", "trace"] }
 opentelemetry-proto = { version = "0.32", default-features = false, features = ["logs", "trace"] }
-geneva-uploader = { path = "../geneva-uploader", version = "0.5.0", default-features = false }
+geneva-uploader = { path = "../geneva-uploader", version = "0.6.0", default-features = false }
 futures = "0.3"
 otap-df-pdata-views = { package = "otel-arrow-dfe-pdata-views", version = "0.53.0" }
 
