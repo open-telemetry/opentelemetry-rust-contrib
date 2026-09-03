@@ -82,22 +82,22 @@ jobs:
       - name: Kernel log after metrics ftrace probe
         if: always()
         run: sudo dmesg || true
-      # The perf ceiling is a compile-time constant (PERF_MAX_TRACE_SIZE), but
-      # the ftrace ceiling derives from the ring buffer sub-buffer size, which
-      # is writable at runtime. Raising it and re-probing shows which of the two
-      # thresholds is actually tunable.
-      - name: Probe ftrace delivery path with a 32 KB sub-buffer (logs)
+      # The ftrace ceiling should derive from the ring buffer sub-buffer size
+      # (rb_subbuf_max_data_size), which is writable at runtime. Sweeping it
+      # shows whether the measured ftrace threshold actually tracks it, or
+      # whether something else is the binding constraint.
+      - name: Sweep ftrace sub-buffer size (logs)
         if: always()
         run: |
-          echo -n "buffer_subbuf_size_kb before: "; sudo cat /sys/kernel/tracing/buffer_subbuf_size_kb
-          sudo sh -c 'echo 32 > /sys/kernel/tracing/buffer_subbuf_size_kb' || echo "not writable on this kernel"
-          echo -n "buffer_subbuf_size_kb after: "; sudo cat /sys/kernel/tracing/buffer_subbuf_size_kb
-          sudo dmesg -C
-          sudo -E $(which cargo) test --manifest-path opentelemetry-user-events-logs/Cargo.toml \
-            --lib size_experiment::size_experiment_ftrace -- --ignored --nocapture --test-threads=1
-      - name: Probe perf delivery path with a 32 KB sub-buffer (logs)
+          for kb in 4 8 16 32 64; do
+            echo "===================== buffer_subbuf_size_kb = $kb ====================="
+            sudo sh -c "echo $kb > /sys/kernel/tracing/buffer_subbuf_size_kb" \
+              || { echo "write failed for $kb"; continue; }
+            echo -n "readback: "; sudo cat /sys/kernel/tracing/buffer_subbuf_size_kb
+            sudo -E $(which cargo) test --manifest-path opentelemetry-user-events-logs/Cargo.toml \
+              --lib size_experiment::size_experiment_ftrace -- --ignored --nocapture --test-threads=1 \
+              2>&1 | grep -E "largest fully delivered|smallest fully dropped|subbuf"
+          done
+      - name: Kernel log after sub-buffer sweep
         if: always()
-        run: |
-          echo -n "buffer_subbuf_size_kb: "; sudo cat /sys/kernel/tracing/buffer_subbuf_size_kb
-          sudo -E $(which cargo) test --manifest-path opentelemetry-user-events-logs/Cargo.toml \
-            --lib size_experiment::size_experiment_perf -- --ignored --nocapture --test-threads=1
+        run: sudo dmesg || true
