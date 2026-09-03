@@ -101,19 +101,41 @@ mod size_experiment {
         trace_point
     }
 
+    /// Sums the `entries` counter across every per-CPU ring buffer. This counts
+    /// records that the kernel actually committed, independent of whether the
+    /// `trace` text formatter can render them: an event larger than
+    /// `TRACE_SEQ_SIZE` (8192) renders as `[LINE TOO BIG]`, so counting lines in
+    /// `trace` measures the formatter rather than delivery.
+    fn ftrace_entries(root: &Path) -> usize {
+        let mut total = 0;
+        let per_cpu = root.join("per_cpu");
+        let dir = fs::read_dir(&per_cpu).expect("failed to list per_cpu directory");
+        for entry in dir.flatten() {
+            let stats = entry.path().join("stats");
+            let Ok(text) = fs::read_to_string(&stats) else {
+                continue;
+            };
+            for line in text.lines() {
+                if let Some(rest) = line.strip_prefix("entries:") {
+                    total += rest.trim().parse::<usize>().unwrap_or(0);
+                }
+            }
+        }
+        total
+    }
+
     fn report(label: &str, results: &[(usize, usize, usize)]) {
         println!("--- {label} ---");
         println!(
-            "{:>8}  {:>9}  {:>8}  {}",
-            "size", "delivered", "written", ""
+            "{:>8}  {:>9}  {:>8}  verdict",
+            "size", "delivered", "written"
         );
         let mut largest_ok = None;
         let mut smallest_dropped = None;
         for (size, delivered, written) in results {
             let verdict = if *delivered == *written {
-                if largest_ok.is_none_or(|s| s < *size) {
-                    largest_ok = Some(*size);
-                }
+                // PROBE_SIZES is ascending, so the last match is the largest.
+                largest_ok = Some(*size);
                 "ok"
             } else if *delivered == 0 {
                 if smallest_dropped.is_none() {
@@ -256,12 +278,7 @@ mod size_experiment {
                 }
             }
 
-            let trace = fs::read_to_string(&trace_path).expect("failed to read trace buffer");
-            let delivered = trace
-                .lines()
-                .filter(|line| !line.trim_start().starts_with('#'))
-                .filter(|line| line.contains("otlp_metrics"))
-                .count();
+            let delivered = ftrace_entries(&root);
             results.push((size, delivered, written));
         }
 
