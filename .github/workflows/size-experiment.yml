@@ -18,8 +18,15 @@ on:
 
 jobs:
   size-experiment:
-    runs-on: ubuntu-latest
-    timeout-minutes: 20
+    # Several runner images, so the measured thresholds can be separated into
+    # those that are fixed by the kernel and those that depend on the
+    # environment (kernel version, architecture, page size, sub-buffer size).
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-22.04, ubuntu-24.04, ubuntu-24.04-arm]
     steps:
       - uses: actions/checkout@v5
       - name: Show kernel and tracefs configuration
@@ -75,3 +82,22 @@ jobs:
       - name: Kernel log after metrics ftrace probe
         if: always()
         run: sudo dmesg || true
+      # The perf ceiling is a compile-time constant (PERF_MAX_TRACE_SIZE), but
+      # the ftrace ceiling derives from the ring buffer sub-buffer size, which
+      # is writable at runtime. Raising it and re-probing shows which of the two
+      # thresholds is actually tunable.
+      - name: Probe ftrace delivery path with a 32 KB sub-buffer (logs)
+        if: always()
+        run: |
+          echo -n "buffer_subbuf_size_kb before: "; sudo cat /sys/kernel/tracing/buffer_subbuf_size_kb
+          sudo sh -c 'echo 32 > /sys/kernel/tracing/buffer_subbuf_size_kb' || echo "not writable on this kernel"
+          echo -n "buffer_subbuf_size_kb after: "; sudo cat /sys/kernel/tracing/buffer_subbuf_size_kb
+          sudo dmesg -C
+          sudo -E $(which cargo) test --manifest-path opentelemetry-user-events-logs/Cargo.toml \
+            --lib size_experiment::size_experiment_ftrace -- --ignored --nocapture --test-threads=1
+      - name: Probe perf delivery path with a 32 KB sub-buffer (logs)
+        if: always()
+        run: |
+          echo -n "buffer_subbuf_size_kb: "; sudo cat /sys/kernel/tracing/buffer_subbuf_size_kb
+          sudo -E $(which cargo) test --manifest-path opentelemetry-user-events-logs/Cargo.toml \
+            --lib size_experiment::size_experiment_perf -- --ignored --nocapture --test-threads=1
