@@ -16,7 +16,14 @@ use prost::Message;
 use std::fmt::{Debug, Formatter};
 use std::pin::Pin;
 
-const MAX_EVENT_SIZE: usize = 65360;
+/// Upper bound on the encoded size of a single tracepoint event.
+///
+/// A perf ring buffer record carries its length in a `__u16`, so a record can
+/// never exceed 65535 bytes in total. The payload budget is set slightly below
+/// that to leave room for the perf record header and the tracepoint's own
+/// fields, so a maximally packed event is still guaranteed to be representable
+/// (and therefore readable) by a perf consumer.
+pub(crate) const MAX_EVENT_SIZE: usize = 65360;
 
 /// Safety margin, in bytes, reserved when deciding whether another data point
 /// fits into the current batch.
@@ -26,7 +33,7 @@ const MAX_EVENT_SIZE: usize = 65360;
 /// `ResourceMetrics`. Each of those four varints grows by at most 2 bytes as
 /// the payload approaches `MAX_EVENT_SIZE`, so 8 bytes is the true bound; 32
 /// gives ample headroom while costing nothing measurable in packing density.
-const SIZE_SLACK: usize = 32;
+pub(crate) const SIZE_SLACK: usize = 32;
 
 /// Abstracts the destination of an encoded OTLP payload.
 ///
