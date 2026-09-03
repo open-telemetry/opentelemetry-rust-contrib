@@ -291,6 +291,26 @@ mod size_limit {
             .collect();
         println!("silently lost sizes: {lost:?}");
 
+        // Single greppable line, so results from different kernels can be
+        // compared at a glance when people paste them into the discussion.
+        let largest_ok = results
+            .iter()
+            .filter(|(_, delivered)| *delivered > 0)
+            .map(|(size, _)| *size)
+            .max();
+        println!(
+            "SUMMARY arch={} page_size={} largest_delivered={:?} smallest_lost={:?}",
+            std::env::consts::ARCH,
+            unsafe {
+                unsafe extern "C" {
+                    fn sysconf(name: i32) -> i64;
+                }
+                sysconf(30)
+            },
+            largest_ok,
+            lost.first().copied()
+        );
+
         assert!(
             lost.is_empty(),
             "these log records were reported as successfully exported but never \
