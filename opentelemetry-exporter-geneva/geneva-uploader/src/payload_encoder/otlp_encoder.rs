@@ -172,6 +172,7 @@ struct LogEncodeContext<'a> {
 struct LogRecordParts<'a> {
     timestamp: u64,
     routing_event_name: Cow<'a, str>,
+    env_name: Option<Cow<'a, str>>,
     name: Option<Cow<'a, str>>,
     severity_number: i32,
     severity_text: Option<Cow<'a, str>>,
@@ -226,6 +227,9 @@ impl<'a> LogRecordParts<'a> {
         if let Some(routing_event_name) = routing_event_name {
             parts.routing_event_name = routing_event_name;
         }
+        if parts.env_name.is_none() {
+            parts.env_name = Some(parts.routing_event_name.clone());
+        }
         if parts.name.is_none() {
             parts.name = Some(parts.routing_event_name.clone());
         }
@@ -259,6 +263,7 @@ impl<'a> LogRecordParts<'a> {
         let mut parts = Self {
             timestamp: record_timestamp(record),
             routing_event_name,
+            env_name: None,
             name,
             severity_number: record.severity_number().unwrap_or(0),
             severity_text,
@@ -302,6 +307,7 @@ impl<'a> LogRecordParts<'a> {
         Self {
             timestamp: record_timestamp(record),
             routing_event_name: Cow::Borrowed(table_name),
+            env_name: None,
             name: None,
             severity_number: record.severity_number().unwrap_or(0),
             severity_text: record
@@ -424,7 +430,6 @@ impl<'a> LogRecordParts<'a> {
 
 struct CommonSchemaParts<'a> {
     parts: LogRecordParts<'a>,
-    part_a_name: Option<Cow<'a, str>>,
     part_b_name: Option<Cow<'a, str>>,
 }
 
@@ -437,7 +442,6 @@ impl<'a> CommonSchemaParts<'a> {
     ) -> Self {
         Self {
             parts: LogRecordParts::common_schema_base(record, role, role_instance, table_name),
-            part_a_name: None,
             part_b_name: None,
         }
     }
@@ -485,7 +489,7 @@ impl<'a> CommonSchemaParts<'a> {
             }
             "PartA.name" => {
                 if let Some(name) = value.and_then(value_as_utf8).filter(|s| !s.is_empty()) {
-                    self.part_a_name = Some(Cow::Owned(name.to_owned()));
+                    self.parts.env_name = Some(Cow::Owned(name.to_owned()));
                 }
             }
             "PartB.name" => {
@@ -584,7 +588,7 @@ impl<'a> CommonSchemaParts<'a> {
     }
 
     fn finish(mut self) -> LogRecordParts<'a> {
-        self.parts.name = self.part_b_name.or(self.part_a_name);
+        self.parts.name = self.part_b_name;
         self.parts
     }
 }
@@ -1232,7 +1236,13 @@ impl OtlpEncoder {
         let formatted_timestamp = Self::format_timestamp(parts.timestamp);
         for field in &parts.fields[..parts.dynamic_fields_start] {
             match field.name.as_ref() {
-                FIELD_ENV_NAME => BondWriter::write_string(&mut buffer, &parts.routing_event_name),
+                FIELD_ENV_NAME => BondWriter::write_string(
+                    &mut buffer,
+                    parts
+                        .env_name
+                        .as_deref()
+                        .unwrap_or(&parts.routing_event_name),
+                ),
                 FIELD_ENV_VER => BondWriter::write_string(&mut buffer, CS_VERSION_4_DISPLAY),
                 FIELD_TENANT => BondWriter::write_string(&mut buffer, &metadata_fields.tenant),
                 FIELD_ROLE => BondWriter::write_string(&mut buffer, &parts.role),
@@ -1929,6 +1939,43 @@ mod tests {
         let parts = LogRecordParts::new(&record, &context);
 
         assert_eq!(parts.routing_event_name, "MappedLog");
+        assert_eq!(parts.env_name.as_deref(), Some("MappedLog"));
+        assert_eq!(parts.name.as_deref(), Some("MappedLog"));
+    }
+
+    /// Scenario: A Common Schema log supplies Part A name but no Part B name.
+    /// Guarantees: Part A controls `env_name` and does not replace the Part B `name` fallback.
+    #[test]
+    fn common_schema_part_a_name_does_not_populate_part_b_name() {
+        use otap_df_pdata::views::otlp::bytes::logs::RawLogRecord;
+        use prost::Message as _;
+
+        let log = LogRecord {
+            attributes: vec![
+                int_attr(KEY_CSVER, CS_VERSION_4),
+                string_attr(KEY_PARTB_TYPENAME, CS_LOG_TYPENAME),
+                string_attr("PartA.name", "ExplicitPartA"),
+            ],
+            ..Default::default()
+        };
+        let bytes = log.encode_to_vec();
+        let record = RawLogRecord::new(&bytes);
+        let metadata = make_metadata("testNamespace");
+        let role = RoleOverrides::default();
+        let scope_routing = LogScopeRouting::Fixed("MappedLog".to_string());
+        let context = LogEncodeContext {
+            metadata_fields: &metadata,
+            routing: LogRoutingContext {
+                table_name: "Log",
+                resource_role: &role,
+                scope_routing: &scope_routing,
+            },
+        };
+
+        let parts = LogRecordParts::new(&record, &context);
+
+        assert_eq!(parts.routing_event_name, "MappedLog");
+        assert_eq!(parts.env_name.as_deref(), Some("ExplicitPartA"));
         assert_eq!(parts.name.as_deref(), Some("MappedLog"));
     }
 
