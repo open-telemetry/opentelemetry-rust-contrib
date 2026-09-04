@@ -1078,12 +1078,8 @@ impl OtlpEncoder {
             };
 
             // 4. Encode row
-            let row_buffer = self.write_span_row_data(
-                span,
-                &field_info,
-                metadata_fields,
-                table_name,
-            );
+            let row_buffer =
+                self.write_span_row_data(span, &field_info, metadata_fields, table_name);
             let level = 5; // Default level for spans (INFO equivalent)
 
             // 5. Create CentralEventEntry
