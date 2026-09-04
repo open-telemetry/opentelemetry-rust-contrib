@@ -1923,7 +1923,6 @@ mod tests {
                 table_name: "Log",
                 resource_role: &role,
                 scope_routing: &scope_routing,
-                obo_event_map: None,
             },
         };
 
@@ -1943,7 +1942,7 @@ mod tests {
             ..Default::default()
         };
         let metadata = make_metadata("testNamespace");
-        let fields = OtlpEncoder::determine_span_fields(&span, "Span", None);
+        let fields = OtlpEncoder::determine_span_fields(&span, "Span");
         let row = encoder.write_span_row_data(&span, &fields, &metadata, "Span");
         let mut offset = 0;
 
