@@ -312,10 +312,12 @@ mod tests {
 
         /// Asserts that no event exceeds the exporter's per-event size budget.
         ///
-        /// This is the invariant the whole batching scheme rests on: a perf ring
-        /// buffer record length is a `__u16`, so an event that overshoots would be
-        /// silently unreadable rather than merely large. Because these payloads
-        /// came back out of the kernel, this also proves the bound end to end.
+        /// This is the invariant the whole batching scheme rests on. A record
+        /// that exceeds `PERF_MAX_TRACE_SIZE` is refused by
+        /// `perf_trace_buf_alloc()` and never submitted, while the write still
+        /// reports success, so an event that overshoots is silently lost rather
+        /// than merely large. Because these payloads came back out of the
+        /// kernel, this also proves the bound end to end.
         pub fn assert_all_events_within_size_limit(requests: &[ExportMetricsServiceRequest]) {
             for (index, request) in requests.iter().enumerate() {
                 let len = request.encoded_len();
@@ -851,9 +853,10 @@ mod tests {
     /// This is the test that actually proves the batching change against the
     /// kernel rather than against a mock: 2000 distinct series are exported,
     /// read back out of the perf ring buffer, and checked for exact
-    /// preservation. It also proves that a maximally packed event survives the
-    /// `__u16` perf record length limit, which is the reason `MAX_EVENT_SIZE`
-    /// exists at all.
+    /// preservation. Because every data point must be accounted for, it also
+    /// proves that events packed up to `MAX_EVENT_SIZE` are actually delivered
+    /// rather than silently refused by `perf_trace_buf_alloc()`, which is the
+    /// reason `MAX_EVENT_SIZE` exists at all.
     #[ignore]
     #[test]
     fn integration_test_batching_high_cardinality() {
@@ -888,7 +891,7 @@ mod tests {
         test_utils::assert_envelope_repeated(&decoded, RESOURCE_ATTRS, "user-event-test");
 
         // Batching must collapse many data points into far fewer events. With
-        // ~60 byte data points and a 65360 byte budget this should be a ~1000x
+        // ~60 byte data points and an 8168 byte budget this is roughly a 100x
         // reduction; assert a very loose 10x so the test is about the behaviour,
         // not about a particular encoding size.
         assert!(
@@ -960,6 +963,18 @@ mod tests {
             decoded.len()
         );
         test_utils::assert_all_events_within_size_limit(&decoded);
+
+        // Packing density is only meaningful if nothing was lost on the way.
+        // An event packed a few bytes over the real kernel budget is refused by
+        // `perf_trace_buf_alloc()` without any error surfacing to the writer, so
+        // without this check a `MAX_EVENT_SIZE` that is slightly too large would
+        // still satisfy every assertion below.
+        let points = test_utils::number_points(&decoded, "counter_packing");
+        assert_eq!(
+            points.len(),
+            3000,
+            "every data point must survive the round trip through the kernel"
+        );
 
         // The most expensive data point anywhere in the export. If an event has
         // at least this much room left over, the batcher could have fitted
