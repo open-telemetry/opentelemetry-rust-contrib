@@ -13,14 +13,31 @@
 * The instrumentation scope now carries the OpenTelemetry semantic conventions
   schema URL.
   [#679](https://github.com/open-telemetry/opentelemetry-rust-contrib/pull/679)
+* HTTP client instrumentation layer (`http::client::Layer`) producing a
+  `SpanKind::Client` span and the standard `http.client.*` metrics, and
+  injecting the current trace context into outgoing request headers.
+  Tracing and metrics can be toggled per layer via `with_tracing(bool)` and
+  `with_metrics(bool)` (both enabled by default).
+  [#700](https://github.com/open-telemetry/opentelemetry-rust-contrib/pull/700)
+* Cargo features to select which layers are compiled: `http-server` and
+  `http-client` (both enabled by default).
+  [#700](https://github.com/open-telemetry/opentelemetry-rust-contrib/pull/700)
+* The **client** layer always defaults to `NoRouteExtractor` (method-only span
+  names); the `axum` matched-path extractor only applies to server routing.
+  [#700](https://github.com/open-telemetry/opentelemetry-rust-contrib/pull/700)
+* `hyper-http-client` and `reqwest-http-client` examples demonstrating the
+  client layer with Hyper and reqwest clients via `tower-reqwest`, with OTLP
+  export.
+  [#700](https://github.com/open-telemetry/opentelemetry-rust-contrib/pull/700)
 
 ### Changed
 
-* **BREAKING**: Reorganized the public API into an `http::server` module with
-  unprefixed `Layer`, `LayerBuilder`, `Service`, and `ResponseFuture` types, and
-  moved the extractors into `http::extractors`. The `HTTPLayer` / `HTTPService` /
-  `HTTPLayerBuilder` / `ResponseFuture` types introduced in v0.18.0 are replaced
-  by `http::server::{Layer, Service, ResponseFuture, LayerBuilder}`.
+* **BREAKING**: Reorganized the public API into `http::server` and `http::client`
+  modules with unprefixed `Layer`, `LayerBuilder`, `Service`, and `ResponseFuture`
+  types, and moved the extractors into `http::extractors`. The `HTTPLayer` /
+  `HTTPService` / `HTTPLayerBuilder` / `ResponseFuture` types introduced in
+  v0.18.0 are replaced by
+  `http::server::{Layer, Service, ResponseFuture, LayerBuilder}`.
   [#717](https://github.com/open-telemetry/opentelemetry-rust-contrib/pull/717)
 
 ### Migration Guide
