@@ -947,7 +947,15 @@ mod tests {
         let meter = provider.meter("user-event-test");
         let counter = meter.u64_counter("counter_packing").build();
 
-        for i in 0..3000 {
+        // Stay at or below the SDK's default cardinality limit (2000 series per
+        // instrument). Beyond it the SDK folds the excess into a single
+        // `otel.metric.overflow` data point, which would make the count below
+        // ambiguous: a shortfall could mean either aggregation overflow or an
+        // event lost in the kernel, and this test needs to detect only the
+        // latter. 2000 series still fills many events at MAX_EVENT_SIZE.
+        const SERIES: usize = 2000;
+
+        for i in 0..SERIES {
             counter.add(1, &[KeyValue::new("partition", format!("p{i:05}"))]);
         }
 
@@ -972,7 +980,7 @@ mod tests {
         let points = test_utils::number_points(&decoded, "counter_packing");
         assert_eq!(
             points.len(),
-            3000,
+            SERIES,
             "every data point must survive the round trip through the kernel"
         );
 
