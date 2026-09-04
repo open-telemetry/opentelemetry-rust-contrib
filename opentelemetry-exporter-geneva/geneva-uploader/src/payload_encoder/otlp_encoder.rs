@@ -1865,7 +1865,7 @@ mod tests {
     }
 
     /// Scenario: A canonical OTLP log has no explicit event name.
-    /// Guarantees: The encoded row uses AMACA-compatible Common Schema fields and values.
+    /// Guarantees: The encoded row uses compatible Common Schema fields and values.
     #[test]
     fn canonical_log_uses_common_schema_contract() {
         use otap_df_pdata::views::otlp::bytes::logs::RawLogRecord;

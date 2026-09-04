@@ -1,5 +1,8 @@
 # Changelog
 
+### Fixed
+- Emit compatible Common Schema metadata for OTLP logs and spans, including `env_ver=4.0`, event-based `env_name`, uppercase `TIMESTAMP`, canonical log severity field casing, and a default Part B log name.
+
 ## [0.7.0] - 2026-09-03
 
 ### Changed
@@ -15,7 +18,6 @@
 - Native multi-moniker routing. `AccountRouting` defines one required default logical account group and optional exact final-event-name overrides. Encoded batches carry their resolved logical group, and uploads resolve that group through the current GCS snapshot to the corresponding primary physical moniker.
 
 ### Fixed
-- Emit AMACA-compatible Common Schema metadata for OTLP logs and spans, including `env_ver=4.0`, event-based `env_name`, uppercase `TIMESTAMP`, canonical log severity field casing, and a default Part B log name.
 - Corrected a misleading startup log message: when `logs.default_event_name` is set without an `event_name_mapping`, `GenevaClient::new` now logs `Configured logs event name routing [default_event_name=...]` instead of `Logs config not initialized; using default values for log events`. The default was always applied correctly; only the log line was wrong. This makes the logs message symmetric with the equivalent spans message.
 - Resolve every GCS logical account group to exactly one primary physical
   moniker instead of inspecting physical moniker names for `diag` or depending
