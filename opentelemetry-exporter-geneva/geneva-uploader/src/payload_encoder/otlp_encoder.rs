@@ -34,6 +34,8 @@ const CS_VERSION_4_DISPLAY: &str = "4.0";
 const KEY_CSVER: &str = "__csver__";
 const KEY_PARTB_TYPENAME: &str = "PartB._typeName";
 const CS_LOG_TYPENAME: &str = "Log";
+const ATTR_SERVICE_NAME: &str = "service.name";
+const ATTR_SERVICE_INSTANCE_ID: &str = "service.instance.id";
 
 const FIELD_ENV_NAME: &str = "env_name";
 const FIELD_ENV_VER: &str = "env_ver";
@@ -121,14 +123,14 @@ impl RoleOverrides {
                 continue;
             };
             match key {
-                "service.name" if overrides.role.is_none() => {
+                ATTR_SERVICE_NAME if overrides.role.is_none() => {
                     overrides.role = attr.value().and_then(|value| {
                         value_as_utf8(&value)
                             .filter(|value| !value.trim().is_empty())
                             .map(str::to_owned)
                     });
                 }
-                "service.instance.id" if overrides.role_instance.is_none() => {
+                ATTR_SERVICE_INSTANCE_ID if overrides.role_instance.is_none() => {
                     overrides.role_instance = attr.value().and_then(|value| {
                         value_as_utf8(&value)
                             .filter(|value| !value.trim().is_empty())
@@ -171,6 +173,12 @@ impl AttributeTemplate {
         let mut template = Self::default();
         if let Some(resource) = resource {
             for attr in resource.attributes() {
+                if matches!(
+                    std::str::from_utf8(attr.key()),
+                    Ok(ATTR_SERVICE_NAME | ATTR_SERVICE_INSTANCE_ID)
+                ) {
+                    continue;
+                }
                 template.upsert_attribute(attr, false);
             }
         }
@@ -3070,6 +3078,8 @@ mod tests {
                 resource: Some(Resource {
                     attributes: vec![
                         string_attr("microsoft.resourceId", "/subscriptions/test"),
+                        string_attr(ATTR_SERVICE_NAME, "checkout"),
+                        string_attr(ATTR_SERVICE_INSTANCE_ID, "instance-1"),
                         string_attr("shared", "resource"),
                         string_attr("scope-wins", "resource"),
                         string_attr(FIELD_BODY, "resource-body"),
@@ -3130,6 +3140,8 @@ mod tests {
         assert!(dynamic_names.contains(&"microsoft.resourceId"));
         assert!(dynamic_names.contains(&"scope.attribute"));
         assert!(dynamic_names.contains(&"record.attribute"));
+        assert!(!dynamic_names.contains(&ATTR_SERVICE_NAME));
+        assert!(!dynamic_names.contains(&ATTR_SERVICE_INSTANCE_ID));
         assert_eq!(
             dynamic_names
                 .iter()
