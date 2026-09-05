@@ -2,6 +2,7 @@
 
 ### Fixed
 - Emit compatible Common Schema metadata for OTLP logs and spans, including `env_ver=4.0`, event-based `env_name`, uppercase `TIMESTAMP`, canonical log severity field casing, and a default Part B log name.
+- Include OTLP resource and instrumentation-scope attributes in log payloads. Log-record attributes take precedence over scope attributes, which take precedence over resource attributes, while fixed Common Schema fields remain authoritative.
 
 ## [0.7.0] - 2026-09-03
 
