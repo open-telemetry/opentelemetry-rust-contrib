@@ -160,6 +160,67 @@ impl DynamicField {
     }
 }
 
+#[derive(Clone, Default)]
+struct AttributeTemplate {
+    fields: Vec<DynamicField>,
+    values: Vec<u8>,
+}
+
+impl AttributeTemplate {
+    fn from_resource<R: ResourceView>(resource: Option<&R>) -> Self {
+        let mut template = Self::default();
+        if let Some(resource) = resource {
+            for attr in resource.attributes() {
+                template.upsert_attribute(attr, false);
+            }
+        }
+        template
+    }
+
+    fn with_scope<S: InstrumentationScopeView>(mut self, scope: Option<&S>) -> Self {
+        if let Some(scope) = scope {
+            for attr in scope.attributes() {
+                self.upsert_attribute(attr, true);
+            }
+        }
+        self
+    }
+
+    fn upsert_attribute<A>(&mut self, attr: A, is_scope_attribute: bool)
+    where
+        A: AttributeView,
+    {
+        let Ok(key) = std::str::from_utf8(attr.key()) else {
+            return;
+        };
+        let Some(value) = attr.value() else {
+            return;
+        };
+        if is_reserved_log_field(key, is_scope_attribute) {
+            return;
+        }
+        let Some(type_id) = bond_type_for_value(&value) else {
+            return;
+        };
+
+        let value_start = self.values.len();
+        write_view_value(&mut self.values, &value, type_id);
+        let value_len = self.values.len() - value_start;
+        if let Some(existing) = self.fields.iter_mut().find(|field| field.name == key) {
+            existing.type_id = type_id;
+            existing.value_start = value_start;
+            existing.value_len = value_len;
+        } else {
+            self.fields.push(DynamicField {
+                name: Cow::Owned(key.to_owned()),
+                type_id,
+                value_start,
+                value_len,
+            });
+        }
+    }
+}
+
 struct LogRoutingContext<'a> {
     table_name: &'a str,
     resource_role: &'a RoleOverrides,
@@ -201,19 +262,16 @@ impl<'a> LogRecordParts<'a> {
         parts
     }
 
-    fn new_with_enrichment<R, RV, SV>(
+    fn new_with_enrichment<R>(
         record: &'a R,
         ctx: &LogEncodeContext<'a>,
-        resource: Option<&RV>,
-        scope: Option<&SV>,
+        enrichment: &AttributeTemplate,
     ) -> Self
     where
         R: LogRecordView,
-        RV: ResourceView,
-        SV: InstrumentationScopeView,
     {
         let mut parts = Self::new_unfinished(record, ctx);
-        parts.add_resource_and_scope_attributes(resource, scope);
+        parts.add_enrichment(enrichment);
         parts.finish_fields();
         parts
     }
@@ -381,77 +439,26 @@ impl<'a> LogRecordParts<'a> {
         true
     }
 
-    fn upsert_dynamic_value<'value, V>(&mut self, name: &str, value: &V)
-    where
-        V: AnyValueView<'value>,
-    {
-        let Some(type_id) = bond_type_for_value(value) else {
-            return;
-        };
-        let value_start = self.dynamic_values.len();
-        write_view_value(&mut self.dynamic_values, value, type_id);
-        let value_len = self.dynamic_values.len() - value_start;
-
-        if let Some(existing) = self
-            .dynamic_fields
-            .iter_mut()
-            .find(|field| field.name == name)
-        {
-            existing.type_id = type_id;
-            existing.value_start = value_start;
-            existing.value_len = value_len;
-        } else {
-            self.dynamic_fields.push(DynamicField {
-                name: Cow::Owned(name.to_owned()),
-                type_id,
-                value_start,
-                value_len,
-            });
-        }
-    }
-
-    fn add_resource_and_scope_attributes<RV, SV>(
-        &mut self,
-        resource: Option<&RV>,
-        scope: Option<&SV>,
-    ) where
-        RV: ResourceView,
-        SV: InstrumentationScopeView,
-    {
+    fn add_enrichment(&mut self, enrichment: &AttributeTemplate) {
         let record_fields_len = self.dynamic_fields.len();
-
-        if let Some(resource) = resource {
-            for attr in resource.attributes() {
-                let Ok(key) = std::str::from_utf8(attr.key()) else {
-                    continue;
-                };
-                let Some(value) = attr.value() else {
-                    continue;
-                };
-                let record_has_key = self.dynamic_fields[..record_fields_len]
-                    .iter()
-                    .any(|field| field.name == key);
-                if !record_has_key && !is_reserved_log_field(key, false) {
-                    self.upsert_dynamic_value(key, &value);
-                }
+        for field in &enrichment.fields {
+            let record_has_key = self.dynamic_fields[..record_fields_len]
+                .iter()
+                .any(|record_field| record_field.name == field.name);
+            if record_has_key {
+                continue;
             }
-        }
 
-        if let Some(scope) = scope {
-            for attr in scope.attributes() {
-                let Ok(key) = std::str::from_utf8(attr.key()) else {
-                    continue;
-                };
-                let Some(value) = attr.value() else {
-                    continue;
-                };
-                let record_has_key = self.dynamic_fields[..record_fields_len]
-                    .iter()
-                    .any(|field| field.name == key);
-                if !record_has_key && !is_reserved_log_field(key, true) {
-                    self.upsert_dynamic_value(key, &value);
-                }
-            }
+            let value_start = self.dynamic_values.len();
+            self.dynamic_values.extend_from_slice(
+                &enrichment.values[field.value_start..field.value_start + field.value_len],
+            );
+            self.dynamic_fields.push(DynamicField {
+                name: field.name.clone(),
+                type_id: field.type_id,
+                value_start,
+                value_len: field.value_len,
+            });
         }
     }
 
@@ -958,18 +965,11 @@ impl LogBatchAccumulator {
     }
 
     /// Encode a single log record and append it to the appropriate batch.
-    fn push<R, RV, SV>(
-        &mut self,
-        record: &R,
-        ctx: &LogEncodeContext<'_>,
-        resource: Option<&RV>,
-        scope: Option<&SV>,
-    ) where
+    fn push<R>(&mut self, record: &R, ctx: &LogEncodeContext<'_>, enrichment: &AttributeTemplate)
+    where
         R: LogRecordView,
-        RV: ResourceView,
-        SV: InstrumentationScopeView,
     {
-        let parts = LogRecordParts::new_with_enrichment(record, ctx, resource, scope);
+        let parts = LogRecordParts::new_with_enrichment(record, ctx, enrichment);
         let timestamp = parts.timestamp;
         let routing_event_name = parts.routing_event_name.as_ref();
         // Role identity is included because the central blob metadata is batch-level.
@@ -1141,8 +1141,10 @@ impl OtlpEncoder {
                 .as_ref()
                 .map(RoleOverrides::from_resource)
                 .unwrap_or_default();
+            let resource_attributes = AttributeTemplate::from_resource(resource.as_ref());
             for scope_logs in resource_logs.scopes() {
                 let scope = scope_logs.scope();
+                let enrichment = resource_attributes.clone().with_scope(scope.as_ref());
                 let scope_routing = resolve_log_scope_routing(
                     resource.as_ref(),
                     scope.as_ref(),
@@ -1158,7 +1160,7 @@ impl OtlpEncoder {
                     },
                 };
                 for log_record in scope_logs.log_records() {
-                    acc.push(&log_record, &ctx, resource.as_ref(), scope.as_ref());
+                    acc.push(&log_record, &ctx, &enrichment);
                 }
             }
         }
@@ -3094,6 +3096,8 @@ mod tests {
         let record = scope_logs.log_records().next().unwrap();
         let metadata = make_metadata("enriched");
         let role_overrides = RoleOverrides::from_resource(resource.as_ref().unwrap());
+        let enrichment =
+            AttributeTemplate::from_resource(resource.as_ref()).with_scope(scope.as_ref());
         let scope_routing = LogScopeRouting::None;
         let ctx = LogEncodeContext {
             metadata_fields: &metadata,
@@ -3104,8 +3108,7 @@ mod tests {
             },
         };
 
-        let parts =
-            LogRecordParts::new_with_enrichment(&record, &ctx, resource.as_ref(), scope.as_ref());
+        let parts = LogRecordParts::new_with_enrichment(&record, &ctx, &enrichment);
         let dynamic_names: Vec<&str> = parts
             .dynamic_fields
             .iter()
