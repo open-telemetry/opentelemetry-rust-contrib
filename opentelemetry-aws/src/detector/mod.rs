@@ -26,6 +26,7 @@ pub use eks::EksResourceDetector;
 mod imds;
 
 #[cfg(any(
+    feature = "detector-aws-lambda",
     feature = "detector-aws-ec2",
     feature = "detector-aws-ecs",
     feature = "detector-aws-eks"

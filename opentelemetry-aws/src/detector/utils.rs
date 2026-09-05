@@ -1,7 +1,7 @@
 //! Helpers shared by the AWS resource detectors.
 
 use opentelemetry::KeyValue;
-#[cfg(feature = "detector-aws-ecs")]
+#[cfg(any(feature = "detector-aws-ecs", feature = "detector-aws-lambda"))]
 use opentelemetry::{Array, StringValue, Value};
 
 /// Builds a blocking HTTP client with proxying disabled and a global timeout.
@@ -70,7 +70,7 @@ pub(super) fn opt_kv(key: &'static str, value: Option<String>) -> Option<KeyValu
 
 /// [`opt_kv`] for the attributes that semantic conventions type as `string[]`,
 /// wrapping the single value the metadata endpoints expose in a one-element array.
-#[cfg(feature = "detector-aws-ecs")]
+#[cfg(any(feature = "detector-aws-ecs", feature = "detector-aws-lambda"))]
 pub(super) fn opt_kv_array(key: &'static str, value: Option<String>) -> Option<KeyValue> {
     value
         .and_then(non_empty)
