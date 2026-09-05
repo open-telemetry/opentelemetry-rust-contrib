@@ -227,12 +227,6 @@ impl<'a> LogRecordParts<'a> {
         if let Some(routing_event_name) = routing_event_name {
             parts.routing_event_name = routing_event_name;
         }
-        if parts.env_name.is_none() {
-            parts.env_name = Some(parts.routing_event_name.clone());
-        }
-        if parts.name.is_none() {
-            parts.name = Some(parts.routing_event_name.clone());
-        }
 
         parts.finish_fields();
         parts
@@ -401,9 +395,7 @@ impl<'a> LogRecordParts<'a> {
         if self.trace_flags.is_some() {
             self.push_field(FIELD_TRACE_FLAGS, BondDataType::BT_UINT32);
         }
-        if self.name.is_some() {
-            self.push_field(FIELD_NAME, BondDataType::BT_STRING);
-        }
+        self.push_field(FIELD_NAME, BondDataType::BT_STRING);
         self.push_field(FIELD_SEVERITY_NUMBER, BondDataType::BT_INT32);
         if self.severity_text.is_some() {
             self.push_field(FIELD_SEVERITY_TEXT, BondDataType::BT_STRING);
@@ -731,8 +723,9 @@ pub(crate) struct MetadataFields {
     pub role: String,
     pub role_instance: String,
     pub namespace: String,
-    pub event_version: String, // TODO - do we need both env_ver and event_version?
-    metadata_string: String,   // preformatted metadata string for central blob
+    // GCS transport event version; distinct from the Common Schema `env_ver`.
+    pub event_version: String,
+    metadata_string: String, // preformatted metadata string for central blob
 }
 
 impl MetadataFields {
@@ -1270,7 +1263,10 @@ impl OtlpEncoder {
                     BondWriter::write_numeric(&mut buffer, parts.trace_flags.unwrap_or(0));
                 }
                 FIELD_NAME => {
-                    BondWriter::write_string(&mut buffer, parts.name.as_deref().unwrap_or(""));
+                    BondWriter::write_string(
+                        &mut buffer,
+                        parts.name.as_deref().unwrap_or(&parts.routing_event_name),
+                    );
                 }
                 FIELD_SEVERITY_NUMBER => {
                     BondWriter::write_numeric(&mut buffer, parts.severity_number);
@@ -1939,8 +1935,16 @@ mod tests {
         let parts = LogRecordParts::new(&record, &context);
 
         assert_eq!(parts.routing_event_name, "MappedLog");
-        assert_eq!(parts.env_name.as_deref(), Some("MappedLog"));
-        assert_eq!(parts.name.as_deref(), Some("MappedLog"));
+        assert_eq!(parts.env_name, None);
+        assert_eq!(parts.name, None);
+
+        let row = OtlpEncoder::write_row_parts(&parts, &metadata);
+        let mut offset = 0;
+        assert_eq!(read_bond_string(&row, &mut offset), "MappedLog");
+        for _ in 0..6 {
+            read_bond_string(&row, &mut offset);
+        }
+        assert_eq!(read_bond_string(&row, &mut offset), "MappedLog");
     }
 
     /// Scenario: A Common Schema log supplies Part A name but no Part B name.
@@ -1976,7 +1980,15 @@ mod tests {
 
         assert_eq!(parts.routing_event_name, "MappedLog");
         assert_eq!(parts.env_name.as_deref(), Some("ExplicitPartA"));
-        assert_eq!(parts.name.as_deref(), Some("MappedLog"));
+        assert_eq!(parts.name, None);
+
+        let row = OtlpEncoder::write_row_parts(&parts, &metadata);
+        let mut offset = 0;
+        assert_eq!(read_bond_string(&row, &mut offset), "ExplicitPartA");
+        for _ in 0..6 {
+            read_bond_string(&row, &mut offset);
+        }
+        assert_eq!(read_bond_string(&row, &mut offset), "MappedLog");
     }
 
     /// Scenario: An OTLP span is encoded for the default Span event.
