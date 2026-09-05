@@ -138,6 +138,351 @@ pub use logs::ProcessorBuilder;
 #[cfg(feature = "experimental_eventname_callback")]
 pub use logs::EventNameCallback;
 
+/// Empirical measurement of the largest EventHeader event that `user_events`
+/// actually delivers to a consumer, for both the perf and ftrace paths.
+///
+/// This is an experiment, not a regression test. The logs exporter currently
+/// assumes a 64 KB bound: `logs/exporter.rs` only reports
+/// `PAYLOAD_SIZE_EXCEEDED_ERROR` and, on success, treats the record as
+/// delivered. But `user_event_perf()` in the kernel stages records through
+/// `perf_trace_buf_alloc()`, which refuses anything above `PERF_MAX_TRACE_SIZE`
+/// (8192), and the ftrace path is bounded by the ring buffer sub-buffer size.
+/// If those bounds apply here, log records between the real limit and 64 KB are
+/// reported as written and silently discarded.
+///
+/// This probes the boundary directly, through the same `eventheader_dynamic`
+/// write path the exporter uses, so the measured overhead is the real one.
+///
+/// Run with:
+///   sudo -E cargo test --lib size_experiment -- --ignored --nocapture --test-threads=1
+#[cfg(all(test, target_os = "linux"))]
+mod size_experiment {
+    use eventheader::{FieldFormat, Level};
+    use eventheader_dynamic::{EventBuilder, EventSet, Provider};
+    use std::fs;
+    use std::path::{Path, PathBuf};
+    use std::sync::Arc;
+
+    const PROVIDER_NAME: &str = "otelsizeexp";
+    const KEYWORD: u64 = 1;
+    /// `Level::Informational` is 4, so the registered tracepoint is
+    /// `otelsizeexp_L4K1`.
+    const TRACEPOINT: &str = "otelsizeexp_L4K1";
+
+    /// Sizes of the variable-length string field, in bytes. Chosen to bracket
+    /// the ftrace sub-buffer bound (~4 KiB), `PERF_MAX_TRACE_SIZE` (8192), and
+    /// the 64 KiB limit the exporter currently assumes.
+    /// All values are multiples of 8 so that record-length attribution on the
+    /// perf path is unambiguous, and the spacing is 8 bytes around each
+    /// candidate boundary so the threshold is pinned exactly.
+    const PROBE_SIZES: &[usize] = &[
+        512, 1024, 2048, 3072, 3968, 3976, 3984, 3992, 4000, 4008, 4016, 4024, 4032, 4040, 4048,
+        4056, 4064, 4072, 4096, 5120, 6144, 7168, 8000, 8016, 8032, 8048, 8064, 8080, 8088, 8096,
+        8104, 8112, 8120, 8128, 8136, 8144, 8168, 8192, 10240, 16384, 32768, 65400,
+    ];
+
+    /// Each size is written this many times so a single transient drop is not
+    /// mistaken for a hard limit.
+    const REPEATS: usize = 3;
+
+    fn tracefs_root() -> PathBuf {
+        for candidate in ["/sys/kernel/tracing", "/sys/kernel/debug/tracing"] {
+            if Path::new(candidate).join("events").is_dir() {
+                return PathBuf::from(candidate);
+            }
+        }
+        panic!("tracefs is not mounted; run as root on a kernel with tracefs available");
+    }
+
+    fn print_environment(root: &Path) {
+        println!("--- environment ---");
+        println!("page_size: {}", unsafe { sysconf_page_size() });
+        for file in ["buffer_subbuf_size_kb", "buffer_size_kb"] {
+            match fs::read_to_string(root.join(file)) {
+                Ok(v) => println!("{file}: {}", v.trim()),
+                Err(e) => println!("{file}: <unavailable: {e}>"),
+            }
+        }
+        if let Ok(v) = fs::read_to_string("/proc/version") {
+            println!("kernel: {}", v.trim());
+        }
+    }
+
+    /// `sysconf(_SC_PAGESIZE)` without adding a dependency on `libc`.
+    unsafe fn sysconf_page_size() -> i64 {
+        unsafe extern "C" {
+            fn sysconf(name: i32) -> i64;
+        }
+        // _SC_PAGESIZE is 30 on Linux.
+        unsafe { sysconf(30) }
+    }
+
+    fn register_provider() -> (Provider, Arc<EventSet>) {
+        let mut provider = Provider::new(PROVIDER_NAME, &Provider::new_options());
+        let event_set = provider.register_set(Level::Informational, KEYWORD);
+        assert_eq!(
+            event_set.errno(),
+            0,
+            "failed to register {PROVIDER_NAME} event set; run as root"
+        );
+        (provider, event_set)
+    }
+
+    /// Writes one event carrying a string field of `size` bytes, plus a `size`
+    /// field so a decoded event can be attributed back to its probe. Returns
+    /// the errno reported by `EventBuilder::write`, which is exactly what the
+    /// exporter inspects to decide whether the record was delivered.
+    fn write_probe(eb: &mut EventBuilder, event_set: &EventSet, size: usize) -> i32 {
+        let payload = "x".repeat(size);
+        eb.reset("SizeProbe", 0);
+        eb.add_value("size", size as u64, FieldFormat::UnsignedInt, 0);
+        eb.add_str("payload", payload.as_str(), FieldFormat::Default, 0);
+        eb.write(event_set, None, None)
+    }
+
+    /// Sums the `entries` counter across every per-CPU ring buffer. This counts
+    /// records that the kernel actually committed, independent of whether the
+    /// `trace` text formatter can render them: an event larger than
+    /// `TRACE_SEQ_SIZE` (8192) renders as `[LINE TOO BIG]`, so counting lines in
+    /// `trace` measures the formatter rather than delivery.
+    fn ftrace_entries(root: &Path) -> usize {
+        let mut total = 0;
+        let per_cpu = root.join("per_cpu");
+        let dir = fs::read_dir(&per_cpu).expect("failed to list per_cpu directory");
+        for entry in dir.flatten() {
+            let stats = entry.path().join("stats");
+            let Ok(text) = fs::read_to_string(&stats) else {
+                continue;
+            };
+            for line in text.lines() {
+                if let Some(rest) = line.strip_prefix("entries:") {
+                    total += rest.trim().parse::<usize>().unwrap_or(0);
+                }
+            }
+        }
+        total
+    }
+
+    fn report(label: &str, results: &[(usize, usize, usize, i32)]) {
+        println!("--- {label} ---");
+        println!(
+            "{:>8}  {:>9}  {:>7}  {:>6}  verdict",
+            "size", "delivered", "written", "errno"
+        );
+        let mut largest_ok = None;
+        let mut smallest_dropped = None;
+        let mut silent_loss = Vec::new();
+        for (size, delivered, written, errno) in results {
+            let verdict = if *delivered == *written {
+                // PROBE_SIZES is ascending, so the last match is the largest.
+                largest_ok = Some(*size);
+                "ok"
+            } else if *delivered == 0 {
+                if smallest_dropped.is_none() {
+                    smallest_dropped = Some(*size);
+                }
+                if *errno == 0 {
+                    silent_loss.push(*size);
+                }
+                "DROPPED"
+            } else {
+                "PARTIAL"
+            };
+            println!("{size:>8}  {delivered:>9}  {written:>7}  {errno:>6}  {verdict}");
+        }
+        println!(
+            "{label}: largest fully delivered = {largest_ok:?}, smallest fully dropped = {smallest_dropped:?}"
+        );
+        println!(
+            "{label}: sizes dropped while write() reported success (silent loss) = {silent_loss:?}"
+        );
+    }
+
+    /// Probes the perf delivery path, which is what a `one_collect`-based
+    /// consumer uses.
+    #[ignore]
+    #[test]
+    fn size_experiment_perf() {
+        use one_collect::perf_event::{RingBufBuilder, RingBufSessionBuilder};
+        use one_collect::tracefs::TraceFS;
+        use one_collect::Writable;
+
+        let root = tracefs_root();
+        print_environment(&root);
+
+        let (_provider, event_set) = register_provider();
+
+        let tracefs = TraceFS::open().expect("need root to open tracefs");
+        let mut tp_event = tracefs
+            .find_event("user_events", TRACEPOINT)
+            .expect("tracepoint not found after registration");
+
+        // Record the raw record length of every delivered event. The
+        // EventHeader overhead is identical across probes (same event name,
+        // same two fields), so record length differs from probe to probe by
+        // exactly the difference in payload size, which makes it a reliable
+        // attribution key without having to decode the payload.
+        let lengths = Writable::<Vec<usize>>::new(Vec::new());
+        let sink = lengths.clone();
+        tp_event.add_callback(move |data| {
+            let len = data.event_data().len();
+            sink.write(|v| v.push(len));
+            Ok(())
+        });
+
+        // 8 MiB per CPU, far more than this test writes, so ring buffer
+        // capacity can never be mistaken for a per-event limit.
+        let mut session = RingBufSessionBuilder::new()
+            .with_page_count(2048)
+            .with_tracepoint_events(RingBufBuilder::for_tracepoint())
+            .with_target_pid(std::process::id() as i32)
+            .build()
+            .expect("need root to create a perf session");
+        session.add_event(tp_event).expect("failed to add event");
+        session.enable().expect("failed to enable perf session");
+
+        assert!(
+            event_set.enabled(),
+            "event set should be enabled once the perf session is attached"
+        );
+
+        let mut eb = EventBuilder::new();
+        let mut write_results = Vec::new();
+        for &size in PROBE_SIZES {
+            let mut written = 0;
+            let mut errno = 0;
+            for _ in 0..REPEATS {
+                let code = write_probe(&mut eb, &event_set, size);
+                if code == 0 {
+                    written += 1;
+                } else {
+                    errno = code;
+                }
+            }
+            write_results.push((size, written, errno));
+        }
+
+        // The ring buffer is drained only after the session is disabled;
+        // draining a live session blocks.
+        session.disable().expect("failed to disable perf session");
+        session.parse_all().expect("failed to drain ring buffer");
+
+        let mut received = Vec::new();
+        lengths.read(|v| received = v.clone());
+
+        // Derive the fixed per-record overhead from the smallest probe, which
+        // is far below every candidate limit and so is always delivered.
+        let smallest = PROBE_SIZES[0];
+        let overhead = received
+            .iter()
+            .min()
+            .map(|min_len| min_len.saturating_sub(smallest))
+            .unwrap_or(0);
+        println!("derived per-record overhead: {overhead} bytes");
+
+        // Print the raw length histogram so the attribution below can be
+        // checked against the unprocessed measurement.
+        let mut sorted = received.clone();
+        sorted.sort_unstable();
+        sorted.dedup();
+        println!("--- received record lengths (length, count, length - overhead) ---");
+        for len in &sorted {
+            let count = received.iter().filter(|&l| l == len).count();
+            println!("{len:>8}  {count:>3}  {}", len.saturating_sub(overhead));
+        }
+
+        // Attribute with a tolerance of one 8-byte alignment unit. Probe sizes
+        // are 8 bytes apart at their closest, so the mapping stays unique.
+        let results: Vec<(usize, usize, usize, i32)> = write_results
+            .iter()
+            .map(|&(size, written, errno)| {
+                let delivered = received
+                    .iter()
+                    .filter(|&&len| {
+                        let payload = len.saturating_sub(overhead);
+                        payload >= size && payload - size < 8
+                    })
+                    .count();
+                (size, delivered, written, errno)
+            })
+            .collect();
+
+        let attributed: usize = results.iter().map(|r| r.1).sum();
+        if attributed != received.len() {
+            println!(
+                "warning: {} of {} received records could not be attributed to a probe size",
+                received.len() - attributed,
+                received.len()
+            );
+        }
+
+        report("perf", &results);
+
+        // Guard against a broken capture setup reporting a bogus threshold: the
+        // smallest probe must always be delivered.
+        assert_eq!(
+            results[0].1, REPEATS,
+            "smallest probe was not delivered; the capture path itself is broken, \
+             so the reported threshold is meaningless"
+        );
+    }
+
+    /// Probes the ftrace delivery path, with no perf session attached. This is
+    /// bounded by the ring buffer sub-buffer size rather than by
+    /// `PERF_MAX_TRACE_SIZE`.
+    #[ignore]
+    #[test]
+    fn size_experiment_ftrace() {
+        let root = tracefs_root();
+        print_environment(&root);
+
+        let (_provider, event_set) = register_provider();
+
+        let enable_path = root.join(format!("events/user_events/{TRACEPOINT}/enable"));
+        fs::write(&enable_path, "1")
+            .unwrap_or_else(|e| panic!("failed to enable {}: {e}", enable_path.display()));
+        fs::write(root.join("tracing_on"), "1").expect("failed to set tracing_on");
+
+        assert!(
+            event_set.enabled(),
+            "event set should be enabled once the ftrace event is enabled"
+        );
+
+        let trace_path = root.join("trace");
+        let mut eb = EventBuilder::new();
+        let mut results = Vec::new();
+        for &size in PROBE_SIZES {
+            // Truncate the trace buffer so each probe is measured in isolation.
+            fs::write(&trace_path, "").expect("failed to clear trace buffer");
+
+            let mut written = 0;
+            let mut errno = 0;
+            for _ in 0..REPEATS {
+                let code = write_probe(&mut eb, &event_set, size);
+                if code == 0 {
+                    written += 1;
+                } else {
+                    errno = code;
+                }
+            }
+
+            let delivered = ftrace_entries(&root);
+            results.push((size, delivered, written, errno));
+        }
+
+        let _ = fs::write(&enable_path, "0");
+        report("ftrace", &results);
+
+        // Guard against a broken capture setup reporting a bogus threshold: the
+        // smallest probe must always be delivered.
+        assert_eq!(
+            results[0].1, REPEATS,
+            "smallest probe was not delivered; the capture path itself is broken, \
+             so the reported threshold is meaningless"
+        );
+    }
+}
+
 #[cfg(all(test, target_os = "linux"))]
 mod tests {
 
