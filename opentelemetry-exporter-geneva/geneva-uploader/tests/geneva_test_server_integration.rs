@@ -73,6 +73,10 @@ async fn uploader_batch_is_accepted_and_decoded_by_test_server() {
     let payload = &records[0]["payload"];
     assert_eq!(payload["Role"], "checkout");
     assert_eq!(payload["RoleInstance"], "instance-1");
+    assert_eq!(payload["env_name"], "Log");
+    assert_eq!(payload["env_ver"], "4.0");
+    assert_eq!(payload["TIMESTAMP"], payload["env_time"]);
+    assert_eq!(payload["name"], "CheckoutEvent");
     assert_eq!(payload["body"], "checkout failed");
     assert_eq!(payload["operation"], "checkout");
     assert_eq!(payload["result"], 127);
@@ -127,9 +131,13 @@ async fn uploader_batch_is_accepted_and_decoded_by_test_server() {
     let payload = &records[0]["payload"];
     assert_eq!(payload["Role"], "checkout");
     assert_eq!(payload["RoleInstance"], "instance-1");
+    assert_eq!(payload["env_name"], "Log");
+    assert_eq!(payload["env_ver"], "4.0");
+    assert_eq!(payload["TIMESTAMP"], payload["env_time"]);
+    assert_eq!(payload["name"], "CommonSchemaCheckoutEvent");
     assert_eq!(payload["body"], "common schema checkout failed");
-    assert_eq!(payload["SeverityNumber"], 17);
-    assert_eq!(payload["SeverityText"], "ERROR");
+    assert_eq!(payload["severityNumber"], 17);
+    assert_eq!(payload["severityText"], "ERROR");
     assert_eq!(payload["operation"], "checkout");
     assert_eq!(payload["result"], 127);
 }

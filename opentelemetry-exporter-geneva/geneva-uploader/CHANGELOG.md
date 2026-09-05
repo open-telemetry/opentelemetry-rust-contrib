@@ -1,5 +1,10 @@
 # Changelog
 
+## [vNext]
+
+### Fixed
+- Emit compatible Common Schema metadata for OTLP logs and spans, including `env_ver=4.0`, event-based `env_name`, uppercase `TIMESTAMP`, canonical log severity field casing, and a default Part B log name.
+
 ## [0.7.0] - 2026-09-03
 
 ### Changed

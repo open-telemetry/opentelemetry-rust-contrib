@@ -28,20 +28,21 @@ use std::sync::Arc;
 use tracing::{debug, error};
 
 const CS_VERSION_4: i64 = 0x400;
+const CS_VERSION_4_DISPLAY: &str = "4.0";
 const KEY_CSVER: &str = "__csver__";
 const KEY_PARTB_TYPENAME: &str = "PartB._typeName";
 const CS_LOG_TYPENAME: &str = "Log";
 
 const FIELD_ENV_NAME: &str = "env_name";
 const FIELD_ENV_VER: &str = "env_ver";
-const FIELD_TIMESTAMP: &str = "timestamp";
+const FIELD_TIMESTAMP: &str = "TIMESTAMP";
 const FIELD_ENV_TIME: &str = "env_time";
 const FIELD_TRACE_ID: &str = "env_dt_traceId";
 const FIELD_SPAN_ID: &str = "env_dt_spanId";
 const FIELD_TRACE_FLAGS: &str = "env_dt_traceFlags";
 const FIELD_NAME: &str = "name";
-const FIELD_SEVERITY_NUMBER: &str = "SeverityNumber";
-const FIELD_SEVERITY_TEXT: &str = "SeverityText";
+const FIELD_SEVERITY_NUMBER: &str = "severityNumber";
+const FIELD_SEVERITY_TEXT: &str = "severityText";
 const FIELD_BODY: &str = "body";
 
 // Tenant/Role/RoleInstance fields
@@ -171,6 +172,7 @@ struct LogEncodeContext<'a> {
 struct LogRecordParts<'a> {
     timestamp: u64,
     routing_event_name: Cow<'a, str>,
+    env_name: Option<Cow<'a, str>>,
     name: Option<Cow<'a, str>>,
     severity_number: i32,
     severity_text: Option<Cow<'a, str>>,
@@ -255,6 +257,7 @@ impl<'a> LogRecordParts<'a> {
         let mut parts = Self {
             timestamp: record_timestamp(record),
             routing_event_name,
+            env_name: None,
             name,
             severity_number: record.severity_number().unwrap_or(0),
             severity_text,
@@ -298,6 +301,7 @@ impl<'a> LogRecordParts<'a> {
         Self {
             timestamp: record_timestamp(record),
             routing_event_name: Cow::Borrowed(table_name),
+            env_name: None,
             name: None,
             severity_number: record.severity_number().unwrap_or(0),
             severity_text: record
@@ -391,9 +395,7 @@ impl<'a> LogRecordParts<'a> {
         if self.trace_flags.is_some() {
             self.push_field(FIELD_TRACE_FLAGS, BondDataType::BT_UINT32);
         }
-        if self.name.is_some() {
-            self.push_field(FIELD_NAME, BondDataType::BT_STRING);
-        }
+        self.push_field(FIELD_NAME, BondDataType::BT_STRING);
         self.push_field(FIELD_SEVERITY_NUMBER, BondDataType::BT_INT32);
         if self.severity_text.is_some() {
             self.push_field(FIELD_SEVERITY_TEXT, BondDataType::BT_STRING);
@@ -420,7 +422,6 @@ impl<'a> LogRecordParts<'a> {
 
 struct CommonSchemaParts<'a> {
     parts: LogRecordParts<'a>,
-    part_a_name: Option<Cow<'a, str>>,
     part_b_name: Option<Cow<'a, str>>,
 }
 
@@ -433,7 +434,6 @@ impl<'a> CommonSchemaParts<'a> {
     ) -> Self {
         Self {
             parts: LogRecordParts::common_schema_base(record, role, role_instance, table_name),
-            part_a_name: None,
             part_b_name: None,
         }
     }
@@ -481,7 +481,7 @@ impl<'a> CommonSchemaParts<'a> {
             }
             "PartA.name" => {
                 if let Some(name) = value.and_then(value_as_utf8).filter(|s| !s.is_empty()) {
-                    self.part_a_name = Some(Cow::Owned(name.to_owned()));
+                    self.parts.env_name = Some(Cow::Owned(name.to_owned()));
                 }
             }
             "PartB.name" => {
@@ -580,7 +580,7 @@ impl<'a> CommonSchemaParts<'a> {
     }
 
     fn finish(mut self) -> LogRecordParts<'a> {
-        self.parts.name = self.part_b_name.or(self.part_a_name);
+        self.parts.name = self.part_b_name;
         self.parts
     }
 }
@@ -719,20 +719,17 @@ fn parse_hex_bytes<const N: usize>(value: &str) -> Option<[u8; N]> {
 /// Metadata fields that should appear as Bond schema fields (queryable in Geneva)
 #[derive(Clone, Debug)]
 pub(crate) struct MetadataFields {
-    pub env_name: String,
-    pub env_ver: String,
     pub tenant: String,
     pub role: String,
     pub role_instance: String,
     pub namespace: String,
-    pub event_version: String, // TODO - do we need both env_ver and event_version?
-    metadata_string: String,   // preformatted metadata string for central blob
+    // GCS transport event version; distinct from the Common Schema `env_ver`.
+    pub event_version: String,
+    metadata_string: String, // preformatted metadata string for central blob
 }
 
 impl MetadataFields {
     pub fn new(
-        env_name: String,
-        env_ver: String,
         tenant: String,
         role: String,
         role_instance: String,
@@ -745,8 +742,6 @@ impl MetadataFields {
         );
 
         Self {
-            env_name,
-            env_ver,
             tenant,
             role,
             role_instance,
@@ -1080,7 +1075,8 @@ impl OtlpEncoder {
             };
 
             // 4. Encode row
-            let row_buffer = self.write_span_row_data(span, &field_info, metadata_fields);
+            let row_buffer =
+                self.write_span_row_data(span, &field_info, metadata_fields, table_name);
             let level = 5; // Default level for spans (INFO equivalent)
 
             // 5. Create CentralEventEntry
@@ -1189,8 +1185,6 @@ impl OtlpEncoder {
             String::new(),
             String::new(),
             String::new(),
-            String::new(),
-            String::new(),
         );
         let role_overrides = RoleOverrides::default();
         let scope_routing = LogScopeRouting::None;
@@ -1235,8 +1229,14 @@ impl OtlpEncoder {
         let formatted_timestamp = Self::format_timestamp(parts.timestamp);
         for field in &parts.fields[..parts.dynamic_fields_start] {
             match field.name.as_ref() {
-                FIELD_ENV_NAME => BondWriter::write_string(&mut buffer, &metadata_fields.env_name),
-                FIELD_ENV_VER => BondWriter::write_string(&mut buffer, &metadata_fields.env_ver),
+                FIELD_ENV_NAME => BondWriter::write_string(
+                    &mut buffer,
+                    parts
+                        .env_name
+                        .as_deref()
+                        .unwrap_or(&parts.routing_event_name),
+                ),
+                FIELD_ENV_VER => BondWriter::write_string(&mut buffer, CS_VERSION_4_DISPLAY),
                 FIELD_TENANT => BondWriter::write_string(&mut buffer, &metadata_fields.tenant),
                 FIELD_ROLE => BondWriter::write_string(&mut buffer, &parts.role),
                 FIELD_ROLE_INSTANCE => BondWriter::write_string(&mut buffer, &parts.role_instance),
@@ -1263,7 +1263,10 @@ impl OtlpEncoder {
                     BondWriter::write_numeric(&mut buffer, parts.trace_flags.unwrap_or(0));
                 }
                 FIELD_NAME => {
-                    BondWriter::write_string(&mut buffer, parts.name.as_deref().unwrap_or(""));
+                    BondWriter::write_string(
+                        &mut buffer,
+                        parts.name.as_deref().unwrap_or(&parts.routing_event_name),
+                    );
                 }
                 FIELD_SEVERITY_NUMBER => {
                     BondWriter::write_numeric(&mut buffer, parts.severity_number);
@@ -1414,6 +1417,7 @@ impl OtlpEncoder {
         span: &Span,
         fields: &[FieldDef],
         metadata_fields: &MetadataFields,
+        event_name: &str,
     ) -> Vec<u8> {
         let mut buffer = Vec::with_capacity(fields.len() * 50);
 
@@ -1422,8 +1426,8 @@ impl OtlpEncoder {
 
         for field in fields {
             match field.name.as_ref() {
-                FIELD_ENV_NAME => BondWriter::write_string(&mut buffer, &metadata_fields.env_name),
-                FIELD_ENV_VER => BondWriter::write_string(&mut buffer, &metadata_fields.env_ver),
+                FIELD_ENV_NAME => BondWriter::write_string(&mut buffer, event_name),
+                FIELD_ENV_VER => BondWriter::write_string(&mut buffer, CS_VERSION_4_DISPLAY),
                 FIELD_TENANT => BondWriter::write_string(&mut buffer, &metadata_fields.tenant),
                 FIELD_ROLE => BondWriter::write_string(&mut buffer, &metadata_fields.role),
                 FIELD_ROLE_INSTANCE => {
@@ -1624,8 +1628,6 @@ mod tests {
 
     fn make_metadata(namespace: &str) -> MetadataFields {
         MetadataFields::new(
-            "TestEnv".to_string(),
-            "Ver1v0".to_string(),
             "TestTenant".to_string(),
             "TestRole".to_string(),
             "TestRoleInstance".to_string(),
@@ -1842,6 +1844,172 @@ mod tests {
         assert_eq!(lhs.metadata.end_time, rhs.metadata.end_time);
         assert_eq!(lhs.metadata.schema_ids, rhs.metadata.schema_ids);
         assert_eq!(lhs.row_count, rhs.row_count);
+    }
+
+    fn read_bond_string(row: &[u8], offset: &mut usize) -> String {
+        let length = u32::from_le_bytes(
+            row[*offset..*offset + 4]
+                .try_into()
+                .expect("string length should be present"),
+        ) as usize;
+        *offset += 4;
+        let value = std::str::from_utf8(&row[*offset..*offset + length])
+            .expect("encoded string should be UTF-8")
+            .to_owned();
+        *offset += length;
+        value
+    }
+
+    /// Scenario: A canonical OTLP log has no explicit event name.
+    /// Guarantees: The encoded row uses compatible Common Schema fields and values.
+    #[test]
+    fn canonical_log_uses_common_schema_contract() {
+        use otap_df_pdata::views::otlp::bytes::logs::RawLogRecord;
+        use prost::Message as _;
+
+        let log = LogRecord {
+            observed_time_unix_nano: 1_700_000_000_000_000_000,
+            severity_number: 9,
+            severity_text: "INFO".to_string(),
+            ..Default::default()
+        };
+        let bytes = log.encode_to_vec();
+        let record = RawLogRecord::new(&bytes);
+        let metadata = make_metadata("testNamespace");
+        let (fields, dynamic_fields_start) = OtlpEncoder::determine_fields(&record);
+        let field_names: Vec<&str> = fields.iter().map(|field| field.name.as_ref()).collect();
+
+        assert_eq!(
+            field_names,
+            vec![
+                "env_name",
+                "env_ver",
+                "TIMESTAMP",
+                "env_time",
+                "Tenant",
+                "Role",
+                "RoleInstance",
+                "name",
+                "severityNumber",
+                "severityText",
+            ]
+        );
+
+        let row = OtlpEncoder::write_row_data(&record, &fields, dynamic_fields_start, &metadata);
+        let mut offset = 0;
+        assert_eq!(read_bond_string(&row, &mut offset), "Log");
+        assert_eq!(read_bond_string(&row, &mut offset), "4.0");
+        let timestamp = read_bond_string(&row, &mut offset);
+        assert!(!timestamp.is_empty());
+        assert_eq!(read_bond_string(&row, &mut offset), timestamp);
+        assert_eq!(read_bond_string(&row, &mut offset), "TestTenant");
+        assert_eq!(read_bond_string(&row, &mut offset), "TestRole");
+        assert_eq!(read_bond_string(&row, &mut offset), "TestRoleInstance");
+        assert_eq!(read_bond_string(&row, &mut offset), "Log");
+        offset += std::mem::size_of::<i32>();
+        assert_eq!(read_bond_string(&row, &mut offset), "INFO");
+        assert_eq!(offset, row.len());
+    }
+
+    /// Scenario: A canonical OTLP log without an event name is routed to a mapped event.
+    /// Guarantees: Common Schema `env_name` and the default Part B `name` use the final event.
+    #[test]
+    fn routed_canonical_log_defaults_name_to_final_event() {
+        use otap_df_pdata::views::otlp::bytes::logs::RawLogRecord;
+        use prost::Message as _;
+
+        let bytes = LogRecord::default().encode_to_vec();
+        let record = RawLogRecord::new(&bytes);
+        let metadata = make_metadata("testNamespace");
+        let role = RoleOverrides::default();
+        let scope_routing = LogScopeRouting::Fixed("MappedLog".to_string());
+        let context = LogEncodeContext {
+            metadata_fields: &metadata,
+            routing: LogRoutingContext {
+                table_name: "Log",
+                resource_role: &role,
+                scope_routing: &scope_routing,
+            },
+        };
+
+        let parts = LogRecordParts::new(&record, &context);
+
+        assert_eq!(parts.routing_event_name, "MappedLog");
+        assert_eq!(parts.env_name, None);
+        assert_eq!(parts.name, None);
+
+        let row = OtlpEncoder::write_row_parts(&parts, &metadata);
+        let mut offset = 0;
+        assert_eq!(read_bond_string(&row, &mut offset), "MappedLog");
+        for _ in 0..6 {
+            read_bond_string(&row, &mut offset);
+        }
+        assert_eq!(read_bond_string(&row, &mut offset), "MappedLog");
+    }
+
+    /// Scenario: A Common Schema log supplies Part A name but no Part B name.
+    /// Guarantees: Part A controls `env_name` and does not replace the Part B `name` fallback.
+    #[test]
+    fn common_schema_part_a_name_does_not_populate_part_b_name() {
+        use otap_df_pdata::views::otlp::bytes::logs::RawLogRecord;
+        use prost::Message as _;
+
+        let log = LogRecord {
+            attributes: vec![
+                int_attr(KEY_CSVER, CS_VERSION_4),
+                string_attr(KEY_PARTB_TYPENAME, CS_LOG_TYPENAME),
+                string_attr("PartA.name", "ExplicitPartA"),
+            ],
+            ..Default::default()
+        };
+        let bytes = log.encode_to_vec();
+        let record = RawLogRecord::new(&bytes);
+        let metadata = make_metadata("testNamespace");
+        let role = RoleOverrides::default();
+        let scope_routing = LogScopeRouting::Fixed("MappedLog".to_string());
+        let context = LogEncodeContext {
+            metadata_fields: &metadata,
+            routing: LogRoutingContext {
+                table_name: "Log",
+                resource_role: &role,
+                scope_routing: &scope_routing,
+            },
+        };
+
+        let parts = LogRecordParts::new(&record, &context);
+
+        assert_eq!(parts.routing_event_name, "MappedLog");
+        assert_eq!(parts.env_name.as_deref(), Some("ExplicitPartA"));
+        assert_eq!(parts.name, None);
+
+        let row = OtlpEncoder::write_row_parts(&parts, &metadata);
+        let mut offset = 0;
+        assert_eq!(read_bond_string(&row, &mut offset), "ExplicitPartA");
+        for _ in 0..6 {
+            read_bond_string(&row, &mut offset);
+        }
+        assert_eq!(read_bond_string(&row, &mut offset), "MappedLog");
+    }
+
+    /// Scenario: An OTLP span is encoded for the default Span event.
+    /// Guarantees: Span Part A metadata uses the Common Schema version and event identity.
+    #[test]
+    fn span_uses_common_schema_part_a_values() {
+        let encoder = OtlpEncoder::new();
+        let span = Span {
+            start_time_unix_nano: 1_700_000_000_000_000_000,
+            ..Default::default()
+        };
+        let metadata = make_metadata("testNamespace");
+        let fields = OtlpEncoder::determine_span_fields(&span, "Span");
+        let row = encoder.write_span_row_data(&span, &fields, &metadata, "Span");
+        let mut offset = 0;
+
+        assert_eq!(read_bond_string(&row, &mut offset), "Span");
+        assert_eq!(read_bond_string(&row, &mut offset), "4.0");
+        let timestamp = read_bond_string(&row, &mut offset);
+        assert!(!timestamp.is_empty());
+        assert_eq!(read_bond_string(&row, &mut offset), timestamp);
     }
 
     #[test]
