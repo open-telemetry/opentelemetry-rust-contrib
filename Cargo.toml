@@ -2,6 +2,7 @@
 members = [
     "opentelemetry-aws",
     "opentelemetry-config",
+    "opentelemetry-config/examples/*",
     "opentelemetry-contrib",
     "opentelemetry-datadog",
     "opentelemetry-etw-logs",
@@ -53,4 +54,3 @@ tail_expr_drop_order = "allow"
 
 [workspace.lints.clippy]
 all = { level = "warn", priority = 1 }
-
