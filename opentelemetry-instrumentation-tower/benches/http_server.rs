@@ -68,7 +68,7 @@
 //!
 //! Minimize noise by increasing samples collected to 1000 (from the default 100):
 //! ```shell
-//! taskset -c 2,3 cargo bench --bench http_server -p opentelemetry-instrumentation-tower -- --sample-size 1000
+//! cargo bench --bench http_server -p opentelemetry-instrumentation-tower -- --sample-size 1000
 //! ```
 //!
 //! Further minimize noise from interrupts by avoiding CPU 0,
@@ -93,7 +93,7 @@
 //! | metrics              |  724 ns  | +665 ns     |
 //! | tracing + metrics    |  870 ns  | +811 ns     |
 //!
-//! Captured on: ThinkPad P14s, AMD Ryzen AI 9 HX PRO 470 (12C/24T), 54 GB RAM,
+//! Captured on: ThinkPad P14s, AMD Ryzen AI 9 HX PRO 470 (12C/24T), 64 GB RAM,
 //! Fedora Linux 44 (Workstation Edition), rustc 1.97.1, OpenTelemetry 0.32.
 //!
 
