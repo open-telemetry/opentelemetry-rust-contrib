@@ -19,6 +19,7 @@ use opentelemetry_sdk::{
     trace::SdkTracerProvider,
     Resource,
 };
+use std::net::SocketAddr;
 use std::sync::OnceLock;
 use tower_http::catch_panic::CatchPanicLayer;
 
@@ -161,10 +162,16 @@ async fn main() {
     let listener = tokio::net::TcpListener::bind("0.0.0.0:5000")
         .await
         .expect("bind 0.0.0.0:5000");
-    axum::serve(listener, app)
-        .with_graceful_shutdown(shutdown_signal())
-        .await
-        .expect("server error");
+    // `into_make_service_with_connect_info` records the peer address of every
+    // connection, which the layer reports as `client.address` and
+    // `network.peer.address`.
+    axum::serve(
+        listener,
+        app.into_make_service_with_connect_info::<SocketAddr>(),
+    )
+    .with_graceful_shutdown(shutdown_signal())
+    .await
+    .expect("server error");
 
     let _ = meter_provider.shutdown();
     let _ = tracer_provider.shutdown();

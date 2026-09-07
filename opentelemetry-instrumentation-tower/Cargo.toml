@@ -17,7 +17,9 @@ default = []
 axum = ["dep:axum"]
 
 [dependencies]
-axum = { features = ["matched-path", "macros"], version = "0.8", default-features = false, optional = true }
+# The `tokio` feature carries `ConnectInfo`, which holds the peer address of a
+# connection. Every Axum server enables it, because `axum::serve` needs it.
+axum = { features = ["matched-path", "macros", "tokio"], version = "0.8", default-features = false, optional = true }
 http = { version = "1", features = ["std"], default-features = false }
 http-body = { version = "1", default-features = false }
 opentelemetry = { workspace = true, features = ["futures", "metrics", "trace"] }

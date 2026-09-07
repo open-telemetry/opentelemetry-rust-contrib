@@ -13,6 +13,22 @@
 * The instrumentation scope now carries the OpenTelemetry semantic conventions
   schema URL.
   [#679](https://github.com/open-telemetry/opentelemetry-rust-contrib/pull/679)
+* The server span now carries the HTTP server span attributes that it missed:
+  `url.query`, `network.protocol.version`, `client.address`, `server.address`,
+  `server.port`, `network.peer.address`, `network.peer.port`, and `error.type`.
+  The middleware reads the attributes of the original client request from the
+  `Forwarded` header, then from the `X-Forwarded-For`, `X-Forwarded-Host`, and
+  `X-Forwarded-Proto` headers, and falls back to the connection. With the `axum`
+  feature, the peer address comes from `ConnectInfo`, so an application that
+  wants `client.address` and `network.peer.address` without a proxy must serve
+  with `Router::into_make_service_with_connect_info`.
+  [#777](https://github.com/open-telemetry/opentelemetry-rust-contrib/issues/777)
+* The `http.server.request.duration` metric now carries `error.type` for a
+  failed request, so users can derive an error rate from it.
+  [#777](https://github.com/open-telemetry/opentelemetry-rust-contrib/issues/777)
+* The README now lists the specification documents that the middleware
+  implements, and the attributes that a Tower service cannot know.
+  [#777](https://github.com/open-telemetry/opentelemetry-rust-contrib/issues/777)
 
 ### Changed
 
@@ -22,6 +38,33 @@
   `HTTPLayerBuilder` / `ResponseFuture` types introduced in v0.18.0 are replaced
   by `http::server::{Layer, Service, ResponseFuture, LayerBuilder}`.
   [#717](https://github.com/open-telemetry/opentelemetry-rust-contrib/pull/717)
+* **BREAKING**: The server span no longer carries `url.full`. The attribute
+  belongs to the HTTP client span, and a server receives a request target that
+  is no absolute URL. `url.path` and `url.query` describe the target instead.
+  [#777](https://github.com/open-telemetry/opentelemetry-rust-contrib/issues/777)
+* **BREAKING**: The `http.server.*` metrics no longer carry
+  `network.protocol.name`. The conventions ask for the attribute only when the
+  protocol is not `http`, which an `http::Version` cannot express.
+  [#777](https://github.com/open-telemetry/opentelemetry-rust-contrib/issues/777)
+* **BREAKING**: `network.protocol.version` now reports `2` and `3` for HTTP/2
+  and HTTP/3, in place of `2.0` and `3.0`, and stays unset for a version the
+  middleware does not know, in place of an empty value.
+  [#777](https://github.com/open-telemetry/opentelemetry-rust-contrib/issues/777)
+* **BREAKING**: `url.scheme` now reports the scheme of the original client
+  request. It read the request target before, which carries no scheme on a
+  server, so every request reported an empty value.
+  [#777](https://github.com/open-telemetry/opentelemetry-rust-contrib/issues/777)
+* **BREAKING**: A request method that the conventions do not list now reports
+  `http.request.method` as `_OTHER`, keeps the value from the request line in
+  `http.request.method_original`, and produces a span name of `HTTP` or
+  `HTTP {route}`. This keeps the method and the span name low cardinality.
+  [#777](https://github.com/open-telemetry/opentelemetry-rust-contrib/issues/777)
+* The span status description of a 5xx response is now empty, because
+  `error.type` already holds the status code.
+  [#777](https://github.com/open-telemetry/opentelemetry-rust-contrib/issues/777)
+* The `axum` feature now enables the `tokio` feature of `axum`, which carries
+  `ConnectInfo`.
+  [#777](https://github.com/open-telemetry/opentelemetry-rust-contrib/issues/777)
 
 ### Migration Guide
 

@@ -20,6 +20,43 @@ Tonic, etc.). The middleware emits the standard `http.server.*` metrics and a
 server span per request, following the OpenTelemetry
 [HTTP semantic conventions](https://opentelemetry.io/docs/specs/semconv/http/).
 
+## Implemented specification
+
+The middleware implements these documents:
+
+- [HTTP spans](https://opentelemetry.io/docs/specs/semconv/http/http-spans/),
+  and the
+  [span examples](https://opentelemetry.io/docs/specs/semconv/http/http-spans/#examples)
+  in particular.
+- [HTTP metrics](https://opentelemetry.io/docs/specs/semconv/http/http-metrics/).
+- [Recording errors](https://opentelemetry.io/docs/specs/semconv/general/recording-errors/).
+- [Attribute requirement levels](https://opentelemetry.io/docs/specs/semconv/general/attribute-requirement-level/).
+
+The server span carries every `Required`, `Conditionally Required`, and
+`Recommended` attribute that a Tower service can read. Three points need
+attention:
+
+- **Attributes of the original client request.** A reverse proxy rewrites the
+  connection and the `Host` header. The middleware therefore reads
+  `client.address`, `server.address`, `server.port`, and `url.scheme` from the
+  [`Forwarded`](https://www.rfc-editor.org/rfc/rfc7239) header first, then from
+  the `X-Forwarded-For`, `X-Forwarded-Host`, and `X-Forwarded-Proto` headers, and
+  falls back to the connection. A client can send these headers too, so a server
+  that no proxy protects can receive any value in them.
+- **`url.scheme` without a proxy.** A server receives a request target that
+  carries no scheme, so the middleware reports `http` unless a forwarding header
+  states otherwise. A server that terminates TLS itself therefore reports `http`.
+- **Peer address.** A Tower service reads the request only, which carries no
+  connection. With the `axum` feature, the middleware reads the peer address from
+  `ConnectInfo`, which Axum records when the application serves with
+  [`Router::into_make_service_with_connect_info`](https://docs.rs/axum/latest/axum/struct.Router.html#method.into_make_service_with_connect_info).
+  Without it, `client.address` holds a forwarded address only, and
+  `network.peer.address` stays unset.
+
+`Opt-In` attributes, such as `http.request.header.<key>` and `client.port`, are
+not emitted. Add them with
+`http::server::LayerBuilder::with_request_extractor`.
+
 ## Quick start
 
 With the default `axum` feature, applying the middleware is a single layer call:

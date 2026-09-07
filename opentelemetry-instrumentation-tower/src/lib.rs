@@ -20,9 +20,19 @@
 //!
 //! # Tracing
 //!
-//! A server span (`SpanKind::Server`) is created per request, with attributes such
-//! as `http.request.method`, `url.scheme`, `url.path`, `url.full`,
-//! `user_agent.original`, `http.route`, and `http.response.status_code`.
+//! A server span (`SpanKind::Server`) is created per request. It carries every
+//! `Required`, `Conditionally Required`, and `Recommended` attribute of the
+//! [HTTP server span] that a Tower service can read: `http.request.method`,
+//! `http.request.method_original`, `url.scheme`, `url.path`, `url.query`,
+//! `network.protocol.version`, `client.address`, `network.peer.address`,
+//! `network.peer.port`, `server.address`, `server.port`, `user_agent.original`,
+//! `http.route`, `http.response.status_code`, and `error.type`.
+//!
+//! The README of the crate describes how the middleware reads the attributes of
+//! the original client request from the forwarding headers, and which values it
+//! cannot know.
+//!
+//! [HTTP server span]: https://opentelemetry.io/docs/specs/semconv/http/http-spans/#http-server-span
 //!
 //! # Quick start
 //!

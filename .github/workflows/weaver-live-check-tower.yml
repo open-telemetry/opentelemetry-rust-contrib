@@ -103,6 +103,17 @@ jobs:
           echo "::group::Drive traffic"
           c "http://127.0.0.1:5000/"
           c "http://127.0.0.1:5000/users/1"
+          # A query component makes `url.query` applicable.
+          c "http://127.0.0.1:5000/users/1?fields=name&verbose=true"
+          # The forwarding headers make the request look like it came through a
+          # reverse proxy, so `client.address`, `server.address` and
+          # `url.scheme` describe the original client request.
+          c -H 'Forwarded: for=203.0.113.7;host=public.example.com:8443;proto=https' \
+            "http://127.0.0.1:5000/users/2"
+          c -H 'X-Forwarded-For: 203.0.113.8' \
+            -H 'X-Forwarded-Host: public.example.com' \
+            -H 'X-Forwarded-Proto: https' \
+            "http://127.0.0.1:5000/users/3?fields=name"
           c "http://127.0.0.1:5000/files/a/b/c/1.txt"
           c -X POST   "http://127.0.0.1:5000/items"
           c -X PUT    "http://127.0.0.1:5000/items/1"

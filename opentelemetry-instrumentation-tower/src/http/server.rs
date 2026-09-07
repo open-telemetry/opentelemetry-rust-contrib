@@ -23,11 +23,12 @@ use pin_project_lite::pin_project;
 use tower_layer::Layer as TowerLayer;
 use tower_service::Service as TowerService;
 
-use crate::common::attributes::{method_kv, split_and_format_protocol_version, url_scheme_kv};
+use crate::common::attributes::{method_as_static, method_kvs, protocol_version};
 use crate::http::extractors::{
     DefaultRouteExtractor, NoOpExtractor, RequestAttributeExtractor, ResponseAttributeExtractor,
     RouteExtractor,
 };
+use crate::http::server_attributes::{server_request_attributes, ServerRequestAttributes};
 use crate::Result;
 
 const HTTP_SERVER_DURATION_UNIT: &str = "s";
@@ -367,8 +368,7 @@ struct RequestData {
     duration_start: Instant,
     req_body_size: Option<u64>,
 
-    protocol_name_kv: KeyValue,
-    protocol_version_kv: KeyValue,
+    protocol_version_kv_opt: Option<KeyValue>,
     url_scheme_kv: KeyValue,
     method_kv: KeyValue,
     route_kv_opt: Option<KeyValue>,
@@ -447,15 +447,19 @@ where
             .get(http::header::CONTENT_LENGTH)
             .and_then(|value| value.to_str().ok()?.parse::<u64>().ok());
 
-        let (protocol, version) = split_and_format_protocol_version(req.version());
-        let protocol_name_kv = KeyValue::new(semconv::attribute::NETWORK_PROTOCOL_NAME, protocol);
-        let protocol_version_kv =
-            KeyValue::new(semconv::attribute::NETWORK_PROTOCOL_VERSION, version);
+        let protocol_version_kv_opt = protocol_version(req.version())
+            .map(|version| KeyValue::new(semconv::attribute::NETWORK_PROTOCOL_VERSION, version));
 
-        let url_scheme_kv = url_scheme_kv(req.uri());
+        let (method_kv, method_original_kv_opt) = method_kvs(req.method());
 
-        let method = req.method().as_str().to_owned();
-        let method_kv = method_kv(req.method());
+        let ServerRequestAttributes {
+            url_scheme_kv,
+            url_query_kv_opt,
+            client_address_kv_opt,
+            network_peer_kv_opt,
+            server_address_kv_opt,
+            server_port_kv_opt,
+        } = server_request_attributes(&req);
 
         // Extract route using the configured extractor
         let route = self.route_extractor.extract_route(&req);
@@ -463,10 +467,13 @@ where
             .as_ref()
             .map(|r| KeyValue::new(semconv::attribute::HTTP_ROUTE, r.clone()));
 
-        // Build span name: "{method} {route}" or just "{method}"
+        // Build span name: "{method} {route}" or just "{method}". A method the
+        // instrumentation does not know is reported as "HTTP", because the
+        // method itself would make the span name high cardinality.
+        let span_method = method_as_static(req.method()).unwrap_or("HTTP");
         let span_name = match &route {
-            Some(r) => format!("{} {}", method, r),
-            None => method.clone(),
+            Some(r) => format!("{span_method} {r}"),
+            None => span_method.to_owned(),
         };
 
         // Extract custom request attributes
@@ -477,16 +484,26 @@ where
             propagator.extract(&HeaderExtractor(req.headers()))
         });
 
-        let mut span_attributes = vec![
-            KeyValue::new(semconv::attribute::HTTP_REQUEST_METHOD, method.clone()),
-            url_scheme_kv.clone(),
-            KeyValue::new(semconv::attribute::URL_PATH, req.uri().path().to_string()),
-            KeyValue::new(semconv::attribute::URL_FULL, req.uri().to_string()),
-        ];
+        let mut span_attributes = vec![method_kv.clone()];
+        span_attributes.extend(method_original_kv_opt);
+        span_attributes.push(url_scheme_kv.clone());
+        span_attributes.push(KeyValue::new(
+            semconv::attribute::URL_PATH,
+            req.uri().path().to_string(),
+        ));
+        span_attributes.extend(url_query_kv_opt);
+        span_attributes.extend(protocol_version_kv_opt.clone());
+        span_attributes.extend(client_address_kv_opt);
+        if let Some((peer_address_kv, peer_port_kv)) = network_peer_kv_opt {
+            span_attributes.push(peer_address_kv);
+            span_attributes.push(peer_port_kv);
+        }
+        span_attributes.extend(server_address_kv_opt);
+        span_attributes.extend(server_port_kv_opt);
 
         if let Some(user_agent) = req
             .headers()
-            .get("user-agent")
+            .get(http::header::USER_AGENT)
             .and_then(|v| v.to_str().ok())
         {
             span_attributes.push(KeyValue::new(
@@ -495,9 +512,7 @@ where
             ));
         }
 
-        if let Some(r) = &route {
-            span_attributes.push(KeyValue::new(semconv::attribute::HTTP_ROUTE, r.clone()));
-        }
+        span_attributes.extend(route_kv_opt.clone());
 
         span_attributes.extend(custom_request_attributes.clone());
 
@@ -517,8 +532,7 @@ where
         let request_data = RequestData {
             duration_start,
             req_body_size: content_length,
-            protocol_name_kv,
-            protocol_version_kv,
+            protocol_version_kv_opt,
             url_scheme_kv,
             method_kv,
             route_kv_opt,
@@ -556,8 +570,7 @@ fn finalize_request<ResBody, E, ResExt>(
     let RequestData {
         duration_start,
         req_body_size,
-        protocol_name_kv,
-        protocol_version_kv,
+        protocol_version_kv_opt,
         url_scheme_kv,
         method_kv,
         route_kv_opt,
@@ -586,26 +599,35 @@ fn finalize_request<ResBody, E, ResExt>(
 
             // Set span status based on HTTP status code. Per the HTTP semantic
             // conventions, a server span is only an error for 5xx responses.
-            if http_status.is_server_error() {
-                span.set_status(Status::Error {
-                    description: format!("HTTP {}", http_status.as_u16()).into(),
-                });
+            // The failure then also carries `error.type`, which holds the status
+            // code, so the status description would only repeat it.
+            let error_type_kv_opt = http_status.is_server_error().then(|| {
+                KeyValue::new(
+                    semconv::attribute::ERROR_TYPE,
+                    http_status.as_u16().to_string(),
+                )
+            });
+            if let Some(error_type_kv) = &error_type_kv_opt {
+                span.set_attribute(error_type_kv.clone());
+                span.set_status(Status::error(""));
             }
 
             // Build label superset by moving owned values where possible.
             // `url_scheme_kv` and `method_kv` are cloned for the active-requests
             // decrement; their underlying strings are typically `&'static str`
             // so the clones are allocation-free.
-            let cap = 5
+            let cap = 3
+                + protocol_version_kv_opt.is_some() as usize
+                + error_type_kv_opt.is_some() as usize
                 + route_kv_opt.is_some() as usize
                 + custom_request_attributes.len()
                 + custom_response_attributes.len();
             let mut label_superset = Vec::with_capacity(cap);
-            label_superset.push(protocol_name_kv);
-            label_superset.push(protocol_version_kv);
+            label_superset.extend(protocol_version_kv_opt);
             label_superset.push(url_scheme_kv.clone());
             label_superset.push(method_kv.clone());
             label_superset.push(status_code_kv);
+            label_superset.extend(error_type_kv_opt);
             if let Some(route_kv) = route_kv_opt {
                 label_superset.push(route_kv);
             }
@@ -634,18 +656,25 @@ fn finalize_request<ResBody, E, ResExt>(
                 .add(-1, &[url_scheme_kv, method_kv]);
         }
         Err(error) => {
-            // Mark span as error
+            // The inner service failed before it produced a response. The type
+            // of the error identifies the failure and keeps `error.type` low
+            // cardinality, while the debug output goes to the status
+            // description, which has no cardinality constraint.
+            let error_type_kv = KeyValue::new(
+                semconv::attribute::ERROR_TYPE,
+                std::any::type_name::<E>().to_owned(),
+            );
+            span.set_attribute(error_type_kv.clone());
             span.set_status(Status::Error {
-                description: format!("{:?}", error).into(),
+                description: format!("{error:?}").into(),
             });
 
             // Still record duration metric (without status code).
-            let label_superset = [
-                protocol_name_kv,
-                protocol_version_kv,
-                url_scheme_kv.clone(),
-                method_kv.clone(),
-            ];
+            let mut label_superset = Vec::with_capacity(4);
+            label_superset.extend(protocol_version_kv_opt);
+            label_superset.push(url_scheme_kv.clone());
+            label_superset.push(method_kv.clone());
+            label_superset.push(error_type_kv);
 
             layer_state
                 .server_request_duration
@@ -761,12 +790,13 @@ mod tests {
         );
         // Build expected attributes
         let expected_attributes = vec![
-            KeyValue::new(semconv::attribute::HTTP_REQUEST_METHOD, "GET".to_string()),
-            KeyValue::new(semconv::attribute::URL_SCHEME, "http".to_string()),
+            KeyValue::new(semconv::attribute::HTTP_REQUEST_METHOD, "GET"),
+            KeyValue::new(semconv::attribute::URL_SCHEME, "http"),
             KeyValue::new(semconv::attribute::URL_PATH, "/api/users/123".to_string()),
+            KeyValue::new(semconv::attribute::NETWORK_PROTOCOL_VERSION, "1.1"),
             KeyValue::new(
-                semconv::attribute::URL_FULL,
-                "http://example.com/api/users/123".to_string(),
+                semconv::attribute::SERVER_ADDRESS,
+                "example.com".to_string(),
             ),
             KeyValue::new(
                 semconv::attribute::USER_AGENT_ORIGINAL,
@@ -779,191 +809,450 @@ mod tests {
         assert_eq!(http_span.attributes, expected_attributes);
     }
 
+    /// Behaviour of the instrumented service for a single table test case.
+    #[derive(Clone, Copy)]
+    enum Handler {
+        /// Answer with 200 and echo the request body.
+        Echo,
+        /// Answer with the given status code.
+        Status(StatusCode),
+        /// Fail before producing a response.
+        Fail,
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn server_span_follows_the_conventions() {
+        struct TestCase {
+            name: &'static str,
+            method: &'static str,
+            target: &'static str,
+            headers: &'static [(&'static str, &'static str)],
+            handler: Handler,
+            expected_span_name: &'static str,
+            expected_status: Status,
+            expected_attributes: Vec<KeyValue>,
+        }
+
+        let test_cases = [
+            TestCase {
+                name: "request with a query component",
+                method: "GET",
+                target: "/users/456?fields=name&verbose=true",
+                headers: &[("host", "example.com:8443")],
+                handler: Handler::Echo,
+                expected_span_name: "GET /users/456",
+                expected_status: Status::Unset,
+                expected_attributes: vec![
+                    KeyValue::new(semconv::attribute::HTTP_REQUEST_METHOD, "GET"),
+                    KeyValue::new(semconv::attribute::URL_SCHEME, "http"),
+                    KeyValue::new(semconv::attribute::URL_PATH, "/users/456".to_string()),
+                    KeyValue::new(semconv::attribute::URL_QUERY, "fields=name&verbose=true"),
+                    KeyValue::new(semconv::attribute::NETWORK_PROTOCOL_VERSION, "1.1"),
+                    KeyValue::new(
+                        semconv::attribute::SERVER_ADDRESS,
+                        "example.com".to_string(),
+                    ),
+                    KeyValue::new(semconv::attribute::SERVER_PORT, 8443),
+                    KeyValue::new(semconv::attribute::HTTP_ROUTE, "/users/456".to_string()),
+                    KeyValue::new(semconv::attribute::HTTP_RESPONSE_STATUS_CODE, 200),
+                ],
+            },
+            TestCase {
+                name: "request through a reverse proxy",
+                method: "GET",
+                target: "/users/456",
+                headers: &[
+                    ("host", "backend.internal:5000"),
+                    (
+                        "forwarded",
+                        "for=203.0.113.7;host=public.example.com;proto=https",
+                    ),
+                ],
+                handler: Handler::Echo,
+                expected_span_name: "GET /users/456",
+                expected_status: Status::Unset,
+                expected_attributes: vec![
+                    KeyValue::new(semconv::attribute::HTTP_REQUEST_METHOD, "GET"),
+                    KeyValue::new(semconv::attribute::URL_SCHEME, "https"),
+                    KeyValue::new(semconv::attribute::URL_PATH, "/users/456".to_string()),
+                    KeyValue::new(semconv::attribute::NETWORK_PROTOCOL_VERSION, "1.1"),
+                    KeyValue::new(
+                        semconv::attribute::CLIENT_ADDRESS,
+                        "203.0.113.7".to_string(),
+                    ),
+                    KeyValue::new(
+                        semconv::attribute::SERVER_ADDRESS,
+                        "public.example.com".to_string(),
+                    ),
+                    KeyValue::new(semconv::attribute::HTTP_ROUTE, "/users/456".to_string()),
+                    KeyValue::new(semconv::attribute::HTTP_RESPONSE_STATUS_CODE, 200),
+                ],
+            },
+            TestCase {
+                name: "client error keeps the span status unset",
+                method: "GET",
+                target: "/users/456",
+                headers: &[("host", "example.com")],
+                handler: Handler::Status(StatusCode::NOT_FOUND),
+                expected_span_name: "GET /users/456",
+                expected_status: Status::Unset,
+                expected_attributes: vec![
+                    KeyValue::new(semconv::attribute::HTTP_REQUEST_METHOD, "GET"),
+                    KeyValue::new(semconv::attribute::URL_SCHEME, "http"),
+                    KeyValue::new(semconv::attribute::URL_PATH, "/users/456".to_string()),
+                    KeyValue::new(semconv::attribute::NETWORK_PROTOCOL_VERSION, "1.1"),
+                    KeyValue::new(
+                        semconv::attribute::SERVER_ADDRESS,
+                        "example.com".to_string(),
+                    ),
+                    KeyValue::new(semconv::attribute::HTTP_ROUTE, "/users/456".to_string()),
+                    KeyValue::new(semconv::attribute::HTTP_RESPONSE_STATUS_CODE, 404),
+                ],
+            },
+            TestCase {
+                name: "server error carries the status code as the error type",
+                method: "GET",
+                target: "/users/456",
+                headers: &[("host", "example.com")],
+                handler: Handler::Status(StatusCode::INTERNAL_SERVER_ERROR),
+                expected_span_name: "GET /users/456",
+                expected_status: Status::error(""),
+                expected_attributes: vec![
+                    KeyValue::new(semconv::attribute::HTTP_REQUEST_METHOD, "GET"),
+                    KeyValue::new(semconv::attribute::URL_SCHEME, "http"),
+                    KeyValue::new(semconv::attribute::URL_PATH, "/users/456".to_string()),
+                    KeyValue::new(semconv::attribute::NETWORK_PROTOCOL_VERSION, "1.1"),
+                    KeyValue::new(
+                        semconv::attribute::SERVER_ADDRESS,
+                        "example.com".to_string(),
+                    ),
+                    KeyValue::new(semconv::attribute::HTTP_ROUTE, "/users/456".to_string()),
+                    KeyValue::new(semconv::attribute::HTTP_RESPONSE_STATUS_CODE, 500),
+                    KeyValue::new(semconv::attribute::ERROR_TYPE, "500".to_string()),
+                ],
+            },
+            TestCase {
+                name: "failed request carries the error type of the failure",
+                method: "GET",
+                target: "/users/456",
+                headers: &[("host", "example.com")],
+                handler: Handler::Fail,
+                expected_span_name: "GET /users/456",
+                expected_status: Status::error("opentelemetry_instrumentation_tower::Error"),
+                expected_attributes: vec![
+                    KeyValue::new(semconv::attribute::HTTP_REQUEST_METHOD, "GET"),
+                    KeyValue::new(semconv::attribute::URL_SCHEME, "http"),
+                    KeyValue::new(semconv::attribute::URL_PATH, "/users/456".to_string()),
+                    KeyValue::new(semconv::attribute::NETWORK_PROTOCOL_VERSION, "1.1"),
+                    KeyValue::new(
+                        semconv::attribute::SERVER_ADDRESS,
+                        "example.com".to_string(),
+                    ),
+                    KeyValue::new(semconv::attribute::HTTP_ROUTE, "/users/456".to_string()),
+                    KeyValue::new(
+                        semconv::attribute::ERROR_TYPE,
+                        "opentelemetry_instrumentation_tower::Error".to_string(),
+                    ),
+                ],
+            },
+            TestCase {
+                name: "unknown method keeps the span name low cardinality",
+                method: "CUSTOM",
+                target: "/users/456",
+                headers: &[("host", "example.com")],
+                handler: Handler::Echo,
+                expected_span_name: "HTTP /users/456",
+                expected_status: Status::Unset,
+                expected_attributes: vec![
+                    KeyValue::new(semconv::attribute::HTTP_REQUEST_METHOD, "_OTHER"),
+                    KeyValue::new(
+                        semconv::attribute::HTTP_REQUEST_METHOD_ORIGINAL,
+                        "CUSTOM".to_string(),
+                    ),
+                    KeyValue::new(semconv::attribute::URL_SCHEME, "http"),
+                    KeyValue::new(semconv::attribute::URL_PATH, "/users/456".to_string()),
+                    KeyValue::new(semconv::attribute::NETWORK_PROTOCOL_VERSION, "1.1"),
+                    KeyValue::new(
+                        semconv::attribute::SERVER_ADDRESS,
+                        "example.com".to_string(),
+                    ),
+                    KeyValue::new(semconv::attribute::HTTP_ROUTE, "/users/456".to_string()),
+                    KeyValue::new(semconv::attribute::HTTP_RESPONSE_STATUS_CODE, 200),
+                ],
+            },
+        ];
+
+        for test_case in test_cases {
+            let trace_exporter = InMemorySpanExporterBuilder::new().build();
+            let tracer_provider = SdkTracerProvider::builder()
+                .with_simple_exporter(trace_exporter.clone())
+                .build();
+            let layer = LayerBuilder::builder()
+                .with_route_extractor(PathExtractor)
+                .with_tracer_provider(tracer_provider.clone())
+                .build()
+                .unwrap();
+            let handler = test_case.handler;
+            let mut service =
+                layer.layer(tower::service_fn(move |req: Request<String>| async move {
+                    respond(handler, req)
+                }));
+
+            let mut request = Request::builder()
+                .method(test_case.method)
+                .uri(test_case.target);
+            for (name, value) in test_case.headers {
+                request = request.header(*name, *value);
+            }
+            let _result = service
+                .call(request.body(String::from("body")).unwrap())
+                .await;
+
+            tracer_provider.force_flush().unwrap();
+            let spans = trace_exporter.get_finished_spans().unwrap();
+            assert_eq!(spans.len(), 1, "{}", test_case.name);
+            let span = &spans[0];
+
+            assert_eq!(
+                (
+                    span.name.as_ref(),
+                    span.span_kind.clone(),
+                    span.status.clone(),
+                    span.attributes.clone()
+                ),
+                (
+                    test_case.expected_span_name,
+                    SpanKind::Server,
+                    test_case.expected_status,
+                    test_case.expected_attributes
+                ),
+                "{}",
+                test_case.name
+            );
+        }
+    }
+
+    fn respond(handler: Handler, req: Request<String>) -> Result<http::Response<String>, Error> {
+        match handler {
+            Handler::Echo => Ok(http::Response::new(req.into_body())),
+            Handler::Status(status) => Ok(Response::builder()
+                .status(status)
+                .body(String::from("body"))
+                .unwrap()),
+            Handler::Fail => Err(Error {
+                inner: crate::ErrorKind::Other(String::from("inner service failure")),
+            }),
+        }
+    }
+
     async fn echo(req: http::Request<String>) -> Result<http::Response<String>, Error> {
         Ok(http::Response::new(req.into_body()))
     }
 
     #[tokio::test(flavor = "current_thread")]
-    async fn test_metrics_labels() {
-        let exporter = InMemoryMetricExporter::default();
-        let reader = PeriodicReader::builder(exporter.clone())
-            .with_interval(Duration::from_millis(100))
-            .build();
-        let meter_provider = SdkMeterProvider::builder().with_reader(reader).build();
-
-        let layer = LayerBuilder::builder()
-            .with_meter_provider(meter_provider.clone())
-            .build()
-            .unwrap();
-
-        let service = tower::service_fn(|_req: Request<String>| async {
-            Ok::<_, std::convert::Infallible>(
-                Response::builder()
-                    .status(StatusCode::OK)
-                    .body(String::from("Hello, World!"))
-                    .unwrap(),
-            )
-        });
-
-        let mut service = layer.layer(service);
-
-        let request = Request::builder()
-            .method("GET")
-            .uri("https://example.com/test")
-            .body("test body".to_string())
-            .unwrap();
-
-        let _response = service.call(request).await.unwrap();
-
-        tokio::time::sleep(Duration::from_millis(500)).await;
-
-        let metrics = exporter.get_finished_metrics().unwrap();
-        assert!(!metrics.is_empty());
-
-        let resource_metrics = &metrics[0];
-        let scope_metrics = resource_metrics
-            .scope_metrics()
-            .next()
-            .expect("Should have scope metrics");
-
-        let duration_metric = scope_metrics
-            .metrics()
-            .find(|m| m.name() == semconv::metric::HTTP_SERVER_REQUEST_DURATION)
-            .expect("Duration metric should exist");
-
-        if let AggregatedMetrics::F64(MetricData::Histogram(histogram)) = duration_metric.data() {
-            let data_point = histogram
-                .data_points()
-                .next()
-                .expect("Should have data point");
-            let attributes: Vec<_> = data_point.attributes().collect();
-
-            // Duration metric should have 5 attributes: protocol_name, protocol_version, url_scheme, method, status_code
-            assert_eq!(
-                attributes.len(),
-                5,
-                "Duration metric should have exactly 5 attributes"
-            );
-
-            let protocol_name = attributes
-                .iter()
-                .find(|kv| kv.key.as_str() == semconv::attribute::NETWORK_PROTOCOL_NAME)
-                .expect("Protocol name should be present");
-            assert_eq!(protocol_name.value.as_str(), "http");
-
-            let protocol_version = attributes
-                .iter()
-                .find(|kv| kv.key.as_str() == semconv::attribute::NETWORK_PROTOCOL_VERSION)
-                .expect("Protocol version should be present");
-            assert_eq!(protocol_version.value.as_str(), "1.1");
-
-            let url_scheme = attributes
-                .iter()
-                .find(|kv| kv.key.as_str() == semconv::attribute::URL_SCHEME)
-                .expect("URL scheme should be present");
-            assert_eq!(url_scheme.value.as_str(), "https");
-
-            let method = attributes
-                .iter()
-                .find(|kv| kv.key.as_str() == semconv::attribute::HTTP_REQUEST_METHOD)
-                .expect("HTTP method should be present");
-            assert_eq!(method.value.as_str(), "GET");
-
-            let status_code = attributes
-                .iter()
-                .find(|kv| kv.key.as_str() == semconv::attribute::HTTP_RESPONSE_STATUS_CODE)
-                .expect("Status code should be present");
-            if let opentelemetry::Value::I64(code) = &status_code.value {
-                assert_eq!(*code, 200);
-            } else {
-                panic!("Expected i64 status code");
-            }
-        } else {
-            panic!("Expected histogram data for duration metric");
+    async fn server_metrics_follow_the_conventions() {
+        struct TestCase {
+            name: &'static str,
+            handler: Handler,
+            expected_metrics: Vec<(&'static str, Vec<KeyValue>)>,
         }
 
-        let request_body_size_metric = scope_metrics
-            .metrics()
-            .find(|m| m.name() == semconv::metric::HTTP_SERVER_REQUEST_BODY_SIZE);
+        let method_kv = KeyValue::new(semconv::attribute::HTTP_REQUEST_METHOD, "GET");
+        let scheme_kv = KeyValue::new(semconv::attribute::URL_SCHEME, "http");
+        let version_kv = KeyValue::new(semconv::attribute::NETWORK_PROTOCOL_VERSION, "1.1");
 
-        if let Some(metric) = request_body_size_metric {
-            if let AggregatedMetrics::F64(MetricData::Histogram(histogram)) = metric.data() {
-                let data_point = histogram
-                    .data_points()
-                    .next()
-                    .expect("Should have data point");
-                let attributes: Vec<_> = data_point.attributes().collect();
+        let test_cases = [
+            TestCase {
+                name: "successful request",
+                handler: Handler::Echo,
+                expected_metrics: vec![
+                    (
+                        semconv::metric::HTTP_SERVER_ACTIVE_REQUESTS,
+                        vec![method_kv.clone(), scheme_kv.clone()],
+                    ),
+                    (
+                        semconv::metric::HTTP_SERVER_REQUEST_BODY_SIZE,
+                        vec![
+                            method_kv.clone(),
+                            KeyValue::new(semconv::attribute::HTTP_RESPONSE_STATUS_CODE, 200),
+                            version_kv.clone(),
+                            scheme_kv.clone(),
+                        ],
+                    ),
+                    (
+                        semconv::metric::HTTP_SERVER_REQUEST_DURATION,
+                        vec![
+                            method_kv.clone(),
+                            KeyValue::new(semconv::attribute::HTTP_RESPONSE_STATUS_CODE, 200),
+                            version_kv.clone(),
+                            scheme_kv.clone(),
+                        ],
+                    ),
+                    (
+                        semconv::metric::HTTP_SERVER_RESPONSE_BODY_SIZE,
+                        vec![
+                            method_kv.clone(),
+                            KeyValue::new(semconv::attribute::HTTP_RESPONSE_STATUS_CODE, 200),
+                            version_kv.clone(),
+                            scheme_kv.clone(),
+                        ],
+                    ),
+                ],
+            },
+            TestCase {
+                name: "server error carries the status code as the error type",
+                handler: Handler::Status(StatusCode::INTERNAL_SERVER_ERROR),
+                expected_metrics: vec![
+                    (
+                        semconv::metric::HTTP_SERVER_ACTIVE_REQUESTS,
+                        vec![method_kv.clone(), scheme_kv.clone()],
+                    ),
+                    (
+                        semconv::metric::HTTP_SERVER_REQUEST_BODY_SIZE,
+                        vec![
+                            KeyValue::new(semconv::attribute::ERROR_TYPE, "500".to_string()),
+                            method_kv.clone(),
+                            KeyValue::new(semconv::attribute::HTTP_RESPONSE_STATUS_CODE, 500),
+                            version_kv.clone(),
+                            scheme_kv.clone(),
+                        ],
+                    ),
+                    (
+                        semconv::metric::HTTP_SERVER_REQUEST_DURATION,
+                        vec![
+                            KeyValue::new(semconv::attribute::ERROR_TYPE, "500".to_string()),
+                            method_kv.clone(),
+                            KeyValue::new(semconv::attribute::HTTP_RESPONSE_STATUS_CODE, 500),
+                            version_kv.clone(),
+                            scheme_kv.clone(),
+                        ],
+                    ),
+                    (
+                        semconv::metric::HTTP_SERVER_RESPONSE_BODY_SIZE,
+                        vec![
+                            KeyValue::new(semconv::attribute::ERROR_TYPE, "500".to_string()),
+                            method_kv.clone(),
+                            KeyValue::new(semconv::attribute::HTTP_RESPONSE_STATUS_CODE, 500),
+                            version_kv.clone(),
+                            scheme_kv.clone(),
+                        ],
+                    ),
+                ],
+            },
+            TestCase {
+                name: "failed request has no status code and no body sizes",
+                handler: Handler::Fail,
+                expected_metrics: vec![
+                    (
+                        semconv::metric::HTTP_SERVER_ACTIVE_REQUESTS,
+                        vec![method_kv.clone(), scheme_kv.clone()],
+                    ),
+                    (
+                        semconv::metric::HTTP_SERVER_REQUEST_DURATION,
+                        vec![
+                            KeyValue::new(
+                                semconv::attribute::ERROR_TYPE,
+                                "opentelemetry_instrumentation_tower::Error".to_string(),
+                            ),
+                            method_kv.clone(),
+                            version_kv.clone(),
+                            scheme_kv.clone(),
+                        ],
+                    ),
+                ],
+            },
+        ];
 
-                assert_eq!(
-                    attributes.len(),
-                    5,
-                    "Request body size metric should have exactly 5 attributes"
-                );
+        for test_case in test_cases {
+            let exporter = InMemoryMetricExporter::default();
+            let reader = PeriodicReader::builder(exporter.clone())
+                .with_interval(Duration::from_millis(100))
+                .build();
+            let meter_provider = SdkMeterProvider::builder().with_reader(reader).build();
+            let layer = LayerBuilder::builder()
+                .with_meter_provider(meter_provider.clone())
+                .build()
+                .unwrap();
+            let handler = test_case.handler;
+            let mut service =
+                layer.layer(tower::service_fn(move |req: Request<String>| async move {
+                    respond(handler, req)
+                }));
 
-                let method = attributes
-                    .iter()
-                    .find(|kv| kv.key.as_str() == semconv::attribute::HTTP_REQUEST_METHOD)
-                    .expect("HTTP method should be present in request body size");
-                assert_eq!(method.value.as_str(), "GET");
+            let body = String::from("test body");
+            let request = Request::builder()
+                .method("GET")
+                .uri("/test")
+                .header(http::header::HOST, "example.com")
+                .header(http::header::CONTENT_LENGTH, body.len().to_string())
+                .body(body)
+                .unwrap();
+            let _result = service.call(request).await;
+
+            meter_provider.force_flush().unwrap();
+
+            let result = recorded_metrics(&exporter);
+
+            assert_eq!(result, test_case.expected_metrics, "{}", test_case.name);
+        }
+    }
+
+    /// Collects the name and the attributes of every recorded data point, both
+    /// sorted by name, so that a test can assert the full set.
+    fn recorded_metrics(exporter: &InMemoryMetricExporter) -> Vec<(&'static str, Vec<KeyValue>)> {
+        let mut recorded = Vec::new();
+
+        for resource_metrics in exporter.get_finished_metrics().unwrap() {
+            for scope_metrics in resource_metrics.scope_metrics() {
+                for metric in scope_metrics.metrics() {
+                    let name = match metric.name() {
+                        semconv::metric::HTTP_SERVER_ACTIVE_REQUESTS => {
+                            semconv::metric::HTTP_SERVER_ACTIVE_REQUESTS
+                        }
+                        semconv::metric::HTTP_SERVER_REQUEST_BODY_SIZE => {
+                            semconv::metric::HTTP_SERVER_REQUEST_BODY_SIZE
+                        }
+                        semconv::metric::HTTP_SERVER_REQUEST_DURATION => {
+                            semconv::metric::HTTP_SERVER_REQUEST_DURATION
+                        }
+                        semconv::metric::HTTP_SERVER_RESPONSE_BODY_SIZE => {
+                            semconv::metric::HTTP_SERVER_RESPONSE_BODY_SIZE
+                        }
+                        other => panic!("unexpected metric {other}"),
+                    };
+
+                    let attribute_sets: Vec<Vec<KeyValue>> = match metric.data() {
+                        AggregatedMetrics::F64(MetricData::Histogram(histogram)) => {
+                            attribute_sets(histogram.data_points().map(|dp| dp.attributes()))
+                        }
+                        AggregatedMetrics::U64(MetricData::Histogram(histogram)) => {
+                            attribute_sets(histogram.data_points().map(|dp| dp.attributes()))
+                        }
+                        AggregatedMetrics::I64(MetricData::Sum(sum)) => {
+                            attribute_sets(sum.data_points().map(|dp| dp.attributes()))
+                        }
+                        _ => panic!("unexpected data for metric {name}"),
+                    };
+
+                    recorded.extend(attribute_sets.into_iter().map(|set| (name, set)));
+                }
             }
         }
 
-        // Test response body size metric
-        let response_body_size_metric = scope_metrics
-            .metrics()
-            .find(|m| m.name() == semconv::metric::HTTP_SERVER_RESPONSE_BODY_SIZE);
+        recorded.sort_by(|left, right| left.0.cmp(right.0));
+        recorded
+    }
 
-        if let Some(metric) = response_body_size_metric {
-            if let AggregatedMetrics::F64(MetricData::Histogram(histogram)) = metric.data() {
-                let data_point = histogram
-                    .data_points()
-                    .next()
-                    .expect("Should have data point");
-                let attributes: Vec<_> = data_point.attributes().collect();
-
-                assert_eq!(
-                    attributes.len(),
-                    5,
-                    "Response body size metric should have exactly 5 attributes"
-                );
-
-                let method = attributes
-                    .iter()
-                    .find(|kv| kv.key.as_str() == semconv::attribute::HTTP_REQUEST_METHOD)
-                    .expect("HTTP method should be present in response body size");
-                assert_eq!(method.value.as_str(), "GET");
-            }
-        }
-
-        // Test active requests metric
-        let active_requests_metric = scope_metrics
-            .metrics()
-            .find(|m| m.name() == semconv::metric::HTTP_SERVER_ACTIVE_REQUESTS);
-
-        if let Some(metric) = active_requests_metric {
-            if let AggregatedMetrics::I64(MetricData::Sum(sum)) = metric.data() {
-                let data_point = sum.data_points().next().expect("Should have data point");
-                let attributes: Vec<_> = data_point.attributes().collect();
-
-                assert_eq!(
-                    attributes.len(),
-                    2,
-                    "Active requests metric should have exactly 2 attributes"
-                );
-
-                let method = attributes
-                    .iter()
-                    .find(|kv| kv.key.as_str() == semconv::attribute::HTTP_REQUEST_METHOD)
-                    .expect("HTTP method should be present in active requests");
-                assert_eq!(method.value.as_str(), "GET");
-
-                let url_scheme = attributes
-                    .iter()
-                    .find(|kv| kv.key.as_str() == semconv::attribute::URL_SCHEME)
-                    .expect("URL scheme should be present in active requests");
-                assert_eq!(url_scheme.value.as_str(), "https");
-            }
-        }
+    fn attribute_sets<'a>(
+        data_points: impl Iterator<Item = impl Iterator<Item = &'a KeyValue>>,
+    ) -> Vec<Vec<KeyValue>> {
+        data_points
+            .map(|attributes| {
+                let mut set: Vec<KeyValue> = attributes.cloned().collect();
+                set.sort_by(|left, right| left.key.cmp(&right.key));
+                set
+            })
+            .collect()
     }
 
     #[tokio::test(flavor = "current_thread")]
