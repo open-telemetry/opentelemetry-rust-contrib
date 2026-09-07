@@ -1142,6 +1142,8 @@ impl OtlpEncoder {
                 .as_ref()
                 .map(RoleOverrides::from_resource)
                 .unwrap_or_default();
+            // TODO: Make resource and instrumentation scope enrichment configurable,
+            // defaulting both to enabled.
             let resource_attributes = AttributeTemplate::from_resource(resource.as_ref());
             for scope_logs in resource_logs.scopes() {
                 let scope = scope_logs.scope();
@@ -3069,7 +3071,7 @@ mod tests {
     }
 
     #[test]
-    fn resource_and_scope_attributes_are_emitted_with_amaca_precedence() {
+    fn resource_and_scope_attributes_follow_record_scope_resource_precedence() {
         use otap_df_pdata::views::otlp::bytes::logs::RawLogsData;
         use prost::Message as _;
 
