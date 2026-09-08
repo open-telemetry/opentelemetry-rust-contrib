@@ -1,5 +1,10 @@
 # Changelog
 
+## [0.7.1] - 2026-09-07
+
+### Changed
+- Update `geneva-uploader` to 0.7.1.
+
 ## [0.7.0] - 2026-09-03
 
 ### Changed
