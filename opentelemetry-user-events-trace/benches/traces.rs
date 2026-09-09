@@ -27,7 +27,7 @@
 use criterion::{criterion_group, criterion_main, Criterion};
 use opentelemetry::trace::{Span, Tracer, TracerProvider};
 use opentelemetry_sdk::trace::SdkTracerProvider;
-use opentelemetry_user_events_trace::UserEventsTracerProviderBuilderExt;
+use opentelemetry_user_events_trace::Processor;
 
 fn setup_provider() -> SdkTracerProvider {
     SdkTracerProvider::builder()
@@ -36,7 +36,7 @@ fn setup_provider() -> SdkTracerProvider {
                 .with_service_name("user-events-trace-example")
                 .build(),
         )
-        .with_user_events_exporter("opentelemetry_traces")
+        .with_span_processor(Processor::builder("opentelemetry_traces").build().unwrap())
         .build()
 }
 
