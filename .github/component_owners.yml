@@ -22,6 +22,9 @@ components:
   opentelemetry-config/:
     - andborja
 
+  opentelemetry-context-macro/:
+    - jan-xyz
+
   # TBD - seeking owners. Issues fall back to @open-telemetry/rust-approvers.
   opentelemetry-contrib/: []
 

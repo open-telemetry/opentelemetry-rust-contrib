@@ -41,6 +41,7 @@ body:
       options:
         - opentelemetry-aws
         - opentelemetry-config
+        - opentelemetry-context-macro
         - opentelemetry-contrib
         - opentelemetry-datadog
         - opentelemetry-etw-logs
