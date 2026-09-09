@@ -10,12 +10,7 @@
 //! nothing restores that thread-local when a suspended future is polled again. The handler
 //! therefore resumes with an empty context unless something puts the context back. The macro does
 //! that: it captures the context on the handler's first poll and attaches it again for every future
-//! the handler awaits.
-//!
-//! Both handlers below are identical apart from the attribute, and the output shows the difference.
-//! The plain handler sends no `traceparent` at all, so the other service starts a trace of its own
-//! and the two halves of the request never join up. The third line shows what the macro saves you:
-//! the same result written by hand, with `FutureExt::with_context` at the call site.
+//! the handler awaits, which is why the outgoing header repeats the inbound trace id.
 
 use std::{
     collections::HashMap,
@@ -26,7 +21,6 @@ use std::{
 };
 
 use opentelemetry::{
-    context::FutureExt,
     propagation::{Extractor, Injector, TextMapPropagator},
     Context,
 };
@@ -83,12 +77,6 @@ async fn call_other_service() -> String {
 /// the code, so create and activate one where you want one.
 #[propagate_context]
 async fn handle_request() -> String {
-    slow_work().await;
-    call_other_service().await
-}
-
-/// The same handler without the attribute, for comparison.
-async fn handle_request_without_the_macro() -> String {
     slow_work().await;
     call_other_service().await
 }
@@ -152,22 +140,8 @@ fn main() {
     let headers = HeaderMap(inbound_headers());
     let inbound_cx = TraceContextPropagator::new().extract(&headers);
 
-    let with_macro = run_losing_the_context(handle_request(), inbound_cx.clone());
-    let without_macro =
-        run_losing_the_context(handle_request_without_the_macro(), inbound_cx.clone());
+    let outbound = run_losing_the_context(handle_request(), inbound_cx);
 
-    // The alternative the macro saves you from writing: the caller attaches the context for every
-    // poll of the handler, which covers the handler's own statements as well as what it awaits.
-    let by_hand = run_losing_the_context(
-        handle_request_without_the_macro().with_context(inbound_cx.clone()),
-        inbound_cx,
-    );
-
-    println!(
-        "inbound  traceparent:            {:?}",
-        headers.get("traceparent")
-    );
-    println!("outbound traceparent (macro):    {with_macro}");
-    println!("outbound traceparent (no macro): {without_macro}");
-    println!("outbound traceparent (by hand):  {by_hand}");
+    println!("inbound  traceparent: {:?}", headers.get("traceparent"));
+    println!("outbound traceparent: {outbound}");
 }

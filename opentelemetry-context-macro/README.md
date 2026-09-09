@@ -74,7 +74,7 @@ impl Warehouse for Postgres {
 }
 ```
 
-Run the worked example, which prints the outgoing `traceparent` with and without the macro:
+Run the worked example, which sends an inbound trace on in an outgoing header after a wait:
 
 ```sh
 cargo run --example basic -p opentelemetry-context-macro
