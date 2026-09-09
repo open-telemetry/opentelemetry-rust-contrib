@@ -65,6 +65,17 @@ pub struct Processor {
 
 impl Processor {
     /// Creates a builder for configuring a user_events processor.
+    ///
+    /// The provider name must:
+    ///
+    /// - not be empty,
+    /// - be less than 234 characters, and
+    /// - contain only ASCII letters, digits, and underscores (`_`).
+    ///
+    /// A provider named `my_provider` creates the tracepoint
+    /// `user_events:my_provider_L4K1`. The exporter reads `service.name` and
+    /// `service.instance.id` from the provider resource and writes them as
+    /// `ext_cloud_role` and `ext_cloud_roleInstance`, respectively.
     pub fn builder(provider_name: &str) -> ProcessorBuilder<'_> {
         ProcessorBuilder::new(provider_name)
     }
@@ -120,47 +131,19 @@ impl<'a> ProcessorBuilder<'a> {
 mod tests {
     use super::*;
 
-    #[derive(Debug)]
-    struct FilteringProcessor {
-        inner: Processor,
-        export_spans: bool,
-    }
-
-    impl SpanProcessor for FilteringProcessor {
-        fn on_start(&self, span: &mut Span, cx: &Context) {
-            self.inner.on_start(span, cx);
-        }
-
-        fn on_end(&self, span: SpanData) {
-            if self.export_spans {
-                self.inner.on_end(span);
-            }
-        }
-
-        fn force_flush(&self) -> OTelSdkResult {
-            self.inner.force_flush()
-        }
-
-        fn shutdown_with_timeout(&self, timeout: Duration) -> OTelSdkResult {
-            self.inner.shutdown_with_timeout(timeout)
-        }
-
-        fn set_resource(&mut self, resource: &Resource) {
-            self.inner.set_resource(resource);
-        }
-    }
-
     #[test]
-    fn processor_can_be_wrapped() {
-        let inner = Processor::builder("test_provider").build().unwrap();
-        let processor = FilteringProcessor {
-            inner,
-            export_spans: false,
-        };
+    fn processor_lifecycle() {
+        let mut processor = Processor::builder("test_provider").build().unwrap();
+        processor.set_resource(
+            &Resource::builder()
+                .with_service_name("test-service")
+                .build(),
+        );
 
-        let _provider = opentelemetry_sdk::trace::SdkTracerProvider::builder()
-            .with_span_processor(processor)
-            .build();
+        assert!(processor.force_flush().is_ok());
+        assert!(processor
+            .shutdown_with_timeout(Duration::from_secs(1))
+            .is_ok());
     }
 
     #[test]
@@ -168,6 +151,17 @@ mod tests {
         assert_eq!(
             Processor::builder("").build().unwrap_err().to_string(),
             "Provider name cannot be empty."
+        );
+    }
+
+    #[test]
+    fn invalid_provider_name_is_rejected() {
+        assert_eq!(
+            Processor::builder("invalid-provider")
+                .build()
+                .unwrap_err()
+                .to_string(),
+            "Provider name must contain only ASCII letters, digits, and '_'."
         );
     }
 }
