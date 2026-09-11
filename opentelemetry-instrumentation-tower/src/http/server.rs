@@ -51,6 +51,9 @@ struct LayerState {
     server_active_requests: UpDownCounter<i64>,
     server_request_body_size: Histogram<u64>,
     server_response_body_size: Histogram<u64>,
+    /// Query parameter keys whose values `url.query` reports as redacted. The
+    /// default list borrows its keys, so it allocates nothing per key.
+    sensitive_query_parameters: Box<[Cow<'static, str>]>,
 }
 
 #[derive(Clone)]
@@ -65,7 +68,6 @@ pub struct Service<
     route_extractor: RouteExt,
     request_extractor: ReqExt,
     response_extractor: ResExt,
-    sensitive_query_parameters: Arc<[Box<str>]>,
     inner_service: S,
     tracer: Arc<BoxedTracer>,
 }
@@ -77,7 +79,6 @@ pub struct Layer<RouteExt = DefaultRouteExtractor, ReqExt = NoOpExtractor, ResEx
     route_extractor: RouteExt,
     request_extractor: ReqExt,
     response_extractor: ResExt,
-    sensitive_query_parameters: Arc<[Box<str>]>,
     tracer: Arc<BoxedTracer>,
 }
 
@@ -105,7 +106,7 @@ pub struct LayerBuilder<
     tracing_enabled: bool,
     metrics_enabled: bool,
     req_dur_bounds: Option<Vec<f64>>,
-    sensitive_query_parameters: Option<Vec<Box<str>>>,
+    sensitive_query_parameters: Option<Vec<Cow<'static, str>>>,
     route_extractor: RouteExt,
     request_extractor: ReqExt,
     response_extractor: ResExt,
@@ -270,20 +271,24 @@ impl<RouteExt, ReqExt, ResExt> LayerBuilder<RouteExt, ReqExt, ResExt> {
             NoopMeterProvider::new().meter_with_scope(instrumentation_scope())
         };
 
-        let sensitive_query_parameters: Arc<[Box<str>]> = match self.sensitive_query_parameters {
-            Some(parameters) => Arc::from(parameters),
-            None => DEFAULT_SENSITIVE_QUERY_PARAMETERS
-                .iter()
-                .map(|parameter| Box::from(*parameter))
-                .collect(),
-        };
+        let sensitive_query_parameters: Box<[Cow<'static, str>]> =
+            match self.sensitive_query_parameters {
+                Some(parameters) => parameters.into(),
+                None => DEFAULT_SENSITIVE_QUERY_PARAMETERS
+                    .iter()
+                    .map(|parameter| Cow::Borrowed(*parameter))
+                    .collect(),
+            };
 
         Ok(Layer {
-            state: Arc::from(make_state(meter, req_dur_bounds)),
+            state: Arc::from(make_state(
+                meter,
+                req_dur_bounds,
+                sensitive_query_parameters,
+            )),
             route_extractor: self.route_extractor,
             request_extractor: self.request_extractor,
             response_extractor: self.response_extractor,
-            sensitive_query_parameters,
             tracer,
         })
     }
@@ -311,7 +316,7 @@ impl<RouteExt, ReqExt, ResExt> LayerBuilder<RouteExt, ReqExt, ResExt> {
         self.sensitive_query_parameters = Some(
             parameters
                 .into_iter()
-                .map(|parameter| Box::from(parameter.as_ref()))
+                .map(|parameter| Cow::Owned(parameter.as_ref().to_owned()))
                 .collect(),
         );
         self
@@ -363,7 +368,11 @@ fn instrumentation_scope() -> InstrumentationScope {
         .build()
 }
 
-fn make_state(meter: Meter, req_dur_bounds: Vec<f64>) -> LayerState {
+fn make_state(
+    meter: Meter,
+    req_dur_bounds: Vec<f64>,
+    sensitive_query_parameters: Box<[Cow<'static, str>]>,
+) -> LayerState {
     LayerState {
         server_request_duration: meter
             .f64_histogram(Cow::from(semconv::metric::HTTP_SERVER_REQUEST_DURATION))
@@ -386,6 +395,7 @@ fn make_state(meter: Meter, req_dur_bounds: Vec<f64>) -> LayerState {
             .with_description("Size of HTTP server response bodies.")
             .with_unit(HTTP_SERVER_RESPONSE_BODY_SIZE_UNIT)
             .build(),
+        sensitive_query_parameters,
     }
 }
 
@@ -403,7 +413,6 @@ where
             route_extractor: self.route_extractor.clone(),
             request_extractor: self.request_extractor.clone(),
             response_extractor: self.response_extractor.clone(),
-            sensitive_query_parameters: self.sensitive_query_parameters.clone(),
             inner_service: service,
             tracer: self.tracer.clone(),
         }
@@ -539,7 +548,7 @@ where
         if let Some(query) = req.uri().query() {
             span_attributes.push(KeyValue::new(
                 semconv::attribute::URL_QUERY,
-                redact_query(query, &self.sensitive_query_parameters).into_owned(),
+                redact_query(query, &self.state.sensitive_query_parameters).into_owned(),
             ));
         }
 

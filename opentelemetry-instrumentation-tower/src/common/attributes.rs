@@ -91,36 +91,53 @@ const REDACTED: &str = "REDACTED";
 /// Replaces the value of every sensitive query parameter with `REDACTED`, and
 /// keeps the key.
 ///
-/// Returns the query unchanged, and allocates nothing, when it holds no
-/// sensitive parameter. That is the common case.
+/// Reads the query once. A query that holds no sensitive parameter, which is the
+/// common case, is returned unchanged and allocates nothing. A query that holds
+/// one allocates on the first match, and copies the regions in between verbatim.
 pub(crate) fn redact_query<'q, S>(query: &'q str, sensitive: &[S]) -> Cow<'q, str>
 where
     S: AsRef<str>,
 {
-    if !sensitive
-        .iter()
-        .any(|parameter| query.contains(parameter.as_ref()))
-    {
-        return Cow::Borrowed(query);
-    }
+    let mut redacted: Option<String> = None;
+    // Byte offset up to which `query` has been copied into `redacted`.
+    let mut copied = 0;
+    // Byte offset of the parameter under inspection.
+    let mut pair_start = 0;
 
-    let mut redacted = String::with_capacity(query.len());
-    for (index, pair) in query.split('&').enumerate() {
-        if index > 0 {
-            redacted.push('&');
-        }
+    loop {
+        let pair_end = query[pair_start..]
+            .find('&')
+            .map_or(query.len(), |offset| pair_start + offset);
+        let key_end = query[pair_start..pair_end]
+            .find('=')
+            .map_or(pair_end, |offset| pair_start + offset);
 
-        let key = pair.split('=').next().unwrap_or(pair);
-        if sensitive.iter().any(|parameter| parameter.as_ref() == key) {
-            redacted.push_str(key);
+        if sensitive
+            .iter()
+            .any(|parameter| parameter.as_ref() == &query[pair_start..key_end])
+        {
+            let redacted =
+                redacted.get_or_insert_with(|| String::with_capacity(query.len() + REDACTED.len()));
+            // Everything up to and including the key stays as it arrived.
+            redacted.push_str(&query[copied..key_end]);
             redacted.push('=');
             redacted.push_str(REDACTED);
-        } else {
-            redacted.push_str(pair);
+            copied = pair_end;
         }
+
+        if pair_end == query.len() {
+            break;
+        }
+        pair_start = pair_end + 1;
     }
 
-    Cow::Owned(redacted)
+    match redacted {
+        Some(mut redacted) => {
+            redacted.push_str(&query[copied..]);
+            Cow::Owned(redacted)
+        }
+        None => Cow::Borrowed(query),
+    }
 }
 
 #[cfg(test)]
@@ -134,9 +151,7 @@ mod tests {
             query: &'static str,
             sensitive: &'static [&'static str],
             expected: Cow<'static, str>,
-            /// Whether the helper returns the query without allocating. The
-            /// fast path tests for a substring, so a key that merely contains a
-            /// sensitive key allocates even though nothing is redacted.
+            /// Whether the helper returns the query without allocating.
             expected_borrowed: bool,
         }
 
@@ -190,7 +205,7 @@ mod tests {
                 query: "design=modern",
                 sensitive: DEFAULT_SENSITIVE_QUERY_PARAMETERS,
                 expected: Cow::Borrowed("design=modern"),
-                expected_borrowed: false,
+                expected_borrowed: true,
             },
             TestCase {
                 name: "sensitive key without a value",
@@ -211,6 +226,29 @@ mod tests {
                 query: "sig=abc==&q=OpenTelemetry",
                 sensitive: DEFAULT_SENSITIVE_QUERY_PARAMETERS,
                 expected: Cow::Owned(String::from("sig=REDACTED&q=OpenTelemetry")),
+                expected_borrowed: false,
+            },
+            TestCase {
+                name: "consecutive separators",
+                query: "a=1&&sig=abc",
+                sensitive: DEFAULT_SENSITIVE_QUERY_PARAMETERS,
+                expected: Cow::Owned(String::from("a=1&&sig=REDACTED")),
+                expected_borrowed: false,
+            },
+            TestCase {
+                name: "trailing separator",
+                query: "sig=abc&",
+                sensitive: DEFAULT_SENSITIVE_QUERY_PARAMETERS,
+                expected: Cow::Owned(String::from("sig=REDACTED&")),
+                expected_borrowed: false,
+            },
+            TestCase {
+                name: "several parameters between two sensitive ones",
+                query: "X-Amz-Credential=key&a=1&b=2&X-Amz-Signature=abc",
+                sensitive: DEFAULT_SENSITIVE_QUERY_PARAMETERS,
+                expected: Cow::Owned(String::from(
+                    "X-Amz-Credential=REDACTED&a=1&b=2&X-Amz-Signature=REDACTED",
+                )),
                 expected_borrowed: false,
             },
             TestCase {
