@@ -17,7 +17,9 @@ use chrono::{TimeZone, Utc};
 use md5::{Digest as _, Md5};
 use opentelemetry_proto::tonic::common::v1::any_value::Value;
 use opentelemetry_proto::tonic::trace::v1::Span;
-use otap_df_pdata_views::views::common::{AnyValueView, AttributeView, ValueType};
+use otap_df_pdata_views::views::common::{
+    AnyValueView, AttributeView, InstrumentationScopeView, ValueType,
+};
 use otap_df_pdata_views::views::logs::{
     LogRecordView, LogsDataView, ResourceLogsView, ScopeLogsView,
 };
@@ -32,6 +34,8 @@ const CS_VERSION_4_DISPLAY: &str = "4.0";
 const KEY_CSVER: &str = "__csver__";
 const KEY_PARTB_TYPENAME: &str = "PartB._typeName";
 const CS_LOG_TYPENAME: &str = "Log";
+const ATTR_SERVICE_NAME: &str = "service.name";
+const ATTR_SERVICE_INSTANCE_ID: &str = "service.instance.id";
 
 const FIELD_ENV_NAME: &str = "env_name";
 const FIELD_ENV_VER: &str = "env_ver";
@@ -119,14 +123,14 @@ impl RoleOverrides {
                 continue;
             };
             match key {
-                "service.name" if overrides.role.is_none() => {
+                ATTR_SERVICE_NAME if overrides.role.is_none() => {
                     overrides.role = attr.value().and_then(|value| {
                         value_as_utf8(&value)
                             .filter(|value| !value.trim().is_empty())
                             .map(str::to_owned)
                     });
                 }
-                "service.instance.id" if overrides.role_instance.is_none() => {
+                ATTR_SERVICE_INSTANCE_ID if overrides.role_instance.is_none() => {
                     overrides.role_instance = attr.value().and_then(|value| {
                         value_as_utf8(&value)
                             .filter(|value| !value.trim().is_empty())
@@ -154,6 +158,73 @@ impl DynamicField {
             name: self.name.clone(),
             type_id: self.type_id,
             field_id,
+        }
+    }
+}
+
+#[derive(Clone, Default)]
+struct AttributeTemplate {
+    fields: Vec<DynamicField>,
+    values: Vec<u8>,
+}
+
+impl AttributeTemplate {
+    fn from_resource<R: ResourceView>(resource: Option<&R>) -> Self {
+        let mut template = Self::default();
+        if let Some(resource) = resource {
+            for attr in resource.attributes() {
+                if matches!(
+                    std::str::from_utf8(attr.key()),
+                    Ok(ATTR_SERVICE_NAME | ATTR_SERVICE_INSTANCE_ID)
+                ) {
+                    continue;
+                }
+                template.upsert_attribute(attr, false);
+            }
+        }
+        template
+    }
+
+    fn with_scope<S: InstrumentationScopeView>(mut self, scope: Option<&S>) -> Self {
+        if let Some(scope) = scope {
+            for attr in scope.attributes() {
+                self.upsert_attribute(attr, true);
+            }
+        }
+        self
+    }
+
+    fn upsert_attribute<A>(&mut self, attr: A, is_scope_attribute: bool)
+    where
+        A: AttributeView,
+    {
+        let Ok(key) = std::str::from_utf8(attr.key()) else {
+            return;
+        };
+        let Some(value) = attr.value() else {
+            return;
+        };
+        if is_reserved_log_field(key, is_scope_attribute) {
+            return;
+        }
+        let Some(type_id) = bond_type_for_value(&value) else {
+            return;
+        };
+
+        let value_start = self.values.len();
+        write_view_value(&mut self.values, &value, type_id);
+        let value_len = self.values.len() - value_start;
+        if let Some(existing) = self.fields.iter_mut().find(|field| field.name == key) {
+            existing.type_id = type_id;
+            existing.value_start = value_start;
+            existing.value_len = value_len;
+        } else {
+            self.fields.push(DynamicField {
+                name: Cow::Owned(key.to_owned()),
+                type_id,
+                value_start,
+                value_len,
+            });
         }
     }
 }
@@ -189,7 +260,31 @@ struct LogRecordParts<'a> {
 }
 
 impl<'a> LogRecordParts<'a> {
+    #[cfg(test)]
     fn new<R>(record: &'a R, ctx: &LogEncodeContext<'a>) -> Self
+    where
+        R: LogRecordView,
+    {
+        let mut parts = Self::new_unfinished(record, ctx);
+        parts.finish_fields();
+        parts
+    }
+
+    fn new_with_enrichment<R>(
+        record: &'a R,
+        ctx: &LogEncodeContext<'a>,
+        enrichment: &AttributeTemplate,
+    ) -> Self
+    where
+        R: LogRecordView,
+    {
+        let mut parts = Self::new_unfinished(record, ctx);
+        parts.add_enrichment(enrichment);
+        parts.finish_fields();
+        parts
+    }
+
+    fn new_unfinished<R>(record: &'a R, ctx: &LogEncodeContext<'a>) -> Self
     where
         R: LogRecordView,
     {
@@ -228,7 +323,6 @@ impl<'a> LogRecordParts<'a> {
             parts.routing_event_name = routing_event_name;
         }
 
-        parts.finish_fields();
         parts
     }
 
@@ -347,6 +441,29 @@ impl<'a> LogRecordParts<'a> {
         true
     }
 
+    fn add_enrichment(&mut self, enrichment: &AttributeTemplate) {
+        let record_fields_len = self.dynamic_fields.len();
+        for field in &enrichment.fields {
+            let record_has_key = self.dynamic_fields[..record_fields_len]
+                .iter()
+                .any(|record_field| record_field.name == field.name);
+            if record_has_key {
+                continue;
+            }
+
+            let value_start = self.dynamic_values.len();
+            self.dynamic_values.extend_from_slice(
+                &enrichment.values[field.value_start..field.value_start + field.value_len],
+            );
+            self.dynamic_fields.push(DynamicField {
+                name: field.name.clone(),
+                type_id: field.type_id,
+                value_start,
+                value_len: field.value_len,
+            });
+        }
+    }
+
     fn finish_fields(&mut self) {
         let estimated_capacity = 14 + self.dynamic_fields.len();
         self.fields = Vec::with_capacity(estimated_capacity);
@@ -389,6 +506,7 @@ impl<'a> LogRecordParts<'a> {
         if self.trace_id.is_some() {
             self.push_field(FIELD_TRACE_ID, BondDataType::BT_STRING);
         }
+
         if self.span_id.is_some() {
             self.push_field(FIELD_SPAN_ID, BondDataType::BT_STRING);
         }
@@ -418,6 +536,30 @@ impl<'a> LogRecordParts<'a> {
             field_id: (self.fields.len() + 1) as u16,
         });
     }
+}
+
+fn is_reserved_log_field(name: &str, is_scope_attribute: bool) -> bool {
+    if is_scope_attribute && name.eq_ignore_ascii_case(FIELD_NAME) {
+        return true;
+    }
+
+    matches!(
+        name,
+        FIELD_ENV_NAME
+            | FIELD_ENV_VER
+            | FIELD_TIMESTAMP
+            | FIELD_ENV_TIME
+            | FIELD_TENANT
+            | FIELD_ROLE
+            | FIELD_ROLE_INSTANCE
+            | FIELD_TRACE_ID
+            | FIELD_SPAN_ID
+            | FIELD_TRACE_FLAGS
+            | FIELD_NAME
+            | FIELD_SEVERITY_NUMBER
+            | FIELD_SEVERITY_TEXT
+            | FIELD_BODY
+    )
 }
 
 struct CommonSchemaParts<'a> {
@@ -824,11 +966,11 @@ impl LogBatchAccumulator {
     }
 
     /// Encode a single log record and append it to the appropriate batch.
-    fn push<R>(&mut self, record: &R, ctx: &LogEncodeContext<'_>)
+    fn push<R>(&mut self, record: &R, ctx: &LogEncodeContext<'_>, enrichment: &AttributeTemplate)
     where
         R: LogRecordView,
     {
-        let parts = LogRecordParts::new(record, ctx);
+        let parts = LogRecordParts::new_with_enrichment(record, ctx, enrichment);
         let timestamp = parts.timestamp;
         let routing_event_name = parts.routing_event_name.as_ref();
         // Role identity is included because the central blob metadata is batch-level.
@@ -1000,8 +1142,12 @@ impl OtlpEncoder {
                 .as_ref()
                 .map(RoleOverrides::from_resource)
                 .unwrap_or_default();
+            // TODO: Make resource and instrumentation scope enrichment configurable,
+            // defaulting both to enabled.
+            let resource_attributes = AttributeTemplate::from_resource(resource.as_ref());
             for scope_logs in resource_logs.scopes() {
                 let scope = scope_logs.scope();
+                let enrichment = resource_attributes.clone().with_scope(scope.as_ref());
                 let scope_routing = resolve_log_scope_routing(
                     resource.as_ref(),
                     scope.as_ref(),
@@ -1017,7 +1163,7 @@ impl OtlpEncoder {
                     },
                 };
                 for log_record in scope_logs.log_records() {
-                    acc.push(&log_record, &ctx);
+                    acc.push(&log_record, &ctx, &enrichment);
                 }
             }
         }
@@ -2320,9 +2466,16 @@ mod tests {
             &metadata,
         )
         .unwrap();
-        let common_schema_encoded =
-            encode_log_batch_via_proto(&encoder, std::iter::once(&common_schema), &metadata)
-                .unwrap();
+        let common_schema_encoded = encode_log_batch_with_resource_attrs(
+            &encoder,
+            std::iter::once(&common_schema),
+            vec![
+                string_attr("service.name", "checkout"),
+                string_attr("service.instance.id", "instance-1"),
+            ],
+            &metadata,
+        )
+        .unwrap();
 
         assert_single_batch_equal(&canonical_encoded, &common_schema_encoded);
     }
@@ -2371,9 +2524,16 @@ mod tests {
             &metadata,
         )
         .unwrap();
-        let common_schema_encoded =
-            encode_log_batch_via_proto(&encoder, std::iter::once(&common_schema), &metadata)
-                .unwrap();
+        let common_schema_encoded = encode_log_batch_with_resource_attrs(
+            &encoder,
+            std::iter::once(&common_schema),
+            vec![
+                string_attr("service.name", "checkout"),
+                string_attr("service.instance.id", "instance-1"),
+            ],
+            &metadata,
+        )
+        .unwrap();
 
         assert_single_batch_equal(&canonical_encoded, &common_schema_encoded);
     }
@@ -2417,9 +2577,16 @@ mod tests {
             &metadata,
         )
         .unwrap();
-        let common_schema_encoded =
-            encode_log_batch_via_proto(&encoder, std::iter::once(&common_schema), &metadata)
-                .unwrap();
+        let common_schema_encoded = encode_log_batch_with_resource_attrs(
+            &encoder,
+            std::iter::once(&common_schema),
+            vec![
+                string_attr("service.name", "checkout"),
+                string_attr("service.instance.id", "instance-1"),
+            ],
+            &metadata,
+        )
+        .unwrap();
 
         assert_single_batch_equal(&canonical_encoded, &common_schema_encoded);
     }
@@ -2596,9 +2763,16 @@ mod tests {
             &metadata,
         )
         .unwrap();
-        let common_schema_encoded =
-            encode_log_batch_via_proto(&encoder, std::iter::once(&common_schema), &metadata)
-                .unwrap();
+        let common_schema_encoded = encode_log_batch_with_resource_attrs(
+            &encoder,
+            std::iter::once(&common_schema),
+            vec![
+                string_attr("service.name", ""),
+                string_attr("service.instance.id", "   "),
+            ],
+            &metadata,
+        )
+        .unwrap();
 
         assert_single_batch_equal(&canonical_encoded, &common_schema_encoded);
     }
@@ -2894,6 +3068,109 @@ mod tests {
 
         assert_eq!(dup_fields.len() - dup_dynamic_fields_start, 2);
         assert_eq!(dup_row.len() - base_row.len(), 16);
+    }
+
+    #[test]
+    fn resource_and_scope_attributes_follow_record_scope_resource_precedence() {
+        use otap_df_pdata::views::otlp::bytes::logs::RawLogsData;
+        use prost::Message as _;
+
+        let bytes = opentelemetry_proto::tonic::collector::logs::v1::ExportLogsServiceRequest {
+            resource_logs: vec![ResourceLogs {
+                resource: Some(Resource {
+                    attributes: vec![
+                        string_attr("microsoft.resourceId", "/subscriptions/test"),
+                        string_attr(ATTR_SERVICE_NAME, "checkout"),
+                        string_attr(ATTR_SERVICE_INSTANCE_ID, "instance-1"),
+                        string_attr("shared", "resource"),
+                        string_attr("scope-wins", "resource"),
+                        string_attr(FIELD_BODY, "resource-body"),
+                    ],
+                    ..Default::default()
+                }),
+                scope_logs: vec![ScopeLogs {
+                    scope: Some(InstrumentationScope {
+                        attributes: vec![
+                            string_attr("scope.attribute", "scope-value"),
+                            string_attr("shared", "scope"),
+                            string_attr("scope-wins", "scope"),
+                            string_attr("Name", "scope-name"),
+                        ],
+                        ..Default::default()
+                    }),
+                    log_records: vec![LogRecord {
+                        attributes: vec![
+                            string_attr("record.attribute", "record-value"),
+                            string_attr("shared", "record"),
+                        ],
+                        ..Default::default()
+                    }],
+                    ..Default::default()
+                }],
+                ..Default::default()
+            }],
+        }
+        .encode_to_vec();
+
+        let view = RawLogsData::new(&bytes);
+        let resource_logs = view.resources().next().unwrap();
+        let resource = resource_logs.resource();
+        let scope_logs = resource_logs.scopes().next().unwrap();
+        let scope = scope_logs.scope();
+        let record = scope_logs.log_records().next().unwrap();
+        let metadata = make_metadata("enriched");
+        let role_overrides = RoleOverrides::from_resource(resource.as_ref().unwrap());
+        let enrichment =
+            AttributeTemplate::from_resource(resource.as_ref()).with_scope(scope.as_ref());
+        let scope_routing = LogScopeRouting::None;
+        let ctx = LogEncodeContext {
+            metadata_fields: &metadata,
+            routing: LogRoutingContext {
+                table_name: "Log",
+                resource_role: &role_overrides,
+                scope_routing: &scope_routing,
+            },
+        };
+
+        let parts = LogRecordParts::new_with_enrichment(&record, &ctx, &enrichment);
+        let dynamic_names: Vec<&str> = parts
+            .dynamic_fields
+            .iter()
+            .map(|field| field.name.as_ref())
+            .collect();
+
+        assert!(dynamic_names.contains(&"microsoft.resourceId"));
+        assert!(dynamic_names.contains(&"scope.attribute"));
+        assert!(dynamic_names.contains(&"record.attribute"));
+        assert!(!dynamic_names.contains(&ATTR_SERVICE_NAME));
+        assert!(!dynamic_names.contains(&ATTR_SERVICE_INSTANCE_ID));
+        assert_eq!(
+            dynamic_names
+                .iter()
+                .filter(|name| **name == "shared")
+                .count(),
+            1
+        );
+        assert!(!dynamic_names.contains(&FIELD_BODY));
+        assert!(!dynamic_names
+            .iter()
+            .any(|name| name.eq_ignore_ascii_case(FIELD_NAME)));
+
+        let dynamic_string = |name: &str| {
+            let field = parts
+                .dynamic_fields
+                .iter()
+                .find(|field| field.name == name)
+                .unwrap();
+            let mut offset = field.value_start;
+            read_bond_string(&parts.dynamic_values, &mut offset)
+        };
+        assert_eq!(
+            dynamic_string("microsoft.resourceId"),
+            "/subscriptions/test"
+        );
+        assert_eq!(dynamic_string("scope-wins"), "scope");
+        assert_eq!(dynamic_string("shared"), "record");
     }
 
     #[test]
