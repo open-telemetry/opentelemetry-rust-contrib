@@ -69,12 +69,6 @@ pub(crate) fn split_and_format_protocol_version(
 
 /// Query parameter keys whose values the conventions ask instrumentations to
 /// redact by default.
-///
-/// Each key names a credential or a signature of a pre-signed URL. The keys are
-/// the ones that `opentelemetry-semantic-conventions` documents for
-/// [`URL_QUERY`](opentelemetry_semantic_conventions::attribute::URL_QUERY). The
-/// conventions state that the list changes over time, and they ask for a
-/// case-sensitive match.
 pub(crate) const DEFAULT_SENSITIVE_QUERY_PARAMETERS: &[&str] = &[
     "X-Amz-Signature",
     "X-Amz-Credential",
@@ -88,10 +82,6 @@ const REDACTED: &str = "REDACTED";
 
 /// Replaces the value of every sensitive query parameter with `REDACTED`, and
 /// keeps the key.
-///
-/// Reads the query once. A query that holds no sensitive parameter, which is the
-/// common case, is returned unchanged and allocates nothing. A query that holds
-/// one allocates on the first match, and copies the regions in between verbatim.
 pub(crate) fn redact_query<'q, S>(query: &'q str, sensitive: &[S]) -> Cow<'q, str>
 where
     S: AsRef<str>,
@@ -102,31 +92,20 @@ where
     // Byte offset of the parameter under inspection.
     let mut pair_start = 0;
 
-    loop {
-        let pair_end = query[pair_start..]
-            .find('&')
-            .map_or(query.len(), |offset| pair_start + offset);
-        let key_end = query[pair_start..pair_end]
-            .find('=')
-            .map_or(pair_end, |offset| pair_start + offset);
+    for pair in query.split('&') {
+        let key = pair.split('=').next().unwrap_or(pair);
 
-        if sensitive
-            .iter()
-            .any(|parameter| parameter.as_ref() == &query[pair_start..key_end])
-        {
+        if sensitive.iter().any(|parameter| parameter.as_ref() == key) {
             let redacted =
                 redacted.get_or_insert_with(|| String::with_capacity(query.len() + REDACTED.len()));
             // Everything up to and including the key stays as it arrived.
-            redacted.push_str(&query[copied..key_end]);
+            redacted.push_str(&query[copied..pair_start + key.len()]);
             redacted.push('=');
             redacted.push_str(REDACTED);
-            copied = pair_end;
+            copied = pair_start + pair.len();
         }
 
-        if pair_end == query.len() {
-            break;
-        }
-        pair_start = pair_end + 1;
+        pair_start += pair.len() + '&'.len_utf8();
     }
 
     match redacted {
