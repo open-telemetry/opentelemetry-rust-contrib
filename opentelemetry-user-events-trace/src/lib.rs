@@ -17,8 +17,9 @@
 //! ```no_run
 //! use opentelemetry::KeyValue;
 //! use opentelemetry_sdk::trace::SdkTracerProvider;
-//! use opentelemetry_user_events_trace::UserEventsTracerProviderBuilderExt;
+//! use opentelemetry_user_events_trace::Processor;
 //!
+//! let processor = Processor::builder("my_provider").build()?;
 //! let provider = SdkTracerProvider::builder()
 //!     .with_resource(
 //!         opentelemetry_sdk::Resource::builder()
@@ -26,8 +27,9 @@
 //!             .with_attribute(KeyValue::new("service.instance.id", "instance-1"))
 //!             .build(),
 //!     )
-//!     .with_user_events_exporter("my_provider")
+//!     .with_span_processor(processor)
 //!     .build();
+//! # Ok::<(), Box<dyn std::error::Error>>(())
 //! ```
 //!
 //! # Well-Known Span Attributes
@@ -60,18 +62,51 @@ pub use trace::*;
 #[cfg(all(test, target_os = "linux"))]
 mod tests {
 
-    use crate::UserEventsTracerProviderBuilderExt;
+    use crate::Processor;
     use one_collect::perf_event::{RingBufBuilder, RingBufSessionBuilder};
     use one_collect::tracefs::TraceFS;
     use one_collect::Writable;
     use opentelemetry::{
         trace::{TraceContextExt, Tracer, TracerProvider},
-        KeyValue,
+        Context, KeyValue,
     };
-    use opentelemetry_sdk::trace::SdkTracerProvider;
+    use opentelemetry_sdk::{
+        error::OTelSdkResult,
+        trace::{SdkTracerProvider, Span, SpanData, SpanProcessor},
+        Resource,
+    };
     use serde_json::{from_str, Value};
     use std::time::Duration;
     use tracepoint_decode::{EventHeaderEnumeratorContext, PerfConvertOptions};
+
+    #[derive(Debug)]
+    struct FilteringProcessor {
+        inner: Processor,
+    }
+
+    impl SpanProcessor for FilteringProcessor {
+        fn on_start(&self, span: &mut Span, cx: &Context) {
+            self.inner.on_start(span, cx);
+        }
+
+        fn on_end(&self, span: SpanData) {
+            if span.name != "filtered-span" {
+                self.inner.on_end(span);
+            }
+        }
+
+        fn force_flush(&self) -> OTelSdkResult {
+            self.inner.force_flush()
+        }
+
+        fn shutdown_with_timeout(&self, timeout: Duration) -> OTelSdkResult {
+            self.inner.shutdown_with_timeout(timeout)
+        }
+
+        fn set_resource(&mut self, resource: &Resource) {
+            self.inner.set_resource(resource);
+        }
+    }
 
     // This test requires a Linux kernel with user_events support. Events are
     // captured and decoded in-process via `one_collect` + `tracepoint_decode`,
@@ -91,7 +126,7 @@ mod tests {
                     .with_attribute(KeyValue::new("service.instance.id", "myinstance123"))
                     .build(),
             )
-            .with_user_events_exporter("opentelemetry_traces")
+            .with_span_processor(Processor::builder("opentelemetry_traces").build().unwrap())
             .build();
 
         // Validate that the TracePoint is created.
@@ -273,6 +308,52 @@ mod tests {
         assert_eq!(part_c["my-key"].as_str().unwrap(), "my-value");
     }
 
+    #[ignore]
+    #[test]
+    fn integration_test_filtering_processor() {
+        check_user_events_available().expect("Kernel does not support user_events");
+
+        let processor = Processor::builder("otel_trace_filter").build().unwrap();
+        let provider = SdkTracerProvider::builder()
+            .with_resource(
+                Resource::builder()
+                    .with_service_name("filter-service")
+                    .build(),
+            )
+            .with_span_processor(FilteringProcessor { inner: processor })
+            .build();
+
+        let perf_thread = std::thread::spawn(|| {
+            capture_and_decode_events(5, "user_events:otel_trace_filter_L4K1")
+        });
+        std::thread::sleep(Duration::from_secs(1));
+
+        let tracer = provider.tracer("filtering-test");
+        tracer.in_span("filtered-span", |_| {});
+        tracer.in_span("exported-span", |_| {});
+
+        let json_content = perf_thread
+            .join()
+            .expect("Perf thread panicked")
+            .expect("Failed to capture events");
+        let json_value: Value = from_str(json_content.trim()).expect("Failed to parse JSON");
+        let events = json_value
+            .as_object()
+            .expect("JSON is not an object")
+            .values()
+            .next()
+            .and_then(Value::as_array)
+            .expect("Captured events are not an array");
+        let span_events: Vec<_> = events
+            .iter()
+            .filter(|event| event["n"] == "otel_trace_filter:Span")
+            .collect();
+
+        assert_eq!(span_events.len(), 1, "expected only the unfiltered span");
+        assert_eq!(span_events[0]["PartB"]["name"], "exported-span");
+        assert_eq!(span_events[0]["PartA"]["ext_cloud_role"], "filter-service");
+    }
+
     /// Test with a child span that has Error status and Client SpanKind.
     /// Validates parentId serialization, success=false, kind=2, and
     /// non-string PartC attribute types (bool, f64).
@@ -289,7 +370,7 @@ mod tests {
                     .with_service_name("child_span_test")
                     .build(),
             )
-            .with_user_events_exporter("otel_trace_child")
+            .with_span_processor(Processor::builder("otel_trace_child").build().unwrap())
             .build();
 
         let user_event_status = check_user_events_available().unwrap();
@@ -406,7 +487,7 @@ mod tests {
 
         let provider = SdkTracerProvider::builder()
             .with_resource(opentelemetry_sdk::Resource::builder_empty().build())
-            .with_user_events_exporter("otel_trace_nores")
+            .with_span_processor(Processor::builder("otel_trace_nores").build().unwrap())
             .build();
 
         let user_event_status = check_user_events_available().unwrap();
@@ -495,7 +576,7 @@ mod tests {
                     .with_service_name("links_test")
                     .build(),
             )
-            .with_user_events_exporter("otel_trace_links")
+            .with_span_processor(Processor::builder("otel_trace_links").build().unwrap())
             .build();
 
         let user_event_status = check_user_events_available().unwrap();
@@ -598,7 +679,7 @@ mod tests {
                     .with_service_name("statusmsg_test")
                     .build(),
             )
-            .with_user_events_exporter("otel_trace_stmsg")
+            .with_span_processor(Processor::builder("otel_trace_stmsg").build().unwrap())
             .build();
 
         let user_event_status = check_user_events_available().unwrap();
@@ -692,7 +773,7 @@ mod tests {
                     .with_service_name("suppress_test")
                     .build(),
             )
-            .with_user_events_exporter("otel_trace_suppr")
+            .with_span_processor(Processor::builder("otel_trace_suppr").build().unwrap())
             .build();
 
         let user_event_status = check_user_events_available().unwrap();
@@ -771,7 +852,7 @@ mod tests {
                     .with_service_name("kinds_test")
                     .build(),
             )
-            .with_user_events_exporter("otel_trace_kinds")
+            .with_span_processor(Processor::builder("otel_trace_kinds").build().unwrap())
             .build();
 
         let user_event_status = check_user_events_available().unwrap();
@@ -868,7 +949,7 @@ mod tests {
                     .with_service_name("partial_resource_test")
                     .build(),
             )
-            .with_user_events_exporter("otel_trace_pres")
+            .with_span_processor(Processor::builder("otel_trace_pres").build().unwrap())
             .build();
 
         let user_event_status = check_user_events_available().unwrap();
