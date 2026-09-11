@@ -128,7 +128,6 @@ mod tests {
             query: &'static str,
             sensitive: &'static [&'static str],
             expected: Cow<'static, str>,
-            /// Whether the helper returns the query without allocating.
             expected_borrowed: bool,
         }
 

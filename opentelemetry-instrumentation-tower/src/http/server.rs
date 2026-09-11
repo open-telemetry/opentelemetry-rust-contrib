@@ -51,8 +51,6 @@ struct LayerState {
     server_active_requests: UpDownCounter<i64>,
     server_request_body_size: Histogram<u64>,
     server_response_body_size: Histogram<u64>,
-    /// Query parameter keys whose values `url.query` reports as redacted. The
-    /// default list borrows its keys, so it allocates nothing per key.
     sensitive_query_parameters: Box<[Cow<'static, str>]>,
 }
 
@@ -541,10 +539,6 @@ where
             KeyValue::new(semconv::attribute::URL_PATH, req.uri().path().to_string()),
         ];
 
-        // `url.query` is required when the request target carries a query
-        // component. An empty component still counts as one, so the presence of
-        // the value decides, not its content. The value of a sensitive
-        // parameter, such as the signature of a pre-signed URL, is redacted.
         if let Some(query) = req.uri().query() {
             span_attributes.push(KeyValue::new(
                 semconv::attribute::URL_QUERY,
@@ -777,8 +771,6 @@ mod tests {
                 ],
             },
             TestCase {
-                // A server receives a request target in origin form. That form
-                // carries no scheme, so `url.scheme` holds an empty value.
                 name: "request target in origin form",
                 target: "/api/users/123",
                 expected_span_name: "GET /api/users/123",
@@ -795,8 +787,6 @@ mod tests {
                 ],
             },
             TestCase {
-                // The query component belongs in `url.query`, and never in the
-                // span name, which has to stay low cardinality.
                 name: "request target with a query component",
                 target: "/api/users/123?fields=name&verbose=true",
                 expected_span_name: "GET /api/users/123",
@@ -817,8 +807,6 @@ mod tests {
                 ],
             },
             TestCase {
-                // The value of a sensitive parameter is redacted, and its key
-                // is kept, so a reader still sees which parameters were sent.
                 name: "request target with a sensitive query parameter",
                 target: "/api/users/123?fields=name&sig=secret-signature",
                 expected_span_name: "GET /api/users/123",
@@ -839,7 +827,6 @@ mod tests {
                 ],
             },
             TestCase {
-                // An empty query component is still a query component.
                 name: "request target with an empty query component",
                 target: "/api/users/123?",
                 expected_span_name: "GET /api/users/123",
