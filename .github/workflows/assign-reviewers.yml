@@ -4,7 +4,9 @@ on:
   # pull_request_target is suggested for projects where pull requests will be
   # made from forked repositories. If pull_request is used in these cases,
   # the github token will not have sufficient permission to update the PR.
-  pull_request_target:
+  # This usage is safe: no pull request code is checked out or executed, and
+  # the elevated token is used solely to assign reviewers.
+  pull_request_target: # zizmor: ignore[dangerous-triggers]
     types: [opened, synchronize, reopened, ready_for_review]
 
 permissions:
