@@ -70,17 +70,15 @@ pub(crate) fn split_and_format_protocol_version(
 /// Query parameter keys whose values the conventions ask instrumentations to
 /// redact by default.
 ///
-/// Each key names a credential or a signature of a pre-signed URL. The
-/// conventions state that this list changes over time, and they ask for a
+/// Each key names a credential or a signature of a pre-signed URL. The keys are
+/// the ones that `opentelemetry-semantic-conventions` documents for
+/// [`URL_QUERY`](opentelemetry_semantic_conventions::attribute::URL_QUERY). The
+/// conventions state that the list changes over time, and they ask for a
 /// case-sensitive match.
-///
-/// See <https://opentelemetry.io/docs/specs/semconv/registry/attributes/url/>.
 pub(crate) const DEFAULT_SENSITIVE_QUERY_PARAMETERS: &[&str] = &[
     "X-Amz-Signature",
     "X-Amz-Credential",
     "X-Amz-Security-Token",
-    "AWSAccessKeyId",
-    "Signature",
     "sig",
     "X-Goog-Signature",
 ];
