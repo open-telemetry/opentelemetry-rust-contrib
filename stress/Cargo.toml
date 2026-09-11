@@ -17,6 +17,16 @@ path = "src/etw_logs.rs"
 doc = false
 
 [[bin]]
+name = "user_events_traces"
+path = "src/user_events_traces.rs"
+doc = false
+
+[[bin]]
+name = "etw_traces"
+path = "src/etw_traces.rs"
+doc = false
+
+[[bin]]
 name = "geneva_exporter"
 path = "src/geneva_exporter.rs"
 
@@ -30,10 +40,13 @@ wiremock = "0.6"
 futures = "0.3"
 
 opentelemetry-appender-tracing = { version = "0.32" }
-opentelemetry_sdk = { version = "0.32", features = ["logs"] }
+opentelemetry = { version = "0.32", features = ["trace"] }
+opentelemetry_sdk = { version = "0.32", features = ["logs", "trace"] }
 opentelemetry-proto = { version = "0.32", default-features = false, features = ["logs", "gen-tonic-messages"] }
 opentelemetry-user-events-logs = { path = "../opentelemetry-user-events-logs" }
+opentelemetry-user-events-trace = { path = "../opentelemetry-user-events-trace" }
 opentelemetry-etw-logs = { path = "../opentelemetry-etw-logs"}
+opentelemetry-etw-traces = { path = "../opentelemetry-etw-traces" }
 tracing = { version = "0.1", default-features = false, features = ["std"] }
 tracing-subscriber = { version = "0.3.0", default-features = false, features = ["env-filter","registry", "std"] }
 geneva-uploader = { version = "0.7.1", path = "../opentelemetry-exporter-geneva/geneva-uploader", features = ["mock_auth"]}
