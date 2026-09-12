@@ -2389,8 +2389,10 @@ mod tests {
     /// An instrument that reports no observations must not produce an event,
     /// and must not disturb a populated metric exported in the same cycle.
     ///
-    /// This exercises `emit_batched` with an empty data point iterator, which
-    /// is the path where a stale batch from the previous metric could leak out.
+    /// This asserts the externally visible behaviour only. SDK 0.32 drops a
+    /// metric whose aggregation produced no data points before calling the
+    /// exporter, so the exporter's empty-batch path is not reached from here;
+    /// this test exists to notice if that ever stops being true.
     #[ignore]
     #[test]
     fn integration_test_observable_with_no_observations_emits_no_event() {
@@ -2551,6 +2553,33 @@ mod tests {
                  regardless of how they are split across {} event(s)",
                 decoded.len()
             );
+
+            // Counting is not enough: losing one point and duplicating the
+            // other also yields two. The two payloads are distinguishable by
+            // their first byte, so assert exactly one of each survived intact.
+            let mut prefixes: Vec<char> = points
+                .iter()
+                .map(|(attrs, value)| {
+                    assert_eq!(
+                        *value,
+                        test_utils::Num::I(1),
+                        "size {size}: data point value was altered"
+                    );
+                    attrs
+                        .iter()
+                        .find(|(k, _)| k == "payload")
+                        .map(|(_, v)| v.chars().next().expect("payload is never empty"))
+                        .expect("payload attribute missing")
+                })
+                .collect();
+            prefixes.sort_unstable();
+            assert_eq!(
+                prefixes,
+                vec!['a', 'b'],
+                "size {size}: expected both distinct data points to survive the split, \
+                 got payload prefixes {prefixes:?}"
+            );
+
             decoded.len()
         };
 
