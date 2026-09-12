@@ -56,9 +56,6 @@ components:
   opentelemetry-resource-detectors/:
     - gruebel
 
-  # TBD - seeking owners. Issues fall back to @open-telemetry/rust-approvers.
-  opentelemetry-stackdriver/: []
-
   opentelemetry-user-events-logs/:
     - cijothomas
     - lalitb

@@ -27,11 +27,6 @@ cargo_feature opentelemetry-contrib "jaeger_json_exporter"
 cargo_feature opentelemetry-contrib "rt-tokio"
 cargo_feature opentelemetry-contrib "rt-tokio-current-thread"
 
-cargo_feature opentelemetry-stackdriver "default"
-cargo_feature opentelemetry-stackdriver "gcp-authorizer"
-cargo_feature opentelemetry-stackdriver "tls-native-roots"
-cargo_feature opentelemetry-stackdriver "tls-webpki-roots"
-
 cargo_feature opentelemetry-user-events-logs "default"
 
 cargo_feature opentelemetry-user-events-metrics ""
