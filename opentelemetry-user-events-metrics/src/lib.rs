@@ -1874,8 +1874,9 @@ mod tests {
             );
             assert_eq!(
                 sum.aggregation_temporality,
-                AggregationTemporality::Delta as i32,
-                "occurrence {index} lost delta temporality"
+                AggregationTemporality::Cumulative as i32,
+                "occurrence {index} has the wrong temporality; the SDK aggregates \
+                 up/down counters cumulatively"
             );
         }
 
@@ -2563,5 +2564,70 @@ mod tests {
                 "{name} was never exported"
             );
         }
+    }
+
+    /// Pins the mapping from the SDK's `Temporality` to the OTLP wire value.
+    ///
+    /// The two enums are numbered differently (`Cumulative` is 0 in the SDK but
+    /// 2 in OTLP, where 0 means UNSPECIFIED), so a direct cast is wrong for
+    /// everything except delta. This asserts the actual bytes a consumer reads
+    /// for both a delta instrument and a cumulative one.
+    #[ignore]
+    #[test]
+    fn integration_test_temporality_uses_otlp_wire_values() {
+        use opentelemetry_proto::tonic::metrics::v1::metric::Data;
+        use opentelemetry_proto::tonic::metrics::v1::AggregationTemporality;
+
+        test_utils::check_user_events_available().expect("Kernel does not support user_events.");
+
+        let provider = test_provider();
+        let meter = provider.meter("user-event-test");
+        meter
+            .u64_counter("temporality_counter")
+            .build()
+            .add(1, &[KeyValue::new("k", "a")]);
+        meter
+            .i64_up_down_counter("temporality_updown")
+            .build()
+            .add(1, &[KeyValue::new("k", "a")]);
+        meter
+            .f64_histogram("temporality_histogram")
+            .build()
+            .record(1.0, &[KeyValue::new("k", "a")]);
+
+        let decoded = test_utils::collect_otlp_metrics(|| {
+            provider.shutdown().expect("shutdown failed");
+        });
+
+        let temporality_of = |name: &str| -> i32 {
+            let metrics = test_utils::find_metrics(&decoded, name);
+            assert!(!metrics.is_empty(), "{name} was never exported");
+            match metrics[0].data.as_ref().expect("metric data missing") {
+                Data::Sum(s) => s.aggregation_temporality,
+                Data::Histogram(h) => h.aggregation_temporality,
+                other => panic!("{name} has unexpected data {other:?}"),
+            }
+        };
+
+        // A monotonic counter is aggregated as delta, which is 1 in both enums.
+        assert_eq!(
+            temporality_of("temporality_counter"),
+            AggregationTemporality::Delta as i32
+        );
+        assert_eq!(
+            temporality_of("temporality_histogram"),
+            AggregationTemporality::Delta as i32
+        );
+
+        // An up/down counter is aggregated cumulatively, which is 2 on the wire.
+        // A direct enum cast would write 0 here, which OTLP defines as
+        // UNSPECIFIED.
+        let updown = temporality_of("temporality_updown");
+        assert_ne!(
+            updown,
+            AggregationTemporality::Unspecified as i32,
+            "cumulative temporality must not be written as UNSPECIFIED"
+        );
+        assert_eq!(updown, AggregationTemporality::Cumulative as i32);
     }
 }
