@@ -185,6 +185,31 @@ fn to_nanos(time: SystemTime) -> u64 {
         .as_nanos() as u64
 }
 
+/// Maps the SDK's temporality to the OTLP wire value.
+///
+/// These two enums are *not* numbered the same. The SDK orders them
+/// `Cumulative = 0, Delta = 1, LowMemory = 2`, while OTLP uses
+/// `UNSPECIFIED = 0, DELTA = 1, CUMULATIVE = 2`. Casting the SDK value directly
+/// therefore happens to be correct for delta and silently wrong for everything
+/// else: cumulative data would be written as UNSPECIFIED, which a consumer is
+/// entitled to reject or misinterpret.
+///
+/// `LowMemory` is a reader-level preference rather than a property of collected
+/// data, so it should never reach this function; it is mapped to delta because
+/// that is the temporality it selects for the synchronous instruments it
+/// applies to.
+fn to_otlp_temporality(temporality: Temporality) -> i32 {
+    use opentelemetry_proto::tonic::metrics::v1::AggregationTemporality;
+
+    match temporality {
+        Temporality::Delta | Temporality::LowMemory => AggregationTemporality::Delta as i32,
+        Temporality::Cumulative => AggregationTemporality::Cumulative as i32,
+        // `Temporality` is #[non_exhaustive]; a newly added variant is safer
+        // reported as unspecified than silently mislabelled as a known one.
+        _ => AggregationTemporality::Unspecified as i32,
+    }
+}
+
 impl MetricsExporter {
     fn process_numeric_metrics<T: Numeric>(
         &self,
@@ -341,7 +366,7 @@ impl MetricsExporter {
         let start_time = to_nanos(sum.start_time());
         let time = to_nanos(sum.time());
         let is_monotonic = sum.is_monotonic();
-        let temporality = sum.temporality() as i32;
+        let temporality = to_otlp_temporality(sum.temporality());
         let default_flags =
             opentelemetry_proto::tonic::metrics::v1::DataPointFlags::default() as u32;
 
@@ -376,7 +401,7 @@ impl MetricsExporter {
     ) -> usize {
         let start_time = to_nanos(hist.start_time());
         let time = to_nanos(hist.time());
-        let temporality = hist.temporality() as i32;
+        let temporality = to_otlp_temporality(hist.temporality());
         let default_flags =
             opentelemetry_proto::tonic::metrics::v1::DataPointFlags::default() as u32;
 
@@ -415,7 +440,7 @@ impl MetricsExporter {
     ) -> usize {
         let start_time = to_nanos(hist.start_time());
         let time = to_nanos(hist.time());
-        let temporality = hist.temporality() as i32;
+        let temporality = to_otlp_temporality(hist.temporality());
         let default_flags =
             opentelemetry_proto::tonic::metrics::v1::DataPointFlags::default() as u32;
 
