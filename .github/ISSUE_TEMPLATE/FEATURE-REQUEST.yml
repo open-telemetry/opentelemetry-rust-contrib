@@ -39,7 +39,6 @@ body:
         - opentelemetry-instrumentation-actix-web
         - opentelemetry-instrumentation-tower
         - opentelemetry-resource-detectors
-        - opentelemetry-stackdriver
         - opentelemetry-user-events-logs
         - opentelemetry-user-events-metrics
         - opentelemetry-user-events-trace
