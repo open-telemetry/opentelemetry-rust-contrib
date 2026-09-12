@@ -42,7 +42,6 @@ body:
         - opentelemetry-aws
         - opentelemetry-config
         - opentelemetry-contrib
-        - opentelemetry-datadog
         - opentelemetry-etw-logs
         - opentelemetry-etw-metrics
         - opentelemetry-etw-traces
