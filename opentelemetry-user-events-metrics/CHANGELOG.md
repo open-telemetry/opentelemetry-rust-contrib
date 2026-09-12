@@ -14,6 +14,11 @@
   event that does not fit is dropped without any error being reported to the
   writer. The limit is now derived from that bound. This had no effect before
   batching, because a single data point never approached 64KB.
+- Fixed the aggregation temporality written to the wire. The SDK's `Temporality`
+  and OTLP's `AggregationTemporality` do not use the same discriminants, and the
+  exporter cast between them directly. Cumulative data — which is what the SDK
+  produces for `UpDownCounter` and `ObservableUpDownCounter` — was therefore
+  written as `AGGREGATION_TEMPORALITY_UNSPECIFIED`.
 
 ## v0.13.0
 

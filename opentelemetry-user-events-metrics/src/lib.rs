@@ -70,12 +70,20 @@ mod tests {
 
             let collected = Writable::<Vec<ExportMetricsServiceRequest>>::new(Vec::new());
             let sink = collected.clone();
+            // A captured event that does not decode is a wire-format failure and
+            // must fail the test. Recording it here rather than panicking keeps
+            // the panic out of the perf callback, where it would unwind through
+            // the parsing library.
+            let decode_errors = Writable::<Vec<String>>::new(Vec::new());
+            let error_sink = decode_errors.clone();
 
             event.add_callback(move |data| {
                 let buffer = data.format().get_data(buffer_ref, data.event_data());
                 match ExportMetricsServiceRequest::decode(buffer) {
                     Ok(request) => sink.write(|out| out.push(request)),
-                    Err(e) => eprintln!("Failed to decode OTLP metrics from buffer: {e}"),
+                    Err(e) => error_sink.write(|out| {
+                        out.push(format!("{} byte event failed to decode: {e}", buffer.len()))
+                    }),
                 }
                 Ok(())
             });
@@ -107,6 +115,14 @@ mod tests {
             session
                 .parse_all()
                 .expect("Failed to parse perf ring buffer");
+
+            let mut errors = Vec::new();
+            decode_errors.read(|v| errors = v.clone());
+            assert!(
+                errors.is_empty(),
+                "the exporter wrote {} event(s) that are not valid OTLP: {errors:#?}",
+                errors.len()
+            );
 
             let mut decoded_metrics = Vec::new();
             collected.read(|v| decoded_metrics = v.clone());
@@ -1155,17 +1171,24 @@ mod tests {
             })
             .collect();
 
-        assert!(
-            partitions.iter().any(|p| p == "small-a"),
-            "small data point before the oversized one was lost: {partitions:?}"
+        assert_eq!(
+            partitions.len(),
+            2,
+            "expected exactly the two small data points to survive, got {partitions:?}"
+        );
+        let mut sorted = partitions.clone();
+        sorted.sort();
+        assert_eq!(
+            sorted,
+            vec!["small-a".to_string(), "small-b".to_string()],
+            "the oversized data point must be dropped and the two small ones emitted \
+             exactly once each: {partitions:?}"
         );
         assert!(
-            partitions.iter().any(|p| p == "small-b"),
-            "small data point after the oversized one was lost: {partitions:?}"
-        );
-        assert!(
-            !partitions.iter().any(|p| p.len() > 1000),
-            "oversized data point should have been dropped"
+            points
+                .iter()
+                .all(|(_, value)| *value == test_utils::Num::I(1)),
+            "surviving data point values were altered: {points:?}"
         );
     }
 
@@ -2283,6 +2306,306 @@ mod tests {
         }
     }
 
+    /// Every split event must repeat the full scope and resource identity, not
+    /// just the scope name.
+    ///
+    /// A consumer receives these events independently and cannot reconstruct a
+    /// missing version or schema URL from a neighbouring event, so dropping
+    /// them on continuation events would silently change how the data is
+    /// attributed.
+    #[ignore]
+    #[test]
+    fn integration_test_scope_and_resource_identity_repeated_on_every_split_event() {
+        test_utils::check_user_events_available().expect("Kernel does not support user_events.");
+
+        const SCHEMA_URL: &str = "https://opentelemetry.io/schemas/1.30.0";
+        const SERIES: usize = 900;
+
+        let provider = SdkMeterProvider::builder()
+            .with_resource(
+                Resource::builder_empty()
+                    .with_attributes(vec![KeyValue::new("service.name", "metric-demo")])
+                    .with_schema_url(Vec::<KeyValue>::new(), SCHEMA_URL)
+                    .build(),
+            )
+            .with_periodic_exporter(MetricsExporter::new())
+            .build();
+
+        let meter = provider.meter_with_scope(
+            opentelemetry::InstrumentationScope::builder("scoped-meter")
+                .with_version("4.5.6")
+                .with_schema_url(SCHEMA_URL)
+                .build(),
+        );
+        let counter = meter.u64_counter("counter_scope_identity").build();
+        for i in 0..SERIES {
+            counter.add(1, &[KeyValue::new("partition", format!("p{i:04}"))]);
+        }
+
+        let decoded = test_utils::collect_otlp_metrics_with_pages(1024, || {
+            provider.shutdown().expect("shutdown failed");
+        });
+
+        test_utils::assert_all_events_within_size_limit(&decoded);
+        assert!(
+            decoded.len() > 1,
+            "expected the metric to split across several events, got {}",
+            decoded.len()
+        );
+        assert_eq!(
+            test_utils::number_points(&decoded, "counter_scope_identity").len(),
+            SERIES,
+            "data points were lost while splitting"
+        );
+
+        for (index, request) in decoded.iter().enumerate() {
+            let resource_metrics = &request.resource_metrics;
+            assert_eq!(resource_metrics.len(), 1, "event {index}");
+            let rm = &resource_metrics[0];
+            assert_eq!(
+                rm.schema_url, SCHEMA_URL,
+                "event {index} lost the resource schema URL"
+            );
+            assert!(
+                rm.resource.is_some(),
+                "event {index} lost the resource entirely"
+            );
+
+            assert_eq!(rm.scope_metrics.len(), 1, "event {index}");
+            let sm = &rm.scope_metrics[0];
+            assert_eq!(
+                sm.schema_url, SCHEMA_URL,
+                "event {index} lost the scope schema URL"
+            );
+            let scope = sm.scope.as_ref().expect("scope missing");
+            assert_eq!(scope.name, "scoped-meter", "event {index}");
+            assert_eq!(
+                scope.version, "4.5.6",
+                "event {index} lost the scope version"
+            );
+        }
+    }
+
+    /// An instrument that reports no observations must not produce an event,
+    /// and must not disturb a populated metric exported in the same cycle.
+    ///
+    /// This exercises `emit_batched` with an empty data point iterator, which
+    /// is the path where a stale batch from the previous metric could leak out.
+    #[ignore]
+    #[test]
+    fn integration_test_observable_with_no_observations_emits_no_event() {
+        test_utils::check_user_events_available().expect("Kernel does not support user_events.");
+
+        let provider = test_provider();
+        let meter = provider.meter("user-event-test");
+
+        let _empty = meter
+            .u64_observable_counter("counter_never_observed")
+            .with_callback(|_observer| {
+                // Deliberately reports nothing.
+            })
+            .build();
+
+        meter
+            .u64_counter("counter_populated")
+            .build()
+            .add(7, &[KeyValue::new("partition", "only")]);
+
+        let decoded = test_utils::collect_otlp_metrics_with_pages(1024, || {
+            provider.shutdown().expect("shutdown failed");
+        });
+
+        test_utils::assert_all_events_within_size_limit(&decoded);
+        assert!(
+            test_utils::find_metrics(&decoded, "counter_never_observed").is_empty(),
+            "an instrument with no observations must not be exported"
+        );
+
+        let points = test_utils::number_points(&decoded, "counter_populated");
+        assert_eq!(
+            points,
+            vec![(
+                vec![("partition".to_string(), "only".to_string())],
+                test_utils::Num::I(7)
+            )],
+            "the populated metric was altered by the empty instrument"
+        );
+    }
+
+    /// Pins the exact byte at which a single data point stops being emitted.
+    ///
+    /// The monotonicity test above only brackets the cutoff; it would still
+    /// pass if the exporter were wildly over-conservative and silently dropped
+    /// points that the kernel would have accepted. This binary-searches the
+    /// exact attribute size at which delivery stops, then asserts that the
+    /// largest delivered event genuinely fills the budget. That is what proves
+    /// the accounting is tight rather than merely safe.
+    #[ignore]
+    #[test]
+    fn integration_test_single_data_point_cutoff_is_exact() {
+        use prost::Message;
+
+        test_utils::check_user_events_available().expect("Kernel does not support user_events.");
+
+        // Returns the encoded size of the delivered event, or None if the data
+        // point was dropped.
+        let probe = |size: usize| -> Option<usize> {
+            let provider = test_provider();
+            let meter = provider.meter("user-event-test");
+            let counter = meter.u64_counter("counter_cutoff").build();
+            counter.add(1, &[KeyValue::new("payload", "x".repeat(size))]);
+
+            let decoded = test_utils::collect_otlp_metrics_with_pages(1024, || {
+                // A data point that cannot be encoded within the limit is
+                // reported as an export error, which is expected here.
+                let _ = provider.shutdown();
+            });
+
+            test_utils::assert_all_events_within_size_limit(&decoded);
+            if test_utils::number_points(&decoded, "counter_cutoff").is_empty() {
+                None
+            } else {
+                assert_eq!(decoded.len(), 1, "size {size} produced more than one event");
+                Some(decoded[0].encoded_len())
+            }
+        };
+
+        let mut lo = 1024;
+        let mut hi = 16384;
+        assert!(probe(lo).is_some(), "a 1 KiB data point must be delivered");
+        assert!(probe(hi).is_none(), "a 16 KiB data point must be dropped");
+
+        // Invariant: `lo` is always delivered and `hi` is always dropped.
+        while hi - lo > 1 {
+            let mid = lo + (hi - lo) / 2;
+            if probe(mid).is_some() {
+                lo = mid;
+            } else {
+                hi = mid;
+            }
+        }
+
+        let largest = probe(lo).expect("the search invariant guarantees lo is delivered");
+        println!("cutoff: attribute size {lo} delivered as a {largest} byte event, {hi} dropped");
+
+        assert!(
+            largest <= crate::exporter::MAX_EVENT_SIZE,
+            "the largest delivered event is {largest} bytes, over the {} byte budget",
+            crate::exporter::MAX_EVENT_SIZE
+        );
+
+        // Growing the attribute by one byte grows the encoded request by one
+        // byte (plus at most a few bytes of varint growth in the enclosing
+        // length delimiters), so a tight implementation must land within
+        // `SIZE_SLACK` of the budget. A larger gap means usable space is being
+        // given away and near-limit data points are dropped unnecessarily.
+        let headroom = crate::exporter::MAX_EVENT_SIZE - largest;
+        assert!(
+            headroom <= crate::exporter::SIZE_SLACK,
+            "the largest deliverable data point leaves {headroom} bytes of the {} byte \
+             budget unused, which is more than the {} bytes of slack the encoder reserves; \
+             the size accounting is over-conservative and is dropping valid data points",
+            crate::exporter::MAX_EVENT_SIZE,
+            crate::exporter::SIZE_SLACK
+        );
+    }
+
+    /// Pins the exact byte at which a second data point is pushed into a new
+    /// event, and proves nothing is lost at that split.
+    ///
+    /// This is the counterpart to the test above: that one exercises the
+    /// "single point does not fit at all" path, this one exercises the "batch
+    /// is full, start another event" path at single-byte granularity.
+    #[ignore]
+    #[test]
+    fn integration_test_batch_split_boundary_is_exact() {
+        use prost::Message;
+
+        test_utils::check_user_events_available().expect("Kernel does not support user_events.");
+
+        // Emits two equally sized data points and returns how many events they
+        // were spread across, asserting no loss either way.
+        let probe = |size: usize| -> usize {
+            let provider = test_provider();
+            let meter = provider.meter("user-event-test");
+            let counter = meter.u64_counter("counter_split_cutoff").build();
+            counter.add(
+                1,
+                &[KeyValue::new("payload", format!("a{}", "x".repeat(size)))],
+            );
+            counter.add(
+                1,
+                &[KeyValue::new("payload", format!("b{}", "x".repeat(size)))],
+            );
+
+            let decoded = test_utils::collect_otlp_metrics_with_pages(1024, || {
+                provider.shutdown().expect("shutdown failed");
+            });
+
+            test_utils::assert_all_events_within_size_limit(&decoded);
+            let points = test_utils::number_points(&decoded, "counter_split_cutoff");
+            assert_eq!(
+                points.len(),
+                2,
+                "size {size}: both data points fit individually, so neither may be lost \
+                 regardless of how they are split across {} event(s)",
+                decoded.len()
+            );
+            decoded.len()
+        };
+
+        // At 512 bytes each both points share one event; at 4096 bytes each
+        // they cannot.
+        let mut lo = 512;
+        let mut hi = 4096;
+        assert_eq!(
+            probe(lo),
+            1,
+            "two 512 byte data points must share one event"
+        );
+        assert_eq!(probe(hi), 2, "two 4 KiB data points cannot share one event");
+
+        // Invariant: `lo` fits in one event, `hi` requires two.
+        while hi - lo > 1 {
+            let mid = lo + (hi - lo) / 2;
+            if probe(mid) == 1 {
+                lo = mid;
+            } else {
+                hi = mid;
+            }
+        }
+
+        println!(
+            "split boundary: two {lo} byte points share an event, two {hi} byte points do not"
+        );
+
+        // Confirm the boundary is where the encoder says it is: the combined
+        // event at `lo` must genuinely be near the budget, not split early.
+        let provider = test_provider();
+        let meter = provider.meter("user-event-test");
+        let counter = meter.u64_counter("counter_split_full").build();
+        counter.add(
+            1,
+            &[KeyValue::new("payload", format!("a{}", "x".repeat(lo)))],
+        );
+        counter.add(
+            1,
+            &[KeyValue::new("payload", format!("b{}", "x".repeat(lo)))],
+        );
+        let decoded = test_utils::collect_otlp_metrics_with_pages(1024, || {
+            provider.shutdown().expect("shutdown failed");
+        });
+        assert_eq!(decoded.len(), 1);
+        let filled = decoded[0].encoded_len();
+        let headroom = crate::exporter::MAX_EVENT_SIZE - filled;
+        assert!(
+            headroom <= crate::exporter::SIZE_SLACK,
+            "the last two data points to share an event only filled {filled} of the {} byte \
+             budget, leaving {headroom} bytes unused; the batch is being split early",
+            crate::exporter::MAX_EVENT_SIZE
+        );
+    }
+
     // ---------------------------------------------------------------------
     // Value and attribute edge cases.
     // ---------------------------------------------------------------------
@@ -2298,6 +2621,9 @@ mod tests {
 
         let big = meter.u64_counter("counter_u64_max").build();
         big.add(u64::MAX, &[KeyValue::new("k", "max")]);
+
+        let representable = meter.u64_counter("counter_u64_representable").build();
+        representable.add(i64::MAX as u64, &[KeyValue::new("k", "max_i64")]);
 
         let small = meter.i64_up_down_counter("updown_i64_min").build();
         small.add(i64::MIN, &[KeyValue::new("k", "min")]);
@@ -2315,15 +2641,27 @@ mod tests {
         test_utils::assert_all_events_within_size_limit(&decoded);
 
         // OTLP represents integral data points as a signed 64-bit value, so a
-        // u64 above i64::MAX arrives with the same bit pattern reinterpreted.
-        // This is a property of the wire format rather than of batching; the
-        // assertion pins the behaviour so a future encoding change is noticed.
+        // u64 above i64::MAX has no faithful representation. `opentelemetry-proto`
+        // clamps those to zero, and this exporter matches it so that the same
+        // counter is reported identically over OTLP and over `user_events`. The
+        // assertion is written against the value a consumer actually sees: a
+        // reinterpreted bit pattern would surface as a negative monotonic
+        // counter, which is worse than a zero.
         let big_points = test_utils::number_points(&decoded, "counter_u64_max");
         assert_eq!(big_points.len(), 1);
-        let test_utils::Num::I(raw) = big_points[0].1 else {
-            panic!("expected an integer data point");
-        };
-        assert_eq!(raw as u64, u64::MAX, "u64::MAX must round-trip bitwise");
+        assert_eq!(
+            big_points[0].1,
+            test_utils::Num::I(0),
+            "a u64 above i64::MAX must not be written as a negative value"
+        );
+
+        let representable = test_utils::number_points(&decoded, "counter_u64_representable");
+        assert_eq!(representable.len(), 1);
+        assert_eq!(
+            representable[0].1,
+            test_utils::Num::I(i64::MAX),
+            "the largest representable u64 must round-trip exactly"
+        );
 
         let small_points = test_utils::number_points(&decoded, "updown_i64_min");
         assert_eq!(small_points.len(), 1);

@@ -125,7 +125,15 @@ impl Numeric for u64 {
     fn into_number_data_point_value(
         self,
     ) -> opentelemetry_proto::tonic::metrics::v1::number_data_point::Value {
-        opentelemetry_proto::tonic::metrics::v1::number_data_point::Value::AsInt(self as i64)
+        // OTLP carries integer data points as a signed `i64`, so a `u64` above
+        // `i64::MAX` has no faithful representation. `opentelemetry-proto` maps
+        // those to zero, and this matches it so that the same counter is
+        // reported identically over OTLP and over `user_events`. A raw `as`
+        // cast would instead surface such a value as a negative number, which
+        // is far worse for a monotonic counter.
+        opentelemetry_proto::tonic::metrics::v1::number_data_point::Value::AsInt(
+            i64::try_from(self).unwrap_or_default(),
+        )
     }
 }
 
@@ -194,20 +202,15 @@ fn to_nanos(time: SystemTime) -> u64 {
 /// else: cumulative data would be written as UNSPECIFIED, which a consumer is
 /// entitled to reject or misinterpret.
 ///
-/// `LowMemory` is a reader-level preference rather than a property of collected
-/// data, so it should never reach this function; it is mapped to delta because
-/// that is the temporality it selects for the synchronous instruments it
-/// applies to.
+/// This defers to the conversion in `opentelemetry-proto` so that a metric is
+/// labelled identically whether it leaves the process over OTLP or over
+/// `user_events`. That conversion also owns the handling of `LowMemory`, which
+/// is a reader-level preference rather than a property of collected data and so
+/// should never reach an exporter.
 fn to_otlp_temporality(temporality: Temporality) -> i32 {
     use opentelemetry_proto::tonic::metrics::v1::AggregationTemporality;
 
-    match temporality {
-        Temporality::Delta | Temporality::LowMemory => AggregationTemporality::Delta as i32,
-        Temporality::Cumulative => AggregationTemporality::Cumulative as i32,
-        // `Temporality` is #[non_exhaustive]; a newly added variant is safer
-        // reported as unspecified than silently mislabelled as a known one.
-        _ => AggregationTemporality::Unspecified as i32,
-    }
+    AggregationTemporality::from(temporality) as i32
 }
 
 impl MetricsExporter {
