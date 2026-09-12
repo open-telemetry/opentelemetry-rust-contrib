@@ -16,7 +16,10 @@ pub(super) fn blocking_client(timeout: std::time::Duration) -> ureq::Agent {
 
 /// Converts a `Result` into an `Option`, reporting the error via [`tracing::debug`].
 #[cfg(feature = "detector-aws-eks")]
-#[cfg_attr(not(feature = "internal-logs"), allow(unused_variables))]
+#[cfg_attr(
+    not(feature = "internal-logs"),
+    allow(unused_variables, clippy::manual_ok_err) // without logging this is just `Result::ok`
+)]
 pub(super) fn debug_on_error<T, E: std::error::Error>(
     detector: &'static str,
     result: Result<T, E>,
@@ -32,7 +35,10 @@ pub(super) fn debug_on_error<T, E: std::error::Error>(
 }
 
 /// Converts a `Result` into an `Option`, reporting the error via [`tracing::info`].
-#[cfg_attr(not(feature = "internal-logs"), allow(unused_variables))]
+#[cfg_attr(
+    not(feature = "internal-logs"),
+    allow(unused_variables, clippy::manual_ok_err) // without logging this is just `Result::ok`
+)]
 pub(super) fn info_on_error<T, E: std::error::Error>(
     detector: &'static str,
     result: Result<T, E>,
@@ -48,7 +54,10 @@ pub(super) fn info_on_error<T, E: std::error::Error>(
 }
 
 /// Converts a `Result` into an `Option`, reporting the error via [`tracing::warn`].
-#[cfg_attr(not(feature = "internal-logs"), allow(unused_variables))]
+#[cfg_attr(
+    not(feature = "internal-logs"),
+    allow(unused_variables, clippy::manual_ok_err) // without logging this is just `Result::ok`
+)]
 pub(super) fn warn_on_error<T, E: std::error::Error>(
     detector: &'static str,
     result: Result<T, E>,
