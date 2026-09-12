@@ -108,9 +108,7 @@ struct CustomData {
 struct MockPeriodicExporterProvider {}
 
 impl MockPeriodicExporterProvider {
-    pub fn register_into(
-        registry: &mut opentelemetry_config::ConfigurationProviderRegistry,
-    ) {
+    pub fn register_into(registry: &mut opentelemetry_config::ConfigurationProviderRegistry) {
         registry.register_metric_exporter_factory(
             "custom",
             MockPeriodicExporterProvider::register_mock_exporter_factory,
