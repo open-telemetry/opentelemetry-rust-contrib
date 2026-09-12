@@ -103,6 +103,7 @@ jobs:
           echo "::group::Drive traffic"
           c "http://127.0.0.1:5000/"
           c "http://127.0.0.1:5000/users/1"
+          c "http://127.0.0.1:5000/users/1?fields=name&sig=secret-signature"
           c "http://127.0.0.1:5000/files/a/b/c/1.txt"
           c -X POST   "http://127.0.0.1:5000/items"
           c -X PUT    "http://127.0.0.1:5000/items/1"

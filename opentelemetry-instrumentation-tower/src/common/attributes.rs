@@ -1,5 +1,7 @@
 //! Common HTTP attribute helpers.
 
+use std::borrow::Cow;
+
 use opentelemetry::KeyValue;
 use opentelemetry_semantic_conventions as semconv;
 
@@ -63,4 +65,193 @@ pub(crate) fn split_and_format_protocol_version(
         _ => "",
     };
     ("http", version_str)
+}
+
+/// Query parameter keys whose values the conventions ask instrumentations to
+/// redact by default.
+pub(crate) const DEFAULT_SENSITIVE_QUERY_PARAMETERS: &[&str] = &[
+    "X-Amz-Signature",
+    "X-Amz-Credential",
+    "X-Amz-Security-Token",
+    "sig",
+    "X-Goog-Signature",
+];
+
+/// Value that replaces the value of a sensitive query parameter.
+const REDACTED: &str = "REDACTED";
+
+/// Replaces the value of every sensitive query parameter with `REDACTED`, and
+/// keeps the key.
+pub(crate) fn redact_query<'q, S>(query: &'q str, sensitive: &[S]) -> Cow<'q, str>
+where
+    S: AsRef<str>,
+{
+    let mut redacted: Option<String> = None;
+    // Byte offset up to which `query` has been copied into `redacted`.
+    let mut copied = 0;
+    // Byte offset of the parameter under inspection.
+    let mut pair_start = 0;
+
+    for pair in query.split('&') {
+        let key = pair.split('=').next().unwrap_or(pair);
+
+        if sensitive.iter().any(|parameter| parameter.as_ref() == key) {
+            let redacted =
+                redacted.get_or_insert_with(|| String::with_capacity(query.len() + REDACTED.len()));
+            // Everything up to and including the key stays as it arrived.
+            redacted.push_str(&query[copied..pair_start + key.len()]);
+            redacted.push('=');
+            redacted.push_str(REDACTED);
+            copied = pair_start + pair.len();
+        }
+
+        pair_start += pair.len() + '&'.len_utf8();
+    }
+
+    match redacted {
+        Some(mut redacted) => {
+            redacted.push_str(&query[copied..]);
+            Cow::Owned(redacted)
+        }
+        None => Cow::Borrowed(query),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn redact_query_replaces_sensitive_values() {
+        struct TestCase {
+            name: &'static str,
+            query: &'static str,
+            sensitive: &'static [&'static str],
+            expected: Cow<'static, str>,
+            expected_borrowed: bool,
+        }
+
+        let test_cases = [
+            TestCase {
+                name: "no sensitive parameter borrows the query",
+                query: "fields=name&verbose=true",
+                sensitive: DEFAULT_SENSITIVE_QUERY_PARAMETERS,
+                expected: Cow::Borrowed("fields=name&verbose=true"),
+                expected_borrowed: true,
+            },
+            TestCase {
+                name: "empty query",
+                query: "",
+                sensitive: DEFAULT_SENSITIVE_QUERY_PARAMETERS,
+                expected: Cow::Borrowed(""),
+                expected_borrowed: true,
+            },
+            TestCase {
+                name: "single sensitive parameter",
+                query: "sig=abc123",
+                sensitive: DEFAULT_SENSITIVE_QUERY_PARAMETERS,
+                expected: Cow::Owned(String::from("sig=REDACTED")),
+                expected_borrowed: false,
+            },
+            TestCase {
+                name: "sensitive parameter keeps its position",
+                query: "q=OpenTelemetry&sig=abc123",
+                sensitive: DEFAULT_SENSITIVE_QUERY_PARAMETERS,
+                expected: Cow::Owned(String::from("q=OpenTelemetry&sig=REDACTED")),
+                expected_borrowed: false,
+            },
+            TestCase {
+                name: "several sensitive parameters",
+                query: "X-Amz-Credential=key&X-Amz-Date=today&X-Amz-Signature=abc",
+                sensitive: DEFAULT_SENSITIVE_QUERY_PARAMETERS,
+                expected: Cow::Owned(String::from(
+                    "X-Amz-Credential=REDACTED&X-Amz-Date=today&X-Amz-Signature=REDACTED",
+                )),
+                expected_borrowed: false,
+            },
+            TestCase {
+                name: "matching is case sensitive",
+                query: "SIG=abc123",
+                sensitive: DEFAULT_SENSITIVE_QUERY_PARAMETERS,
+                expected: Cow::Borrowed("SIG=abc123"),
+                expected_borrowed: true,
+            },
+            TestCase {
+                name: "a key that only contains a sensitive key is kept",
+                query: "design=modern",
+                sensitive: DEFAULT_SENSITIVE_QUERY_PARAMETERS,
+                expected: Cow::Borrowed("design=modern"),
+                expected_borrowed: true,
+            },
+            TestCase {
+                name: "sensitive key without a value",
+                query: "q=OpenTelemetry&sig",
+                sensitive: DEFAULT_SENSITIVE_QUERY_PARAMETERS,
+                expected: Cow::Owned(String::from("q=OpenTelemetry&sig=REDACTED")),
+                expected_borrowed: false,
+            },
+            TestCase {
+                name: "sensitive key with an empty value",
+                query: "sig=",
+                sensitive: DEFAULT_SENSITIVE_QUERY_PARAMETERS,
+                expected: Cow::Owned(String::from("sig=REDACTED")),
+                expected_borrowed: false,
+            },
+            TestCase {
+                name: "a value that contains an equals sign",
+                query: "sig=abc==&q=OpenTelemetry",
+                sensitive: DEFAULT_SENSITIVE_QUERY_PARAMETERS,
+                expected: Cow::Owned(String::from("sig=REDACTED&q=OpenTelemetry")),
+                expected_borrowed: false,
+            },
+            TestCase {
+                name: "consecutive separators",
+                query: "a=1&&sig=abc",
+                sensitive: DEFAULT_SENSITIVE_QUERY_PARAMETERS,
+                expected: Cow::Owned(String::from("a=1&&sig=REDACTED")),
+                expected_borrowed: false,
+            },
+            TestCase {
+                name: "trailing separator",
+                query: "sig=abc&",
+                sensitive: DEFAULT_SENSITIVE_QUERY_PARAMETERS,
+                expected: Cow::Owned(String::from("sig=REDACTED&")),
+                expected_borrowed: false,
+            },
+            TestCase {
+                name: "several parameters between two sensitive ones",
+                query: "X-Amz-Credential=key&a=1&b=2&X-Amz-Signature=abc",
+                sensitive: DEFAULT_SENSITIVE_QUERY_PARAMETERS,
+                expected: Cow::Owned(String::from(
+                    "X-Amz-Credential=REDACTED&a=1&b=2&X-Amz-Signature=REDACTED",
+                )),
+                expected_borrowed: false,
+            },
+            TestCase {
+                name: "an empty list redacts nothing",
+                query: "sig=abc123",
+                sensitive: &[],
+                expected: Cow::Borrowed("sig=abc123"),
+                expected_borrowed: true,
+            },
+            TestCase {
+                name: "a custom list replaces the default one",
+                query: "token=abc123&sig=abc123",
+                sensitive: &["token"],
+                expected: Cow::Owned(String::from("token=REDACTED&sig=abc123")),
+                expected_borrowed: false,
+            },
+        ];
+
+        for test_case in test_cases {
+            let result = redact_query(test_case.query, test_case.sensitive);
+
+            assert_eq!(
+                (matches!(result, Cow::Borrowed(_)), result),
+                (test_case.expected_borrowed, test_case.expected),
+                "{}",
+                test_case.name
+            );
+        }
+    }
 }
