@@ -331,6 +331,98 @@ mod tests {
             }
         }
 
+        /// Flattens every `ExponentialHistogramDataPoint` of `name` across all
+        /// events.
+        pub fn exp_histogram_points(
+            requests: &[ExportMetricsServiceRequest],
+            name: &str,
+        ) -> Vec<(
+            Vec<(String, String)>,
+            opentelemetry_proto::tonic::metrics::v1::ExponentialHistogramDataPoint,
+        )> {
+            use opentelemetry_proto::tonic::metrics::v1::metric::Data;
+
+            let mut out = Vec::new();
+            for metric in find_metrics(requests, name) {
+                let Data::ExponentialHistogram(h) =
+                    metric.data.as_ref().expect("metric data missing")
+                else {
+                    panic!("metric {name} is not an ExponentialHistogram");
+                };
+                for dp in &h.data_points {
+                    out.push((attrs_of(&dp.attributes), dp.clone()));
+                }
+            }
+            out
+        }
+
+        /// Asserts that every event carries exactly one scope holding exactly one
+        /// metric.
+        ///
+        /// The exporter reuses a single `ExportMetricsServiceRequest` across
+        /// metrics and scopes, mutating it in place. If a metric's data were ever
+        /// left behind when the next metric is processed, a consumer would see
+        /// duplicated or misattributed data points. This is the assertion that
+        /// would catch that.
+        pub fn assert_one_metric_per_event(requests: &[ExportMetricsServiceRequest]) {
+            for (index, request) in requests.iter().enumerate() {
+                assert_eq!(
+                    request.resource_metrics.len(),
+                    1,
+                    "event {index} should carry exactly one resource_metrics"
+                );
+                let scope_metrics = &request.resource_metrics[0].scope_metrics;
+                assert_eq!(
+                    scope_metrics.len(),
+                    1,
+                    "event {index} should carry exactly one scope_metrics"
+                );
+                assert_eq!(
+                    scope_metrics[0].metrics.len(),
+                    1,
+                    "event {index} should carry exactly one metric, got {:?}",
+                    scope_metrics[0]
+                        .metrics
+                        .iter()
+                        .map(|m| m.name.clone())
+                        .collect::<Vec<_>>()
+                );
+            }
+        }
+
+        /// Returns the scope name attached to each event.
+        pub fn scope_names(requests: &[ExportMetricsServiceRequest]) -> Vec<String> {
+            requests
+                .iter()
+                .flat_map(|r| &r.resource_metrics)
+                .flat_map(|rm| &rm.scope_metrics)
+                .map(|sm| sm.scope.as_ref().expect("scope missing").name.clone())
+                .collect()
+        }
+
+        /// Asserts that every event carrying `name` repeats its identifying
+        /// metadata. Batching must not emit a bare continuation event that a
+        /// consumer could not interpret on its own.
+        pub fn assert_metric_metadata_repeated(
+            requests: &[ExportMetricsServiceRequest],
+            name: &str,
+            expected_description: &str,
+            expected_unit: &str,
+        ) {
+            let metrics = find_metrics(requests, name);
+            assert!(!metrics.is_empty(), "metric {name} was never exported");
+            for (index, metric) in metrics.iter().enumerate() {
+                assert_eq!(
+                    metric.description, expected_description,
+                    "occurrence {index} of {name} lost its description"
+                );
+                assert_eq!(
+                    metric.unit, expected_unit,
+                    "occurrence {index} of {name} lost its unit"
+                );
+            }
+        }
+
         /// Asserts that every event repeats the full resource and scope envelope.
         ///
         /// Batching amortizes the envelope across the data points inside one
@@ -1643,5 +1735,833 @@ mod tests {
             SERIES,
             "histogram data points were duplicated or dropped"
         );
+    }
+
+    // ---------------------------------------------------------------------
+    // Batching across events, per instrument type.
+    //
+    // The batching code has a separate arm for each data point type. Sums and
+    // histograms are covered above; these cover the remaining arms and, more
+    // importantly, assert that the type-specific metadata (temporality,
+    // monotonicity, bucket layout) is repeated on every event a metric is split
+    // across, not just the first.
+    // ---------------------------------------------------------------------
+
+    /// An observable gauge with enough distinct attribute sets to span several
+    /// events. Gauges carry no temporality, so the invariant here is simply that
+    /// every point survives and every event is independently decodable.
+    #[ignore]
+    #[test]
+    fn integration_test_gauge_batching_splits_across_events() {
+        test_utils::check_user_events_available().expect("Kernel does not support user_events.");
+
+        const SERIES: usize = 800;
+
+        let provider = test_provider();
+        let meter = provider.meter("user-event-test");
+        meter
+            .u64_observable_gauge("gauge_batched")
+            .with_callback(|obs| {
+                for i in 0..SERIES {
+                    obs.observe(
+                        i as u64,
+                        &[
+                            KeyValue::new("partition", format!("p{i:05}")),
+                            KeyValue::new("region", "westus2"),
+                        ],
+                    );
+                }
+            })
+            .build();
+
+        let decoded = test_utils::collect_otlp_metrics_with_pages(1024, || {
+            provider.shutdown().expect("shutdown failed");
+        });
+
+        test_utils::assert_all_events_within_size_limit(&decoded);
+        test_utils::assert_envelope_repeated(&decoded, RESOURCE_ATTRS, "user-event-test");
+        test_utils::assert_one_metric_per_event(&decoded);
+        assert!(
+            decoded.len() > 1,
+            "expected the gauge to span several events, got {}",
+            decoded.len()
+        );
+
+        let points = test_utils::number_points(&decoded, "gauge_batched");
+        assert_eq!(points.len(), SERIES, "every gauge point must be exported");
+
+        let mut seen: Vec<(String, test_utils::Num)> = points
+            .iter()
+            .map(|(attrs, value)| {
+                let partition = attrs
+                    .iter()
+                    .find(|(k, _)| k == "partition")
+                    .map(|(_, v)| v.clone())
+                    .expect("partition attribute missing");
+                (partition, *value)
+            })
+            .collect();
+        seen.sort_by(|a, b| a.0.cmp(&b.0));
+        seen.dedup_by(|a, b| a.0 == b.0);
+        assert_eq!(
+            seen.len(),
+            SERIES,
+            "gauge points were duplicated or dropped"
+        );
+
+        for (partition, value) in seen {
+            let index: usize = partition
+                .trim_start_matches('p')
+                .parse()
+                .expect("partition should be p<number>");
+            assert_eq!(
+                value,
+                test_utils::Num::I(index as i64),
+                "gauge point {partition} carries the wrong value"
+            );
+        }
+    }
+
+    /// A non-monotonic sum split across events. `is_monotonic` and the
+    /// temporality live on the `Sum` message, which is rebuilt for every event,
+    /// so a batching bug could easily produce a first event that is correct and
+    /// later events that are not.
+    #[ignore]
+    #[test]
+    fn integration_test_updowncounter_batching_preserves_sum_flags() {
+        use opentelemetry_proto::tonic::metrics::v1::metric::Data;
+        use opentelemetry_proto::tonic::metrics::v1::AggregationTemporality;
+
+        test_utils::check_user_events_available().expect("Kernel does not support user_events.");
+
+        const SERIES: usize = 600;
+
+        let provider = test_provider();
+        let meter = provider.meter("user-event-test");
+        let udc = meter.i64_up_down_counter("updown_batched").build();
+        for i in 0..SERIES {
+            // Alternate sign so the values cannot be confused with a counter.
+            let delta = if i % 2 == 0 { 5 } else { -5 };
+            udc.add(delta, &[KeyValue::new("partition", format!("p{i:05}"))]);
+        }
+
+        let decoded = test_utils::collect_otlp_metrics_with_pages(1024, || {
+            provider.shutdown().expect("shutdown failed");
+        });
+
+        test_utils::assert_all_events_within_size_limit(&decoded);
+        test_utils::assert_one_metric_per_event(&decoded);
+        assert!(
+            decoded.len() > 1,
+            "expected the up/down counter to span several events, got {}",
+            decoded.len()
+        );
+
+        let metrics = test_utils::find_metrics(&decoded, "updown_batched");
+        assert_eq!(
+            metrics.len(),
+            decoded.len(),
+            "every event should carry the metric"
+        );
+        for (index, metric) in metrics.iter().enumerate() {
+            let Data::Sum(sum) = metric.data.as_ref().expect("metric data missing") else {
+                panic!("occurrence {index} is not a Sum");
+            };
+            assert!(
+                !sum.is_monotonic,
+                "occurrence {index} lost is_monotonic=false; a consumer would treat \
+                 an up/down counter as a monotonic counter"
+            );
+            assert_eq!(
+                sum.aggregation_temporality,
+                AggregationTemporality::Delta as i32,
+                "occurrence {index} lost delta temporality"
+            );
+        }
+
+        let points = test_utils::number_points(&decoded, "updown_batched");
+        assert_eq!(points.len(), SERIES, "every data point must be exported");
+        let negatives = points
+            .iter()
+            .filter(|(_, v)| *v == test_utils::Num::I(-5))
+            .count();
+        assert_eq!(
+            negatives,
+            SERIES / 2,
+            "negative deltas must survive batching intact"
+        );
+    }
+
+    /// Exponential histogram data points are the largest and most structured of
+    /// the four types, with nested positive/negative bucket messages. This packs
+    /// enough of them to span several events and verifies the nested structure
+    /// survives in each.
+    #[ignore]
+    #[test]
+    fn integration_test_exponential_histogram_batching_splits_across_events() {
+        use opentelemetry_sdk::metrics::{Aggregation, Instrument, Stream};
+
+        test_utils::check_user_events_available().expect("Kernel does not support user_events.");
+
+        const SERIES: usize = 300;
+
+        let view = |i: &Instrument| {
+            if i.name() == "exp_histogram_batched" {
+                Some(
+                    Stream::builder()
+                        .with_aggregation(Aggregation::Base2ExponentialHistogram {
+                            max_size: 160,
+                            max_scale: 20,
+                            record_min_max: true,
+                        })
+                        .build()
+                        .unwrap(),
+                )
+            } else {
+                None
+            }
+        };
+
+        let provider = SdkMeterProvider::builder()
+            .with_resource(
+                Resource::builder_empty()
+                    .with_attributes(vec![
+                        KeyValue::new("service.name", "metric-demo"),
+                        KeyValue::new("service.namespace", "demo-ns"),
+                        KeyValue::new("host.name", "test-host"),
+                    ])
+                    .build(),
+            )
+            .with_periodic_exporter(MetricsExporter::new())
+            .with_view(view)
+            .build();
+
+        let meter = provider.meter("user-event-test");
+        let hist = meter.f64_histogram("exp_histogram_batched").build();
+        for i in 0..SERIES {
+            let attrs = [KeyValue::new("partition", format!("p{i:05}"))];
+            // A spread of magnitudes so the buckets are genuinely populated,
+            // including a negative value and an exact zero.
+            hist.record(0.0, &attrs);
+            hist.record(1.5, &attrs);
+            hist.record(64.0, &attrs);
+            hist.record(-2.0, &attrs);
+        }
+
+        let decoded = test_utils::collect_otlp_metrics_with_pages(1024, || {
+            provider.shutdown().expect("shutdown failed");
+        });
+
+        test_utils::assert_all_events_within_size_limit(&decoded);
+        test_utils::assert_envelope_repeated(&decoded, RESOURCE_ATTRS, "user-event-test");
+        test_utils::assert_one_metric_per_event(&decoded);
+        assert!(
+            decoded.len() > 1,
+            "expected the exponential histogram to span several events, got {}",
+            decoded.len()
+        );
+
+        let points = test_utils::exp_histogram_points(&decoded, "exp_histogram_batched");
+        assert_eq!(points.len(), SERIES, "every data point must be exported");
+
+        let mut partitions = Vec::new();
+        for (attrs, dp) in &points {
+            assert_eq!(dp.count, 4, "each series recorded four measurements");
+            assert_eq!(
+                dp.zero_count, 1,
+                "the 0.0 measurement must land in zero_count"
+            );
+            assert!(
+                dp.positive.is_some() && dp.negative.is_some(),
+                "both bucket sets must be present after batching"
+            );
+            let negative = dp.negative.as_ref().unwrap();
+            assert_eq!(
+                negative.bucket_counts.iter().sum::<u64>(),
+                1,
+                "the -2.0 measurement must land in a negative bucket"
+            );
+            assert_eq!(dp.min, Some(-2.0), "min must survive batching");
+            assert_eq!(dp.max, Some(64.0), "max must survive batching");
+            partitions.push(
+                attrs
+                    .iter()
+                    .find(|(k, _)| k == "partition")
+                    .map(|(_, v)| v.clone())
+                    .expect("partition attribute missing"),
+            );
+        }
+        partitions.sort();
+        partitions.dedup();
+        assert_eq!(
+            partitions.len(),
+            SERIES,
+            "exponential histogram points were duplicated or dropped"
+        );
+    }
+
+    /// Identifying metadata must be repeated on every event a metric is split
+    /// across. An event that arrived without it would be undecodable on its own,
+    /// and since events can be reordered or individually lost, a consumer cannot
+    /// recover it from a neighbour.
+    #[ignore]
+    #[test]
+    fn integration_test_metric_metadata_repeated_on_every_split_event() {
+        test_utils::check_user_events_available().expect("Kernel does not support user_events.");
+
+        const SERIES: usize = 1500;
+
+        let provider = test_provider();
+        let meter = provider.meter("user-event-test");
+        let counter = meter
+            .u64_counter("counter_with_metadata")
+            .with_description("requests handled by the ingest tier")
+            .with_unit("{request}")
+            .build();
+        for i in 0..SERIES {
+            counter.add(1, &[KeyValue::new("partition", format!("p{i:05}"))]);
+        }
+
+        let decoded = test_utils::collect_otlp_metrics_with_pages(1024, || {
+            provider.shutdown().expect("shutdown failed");
+        });
+
+        test_utils::assert_all_events_within_size_limit(&decoded);
+        assert!(
+            decoded.len() > 1,
+            "expected the metric to span several events, got {}",
+            decoded.len()
+        );
+        test_utils::assert_metric_metadata_repeated(
+            &decoded,
+            "counter_with_metadata",
+            "requests handled by the ingest tier",
+            "{request}",
+        );
+        assert_eq!(
+            test_utils::number_points(&decoded, "counter_with_metadata").len(),
+            SERIES
+        );
+    }
+
+    /// Several metrics, each large enough to split, exported in one cycle.
+    ///
+    /// The exporter mutates one `ExportMetricsServiceRequest` in place as it
+    /// walks metrics, so this is the scenario where state left over from one
+    /// metric could leak into the next.
+    #[ignore]
+    #[test]
+    fn integration_test_multiple_metrics_each_split_without_cross_contamination() {
+        test_utils::check_user_events_available().expect("Kernel does not support user_events.");
+
+        const SERIES: usize = 700;
+        const NAMES: [&str; 3] = ["counter_alpha", "counter_beta", "counter_gamma"];
+
+        let provider = test_provider();
+        let meter = provider.meter("user-event-test");
+        for (index, name) in NAMES.iter().enumerate() {
+            let counter = meter.u64_counter(*name).build();
+            for i in 0..SERIES {
+                // A distinct value per metric makes misattribution detectable.
+                counter.add(
+                    index as u64 + 1,
+                    &[KeyValue::new("partition", format!("{name}-p{i:05}"))],
+                );
+            }
+        }
+
+        let decoded = test_utils::collect_otlp_metrics_with_pages(2048, || {
+            provider.shutdown().expect("shutdown failed");
+        });
+
+        test_utils::assert_all_events_within_size_limit(&decoded);
+        test_utils::assert_one_metric_per_event(&decoded);
+
+        for (index, name) in NAMES.iter().enumerate() {
+            let points = test_utils::number_points(&decoded, name);
+            assert_eq!(
+                points.len(),
+                SERIES,
+                "{name} lost or duplicated data points"
+            );
+            for (attrs, value) in &points {
+                assert_eq!(
+                    *value,
+                    test_utils::Num::I(index as i64 + 1),
+                    "{name} carries a value belonging to another metric"
+                );
+                let partition = attrs
+                    .iter()
+                    .find(|(k, _)| k == "partition")
+                    .map(|(_, v)| v.clone())
+                    .expect("partition attribute missing");
+                assert!(
+                    partition.starts_with(name),
+                    "{name} carries a data point belonging to another metric: {partition}"
+                );
+            }
+        }
+    }
+
+    /// Several scopes, each with a metric large enough to split. Scope identity
+    /// is part of the envelope rebuilt for every event, so this checks that an
+    /// event is never attributed to the wrong meter.
+    #[ignore]
+    #[test]
+    fn integration_test_multiple_scopes_each_split() {
+        test_utils::check_user_events_available().expect("Kernel does not support user_events.");
+
+        const SERIES: usize = 600;
+        const SCOPES: [&str; 3] = ["scope-alpha", "scope-beta", "scope-gamma"];
+
+        let provider = test_provider();
+        for scope in SCOPES {
+            let meter = provider.meter(scope);
+            let counter = meter.u64_counter(format!("counter_{scope}")).build();
+            for i in 0..SERIES {
+                counter.add(1, &[KeyValue::new("partition", format!("p{i:05}"))]);
+            }
+        }
+
+        let decoded = test_utils::collect_otlp_metrics_with_pages(2048, || {
+            provider.shutdown().expect("shutdown failed");
+        });
+
+        test_utils::assert_all_events_within_size_limit(&decoded);
+        test_utils::assert_one_metric_per_event(&decoded);
+
+        // Every event must pair the right scope with the right metric.
+        for request in &decoded {
+            let sm = &request.resource_metrics[0].scope_metrics[0];
+            let scope_name = sm.scope.as_ref().expect("scope missing").name.clone();
+            let metric_name = sm.metrics[0].name.clone();
+            assert_eq!(
+                metric_name,
+                format!("counter_{scope_name}"),
+                "metric {metric_name} was attributed to scope {scope_name}"
+            );
+        }
+
+        for scope in SCOPES {
+            let points = test_utils::number_points(&decoded, &format!("counter_{scope}"));
+            assert_eq!(points.len(), SERIES, "{scope} lost or duplicated points");
+        }
+
+        let names = test_utils::scope_names(&decoded);
+        for scope in SCOPES {
+            assert!(
+                names.iter().any(|n| n == scope),
+                "no event was emitted for scope {scope}"
+            );
+        }
+    }
+
+    // ---------------------------------------------------------------------
+    // Size boundary behaviour.
+    // ---------------------------------------------------------------------
+
+    /// Sweeps the per-data-point size so that batches land on many different
+    /// alignments relative to `MAX_EVENT_SIZE`.
+    ///
+    /// The batching loop decides whether the next point fits using an
+    /// incrementally accumulated length plus `SIZE_SLACK`. An off-by-one there
+    /// would only show up at particular sizes, which a single fixed-size test
+    /// would very likely miss.
+    #[ignore]
+    #[test]
+    fn integration_test_batching_boundary_size_sweep() {
+        test_utils::check_user_events_available().expect("Kernel does not support user_events.");
+
+        // Sizes chosen to straddle protobuf varint length boundaries (127/128
+        // and 16383/16384 are where the length delimiter grows).
+        const VALUE_SIZES: [usize; 10] = [1, 63, 126, 127, 128, 129, 255, 512, 1024, 4096];
+        const SERIES: usize = 40;
+
+        for size in VALUE_SIZES {
+            let provider = test_provider();
+            let meter = provider.meter("user-event-test");
+            let counter = meter.u64_counter("counter_sweep").build();
+            for i in 0..SERIES {
+                // The index keeps the series distinct; the padding sets the size.
+                let value = format!("{i:05}{}", "x".repeat(size));
+                counter.add(1, &[KeyValue::new("partition", value)]);
+            }
+
+            let decoded = test_utils::collect_otlp_metrics_with_pages(1024, || {
+                provider.shutdown().expect("shutdown failed");
+            });
+
+            test_utils::assert_all_events_within_size_limit(&decoded);
+            test_utils::assert_one_metric_per_event(&decoded);
+
+            let points = test_utils::number_points(&decoded, "counter_sweep");
+            assert_eq!(
+                points.len(),
+                SERIES,
+                "value size {size}: expected {SERIES} data points, got {} across {} events",
+                points.len(),
+                decoded.len()
+            );
+
+            let mut partitions: Vec<String> = points
+                .iter()
+                .map(|(attrs, _)| {
+                    attrs
+                        .iter()
+                        .find(|(k, _)| k == "partition")
+                        .map(|(_, v)| v.clone())
+                        .expect("partition attribute missing")
+                })
+                .collect();
+            partitions.sort();
+            partitions.dedup();
+            assert_eq!(
+                partitions.len(),
+                SERIES,
+                "value size {size}: data points were duplicated"
+            );
+        }
+    }
+
+    /// Walks a single data point up to and past the per-event limit.
+    ///
+    /// Delivery must be monotonic in size: once a point is too large it must
+    /// stay too large. A non-monotonic result would mean the size accounting
+    /// disagrees with what the kernel accepts, which is the failure mode that
+    /// loses data silently in production.
+    #[ignore]
+    #[test]
+    fn integration_test_single_data_point_size_limit_is_monotonic() {
+        test_utils::check_user_events_available().expect("Kernel does not support user_events.");
+
+        // Around the 8168 byte budget, minus the resource/scope/metric envelope.
+        const SIZES: [usize; 9] = [4096, 6144, 7168, 7680, 7900, 8000, 8100, 8192, 16384];
+
+        let mut delivered = Vec::new();
+        for size in SIZES {
+            let provider = test_provider();
+            let meter = provider.meter("user-event-test");
+            let counter = meter.u64_counter("counter_single_large").build();
+            counter.add(1, &[KeyValue::new("payload", "x".repeat(size))]);
+
+            let decoded = test_utils::collect_otlp_metrics_with_pages(1024, || {
+                // Export returns an error when a data point cannot be encoded
+                // within the limit; that is expected for the larger sizes here,
+                // so the result is deliberately not unwrapped.
+                let _ = provider.shutdown();
+            });
+
+            test_utils::assert_all_events_within_size_limit(&decoded);
+            let points = test_utils::number_points(&decoded, "counter_single_large");
+            delivered.push((size, points.len()));
+        }
+
+        println!("single data point delivery by attribute size: {delivered:?}");
+
+        assert_eq!(
+            delivered[0].1, 1,
+            "a 4 KiB data point must fit in one event"
+        );
+        assert_eq!(
+            delivered.last().expect("sizes must not be empty").1,
+            0,
+            "a 16 KiB data point cannot fit and must be dropped rather than written"
+        );
+
+        let mut seen_drop = false;
+        for (size, count) in &delivered {
+            if *count == 0 {
+                seen_drop = true;
+            } else {
+                assert!(
+                    !seen_drop,
+                    "size {size} was delivered after a smaller size was dropped; \
+                     the size accounting is not monotonic"
+                );
+            }
+        }
+    }
+
+    // ---------------------------------------------------------------------
+    // Value and attribute edge cases.
+    // ---------------------------------------------------------------------
+
+    /// Extreme numeric values must round-trip through the protobuf encoding.
+    #[ignore]
+    #[test]
+    fn integration_test_extreme_numeric_values() {
+        test_utils::check_user_events_available().expect("Kernel does not support user_events.");
+
+        let provider = test_provider();
+        let meter = provider.meter("user-event-test");
+
+        let big = meter.u64_counter("counter_u64_max").build();
+        big.add(u64::MAX, &[KeyValue::new("k", "max")]);
+
+        let small = meter.i64_up_down_counter("updown_i64_min").build();
+        small.add(i64::MIN, &[KeyValue::new("k", "min")]);
+
+        let gauge = meter.f64_gauge("gauge_special_floats").build();
+        gauge.record(f64::INFINITY, &[KeyValue::new("k", "inf")]);
+        gauge.record(f64::NEG_INFINITY, &[KeyValue::new("k", "neg_inf")]);
+        gauge.record(f64::NAN, &[KeyValue::new("k", "nan")]);
+        gauge.record(f64::MIN_POSITIVE, &[KeyValue::new("k", "min_positive")]);
+
+        let decoded = test_utils::collect_otlp_metrics(|| {
+            provider.shutdown().expect("shutdown failed");
+        });
+
+        test_utils::assert_all_events_within_size_limit(&decoded);
+
+        // OTLP represents integral data points as a signed 64-bit value, so a
+        // u64 above i64::MAX arrives with the same bit pattern reinterpreted.
+        // This is a property of the wire format rather than of batching; the
+        // assertion pins the behaviour so a future encoding change is noticed.
+        let big_points = test_utils::number_points(&decoded, "counter_u64_max");
+        assert_eq!(big_points.len(), 1);
+        let test_utils::Num::I(raw) = big_points[0].1 else {
+            panic!("expected an integer data point");
+        };
+        assert_eq!(raw as u64, u64::MAX, "u64::MAX must round-trip bitwise");
+
+        let small_points = test_utils::number_points(&decoded, "updown_i64_min");
+        assert_eq!(small_points.len(), 1);
+        assert_eq!(small_points[0].1, test_utils::Num::I(i64::MIN));
+
+        let floats = test_utils::number_points(&decoded, "gauge_special_floats");
+        assert_eq!(floats.len(), 4, "every gauge series must be exported");
+        for (attrs, value) in &floats {
+            let key = attrs
+                .iter()
+                .find(|(k, _)| k == "k")
+                .map(|(_, v)| v.clone())
+                .expect("attribute k missing");
+            let test_utils::Num::D(d) = value else {
+                panic!("expected a double data point for {key}");
+            };
+            match key.as_str() {
+                "inf" => assert!(d.is_infinite() && d.is_sign_positive()),
+                "neg_inf" => assert!(d.is_infinite() && d.is_sign_negative()),
+                // NaN is never equal to itself, so this cannot be asserted with
+                // a plain comparison.
+                "nan" => assert!(d.is_nan(), "NaN must survive as NaN"),
+                "min_positive" => assert_eq!(*d, f64::MIN_POSITIVE),
+                other => panic!("unexpected series {other}"),
+            }
+        }
+    }
+
+    /// Attribute keys and values are copied verbatim into the payload, so
+    /// multi-byte and empty values must not be mangled or truncated.
+    #[ignore]
+    #[test]
+    fn integration_test_unicode_and_empty_attribute_values() {
+        test_utils::check_user_events_available().expect("Kernel does not support user_events.");
+
+        let cases: Vec<(&str, String)> = vec![
+            ("ascii", "plain".to_string()),
+            ("empty", String::new()),
+            ("cjk", "配置更新".to_string()),
+            ("emoji", "🚀🛰️".to_string()),
+            ("combining", "e\u{0301}".to_string()),
+            ("whitespace", " leading and trailing ".to_string()),
+            ("newline", "line1\nline2".to_string()),
+            ("quotes", "he said \"hi\"".to_string()),
+        ];
+
+        let provider = test_provider();
+        let meter = provider.meter("user-event-test");
+        let counter = meter.u64_counter("counter_unicode").build();
+        for (name, value) in &cases {
+            counter.add(
+                1,
+                &[
+                    KeyValue::new("case", *name),
+                    KeyValue::new("value", value.clone()),
+                ],
+            );
+        }
+
+        let decoded = test_utils::collect_otlp_metrics(|| {
+            provider.shutdown().expect("shutdown failed");
+        });
+
+        test_utils::assert_all_events_within_size_limit(&decoded);
+        let points = test_utils::number_points(&decoded, "counter_unicode");
+        assert_eq!(points.len(), cases.len(), "every series must be exported");
+
+        for (name, expected) in &cases {
+            let found = points
+                .iter()
+                .find(|(attrs, _)| attrs.iter().any(|(k, v)| k == "case" && v == name))
+                .unwrap_or_else(|| panic!("series {name} was not exported"));
+            let actual = found
+                .0
+                .iter()
+                .find(|(k, _)| k == "value")
+                .map(|(_, v)| v.clone())
+                .expect("value attribute missing");
+            assert_eq!(&actual, expected, "series {name} was mangled in transit");
+        }
+    }
+
+    /// A data point carrying many attributes. The attribute list is the bulk of
+    /// a data point's size, so this is the shape most likely to interact badly
+    /// with the per-point size accounting.
+    #[ignore]
+    #[test]
+    fn integration_test_many_attributes_per_data_point() {
+        test_utils::check_user_events_available().expect("Kernel does not support user_events.");
+
+        const ATTRS: usize = 32;
+        const SERIES: usize = 50;
+
+        let provider = test_provider();
+        let meter = provider.meter("user-event-test");
+        let counter = meter.u64_counter("counter_wide").build();
+        for i in 0..SERIES {
+            let mut kvs: Vec<KeyValue> = (0..ATTRS)
+                .map(|a| KeyValue::new(format!("dimension_{a:02}"), format!("value_{a:02}")))
+                .collect();
+            kvs.push(KeyValue::new("partition", format!("p{i:05}")));
+            counter.add(1, &kvs);
+        }
+
+        let decoded = test_utils::collect_otlp_metrics_with_pages(1024, || {
+            provider.shutdown().expect("shutdown failed");
+        });
+
+        test_utils::assert_all_events_within_size_limit(&decoded);
+        test_utils::assert_one_metric_per_event(&decoded);
+
+        let points = test_utils::number_points(&decoded, "counter_wide");
+        assert_eq!(
+            points.len(),
+            SERIES,
+            "every wide data point must be exported"
+        );
+        for (attrs, _) in &points {
+            assert_eq!(
+                attrs.len(),
+                ATTRS + 1,
+                "a wide data point lost attributes during batching"
+            );
+        }
+    }
+
+    /// Histograms must also report deltas rather than cumulative totals across
+    /// collection cycles, including the bucket counts.
+    #[ignore]
+    #[test]
+    fn integration_test_histogram_delta_across_cycles() {
+        test_utils::check_user_events_available().expect("Kernel does not support user_events.");
+
+        let provider = test_provider();
+        let meter = provider.meter("user-event-test");
+        let hist = meter.f64_histogram("histogram_delta").build();
+        let attrs = [KeyValue::new("k", "a")];
+
+        hist.record(1.0, &attrs);
+        hist.record(2.0, &attrs);
+        let first = test_utils::collect_otlp_metrics(|| {
+            provider.force_flush().expect("first force_flush failed");
+        });
+        let first_points = test_utils::histogram_points(&first, "histogram_delta");
+        assert_eq!(first_points.len(), 1);
+        assert_eq!(
+            first_points[0].1.count, 2,
+            "first cycle recorded two values"
+        );
+        assert_eq!(first_points[0].1.sum, Some(3.0));
+
+        hist.record(10.0, &attrs);
+        let second = test_utils::collect_otlp_metrics(|| {
+            provider.force_flush().expect("second force_flush failed");
+        });
+        let second_points = test_utils::histogram_points(&second, "histogram_delta");
+        assert_eq!(second_points.len(), 1);
+        assert_eq!(
+            second_points[0].1.count, 1,
+            "delta temporality means the second cycle reports only the new measurement"
+        );
+        assert_eq!(second_points[0].1.sum, Some(10.0));
+        assert_eq!(
+            second_points[0].1.bucket_counts.iter().sum::<u64>(),
+            1,
+            "bucket counts must be deltas too"
+        );
+
+        provider.shutdown().expect("shutdown failed");
+    }
+
+    /// All four data point types in a single collection cycle, each large enough
+    /// to span multiple events. This is the closest thing to a production export
+    /// in the suite.
+    #[ignore]
+    #[test]
+    fn integration_test_mixed_instrument_types_in_one_cycle() {
+        test_utils::check_user_events_available().expect("Kernel does not support user_events.");
+
+        const SERIES: usize = 400;
+
+        let provider = test_provider();
+        let meter = provider.meter("user-event-test");
+        let counter = meter.u64_counter("mixed_counter").build();
+        let udc = meter.i64_up_down_counter("mixed_updown").build();
+        let hist = meter.f64_histogram("mixed_histogram").build();
+        meter
+            .u64_observable_gauge("mixed_gauge")
+            .with_callback(|obs| {
+                for i in 0..SERIES {
+                    obs.observe(i as u64, &[KeyValue::new("partition", format!("p{i:05}"))]);
+                }
+            })
+            .build();
+
+        for i in 0..SERIES {
+            let attrs = [KeyValue::new("partition", format!("p{i:05}"))];
+            counter.add(1, &attrs);
+            udc.add(-1, &attrs);
+            hist.record(i as f64, &attrs);
+        }
+
+        let decoded = test_utils::collect_otlp_metrics_with_pages(2048, || {
+            provider.shutdown().expect("shutdown failed");
+        });
+
+        test_utils::assert_all_events_within_size_limit(&decoded);
+        test_utils::assert_envelope_repeated(&decoded, RESOURCE_ATTRS, "user-event-test");
+        test_utils::assert_one_metric_per_event(&decoded);
+
+        assert_eq!(
+            test_utils::number_points(&decoded, "mixed_counter").len(),
+            SERIES
+        );
+        assert_eq!(
+            test_utils::number_points(&decoded, "mixed_updown").len(),
+            SERIES
+        );
+        assert_eq!(
+            test_utils::number_points(&decoded, "mixed_gauge").len(),
+            SERIES
+        );
+        assert_eq!(
+            test_utils::histogram_points(&decoded, "mixed_histogram").len(),
+            SERIES
+        );
+
+        // Each metric must appear in at least one event, and no event may mix
+        // data points from two different metrics.
+        for name in [
+            "mixed_counter",
+            "mixed_updown",
+            "mixed_gauge",
+            "mixed_histogram",
+        ] {
+            assert!(
+                !test_utils::find_metrics(&decoded, name).is_empty(),
+                "{name} was never exported"
+            );
+        }
     }
 }
