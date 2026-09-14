@@ -2635,6 +2635,181 @@ mod tests {
         );
     }
 
+    /// A `u64` histogram must carry an exact sum, min and max.
+    ///
+    /// OTLP stores these three as doubles, so the exporter converts them from
+    /// the instrument's integer type. Every other histogram test here uses an
+    /// `f64` instrument, where that conversion is a no-op, which leaves the
+    /// integer conversion untested despite being the path that can silently
+    /// lose precision.
+    #[ignore]
+    #[test]
+    fn integration_test_u64_histogram_reports_exact_sum_min_max() {
+        test_utils::check_user_events_available().expect("Kernel does not support user_events.");
+
+        let provider = test_provider();
+        let meter = provider.meter("user-event-test");
+        let hist = meter.u64_histogram("histogram_u64").build();
+
+        let values: [u64; 5] = [3, 1, 4, 1, 5];
+        for v in values {
+            hist.record(v, &[KeyValue::new("partition", "only")]);
+        }
+
+        let decoded = test_utils::collect_otlp_metrics(|| {
+            provider.shutdown().expect("shutdown failed");
+        });
+
+        test_utils::assert_all_events_within_size_limit(&decoded);
+
+        let points = test_utils::histogram_points(&decoded, "histogram_u64");
+        assert_eq!(points.len(), 1, "expected a single histogram series");
+        let dp = &points[0].1;
+
+        assert_eq!(dp.count, values.len() as u64, "histogram count is wrong");
+        assert_eq!(
+            dp.sum,
+            Some(values.iter().sum::<u64>() as f64),
+            "histogram sum is wrong"
+        );
+        assert_eq!(dp.min, Some(1.0), "histogram min is wrong");
+        assert_eq!(dp.max, Some(5.0), "histogram max is wrong");
+        assert_eq!(
+            dp.bucket_counts.iter().sum::<u64>(),
+            values.len() as u64,
+            "bucket counts must account for every recorded value"
+        );
+    }
+
+    /// Exercises every instrument constructor the API offers in one export
+    /// cycle.
+    ///
+    /// The exporter is generic over the data point's numeric type, so each
+    /// instrument type and value type combination is a separate code path.
+    /// Without this, several combinations are never encoded at all and a
+    /// mistake in one of them would not surface until production.
+    #[ignore]
+    #[test]
+    fn integration_test_every_instrument_type_is_exported() {
+        test_utils::check_user_events_available().expect("Kernel does not support user_events.");
+
+        let provider = test_provider();
+        let meter = provider.meter("user-event-test");
+        let attrs = [KeyValue::new("partition", "only")];
+
+        // Synchronous instruments.
+        meter.u64_counter("all_u64_counter").build().add(1, &attrs);
+        meter
+            .f64_counter("all_f64_counter")
+            .build()
+            .add(2.5, &attrs);
+        meter
+            .i64_up_down_counter("all_i64_updown")
+            .build()
+            .add(-3, &attrs);
+        meter
+            .f64_up_down_counter("all_f64_updown")
+            .build()
+            .add(-4.5, &attrs);
+        meter.u64_gauge("all_u64_gauge").build().record(6, &attrs);
+        meter.i64_gauge("all_i64_gauge").build().record(-7, &attrs);
+        meter.f64_gauge("all_f64_gauge").build().record(8.5, &attrs);
+        meter
+            .u64_histogram("all_u64_histogram")
+            .build()
+            .record(9, &attrs);
+        meter
+            .f64_histogram("all_f64_histogram")
+            .build()
+            .record(10.5, &attrs);
+
+        // Observable instruments. These are kept alive until shutdown so their
+        // callbacks run during collection.
+        let _obs = (
+            meter
+                .u64_observable_counter("all_u64_obs_counter")
+                .with_callback(|o| o.observe(11, &[KeyValue::new("partition", "only")]))
+                .build(),
+            meter
+                .f64_observable_counter("all_f64_obs_counter")
+                .with_callback(|o| o.observe(12.5, &[KeyValue::new("partition", "only")]))
+                .build(),
+            meter
+                .i64_observable_up_down_counter("all_i64_obs_updown")
+                .with_callback(|o| o.observe(-13, &[KeyValue::new("partition", "only")]))
+                .build(),
+            meter
+                .f64_observable_up_down_counter("all_f64_obs_updown")
+                .with_callback(|o| o.observe(-14.5, &[KeyValue::new("partition", "only")]))
+                .build(),
+            meter
+                .u64_observable_gauge("all_u64_obs_gauge")
+                .with_callback(|o| o.observe(15, &[KeyValue::new("partition", "only")]))
+                .build(),
+            meter
+                .i64_observable_gauge("all_i64_obs_gauge")
+                .with_callback(|o| o.observe(-16, &[KeyValue::new("partition", "only")]))
+                .build(),
+            meter
+                .f64_observable_gauge("all_f64_obs_gauge")
+                .with_callback(|o| o.observe(17.5, &[KeyValue::new("partition", "only")]))
+                .build(),
+        );
+
+        let decoded = test_utils::collect_otlp_metrics(|| {
+            provider.shutdown().expect("shutdown failed");
+        });
+
+        test_utils::assert_all_events_within_size_limit(&decoded);
+
+        // Every numeric instrument, with the exact value a consumer must see.
+        let expected: [(&str, test_utils::Num); 13] = [
+            ("all_u64_counter", test_utils::Num::I(1)),
+            ("all_f64_counter", test_utils::Num::D(2.5)),
+            ("all_i64_updown", test_utils::Num::I(-3)),
+            ("all_f64_updown", test_utils::Num::D(-4.5)),
+            ("all_u64_gauge", test_utils::Num::I(6)),
+            ("all_i64_gauge", test_utils::Num::I(-7)),
+            ("all_f64_gauge", test_utils::Num::D(8.5)),
+            ("all_u64_obs_counter", test_utils::Num::I(11)),
+            ("all_f64_obs_counter", test_utils::Num::D(12.5)),
+            ("all_i64_obs_updown", test_utils::Num::I(-13)),
+            ("all_f64_obs_updown", test_utils::Num::D(-14.5)),
+            ("all_u64_obs_gauge", test_utils::Num::I(15)),
+            ("all_i64_obs_gauge", test_utils::Num::I(-16)),
+        ];
+
+        for (name, value) in expected {
+            let points = test_utils::number_points(&decoded, name);
+            assert_eq!(
+                points.len(),
+                1,
+                "{name}: expected exactly one data point, got {points:?}"
+            );
+            assert_eq!(
+                points[0].0,
+                vec![("partition".to_string(), "only".to_string())],
+                "{name}: attributes were altered"
+            );
+            assert_eq!(points[0].1, value, "{name}: value was altered");
+        }
+
+        // f64 observable gauge is asserted separately so the tuple above can
+        // stay a single type; its value is fractional.
+        let obs_gauge = test_utils::number_points(&decoded, "all_f64_obs_gauge");
+        assert_eq!(obs_gauge.len(), 1);
+        assert_eq!(obs_gauge[0].1, test_utils::Num::D(17.5));
+
+        // Histograms carry their value in the sum rather than a point value.
+        for (name, expected_sum) in [("all_u64_histogram", 9.0), ("all_f64_histogram", 10.5)] {
+            let points = test_utils::histogram_points(&decoded, name);
+            assert_eq!(points.len(), 1, "{name}: expected one histogram series");
+            assert_eq!(points[0].1.count, 1, "{name}: count is wrong");
+            assert_eq!(points[0].1.sum, Some(expected_sum), "{name}: sum is wrong");
+            assert_eq!(points[0].1.max, Some(expected_sum), "{name}: max is wrong");
+        }
+    }
+
     // ---------------------------------------------------------------------
     // Value and attribute edge cases.
     // ---------------------------------------------------------------------
