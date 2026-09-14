@@ -28,7 +28,7 @@ rt-tokio = ["tokio", "opentelemetry_sdk/rt-tokio"]
 rt-tokio-current-thread = ["tokio", "opentelemetry_sdk/rt-tokio-current-thread"]
 
 [dependencies]
-base64 = { version = "0.22", optional = true }
+base64 = { version = "0.23", optional = true }
 opentelemetry = { workspace = true }
 opentelemetry_sdk = { workspace = true, optional = true }
 serde_json = { version = "1", optional = true }

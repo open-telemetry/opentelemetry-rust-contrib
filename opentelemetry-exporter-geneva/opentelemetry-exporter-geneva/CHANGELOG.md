@@ -1,6 +1,16 @@
 # Changelog
 
-## [Unreleased]
+## [0.7.1] - 2026-09-07
+
+### Changed
+- Update `geneva-uploader` to 0.7.1.
+
+## [0.7.0] - 2026-09-03
+
+### Changed
+- Update `geneva-uploader` to 0.7.0 and `otel-arrow-dfe-pdata-views` to 0.54.1.
+
+## [0.6.0] - 2026-09-03
 
 ### Added
 - Forwarded `tls-native` (default) and `tls-rustls` feature flags from `geneva-uploader`. Build with `--no-default-features --features tls-rustls` to use the pure-Rust TLS backend (required for FIPS / OpenSSL-free deployments that install a custom `rustls::crypto::CryptoProvider`).
@@ -8,10 +18,8 @@
 
 ### Changed
 - Bump opentelemetry, opentelemetry_sdk, and opentelemetry-proto versions to 0.32.
-- Bump pinned `otel-arrow` rev for `otap-df-pdata-views` to `4f522d2e` so
-  consumers can unify on a single `otap-df-pdata-views` version and avoid
-  duplicate `LogsDataView` trait errors. API-compatible; the view trait
-  signatures are unchanged.
+- Replace the Git-pinned `otap-df-pdata-views` dependency with the published
+  `otel-arrow-dfe-pdata-views` 0.53.0 crate.
 
 ## [0.5.0] - 2026-04-13
 

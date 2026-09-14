@@ -10,3 +10,8 @@ updates:
     schedule:
       interval: monthly
     open-pull-requests-limit: 10
+  - package-ecosystem: rust-toolchain
+    directory: /
+    schedule:
+      interval: monthly
+    open-pull-requests-limit: 1
