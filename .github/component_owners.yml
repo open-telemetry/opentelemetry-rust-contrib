@@ -25,9 +25,6 @@ components:
   # TBD - seeking owners. Issues fall back to @open-telemetry/rust-approvers.
   opentelemetry-contrib/: []
 
-  opentelemetry-datadog/:
-    - gruebel
-
   opentelemetry-etw-logs/:
     - cijothomas
     - lalitb

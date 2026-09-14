@@ -3,7 +3,6 @@
 packages=(
     "opentelemetry-aws"
     "opentelemetry-contrib"
-    "opentelemetry-datadog"
     "opentelemetry-etw-logs"
     "opentelemetry-etw-metrics"
     "opentelemetry-instrumentation-actix-web"
