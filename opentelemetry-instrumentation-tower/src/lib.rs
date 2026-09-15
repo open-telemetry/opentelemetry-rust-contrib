@@ -1,33 +1,19 @@
-//! [OpenTelemetry] instrumentation middleware for [Tower]-compatible HTTP servers
-//! (Axum, Hyper, Tonic, etc.).
+//! [OpenTelemetry] instrumentation middleware for [Tower]-compatible HTTP clients
+//! and servers (Axum, Hyper, reqwest, etc.).
 //!
-//! The middleware produces both metrics and distributed tracing for incoming HTTP
-//! requests, following the OpenTelemetry [HTTP semantic conventions].
+//! The middleware produces both metrics and distributed tracing following the
+//! OpenTelemetry [HTTP semantic conventions].
 //!
 //! # Layout
 //!
 //! - [`http::server`] — instruments incoming requests (`SpanKind::Server`) and
 //!   extracts the trace context from request headers.
-//! - [`http::extractors`] — pluggable route and attribute extractors used by the
-//!   server layer.
-//!
-//! # Metrics
-//!
-//! - `http.server.request.duration` — duration of HTTP server requests.
-//! - `http.server.active_requests` — number of in-flight HTTP server requests.
-//! - `http.server.request.body.size` — size of HTTP server request bodies.
-//! - `http.server.response.body.size` — size of HTTP server response bodies.
-//!
-//! # Tracing
-//!
-//! A server span (`SpanKind::Server`) is created per request, with attributes such
-//! as `http.request.method`, `url.scheme`, `url.path`, `url.full`,
-//! `user_agent.original`, `http.route`, and `http.response.status_code`.
+//! - [`http::client`] — instruments outgoing requests (`SpanKind::Client`) and
+//!   injects the trace context into request headers.
+//! - [`http::extractors`] — pluggable route and attribute extractors shared by
+//!   the server and client layers.
 //!
 //! # Quick start
-//!
-//! With the default `axum` feature enabled, applying the middleware is a single
-//! [`http::server::Layer::new`] call:
 //!
 //! ```ignore
 //! use axum::{routing::get, Router};
@@ -44,52 +30,51 @@
 //! # }
 //! ```
 //!
-//! The layer reads the global [`TracerProvider`] and [`MeterProvider`], so configure
-//! those before constructing the layer.
+//! Instrument an outgoing client stack:
 //!
-//! # Customization
+//! ```ignore
+//! use opentelemetry_instrumentation_tower::http;
+//! use tower::ServiceBuilder;
 //!
-//! Use [`http::server::LayerBuilder`] to plug in custom extractors:
+//! # fn run<S>(inner: S) {
+//! let client = ServiceBuilder::new()
+//!     // Tracing and metrics are on by default; toggle either per layer.
+//!     .layer(
+//!         http::client::LayerBuilder::builder()
+//!             .with_metrics(false)
+//!             .build()
+//!             .unwrap(),
+//!     )
+//!     .service(inner);
+//! # let _ = client;
+//! # }
+//! ```
 //!
-//! - [`http::extractors::RouteExtractor`] decides how the `http.route` attribute
-//!   (and span name) is produced. Built-in choices:
-//!   [`http::extractors::NoRouteExtractor`], [`http::extractors::PathExtractor`],
-//!   [`http::extractors::AxumMatchedPathExtractor`] (requires the `axum` feature),
-//!   or [`http::extractors::FnRouteExtractor`].
-//! - [`http::extractors::RequestAttributeExtractor`] /
-//!   [`http::extractors::ResponseAttributeExtractor`] let you attach additional
-//!   attributes to spans and metrics. The default is
-//!   [`http::extractors::NoOpExtractor`].
-//!
-//! See [`http::extractors::RouteExtractor`] for cardinality guidance — picking the
-//! wrong extractor can blow up the cardinality of your metrics.
+//! The layers read the global [`TracerProvider`] and [`MeterProvider`], so
+//! configure those (and a text-map propagator) before constructing them.
 //!
 //! # Cargo features
 //!
-//! - `axum` *(default-off)* — enables
-//!   [`http::extractors::AxumMatchedPathExtractor`] and makes it the default route
-//!   extractor. Without this feature the default extractor is
-//!   [`http::extractors::NoRouteExtractor`] (method-only span names, no
-//!   `http.route` attribute).
-//!
-//! # Examples
-//!
-//! Runnable end-to-end examples live in the [`examples/`] directory of the
-//! `opentelemetry-rust-contrib` repository.
+//! - `http-server` *(default)* — the HTTP server layer ([`http::server`]).
+//! - `http-client` *(default)* — the HTTP client layer ([`http::client`]).
+//! - `axum` — enables [`http::extractors::AxumMatchedPathExtractor`] and makes it
+//!   the default route extractor for the server layer.
 //!
 //! [OpenTelemetry]: https://opentelemetry.io
 //! [Tower]: https://docs.rs/tower
 //! [HTTP semantic conventions]: https://opentelemetry.io/docs/specs/semconv/http/
 //! [`TracerProvider`]: opentelemetry::trace::TracerProvider
 //! [`MeterProvider`]: opentelemetry::metrics::MeterProvider
-//! [`examples/`]: https://github.com/open-telemetry/opentelemetry-rust-contrib/tree/main/opentelemetry-instrumentation-tower/examples
 
 use std::fmt;
 
+#[cfg(any(feature = "http-server", feature = "http-client"))]
 mod common;
+#[cfg(any(feature = "http-server", feature = "http-client"))]
 pub mod http;
 
 /// Instrumentation scope name reported on emitted spans and metrics.
+#[cfg(any(feature = "http-server", feature = "http-client"))]
 pub(crate) const INSTRUMENTATION_NAME: &str = "opentelemetry-instrumentation-tower";
 
 /// Error type for `opentelemetry_instrumentation_tower`.
