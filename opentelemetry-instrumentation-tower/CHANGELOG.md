@@ -13,8 +13,23 @@
 * The instrumentation scope now carries the OpenTelemetry semantic conventions
   schema URL.
   [#679](https://github.com/open-telemetry/opentelemetry-rust-contrib/pull/679)
+* The server span now carries `url.query` when the request target has a query
+  component. The HTTP server span requires the attribute in that case. The value
+  of a query parameter that can carry a credential, such as `sig` or
+  `X-Amz-Signature`, is replaced with `REDACTED`.
+  [#789](https://github.com/open-telemetry/opentelemetry-rust-contrib/pull/789)
+* `http::server::LayerBuilder::with_sensitive_query_parameters` to name the query
+  parameter keys whose values the layer redacts. The list replaces the default
+  one, and an empty list disables redaction.
+  [#789](https://github.com/open-telemetry/opentelemetry-rust-contrib/pull/789)
 
 ### Changed
+
+* **BREAKING**: The server span no longer carries `url.full`. The attribute
+  belongs to the HTTP client span, a server receives a request target that is no
+  absolute URL, and the value repeated the query string, which would need the
+  same redaction. `url.path` and `url.query` describe the target instead.
+  [#789](https://github.com/open-telemetry/opentelemetry-rust-contrib/pull/789)
 
 * **BREAKING**: Reorganized the public API into an `http::server` module with
   unprefixed `Layer`, `LayerBuilder`, `Service`, and `ResponseFuture` types, and
