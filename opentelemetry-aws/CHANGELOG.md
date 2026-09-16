@@ -11,6 +11,7 @@
 - `Ec2ResourceDetector` (`detector-aws-ec2` feature)
 - `EcsResourceDetector` (`detector-aws-ecs` feature)
 - `EksResourceDetector` (`detector-aws-eks` feature)
+- `BeanstalkResourceDetector` (`detector-aws-beanstalk` feature)
 
 ### Changed
 
