@@ -12,6 +12,10 @@
 - `EcsResourceDetector` (`detector-aws-ecs` feature)
 - `EksResourceDetector` (`detector-aws-eks` feature)
 
+### Changed
+
+- the Lambda detector now add "cloud.platform = aws_lambda" and no longer set empty values in case of errors or missing environment variables
+
 ## v0.20.0
 
 Released 2026-May-13
