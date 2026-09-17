@@ -90,14 +90,14 @@
 //!
 //! | Scenario                | Median   | vs baseline |
 //! | ----------------------- | -------- | ----------- |
-//! | baseline                |   40 ns  | —           |
-//! | noop                    |  372 ns  | +332 ns     |
-//! | tracing                 |  491 ns  | +451 ns     |
-//! | tracing-query           |  542 ns  | +502 ns     |
-//! | tracing-query-redacted  |  587 ns  | +547 ns     |
-//! | tracing-sampled-out     |  399 ns  | +359 ns     |
-//! | metrics                 |  679 ns  | +639 ns     |
-//! | tracing + metrics       |  836 ns  | +796 ns     |
+//! | baseline                |   62 ns  | —           |
+//! | noop                    |  346 ns  | +284 ns     |
+//! | tracing                 |  484 ns  | +422 ns     |
+//! | tracing-query           |  550 ns  | +488 ns     |
+//! | tracing-query-redacted  |  557 ns  | +495 ns     |
+//! | tracing-sampled-out     |  374 ns  | +312 ns     |
+//! | metrics                 |  634 ns  | +572 ns     |
+//! | tracing + metrics       |  798 ns  | +736 ns     |
 //!
 //! Captured on: ThinkPad P14s, AMD Ryzen AI 9 HX PRO 470 (12C/24T), 64 GB RAM,
 //! Fedora Linux 44 (Workstation Edition), rustc 1.97.1, OpenTelemetry 0.32.
