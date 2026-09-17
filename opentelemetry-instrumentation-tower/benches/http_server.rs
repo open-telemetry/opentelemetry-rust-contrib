@@ -104,7 +104,7 @@ fn build_requests(n: u64) -> Vec<http::Request<String>> {
         .map(|_| {
             http::Request::builder()
                 .method("GET")
-                .uri("http://example.com/users/123")
+                .uri("http://example.com/users/123?fields=name&sig=secret-signature")
                 .body(String::new())
                 .unwrap()
         })
