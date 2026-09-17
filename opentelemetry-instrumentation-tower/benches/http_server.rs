@@ -13,6 +13,10 @@
 //! - **Baseline**: No middleware (control measurement)
 //! - **No-op**: `http::server::Layer` present, but both tracer and meter are no-ops
 //! - **Tracing**: `http::server::Layer` with active tracer, no-op meter (all spans sampled)
+//! - **Tracing (query)**: Same, but the request target carries a query string
+//!   that holds no sensitive parameter
+//! - **Tracing (query, redacted)**: Same, but the query string holds a credential,
+//!   so the layer has to redact it
 //! - **Tracing (sampled-out)**: Same, but with `AlwaysOff` sampler (all spans dropped)
 //! - **Metrics**: `http::server::Layer` with active meter, no-op tracer (no spans created)
 //! - **Tracing + Metrics**: `http::server::Layer` with both active tracer and active meter
@@ -66,17 +70,19 @@
 //!
 //! Latest measurements (criterion median):
 //!
-//! | Scenario             | Median   | vs baseline |
-//! | -------------------- | -------- | ----------- |
-//! | baseline             |   53 ns  | —           |
-//! | noop                 |  559 ns  | +506 ns     |
-//! | tracing              |  680 ns  | +627 ns     |
-//! | tracing-sampled-out  |  581 ns  | +528 ns     |
-//! | metrics              |  855 ns  | +802 ns     |
-//! | tracing + metrics    |  970 ns  | +917 ns     |
+//! | Scenario                | Median   | vs baseline |
+//! | ----------------------- | -------- | ----------- |
+//! | baseline                |   40 ns  | —           |
+//! | noop                    |  372 ns  | +332 ns     |
+//! | tracing                 |  491 ns  | +451 ns     |
+//! | tracing-query           |  542 ns  | +502 ns     |
+//! | tracing-query-redacted  |  587 ns  | +547 ns     |
+//! | tracing-sampled-out     |  399 ns  | +359 ns     |
+//! | metrics                 |  679 ns  | +639 ns     |
+//! | tracing + metrics       |  836 ns  | +796 ns     |
 //!
-//! Captured on: MacBook Pro, Apple M4 Pro (10P + 4E cores), 24 GB RAM,
-//! macOS 26.4.1, rustc 1.95.0, OpenTelemetry 0.32.
+//! Captured on: MacBook Pro, Apple M4 Max (12P + 4E cores), 48 GB RAM,
+//! macOS 26.7, rustc 1.98.0, OpenTelemetry 0.32.
 //!
 
 use criterion::{criterion_group, criterion_main, BenchmarkId, Criterion, Throughput};
@@ -99,12 +105,12 @@ async fn handler(_req: http::Request<String>) -> Result<http::Response<String>, 
 
 /// Build requests outside the timed loop so request construction cost does not
 /// inflate the middleware overhead measurement.
-fn build_requests(n: u64) -> Vec<http::Request<String>> {
+fn build_requests(n: u64, target: &'static str) -> Vec<http::Request<String>> {
     (0..n)
         .map(|_| {
             http::Request::builder()
                 .method("GET")
-                .uri("http://example.com/users/123?fields=name&sig=secret-signature")
+                .uri(target)
                 .body(String::new())
                 .unwrap()
         })
@@ -158,7 +164,7 @@ fn benchmark_http_server(c: &mut Criterion) {
     group.bench_function(BenchmarkId::new("request", "baseline"), |b| {
         b.to_async(&rt).iter_custom(|iters| async move {
             let mut service = tower::service_fn(handler);
-            let requests = build_requests(iters);
+            let requests = build_requests(iters, "http://example.com/users/123");
 
             let start = std::time::Instant::now();
             for req in requests {
@@ -182,7 +188,7 @@ fn benchmark_http_server(c: &mut Criterion) {
                 let mut service = ServiceBuilder::new()
                     .layer(layer)
                     .service(tower::service_fn(handler));
-                let requests = build_requests(iters);
+                let requests = build_requests(iters, "http://example.com/users/123");
 
                 let start = std::time::Instant::now();
                 for req in requests {
@@ -204,7 +210,7 @@ fn benchmark_http_server(c: &mut Criterion) {
                 let mut service = ServiceBuilder::new()
                     .layer(layer)
                     .service(tower::service_fn(handler));
-                let requests = build_requests(iters);
+                let requests = build_requests(iters, "http://example.com/users/123");
 
                 let start = std::time::Instant::now();
                 for req in requests {
@@ -216,7 +222,59 @@ fn benchmark_http_server(c: &mut Criterion) {
         });
     });
 
-    // Scenario 4: Tracing with AlwaysOff sampler (global meter not set, so meter instruments are no-op)
+    // Scenario 4: Tracing, request target with a query string that holds no
+    // sensitive parameter (measures `url.query` and the scan for a key to redact)
+    group.bench_function(BenchmarkId::new("request", "tracing-query"), |b| {
+        let _tracer_provider = setup_tracer();
+        let layer = LayerBuilder::builder().build().unwrap();
+        b.to_async(&rt).iter_custom(|iters| {
+            let layer = layer.clone();
+            async move {
+                let mut service = ServiceBuilder::new()
+                    .layer(layer)
+                    .service(tower::service_fn(handler));
+                let requests = build_requests(
+                    iters,
+                    "http://example.com/users/123?fields=name&verbose=true",
+                );
+
+                let start = std::time::Instant::now();
+                for req in requests {
+                    let resp = service.ready().await.unwrap().call(req).await.unwrap();
+                    black_box(resp);
+                }
+                start.elapsed()
+            }
+        });
+    });
+
+    // Scenario 5: Tracing, request target with a query string that holds a
+    // credential (measures redaction, which has to rewrite the value)
+    group.bench_function(BenchmarkId::new("request", "tracing-query-redacted"), |b| {
+        let _tracer_provider = setup_tracer();
+        let layer = LayerBuilder::builder().build().unwrap();
+        b.to_async(&rt).iter_custom(|iters| {
+            let layer = layer.clone();
+            async move {
+                let mut service = ServiceBuilder::new()
+                    .layer(layer)
+                    .service(tower::service_fn(handler));
+                let requests = build_requests(
+                    iters,
+                    "http://example.com/users/123?fields=name&sig=secret-signature",
+                );
+
+                let start = std::time::Instant::now();
+                for req in requests {
+                    let resp = service.ready().await.unwrap().call(req).await.unwrap();
+                    black_box(resp);
+                }
+                start.elapsed()
+            }
+        });
+    });
+
+    // Scenario 6: Tracing with AlwaysOff sampler (global meter not set, so meter instruments are no-op)
     group.bench_function(BenchmarkId::new("request", "tracing-sampled-out"), |b| {
         let _tracer_provider = setup_sampled_out_tracer();
         let layer = LayerBuilder::builder().build().unwrap();
@@ -226,7 +284,7 @@ fn benchmark_http_server(c: &mut Criterion) {
                 let mut service = ServiceBuilder::new()
                     .layer(layer)
                     .service(tower::service_fn(handler));
-                let requests = build_requests(iters);
+                let requests = build_requests(iters, "http://example.com/users/123");
 
                 let start = std::time::Instant::now();
                 for req in requests {
@@ -238,7 +296,7 @@ fn benchmark_http_server(c: &mut Criterion) {
         });
     });
 
-    // Scenario 5: Metrics only (tracer reset to NoopTracerProvider)
+    // Scenario 7: Metrics only (tracer reset to NoopTracerProvider)
     group.bench_function(BenchmarkId::new("request", "metrics"), |b| {
         noop_tracer();
         let (_meter_provider, _metric_exporter) = setup_meter();
@@ -249,7 +307,7 @@ fn benchmark_http_server(c: &mut Criterion) {
                 let mut service = ServiceBuilder::new()
                     .layer(layer)
                     .service(tower::service_fn(handler));
-                let requests = build_requests(iters);
+                let requests = build_requests(iters, "http://example.com/users/123");
 
                 let start = std::time::Instant::now();
                 for req in requests {
@@ -261,7 +319,7 @@ fn benchmark_http_server(c: &mut Criterion) {
         });
     });
 
-    // Scenario 6: Both tracing + metrics
+    // Scenario 8: Both tracing + metrics
     group.bench_function(BenchmarkId::new("request", "tracing+metrics"), |b| {
         let _tracer_provider = setup_tracer();
         let (_meter_provider, _metric_exporter) = setup_meter();
@@ -272,7 +330,7 @@ fn benchmark_http_server(c: &mut Criterion) {
                 let mut service = ServiceBuilder::new()
                     .layer(layer)
                     .service(tower::service_fn(handler));
-                let requests = build_requests(iters);
+                let requests = build_requests(iters, "http://example.com/users/123");
 
                 let start = std::time::Instant::now();
                 for req in requests {

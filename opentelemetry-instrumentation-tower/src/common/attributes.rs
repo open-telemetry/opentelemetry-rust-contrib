@@ -69,10 +69,17 @@ pub(crate) fn split_and_format_protocol_version(
 
 /// Query parameter keys whose values the conventions ask instrumentations to
 /// redact by default.
+///
+/// See the note on
+/// [`URL_QUERY`](https://opentelemetry.io/docs/specs/semconv/registry/attributes/url/#url-query).
+/// The conventions state that the list changes over time, and they ask for a
+/// case-sensitive match.
 pub(crate) const DEFAULT_SENSITIVE_QUERY_PARAMETERS: &[&str] = &[
     "X-Amz-Signature",
     "X-Amz-Credential",
     "X-Amz-Security-Token",
+    "AWSAccessKeyId",
+    "Signature",
     "sig",
     "X-Goog-Signature",
 ];

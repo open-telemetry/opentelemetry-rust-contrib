@@ -30,8 +30,20 @@ as `http.request.header.<key>`, are not emitted. Add them with
 
 The `url.query` attribute holds the query string of the request, which can carry
 a credential. The middleware therefore replaces the value of every query
-parameter that the conventions name, such as `sig` or `X-Amz-Signature`, with
-`REDACTED`, and keeps the key: `fields=name&sig=REDACTED`.
+parameter that the conventions name with `REDACTED`, and keeps the key:
+`fields=name&sig=REDACTED`.
+
+The default keys are the ones that the
+[`url.query` conventions](https://opentelemetry.io/docs/specs/semconv/registry/attributes/url/#url-query)
+list:
+
+- `X-Amz-Signature`
+- `X-Amz-Credential`
+- `X-Amz-Security-Token`
+- `AWSAccessKeyId`
+- `Signature`
+- `sig`
+- `X-Goog-Signature`
 
 Use `http::server::LayerBuilder::with_sensitive_query_parameters` to name the
 keys yourself. The list replaces the default one, it does not extend it, and an
