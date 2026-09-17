@@ -2,6 +2,10 @@
 
 ## vNext
 
+## v0.21.0
+
+Released 2026-Sep-19
+
 ### Added
 
 - Read `cloud.account.id` from symlink created by the OTel Lambda Extension in the Lambda resource detector
@@ -15,6 +19,7 @@
 ### Changed
 
 - the Lambda detector now add "cloud.platform = aws_lambda" and no longer set empty values in case of errors or missing environment variables
+- Bump opentelemetry and opentelemetry_sdk versions to 0.33.0
 
 ## v0.20.0
 
@@ -42,13 +47,13 @@ Released 2026-May-13
 
 - Bump opentelemetry and opentelemetry_sdk versions to 0.29.0
 - Breaking change in the way XrayIdGenerator is configured:
-  
+
   ```rust
   // Before
   SdkTracerProvider::builder()
       .with_config(trace::config().with_id_generator(XrayIdGenerator::default()))
       .build();
-  
+
   // After
   SdkTracerProvider::builder()
       .with_id_generator(XrayIdGenerator::default())
@@ -89,7 +94,7 @@ Released 2026-May-13
 
 ### Changed
 
--  Bump opentelemetry and opentelemetry_sdk versions to 0.23.0
+- Bump opentelemetry and opentelemetry_sdk versions to 0.23.0
 
 ## v0.10.0
 
