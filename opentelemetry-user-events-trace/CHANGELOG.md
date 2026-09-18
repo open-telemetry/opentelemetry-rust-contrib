@@ -2,6 +2,10 @@
 
 ## vNext
 
+## v0.6.0
+
+- Bump OpenTelemetry dependencies to 0.33.
+
 - **Breaking**: Replace `UserEventsTracerProviderBuilderExt::with_user_events_exporter`
   with a public `Processor` and `ProcessorBuilder`. The processor can now be
   wrapped by filtering or other custom processors before it is added to an

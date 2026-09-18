@@ -2,6 +2,10 @@
 
 ## vNext
 
+## v0.17.0
+
+- Bump OpenTelemetry dependencies to 0.33.
+
 - Removed `futures-executor` dependency and `LogExporter` trait implementation.
   The processor now calls the exporter synchronously, avoiding potential panics
   from nested `block_on()` calls (e.g. when logging from inside an async
