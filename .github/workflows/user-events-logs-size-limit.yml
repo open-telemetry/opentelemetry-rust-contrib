@@ -1,0 +1,57 @@
+name: user_events logs size limit
+
+# Demonstration, not a gate. Runs the oversized-log-record test across several
+# runner images so the per-event `user_events` delivery limit can be compared
+# across kernel versions and architectures. Every leg is expected to fail on a
+# kernel that enforces PERF_MAX_TRACE_SIZE; the failure is the finding.
+
+env:
+  CI: true
+
+permissions:
+  contents: read
+
+on:
+  workflow_dispatch:
+  pull_request:
+    paths:
+      - 'opentelemetry-user-events-logs/**'
+      - '.github/workflows/user-events-logs-size-limit.yml'
+
+jobs:
+  size-limit:
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 20
+    strategy:
+      # Every leg must report, so one failing kernel does not hide the others.
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-22.04
+            note: x86_64
+          - os: ubuntu-24.04
+            note: x86_64
+          - os: ubuntu-24.04-arm
+            note: aarch64
+    name: size-limit (${{ matrix.os }}, ${{ matrix.note }})
+    steps:
+      - uses: actions/checkout@v5
+      - name: Show kernel configuration
+        run: |
+          uname -a
+          echo -n "page size: "; getconf PAGESIZE
+          sudo mount -t tracefs nodev /sys/kernel/tracing 2>/dev/null || true
+          ls -l /sys/kernel/tracing/user_events_data \
+            || echo "user_events_data missing: kernel lacks CONFIG_USER_EVENTS"
+          for f in buffer_size_kb buffer_subbuf_size_kb; do
+            echo -n "$f: "; sudo cat /sys/kernel/tracing/$f 2>/dev/null || echo "<unavailable>"
+          done
+      - name: Emit oversized log records through the OpenTelemetry Logs API
+        run: |
+          sudo -E $(which cargo) test --manifest-path opentelemetry-user-events-logs/Cargo.toml \
+            --lib --all-features size_limit -- --ignored --nocapture --test-threads=1
+      # perf_trace_buf_alloc() reports the refusal via WARN_ONCE, which names
+      # both the requested and the maximum size.
+      - name: Kernel log
+        if: always()
+        run: sudo dmesg | grep -iE "perf buffer|user_event" || echo "(no relevant kernel messages)"
