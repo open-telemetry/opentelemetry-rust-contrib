@@ -33,7 +33,7 @@ Add this to your `Cargo.toml`:
 
 ```toml
 [dependencies]
-opentelemetry-config = "0.2.0"
+opentelemetry-config = "0.1.0"
 ```
 
 ## Quick Start

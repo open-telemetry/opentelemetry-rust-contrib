@@ -1,6 +1,6 @@
 [package]
 name = "opentelemetry-config"
-version = "0.2.0"
+version = "0.1.0"
 description = "Declarative configuration for OpenTelemetry SDK"
 homepage = "https://github.com/open-telemetry/opentelemetry-rust-contrib/tree/main/opentelemetry-config"
 repository = "https://github.com/open-telemetry/opentelemetry-rust-contrib/tree/main/opentelemetry-config"
