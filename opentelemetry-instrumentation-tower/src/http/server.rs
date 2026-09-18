@@ -770,10 +770,13 @@ mod tests {
 
     #[tokio::test(flavor = "current_thread")]
     async fn test_tracing_with_in_memory_tracer() {
+        #[derive(Debug, Clone, Copy)]
+        struct TestError;
+
         struct TestCase {
             name: &'static str,
             target: &'static str,
-            response_status: StatusCode,
+            outcome: Result<StatusCode, TestError>,
             expected_span_name: &'static str,
             expected_attributes: Vec<KeyValue>,
             expected_span_status: Status,
@@ -783,7 +786,7 @@ mod tests {
             TestCase {
                 name: "request target in absolute form",
                 target: "http://example.com/api/users/123",
-                response_status: StatusCode::OK,
+                outcome: Ok(StatusCode::OK),
                 expected_span_name: "GET /api/users/123",
                 expected_attributes: vec![
                     KeyValue::new(semconv::attribute::HTTP_REQUEST_METHOD, "GET".to_string()),
@@ -801,7 +804,7 @@ mod tests {
             TestCase {
                 name: "request target in origin form",
                 target: "/api/users/123",
-                response_status: StatusCode::OK,
+                outcome: Ok(StatusCode::OK),
                 expected_span_name: "GET /api/users/123",
                 expected_attributes: vec![
                     KeyValue::new(semconv::attribute::HTTP_REQUEST_METHOD, "GET".to_string()),
@@ -819,7 +822,7 @@ mod tests {
             TestCase {
                 name: "request target with a query component",
                 target: "/api/users/123?fields=name&verbose=true",
-                response_status: StatusCode::OK,
+                outcome: Ok(StatusCode::OK),
                 expected_span_name: "GET /api/users/123",
                 expected_attributes: vec![
                     KeyValue::new(semconv::attribute::HTTP_REQUEST_METHOD, "GET".to_string()),
@@ -841,7 +844,7 @@ mod tests {
             TestCase {
                 name: "request target with a sensitive query parameter",
                 target: "/api/users/123?fields=name&sig=secret-signature",
-                response_status: StatusCode::OK,
+                outcome: Ok(StatusCode::OK),
                 expected_span_name: "GET /api/users/123",
                 expected_attributes: vec![
                     KeyValue::new(semconv::attribute::HTTP_REQUEST_METHOD, "GET".to_string()),
@@ -863,7 +866,7 @@ mod tests {
             TestCase {
                 name: "request target with an empty query component",
                 target: "/api/users/123?",
-                response_status: StatusCode::OK,
+                outcome: Ok(StatusCode::OK),
                 expected_span_name: "GET /api/users/123",
                 expected_attributes: vec![
                     KeyValue::new(semconv::attribute::HTTP_REQUEST_METHOD, "GET".to_string()),
@@ -882,7 +885,7 @@ mod tests {
             TestCase {
                 name: "a server error response carries error.type",
                 target: "/api/users/123",
-                response_status: StatusCode::INTERNAL_SERVER_ERROR,
+                outcome: Ok(StatusCode::INTERNAL_SERVER_ERROR),
                 expected_span_name: "GET /api/users/123",
                 expected_attributes: vec![
                     KeyValue::new(semconv::attribute::HTTP_REQUEST_METHOD, "GET".to_string()),
@@ -901,7 +904,7 @@ mod tests {
             TestCase {
                 name: "a client error response carries no error.type",
                 target: "/api/users/123",
-                response_status: StatusCode::NOT_FOUND,
+                outcome: Ok(StatusCode::NOT_FOUND),
                 expected_span_name: "GET /api/users/123",
                 expected_attributes: vec![
                     KeyValue::new(semconv::attribute::HTTP_REQUEST_METHOD, "GET".to_string()),
@@ -919,7 +922,7 @@ mod tests {
             TestCase {
                 name: "an uncommon server error response carries error.type",
                 target: "/api/users/123",
-                response_status: StatusCode::from_u16(599).unwrap(),
+                outcome: Ok(StatusCode::from_u16(599).unwrap()),
                 expected_span_name: "GET /api/users/123",
                 expected_attributes: vec![
                     KeyValue::new(semconv::attribute::HTTP_REQUEST_METHOD, "GET".to_string()),
@@ -934,6 +937,24 @@ mod tests {
                     KeyValue::new(ERROR_TYPE, "599"),
                 ],
                 expected_span_status: Status::error(""),
+            },
+            TestCase {
+                name: "an inner-service error carries the error type name",
+                target: "/api/users/123",
+                outcome: Err(TestError),
+                expected_span_name: "GET /api/users/123",
+                expected_attributes: vec![
+                    KeyValue::new(semconv::attribute::HTTP_REQUEST_METHOD, "GET".to_string()),
+                    KeyValue::new(semconv::attribute::URL_SCHEME, "".to_string()),
+                    KeyValue::new(semconv::attribute::URL_PATH, "/api/users/123".to_string()),
+                    KeyValue::new(
+                        semconv::attribute::USER_AGENT_ORIGINAL,
+                        "tower-test-client/1.0".to_string(),
+                    ),
+                    KeyValue::new(semconv::attribute::HTTP_ROUTE, "/api/users/123".to_string()),
+                    KeyValue::new(ERROR_TYPE, std::any::type_name::<TestError>()),
+                ],
+                expected_span_status: Status::error(format!("{:?}", TestError)),
             },
         ];
 
@@ -953,17 +974,17 @@ mod tests {
                 .build()
                 .unwrap();
 
-            let response_status = test_case.response_status;
+            let outcome = test_case.outcome;
             let mut service = ServiceBuilder::new()
                 .layer(layer)
                 .service(tower::service_fn(
                     move |req: http::Request<String>| async move {
-                        Ok::<_, Error>(
+                        outcome.map(|status| {
                             http::Response::builder()
-                                .status(response_status)
+                                .status(status)
                                 .body(req.into_body())
-                                .unwrap(),
-                        )
+                                .unwrap()
+                        })
                     },
                 ));
 
@@ -980,7 +1001,7 @@ mod tests {
                 .unwrap();
 
             // Execute the service call within the parent span context
-            let _response = async { service.ready().await.unwrap().call(request).await.unwrap() }
+            let _response = async { service.ready().await.unwrap().call(request).await }
                 .with_context(cx)
                 .await;
 
@@ -1026,53 +1047,6 @@ mod tests {
 
     async fn echo(req: http::Request<String>) -> Result<http::Response<String>, Error> {
         Ok(http::Response::new(req.into_body()))
-    }
-
-    #[tokio::test(flavor = "current_thread")]
-    async fn an_inner_service_error_carries_the_error_type_name() {
-        #[derive(Debug)]
-        struct InnerError;
-
-        let trace_exporter = InMemorySpanExporterBuilder::new().build();
-        let tracer_provider = SdkTracerProvider::builder()
-            .with_simple_exporter(trace_exporter.clone())
-            .build();
-
-        let layer = LayerBuilder::builder()
-            .with_route_extractor(PathExtractor)
-            .with_tracer_provider(tracer_provider.clone())
-            .build()
-            .unwrap();
-
-        let mut service = layer.layer(tower::service_fn(|_req: Request<String>| async {
-            Err::<Response<String>, InnerError>(InnerError)
-        }));
-
-        let request = Request::builder()
-            .uri("/api/users/123")
-            .body(String::from("test"))
-            .unwrap();
-
-        let _ = service.call(request).await;
-
-        tracer_provider.force_flush().unwrap();
-
-        let spans = trace_exporter.get_finished_spans().unwrap();
-        assert_eq!(spans.len(), 1, "Expected one HTTP span");
-
-        assert_eq!(
-            (spans[0].attributes.clone(), spans[0].status.clone()),
-            (
-                vec![
-                    KeyValue::new(semconv::attribute::HTTP_REQUEST_METHOD, "GET".to_string()),
-                    KeyValue::new(semconv::attribute::URL_SCHEME, "".to_string()),
-                    KeyValue::new(semconv::attribute::URL_PATH, "/api/users/123".to_string()),
-                    KeyValue::new(semconv::attribute::HTTP_ROUTE, "/api/users/123".to_string()),
-                    KeyValue::new(ERROR_TYPE, std::any::type_name::<InnerError>(),),
-                ],
-                Status::error(format!("{:?}", InnerError))
-            )
-        );
     }
 
     #[tokio::test(flavor = "current_thread")]
