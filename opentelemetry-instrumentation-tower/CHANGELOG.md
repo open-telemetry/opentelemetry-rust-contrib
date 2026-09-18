@@ -15,8 +15,9 @@
   [#679](https://github.com/open-telemetry/opentelemetry-rust-contrib/pull/679)
 * The server span now carries `url.query` when the request target has a query
   component. The HTTP server span requires the attribute in that case. The value
-  of a query parameter that can carry a credential, such as `sig` or
-  `X-Amz-Signature`, is replaced with `REDACTED`.
+  of a query parameter that can carry a credential is replaced with `REDACTED`:
+  `X-Amz-Signature`, `X-Amz-Credential`, `X-Amz-Security-Token`,
+  `AWSAccessKeyId`, `Signature`, `sig`, and `X-Goog-Signature`.
   [#789](https://github.com/open-telemetry/opentelemetry-rust-contrib/pull/789)
 * `http::server::LayerBuilder::with_sensitive_query_parameters` to name the query
   parameter keys whose values the layer redacts. The list replaces the default
