@@ -28,14 +28,14 @@
   `error.type` to the status code number as a string. An error from the inner
   service, returned before a status code exists, sets `error.type` to that
   error's Rust type name.
-  [#PENDING](https://github.com/open-telemetry/opentelemetry-rust-contrib/pull/PENDING)
+  [#801](https://github.com/open-telemetry/opentelemetry-rust-contrib/pull/801)
 
 ### Changed
 
 * The span status of a 5xx response no longer carries an `HTTP {code}`
   description. The reader can derive the reason from
   `http.response.status_code`.
-  [#PENDING](https://github.com/open-telemetry/opentelemetry-rust-contrib/pull/PENDING)
+  [#801](https://github.com/open-telemetry/opentelemetry-rust-contrib/pull/801)
 * **BREAKING**: The server span no longer carries `url.full`. The attribute
   belongs to the HTTP client span, a server receives a request target that is no
   absolute URL, and the value repeated the query string, which would need the
