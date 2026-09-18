@@ -23,9 +23,20 @@
   parameter keys whose values the layer redacts. The list replaces the default
   one, and an empty list disables redaction.
   [#789](https://github.com/open-telemetry/opentelemetry-rust-contrib/pull/789)
+* The server span, and the `http.server.request.duration`,
+  `http.server.request.body.size` and `http.server.response.body.size` metrics,
+  now carry `error.type` when a request ends with an error. A 5xx response sets
+  `error.type` to the status code number as a string. An error from the inner
+  service, returned before a status code exists, sets `error.type` to that
+  error's Rust type name.
+  [#801](https://github.com/open-telemetry/opentelemetry-rust-contrib/pull/801)
 
 ### Changed
 
+* The span status of a 5xx response no longer carries an `HTTP {code}`
+  description. The reader can derive the reason from
+  `http.response.status_code`.
+  [#801](https://github.com/open-telemetry/opentelemetry-rust-contrib/pull/801)
 * **BREAKING**: The server span no longer carries `url.full`. The attribute
   belongs to the HTTP client span, a server receives a request target that is no
   absolute URL, and the value repeated the query string, which would need the
