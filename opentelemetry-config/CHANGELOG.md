@@ -6,4 +6,4 @@
 
 ### Added
 
-- Initial declarative configuration for OpenTelemetry 0.33.
+- Initial declarative configuration
