@@ -1177,7 +1177,7 @@ mod tests {
 
         let _response = service.call(request).await.unwrap();
 
-        tokio::time::sleep(Duration::from_millis(500)).await;
+        meter_provider.force_flush().unwrap();
 
         let metrics = exporter.get_finished_metrics().unwrap();
         assert!(!metrics.is_empty());
@@ -1359,7 +1359,7 @@ mod tests {
 
         let _response = service.call(request).await.unwrap();
 
-        tokio::time::sleep(Duration::from_millis(500)).await;
+        meter_provider.force_flush().unwrap();
 
         let metrics = exporter.get_finished_metrics().unwrap();
         assert!(!metrics.is_empty());
@@ -1684,7 +1684,7 @@ mod tests {
 
         let _response = service.call(request).await.unwrap();
 
-        tokio::time::sleep(Duration::from_millis(500)).await;
+        meter_provider.force_flush().unwrap();
 
         let metrics = exporter.get_finished_metrics().unwrap();
         assert!(
