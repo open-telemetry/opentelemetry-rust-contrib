@@ -2,8 +2,10 @@
 
 use std::borrow::Cow;
 
+use http::StatusCode;
 use opentelemetry::KeyValue;
 use opentelemetry_semantic_conventions as semconv;
+use opentelemetry_semantic_conventions::attribute::ERROR_TYPE;
 
 /// Maps common HTTP methods to a `&'static str` so the resulting `KeyValue`
 /// stores the method as a static string (no heap allocation, allocation-free
@@ -65,6 +67,28 @@ pub(crate) fn split_and_format_protocol_version(
         _ => "",
     };
     ("http", version_str)
+}
+
+/// Builds the `error.type` [`KeyValue`] for a response whose status code the
+/// HTTP conventions treat as an error.
+///
+/// Promotes common 5xx codes to a `&'static str` for an
+/// allocation-free clone in the hot path, and falls back to an owned `String`
+/// for every other status code.
+#[inline]
+pub(crate) fn error_type_kv(status: http::StatusCode) -> KeyValue {
+    // From the semantic convention: once a status code exists and indicates an
+    // error, `error.type` should be "the status code number (represented as a
+    // string)".
+    match status {
+        StatusCode::INTERNAL_SERVER_ERROR => KeyValue::new(ERROR_TYPE, "500"),
+        StatusCode::NOT_IMPLEMENTED => KeyValue::new(ERROR_TYPE, "501"),
+        StatusCode::BAD_GATEWAY => KeyValue::new(ERROR_TYPE, "502"),
+        StatusCode::SERVICE_UNAVAILABLE => KeyValue::new(ERROR_TYPE, "503"),
+        StatusCode::GATEWAY_TIMEOUT => KeyValue::new(ERROR_TYPE, "504"),
+        StatusCode::HTTP_VERSION_NOT_SUPPORTED => KeyValue::new(ERROR_TYPE, "505"),
+        _ => KeyValue::new(ERROR_TYPE, status.as_str().to_owned()),
+    }
 }
 
 /// Query parameter keys whose values the conventions ask instrumentations to
@@ -252,6 +276,59 @@ mod tests {
                 "{}",
                 test_case.name
             );
+        }
+    }
+
+    #[test]
+    fn error_type_kv_builds_the_error_type_attribute() {
+        struct TestCase {
+            name: &'static str,
+            status: http::StatusCode,
+            expected: KeyValue,
+        }
+
+        let test_cases = [
+            TestCase {
+                name: "500 uses the static path",
+                status: http::StatusCode::INTERNAL_SERVER_ERROR,
+                expected: KeyValue::new(semconv::attribute::ERROR_TYPE, "500"),
+            },
+            TestCase {
+                name: "501 uses the static path",
+                status: http::StatusCode::NOT_IMPLEMENTED,
+                expected: KeyValue::new(semconv::attribute::ERROR_TYPE, "501"),
+            },
+            TestCase {
+                name: "502 uses the static path",
+                status: http::StatusCode::BAD_GATEWAY,
+                expected: KeyValue::new(semconv::attribute::ERROR_TYPE, "502"),
+            },
+            TestCase {
+                name: "503 uses the static path",
+                status: http::StatusCode::SERVICE_UNAVAILABLE,
+                expected: KeyValue::new(semconv::attribute::ERROR_TYPE, "503"),
+            },
+            TestCase {
+                name: "504 uses the static path",
+                status: http::StatusCode::GATEWAY_TIMEOUT,
+                expected: KeyValue::new(semconv::attribute::ERROR_TYPE, "504"),
+            },
+            TestCase {
+                name: "505 uses the static path",
+                status: http::StatusCode::HTTP_VERSION_NOT_SUPPORTED,
+                expected: KeyValue::new(semconv::attribute::ERROR_TYPE, "505"),
+            },
+            TestCase {
+                name: "an uncommon status code uses the owned path",
+                status: http::StatusCode::from_u16(599).unwrap(),
+                expected: KeyValue::new(semconv::attribute::ERROR_TYPE, "599".to_string()),
+            },
+        ];
+
+        for test_case in test_cases {
+            let result = error_type_kv(test_case.status);
+
+            assert_eq!(result, test_case.expected, "{}", test_case.name);
         }
     }
 }
