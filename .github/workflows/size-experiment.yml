@@ -1,0 +1,103 @@
+name: user_events size experiment
+
+# Fork-only experiment. Measures the largest user_events event that is actually
+# delivered, separately for the perf and ftrace paths, and captures any kernel
+# WARN_ONCE that explains a drop. Not intended to be merged.
+
+env:
+  CI: true
+
+permissions:
+  contents: read
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - cijothomas/user-events-size-experiment
+
+jobs:
+  size-experiment:
+    # Several runner images, so the measured thresholds can be separated into
+    # those that are fixed by the kernel and those that depend on the
+    # environment (kernel version, architecture, page size, sub-buffer size).
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-22.04, ubuntu-24.04, ubuntu-24.04-arm]
+    steps:
+      - uses: actions/checkout@v5
+      - name: Show kernel and tracefs configuration
+        run: |
+          uname -a
+          getconf PAGESIZE
+          sudo mount -t tracefs nodev /sys/kernel/tracing 2>/dev/null || true
+          ls -l /sys/kernel/tracing/user_events_data || true
+          for f in buffer_size_kb buffer_subbuf_size_kb; do
+            echo -n "$f: "; sudo cat /sys/kernel/tracing/$f 2>/dev/null || echo "<unavailable>"
+          done
+      - name: Build test binary
+        run: |
+          cargo test --manifest-path opentelemetry-user-events-metrics/Cargo.toml --lib --no-run
+          cargo test --manifest-path opentelemetry-user-events-logs/Cargo.toml --lib --no-run
+      # dmesg is cleared before each probe because perf_trace_buf_alloc() uses
+      # WARN_ONCE, which fires at most once per boot per call site. Running the
+      # probes in separate steps with a clear in between keeps the attribution
+      # unambiguous.
+      - name: Probe perf delivery path (logs)
+        if: always()
+        run: |
+          sudo dmesg -C
+          sudo -E $(which cargo) test --manifest-path opentelemetry-user-events-logs/Cargo.toml \
+            --lib size_experiment::size_experiment_perf -- --ignored --nocapture --test-threads=1
+      - name: Kernel log after logs perf probe
+        if: always()
+        run: sudo dmesg || true
+      - name: Probe ftrace delivery path (logs)
+        if: always()
+        run: |
+          sudo dmesg -C
+          sudo -E $(which cargo) test --manifest-path opentelemetry-user-events-logs/Cargo.toml \
+            --lib size_experiment::size_experiment_ftrace -- --ignored --nocapture --test-threads=1
+      - name: Kernel log after logs ftrace probe
+        if: always()
+        run: sudo dmesg || true
+      - name: Probe perf delivery path (metrics)
+        if: always()
+        run: |
+          sudo dmesg -C
+          sudo -E $(which cargo) test --manifest-path opentelemetry-user-events-metrics/Cargo.toml \
+            --lib size_experiment::size_experiment_perf -- --ignored --nocapture --test-threads=1
+      - name: Kernel log after metrics perf probe
+        if: always()
+        run: sudo dmesg || true
+      - name: Probe ftrace delivery path (metrics)
+        if: always()
+        run: |
+          sudo dmesg -C
+          sudo -E $(which cargo) test --manifest-path opentelemetry-user-events-metrics/Cargo.toml \
+            --lib size_experiment::size_experiment_ftrace -- --ignored --nocapture --test-threads=1
+      - name: Kernel log after metrics ftrace probe
+        if: always()
+        run: sudo dmesg || true
+      # The ftrace ceiling should derive from the ring buffer sub-buffer size
+      # (rb_subbuf_max_data_size), which is writable at runtime. Sweeping it
+      # shows whether the measured ftrace threshold actually tracks it, or
+      # whether something else is the binding constraint.
+      - name: Sweep ftrace sub-buffer size (logs)
+        if: always()
+        run: |
+          for kb in 4 8 16 32 64; do
+            echo "===================== buffer_subbuf_size_kb = $kb ====================="
+            sudo sh -c "echo $kb > /sys/kernel/tracing/buffer_subbuf_size_kb" \
+              || { echo "write failed for $kb"; continue; }
+            echo -n "readback: "; sudo cat /sys/kernel/tracing/buffer_subbuf_size_kb
+            sudo -E $(which cargo) test --manifest-path opentelemetry-user-events-logs/Cargo.toml \
+              --lib size_experiment::size_experiment_ftrace -- --ignored --nocapture --test-threads=1 \
+              2>&1 | grep -E "largest fully delivered|smallest fully dropped|subbuf"
+          done
+      - name: Kernel log after sub-buffer sweep
+        if: always()
+        run: sudo dmesg || true
