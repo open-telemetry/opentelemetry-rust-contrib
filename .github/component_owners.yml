@@ -18,6 +18,7 @@
 components:
   opentelemetry-aws/:
     - jj22ee
+    - chinmaychahar
 
   opentelemetry-config/:
     - andborja
