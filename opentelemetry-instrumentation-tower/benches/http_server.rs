@@ -20,6 +20,9 @@
 //! - **Tracing (sampled-out)**: Same, but with `AlwaysOff` sampler (all spans dropped)
 //! - **Metrics**: `http::server::Layer` with active meter, no-op tracer (no spans created)
 //! - **Tracing + Metrics**: `http::server::Layer` with both active tracer and active meter
+//! - **Tracing + Metrics (500)**: Same as above, but the handler answers with a
+//!   500 response, to baseline the extra `error.type` attribute, span status,
+//!   and metric label
 //!
 //! Each tracing scenario sets the global `TracerProvider` before building the layer so
 //! that no tracer state leaks between scenarios.  Scenarios that do not need traces use
@@ -90,17 +93,22 @@
 //!
 //! | Scenario                | Median   | vs baseline |
 //! | ----------------------- | -------- | ----------- |
-//! | baseline                |   62 ns  | —           |
-//! | noop                    |  346 ns  | +284 ns     |
-//! | tracing                 |  484 ns  | +422 ns     |
-//! | tracing-query           |  550 ns  | +488 ns     |
-//! | tracing-query-redacted  |  557 ns  | +495 ns     |
-//! | tracing-sampled-out     |  374 ns  | +312 ns     |
-//! | metrics                 |  634 ns  | +572 ns     |
-//! | tracing + metrics       |  798 ns  | +736 ns     |
+//! | baseline                |   48 ns  | —           |
+//! | noop                    |  381 ns  | +333 ns     |
+//! | tracing                 |  489 ns  | +442 ns     |
+//! | tracing-query           |  561 ns  | +513 ns     |
+//! | tracing-query-redacted  |  594 ns  | +546 ns     |
+//! | tracing-sampled-out     |  399 ns  | +351 ns     |
+//! | metrics                 |  687 ns  | +640 ns     |
+//! | tracing + metrics       |  823 ns  | +775 ns     |
+//! | tracing + metrics-500   |  858 ns  | +810 ns     |
 //!
-//! Captured on: ThinkPad P14s, AMD Ryzen AI 9 HX PRO 470 (12C/24T), 64 GB RAM,
-//! Fedora Linux 44 (Workstation Edition), rustc 1.97.1, OpenTelemetry 0.32.
+//! `tracing + metrics-500` isolates the `error.type` code path: the extra
+//! span attribute, span status, and metric label on a 5xx response cost
+//! about 35 ns more than `tracing + metrics`.
+//!
+//! Captured on: MacBook Pro, Apple M4 Max (12P + 4E cores), 48 GB RAM,
+//! macOS 26.7, rustc 1.98.0, OpenTelemetry 0.32.
 //!
 
 use criterion::{criterion_group, criterion_main, BatchSize, BenchmarkId, Criterion, Throughput};
@@ -119,6 +127,16 @@ use tower::{Service, ServiceBuilder, ServiceExt};
 /// Minimal handler — returns an empty body to keep baseline noise as low as possible.
 async fn handler(_req: http::Request<String>) -> Result<http::Response<String>, Infallible> {
     Ok(http::Response::new(String::new()))
+}
+
+/// Handler that always answers with a 500. Isolates the additional cost of
+/// the `error.type` code path: the extra span attribute, the span status,
+/// and the extra metric label.
+async fn error_handler(_req: http::Request<String>) -> Result<http::Response<String>, Infallible> {
+    Ok(http::Response::builder()
+        .status(http::StatusCode::INTERNAL_SERVER_ERROR)
+        .body(String::new())
+        .unwrap())
 }
 
 fn build_request(target: &'static str) -> http::Request<String> {
@@ -324,6 +342,30 @@ fn benchmark_http_server(c: &mut Criterion) {
         let mut service = ServiceBuilder::new()
             .layer(layer.clone())
             .service(tower::service_fn(handler));
+        rt.block_on(service.ready()).unwrap();
+        b.to_async(&rt).iter_batched(
+            || build_request("http://example.com/users/123"),
+            |req| {
+                let response = service.call(req);
+                async move {
+                    black_box(response.await.unwrap());
+                }
+            },
+            BatchSize::SmallInput,
+        );
+    });
+
+    // Scenario 9: Both tracing + metrics, with a 500 response. Comparing this
+    // against scenario 8 isolates the cost of the `error.type` code path,
+    // since both scenarios have the same signals active and differ only in
+    // the response status.
+    group.bench_function(BenchmarkId::new("request", "tracing+metrics-500"), |b| {
+        let _tracer_provider = setup_tracer();
+        let (_meter_provider, _metric_exporter) = setup_meter();
+        let layer = LayerBuilder::builder().build().unwrap();
+        let mut service = ServiceBuilder::new()
+            .layer(layer.clone())
+            .service(tower::service_fn(error_handler));
         rt.block_on(service.ready()).unwrap();
         b.to_async(&rt).iter_batched(
             || build_request("http://example.com/users/123"),
