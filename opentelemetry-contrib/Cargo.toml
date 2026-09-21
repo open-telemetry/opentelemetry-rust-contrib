@@ -1,6 +1,6 @@
 [package]
 name = "opentelemetry-contrib"
-version = "0.24.0"
+version = "0.25.0"
 description = "Rust contrib repo for OpenTelemetry"
 homepage = "https://github.com/open-telemetry/opentelemetry-rust-contrib/tree/main/opentelemetry-contrib"
 repository = "https://github.com/open-telemetry/opentelemetry-rust-contrib/tree/main/opentelemetry-contrib"
@@ -29,7 +29,7 @@ rt-tokio-current-thread = ["tokio", "opentelemetry_sdk/rt-tokio-current-thread"]
 
 [dependencies]
 base64 = { version = "0.23", optional = true }
-opentelemetry = { workspace = true }
+opentelemetry = { workspace = true, default-features = true }
 opentelemetry_sdk = { workspace = true, optional = true }
 serde_json = { version = "1", optional = true }
 tokio = { version = "1.0", features = ["fs", "io-util"], optional = true }

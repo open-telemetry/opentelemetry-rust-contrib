@@ -1,6 +1,6 @@
 [package]
 name = "opentelemetry-etw-traces"
-version = "0.1.1"
+version = "0.2.0"
 description = "OpenTelemetry exporter for ETW (Event Tracing for Windows) traces using TraceLogging Dynamic"
 homepage = "https://github.com/open-telemetry/opentelemetry-rust-contrib/tree/main/opentelemetry-etw-traces"
 repository = "https://github.com/open-telemetry/opentelemetry-rust-contrib/tree/main/opentelemetry-etw-traces"
@@ -16,7 +16,7 @@ rust-version = "1.75.0"
 
 [dependencies]
 chrono = { version = "0.4.40", default-features = false, features = ["alloc", "std"] }
-opentelemetry = { workspace = true, features = ["trace"] }
+opentelemetry = { workspace = true, default-features = true, features = ["trace"] }
 opentelemetry_sdk = { workspace = true, features = ["trace"] }
 tracelogging_dynamic = "1.2.4"
 serde_json = { version = "1.0.113", optional = true }

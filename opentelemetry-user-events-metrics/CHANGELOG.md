@@ -1,6 +1,8 @@
 # Changelog
 
-## vNext
+## v0.14.0
+
+- Bump OpenTelemetry dependencies to 0.33.
 
 ## v0.13.0
 

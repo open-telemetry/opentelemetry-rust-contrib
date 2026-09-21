@@ -1,6 +1,8 @@
 # Changelog
 
-## vNext
+## v0.12.0
+
+- Bump OpenTelemetry dependencies to 0.33.
 
 ## v0.11.1
 - Do not panic on debug builds when transient errors are returned by `EventBuilder::write`.

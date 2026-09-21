@@ -1,6 +1,6 @@
 # Changelog
 
-## vNext
+## v0.19.0
 
 ### Added
 
@@ -26,6 +26,7 @@
 
 ### Changed
 
+* Bump OpenTelemetry dependencies to 0.33.
 * **BREAKING**: The server span no longer carries `url.full`. The attribute
   belongs to the HTTP client span, a server receives a request target that is no
   absolute URL, and the value repeated the query string, which would need the

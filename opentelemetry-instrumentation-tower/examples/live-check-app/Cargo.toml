@@ -14,7 +14,7 @@ publish = false
 opentelemetry_instrumentation_tower = { path = "../../", package = "opentelemetry-instrumentation-tower", features = ["axum"], default-features = false }
 axum = { features = ["http1", "tokio"], version = "0.8", default-features = false }
 tower-http = { version = "0.7", features = ["catch-panic"], default-features = false }
-opentelemetry = { workspace = true }
+opentelemetry = { workspace = true, default-features = true }
 opentelemetry_sdk = { workspace = true, default-features = false }
 opentelemetry-otlp = { workspace = true, features = ["grpc-tonic", "metrics", "trace"] }
 tokio = { version = "1", features = ["rt-multi-thread", "macros", "signal"], default-features = false }

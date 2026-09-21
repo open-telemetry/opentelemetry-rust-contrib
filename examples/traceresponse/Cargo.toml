@@ -21,7 +21,7 @@ http-body-util = { version="0.1" }
 hyper = { version = "1.4.1", features = ["full"] }
 hyper-util = {version = "0.1", features = ["full"] }
 tokio = { version = "1.0", features = ["full"] }
-opentelemetry = { workspace = true }
+opentelemetry = { workspace = true, default-features = true }
 opentelemetry_sdk = { workspace = true }
 opentelemetry-http = { workspace = true }
 opentelemetry-contrib = { path = "../../opentelemetry-contrib" }

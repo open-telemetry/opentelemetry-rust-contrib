@@ -3,7 +3,7 @@ name = "opentelemetry-instrumentation-tower"
 edition = "2021"
 rust-version = "1.75.0"
 
-version = "0.18.0"
+version = "0.19.0"
 license = "Apache-2.0"
 description = "OpenTelemetry Middleware for Tower-compatible Rust HTTP servers"
 homepage = "https://github.com/open-telemetry/opentelemetry-rust-contrib"
@@ -20,8 +20,8 @@ axum = ["dep:axum"]
 axum = { features = ["matched-path", "macros"], version = "0.8", default-features = false, optional = true }
 http = { version = "1", features = ["std"], default-features = false }
 http-body = { version = "1", default-features = false }
-opentelemetry = { workspace = true, features = ["futures", "metrics", "trace"] }
-opentelemetry-http = "0.32"
+opentelemetry = { workspace = true, default-features = true, features = ["futures", "metrics", "trace"] }
+opentelemetry-http = { workspace = true }
 opentelemetry-semantic-conventions = { workspace = true, features = ["semconv_experimental"] }
 pin-project-lite = "0.2"
 tower-service = { version = "0.3", default-features = false }
