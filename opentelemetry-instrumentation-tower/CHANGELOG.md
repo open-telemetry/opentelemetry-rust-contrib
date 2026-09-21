@@ -4,6 +4,8 @@
 
 ## v0.19.0
 
+Released 2026-Sep-21
+
 ### Added
 
 * `http::server::LayerBuilder::with_tracing(bool)` and

@@ -4,6 +4,8 @@
 
 ## v0.17.0
 
+Released 2026-Sep-21
+
 - Bump OpenTelemetry dependencies to 0.33.
 
 - Removed `futures-executor` dependency and `LogExporter` trait implementation.
