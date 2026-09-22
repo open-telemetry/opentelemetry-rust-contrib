@@ -2335,6 +2335,10 @@ mod tests {
             opentelemetry::InstrumentationScope::builder("scoped-meter")
                 .with_version("4.5.6")
                 .with_schema_url(SCHEMA_URL)
+                .with_attributes([
+                    KeyValue::new("scope.tenant", "contoso"),
+                    KeyValue::new("scope.pipeline", "ingest"),
+                ])
                 .build(),
         );
         let counter = meter.u64_counter("counter_scope_identity").build();
@@ -2383,7 +2387,174 @@ mod tests {
                 scope.version, "4.5.6",
                 "event {index} lost the scope version"
             );
+            // Scope attributes are envelope, so they are re-serialized on every
+            // split event. A consumer cannot recover them from a neighbouring
+            // event, so dropping them on continuations would silently change
+            // how the data is attributed.
+            let mut scope_attrs = test_utils::attrs_of(&scope.attributes);
+            scope_attrs.sort();
+            assert_eq!(
+                scope_attrs,
+                vec![
+                    ("scope.pipeline".to_string(), "ingest".to_string()),
+                    ("scope.tenant".to_string(), "contoso".to_string()),
+                ],
+                "event {index} lost or altered the scope attributes"
+            );
         }
+    }
+
+    /// Two meters whose scopes differ *only* by their attributes must stay
+    /// distinct.
+    ///
+    /// The exporter writes one scope per event and rebuilds it from the SDK's
+    /// scope for each `ScopeMetrics`. If attributes were dropped from that
+    /// conversion the two scopes would become indistinguishable on the wire,
+    /// silently merging data from two different sources.
+    #[ignore]
+    #[test]
+    fn integration_test_scopes_differing_only_by_attributes_stay_distinct() {
+        test_utils::check_user_events_available().expect("Kernel does not support user_events.");
+
+        let provider = test_provider();
+        let meter_a = provider.meter_with_scope(
+            opentelemetry::InstrumentationScope::builder("same-name")
+                .with_version("1.0.0")
+                .with_attributes([KeyValue::new("scope.tenant", "tenant-a")])
+                .build(),
+        );
+        let meter_b = provider.meter_with_scope(
+            opentelemetry::InstrumentationScope::builder("same-name")
+                .with_version("1.0.0")
+                .with_attributes([KeyValue::new("scope.tenant", "tenant-b")])
+                .build(),
+        );
+
+        meter_a
+            .u64_counter("counter_scope_attrs")
+            .build()
+            .add(11, &[KeyValue::new("k", "v")]);
+        meter_b
+            .u64_counter("counter_scope_attrs")
+            .build()
+            .add(22, &[KeyValue::new("k", "v")]);
+
+        let decoded = test_utils::collect_otlp_metrics_with_pages(1024, || {
+            provider.shutdown().expect("shutdown failed");
+        });
+
+        test_utils::assert_all_events_within_size_limit(&decoded);
+
+        // Pair each exported value with the scope attributes of the event that
+        // carried it, so a merge or a swap is visible.
+        let mut seen: Vec<(String, i64)> = Vec::new();
+        for request in &decoded {
+            for rm in &request.resource_metrics {
+                for sm in &rm.scope_metrics {
+                    let scope = sm.scope.as_ref().expect("scope missing");
+                    let tenant = test_utils::attrs_of(&scope.attributes)
+                        .into_iter()
+                        .find(|(k, _)| k == "scope.tenant")
+                        .map(|(_, v)| v)
+                        .unwrap_or_else(|| {
+                            panic!("scope {} lost its attributes entirely", scope.name)
+                        });
+                    for metric in &sm.metrics {
+                        if metric.name != "counter_scope_attrs" {
+                            continue;
+                        }
+                        let Some(opentelemetry_proto::tonic::metrics::v1::metric::Data::Sum(sum)) =
+                            metric.data.as_ref()
+                        else {
+                            panic!("counter must encode as Sum");
+                        };
+                        for dp in &sum.data_points {
+                            let Some(
+                                opentelemetry_proto::tonic::metrics::v1::number_data_point::Value::AsInt(v),
+                            ) = dp.value.as_ref() else {
+                                panic!("counter must encode as int");
+                            };
+                            seen.push((tenant.clone(), *v));
+                        }
+                    }
+                }
+            }
+        }
+
+        seen.sort();
+        assert_eq!(
+            seen,
+            vec![
+                ("tenant-a".to_string(), 11i64),
+                ("tenant-b".to_string(), 22i64)
+            ],
+            "the two scopes were merged, swapped, or lost their attributes"
+        );
+    }
+
+    /// A scope so large that the envelope alone cannot fit in one event.
+    ///
+    /// The batching loop always admits the first data point unconditionally, so
+    /// in this case every batch is oversized. The final size check in
+    /// `encode_and_emit_metric` is the backstop: each event must be dropped
+    /// before it reaches the kernel rather than written and silently discarded
+    /// by `perf_trace_buf_alloc()`. A metric on a normally sized scope in the
+    /// same export cycle must be unaffected.
+    #[ignore]
+    #[test]
+    fn integration_test_scope_too_large_for_any_data_point_drops_only_that_scope() {
+        test_utils::check_user_events_available().expect("Kernel does not support user_events.");
+
+        let provider = test_provider();
+
+        // One attribute value comfortably larger than the whole event budget.
+        let huge = "z".repeat(crate::exporter::MAX_EVENT_SIZE + 1024);
+        let fat_meter = provider.meter_with_scope(
+            opentelemetry::InstrumentationScope::builder("fat-scope")
+                .with_attributes([KeyValue::new("scope.blob", huge)])
+                .build(),
+        );
+        let fat_counter = fat_meter.u64_counter("counter_fat_scope").build();
+        for i in 0..5 {
+            fat_counter.add(1, &[KeyValue::new("partition", format!("p{i}"))]);
+        }
+
+        let ok_meter = provider.meter_with_scope(
+            opentelemetry::InstrumentationScope::builder("slim-scope")
+                .with_attributes([KeyValue::new("scope.tenant", "contoso")])
+                .build(),
+        );
+        let ok_counter = ok_meter.u64_counter("counter_slim_scope").build();
+        ok_counter.add(7, &[KeyValue::new("partition", "p0")]);
+
+        let mut shutdown_result = None;
+        let decoded = test_utils::collect_otlp_metrics_with_pages(1024, || {
+            shutdown_result = Some(provider.shutdown());
+        });
+
+        // Dropping data points surfaces as an export error rather than passing
+        // silently, which is the only signal a caller gets that data was lost.
+        assert!(
+            shutdown_result.expect("shutdown was not invoked").is_err(),
+            "a metric whose every data point had to be dropped must surface as an export error"
+        );
+
+        // Nothing oversized may reach the kernel, whatever the exporter decided.
+        test_utils::assert_all_events_within_size_limit(&decoded);
+
+        assert!(
+            test_utils::number_points(&decoded, "counter_fat_scope").is_empty(),
+            "a metric whose scope alone exceeds the event budget must be dropped, \
+             not emitted over the limit"
+        );
+
+        let slim = test_utils::number_points(&decoded, "counter_slim_scope");
+        assert_eq!(
+            slim.len(),
+            1,
+            "the oversized scope must not affect a metric exported alongside it"
+        );
+        assert_eq!(slim[0].1, test_utils::Num::I(7), "slim value was altered");
     }
 
     /// An instrument that reports no observations must not produce an event,
