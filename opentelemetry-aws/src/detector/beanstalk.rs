@@ -29,14 +29,13 @@ struct EnvironmentConf {
 /// Reads the X-Ray `environment.conf` file written by the Elastic Beanstalk
 /// platform and returns an OTel [`Resource`] with the following attributes:
 ///
-/// | OTel attribute        | Source                                                     |
-/// |-----------------------|------------------------------------------------------------|
-/// | `cloud.provider`      | hardcoded `"aws"`                                          |
-/// | `cloud.platform`      | hardcoded `"aws_elastic_beanstalk"`                       |
-/// | `service.name`        | hardcoded `"aws_elastic_beanstalk"`                       |
-/// | `service.instance.id` | `deployment_id` from the config file                       |
-/// | `service.namespace`   | `environment_name` from the config file                    |
-/// | `service.version`     | `version_label` from the config file                       |
+/// | OTel attribute               | Source                                              |
+/// |------------------------------|-----------------------------------------------------|
+/// | `cloud.provider`             | hardcoded `"aws"`                                   |
+/// | `cloud.platform`             | hardcoded `"aws_elastic_beanstalk"`                 |
+/// | `deployment.id`              | `deployment_id` from the config file                |
+/// | `deployment.environment.name`| `environment_name` from the config file             |
+/// | `service.version`            | `version_label` from the config file                |
 ///
 /// Values that cannot be found or parsed are skipped.
 ///
@@ -86,9 +85,8 @@ impl BeanstalkResourceDetector {
                 semco::CLOUD_PLATFORM,
                 "aws_elastic_beanstalk",
             )),
-            Some(KeyValue::new(semco::SERVICE_NAME, "aws_elastic_beanstalk")),
-            opt_kv(semco::SERVICE_INSTANCE_ID, deployment_id),
-            opt_kv(semco::SERVICE_NAMESPACE, conf.environment_name),
+            opt_kv(semco::DEPLOYMENT_ID, deployment_id),
+            opt_kv(semco::DEPLOYMENT_ENVIRONMENT_NAME, conf.environment_name),
             opt_kv(semco::SERVICE_VERSION, conf.version_label),
         ];
 
@@ -127,9 +125,8 @@ mod tests {
             .with_attributes([
                 KeyValue::new(semco::CLOUD_PROVIDER, "aws"),
                 KeyValue::new(semco::CLOUD_PLATFORM, "aws_elastic_beanstalk"),
-                KeyValue::new(semco::SERVICE_NAME, "aws_elastic_beanstalk"),
-                KeyValue::new(semco::SERVICE_INSTANCE_ID, "23"),
-                KeyValue::new(semco::SERVICE_NAMESPACE, "my-env"),
+                KeyValue::new(semco::DEPLOYMENT_ID, "23"),
+                KeyValue::new(semco::DEPLOYMENT_ENVIRONMENT_NAME, "my-env"),
                 KeyValue::new(semco::SERVICE_VERSION, "v1.2.3"),
             ])
             .build();
@@ -149,10 +146,21 @@ mod tests {
         let got = BeanstalkResourceDetector::detect_with_path(&path);
         let _ = std::fs::remove_file(&path);
 
-        let instance_id = got
-            .iter()
-            .find(|(k, _)| k.as_str() == semco::SERVICE_INSTANCE_ID);
-        assert_eq!(instance_id.unwrap().1.as_str(), "42");
+        let deployment_id = got.iter().find(|(k, _)| k.as_str() == semco::DEPLOYMENT_ID);
+        assert_eq!(deployment_id.unwrap().1.as_str(), "42");
+    }
+
+    #[test]
+    fn does_not_set_service_name() {
+        let path = write_conf(
+            "otel-aws-beanstalk-no-service-name.conf",
+            r#"{"deployment_id": 1, "environment_name": "env", "version_label": "v"}"#,
+        );
+
+        let got = BeanstalkResourceDetector::detect_with_path(&path);
+        let _ = std::fs::remove_file(&path);
+
+        assert!(got.iter().all(|(k, _)| k.as_str() != semco::SERVICE_NAME));
     }
 
     #[test]
@@ -185,10 +193,8 @@ mod tests {
 
         assert!(got
             .iter()
-            .any(|(k, _)| k.as_str() == semco::SERVICE_NAMESPACE));
-        assert!(got
-            .iter()
-            .all(|(k, _)| k.as_str() != semco::SERVICE_INSTANCE_ID));
+            .any(|(k, _)| k.as_str() == semco::DEPLOYMENT_ENVIRONMENT_NAME));
+        assert!(got.iter().all(|(k, _)| k.as_str() != semco::DEPLOYMENT_ID));
         assert!(got
             .iter()
             .all(|(k, _)| k.as_str() != semco::SERVICE_VERSION));
