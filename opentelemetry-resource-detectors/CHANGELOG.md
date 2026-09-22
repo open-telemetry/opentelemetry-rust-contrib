@@ -1,5 +1,13 @@
 # Changelog
 
+## vNext
+
+## v0.13.0
+
+Released 2026-Sep-21
+
+- Bump OpenTelemetry dependencies to 0.33.
+
 ## v0.12.0
 
 Released 2026-Aug-27
