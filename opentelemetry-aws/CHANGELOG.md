@@ -2,6 +2,10 @@
 
 ## vNext
 
+### Added
+
+- `BeanstalkResourceDetector` (`detector-aws-beanstalk` feature)
+
 ## v0.21.0
 
 Released 2026-Sep-21
@@ -15,7 +19,6 @@ Released 2026-Sep-21
 - `Ec2ResourceDetector` (`detector-aws-ec2` feature)
 - `EcsResourceDetector` (`detector-aws-ecs` feature)
 - `EksResourceDetector` (`detector-aws-eks` feature)
-- `BeanstalkResourceDetector` (`detector-aws-beanstalk` feature)
 
 ### Changed
 
