@@ -2,6 +2,10 @@
 
 ## vNext
 
+### Added
+
+- `BeanstalkResourceDetector` (`detector-aws-beanstalk` feature)
+
 ## v0.21.0
 
 Released 2026-Sep-21
