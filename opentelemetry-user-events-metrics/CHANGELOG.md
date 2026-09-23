@@ -12,8 +12,12 @@
   When a `user_events` tracepoint is consumed through perf, the kernel copies
   the record into a `PERF_MAX_TRACE_SIZE` (8192 byte) per-CPU buffer, and an
   event that does not fit is dropped without any error being reported to the
-  writer. The limit is now derived from that bound. This had no effect before
-  batching, because a single data point never approached 64KB.
+  writer. The limit is now derived from that bound. Before batching this
+  rarely mattered, since one event carried one data point, but any single data
+  point whose encoded event exceeded 8KB — a large attribute set, or a
+  histogram with many buckets — already passed the old 64KB check and was
+  silently discarded by the kernel. Batching made the incorrect limit routine
+  rather than introducing the problem.
 - Fixed the aggregation temporality written to the wire. The SDK's `Temporality`
   and OTLP's `AggregationTemporality` do not use the same discriminants, and the
   exporter cast between them directly. Cumulative data — which is what the SDK

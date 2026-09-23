@@ -2611,8 +2611,10 @@ mod tests {
     /// pass if the exporter were wildly over-conservative and silently dropped
     /// points that the kernel would have accepted. This binary-searches the
     /// exact attribute size at which delivery stops, then asserts that the
-    /// largest delivered event genuinely fills the budget. That is what proves
-    /// the accounting is tight rather than merely safe.
+    /// largest delivered event is exactly `MAX_EVENT_SIZE`. Because the event
+    /// came back out of the perf ring buffer, that equality is what proves the
+    /// constant matches the kernel's real budget in both directions rather
+    /// than merely erring on the safe side.
     #[ignore]
     #[test]
     fn integration_test_single_data_point_cutoff_is_exact() {
@@ -2667,19 +2669,28 @@ mod tests {
             crate::exporter::MAX_EVENT_SIZE
         );
 
-        // Growing the attribute by one byte grows the encoded request by one
-        // byte (plus at most a few bytes of varint growth in the enclosing
-        // length delimiters), so a tight implementation must land within
-        // `SIZE_SLACK` of the budget. A larger gap means usable space is being
-        // given away and near-limit data points are dropped unnecessarily.
-        let headroom = crate::exporter::MAX_EVENT_SIZE - largest;
-        assert!(
-            headroom <= crate::exporter::SIZE_SLACK,
-            "the largest deliverable data point leaves {headroom} bytes of the {} byte \
-             budget unused, which is more than the {} bytes of slack the encoder reserves; \
-             the size accounting is over-conservative and is dropping valid data points",
+        // The exporter admits a lone data point unconditionally and then gates
+        // it on the exact encoded length, so the largest deliverable event must
+        // land exactly on the budget. Asserting equality proves both directions
+        // of the invariant at once:
+        //
+        //   * not over-conservative - no usable byte is given away, so valid
+        //     data points are not dropped unnecessarily;
+        //   * not over-permissive - the kernel accepted a record of exactly
+        //     `MAX_EVENT_SIZE`, so the constant is not larger than what
+        //     `perf_trace_buf_alloc()` will take. That direction is the one
+        //     that loses data silently, and a tolerance here would hide it: if
+        //     the true budget were a few bytes smaller, the search would simply
+        //     converge lower and a loose bound would still pass.
+        assert_eq!(
+            largest,
             crate::exporter::MAX_EVENT_SIZE,
-            crate::exporter::SIZE_SLACK
+            "the largest event the kernel delivered is {largest} bytes but the budget is {}; \
+             if it is smaller, MAX_EVENT_SIZE is too permissive and events between the two \
+             sizes are being written and silently discarded by the kernel, and if the \
+             encoding can no longer land exactly on the budget this assertion needs to be \
+             re-derived rather than loosened",
+            crate::exporter::MAX_EVENT_SIZE
         );
     }
 
