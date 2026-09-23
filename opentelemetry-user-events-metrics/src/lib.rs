@@ -999,7 +999,7 @@ mod tests {
         test_utils::assert_envelope_repeated(&decoded, RESOURCE_ATTRS, "user-event-test");
 
         // Batching must collapse many data points into far fewer events. With
-        // ~60 byte data points and an 8168 byte budget this is roughly a 100x
+        // ~60 byte data points and a 4000 byte budget this is roughly a 50x
         // reduction; assert a very loose 10x so the test is about the behaviour,
         // not about a particular encoding size.
         assert!(
@@ -2196,9 +2196,8 @@ mod tests {
     fn integration_test_batching_boundary_size_sweep() {
         test_utils::check_user_events_available().expect("Kernel does not support user_events.");
 
-        // Sizes chosen to straddle protobuf varint length boundaries (127/128
-        // and 16383/16384 are where the length delimiter grows).
-        const VALUE_SIZES: [usize; 10] = [1, 63, 126, 127, 128, 129, 255, 512, 1024, 4096];
+        // Sizes chosen to straddle the protobuf varint length boundary at 127/128.
+        const VALUE_SIZES: [usize; 10] = [1, 63, 126, 127, 128, 129, 255, 512, 1024, 2048];
         const SERIES: usize = 40;
 
         for size in VALUE_SIZES {
@@ -2258,8 +2257,8 @@ mod tests {
     fn integration_test_single_data_point_size_limit_is_monotonic() {
         test_utils::check_user_events_available().expect("Kernel does not support user_events.");
 
-        // Around the 8168 byte budget, minus the resource/scope/metric envelope.
-        const SIZES: [usize; 9] = [4096, 6144, 7168, 7680, 7900, 8000, 8100, 8192, 16384];
+        // Around the 4000 byte budget, minus the resource/scope/metric envelope.
+        const SIZES: [usize; 9] = [1024, 2048, 3072, 3500, 3700, 3800, 3900, 4096, 16384];
 
         let mut delivered = Vec::new();
         for size in SIZES {
@@ -2284,7 +2283,7 @@ mod tests {
 
         assert_eq!(
             delivered[0].1, 1,
-            "a 4 KiB data point must fit in one event"
+            "a 1 KiB data point must fit in one event"
         );
         assert_eq!(
             delivered.last().expect("sizes must not be empty").1,
@@ -2612,9 +2611,8 @@ mod tests {
     /// points that the kernel would have accepted. This binary-searches the
     /// exact attribute size at which delivery stops, then asserts that the
     /// largest delivered event is exactly `MAX_EVENT_SIZE`. Because the event
-    /// came back out of the perf ring buffer, that equality is what proves the
-    /// constant matches the kernel's real budget in both directions rather
-    /// than merely erring on the safe side.
+    /// came back out of the perf ring buffer, that equality proves the full
+    /// exporter budget is usable, not that it is the kernel's maximum.
     #[ignore]
     #[test]
     fn integration_test_single_data_point_cutoff_is_exact() {
@@ -2765,16 +2763,16 @@ mod tests {
             decoded.len()
         };
 
-        // At 512 bytes each both points share one event; at 4096 bytes each
+        // At 512 bytes each both points share one event; at 2048 bytes each
         // they cannot.
         let mut lo = 512;
-        let mut hi = 4096;
+        let mut hi = 2048;
         assert_eq!(
             probe(lo),
             1,
             "two 512 byte data points must share one event"
         );
-        assert_eq!(probe(hi), 2, "two 4 KiB data points cannot share one event");
+        assert_eq!(probe(hi), 2, "two 2 KiB data points cannot share one event");
 
         // Invariant: `lo` fits in one event, `hi` requires two.
         while hi - lo > 1 {

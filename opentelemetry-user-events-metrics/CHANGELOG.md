@@ -2,27 +2,7 @@
 
 ## vNext
 
-- Pack multiple metric data points into each `user_events` write instead of
-  emitting one event per data point. The resource/scope/metric envelope is now
-  amortized across every data point that fits within a single event, which
-  substantially reduces both the bytes written to the per-CPU perf ring buffer
-  and the number of writes per export cycle. Batching is per-metric: a single
-  event never mixes data points from different metrics or scopes.
-- Fixed the maximum tracepoint event size, which was previously set to 64KB.
-  When a `user_events` tracepoint is consumed through perf, the kernel copies
-  the record into a `PERF_MAX_TRACE_SIZE` (8192 byte) per-CPU buffer, and an
-  event that does not fit is dropped without any error being reported to the
-  writer. The limit is now derived from that bound. Before batching this
-  rarely mattered, since one event carried one data point, but any single data
-  point whose encoded event exceeded 8KB — a large attribute set, or a
-  histogram with many buckets — already passed the old 64KB check and was
-  silently discarded by the kernel. Batching made the incorrect limit routine
-  rather than introducing the problem.
-- Fixed the aggregation temporality written to the wire. The SDK's `Temporality`
-  and OTLP's `AggregationTemporality` do not use the same discriminants, and the
-  exporter cast between them directly. Cumulative data — which is what the SDK
-  produces for `UpDownCounter` and `ObservableUpDownCounter` — was therefore
-  written as `AGGREGATION_TEMPORALITY_UNSPECIFIED`.
+- Improve metrics export efficiency and reliability with batching, and fix cumulative metric reporting.
 
 ## v0.14.0
 

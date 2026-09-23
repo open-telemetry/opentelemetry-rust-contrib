@@ -19,16 +19,11 @@ use std::pin::Pin;
 /// Maximum number of protobuf payload bytes that may be written in a single
 /// tracepoint event.
 ///
-/// A `user_events` tracepoint consumed through perf goes through
-/// `user_event_perf()`, which copies the record into a per-CPU scratch buffer
-/// obtained from `perf_trace_buf_alloc()`. That buffer is `PERF_MAX_TRACE_SIZE`
-/// (8192) bytes. If the record does not fit, `perf_trace_buf_alloc()` returns
-/// NULL and `user_event_perf()` returns without submitting anything, so the
-/// write silently succeeds from userspace while the event never reaches the
-/// consumer.
-///
-/// The size the kernel accounts for is
-/// `ALIGN(sizeof(struct trace_entry) + bytes_written_after_the_write_index, 8)`:
+/// Use a conservative budget for ftrace consumers with 4 KiB ring-buffer
+/// pages. Reserve 96 bytes for page and record headers, alignment, timestamps,
+/// and the fixed tracepoint fields below. This also fits perf's larger
+/// `PERF_MAX_TRACE_SIZE` (8192 byte) buffer. Oversized records can be silently
+/// dropped by either consumer even when the userspace write succeeds.
 ///
 /// | component                         | bytes |
 /// |-----------------------------------|-------|
@@ -38,13 +33,9 @@ use std::pin::Pin;
 /// | `__rel_loc` descriptor for buffer | 4     |
 /// | **fixed overhead**                | 24    |
 ///
-/// which leaves `8192 - 24 = 8168` bytes for the payload itself. See
-/// `src/tracepoint/mod.rs` for the field layout this is derived from.
-///
-/// Note that a consumer reading the same tracepoint through ftrace rather than
-/// perf is bounded by the trace ring buffer's per-event limit (roughly one
-/// page) instead, which is smaller still.
-pub(crate) const MAX_EVENT_SIZE: usize = 8168;
+/// See `src/tracepoint/mod.rs` for the tracepoint field layout. This is a
+/// conservative payload budget, not the exact kernel acceptance boundary.
+pub(crate) const MAX_EVENT_SIZE: usize = 4000;
 
 /// Safety margin, in bytes, reserved when deciding whether another data point
 /// fits into the current batch.
