@@ -2,6 +2,8 @@
 
 ## vNext
 
+- Improve metrics export efficiency and reliability with batching, and fix cumulative metric reporting.
+
 ## v0.14.0
 
 Released 2026-Sep-21

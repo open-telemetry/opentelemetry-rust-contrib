@@ -20,6 +20,7 @@ prost = "0.14"
 [dev-dependencies]
 tokio = { version = "1.0", features = ["full"] }
 tracing-subscriber = { version = "0.3", features = ["env-filter","registry", "std", "fmt"] }
+criterion = "0.8"
 
 # Linux-only: in-process user_events consumer used by the integration tests to
 # read the `otlp_metrics` tracepoint directly from the perf ring buffer instead
@@ -30,6 +31,10 @@ one_collect = "0.1.34532"
 [features]
 internal-logs = ["opentelemetry/internal-logs", "opentelemetry_sdk/internal-logs", "opentelemetry-proto/internal-logs"]
 default = ["internal-logs"]
+
+[[bench]]
+name = "metrics"
+harness = false
 
 [package.metadata.cargo-machete]
 ignored = ["tracing"]
