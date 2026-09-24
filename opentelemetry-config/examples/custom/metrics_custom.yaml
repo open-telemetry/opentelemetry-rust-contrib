@@ -1,10 +1,15 @@
-metrics:
-    readers:
-        - periodic:
-            exporter:
-                custom:
-                    custom_string_field: delta
-                    custom_int_field: 42
+file_format: "1.2"
 resource:
-    service.name: "test-service"
-    service.version: "1.0.0"
+  attributes:
+    - name: service.name
+      value: "test-service"
+    - name: service.version
+      value: "1.0.0"
+meter_provider:
+  readers:
+    - periodic:
+        interval: 60000
+        exporter:
+          custom:
+            custom_string_field: delta
+            custom_int_field: 42
