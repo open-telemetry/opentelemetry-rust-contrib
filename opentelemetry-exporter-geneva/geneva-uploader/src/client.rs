@@ -426,22 +426,21 @@ impl GenevaClient {
         );
         let config_version = format!("Ver{}v0", config_major_version);
 
-        // Metadata fields that will appear as Bond schema fields in Geneva.
+        // Common Schema metadata is independent of the Geneva transport
+        // environment and GCS configuration version.
         let metadata_fields = MetadataFields::new(
-            environment,
-            config_version.clone(),
             tenant,
             role_name,
             role_instance,
-            namespace,
-            config_version,
+            namespace.clone(),
+            config_version.clone(),
         );
 
         let uploader_config = GenevaUploaderConfig {
-            namespace: metadata_fields.namespace.clone(),
+            namespace,
             source_identity,
-            environment: metadata_fields.env_name.clone(),
-            config_version: metadata_fields.event_version.clone(),
+            environment,
+            config_version,
         };
 
         (
@@ -862,6 +861,17 @@ mod tests {
 
     fn build_client(logs: Option<&str>, spans: Option<&str>) -> GenevaClient {
         GenevaClient::new(build_config(logs, spans)).expect("client should initialize")
+    }
+
+    /// Scenario: Geneva transport uses a GCS environment and configuration version.
+    /// Guarantees: Deriving payload metadata does not alter the uploader routing values.
+    #[test]
+    fn derive_parts_preserves_transport_environment_and_version() {
+        let (uploader, metadata) = GenevaClient::derive_parts(build_config(None, None));
+
+        assert_eq!(uploader.environment, "Test");
+        assert_eq!(uploader.config_version, "Ver2v0");
+        assert_eq!(metadata.metadata_fields.event_version, "Ver2v0");
     }
 
     fn build_span_client(

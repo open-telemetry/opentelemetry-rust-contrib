@@ -1,6 +1,23 @@
 # Changelog
 
-## [Unreleased]
+## [0.8.0] - 2026-09-22
+
+### Changed
+
+- Update `opentelemetry-proto` to 0.33. Applications passing OTLP protobuf types to the uploader must use the same version.
+
+## [0.7.1] - 2026-09-07
+
+### Fixed
+- Emit compatible Common Schema metadata for OTLP logs and spans, including `env_ver=4.0`, event-based `env_name`, uppercase `TIMESTAMP`, canonical log severity field casing, and a default Part B log name.
+- Include OTLP resource and instrumentation-scope attributes in log payloads. Log-record attributes take precedence over scope attributes, which take precedence over resource attributes, while fixed Common Schema fields remain authoritative. Resource `service.name` and `service.instance.id` remain represented by `Role` and `RoleInstance` without redundant dynamic columns.
+
+## [0.7.0] - 2026-09-03
+
+### Changed
+- Update `otel-arrow-dfe-pdata` and `otel-arrow-dfe-pdata-views` to 0.54.1.
+
+## [0.6.0] - 2026-09-03
 
 ### Added
 - New `tls-rustls` feature flag enables a pure-Rust TLS backend as an alternative to the default `tls-native` (native-tls / OpenSSL) backend. The two flags are additive (so `--all-features` builds compile cleanly); if both are enabled simultaneously, `tls-rustls` takes precedence at runtime. No built-in crypto provider (e.g. ring) is compiled in; consumers **must** install a `rustls::crypto::CryptoProvider` (e.g. `rustls-symcrypt`) at process start. The uploader returns a clear error if no provider is found.
@@ -27,10 +44,9 @@
   required and `account_group_mapping` supplies optional final-event-name
   overrides.
 - Bump opentelemetry-proto version to 0.32.
-- Bump pinned `otel-arrow` rev for `otap-df-pdata` and `otap-df-pdata-views`
-  to `4f522d2e` so consumers can unify on a single `otap-df-pdata-views`
-  version and avoid duplicate `LogsDataView` trait errors. API-compatible;
-  the view trait signatures are unchanged.
+- Replace the Git-pinned `otap-df-pdata` and `otap-df-pdata-views`
+  dependencies with the published `otel-arrow-dfe-pdata` and
+  `otel-arrow-dfe-pdata-views` 0.53.0 crates.
 - `GenevaClientConfig` now applies signal-specific defaults consistently on emitted batches: when `logs.default_event_name` / `spans.default_event_name` is set, encoded batches use that value as `event_name`; when unset, they fall back to `Log` and `Span` respectively.
 - **Breaking:** `GenevaClientConfig.logs` and `.spans` changed from `LogsConfig` / `TracesConfig` to `Option<LogsConfig>` / `Option<TracesConfig>`. Pass `None` to use the default `Log` / `Span` table names.
 

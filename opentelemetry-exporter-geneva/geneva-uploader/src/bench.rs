@@ -21,8 +21,6 @@ mod benchmarks {
 
     fn make_metadata(namespace: &str) -> MetadataFields {
         MetadataFields::new(
-            "BenchmarkEnv".to_string(),
-            "Ver1v0".to_string(),
             "BenchmarkTenant".to_string(),
             "BenchmarkRole".to_string(),
             "BenchmarkRoleInstance".to_string(),

@@ -4,10 +4,26 @@
 
 ### Added
 
+- `BeanstalkResourceDetector` (`detector-aws-beanstalk` feature)
+
+## v0.21.0
+
+Released 2026-Sep-21
+
+### Added
+
 - Read `cloud.account.id` from symlink created by the OTel Lambda Extension in the Lambda resource detector
 - `XrayExtractor` has been added to extract the X-Ray Trace ID from the `x-amzn-trace-id` HTTP header or the `_X_AMZN_TRACE_ID` environment variable as a fallback.
 - `MissingSampledBehavior` enum and `XrayPropagator::with_missing_sampled_behavior()` to configure behavior when the `Sampled` field is absent from the trace header
 - AWS X-Ray span exporter (`xray-exporter` feature) for converting OpenTelemetry spans into X-Ray segment documents. Includes `XrayExporter`, `SegmentTranslator`, `SegmentDocumentExporter` trait, `XrayDaemonClient` (`xray-daemon-client` feature), `StdoutClient` (`xray-stdout-client` feature), and optional subsegment nesting (`xray-subsegment-nesting` feature).
+- `Ec2ResourceDetector` (`detector-aws-ec2` feature)
+- `EcsResourceDetector` (`detector-aws-ecs` feature)
+- `EksResourceDetector` (`detector-aws-eks` feature)
+
+### Changed
+
+- Bump OpenTelemetry dependencies to 0.33.
+- the Lambda detector now add "cloud.platform = aws_lambda" and no longer set empty values in case of errors or missing environment variables
 
 ## v0.20.0
 

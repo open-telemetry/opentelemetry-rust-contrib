@@ -1,7 +1,7 @@
 [package]
 name = "opentelemetry-user-events-trace"
 description = "OpenTelemetry-Rust exporter to user_events"
-version = "0.5.0"
+version = "0.6.0"
 edition = "2021"
 homepage = "https://github.com/open-telemetry/opentelemetry-rust-contrib/tree/main/opentelemetry-user-events-traces"
 repository = "https://github.com/open-telemetry/opentelemetry-rust-contrib/tree/main/opentelemetry-user-events-traces"
@@ -16,7 +16,6 @@ eventheader_dynamic = "0.5.0"
 opentelemetry = { workspace = true, features = ["trace"] }
 opentelemetry_sdk = { workspace = true, features = ["trace"] }
 chrono = { version = "0.4", default-features = false, features = ["std"] }
-futures-executor = "0.3"
 
 [dev-dependencies]
 tracing = { version = "0.1", default-features = false, features = ["std"] }

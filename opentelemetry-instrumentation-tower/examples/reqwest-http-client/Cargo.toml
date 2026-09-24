@@ -8,7 +8,7 @@ rust-version = "1.75.0"
 opentelemetry_instrumentation_tower = { path = "../../", package = "opentelemetry-instrumentation-tower", features = ["http-client"], default-features = false }
 opentelemetry = { workspace = true }
 opentelemetry_sdk = { workspace = true, default-features = false }
-opentelemetry-otlp = { workspace = true, features = ["grpc-tonic", "metrics", "trace"] }
+opentelemetry-otlp = { version = "0.33", features = ["grpc-tonic", "metrics", "trace"], default-features = false }
 reqwest = { version = "0.13" }
 tower-reqwest = { version = "0.6", default-features = false }
 http = { version = "1", default-features = false }

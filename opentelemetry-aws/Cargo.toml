@@ -1,6 +1,6 @@
 [package]
 name = "opentelemetry-aws"
-version = "0.20.0"
+version = "0.21.0"
 description = "AWS exporters and propagators for OpenTelemetry"
 homepage = "https://github.com/open-telemetry/opentelemetry-rust-contrib/tree/main/opentelemetry-aws"
 repository = "https://github.com/open-telemetry/opentelemetry-rust-contrib/tree/main/opentelemetry-aws"
@@ -23,7 +23,14 @@ default = ["trace", "internal-logs"]
 internal-logs = ["dep:tracing"]
 
 trace = ["http", "opentelemetry/trace", "opentelemetry_sdk/trace"]
-detector-aws-lambda = ["dep:opentelemetry-semantic-conventions"]
+
+_detector = ["dep:opentelemetry_sdk", "dep:opentelemetry-semantic-conventions"]
+_detector-http = ["dep:ureq", "dep:serde", "dep:thiserror"]
+detector-aws-lambda = ["_detector"]
+detector-aws-ec2 = ["_detector", "_detector-http"]
+detector-aws-ecs = ["_detector", "_detector-http"]
+detector-aws-eks = ["_detector", "_detector-http"]
+detector-aws-beanstalk = ["_detector", "dep:serde", "dep:serde_json"]
 
 xray-exporter = [
     "opentelemetry/trace",
@@ -52,6 +59,7 @@ serde_json = {version = "1.0", optional = true}
 thiserror = {version = "2.0", optional = true}
 regex = {version = "1.0", optional = true}
 rand = {version = "0.9", optional = true}
+ureq = { version = "3.2", default-features = false, features = ["json"], optional = true }
 
 [dev-dependencies]
 opentelemetry-aws = {path = ".", features = ["xray-exporter", "xray-subsegment-nesting", "xray-daemon-client"] }
@@ -61,6 +69,7 @@ opentelemetry-stdout = { workspace = true, features = ["trace"] }
 hyper = { version = "1.4.1" }
 tokio = { version = "1.0", features = ["macros", "rt", "rt-multi-thread"] }
 sealed_test = "1.1"
+serde_json = "1.0"
 temp-env = "0.3"
 criterion = { workspace = true, features = ["html_reports", "async_tokio"] }
 rand = "0.9"

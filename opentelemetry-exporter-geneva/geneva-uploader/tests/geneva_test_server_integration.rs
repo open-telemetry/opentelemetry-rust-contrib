@@ -3,8 +3,11 @@ use geneva_uploader::{
     AccountRouting, AuthMethod, GenevaClient, GenevaClientConfig, LogsConfig, TracesConfig,
 };
 use opentelemetry_proto::tonic::collector::logs::v1::ExportLogsServiceRequest;
-use opentelemetry_proto::tonic::common::v1::{any_value::Value, AnyValue, KeyValue};
+use opentelemetry_proto::tonic::common::v1::{
+    any_value::Value, AnyValue, InstrumentationScope, KeyValue,
+};
 use opentelemetry_proto::tonic::logs::v1::{LogRecord, ResourceLogs, ScopeLogs};
+use opentelemetry_proto::tonic::resource::v1::Resource;
 use otap_df_pdata::views::otlp::bytes::logs::RawLogsData;
 use prost::Message as _;
 use std::collections::HashSet;
@@ -40,7 +43,23 @@ async fn uploader_batch_is_accepted_and_decoded_by_test_server() {
 
     let request = ExportLogsServiceRequest {
         resource_logs: vec![ResourceLogs {
+            resource: Some(Resource {
+                attributes: vec![
+                    string_attr("microsoft.resourceId", "/subscriptions/test"),
+                    string_attr("shared", "resource"),
+                    string_attr("scope-wins", "resource"),
+                ],
+                ..Default::default()
+            }),
             scope_logs: vec![ScopeLogs {
+                scope: Some(InstrumentationScope {
+                    attributes: vec![
+                        string_attr("scope.attribute", "scope-value"),
+                        string_attr("shared", "scope"),
+                        string_attr("scope-wins", "scope"),
+                    ],
+                    ..Default::default()
+                }),
                 log_records: vec![LogRecord {
                     time_unix_nano: 1_718_432_000_000_000_000,
                     event_name: "CheckoutEvent".to_string(),
@@ -48,6 +67,7 @@ async fn uploader_batch_is_accepted_and_decoded_by_test_server() {
                     severity_text: "ERROR".to_string(),
                     attributes: vec![
                         string_attr("operation", "checkout"),
+                        string_attr("shared", "record"),
                         int_attr("result", 127),
                     ],
                     body: Some(AnyValue {
@@ -73,7 +93,15 @@ async fn uploader_batch_is_accepted_and_decoded_by_test_server() {
     let payload = &records[0]["payload"];
     assert_eq!(payload["Role"], "checkout");
     assert_eq!(payload["RoleInstance"], "instance-1");
+    assert_eq!(payload["env_name"], "Log");
+    assert_eq!(payload["env_ver"], "4.0");
+    assert_eq!(payload["TIMESTAMP"], payload["env_time"]);
+    assert_eq!(payload["name"], "CheckoutEvent");
     assert_eq!(payload["body"], "checkout failed");
+    assert_eq!(payload["microsoft.resourceId"], "/subscriptions/test");
+    assert_eq!(payload["scope.attribute"], "scope-value");
+    assert_eq!(payload["scope-wins"], "scope");
+    assert_eq!(payload["shared"], "record");
     assert_eq!(payload["operation"], "checkout");
     assert_eq!(payload["result"], 127);
     let first_request_id = detail["request_id"]
@@ -127,9 +155,13 @@ async fn uploader_batch_is_accepted_and_decoded_by_test_server() {
     let payload = &records[0]["payload"];
     assert_eq!(payload["Role"], "checkout");
     assert_eq!(payload["RoleInstance"], "instance-1");
+    assert_eq!(payload["env_name"], "Log");
+    assert_eq!(payload["env_ver"], "4.0");
+    assert_eq!(payload["TIMESTAMP"], payload["env_time"]);
+    assert_eq!(payload["name"], "CommonSchemaCheckoutEvent");
     assert_eq!(payload["body"], "common schema checkout failed");
-    assert_eq!(payload["SeverityNumber"], 17);
-    assert_eq!(payload["SeverityText"], "ERROR");
+    assert_eq!(payload["severityNumber"], 17);
+    assert_eq!(payload["severityText"], "ERROR");
     assert_eq!(payload["operation"], "checkout");
     assert_eq!(payload["result"], 127);
 }

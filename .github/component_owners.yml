@@ -18,15 +18,13 @@
 components:
   opentelemetry-aws/:
     - jj22ee
+    - chinmaychahar
 
   opentelemetry-config/:
     - andborja
 
   # TBD - seeking owners. Issues fall back to @open-telemetry/rust-approvers.
   opentelemetry-contrib/: []
-
-  opentelemetry-datadog/:
-    - gruebel
 
   opentelemetry-etw-logs/:
     - cijothomas
@@ -55,9 +53,6 @@ components:
 
   opentelemetry-resource-detectors/:
     - gruebel
-
-  # TBD - seeking owners. Issues fall back to @open-telemetry/rust-approvers.
-  opentelemetry-stackdriver/: []
 
   opentelemetry-user-events-logs/:
     - cijothomas

@@ -13,6 +13,33 @@
 //! - [`http::extractors`] — pluggable route and attribute extractors shared by
 //!   the server and client layers.
 //!
+//! # Metrics
+//!
+//! - `http.server.request.duration` — duration of HTTP server requests.
+//! - `http.server.active_requests` — number of in-flight HTTP server requests.
+//! - `http.server.request.body.size` — size of HTTP server request bodies.
+//! - `http.server.response.body.size` — size of HTTP server response bodies.
+//! - `http.client.request.duration` — duration of HTTP client requests.
+//! - `http.client.request.body.size` — size of HTTP client request bodies.
+//! - `http.client.response.body.size` — size of HTTP client response bodies.
+//!
+//! # Tracing
+//!
+//! A server span (`SpanKind::Server`) is created per request, with attributes such
+//! as `http.request.method`, `url.scheme`, `url.path`, `url.query`,
+//! `user_agent.original`, `http.route`, and `http.response.status_code`.
+//!
+//! A client span (`SpanKind::Client`) is created per request, with attributes such
+//! as `http.request.method`, `url.full`, `url.scheme`, `server.address`,
+//! `server.port`, and `http.response.status_code`.
+//!
+//! The value of a query parameter that can carry a credential, such as `sig`, is
+//! replaced with `REDACTED` in `url.query` and `url.full`. The client layer also
+//! replaces the user information of `url.full` with `REDACTED:REDACTED`. Use
+//! [`http::server::LayerBuilder::with_sensitive_query_parameters`] and
+//! [`http::client::LayerBuilder::with_sensitive_query_parameters`] to name the
+//! keys yourself.
+//!
 //! # Quick start
 //!
 //! ```ignore

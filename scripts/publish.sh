@@ -3,12 +3,10 @@
 packages=(
     "opentelemetry-aws"
     "opentelemetry-contrib"
-    "opentelemetry-datadog"
     "opentelemetry-etw-logs"
     "opentelemetry-etw-metrics"
     "opentelemetry-instrumentation-actix-web"
     "opentelemetry-resource-detectors"
-    "opentelemetry-stackdriver"
     "opentelemetry-user-events-logs"
     "opentelemetry-user-events-metrics"
     "opentelemetry-user-events-trace"

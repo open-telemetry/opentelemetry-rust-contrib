@@ -1942,12 +1942,11 @@ impl<'a> LogsDataView for FlatLogsView<'a> {
 /// from `records` without any intermediate OTLP serialisation.
 ///
 /// # Limitations
-/// Each record is treated as a standalone log entry.  Resource attributes
-/// (service name, host, etc.) and instrumentation scope metadata are **not**
-/// supported by this path and are silently ignored.  Note that the OTLP path
-/// ([`geneva_encode_and_compress_logs`]) also does not yet propagate resource
-/// or scope attributes into the encoded output; that is a known limitation
-/// tracked for a future release.
+/// Each record is treated as a standalone log entry. [`GenevaLogRecordC`] does
+/// not expose resource or instrumentation scope attributes, so they cannot be
+/// supplied through this path. Use the OTLP path
+/// ([`geneva_encode_and_compress_logs`]) to propagate resource and scope
+/// attributes into the encoded output.
 ///
 /// # Parameters
 /// - `handle`: valid client handle returned by [`geneva_client_new`].

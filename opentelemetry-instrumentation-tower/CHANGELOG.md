@@ -4,15 +4,6 @@
 
 ### Added
 
-* `http::server::LayerBuilder::with_tracing(bool)` and
-  `http::server::LayerBuilder::with_metrics(bool)` to enable or disable each
-  signal for a layer (both default to enabled). Disabling tracing does not stop
-  context propagation: incoming trace headers are still extracted and the
-  current context still flows to the inner service.
-  [#679](https://github.com/open-telemetry/opentelemetry-rust-contrib/pull/679)
-* The instrumentation scope now carries the OpenTelemetry semantic conventions
-  schema URL.
-  [#679](https://github.com/open-telemetry/opentelemetry-rust-contrib/pull/679)
 * HTTP client instrumentation layer (`http::client::Layer`) producing a
   `SpanKind::Client` span and the standard `http.client.*` metrics, and
   injecting the current trace context into outgoing request headers.
@@ -29,15 +20,61 @@
   client layer with Hyper and reqwest clients via `tower-reqwest`, with OTLP
   export.
   [#700](https://github.com/open-telemetry/opentelemetry-rust-contrib/pull/700)
+* `http::client::LayerBuilder::with_sensitive_query_parameters` to name the
+  query parameter keys whose values the client layer redacts in `url.full`.
+  The default list is the same as the one of the server layer.
+  [#700](https://github.com/open-telemetry/opentelemetry-rust-contrib/pull/700)
+* `http::client::LayerBuilder::with_tracer_provider` and
+  `http::client::LayerBuilder::with_meter_provider`. The client scope carries
+  the semantic conventions schema URL, the same as the server scope.
+  [#700](https://github.com/open-telemetry/opentelemetry-rust-contrib/pull/700)
 
 ### Changed
 
-* **BREAKING**: Reorganized the public API into `http::server` and `http::client`
-  modules with unprefixed `Layer`, `LayerBuilder`, `Service`, and `ResponseFuture`
-  types, and moved the extractors into `http::extractors`. The `HTTPLayer` /
-  `HTTPService` / `HTTPLayerBuilder` / `ResponseFuture` types introduced in
-  v0.18.0 are replaced by
-  `http::server::{Layer, Service, ResponseFuture, LayerBuilder}`.
+* `http::extractors` now serves the `http::server` and the `http::client`
+  layers.
+  [#700](https://github.com/open-telemetry/opentelemetry-rust-contrib/pull/700)
+
+## v0.19.0
+
+Released 2026-Sep-21
+
+### Added
+
+* `http::server::LayerBuilder::with_tracing(bool)` and
+  `http::server::LayerBuilder::with_metrics(bool)` to enable or disable each
+  signal for a layer (both default to enabled). Disabling tracing does not stop
+  context propagation: incoming trace headers are still extracted and the
+  current context still flows to the inner service.
+  [#679](https://github.com/open-telemetry/opentelemetry-rust-contrib/pull/679)
+* The instrumentation scope now carries the OpenTelemetry semantic conventions
+  schema URL.
+  [#679](https://github.com/open-telemetry/opentelemetry-rust-contrib/pull/679)
+* The server span now carries `url.query` when the request target has a query
+  component. The HTTP server span requires the attribute in that case. The value
+  of a query parameter that can carry a credential is replaced with `REDACTED`:
+  `X-Amz-Signature`, `X-Amz-Credential`, `X-Amz-Security-Token`,
+  `AWSAccessKeyId`, `Signature`, `sig`, and `X-Goog-Signature`.
+  [#789](https://github.com/open-telemetry/opentelemetry-rust-contrib/pull/789)
+* `http::server::LayerBuilder::with_sensitive_query_parameters` to name the query
+  parameter keys whose values the layer redacts. The list replaces the default
+  one, and an empty list disables redaction.
+  [#789](https://github.com/open-telemetry/opentelemetry-rust-contrib/pull/789)
+
+### Changed
+
+* Bump OpenTelemetry dependencies to 0.33.
+* **BREAKING**: The server span no longer carries `url.full`. The attribute
+  belongs to the HTTP client span, a server receives a request target that is no
+  absolute URL, and the value repeated the query string, which would need the
+  same redaction. `url.path` and `url.query` describe the target instead.
+  [#789](https://github.com/open-telemetry/opentelemetry-rust-contrib/pull/789)
+
+* **BREAKING**: Reorganized the public API into an `http::server` module with
+  unprefixed `Layer`, `LayerBuilder`, `Service`, and `ResponseFuture` types, and
+  moved the extractors into `http::extractors`. The `HTTPLayer` / `HTTPService` /
+  `HTTPLayerBuilder` / `ResponseFuture` types introduced in v0.18.0 are replaced
+  by `http::server::{Layer, Service, ResponseFuture, LayerBuilder}`.
   [#717](https://github.com/open-telemetry/opentelemetry-rust-contrib/pull/717)
 
 ### Migration Guide
