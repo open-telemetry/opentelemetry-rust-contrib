@@ -190,7 +190,14 @@ meter_provider:
         .arg("test_end_to_end_console_exporter_initialization_and_shutdown")
         .env("RUN_CONSOLE_TEST_CHILD", "1")
         .output()
-        .expect("Failed to execute child process for console export test");
+        .expect("child process should execute successfully");
+
+    assert!(
+        output.status.success(),
+        "Child test process failed:\nSTDOUT: {}\nSTDERR: {}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
 
     let stdout = String::from_utf8_lossy(&output.stdout);
     assert!(
@@ -917,6 +924,37 @@ meter_provider:
     let providers =
         TelemetryProviders::configure_from_yaml_str(&registry, yaml_combined_nulls).unwrap();
     assert!(providers.meter_provider().is_some());
+
+    // 7. Resource attributes with valid types and null values are permitted and ignored
+    let yaml_resource_null_attrs = r#"
+file_format: "1.2"
+resource:
+  attributes:
+    - name: string.null
+      type: string
+      value: null
+    - name: bool.null
+      type: bool
+      value: null
+    - name: int.null
+      type: int
+      value: null
+    - name: double.null
+      type: double
+      value: null
+    - name: omitted.null
+      value: null
+    - name: valid.attr
+      value: "kept"
+meter_provider:
+  readers:
+    - periodic:
+        exporter:
+          console: {}
+"#;
+    let providers =
+        TelemetryProviders::configure_from_yaml_str(&registry, yaml_resource_null_attrs).unwrap();
+    assert!(providers.meter_provider().is_some());
 }
 
 #[test]
@@ -1458,6 +1496,34 @@ fn test_validation_rejects_invalid_resource_attribute_types() {
         (
             "name: amount\n      value: 1\n      type: custom",
             "has unsupported type 'custom'",
+        ),
+        (
+            "name: amount\n      value: null\n      type: invalid_type",
+            "has unsupported type 'invalid_type'",
+        ),
+        (
+            "name: amount\n      value: null\n      type: string_array",
+            "uses array type 'string_array' which is not supported",
+        ),
+        (
+            "name: amount\n      value: 'val'\n      type: null",
+            "type cannot be null",
+        ),
+        (
+            "name: amount\n      value: null\n      type: null",
+            "type cannot be null",
+        ),
+        (
+            "name: amount\n      value: 'val'\n      type: ~",
+            "type cannot be null",
+        ),
+        (
+            "name: amount\n      value: null\n      type: ~",
+            "type cannot be null",
+        ),
+        (
+            "name: amount\n      value: null\n      type: 123",
+            "type must be a string",
         ),
     ] {
         let yaml = format!("file_format: '1.2'\nresource:\n  attributes:\n    - {attribute}\n");
