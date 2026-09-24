@@ -10,7 +10,8 @@ use opentelemetry_sdk::error::{OTelSdkError, OTelSdkResult};
 use opentelemetry_sdk::trace::SpanData;
 use opentelemetry_sdk::Resource;
 use std::{
-    collections::HashMap,
+    borrow::Cow,
+    collections::{HashMap, HashSet},
     fmt::{Debug, Write},
     sync::{Arc, Mutex, OnceLock},
 };
@@ -79,6 +80,8 @@ pub(crate) struct UserEventsSpanExporter {
     event_set: Arc<EventSet>,
     cloud_role: Option<String>,
     cloud_role_instance: Option<String>,
+    attributes_from_resource: Vec<(Key, Value)>,
+    resource_attribute_keys: HashSet<Cow<'static, str>>,
 }
 
 impl Debug for UserEventsSpanExporter {
@@ -122,12 +125,27 @@ impl SpanExporter for UserEventsSpanExporter {
         self.cloud_role_instance = resource
             .get(&Key::from_static_str("service.instance.id"))
             .map(|v| v.to_string());
+        self.attributes_from_resource.clear();
+        for (key, value) in resource.iter() {
+            if matches!(key.as_str(), "service.name" | "service.instance.id") {
+                continue;
+            }
+            if self.resource_attribute_keys.contains(key.as_str()) {
+                self.attributes_from_resource
+                    .push((key.clone(), value.clone()));
+            } else {
+                otel_debug!(name: "UserEvents.ResourceAttributeIgnored", key = key.as_str(), message = "To include this attribute, add it via with_resource_attributes() method in the processor builder.");
+            }
+        }
     }
 }
 
 impl UserEventsSpanExporter {
     /// Create a new instance of the exporter
-    pub(crate) fn new(provider_name: &str) -> Result<Self, String> {
+    pub(crate) fn new(
+        provider_name: &str,
+        resource_attribute_keys: HashSet<Cow<'static, str>>,
+    ) -> Result<Self, String> {
         if provider_name.len() >= 234 {
             return Err("Provider name must be less than 234 characters.".to_string());
         }
@@ -152,6 +170,8 @@ impl UserEventsSpanExporter {
             event_set,
             cloud_role: None,
             cloud_role_instance: None,
+            attributes_from_resource: Vec::new(),
+            resource_attribute_keys,
         })
     }
 
@@ -175,6 +195,19 @@ impl UserEventsSpanExporter {
                 eb.add_str(field_name, "", FieldFormat::Default, 0);
             }
         }
+    }
+
+    fn part_c_field_count(&self, span_attribute_count: usize) -> Result<u8, OTelSdkError> {
+        let field_count = span_attribute_count + self.attributes_from_resource.len();
+        u8::try_from(field_count)
+            .ok()
+            .filter(|count| *count <= FieldFormat::ValueMask)
+            .ok_or_else(|| {
+                otel_info!(name: "UserEvents.EventWriteFailed", reason = "PartC exceeds the 127-field EventHeader struct limit", field_count = field_count);
+                OTelSdkError::InternalFailure(
+                    "PartC exceeds the 127-field EventHeader struct limit".to_string(),
+                )
+            })
     }
 
     pub(crate) fn export_span(&self, span: &SpanData) -> OTelSdkResult {
@@ -331,13 +364,17 @@ impl UserEventsSpanExporter {
                     + u8::from(has_links),
             );
 
-            // Add regular attributes to PartC if any.
-            if partc_attribute_count > 0 {
-                eb.add_struct("PartC", partc_attribute_count, 0);
+            // Add span attributes first, then selected resource attributes, as in logs.
+            let field_count = self.part_c_field_count(partc_attribute_count)?;
+            if field_count > 0 {
+                eb.add_struct("PartC", field_count, 0);
                 for kv in span.attributes.iter() {
                     if !well_known_attrs.contains_key(kv.key.as_str()) {
                         self.add_attribute_to_event(&mut eb, kv.key.as_str(), &kv.value);
                     }
+                }
+                for (key, value) in &self.attributes_from_resource {
+                    self.add_attribute_to_event(&mut eb, key.as_str(), value);
                 }
             }
 
@@ -366,6 +403,110 @@ impl UserEventsSpanExporter {
 mod tests {
     use super::*;
     use opentelemetry::trace::{Link, SpanContext, SpanId, TraceFlags, TraceId, TraceState};
+    use opentelemetry::KeyValue;
+
+    #[test]
+    fn resource_attributes_are_opt_in() {
+        let mut exporter = UserEventsSpanExporter::new("test_provider", HashSet::new()).unwrap();
+        exporter.set_resource(
+            &Resource::builder_empty()
+                .with_attributes([
+                    KeyValue::new("service.name", "test-service"),
+                    KeyValue::new("service.instance.id", "test-instance"),
+                    KeyValue::new("service.version", "1.0"),
+                ])
+                .build(),
+        );
+        assert_eq!(exporter.cloud_role.as_deref(), Some("test-service"));
+        assert_eq!(
+            exporter.cloud_role_instance.as_deref(),
+            Some("test-instance")
+        );
+        assert!(exporter.attributes_from_resource.is_empty());
+    }
+
+    #[test]
+    fn resource_attributes_are_selected_and_replaced() {
+        let keys = [
+            "service.name",
+            "service.instance.id",
+            "string",
+            "int",
+            "double",
+            "bool",
+            "missing",
+        ]
+        .into_iter()
+        .map(Cow::Borrowed)
+        .collect();
+        let mut exporter = UserEventsSpanExporter::new("test_provider", keys).unwrap();
+        let selected = [
+            KeyValue::new("string", "value"),
+            KeyValue::new("int", 42_i64),
+            KeyValue::new("double", 1.5_f64),
+            KeyValue::new("bool", true),
+        ];
+        let resource = Resource::builder_empty()
+            .with_attributes(selected.clone())
+            .with_attributes([
+                KeyValue::new("service.name", "test-service"),
+                KeyValue::new("service.instance.id", "test-instance"),
+                KeyValue::new("unselected", "ignored"),
+            ])
+            .build();
+        exporter.set_resource(&resource);
+        exporter.set_resource(&resource);
+        assert_eq!(exporter.attributes_from_resource.len(), selected.len());
+        for kv in selected {
+            assert!(exporter
+                .attributes_from_resource
+                .contains(&(kv.key, kv.value)));
+        }
+        assert_eq!(exporter.cloud_role.as_deref(), Some("test-service"));
+        assert_eq!(
+            exporter.cloud_role_instance.as_deref(),
+            Some("test-instance")
+        );
+
+        exporter.set_resource(
+            &Resource::builder_empty()
+                .with_attribute(KeyValue::new("string", "updated"))
+                .build(),
+        );
+        assert_eq!(
+            exporter.attributes_from_resource,
+            vec![(Key::from_static_str("string"), Value::from("updated"))]
+        );
+        assert!(exporter.cloud_role.is_none());
+        assert!(exporter.cloud_role_instance.is_none());
+
+        exporter.set_resource(&Resource::builder_empty().build());
+        assert!(exporter.attributes_from_resource.is_empty());
+    }
+
+    #[test]
+    fn part_c_counts_span_and_resource_fields_without_overflow() {
+        let mut exporter = UserEventsSpanExporter::new(
+            "test_provider",
+            [Cow::Borrowed("service.version")].into_iter().collect(),
+        )
+        .unwrap();
+        assert_eq!(exporter.part_c_field_count(0).unwrap(), 0);
+        assert_eq!(exporter.part_c_field_count(127).unwrap(), 127);
+        assert!(exporter.part_c_field_count(128).is_err());
+
+        exporter.set_resource(
+            &Resource::builder_empty()
+                .with_attribute(KeyValue::new("service.version", "1.0"))
+                .build(),
+        );
+        assert_eq!(exporter.part_c_field_count(0).unwrap(), 1);
+        assert_eq!(exporter.part_c_field_count(1).unwrap(), 2);
+        assert_eq!(exporter.part_c_field_count(126).unwrap(), 127);
+        assert!(exporter.part_c_field_count(127).is_err());
+        assert!(exporter.part_c_field_count(255).is_err());
+        assert!(exporter.part_c_field_count(256).is_err());
+    }
 
     #[test]
     fn links_to_json_empty() {
@@ -472,21 +613,22 @@ mod tests {
     #[test]
     fn provider_name_validation_rejects_too_long() {
         let long_name = "a".repeat(234);
-        assert!(UserEventsSpanExporter::new(&long_name).is_err());
+        assert!(UserEventsSpanExporter::new(&long_name, HashSet::new()).is_err());
     }
 
     #[test]
     fn provider_name_validation_rejects_special_chars() {
-        assert!(UserEventsSpanExporter::new("has-hyphen").is_err());
-        assert!(UserEventsSpanExporter::new("has space").is_err());
-        assert!(UserEventsSpanExporter::new("has.dot").is_err());
+        assert!(UserEventsSpanExporter::new("has-hyphen", HashSet::new()).is_err());
+        assert!(UserEventsSpanExporter::new("has space", HashSet::new()).is_err());
+        assert!(UserEventsSpanExporter::new("has.dot", HashSet::new()).is_err());
     }
 
     #[test]
     fn provider_name_validation_accepts_valid() {
         // Can't fully construct on non-Linux, but validation should pass
         assert!(
-            UserEventsSpanExporter::new("valid_name_123").is_ok() || cfg!(not(target_os = "linux"))
+            UserEventsSpanExporter::new("valid_name_123", HashSet::new()).is_ok()
+                || cfg!(not(target_os = "linux"))
         );
     }
 }
