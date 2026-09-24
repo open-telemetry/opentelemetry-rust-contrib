@@ -124,6 +124,35 @@ where
     }
 }
 
+/// Formats `uri` for `url.full`. The user information becomes
+/// `REDACTED:REDACTED`, and the query goes through [`redact_query`].
+#[cfg(feature = "http-client")]
+pub(crate) fn redact_url_full<S>(uri: &http::Uri, sensitive: &[S]) -> String
+where
+    S: AsRef<str>,
+{
+    let mut full = String::new();
+    if let Some(scheme) = uri.scheme_str() {
+        full.push_str(scheme);
+        full.push_str("://");
+    }
+    if let Some(authority) = uri.authority() {
+        match authority.as_str().rsplit_once('@') {
+            Some((_, host)) => {
+                full.push_str("REDACTED:REDACTED@");
+                full.push_str(host);
+            }
+            None => full.push_str(authority.as_str()),
+        }
+    }
+    full.push_str(uri.path());
+    if let Some(query) = uri.query() {
+        full.push('?');
+        full.push_str(&redact_query(query, sensitive));
+    }
+    full
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -259,6 +288,67 @@ mod tests {
                 "{}",
                 test_case.name
             );
+        }
+    }
+
+    #[cfg(feature = "http-client")]
+    #[test]
+    fn redact_url_full_redacts_credentials() {
+        struct TestCase {
+            name: &'static str,
+            uri: &'static str,
+            expected: &'static str,
+        }
+
+        let test_cases = [
+            TestCase {
+                name: "plain URL",
+                uri: "https://example.com/search?q=OpenTelemetry",
+                expected: "https://example.com/search?q=OpenTelemetry",
+            },
+            TestCase {
+                name: "URL with a port",
+                uri: "http://example.com:8080/",
+                expected: "http://example.com:8080/",
+            },
+            TestCase {
+                name: "URL without a path",
+                uri: "http://example.com",
+                expected: "http://example.com/",
+            },
+            TestCase {
+                name: "user information",
+                uri: "https://user:password@example.com/",
+                expected: "https://REDACTED:REDACTED@example.com/",
+            },
+            TestCase {
+                name: "user name only",
+                uri: "https://user@example.com/",
+                expected: "https://REDACTED:REDACTED@example.com/",
+            },
+            TestCase {
+                name: "sensitive query parameter",
+                uri: "https://example.com/path?q=OpenTelemetry&sig=abc123",
+                expected: "https://example.com/path?q=OpenTelemetry&sig=REDACTED",
+            },
+            TestCase {
+                name: "empty query",
+                uri: "https://example.com/path?",
+                expected: "https://example.com/path?",
+            },
+            TestCase {
+                name: "origin form",
+                uri: "/path?sig=abc123",
+                expected: "/path?sig=REDACTED",
+            },
+        ];
+
+        for test_case in test_cases {
+            let uri: http::Uri = test_case.uri.parse().unwrap();
+
+            let result = redact_url_full(&uri, DEFAULT_SENSITIVE_QUERY_PARAMETERS);
+
+            assert_eq!(result, test_case.expected, "{}", test_case.name);
         }
     }
 }
