@@ -19,18 +19,33 @@
 //! use opentelemetry_sdk::trace::SdkTracerProvider;
 //! use opentelemetry_user_events_trace::Processor;
 //!
-//! let processor = Processor::builder("my_provider").build()?;
+//! let processor = Processor::builder("my_provider")
+//!     .with_resource_attributes(["service.version"])
+//!     .build()?;
 //! let provider = SdkTracerProvider::builder()
 //!     .with_resource(
 //!         opentelemetry_sdk::Resource::builder()
 //!             .with_service_name("my-service")
 //!             .with_attribute(KeyValue::new("service.instance.id", "instance-1"))
+//!             .with_attribute(KeyValue::new("service.version", "1.0"))
 //!             .build(),
 //!     )
 //!     .with_span_processor(processor)
 //!     .build();
 //! # Ok::<(), Box<dyn std::error::Error>>(())
 //! ```
+//!
+//! All other resource attributes are ignored unless selected with
+//! [`ProcessorBuilder::with_resource_attributes`]. Selected attributes are cached
+//! and exported in Part C with their original keys, after span attributes.
+//! Duplicate keys are retained. `service.name` and `service.instance.id` remain
+//! exclusively in Part A, even if selected.
+//!
+//! Be selective: each selected attribute is serialized with every span, not once
+//! per batch. Scalar values retain their types; arrays currently become empty
+//! strings, as with span attributes. Part C can contain at most 127 fields,
+//! including both span and resource attributes; larger events are not exported
+//! and an internal diagnostic is emitted.
 //!
 //! # Well-Known Span Attributes
 //!
@@ -124,9 +139,34 @@ mod tests {
                 opentelemetry_sdk::Resource::builder()
                     .with_service_name("myrolename")
                     .with_attribute(KeyValue::new("service.instance.id", "myinstance123"))
+                    .with_attributes([
+                        KeyValue::new("resource.string", "value"),
+                        KeyValue::new("resource.int", 42_i64),
+                        KeyValue::new("resource.double", 1.5_f64),
+                        KeyValue::new("resource.bool", true),
+                        KeyValue::new("resource.ignored", "ignored"),
+                        KeyValue::new("http.request.method", "resource-method"),
+                        KeyValue::new("shared", "resource-value"),
+                    ])
                     .build(),
             )
-            .with_span_processor(Processor::builder("opentelemetry_traces").build().unwrap())
+            .with_span_processor(
+                Processor::builder("opentelemetry_traces")
+                    .with_resource_attributes([
+                        "service.name",
+                        "service.instance.id",
+                        "resource.string",
+                        "resource.string",
+                        "resource.int",
+                        "resource.double",
+                        "resource.bool",
+                        "resource.missing",
+                        "http.request.method",
+                        "shared",
+                    ])
+                    .build()
+                    .unwrap(),
+            )
             .build();
 
         // Validate that the TracePoint is created.
@@ -178,9 +218,11 @@ mod tests {
 
             // Set PartC attributes
             span.set_attribute(KeyValue::new("my-key", "my-value"));
+            span.set_attribute(KeyValue::new("shared", "span-value"));
 
             (trace_id, span_id)
         });
+        tracer.in_span("resource-only-span", |_| {});
 
         // Wait for the perf thread to complete and get the results
         let result = perf_thread.join().expect("Perf thread panicked");
@@ -216,6 +258,7 @@ mod tests {
             .find(|e| {
                 if let Some(name) = e.get("n") {
                     name.as_str().unwrap_or("") == "opentelemetry_traces:Span"
+                        && e["PartB"]["name"] == "my-span-name"
                 } else {
                     false
                 }
@@ -306,6 +349,33 @@ mod tests {
         // Validate PartC
         let part_c = &event["PartC"];
         assert_eq!(part_c["my-key"].as_str().unwrap(), "my-value");
+        assert_eq!(part_c["shared"].as_str().unwrap(), "resource-value");
+        assert_eq!(part_c["resource.string"].as_str().unwrap(), "value");
+        assert_eq!(part_c["resource.int"].as_i64().unwrap(), 42);
+        assert_eq!(part_c["resource.double"].as_f64().unwrap(), 1.5);
+        assert!(part_c["resource.bool"].as_bool().unwrap());
+        assert_eq!(
+            part_c["http.request.method"].as_str().unwrap(),
+            "resource-method"
+        );
+        assert!(part_c.get("resource.ignored").is_none());
+        assert!(part_c.get("resource.missing").is_none());
+        assert!(part_c.get("service.name").is_none());
+        assert!(part_c.get("service.instance.id").is_none());
+
+        let resource_only = events
+            .iter()
+            .find(|e| e["PartB"]["name"] == "resource-only-span")
+            .expect("Resource-only span not found");
+        let resource_part_c = resource_only["PartC"].as_object().unwrap();
+        assert_eq!(resource_part_c.len(), 6);
+        assert_eq!(resource_part_c["resource.string"], "value");
+        assert_eq!(resource_part_c["resource.int"], 42);
+        assert_eq!(resource_part_c["resource.double"], 1.5);
+        assert_eq!(resource_part_c["resource.bool"], true);
+        assert_eq!(resource_part_c["http.request.method"], "resource-method");
+        assert_eq!(resource_part_c["shared"], "resource-value");
+        assert!(resource_only["PartB"].get("httpMethod").is_none());
     }
 
     #[ignore]
