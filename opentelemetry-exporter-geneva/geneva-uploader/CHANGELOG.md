@@ -1,5 +1,11 @@
 # Changelog
 
+## [0.8.0] - 2026-09-22
+
+### Changed
+
+- Update `opentelemetry-proto` to 0.33. Applications passing OTLP protobuf types to the uploader must use the same version.
+
 ## [0.7.1] - 2026-09-07
 
 ### Fixed

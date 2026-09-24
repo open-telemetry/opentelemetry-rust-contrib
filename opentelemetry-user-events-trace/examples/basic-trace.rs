@@ -6,7 +6,7 @@ use opentelemetry::global;
 use opentelemetry::trace::TraceContextExt;
 use opentelemetry::trace::Tracer;
 use opentelemetry_sdk::trace::SdkTracerProvider;
-use opentelemetry_user_events_trace::UserEventsTracerProviderBuilderExt;
+use opentelemetry_user_events_trace::Processor;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use std::{thread, time::Duration};
@@ -20,7 +20,7 @@ fn init_tracer() -> SdkTracerProvider {
                 .with_service_name("user-events-trace-example")
                 .build(),
         )
-        .with_user_events_exporter("opentelemetry_traces")
+        .with_span_processor(Processor::builder("opentelemetry_traces").build().unwrap())
         .build();
     global::set_tracer_provider(provider.clone());
     provider

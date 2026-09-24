@@ -21,8 +21,13 @@
 //! # Tracing
 //!
 //! A server span (`SpanKind::Server`) is created per request, with attributes such
-//! as `http.request.method`, `url.scheme`, `url.path`, `url.full`,
+//! as `http.request.method`, `url.scheme`, `url.path`, `url.query`,
 //! `user_agent.original`, `http.route`, and `http.response.status_code`.
+//!
+//! The value of a query parameter that can carry a credential, such as `sig`, is
+//! replaced with `REDACTED`. Use
+//! [`http::server::LayerBuilder::with_sensitive_query_parameters`] to name the
+//! keys yourself.
 //!
 //! # Quick start
 //!

@@ -16,9 +16,38 @@
 
 [OpenTelemetry](https://opentelemetry.io/) HTTP metrics and tracing middleware
 for [Tower](https://docs.rs/tower)-compatible Rust HTTP servers (Axum, Hyper,
-Tonic, etc.). The middleware emits the standard `http.server.*` metrics and a
-server span per request, following the OpenTelemetry
-[HTTP semantic conventions](https://opentelemetry.io/docs/specs/semconv/http/).
+Tonic, etc.). The middleware emits the standard `http.server.*` metrics, which
+follow the
+[HTTP metrics](https://opentelemetry.io/docs/specs/semconv/http/http-metrics/)
+conventions, and a server span per request, which follows the
+[HTTP spans](https://opentelemetry.io/docs/specs/semconv/http/http-spans/)
+conventions. The goal is every `Required`, `Conditionally Required`, and
+`Recommended` attribute that a Tower service can read. `Opt-In` attributes, such
+as `http.request.header.<key>`, are not emitted. Add them with
+`http::server::LayerBuilder::with_request_extractor`.
+
+## Query string redaction
+
+The `url.query` attribute holds the query string of the request, which can carry
+a credential. The middleware therefore replaces the value of every query
+parameter that the conventions name with `REDACTED`, and keeps the key:
+`fields=name&sig=REDACTED`.
+
+The default keys are the ones that the
+[`url.query` conventions](https://opentelemetry.io/docs/specs/semconv/registry/attributes/url/#url-query)
+list:
+
+- `X-Amz-Signature`
+- `X-Amz-Credential`
+- `X-Amz-Security-Token`
+- `AWSAccessKeyId`
+- `Signature`
+- `sig`
+- `X-Goog-Signature`
+
+Use `http::server::LayerBuilder::with_sensitive_query_parameters` to name the
+keys yourself. The list replaces the default one, it does not extend it, and an
+empty list disables redaction. Keys are matched case-sensitively.
 
 ## Quick start
 

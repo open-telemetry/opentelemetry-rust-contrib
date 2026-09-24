@@ -4,7 +4,6 @@ members = [
     "opentelemetry-config",
     "opentelemetry-context-macro",
     "opentelemetry-contrib",
-    "opentelemetry-datadog",
     "opentelemetry-etw-logs",
     "opentelemetry-etw-metrics",
     "opentelemetry-etw-traces",
@@ -13,7 +12,6 @@ members = [
     "opentelemetry-instrumentation-tower",
     "opentelemetry-instrumentation-tower/examples/*",
     "opentelemetry-resource-detectors",
-    "opentelemetry-stackdriver",
     "opentelemetry-user-events-logs",
     "opentelemetry-user-events-trace",
     "opentelemetry-user-events-metrics",
@@ -34,14 +32,14 @@ resolver = "2"
 debug = 1
 
 [workspace.dependencies]
-opentelemetry = "0.32"
-opentelemetry-appender-tracing = "0.32"
-opentelemetry-http = "0.32"
-opentelemetry-otlp = { version = "0.32", default-features = false }
-opentelemetry-proto = { version = "0.32", default-features = false }
-opentelemetry_sdk = { version = "0.32", default-features = false }
-opentelemetry-stdout = { version = "0.32", default-features = false }
-opentelemetry-semantic-conventions = { version = "0.32", features = [
+opentelemetry = "0.33"
+opentelemetry-appender-tracing = "0.33"
+opentelemetry-http = "0.33"
+opentelemetry-otlp = { version = "0.33", default-features = false }
+opentelemetry-proto = { version = "0.33", default-features = false }
+opentelemetry_sdk = { version = "0.33", default-features = false }
+opentelemetry-stdout = { version = "0.33", default-features = false }
+opentelemetry-semantic-conventions = { version = "0.33", features = [
     "semconv_experimental",
 ] }
 criterion = "0.8"

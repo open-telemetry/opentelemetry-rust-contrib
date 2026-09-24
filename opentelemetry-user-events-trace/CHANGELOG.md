@@ -2,6 +2,16 @@
 
 ## vNext
 
+## v0.6.0
+
+Released 2026-Sep-21
+
+- Bump OpenTelemetry dependencies to 0.33.
+
+- **Breaking**: Replace `UserEventsTracerProviderBuilderExt::with_user_events_exporter`
+  with a public `Processor` and `ProcessorBuilder`. The processor can now be
+  wrapped by filtering or other custom processors before it is added to an
+  `SdkTracerProvider`, and invalid configuration is returned to the caller.
 - Add `links` field to Part B (serialized as JSON array of `{toTraceId, toSpanId}`)
 - Add `statusMessage` field to Part B for error spans with descriptions
 - **Breaking**: Update well-known attribute mappings to use stable OTel semantic
