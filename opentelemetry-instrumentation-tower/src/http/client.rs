@@ -23,7 +23,11 @@ use pin_project_lite::pin_project;
 use tower_layer::Layer as TowerLayer;
 use tower_service::Service as TowerService;
 
-use crate::common::attributes::{method_kv, split_and_format_protocol_version, url_scheme_kv};
+use crate::common::attributes::{
+    method_kv, redact_url_full, split_and_format_protocol_version, url_scheme_kv,
+    DEFAULT_SENSITIVE_QUERY_PARAMETERS,
+};
+use crate::common::instrumentation_scope;
 use crate::http::extractors::{
     NoOpExtractor, NoRouteExtractor, RequestAttributeExtractor, ResponseAttributeExtractor,
     RouteExtractor,
@@ -45,6 +49,7 @@ struct LayerState {
     client_request_duration: Histogram<f64>,
     client_request_body_size: Histogram<u64>,
     client_response_body_size: Histogram<u64>,
+    sensitive_query_parameters: Box<[Cow<'static, str>]>,
 }
 
 #[derive(Clone)]
@@ -88,6 +93,7 @@ pub struct LayerBuilder<RouteExt = NoRouteExtractor, ReqExt = NoOpExtractor, Res
     req_dur_bounds: Option<Vec<f64>>,
     tracing_enabled: bool,
     metrics_enabled: bool,
+    sensitive_query_parameters: Option<Vec<Cow<'static, str>>>,
     route_extractor: RouteExt,
     request_extractor: ReqExt,
     response_extractor: ResExt,
@@ -100,6 +106,7 @@ impl LayerBuilder {
             req_dur_bounds: Some(Vec::from(OTEL_DEFAULT_HTTP_CLIENT_DURATION_BOUNDS)),
             tracing_enabled: true,
             metrics_enabled: true,
+            sensitive_query_parameters: None,
             route_extractor: NoRouteExtractor,
             request_extractor: NoOpExtractor,
             response_extractor: NoOpExtractor,
@@ -123,6 +130,7 @@ impl<RouteExt, ReqExt, ResExt> LayerBuilder<RouteExt, ReqExt, ResExt> {
             req_dur_bounds: self.req_dur_bounds,
             tracing_enabled: self.tracing_enabled,
             metrics_enabled: self.metrics_enabled,
+            sensitive_query_parameters: self.sensitive_query_parameters,
             route_extractor: extractor,
             request_extractor: self.request_extractor,
             response_extractor: self.response_extractor,
@@ -153,6 +161,7 @@ impl<RouteExt, ReqExt, ResExt> LayerBuilder<RouteExt, ReqExt, ResExt> {
             req_dur_bounds: self.req_dur_bounds,
             tracing_enabled: self.tracing_enabled,
             metrics_enabled: self.metrics_enabled,
+            sensitive_query_parameters: self.sensitive_query_parameters,
             route_extractor: self.route_extractor,
             request_extractor: extractor,
             response_extractor: self.response_extractor,
@@ -172,6 +181,7 @@ impl<RouteExt, ReqExt, ResExt> LayerBuilder<RouteExt, ReqExt, ResExt> {
             req_dur_bounds: self.req_dur_bounds,
             tracing_enabled: self.tracing_enabled,
             metrics_enabled: self.metrics_enabled,
+            sensitive_query_parameters: self.sensitive_query_parameters,
             route_extractor: self.route_extractor,
             request_extractor: self.request_extractor,
             response_extractor: extractor,
@@ -206,27 +216,70 @@ impl<RouteExt, ReqExt, ResExt> LayerBuilder<RouteExt, ReqExt, ResExt> {
             .unwrap_or_else(|| Vec::from(OTEL_DEFAULT_HTTP_CLIENT_DURATION_BOUNDS));
 
         let tracer = if self.tracing_enabled {
-            Arc::new(global::tracer(crate::INSTRUMENTATION_NAME))
+            Arc::new(global::tracer_with_scope(instrumentation_scope()))
         } else {
             Arc::new(BoxedTracer::new(Box::new(
-                NoopTracerProvider::new().tracer(crate::INSTRUMENTATION_NAME),
+                NoopTracerProvider::new().tracer_with_scope(instrumentation_scope()),
             )))
         };
 
         let meter: Meter = if self.metrics_enabled {
             self.meter
-                .unwrap_or_else(|| global::meter(crate::INSTRUMENTATION_NAME))
+                .unwrap_or_else(|| global::meter_with_scope(instrumentation_scope()))
         } else {
-            NoopMeterProvider::new().meter(crate::INSTRUMENTATION_NAME)
+            NoopMeterProvider::new().meter_with_scope(instrumentation_scope())
         };
 
+        let sensitive_query_parameters: Box<[Cow<'static, str>]> =
+            match self.sensitive_query_parameters {
+                Some(parameters) => parameters.into(),
+                None => DEFAULT_SENSITIVE_QUERY_PARAMETERS
+                    .iter()
+                    .map(|parameter| Cow::Borrowed(*parameter))
+                    .collect(),
+            };
+
         Ok(Layer {
-            state: Arc::from(Self::make_state(meter, req_dur_bounds)),
+            state: Arc::from(Self::make_state(
+                meter,
+                req_dur_bounds,
+                sensitive_query_parameters,
+            )),
             route_extractor: self.route_extractor,
             request_extractor: self.request_extractor,
             response_extractor: self.response_extractor,
             tracer,
         })
+    }
+
+    /// Set the query parameter keys whose values the layer redacts in
+    /// `url.full`.
+    ///
+    /// The list replaces the default one, which holds the keys that the
+    /// semantic conventions name. It does not extend it. An empty list disables
+    /// redaction. Keys are matched case-sensitively. The user information of
+    /// `url.full` is always redacted.
+    ///
+    /// # Example
+    ///
+    /// ```ignore
+    /// let layer = LayerBuilder::builder()
+    ///     .with_sensitive_query_parameters(["sig", "token"])
+    ///     .build()
+    ///     .unwrap();
+    /// ```
+    pub fn with_sensitive_query_parameters<I, P>(mut self, parameters: I) -> Self
+    where
+        I: IntoIterator<Item = P>,
+        P: AsRef<str>,
+    {
+        self.sensitive_query_parameters = Some(
+            parameters
+                .into_iter()
+                .map(|parameter| Cow::Owned(parameter.as_ref().to_owned()))
+                .collect(),
+        );
+        self
     }
 
     /// Enable or disable trace collection for this layer.
@@ -255,7 +308,11 @@ impl<RouteExt, ReqExt, ResExt> LayerBuilder<RouteExt, ReqExt, ResExt> {
         self
     }
 
-    fn make_state(meter: Meter, req_dur_bounds: Vec<f64>) -> LayerState {
+    fn make_state(
+        meter: Meter,
+        req_dur_bounds: Vec<f64>,
+        sensitive_query_parameters: Box<[Cow<'static, str>]>,
+    ) -> LayerState {
         LayerState {
             client_request_duration: meter
                 .f64_histogram(Cow::from(semconv::metric::HTTP_CLIENT_REQUEST_DURATION))
@@ -273,6 +330,7 @@ impl<RouteExt, ReqExt, ResExt> LayerBuilder<RouteExt, ReqExt, ResExt> {
                 .with_description("Size of HTTP client response bodies.")
                 .with_unit(HTTP_CLIENT_RESPONSE_BODY_SIZE_UNIT)
                 .build(),
+            sensitive_query_parameters,
         }
     }
 }
@@ -414,7 +472,10 @@ where
 
         let mut span_attributes = vec![
             KeyValue::new(semconv::attribute::HTTP_REQUEST_METHOD, method.clone()),
-            KeyValue::new(semconv::attribute::URL_FULL, req.uri().to_string()),
+            KeyValue::new(
+                semconv::attribute::URL_FULL,
+                redact_url_full(req.uri(), &self.state.sensitive_query_parameters),
+            ),
             url_scheme_kv.clone(),
         ];
         if let Some(server_address_kv) = &server_address_kv_opt {
@@ -582,85 +643,270 @@ mod tests {
     use std::time::Duration;
     use tower::{ServiceBuilder, ServiceExt};
 
+    fn ok_service() -> impl TowerService<
+        Request<String>,
+        Response = Response<String>,
+        Error = std::convert::Infallible,
+    > + Clone {
+        tower::service_fn(|_req: Request<String>| async {
+            Ok::<_, std::convert::Infallible>(
+                Response::builder()
+                    .status(StatusCode::OK)
+                    .body(String::from("OK"))
+                    .unwrap(),
+            )
+        })
+    }
+
     #[tokio::test(flavor = "current_thread")]
     async fn test_client_span_is_child_with_client_kind() {
-        let trace_exporter = InMemorySpanExporterBuilder::new().build();
-        let tracer_provider = SdkTracerProvider::builder()
-            .with_simple_exporter(trace_exporter.clone())
-            .build();
-        let tracer = Arc::new(BoxedTracer::new(Box::new(
-            tracer_provider.tracer("test_tracer"),
-        )));
+        struct TestCase {
+            name: &'static str,
+            target: &'static str,
+            expected_span_name: &'static str,
+            expected_attributes: Vec<KeyValue>,
+        }
 
-        let mut layer = LayerBuilder::builder()
-            .with_route_extractor(PathExtractor)
-            .build()
-            .unwrap();
-        layer.tracer = tracer.clone();
-
-        let mut service = ServiceBuilder::new()
-            .layer(layer)
-            .service(tower::service_fn(|_req: Request<String>| async {
-                Ok::<_, std::convert::Infallible>(
-                    Response::builder()
-                        .status(StatusCode::OK)
-                        .body(String::from("OK"))
-                        .unwrap(),
-                )
-            }));
-
-        let parent_span = tracer.start("parent_operation");
-        let cx = OtelContext::current_with_span(parent_span);
-
-        let request = Request::builder()
-            .method("GET")
-            .uri("http://example.com/api/users/123")
-            .body("test".to_string())
-            .unwrap();
-
-        let _response = async { service.ready().await.unwrap().call(request).await.unwrap() }
-            .with_context(cx)
-            .await;
-
-        tracer_provider.force_flush().unwrap();
-
-        let spans = trace_exporter.get_finished_spans().unwrap();
-        assert_eq!(spans.len(), 2, "Expected parent + client span");
-
-        let client_span = spans
-            .iter()
-            .find(|span| span.name == "GET /api/users/123")
-            .expect("Should find client span");
-        let parent_span = spans
-            .iter()
-            .find(|span| span.name == "parent_operation")
-            .expect("Should find parent span");
-
-        assert_eq!(client_span.span_kind, SpanKind::Client);
-        assert_eq!(
-            client_span.parent_span_id,
-            parent_span.span_context.span_id()
-        );
-        assert_eq!(
-            client_span.span_context.trace_id(),
-            parent_span.span_context.trace_id()
-        );
-
-        let expected_attributes = vec![
-            KeyValue::new(semconv::attribute::HTTP_REQUEST_METHOD, "GET".to_string()),
-            KeyValue::new(
-                semconv::attribute::URL_FULL,
-                "http://example.com/api/users/123".to_string(),
-            ),
-            KeyValue::new(semconv::attribute::URL_SCHEME, "http".to_string()),
-            KeyValue::new(
-                semconv::attribute::SERVER_ADDRESS,
-                "example.com".to_string(),
-            ),
-            KeyValue::new(semconv::attribute::HTTP_ROUTE, "/api/users/123".to_string()),
-            KeyValue::new(semconv::attribute::HTTP_RESPONSE_STATUS_CODE, 200),
+        let test_cases = [
+            TestCase {
+                name: "plain URL",
+                target: "http://example.com/api/users/123",
+                expected_span_name: "GET /api/users/123",
+                expected_attributes: vec![
+                    KeyValue::new(semconv::attribute::HTTP_REQUEST_METHOD, "GET".to_string()),
+                    KeyValue::new(
+                        semconv::attribute::URL_FULL,
+                        "http://example.com/api/users/123".to_string(),
+                    ),
+                    KeyValue::new(semconv::attribute::URL_SCHEME, "http".to_string()),
+                    KeyValue::new(
+                        semconv::attribute::SERVER_ADDRESS,
+                        "example.com".to_string(),
+                    ),
+                    KeyValue::new(semconv::attribute::HTTP_ROUTE, "/api/users/123".to_string()),
+                    KeyValue::new(semconv::attribute::HTTP_RESPONSE_STATUS_CODE, 200),
+                ],
+            },
+            TestCase {
+                name: "URL with a query component",
+                target: "http://example.com/api/users/123?fields=name&verbose=true",
+                expected_span_name: "GET /api/users/123",
+                expected_attributes: vec![
+                    KeyValue::new(semconv::attribute::HTTP_REQUEST_METHOD, "GET".to_string()),
+                    KeyValue::new(
+                        semconv::attribute::URL_FULL,
+                        "http://example.com/api/users/123?fields=name&verbose=true".to_string(),
+                    ),
+                    KeyValue::new(semconv::attribute::URL_SCHEME, "http".to_string()),
+                    KeyValue::new(
+                        semconv::attribute::SERVER_ADDRESS,
+                        "example.com".to_string(),
+                    ),
+                    KeyValue::new(semconv::attribute::HTTP_ROUTE, "/api/users/123".to_string()),
+                    KeyValue::new(semconv::attribute::HTTP_RESPONSE_STATUS_CODE, 200),
+                ],
+            },
+            TestCase {
+                name: "URL with a sensitive query parameter",
+                target: "https://example.com:8443/api/users/123?fields=name&sig=secret",
+                expected_span_name: "GET /api/users/123",
+                expected_attributes: vec![
+                    KeyValue::new(semconv::attribute::HTTP_REQUEST_METHOD, "GET".to_string()),
+                    KeyValue::new(
+                        semconv::attribute::URL_FULL,
+                        "https://example.com:8443/api/users/123?fields=name&sig=REDACTED"
+                            .to_string(),
+                    ),
+                    KeyValue::new(semconv::attribute::URL_SCHEME, "https".to_string()),
+                    KeyValue::new(
+                        semconv::attribute::SERVER_ADDRESS,
+                        "example.com".to_string(),
+                    ),
+                    KeyValue::new(semconv::attribute::SERVER_PORT, 8443),
+                    KeyValue::new(semconv::attribute::HTTP_ROUTE, "/api/users/123".to_string()),
+                    KeyValue::new(semconv::attribute::HTTP_RESPONSE_STATUS_CODE, 200),
+                ],
+            },
+            TestCase {
+                name: "URL with user information",
+                target: "http://user:password@example.com/api/users/123",
+                expected_span_name: "GET /api/users/123",
+                expected_attributes: vec![
+                    KeyValue::new(semconv::attribute::HTTP_REQUEST_METHOD, "GET".to_string()),
+                    KeyValue::new(
+                        semconv::attribute::URL_FULL,
+                        "http://REDACTED:REDACTED@example.com/api/users/123".to_string(),
+                    ),
+                    KeyValue::new(semconv::attribute::URL_SCHEME, "http".to_string()),
+                    KeyValue::new(
+                        semconv::attribute::SERVER_ADDRESS,
+                        "example.com".to_string(),
+                    ),
+                    KeyValue::new(semconv::attribute::HTTP_ROUTE, "/api/users/123".to_string()),
+                    KeyValue::new(semconv::attribute::HTTP_RESPONSE_STATUS_CODE, 200),
+                ],
+            },
+            TestCase {
+                name: "URL with an empty query component",
+                target: "http://example.com/api/users/123?",
+                expected_span_name: "GET /api/users/123",
+                expected_attributes: vec![
+                    KeyValue::new(semconv::attribute::HTTP_REQUEST_METHOD, "GET".to_string()),
+                    KeyValue::new(
+                        semconv::attribute::URL_FULL,
+                        "http://example.com/api/users/123?".to_string(),
+                    ),
+                    KeyValue::new(semconv::attribute::URL_SCHEME, "http".to_string()),
+                    KeyValue::new(
+                        semconv::attribute::SERVER_ADDRESS,
+                        "example.com".to_string(),
+                    ),
+                    KeyValue::new(semconv::attribute::HTTP_ROUTE, "/api/users/123".to_string()),
+                    KeyValue::new(semconv::attribute::HTTP_RESPONSE_STATUS_CODE, 200),
+                ],
+            },
         ];
-        assert_eq!(client_span.attributes, expected_attributes);
+
+        for test_case in test_cases {
+            let trace_exporter = InMemorySpanExporterBuilder::new().build();
+            let tracer_provider = SdkTracerProvider::builder()
+                .with_simple_exporter(trace_exporter.clone())
+                .build();
+            let tracer = Arc::new(BoxedTracer::new(Box::new(
+                tracer_provider.tracer("test_tracer"),
+            )));
+
+            let mut layer = LayerBuilder::builder()
+                .with_route_extractor(PathExtractor)
+                .build()
+                .unwrap();
+            layer.tracer = tracer.clone();
+
+            let mut service = ServiceBuilder::new().layer(layer).service(ok_service());
+
+            let parent_span = tracer.start("parent_operation");
+            let cx = OtelContext::current_with_span(parent_span);
+
+            let request = Request::builder()
+                .method("GET")
+                .uri(test_case.target)
+                .body("test".to_string())
+                .unwrap();
+
+            let _response = async { service.ready().await.unwrap().call(request).await.unwrap() }
+                .with_context(cx)
+                .await;
+
+            tracer_provider.force_flush().unwrap();
+
+            let spans = trace_exporter.get_finished_spans().unwrap();
+            assert_eq!(
+                spans.len(),
+                2,
+                "{}: expected parent + client span",
+                test_case.name
+            );
+
+            let client_span = spans
+                .iter()
+                .find(|span| span.name == test_case.expected_span_name)
+                .expect("Should find client span");
+            let parent_span = spans
+                .iter()
+                .find(|span| span.name == "parent_operation")
+                .expect("Should find parent span");
+
+            assert_eq!(
+                (
+                    client_span.name.as_ref(),
+                    client_span.span_kind.clone(),
+                    client_span.parent_span_id,
+                    client_span.span_context.trace_id(),
+                    client_span.attributes.clone()
+                ),
+                (
+                    test_case.expected_span_name,
+                    SpanKind::Client,
+                    parent_span.span_context.span_id(),
+                    parent_span.span_context.trace_id(),
+                    test_case.expected_attributes
+                ),
+                "{}",
+                test_case.name
+            );
+        }
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn with_sensitive_query_parameters_replaces_the_default_list() {
+        struct TestCase {
+            name: &'static str,
+            sensitive: Option<Vec<&'static str>>,
+            expected_url_full: &'static str,
+        }
+
+        let test_cases = [
+            TestCase {
+                name: "the default list redacts the keys of the conventions",
+                sensitive: None,
+                expected_url_full: "http://example.com/api?token=abc&sig=REDACTED",
+            },
+            TestCase {
+                name: "a custom list replaces the default one",
+                sensitive: Some(vec!["token"]),
+                expected_url_full: "http://example.com/api?token=REDACTED&sig=abc",
+            },
+            TestCase {
+                name: "an empty list disables redaction",
+                sensitive: Some(Vec::new()),
+                expected_url_full: "http://example.com/api?token=abc&sig=abc",
+            },
+        ];
+
+        for test_case in test_cases {
+            let trace_exporter = InMemorySpanExporterBuilder::new().build();
+            let tracer_provider = SdkTracerProvider::builder()
+                .with_simple_exporter(trace_exporter.clone())
+                .build();
+            let builder = LayerBuilder::builder();
+            let builder = match test_case.sensitive {
+                Some(sensitive) => builder.with_sensitive_query_parameters(sensitive),
+                None => builder,
+            };
+            let mut layer = builder.build().unwrap();
+            layer.tracer = Arc::new(BoxedTracer::new(Box::new(
+                tracer_provider.tracer("test_tracer"),
+            )));
+            let mut service = layer.layer(ok_service());
+
+            let request = Request::builder()
+                .method("GET")
+                .uri("http://example.com/api?token=abc&sig=abc")
+                .body(String::from("body"))
+                .unwrap();
+            let _response = service.call(request).await.unwrap();
+
+            tracer_provider.force_flush().unwrap();
+            let spans = trace_exporter.get_finished_spans().unwrap();
+            assert_eq!(spans.len(), 1, "{}", test_case.name);
+
+            let result = spans[0]
+                .attributes
+                .iter()
+                .find(|kv| kv.key.as_str() == semconv::attribute::URL_FULL)
+                .expect("url.full should be present")
+                .clone();
+
+            assert_eq!(
+                result,
+                KeyValue::new(
+                    semconv::attribute::URL_FULL,
+                    test_case.expected_url_full.to_string()
+                ),
+                "{}",
+                test_case.name
+            );
+        }
     }
 
     #[tokio::test(flavor = "current_thread")]

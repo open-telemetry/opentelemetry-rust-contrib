@@ -20,13 +20,16 @@
   client layer with Hyper and reqwest clients via `tower-reqwest`, with OTLP
   export.
   [#700](https://github.com/open-telemetry/opentelemetry-rust-contrib/pull/700)
+* The client span redacts `url.full`: the user information becomes
+  `REDACTED:REDACTED`, and the value of a sensitive query parameter becomes
+  `REDACTED`.
+  [#700](https://github.com/open-telemetry/opentelemetry-rust-contrib/pull/700)
 * `http::client::LayerBuilder::with_sensitive_query_parameters` to name the
   query parameter keys whose values the client layer redacts in `url.full`.
   The default list is the same as the one of the server layer.
   [#700](https://github.com/open-telemetry/opentelemetry-rust-contrib/pull/700)
-* `http::client::LayerBuilder::with_tracer_provider` and
-  `http::client::LayerBuilder::with_meter_provider`. The client scope carries
-  the semantic conventions schema URL, the same as the server scope.
+* The client instrumentation scope carries the OpenTelemetry semantic
+  conventions schema URL, the same as the server scope.
   [#700](https://github.com/open-telemetry/opentelemetry-rust-contrib/pull/700)
 
 ### Changed
