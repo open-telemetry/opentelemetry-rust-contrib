@@ -357,6 +357,26 @@ mod tests {
     }
 
     #[test]
+    fn test_validate_rejects_unsupported_top_level_fields() {
+        for (field, expected_message) in [
+            ("metrics: {}", "Old 'metrics' configuration format"),
+            ("logger_provider: {}", "`logger_provider` is not supported"),
+            ("propagator: {}", "`propagator` is not supported"),
+            ("disabled: true", "`disabled` is not supported"),
+            (
+                "attribute_limits: {}",
+                "`attribute_limits` is not supported",
+            ),
+            ("log_level: info", "`log_level` is not supported"),
+        ] {
+            let yaml = format!("file_format: '1.2'\n{field}\n");
+            let telemetry: Telemetry = serde_yaml::from_str(&yaml).unwrap();
+            let err = telemetry.validate().unwrap_err();
+            assert!(err.to_string().contains(expected_message));
+        }
+    }
+
+    #[test]
     fn test_unknown_top_level_field_rejected() {
         let yaml_str = r#"
           file_format: "1.2"

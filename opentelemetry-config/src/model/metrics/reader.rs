@@ -449,3 +449,57 @@ impl PeriodicReaderConfig {
         60_000
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::{PeriodicReaderConfig, Reader};
+
+    #[test]
+    fn reader_deserializer_rejects_invalid_variants() {
+        for yaml in ["{}", "periodic: {}\npull: {}", "unknown: {}"] {
+            let result = serde_yaml::from_str::<Reader>(yaml);
+            assert!(result.is_err(), "expected {yaml:?} to be rejected");
+        }
+    }
+
+    #[test]
+    fn reader_validation_rejects_pull_readers() {
+        let reader = serde_yaml::from_str::<Reader>("pull: {}").unwrap();
+        assert!(reader
+            .validate()
+            .unwrap_err()
+            .to_string()
+            .contains("Pull readers are not supported"));
+    }
+
+    #[test]
+    fn periodic_reader_validation_rejects_unsupported_options() {
+        for (field, expected_message) in [
+            ("timeout: 1", "periodic reader timeout is not supported"),
+            (
+                "max_export_batch_size/development: 1",
+                "`periodic.max_export_batch_size` is not supported",
+            ),
+            ("producers: []", "`periodic.producers` is not supported"),
+            (
+                "cardinality_limits: {}",
+                "`periodic.cardinality_limits` is not supported",
+            ),
+        ] {
+            let yaml = format!("exporter: {{console: {{}}}}\n{field}\n");
+            let config: PeriodicReaderConfig = serde_yaml::from_str(&yaml).unwrap();
+            let err = config.validate().unwrap_err();
+            assert!(err.to_string().contains(expected_message));
+        }
+    }
+
+    #[test]
+    fn periodic_reader_validation_requires_exporter() {
+        let config = PeriodicReaderConfig::default();
+        assert!(config
+            .validate()
+            .unwrap_err()
+            .to_string()
+            .contains("Missing required field `exporter`"));
+    }
+}

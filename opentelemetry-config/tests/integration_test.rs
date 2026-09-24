@@ -1302,3 +1302,165 @@ meter_provider:
         .to_string()
         .contains("Custom exporter 'custom_mock' configuration must be an object or null"));
 }
+
+fn assert_invalid_config(yaml: &str, expected_message: &str) {
+    let registry = ConfigurationProviderRegistry::default();
+    let err = TelemetryProviders::configure_from_yaml_str(&registry, yaml).unwrap_err();
+    assert!(
+        err.to_string().contains(expected_message),
+        "expected error containing {expected_message:?}, got {err}"
+    );
+}
+
+#[test]
+fn test_validation_rejects_unsupported_configuration_fields() {
+    let cases = [
+        ("propagator: {}", "`propagator` is not supported"),
+        ("disabled: true", "`disabled` is not supported"),
+        ("attribute_limits: {}", "`attribute_limits` is not supported"),
+        ("log_level: info", "`log_level` is not supported"),
+        (
+            "meter_provider:\n  readers: []\n  meter_configurator/development: {}",
+            "`meter_provider.meter_configurator` is not supported",
+        ),
+        (
+            "meter_provider:\n  readers: []\n  view_matching_mode/development: strict",
+            "`meter_provider.view_matching_mode` is not supported",
+        ),
+        (
+            "meter_provider:\n  readers:\n    - periodic:\n        exporter: {console: {}}\n        producers: []",
+            "`periodic.producers` is not supported",
+        ),
+        (
+            "meter_provider:\n  readers:\n    - periodic:\n        exporter: {console: {}}\n        cardinality_limits: {}",
+            "`periodic.cardinality_limits` is not supported",
+        ),
+        (
+            "meter_provider:\n  readers:\n    - periodic:\n        exporter: {console: {}}\n        max_export_batch_size/development: 10",
+            "`periodic.max_export_batch_size` is not supported",
+        ),
+    ];
+
+    for (fields, expected_message) in cases {
+        let yaml = format!("file_format: '1.2'\n{fields}\n");
+        assert_invalid_config(&yaml, expected_message);
+    }
+}
+
+#[test]
+fn test_validation_rejects_malformed_configuration_shapes() {
+    let cases = [
+        ("[]", "Configuration root must be an object"),
+        (
+            "file_format: null",
+            "Field 'file_format' must be a string, but got null",
+        ),
+        ("file_format: true", "Field 'file_format' must be a string"),
+        (
+            "file_format: '1.2'\nunknown_field: value",
+            "Unknown field 'unknown_field' in configuration",
+        ),
+        (
+            "{file_format: '1.2', 1: value}",
+            "Configuration keys must be strings",
+        ),
+        ("file_format: '1.2'\nresource: 1", "Field 'resource' must be an object"),
+        (
+            "file_format: '1.2'\nresource: {1: value}",
+            "Resource keys must be strings",
+        ),
+        (
+            "file_format: '1.2'\nresource:\n  attributes: {}",
+            "Field 'resource.attributes' must be an array",
+        ),
+        (
+            "file_format: '1.2'\nresource:\n  attributes: []",
+            "`resource.attributes` must not be empty",
+        ),
+        (
+            "file_format: '1.2'\nresource:\n  attributes: [null]",
+            "Resource attribute must be an object, but got null",
+        ),
+        (
+            "file_format: '1.2'\nresource:\n  attributes: [scalar]",
+            "Resource attribute must be an object",
+        ),
+        (
+            "file_format: '1.2'\nmeter_provider: 1",
+            "Field 'meter_provider' must be an object",
+        ),
+        (
+            "file_format: '1.2'\nmeter_provider: {1: value}",
+            "MeterProvider keys must be strings",
+        ),
+        (
+            "file_format: '1.2'\nmeter_provider: {unknown: value}",
+            "Unknown field 'meter_provider.unknown'",
+        ),
+        (
+            "file_format: '1.2'\nmeter_provider:\n  readers: {}",
+            "Field 'meter_provider.readers' must be an array",
+        ),
+        (
+            "file_format: '1.2'\nmeter_provider:\n  readers: [null]",
+            "Reader must be an object, but got null",
+        ),
+        (
+            "file_format: '1.2'\nmeter_provider:\n  readers: [scalar]",
+            "Reader must be an object",
+        ),
+        (
+            "file_format: '1.2'\nmeter_provider:\n  readers:\n    - {1: {}}",
+            "Reader key must be a string",
+        ),
+        (
+            "file_format: '1.2'\nmeter_provider:\n  readers:\n    - unknown: {}",
+            "Unknown reader type 'unknown'",
+        ),
+        (
+            "file_format: '1.2'\nmeter_provider:\n  readers:\n    - periodic: []",
+            "Field 'periodic' must be an object",
+        ),
+        (
+            "file_format: '1.2'\nmeter_provider:\n  readers:\n    - periodic:\n        exporter: {console: {}}\n        mystery: true",
+            "Unknown field 'periodic.mystery'",
+        ),
+        (
+            "file_format: '1.2'\nmeter_provider:\n  readers:\n    - periodic:\n        exporter: scalar",
+            "`exporter` in periodic reader must be an object",
+        ),
+        (
+            "file_format: '1.2'\nmeter_provider:\n  readers:\n    - periodic:\n        exporter: {1: {}}",
+            "Exporter name must be a string",
+        ),
+        (
+            "file_format: '1.2'\nmeter_provider:\n  readers:\n    - periodic:\n        exporter:\n          console: {1: value}",
+            "Console configuration keys must be strings",
+        ),
+    ];
+
+    for (yaml, expected_message) in cases {
+        assert_invalid_config(yaml, expected_message);
+    }
+}
+
+#[test]
+fn test_validation_rejects_invalid_resource_attribute_types() {
+    for (attribute, expected_message) in [
+        (
+            "name: '  '\n      value: ignored",
+            "Resource attribute name must not be empty",
+        ),
+        (
+            "name: amount\n      value: invalid\n      type: double",
+            "declared as type 'double' but value is not a double",
+        ),
+        (
+            "name: amount\n      value: 1\n      type: custom",
+            "has unsupported type 'custom'",
+        ),
+    ] {
+        let yaml = format!("file_format: '1.2'\nresource:\n  attributes:\n    - {attribute}\n");
+        assert_invalid_config(&yaml, expected_message);
+    }
+}

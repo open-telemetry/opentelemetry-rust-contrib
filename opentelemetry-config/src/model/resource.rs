@@ -352,4 +352,27 @@ attributes:
             Some("configured".into())
         );
     }
+
+    #[test]
+    fn validate_rejects_unsupported_resource_fields() {
+        for (field, expected_message) in [
+            (
+                "detection/development: {}",
+                "`resource.detection` is not supported",
+            ),
+            (
+                "schema_url: https://example.com/schema",
+                "`resource.schema_url` is not supported",
+            ),
+            (
+                "attributes_list: key=value",
+                "`resource.attributes_list` is not supported",
+            ),
+        ] {
+            let yaml = format!("{field}\n");
+            let config: ResourceConfig = serde_yaml::from_str(&yaml).unwrap();
+            let err = config.validate().unwrap_err();
+            assert!(err.to_string().contains(expected_message));
+        }
+    }
 }
