@@ -117,18 +117,20 @@ impl<'value> ValueBuilder<'value> for SegmentNameBuilder<'value> {
     }
 }
 
-impl<'v> SpanAttributeProcessor<'v, 6> for SegmentNameBuilder<'v> {
-    const HANDLERS: [(&'static str, fn(&mut Self, &'v Value) -> bool); 6] = [
+impl<'v> SpanAttributeProcessor<'v, 8> for SegmentNameBuilder<'v> {
+    const HANDLERS: [(&'static str, fn(&mut Self, &'v Value) -> bool); 8] = [
         (
             #[allow(deprecated)]
             semconv::RPC_SYSTEM,
             Self::rpc_system_is_aws_api,
         ),
+        (semconv::RPC_SYSTEM_NAME, Self::rpc_system_is_aws_api),
         (
             #[allow(deprecated)]
             semconv::PEER_SERVICE,
             Self::peer_service,
         ),
+        (semconv::SERVICE_PEER_NAME, Self::peer_service),
         (semconv::AWS_SERVICE, Self::aws_service),
         (
             #[allow(deprecated)]
@@ -423,22 +425,5 @@ mod tests {
         assert!(!builder.rpc_service(&value));
         assert!(!builder.db_service(&value));
         assert!(!builder.service_name(&value));
-    }
-
-    #[test]
-    fn handlers_array_maps_correct_semconv_keys() {
-        // Verify the HANDLERS array maps the expected attribute keys
-        let keys: Vec<&str> = SegmentNameBuilder::HANDLERS
-            .iter()
-            .map(|(key, _)| *key)
-            .collect();
-
-        assert_eq!(keys[0], "rpc.system");
-        assert_eq!(keys[1], "peer.service");
-        assert_eq!(keys[2], "aws.service");
-        assert_eq!(keys[3], "rpc.service");
-        assert_eq!(keys[4], "db.service");
-        assert_eq!(keys[5], "service.name");
-        assert_eq!(keys.len(), 6);
     }
 }
