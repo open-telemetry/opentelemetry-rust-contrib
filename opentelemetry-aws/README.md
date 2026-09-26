@@ -30,6 +30,7 @@ to AWS's telemetry platform.
 | **X-Ray Propagator** | `trace` | Propagates trace context using the `X-Amzn-Trace-Id` header |
 | **X-Ray ID Generator** | `trace` | Generates X-Ray-compatible trace and span IDs (time-based trace IDs) |
 | **X-Ray Exporter** | `xray-exporter` | Exports OpenTelemetry spans as [X-Ray segment documents] |
+| **X-Ray Remote Sampler** | `xray-sampler` | Samples spans using the [X-Ray sampling rules] fetched from the X-Ray daemon or Collector |
 | **Lambda Resource Detector** | `detector-aws-lambda` | Detects AWS Lambda resource attributes from the environment |
 | **EC2 Resource Detector** | `detector-aws-ec2` | Detects AWS EC2 resource attributes via IMDSv2 |
 | **ECS Resource Detector** | `detector-aws-ecs` | Detects AWS ECS resource attributes via the task and container metadata endpoints |
@@ -77,6 +78,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 | `xray-daemon-client` | No | `XrayDaemonClient` — UDP client for the [X-Ray daemon] |
 | `xray-stdout-client` | No | `StdoutClient` — writes segment documents to stdout (useful for debugging) |
 | `xray-subsegment-nesting` | No | Enables subsegment nesting within parent segments during translation |
+| `xray-sampler` | No | `AwsXrayRemoteSampler` — samples spans using X-Ray sampling rules |
 | `detector-aws-lambda` | No | AWS Lambda resource detector |
 | `detector-aws-ec2` | No | AWS EC2 resource detector |
 | `detector-aws-ecs` | No | AWS ECS resource detector |
@@ -86,3 +88,4 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 [`OpenTelemetry`]: https://crates.io/crates/opentelemetry
 [X-Ray daemon]: https://docs.aws.amazon.com/xray/latest/devguide/xray-daemon.html
 [X-Ray segment documents]: https://docs.aws.amazon.com/xray/latest/devguide/xray-api-segmentdocuments.html
+[X-Ray sampling rules]: https://docs.aws.amazon.com/xray/latest/devguide/xray-console-sampling.html

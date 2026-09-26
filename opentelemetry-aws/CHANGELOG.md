@@ -5,6 +5,7 @@
 ### Added
 
 - `BeanstalkResourceDetector` (`detector-aws-beanstalk` feature)
+- `AwsXrayRemoteSampler` (`xray-sampler` feature) that samples spans using the fixed rates of X-Ray sampling rules
 
 ## v0.21.0
 
