@@ -6,14 +6,9 @@
 
 - `BeanstalkResourceDetector` (`detector-aws-beanstalk` feature)
 
-### Removed
-
-- Low-value unit-test in `xray_exporter::translator::attribute_processing::value_builder::segment_name_builder`
-
 ### Fixed
 
 - Added missing replacement for deprecated attributes in value builders: `RPC_SYSTEM` -> `RPC_SYSTEM_NAME` and `PEER_SERVICE` -> `SERVICE_PEER_NAME`. Deprecated attributes also kept for retro-compatibility.
-- Broken documentation links
 
 ## v0.21.0
 
@@ -60,13 +55,13 @@ Released 2026-May-13
 
 - Bump opentelemetry and opentelemetry_sdk versions to 0.29.0
 - Breaking change in the way XrayIdGenerator is configured:
-
+  
   ```rust
   // Before
   SdkTracerProvider::builder()
       .with_config(trace::config().with_id_generator(XrayIdGenerator::default()))
       .build();
-
+  
   // After
   SdkTracerProvider::builder()
       .with_id_generator(XrayIdGenerator::default())
@@ -107,7 +102,7 @@ Released 2026-May-13
 
 ### Changed
 
-- Bump opentelemetry and opentelemetry_sdk versions to 0.23.0
+-  Bump opentelemetry and opentelemetry_sdk versions to 0.23.0
 
 ## v0.10.0
 
