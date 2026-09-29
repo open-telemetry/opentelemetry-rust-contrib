@@ -15,7 +15,6 @@ use opentelemetry::metrics::{Histogram, Meter, MeterProvider, NoopMeterProvider,
 use opentelemetry::trace::noop::NoopTracerProvider;
 use opentelemetry::trace::{SpanKind, Status, TraceContextExt, Tracer, TracerProvider};
 use opentelemetry::Context as OtelContext;
-use opentelemetry::InstrumentationScope;
 use opentelemetry::KeyValue;
 use opentelemetry_http::HeaderExtractor;
 use opentelemetry_semantic_conventions as semconv;
@@ -27,6 +26,7 @@ use crate::common::attributes::{
     method_kv, redact_query, split_and_format_protocol_version, url_scheme_kv,
     DEFAULT_SENSITIVE_QUERY_PARAMETERS,
 };
+use crate::common::instrumentation_scope;
 use crate::http::extractors::{
     DefaultRouteExtractor, NoOpExtractor, RequestAttributeExtractor, ResponseAttributeExtractor,
     RouteExtractor,
@@ -357,13 +357,6 @@ impl<RouteExt, ReqExt, ResExt> LayerBuilder<RouteExt, ReqExt, ResExt> {
         self.meter = Some(meter_provider.meter_with_scope(instrumentation_scope()));
         self
     }
-}
-
-fn instrumentation_scope() -> InstrumentationScope {
-    InstrumentationScope::builder(crate::INSTRUMENTATION_NAME)
-        .with_version(env!("CARGO_PKG_VERSION"))
-        .with_schema_url(opentelemetry_semantic_conventions::SCHEMA_URL)
-        .build()
 }
 
 fn make_state(

@@ -5,7 +5,7 @@ edition = "2021"
 rust-version = "1.75.0"
 
 [dependencies]
-opentelemetry_instrumentation_tower = { path = "../../", package = "opentelemetry-instrumentation-tower", default-features = false }
+opentelemetry_instrumentation_tower = { path = "../../", package = "opentelemetry-instrumentation-tower", features = ["http-server"], default-features = false }
 axum = { features = ["http1", "tokio"], version = "0.8", default-features = false }
 http = { version = "1", default-features = false }
 opentelemetry = { workspace = true }

@@ -2,6 +2,42 @@
 
 ## vNext
 
+### Added
+
+* HTTP client instrumentation layer (`http::client::Layer`) producing a
+  `SpanKind::Client` span and the standard `http.client.*` metrics, and
+  injecting the current trace context into outgoing request headers.
+  Tracing and metrics can be toggled per layer via `with_tracing(bool)` and
+  `with_metrics(bool)` (both enabled by default).
+  [#700](https://github.com/open-telemetry/opentelemetry-rust-contrib/pull/700)
+* Cargo features to select which layers are compiled: `http-server` and
+  `http-client` (both enabled by default).
+  [#700](https://github.com/open-telemetry/opentelemetry-rust-contrib/pull/700)
+* The **client** layer always defaults to `NoRouteExtractor` (method-only span
+  names); the `axum` matched-path extractor only applies to server routing.
+  [#700](https://github.com/open-telemetry/opentelemetry-rust-contrib/pull/700)
+* `hyper-http-client` and `reqwest-http-client` examples demonstrating the
+  client layer with Hyper and reqwest clients via `tower-reqwest`, with OTLP
+  export.
+  [#700](https://github.com/open-telemetry/opentelemetry-rust-contrib/pull/700)
+* The client span redacts `url.full`: the user information becomes
+  `REDACTED:REDACTED`, and the value of a sensitive query parameter becomes
+  `REDACTED`.
+  [#700](https://github.com/open-telemetry/opentelemetry-rust-contrib/pull/700)
+* `http::client::LayerBuilder::with_sensitive_query_parameters` to name the
+  query parameter keys whose values the client layer redacts in `url.full`.
+  The default list is the same as the one of the server layer.
+  [#700](https://github.com/open-telemetry/opentelemetry-rust-contrib/pull/700)
+* The client instrumentation scope carries the OpenTelemetry semantic
+  conventions schema URL, the same as the server scope.
+  [#700](https://github.com/open-telemetry/opentelemetry-rust-contrib/pull/700)
+
+### Changed
+
+* `http::extractors` now serves the `http::server` and the `http::client`
+  layers.
+  [#700](https://github.com/open-telemetry/opentelemetry-rust-contrib/pull/700)
+
 ## v0.19.0
 
 Released 2026-Sep-21
