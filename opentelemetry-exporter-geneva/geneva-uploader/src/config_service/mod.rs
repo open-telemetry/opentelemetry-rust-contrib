@@ -727,6 +727,8 @@ mod tests {
 
     #[cfg(feature = "certificate-auth")]
     #[cfg_attr(target_os = "macos", ignore)] // cert generated not compatible with macOS
+    /// Scenario: GCS returns a non-success HTTP response.
+    /// Guarantees: The client returns the response status without exposing the response body.
     #[tokio::test]
     async fn error_handling_with_non_success_status() {
         #[cfg(feature = "tls-rustls")]
@@ -737,7 +739,10 @@ mod tests {
             .and(path(
                 "/api/agent/v3/mockenv/mockacct/MonitoringStorageKeys/",
             ))
-            .respond_with(ResponseTemplate::new(403).set_body_string("Forbidden"))
+            .respond_with(
+                ResponseTemplate::new(403)
+                    .set_body_string("token=secret&identity=sensitive&TagId=private"),
+            )
             .mount(&mock_server)
             .await;
 
@@ -762,12 +767,18 @@ mod tests {
         let result = client.get_ingestion_info().await;
 
         assert!(result.is_err());
-        if let Err(crate::config_service::client::GenevaConfigClientError::RequestFailed {
-            status,
-            ..
-        }) = result
+        if let Err(
+            error @ crate::config_service::client::GenevaConfigClientError::RequestFailed {
+                status,
+                ..
+            },
+        ) = result
         {
             assert_eq!(status, 403);
+            let message = error.to_string();
+            assert!(!message.contains("secret"));
+            assert!(!message.contains("sensitive"));
+            assert!(!message.contains("private"));
         } else {
             panic!("Expected RequestFailed with 403, got: {result:?}");
         }

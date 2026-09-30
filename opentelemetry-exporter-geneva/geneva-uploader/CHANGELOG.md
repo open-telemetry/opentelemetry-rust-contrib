@@ -1,5 +1,11 @@
 # Changelog
 
+## [Unreleased]
+
+### Fixed
+
+- Emit structured warning diagnostics for Geneva Config Service transport and HTTP status failures without logging request URLs, query values, authorization tokens, or response bodies.
+
 ## [0.8.0] - 2026-09-22
 
 ### Changed

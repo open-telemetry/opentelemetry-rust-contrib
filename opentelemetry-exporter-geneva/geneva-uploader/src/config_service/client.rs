@@ -10,7 +10,7 @@ use secrecy::{ExposeSecret, SecretString};
 use serde::Deserialize;
 use std::time::Duration;
 use thiserror::Error;
-use tracing::{debug, error, info};
+use tracing::{debug, error, info, warn};
 use uuid::Uuid;
 
 use chrono::{DateTime, Utc};
@@ -123,8 +123,15 @@ pub(crate) enum GenevaConfigClientError {
     // Networking / HTTP / TLS
     #[error("HTTP error: {0}")]
     Http(#[from] reqwest::Error),
-    #[error("Request failed with status {status}: {message}")]
-    RequestFailed { status: u16, message: String },
+    #[error("GCS request failed (request_id={request_id}, category={category})")]
+    ConfigRequest {
+        request_id: String,
+        category: &'static str,
+        #[source]
+        source: reqwest::Error,
+    },
+    #[error("GCS request failed (request_id={request_id}, category=http_status, status={status})")]
+    RequestFailed { request_id: String, status: u16 },
 
     // Data / parsing
     #[error("JSON error: {0}")]
@@ -275,6 +282,7 @@ pub(crate) struct GenevaConfigClient {
     // TODO: revisit if the lock can be removed
     cached_data: RwLock<Option<CachedAuthData>>,
     precomputed_url_prefix: String,
+    endpoint_host: String,
     agent_identity: String,
     agent_version: String,
 }
@@ -308,10 +316,11 @@ impl GenevaConfigClient {
     /// * `GenevaConfigClientError::AuthMethodNotImplemented` - If the specified authentication method is not yet supported
     #[allow(dead_code)]
     pub(crate) fn new(config: GenevaConfigClientConfig) -> Result<Self> {
+        let endpoint_host = sanitized_endpoint_host(&config.endpoint);
         info!(
             name: "config_client.new",
             target: "geneva-uploader",
-            endpoint = %config.endpoint,
+            endpoint_host = %endpoint_host,
             account = %config.account,
             namespace = %config.namespace,
             "Initializing GenevaConfigClient"
@@ -485,6 +494,7 @@ impl GenevaConfigClient {
             http_client,
             cached_data: RwLock::new(None),
             precomputed_url_prefix: pre_url,
+            endpoint_host,
             agent_identity: agent_identity.to_string(), // TODO make this configurable
             agent_version: "1.0".to_string(),           // TODO make this configurable
         })
@@ -968,7 +978,7 @@ impl GenevaConfigClient {
 
         let mut request = self.http_client.get(&url);
 
-        request = request.header("x-ms-client-request-id", req_id);
+        request = request.header("x-ms-client-request-id", req_id.clone());
 
         // Add appropriate authentication header
         match &self.config.auth_method {
@@ -992,20 +1002,37 @@ impl GenevaConfigClient {
         let response = match request.send().await {
             Ok(resp) => resp,
             Err(e) => {
-                debug!(
+                let category = classify_reqwest_error(&e);
+                warn!(
                     name: "config_client.fetch_ingestion_info.http_error",
                     target: "geneva-uploader",
-                    error = %e,
+                    request_id = %req_id,
+                    endpoint_host = %self.endpoint_host,
+                    environment = %self.config.environment,
+                    account = %self.config.account,
+                    namespace = %self.config.namespace,
+                    region = %self.config.region,
+                    config_major_version = self.config.config_major_version,
+                    category,
+                    is_timeout = e.is_timeout(),
+                    is_connect = e.is_connect(),
+                    is_request = e.is_request(),
+                    is_builder = e.is_builder(),
+                    status_code = ?e.status().map(|status| status.as_u16()),
                     "Config service HTTP request failed"
                 );
-                return Err(GenevaConfigClientError::Http(e));
+                return Err(GenevaConfigClientError::ConfigRequest {
+                    request_id: req_id,
+                    category,
+                    source: e,
+                });
             }
         };
 
         let status = response.status();
-        let body = response.text().await?;
 
         if status.is_success() {
+            let body = response.text().await?;
             let body = Zeroizing::new(body);
             debug!(
                 name: "config_client.fetch_ingestion_info.response",
@@ -1037,18 +1064,54 @@ impl GenevaConfigClient {
             );
             Ok((parsed.ingestion_gateway_info, primary_monikers))
         } else {
-            debug!(
+            warn!(
                 name: "config_client.fetch_ingestion_info.error_status",
                 target: "geneva-uploader",
-                status = status.as_u16(),
-                body = %body,
-                "Config service returned error"
+                request_id = %req_id,
+                endpoint_host = %self.endpoint_host,
+                environment = %self.config.environment,
+                account = %self.config.account,
+                namespace = %self.config.namespace,
+                region = %self.config.region,
+                config_major_version = self.config.config_major_version,
+                category = "http_status",
+                status_code = status.as_u16(),
+                "Config service returned a non-success status"
             );
             Err(GenevaConfigClientError::RequestFailed {
+                request_id: req_id,
                 status: status.as_u16(),
-                message: body,
             })
         }
+    }
+}
+
+fn sanitized_endpoint_host(endpoint: &str) -> String {
+    Url::parse(endpoint)
+        .ok()
+        .and_then(|url| {
+            url.host_str().map(|host| match url.port() {
+                Some(port) if host.contains(':') => format!("[{host}]:{port}"),
+                Some(port) => format!("{host}:{port}"),
+                None => host.to_string(),
+            })
+        })
+        .unwrap_or_else(|| "invalid_endpoint".to_string())
+}
+
+fn classify_reqwest_error(error: &reqwest::Error) -> &'static str {
+    if error.status().is_some() {
+        "http_status"
+    } else if error.is_timeout() {
+        "timeout"
+    } else if error.is_connect() {
+        "connect"
+    } else if error.is_builder() {
+        "build"
+    } else if error.is_request() {
+        "request"
+    } else {
+        "tls_or_transport"
     }
 }
 
@@ -1250,6 +1313,8 @@ fn build_rustls_client_config(
 #[cfg(test)]
 mod account_selection_tests {
     use super::*;
+    use std::error::Error as _;
+    use std::net::TcpListener;
 
     fn account(group: &str, moniker: &str, is_primary: bool) -> StorageAccountKey {
         StorageAccountKey {
@@ -1259,6 +1324,96 @@ mod account_selection_tests {
         }
     }
 
+    /// Scenario: A GCS endpoint contains sensitive path and query values.
+    /// Guarantees: Production diagnostics retain only the endpoint host and optional port.
+    #[test]
+    fn sanitizes_endpoint_for_diagnostics() {
+        let endpoint = "https://gcs.example.test/private/identity?token=secret&TagId=sensitive-tag";
+
+        let sanitized = sanitized_endpoint_host(endpoint);
+
+        assert_eq!(sanitized, "gcs.example.test");
+        assert!(!sanitized.contains("private"));
+        assert!(!sanitized.contains("secret"));
+        assert!(!sanitized.contains("sensitive-tag"));
+    }
+
+    /// Scenario: Reqwest rejects a malformed GCS request before transport.
+    /// Guarantees: The stable category is `build`, and the returned message excludes the URL.
+    #[tokio::test]
+    async fn classifies_builder_error_without_exposing_request_url() {
+        let source = reqwest::Client::new()
+            .get("http://[::1/private?token=secret")
+            .send()
+            .await
+            .expect_err("the malformed URL must fail");
+
+        assert_eq!(classify_reqwest_error(&source), "build");
+
+        let error = GenevaConfigClientError::ConfigRequest {
+            request_id: "safe-request-id".to_string(),
+            category: classify_reqwest_error(&source),
+            source,
+        };
+        let message = error.to_string();
+
+        assert_eq!(
+            message,
+            "GCS request failed (request_id=safe-request-id, category=build)"
+        );
+        assert!(!message.contains("secret"));
+        assert!(!message.contains("private"));
+        assert!(error.source().is_some());
+    }
+
+    /// Scenario: A GCS connection cannot be established.
+    /// Guarantees: Reqwest classification reports `connect` without exposing query credentials.
+    #[tokio::test]
+    async fn classifies_connect_error_without_exposing_request_url() {
+        let listener = TcpListener::bind("127.0.0.1:0").expect("reserve an unused local port");
+        let port = listener.local_addr().expect("read listener address").port();
+        drop(listener);
+        let endpoint = format!("http://127.0.0.1:{port}/private?identity=secret");
+        let source = reqwest::Client::new()
+            .get(endpoint)
+            .send()
+            .await
+            .expect_err("the closed local port must reject the connection");
+
+        assert_eq!(classify_reqwest_error(&source), "connect");
+
+        let error = GenevaConfigClientError::ConfigRequest {
+            request_id: "safe-request-id".to_string(),
+            category: classify_reqwest_error(&source),
+            source,
+        };
+        let message = error.to_string();
+
+        assert!(!message.contains("secret"));
+        assert!(!message.contains("identity"));
+        assert!(error.source().is_some());
+    }
+
+    /// Scenario: GCS returns a non-success response containing sensitive diagnostic text.
+    /// Guarantees: The propagated error contains only request ID, category, and status.
+    #[test]
+    fn http_status_error_excludes_response_body() {
+        let error = GenevaConfigClientError::RequestFailed {
+            request_id: "safe-request-id".to_string(),
+            status: 403,
+        };
+        let message = error.to_string();
+
+        assert_eq!(
+            message,
+            "GCS request failed (request_id=safe-request-id, category=http_status, status=403)"
+        );
+        assert!(!message.contains("token"));
+        assert!(!message.contains("identity"));
+    }
+
+    /// Scenario: GCS returns primary and secondary monikers for multiple account groups.
+    /// Guarantees: Exactly the primary moniker is selected for each exact group name.
     #[test]
     fn selects_one_primary_for_every_exact_account_group() {
         let selected = select_primary_monikers(vec![
@@ -1275,6 +1430,8 @@ mod account_selection_tests {
         );
     }
 
+    /// Scenario: A GCS account group has no primary moniker.
+    /// Guarantees: Selection fails instead of routing to a secondary moniker.
     #[test]
     fn rejects_missing_primary_for_account_group() {
         let error = select_primary_monikers(vec![
@@ -1286,6 +1443,8 @@ mod account_selection_tests {
         assert!(error.to_string().contains("No primary moniker found"));
     }
 
+    /// Scenario: A GCS account group has multiple primary monikers.
+    /// Guarantees: Selection fails instead of depending on response ordering.
     #[test]
     fn rejects_ambiguous_primary_for_account_group() {
         let error = select_primary_monikers(vec![
@@ -1299,6 +1458,8 @@ mod account_selection_tests {
             .contains("Multiple primary monikers found"));
     }
 
+    /// Scenario: GCS returns account groups that differ only by case.
+    /// Guarantees: The groups remain distinct during primary-moniker selection.
     #[test]
     fn preserves_case_distinct_account_groups() {
         let selected = select_primary_monikers(vec![
