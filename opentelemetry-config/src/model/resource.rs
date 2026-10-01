@@ -24,6 +24,34 @@ pub(crate) struct ResourceConfig {
     pub attributes_list: Option<serde_yaml::Value>,
 }
 
+/// The declared type of a resource attribute.
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub(crate) enum AttributeTypeConfig {
+    /// Type was not specified in the configuration (defaults to "string").
+    #[default]
+    Omitted,
+    /// Type was explicitly specified as YAML null (`type: null` or `type: ~`).
+    Null,
+    /// Type was specified as a string (e.g., "string", "int", etc.).
+    String(String),
+    /// Type was specified as another YAML type (e.g., integer, boolean).
+    Other,
+}
+
+impl<'de> Deserialize<'de> for AttributeTypeConfig {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        let value = serde_yaml::Value::deserialize(deserializer)?;
+        match value {
+            serde_yaml::Value::Null => Ok(AttributeTypeConfig::Null),
+            serde_yaml::Value::String(s) => Ok(AttributeTypeConfig::String(s)),
+            _ => Ok(AttributeTypeConfig::Other),
+        }
+    }
+}
+
 /// A name-value pair defining a single resource attribute.
 #[derive(Deserialize, Debug, Clone)]
 #[serde(deny_unknown_fields)]
@@ -35,7 +63,8 @@ pub(crate) struct AttributeConfig {
     pub value: serde_yaml::Value,
 
     /// The declared attribute type (defaults to "string").
-    pub r#type: Option<String>,
+    #[serde(default)]
+    pub r#type: AttributeTypeConfig,
 }
 
 use crate::model::get_mapping_value;
@@ -201,7 +230,7 @@ impl ResourceConfig {
 }
 
 impl AttributeConfig {
-    /// Validates attribute name and type/value agreement.
+    /// Validates attribute name, declared type, and type/value agreement.
     pub(crate) fn validate(&self) -> Result<(), ProviderError> {
         let name = self.name.trim();
         if name.is_empty() {
@@ -210,13 +239,45 @@ impl AttributeConfig {
             ));
         }
 
+        let declared_type = match &self.r#type {
+            AttributeTypeConfig::Omitted => "string",
+            AttributeTypeConfig::Null => {
+                return Err(ProviderError::InvalidConfiguration(format!(
+                    "Resource attribute '{}' type cannot be null",
+                    self.name
+                )));
+            }
+            AttributeTypeConfig::Other => {
+                return Err(ProviderError::InvalidConfiguration(format!(
+                    "Resource attribute '{}' type must be a string",
+                    self.name
+                )));
+            }
+            AttributeTypeConfig::String(s) => s.as_str(),
+        };
+
+        match declared_type {
+            "string" | "bool" | "int" | "double" => {}
+            "string_array" | "bool_array" | "int_array" | "double_array" => {
+                return Err(ProviderError::InvalidConfiguration(format!(
+                    "Resource attribute '{}' uses array type '{}' which is not supported in this milestone",
+                    self.name, declared_type
+                )));
+            }
+            other => {
+                return Err(ProviderError::InvalidConfiguration(format!(
+                    "Resource attribute '{}' has unsupported type '{}'",
+                    self.name, other
+                )));
+            }
+        }
+
         // Schema nullBehavior: "the entry is ignored"
         if self.value.is_null() {
             return Ok(());
         }
 
-        let attr_type = self.r#type.as_deref().unwrap_or("string");
-        match attr_type {
+        match declared_type {
             "string" => {
                 if !self.value.is_string() {
                     return Err(ProviderError::InvalidConfiguration(format!(
@@ -250,18 +311,7 @@ impl AttributeConfig {
                     )));
                 }
             }
-            "string_array" | "bool_array" | "int_array" | "double_array" => {
-                return Err(ProviderError::InvalidConfiguration(format!(
-                    "Resource attribute '{}' uses array type '{}' which is not supported in this milestone",
-                    self.name, attr_type
-                )));
-            }
-            other => {
-                return Err(ProviderError::InvalidConfiguration(format!(
-                    "Resource attribute '{}' has unsupported type '{}'",
-                    self.name, other
-                )));
-            }
+            _ => unreachable!(),
         }
 
         if self.value.is_sequence() {
@@ -280,7 +330,23 @@ impl AttributeConfig {
             return Ok(None);
         }
 
-        let attr_type = self.r#type.as_deref().unwrap_or("string");
+        let attr_type = match &self.r#type {
+            AttributeTypeConfig::Omitted => "string",
+            AttributeTypeConfig::String(s) => s.as_str(),
+            AttributeTypeConfig::Null => {
+                return Err(ProviderError::InvalidConfiguration(format!(
+                    "Resource attribute '{}' type cannot be null",
+                    self.name
+                )));
+            }
+            AttributeTypeConfig::Other => {
+                return Err(ProviderError::InvalidConfiguration(format!(
+                    "Resource attribute '{}' type must be a string",
+                    self.name
+                )));
+            }
+        };
+
         let kv = match attr_type {
             "string" => {
                 let s = self.value.as_str().ok_or_else(|| {
@@ -317,6 +383,12 @@ impl AttributeConfig {
                     ))
                 })?;
                 KeyValue::new(self.name.clone(), f)
+            }
+            "string_array" | "bool_array" | "int_array" | "double_array" => {
+                return Err(ProviderError::InvalidConfiguration(format!(
+                    "Resource attribute '{}' uses array type '{}' which is not supported in this milestone",
+                    self.name, attr_type
+                )));
             }
             other => {
                 return Err(ProviderError::InvalidConfiguration(format!(
