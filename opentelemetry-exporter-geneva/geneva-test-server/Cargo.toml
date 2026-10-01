@@ -23,7 +23,7 @@ testing = ["dep:reqwest", "dep:tempfile"]
 default = []
 
 [dependencies.reqwest]
-version = "0.12"
+version = "0.13"
 default-features = false
 features = ["json", "rustls-tls"]
 optional = true
