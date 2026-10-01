@@ -190,7 +190,14 @@ meter_provider:
         .arg("test_end_to_end_console_exporter_initialization_and_shutdown")
         .env("RUN_CONSOLE_TEST_CHILD", "1")
         .output()
-        .expect("Failed to execute child process for console export test");
+        .expect("child process should execute successfully");
+
+    assert!(
+        output.status.success(),
+        "Child test process failed:\nSTDOUT: {}\nSTDERR: {}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
 
     let stdout = String::from_utf8_lossy(&output.stdout);
     assert!(
