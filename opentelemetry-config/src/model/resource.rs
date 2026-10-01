@@ -447,4 +447,202 @@ attributes:
             assert!(err.to_string().contains(expected_message));
         }
     }
+
+    #[test]
+    fn test_attribute_validation_rejects_empty_name() {
+        let yaml = r#"
+attributes:
+  - name: "   "
+    value: "test"
+"#;
+        let config: ResourceConfig = serde_yaml::from_str(yaml).unwrap();
+        let err = config.validate().unwrap_err();
+        assert!(err
+            .to_string()
+            .contains("Resource attribute name must not be empty"));
+    }
+
+    #[test]
+    fn test_attribute_validation_rejects_invalid_type_even_with_null_value() {
+        let yaml = r#"
+attributes:
+  - name: example.key
+    type: invalid_type
+    value: null
+"#;
+        let config: ResourceConfig = serde_yaml::from_str(yaml).unwrap();
+        let err = config.validate().unwrap_err();
+        assert!(err
+            .to_string()
+            .contains("Resource attribute 'example.key' has unsupported type 'invalid_type'"));
+    }
+
+    #[test]
+    fn test_attribute_validation_rejects_array_type_even_with_null_value() {
+        let yaml = r#"
+attributes:
+  - name: example.key
+    type: string_array
+    value: null
+"#;
+        let config: ResourceConfig = serde_yaml::from_str(yaml).unwrap();
+        let err = config.validate().unwrap_err();
+        assert!(err
+            .to_string()
+            .contains("uses array type 'string_array' which is not supported"));
+    }
+
+    #[test]
+    fn test_attribute_validation_rejects_explicit_null_type() {
+        for yaml in [
+            "attributes:\n  - name: k\n    type: null\n    value: 'val'",
+            "attributes:\n  - name: k\n    type: null\n    value: null",
+            "attributes:\n  - name: k\n    type: ~\n    value: 'val'",
+        ] {
+            let config: ResourceConfig = serde_yaml::from_str(yaml).unwrap();
+            let err = config.validate().unwrap_err();
+            assert!(
+                err.to_string()
+                    .contains("Resource attribute 'k' type cannot be null"),
+                "Expected rejection for {yaml}, got: {err}"
+            );
+        }
+    }
+
+    #[test]
+    fn test_attribute_validation_rejects_non_string_type() {
+        let yaml = r#"
+attributes:
+  - name: k
+    type: 123
+    value: "val"
+"#;
+        let config: ResourceConfig = serde_yaml::from_str(yaml).unwrap();
+        let err = config.validate().unwrap_err();
+        assert!(err
+            .to_string()
+            .contains("Resource attribute 'k' type must be a string"));
+    }
+
+    #[test]
+    fn test_attribute_validation_rejects_array_values() {
+        for yaml in [
+            "attributes:\n  - name: k\n    value: ['a', 'b']",
+            "attributes:\n  - name: k\n    type: string\n    value: ['a', 'b']",
+        ] {
+            let config: ResourceConfig = serde_yaml::from_str(yaml).unwrap();
+            let err = config.validate().unwrap_err();
+            assert!(
+                err.to_string()
+                    .contains("declared as type 'string' but value is not a string"),
+                "Expected scalar type mismatch for {yaml}, got: {err}"
+            );
+        }
+    }
+
+    #[test]
+    fn test_attribute_validation_rejects_type_mismatches() {
+        for (yaml, expected) in [
+            (
+                "attributes:\n  - name: k\n    type: string\n    value: 123",
+                "declared as type 'string' but value is not a string",
+            ),
+            (
+                "attributes:\n  - name: k\n    type: bool\n    value: 'true'",
+                "declared as type 'bool' but value is not a boolean",
+            ),
+            (
+                "attributes:\n  - name: k\n    type: int\n    value: '123'",
+                "declared as type 'int' but value is not an integer",
+            ),
+            (
+                "attributes:\n  - name: k\n    type: int\n    value: 3.5",
+                "declared as type 'int' but value is not an integer",
+            ),
+            (
+                "attributes:\n  - name: k\n    type: double\n    value: '3.5'",
+                "declared as type 'double' but value is not a double",
+            ),
+        ] {
+            let config: ResourceConfig = serde_yaml::from_str(yaml).unwrap();
+            let err = config.validate().unwrap_err();
+            assert!(
+                err.to_string().contains(expected),
+                "Expected {expected} for {yaml}, got: {err}"
+            );
+        }
+    }
+
+    #[test]
+    fn test_attribute_valid_null_values_are_ignored() {
+        let yaml = r#"
+attributes:
+  - name: string.null
+    type: string
+    value: null
+  - name: bool.null
+    type: bool
+    value: null
+  - name: int.null
+    type: int
+    value: null
+  - name: double.null
+    type: double
+    value: null
+  - name: omitted.null
+    value: null
+  - name: active.attr
+    value: active
+"#;
+        let config: ResourceConfig = serde_yaml::from_str(yaml).unwrap();
+        config.validate().unwrap();
+        let res = config.to_resource().unwrap();
+        assert_eq!(res.get(&Key::new("active.attr")), Some("active".into()));
+        assert_eq!(res.get(&Key::new("string.null")), None);
+        assert_eq!(res.get(&Key::new("bool.null")), None);
+        assert_eq!(res.get(&Key::new("int.null")), None);
+        assert_eq!(res.get(&Key::new("double.null")), None);
+        assert_eq!(res.get(&Key::new("omitted.null")), None);
+    }
+
+    #[test]
+    fn test_attribute_valid_scalars_converted_to_resource() {
+        let yaml = r#"
+attributes:
+  - name: str.key
+    type: string
+    value: "hello"
+  - name: bool.key
+    type: bool
+    value: true
+  - name: int.key
+    type: int
+    value: 42
+  - name: double.key
+    type: double
+    value: 3.5
+  - name: default.key
+    value: "default_str"
+"#;
+        let config: ResourceConfig = serde_yaml::from_str(yaml).unwrap();
+        config.validate().unwrap();
+        let res = config.to_resource().unwrap();
+        assert_eq!(res.get(&Key::new("str.key")), Some("hello".into()));
+        assert_eq!(
+            res.get(&Key::new("bool.key")),
+            Some(opentelemetry::Value::Bool(true))
+        );
+        assert_eq!(
+            res.get(&Key::new("int.key")),
+            Some(opentelemetry::Value::I64(42))
+        );
+        assert_eq!(
+            res.get(&Key::new("double.key")),
+            Some(opentelemetry::Value::F64(3.5))
+        );
+        assert_eq!(
+            res.get(&Key::new("default.key")),
+            Some("default_str".into())
+        );
+    }
 }
