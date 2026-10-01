@@ -1,0 +1,13 @@
+flags:
+  etw-integration:
+    paths:
+      - opentelemetry-etw-logs/**
+      - opentelemetry-etw-metrics/**
+      - opentelemetry-etw-traces/**
+    carryforward: true
+  user-events-integration:
+    paths:
+      - opentelemetry-user-events-logs/**
+      - opentelemetry-user-events-metrics/**
+      - opentelemetry-user-events-trace/**
+    carryforward: true
