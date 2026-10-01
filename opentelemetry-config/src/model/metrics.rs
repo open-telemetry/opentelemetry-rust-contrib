@@ -174,3 +174,33 @@ impl MeterProviderConfig {
         Ok(())
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::MeterProviderConfig;
+
+    #[test]
+    fn validate_rejects_unsupported_meter_provider_fields() {
+        for (field, expected_message) in [
+            ("views: []", "`meter_provider.views` is not supported"),
+            (
+                "exemplar_filter: trace_based",
+                "`meter_provider.exemplar_filter` is not supported",
+            ),
+            (
+                "meter_configurator/development: {}",
+                "`meter_provider.meter_configurator` is not supported",
+            ),
+            (
+                "view_matching_mode/development: strict",
+                "`meter_provider.view_matching_mode` is not supported",
+            ),
+        ] {
+            let yaml =
+                format!("readers:\n  - periodic:\n      exporter: {{console: {{}}}}\n{field}\n");
+            let config: MeterProviderConfig = serde_yaml::from_str(&yaml).unwrap();
+            let err = config.validate().unwrap_err();
+            assert!(err.to_string().contains(expected_message));
+        }
+    }
+}
