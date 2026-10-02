@@ -38,7 +38,7 @@ use azure_identity::{
 // Compile-time guard: at least one TLS backend must be selected. Cargo features are
 // additive, so we cannot reject the both-enabled case (e.g. `--all-features`); instead
 // `tls-rustls` takes precedence when both are on. This matches reqwest's own pattern of
-// allowing `native-tls`, `rustls-tls`, etc. to coexist.
+// allowing `native-tls`, `rustls`, etc. to coexist.
 #[cfg(not(any(feature = "tls-native", feature = "tls-rustls")))]
 compile_error!(
     "geneva-uploader requires at least one TLS backend feature: `tls-native` or `tls-rustls`."
@@ -1224,7 +1224,7 @@ fn build_rustls_client_config(
     }
 
     // Require an explicitly installed CryptoProvider (e.g. rustls-symcrypt for FIPS).
-    // No built-in fallback provider is compiled in (`reqwest/rustls-tls-native-roots-no-provider`),
+    // No built-in fallback provider is compiled in (`reqwest/rustls-no-provider`),
     // so callers must install one at process startup via `CryptoProvider::install_default()`.
     let provider = rustls::crypto::CryptoProvider::get_default()
         .cloned()

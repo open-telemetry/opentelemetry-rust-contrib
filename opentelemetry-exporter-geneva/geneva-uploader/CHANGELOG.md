@@ -1,5 +1,11 @@
 # Changelog
 
+## vNext
+
+### Changed
+
+- Update reqwest to 0.13 and use its renamed TLS features. Ordinary rustls clients now use the platform certificate verifier; rustls certificate authentication continues to load native roots explicitly and use the caller-installed crypto provider.
+
 ## [0.8.0] - 2026-09-22
 
 ### Changed
