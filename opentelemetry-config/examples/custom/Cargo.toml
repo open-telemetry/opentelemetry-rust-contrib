@@ -9,6 +9,7 @@ rust-version = "1.75.0"
 [workspace]
 
 [dependencies]
+opentelemetry = "0.33"
 opentelemetry-config = { path = "../../"}
 opentelemetry_sdk = "0.33"
 serde = { version = "1.0", features = ["derive"] }
