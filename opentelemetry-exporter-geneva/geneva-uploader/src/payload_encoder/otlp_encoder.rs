@@ -29,6 +29,8 @@ use std::collections::HashMap;
 use std::sync::Arc;
 use tracing::{debug, error};
 
+// Geneva OBO prefixes every field with any other struct name; this is what MA/mdsd writes.
+const GENEVA_STRUCT_NAME: &str = "MdsContainer";
 const CS_VERSION_4: i64 = 0x400;
 const CS_VERSION_4_DISPLAY: &str = "4.0";
 const KEY_CSVER: &str = "__csver__";
@@ -1528,7 +1530,7 @@ impl OtlpEncoder {
 
     /// Create log schema entry.
     fn create_schema(schema_id: u64, field_info: &[FieldDef]) -> CentralSchemaEntry {
-        let schema = BondEncodedSchema::from_fields("OtlpLogRecord", "telemetry", field_info); //TODO - use actual struct name and namespace
+        let schema = BondEncodedSchema::from_fields(GENEVA_STRUCT_NAME, "", field_info);
 
         let schema_bytes = schema.as_bytes();
         let schema_md5: [u8; 16] = Md5::digest(schema_bytes).into();
@@ -1543,7 +1545,7 @@ impl OtlpEncoder {
 
     /// Create span schema entry.
     fn create_span_schema(schema_id: u64, field_info: &[FieldDef]) -> CentralSchemaEntry {
-        let schema = BondEncodedSchema::from_fields("OtlpSpanRecord", "telemetry", field_info);
+        let schema = BondEncodedSchema::from_fields(GENEVA_STRUCT_NAME, "", field_info);
 
         let schema_bytes = schema.as_bytes();
         let schema_md5: [u8; 16] = Md5::digest(schema_bytes).into();
@@ -2004,6 +2006,37 @@ mod tests {
             .to_owned();
         *offset += length;
         value
+    }
+
+    fn schema_struct_names(entry: &CentralSchemaEntry) -> (String, String) {
+        let bytes = entry.schema.as_bytes();
+        // Skip the "SP" signature, protocol version, and struct count.
+        let mut offset = 8;
+        let struct_name = read_bond_string(bytes, &mut offset);
+        let qualified_name = read_bond_string(bytes, &mut offset);
+        (struct_name, qualified_name)
+    }
+
+    /// Scenario: Log and span rows are encoded for upload.
+    /// Guarantees: Both schemas use MA's unqualified `MdsContainer` struct, so Geneva
+    /// OBO reads fields such as `resourceId` and `category` without a struct prefix.
+    #[test]
+    fn log_and_span_schemas_use_mds_container_struct() {
+        let fields = [FieldDef {
+            name: Cow::Borrowed(FIELD_ENV_NAME),
+            type_id: BondDataType::BT_STRING,
+            field_id: 1,
+        }];
+
+        for entry in [
+            OtlpEncoder::create_schema(1, &fields),
+            OtlpEncoder::create_span_schema(1, &fields),
+        ] {
+            assert_eq!(
+                schema_struct_names(&entry),
+                ("MdsContainer".to_string(), "MdsContainer".to_string())
+            );
+        }
     }
 
     /// Scenario: A canonical OTLP log has no explicit event name.
