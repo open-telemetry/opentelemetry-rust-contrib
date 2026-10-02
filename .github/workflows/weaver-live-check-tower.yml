@@ -45,6 +45,8 @@ jobs:
           egress-policy: audit
 
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
 
       - name: Cache cargo
         uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
@@ -80,11 +82,12 @@ jobs:
           OTEL_METRIC_EXPORT_INTERVAL: '2000'
           OTEL_BSP_SCHEDULE_DELAY: '1000'
           OTEL_EXPORTER_OTLP_ENDPOINT: ${{ steps.live-check.outputs.otlp-grpc-endpoint }}
+          STATE_DIR: ${{ steps.live-check.outputs.state-dir }}
         run: |
           set -euo pipefail
 
           echo "::group::Start example service"
-          ../target/release/example-live-check-app > "${{ steps.live-check.outputs.state-dir }}/example.log" 2>&1 &
+          ../target/release/example-live-check-app > "$STATE_DIR/example.log" 2>&1 &
           APP_PID=$!
           echo "app pid: $APP_PID"
           echo "::endgroup::"
