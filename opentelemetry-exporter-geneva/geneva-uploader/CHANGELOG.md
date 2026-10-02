@@ -4,7 +4,7 @@
 
 ### Fixed
 
-- Name log and span Bond schemas `MdsContainer`, matching the Monitoring Agent, instead of `telemetry.OtlpLogRecord` and `telemetry.OtlpSpanRecord`. Geneva On Behalf Of (OBO) processing prefixes every field with any other struct name, so OBO resource logs could not resolve top-level fields such as `category`, and Azure Monitor delivered them nested and unrouted.
+- Name log and span Bond schemas `MdsContainer`, instead of `telemetry.OtlpLogRecord` and `telemetry.OtlpSpanRecord`. Geneva On Behalf Of (OBO) processing prefixes every field with any other struct name, so OBO resource logs could not resolve top-level fields such as `category`, and Azure Monitor delivered them nested and unrouted.
 
 ## [0.8.0] - 2026-09-22
 
