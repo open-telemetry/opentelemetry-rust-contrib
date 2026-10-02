@@ -18,6 +18,11 @@ mod eks;
 #[cfg(feature = "detector-aws-eks")]
 pub use eks::EksResourceDetector;
 
+#[cfg(feature = "detector-aws-beanstalk")]
+mod beanstalk;
+#[cfg(feature = "detector-aws-beanstalk")]
+pub use beanstalk::BeanstalkResourceDetector;
+
 #[cfg(any(
     feature = "detector-aws-ec2",
     feature = "detector-aws-ecs",
@@ -29,6 +34,7 @@ mod imds;
     feature = "detector-aws-lambda",
     feature = "detector-aws-ec2",
     feature = "detector-aws-ecs",
-    feature = "detector-aws-eks"
+    feature = "detector-aws-eks",
+    feature = "detector-aws-beanstalk"
 ))]
 mod utils;

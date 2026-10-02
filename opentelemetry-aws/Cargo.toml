@@ -30,6 +30,7 @@ detector-aws-lambda = ["_detector"]
 detector-aws-ec2 = ["_detector", "_detector-http"]
 detector-aws-ecs = ["_detector", "_detector-http"]
 detector-aws-eks = ["_detector", "_detector-http"]
+detector-aws-beanstalk = ["_detector", "dep:serde", "dep:serde_json"]
 
 xray-exporter = [
     "opentelemetry/trace",

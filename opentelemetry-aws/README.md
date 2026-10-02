@@ -34,6 +34,7 @@ to AWS's telemetry platform.
 | **EC2 Resource Detector** | `detector-aws-ec2` | Detects AWS EC2 resource attributes via IMDSv2 |
 | **ECS Resource Detector** | `detector-aws-ecs` | Detects AWS ECS resource attributes via the task and container metadata endpoints |
 | **EKS Resource Detector** | `detector-aws-eks` | Detects AWS EKS resource attributes via the Kubernetes service-account mount and IMDSv2 |
+| **Elastic Beanstalk Resource Detector** | `detector-aws-beanstalk` | Detects AWS Elastic Beanstalk resource attributes from the X-Ray `environment.conf` file |
 
 ## Quick Start
 
@@ -80,6 +81,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 | `detector-aws-ec2` | No | AWS EC2 resource detector |
 | `detector-aws-ecs` | No | AWS ECS resource detector |
 | `detector-aws-eks` | No | AWS EKS resource detector |
+| `detector-aws-beanstalk` | No | AWS Elastic Beanstalk resource detector |
 
 [`OpenTelemetry`]: https://crates.io/crates/opentelemetry
 [X-Ray daemon]: https://docs.aws.amazon.com/xray/latest/devguide/xray-daemon.html

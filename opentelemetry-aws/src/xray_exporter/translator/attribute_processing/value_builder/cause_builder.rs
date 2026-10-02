@@ -258,13 +258,14 @@ impl<'value> ValueBuilder<'value> for CauseBuilder<'value> {
     }
 }
 
-impl<'v> SpanAttributeProcessor<'v, 7> for CauseBuilder<'v> {
-    const HANDLERS: [(&'static str, fn(&mut Self, &'v Value) -> bool); 7] = [
+impl<'v> SpanAttributeProcessor<'v, 8> for CauseBuilder<'v> {
+    const HANDLERS: [(&'static str, fn(&mut Self, &'v Value) -> bool); 8] = [
         (
             #[allow(deprecated)]
             semconv::RPC_SYSTEM,
             Self::rpc_system_is_aws_api,
         ),
+        (semconv::RPC_SYSTEM_NAME, Self::rpc_system_is_aws_api),
         (semconv::TELEMETRY_SDK_LANGUAGE, Self::sdk_lang),
         (semconv::HTTP_STATUS_TEXT, Self::http_status_text),
         (
