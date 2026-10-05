@@ -218,7 +218,13 @@ impl std::fmt::Debug for AgentFedCredential {
 ///   (timeout, connection refused, DNS) that is typically retriable.
 /// - [`AccountGroupNotResolved`](UploadError::AccountGroupNotResolved) indicates
 ///   a permanent routing configuration error.
-/// - [`Other`](UploadError::Other) covers config-service or internal errors.
+/// - [`ConfigService`](UploadError::ConfigService) indicates a failure while
+///   fetching or refreshing ingestion info (auth tokens, storage keys, moniker
+///   map) from the Geneva Config Service (GCS). This is a distinct dependency
+///   from the ingestion gateway (GIG) used for the actual upload, and callers
+///   may want to track/alert on it separately.
+/// - [`Other`](UploadError::Other) covers internal errors not otherwise
+///   classified.
 #[derive(Debug)]
 pub enum UploadError {
     /// Server returned a non-202 HTTP status.
@@ -236,7 +242,11 @@ pub enum UploadError {
         requested: String,
         available: Vec<String>,
     },
-    /// Config service or other internal error.
+    /// Failure while fetching or refreshing ingestion info from the Geneva
+    /// Config Service (GCS), e.g. network issues reaching GCS, authentication
+    /// failures, or malformed responses.
+    ConfigService(String),
+    /// Internal error not otherwise classified.
     Other(String),
 }
 
@@ -256,6 +266,7 @@ impl fmt::Display for UploadError {
                 f,
                 "account group '{requested}' was not resolved; available groups: {available:?}"
             ),
+            Self::ConfigService(msg) => write!(f, "config service error: {msg}"),
             Self::Other(msg) => write!(f, "{msg}"),
         }
     }
@@ -797,27 +808,39 @@ impl GenevaClient {
                     error = %e,
                     "Geneva upload failed"
                 );
-                match e {
-                    GenevaUploaderError::UploadFailed {
-                        status,
-                        retry_after,
-                        message,
-                    } => UploadError::HttpStatus {
-                        status,
-                        retry_after,
-                        message,
-                    },
-                    GenevaUploaderError::Http(msg) => UploadError::Transport(msg),
-                    GenevaUploaderError::AccountGroupNotResolved {
-                        requested,
-                        available,
-                    } => UploadError::AccountGroupNotResolved {
-                        requested,
-                        available,
-                    },
-                    other => UploadError::Other(other.to_string()),
-                }
+                map_uploader_error(e)
             })
+    }
+}
+
+/// Maps the internal, crate-private [`GenevaUploaderError`] to the public
+/// [`UploadError`] surfaced to callers of [`GenevaClient::upload_batch`].
+///
+/// Config-service failures (e.g. a failed GCS fetch of ingestion info/storage
+/// keys) are mapped to [`UploadError::ConfigService`] rather than
+/// [`UploadError::Other`] so that callers can distinguish GCS dependency
+/// failures from ingestion-gateway (GIG) failures or other internal errors.
+fn map_uploader_error(e: GenevaUploaderError) -> UploadError {
+    match e {
+        GenevaUploaderError::UploadFailed {
+            status,
+            retry_after,
+            message,
+        } => UploadError::HttpStatus {
+            status,
+            retry_after,
+            message,
+        },
+        GenevaUploaderError::Http(msg) => UploadError::Transport(msg),
+        GenevaUploaderError::AccountGroupNotResolved {
+            requested,
+            available,
+        } => UploadError::AccountGroupNotResolved {
+            requested,
+            available,
+        },
+        GenevaUploaderError::ConfigClient(msg) => UploadError::ConfigService(msg),
+        other => UploadError::Other(other.to_string()),
     }
 }
 
@@ -830,6 +853,42 @@ mod tests {
     use otap_df_pdata::views::otlp::bytes::logs::RawLogsData;
     use prost::Message as _;
     use std::collections::HashMap;
+
+    /// Scenario: The Geneva Config Service (GCS) fails to resolve ingestion
+    /// info (e.g. network issue, auth failure, or malformed response).
+    /// Guarantees: The failure maps to `UploadError::ConfigService` so callers
+    /// can distinguish it from ingestion-gateway (GIG) or internal failures.
+    #[test]
+    fn config_client_failure_maps_to_config_service_error() {
+        let mapped = map_uploader_error(GenevaUploaderError::ConfigClient(
+            "GenevaConfigClient error: connection refused".to_string(),
+        ));
+
+        match mapped {
+            UploadError::ConfigService(msg) => {
+                assert!(msg.contains("connection refused"));
+            }
+            other => panic!("expected UploadError::ConfigService, got: {other:?}"),
+        }
+    }
+
+    /// Scenario: The ingestion gateway (GIG) rejects an upload with a non-202
+    /// HTTP status.
+    /// Guarantees: The failure maps to `UploadError::HttpStatus`, distinct
+    /// from config-service failures.
+    #[test]
+    fn upload_failed_maps_to_http_status_error() {
+        let mapped = map_uploader_error(GenevaUploaderError::UploadFailed {
+            status: 503,
+            retry_after: None,
+            message: "service unavailable".to_string(),
+        });
+
+        match mapped {
+            UploadError::HttpStatus { status, .. } => assert_eq!(status, 503),
+            other => panic!("expected UploadError::HttpStatus, got: {other:?}"),
+        }
+    }
 
     fn build_config(logs: Option<&str>, spans: Option<&str>) -> GenevaClientConfig {
         GenevaClientConfig {
