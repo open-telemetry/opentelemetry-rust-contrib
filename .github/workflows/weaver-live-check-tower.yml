@@ -40,7 +40,7 @@ jobs:
     timeout-minutes: 15
     steps:
       - name: Harden the runner (Audit all outbound calls)
-        uses: step-security/harden-runner@05e31511f85b41b11d1cf0ef85d0992719546e2c # v2.21.0
+        uses: step-security/harden-runner@e14015d583714f6e62063499dc959a02595150a1 # v2.21.1
         with:
           egress-policy: audit
 
@@ -60,13 +60,13 @@ jobs:
         run: cargo build --release
 
       - name: Setup weaver
-        uses: open-telemetry/weaver/.github/actions/setup-weaver@26c685ff52b925056ff1d53476c6022638c01220 # v0.25.1
+        uses: open-telemetry/weaver/.github/actions/setup-weaver@38befce4bc68fe320d20f189465c93835ac20c12 # v0.26.1
         with:
           version: ${{ env.WEAVER_VERSION }}
 
       - name: Start weaver live-check
         id: live-check
-        uses: open-telemetry/weaver/.github/actions/weaver-live-check-start@26c685ff52b925056ff1d53476c6022638c01220 # v0.25.1
+        uses: open-telemetry/weaver/.github/actions/weaver-live-check-start@38befce4bc68fe320d20f189465c93835ac20c12 # v0.26.1
         with:
           registry: ${{ env.SEMCONV_REGISTRY }}
 
@@ -122,7 +122,7 @@ jobs:
 
       - name: Stop weaver live-check
         if: always()
-        uses: open-telemetry/weaver/.github/actions/weaver-live-check-stop@26c685ff52b925056ff1d53476c6022638c01220 # v0.25.1
+        uses: open-telemetry/weaver/.github/actions/weaver-live-check-stop@38befce4bc68fe320d20f189465c93835ac20c12 # v0.26.1
         with:
           fail-on: violation
 
