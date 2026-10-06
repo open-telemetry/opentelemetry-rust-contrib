@@ -6,6 +6,10 @@
 
 - `BeanstalkResourceDetector` (`detector-aws-beanstalk` feature)
 
+### Fixed
+
+- Added missing replacement for deprecated attributes in value builders: `RPC_SYSTEM` -> `RPC_SYSTEM_NAME` and `PEER_SERVICE` -> `SERVICE_PEER_NAME`. Deprecated attributes also kept for retro-compatibility.
+
 ## v0.21.0
 
 Released 2026-Sep-21
