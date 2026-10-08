@@ -58,7 +58,7 @@ serde = { version = "1.0", features = ["derive"], optional = true }
 serde_json = {version = "1.0", optional = true}
 thiserror = {version = "2.0", optional = true}
 regex = {version = "1.0", optional = true}
-rand = {version = "0.9", optional = true}
+rand = {version = "0.10", optional = true}
 ureq = { version = "3.2", default-features = false, features = ["json"], optional = true }
 
 [dev-dependencies]
@@ -72,7 +72,7 @@ sealed_test = "1.1"
 serde_json = "1.0"
 temp-env = "0.3"
 criterion = { workspace = true, features = ["html_reports", "async_tokio"] }
-rand = "0.9"
+rand = "0.10"
 
 [target.'cfg(not(target_os = "windows"))'.dev-dependencies]
 pprof = { version = "0.14.1", features = ["flamegraph", "criterion"]}
