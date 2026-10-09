@@ -437,6 +437,33 @@ struct RequestFinalization<ResExt> {
     request_data: RequestData,
     layer_state: Arc<LayerState>,
     response_extractor: ResExt,
+    active_request: ActiveRequestGuard,
+}
+
+/// Decrements `http.server.active_requests` exactly once when dropped.
+///
+/// The guard is dropped when the request completes, and also when the
+/// [`ResponseFuture`] is dropped before completion, so canceled requests do
+/// not leave the counter elevated.
+struct ActiveRequestGuard {
+    server_active_requests: UpDownCounter<i64>,
+    attributes: [KeyValue; 2],
+}
+
+impl ActiveRequestGuard {
+    fn new(server_active_requests: &UpDownCounter<i64>, attributes: [KeyValue; 2]) -> Self {
+        server_active_requests.add(1, &attributes);
+        ActiveRequestGuard {
+            server_active_requests: server_active_requests.clone(),
+            attributes,
+        }
+    }
+}
+
+impl Drop for ActiveRequestGuard {
+    fn drop(&mut self) {
+        self.server_active_requests.add(-1, &self.attributes);
+    }
 }
 
 pin_project! {
@@ -469,9 +496,11 @@ where
             request_data,
             layer_state,
             response_extractor,
+            active_request,
         }) = this.finalization.take()
         {
             finalize_request(&result, request_data, &layer_state, &response_extractor);
+            drop(active_request);
         }
         Poll::Ready(result)
     }
@@ -573,9 +602,10 @@ where
 
         let cx = parent_cx.with_span(span);
 
-        self.state
-            .server_active_requests
-            .add(1, &[url_scheme_kv.clone(), method_kv.clone()]);
+        let active_request = ActiveRequestGuard::new(
+            &self.state.server_active_requests,
+            [url_scheme_kv.clone(), method_kv.clone()],
+        );
 
         let request_data = RequestData {
             duration_start,
@@ -600,6 +630,7 @@ where
                 request_data,
                 layer_state,
                 response_extractor,
+                active_request,
             }),
         }
     }
@@ -665,9 +696,6 @@ fn finalize_request<ResBody, E, ResExt>(
             };
 
             // Build label superset by moving owned values where possible.
-            // `url_scheme_kv` and `method_kv` are cloned for the active-requests
-            // decrement; their underlying strings are typically `&'static str`
-            // so the clones are allocation-free.
             let cap = 5
                 + error_type_kv.is_some() as usize
                 + route_kv_opt.is_some() as usize
@@ -676,8 +704,8 @@ fn finalize_request<ResBody, E, ResExt>(
             let mut label_superset = Vec::with_capacity(cap);
             label_superset.push(protocol_name_kv);
             label_superset.push(protocol_version_kv);
-            label_superset.push(url_scheme_kv.clone());
-            label_superset.push(method_kv.clone());
+            label_superset.push(url_scheme_kv);
+            label_superset.push(method_kv);
             label_superset.push(status_code_kv);
             if let Some(route_kv) = route_kv_opt {
                 label_superset.push(route_kv);
@@ -704,10 +732,6 @@ fn finalize_request<ResBody, E, ResExt>(
                     .server_response_body_size
                     .record(resp_content_length, &label_superset);
             }
-
-            layer_state
-                .server_active_requests
-                .add(-1, &[url_scheme_kv, method_kv]);
         }
         Err(error) => {
             // From the semantic convention: If the request fails with an error
@@ -724,18 +748,14 @@ fn finalize_request<ResBody, E, ResExt>(
             let label_superset = [
                 protocol_name_kv,
                 protocol_version_kv,
-                url_scheme_kv.clone(),
-                method_kv.clone(),
+                url_scheme_kv,
+                method_kv,
                 error_type_kv,
             ];
 
             layer_state
                 .server_request_duration
                 .record(duration_start.elapsed().as_secs_f64(), &label_superset);
-
-            layer_state
-                .server_active_requests
-                .add(-1, &[url_scheme_kv, method_kv]);
         }
     }
 }
@@ -1737,5 +1757,254 @@ mod tests {
             spans.is_empty(),
             "Expected no spans when tracing is disabled"
         );
+    }
+
+    /// Returns the cumulative `http.server.active_requests` value for the given
+    /// `url.scheme` and `http.request.method` label set.
+    fn active_requests(
+        meter_provider: &SdkMeterProvider,
+        exporter: &InMemoryMetricExporter,
+        scheme: &str,
+        method: &str,
+    ) -> i64 {
+        exporter.reset();
+        meter_provider.force_flush().unwrap();
+
+        let metrics = exporter.get_finished_metrics().unwrap();
+        let resource_metrics = &metrics[0];
+        let scope_metrics = resource_metrics
+            .scope_metrics()
+            .next()
+            .expect("Should have scope metrics");
+
+        let active_requests_metric = scope_metrics
+            .metrics()
+            .find(|m| m.name() == semconv::metric::HTTP_SERVER_ACTIVE_REQUESTS)
+            .expect("Active requests metric should exist");
+
+        if let AggregatedMetrics::I64(MetricData::Sum(sum)) = active_requests_metric.data() {
+            sum.data_points()
+                .find(|data_point| {
+                    let has = |key: &str, value: &str| {
+                        data_point
+                            .attributes()
+                            .any(|kv| kv.key.as_str() == key && kv.value.as_str() == value)
+                    };
+                    has(semconv::attribute::URL_SCHEME, scheme)
+                        && has(semconv::attribute::HTTP_REQUEST_METHOD, method)
+                })
+                .expect("Should have data point for the label set")
+                .value()
+        } else {
+            panic!("Expected sum data for active requests metric");
+        }
+    }
+
+    #[derive(Debug)]
+    struct TestError;
+
+    /// Responds `200 OK`, except `/error` fails and `/pending` never completes.
+    async fn respond_by_path(req: Request<String>) -> Result<Response<String>, TestError> {
+        match req.uri().path() {
+            "/error" => Err(TestError),
+            "/pending" => std::future::pending().await,
+            _ => Ok(Response::new(String::from("OK"))),
+        }
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn test_active_requests_return_to_zero() {
+        enum Ending {
+            Await,
+            DropBeforePoll,
+            DropWhilePending,
+        }
+
+        struct TestCase {
+            name: &'static str,
+            target: &'static str,
+            ending: Ending,
+        }
+
+        let test_cases = [
+            TestCase {
+                name: "successful completion",
+                target: "http://example.com/ok",
+                ending: Ending::Await,
+            },
+            TestCase {
+                name: "service error",
+                target: "http://example.com/error",
+                ending: Ending::Await,
+            },
+            TestCase {
+                name: "dropped before the first poll",
+                target: "http://example.com/pending",
+                ending: Ending::DropBeforePoll,
+            },
+            TestCase {
+                name: "dropped after polling to pending",
+                target: "http://example.com/pending",
+                ending: Ending::DropWhilePending,
+            },
+        ];
+
+        for test_case in test_cases {
+            let exporter = InMemoryMetricExporter::default();
+            let reader = PeriodicReader::builder(exporter.clone())
+                .with_interval(Duration::from_millis(100))
+                .build();
+            let meter_provider = SdkMeterProvider::builder().with_reader(reader).build();
+
+            let layer = LayerBuilder::builder()
+                .with_meter_provider(meter_provider.clone())
+                .with_tracing(false)
+                .build()
+                .unwrap();
+            let mut service = layer.layer(tower::service_fn(respond_by_path));
+
+            let request = Request::builder()
+                .method("GET")
+                .uri(test_case.target)
+                .body("test".to_string())
+                .unwrap();
+            let mut future = Box::pin(service.call(request));
+
+            assert_eq!(
+                active_requests(&meter_provider, &exporter, "http", "GET"),
+                1,
+                "{}",
+                test_case.name
+            );
+
+            match test_case.ending {
+                Ending::Await => {
+                    let _response = future.await;
+                }
+                Ending::DropBeforePoll => drop(future),
+                Ending::DropWhilePending => {
+                    std::future::poll_fn(|cx| {
+                        assert!(future.as_mut().poll(cx).is_pending());
+                        Poll::Ready(())
+                    })
+                    .await;
+                    drop(future);
+                }
+            }
+
+            assert_eq!(
+                active_requests(&meter_provider, &exporter, "http", "GET"),
+                0,
+                "{}",
+                test_case.name
+            );
+            // Later idle collections keep reporting zero.
+            assert_eq!(
+                active_requests(&meter_provider, &exporter, "http", "GET"),
+                0,
+                "{}",
+                test_case.name
+            );
+        }
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn test_active_requests_with_one_of_two_concurrent_requests_cancelled() {
+        let exporter = InMemoryMetricExporter::default();
+        let reader = PeriodicReader::builder(exporter.clone())
+            .with_interval(Duration::from_millis(100))
+            .build();
+        let meter_provider = SdkMeterProvider::builder().with_reader(reader).build();
+
+        let layer = LayerBuilder::builder()
+            .with_meter_provider(meter_provider.clone())
+            .with_tracing(false)
+            .build()
+            .unwrap();
+        let mut service = layer.layer(tower::service_fn(respond_by_path));
+
+        let cancelled = service.call(
+            Request::builder()
+                .method("GET")
+                .uri("http://example.com/pending")
+                .body("test".to_string())
+                .unwrap(),
+        );
+        let completed = service.call(
+            Request::builder()
+                .method("GET")
+                .uri("http://example.com/ok")
+                .body("test".to_string())
+                .unwrap(),
+        );
+        assert_eq!(
+            active_requests(&meter_provider, &exporter, "http", "GET"),
+            2
+        );
+
+        drop(cancelled);
+        assert_eq!(
+            active_requests(&meter_provider, &exporter, "http", "GET"),
+            1
+        );
+
+        let _response = completed.await.unwrap();
+        assert_eq!(
+            active_requests(&meter_provider, &exporter, "http", "GET"),
+            0
+        );
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn test_active_requests_are_counted_per_method_and_scheme() {
+        let exporter = InMemoryMetricExporter::default();
+        let reader = PeriodicReader::builder(exporter.clone())
+            .with_interval(Duration::from_millis(100))
+            .build();
+        let meter_provider = SdkMeterProvider::builder().with_reader(reader).build();
+
+        let layer = LayerBuilder::builder()
+            .with_meter_provider(meter_provider.clone())
+            .with_tracing(false)
+            .build()
+            .unwrap();
+        let mut service = layer.layer(tower::service_fn(respond_by_path));
+
+        let get_http = service.call(
+            Request::builder()
+                .method("GET")
+                .uri("http://example.com/pending")
+                .body("test".to_string())
+                .unwrap(),
+        );
+        let post_http = service.call(
+            Request::builder()
+                .method("POST")
+                .uri("http://example.com/ok")
+                .body("test".to_string())
+                .unwrap(),
+        );
+        let post_https = service.call(
+            Request::builder()
+                .method("POST")
+                .uri("https://example.com/pending")
+                .body("test".to_string())
+                .unwrap(),
+        );
+
+        let counts = || {
+            [("http", "GET"), ("http", "POST"), ("https", "POST")]
+                .map(|(scheme, method)| active_requests(&meter_provider, &exporter, scheme, method))
+        };
+        assert_eq!(counts(), [1, 1, 1]);
+
+        drop(post_https);
+        assert_eq!(counts(), [1, 1, 0]);
+
+        let _response = post_http.await.unwrap();
+        assert_eq!(counts(), [1, 0, 0]);
+
+        drop(get_http);
+        assert_eq!(counts(), [0, 0, 0]);
     }
 }
