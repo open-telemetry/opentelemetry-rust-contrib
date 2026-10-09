@@ -2,6 +2,12 @@
 
 ## vNext
 
+- Add `ProcessorBuilder::with_resource_attributes` to opt in to exporting
+  additional resource attributes in Part C. The existing automatic Part A
+  mappings for `service.name` and `service.instance.id` are unchanged.
+- Report an export failure instead of panicking when Part C exceeds the
+  EventHeader limit of 127 span and resource fields.
+
 ## v0.6.0
 
 Released 2026-Sep-21
