@@ -18,6 +18,9 @@
   description. The reader can derive the reason from
   `http.response.status_code`.
   [#801](https://github.com/open-telemetry/opentelemetry-rust-contrib/pull/801)
+* The server metric `http.server.active_requests` will now decrement when a
+  request is cancelled.
+  [#838](https://github.com/open-telemetry/opentelemetry-rust-contrib/pull/838)
 
 ## v0.19.0
 
