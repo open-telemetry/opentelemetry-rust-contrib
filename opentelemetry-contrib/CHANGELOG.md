@@ -2,6 +2,11 @@
 
 ## vNext
 
+- Fix docs.rs builds by removing the obsolete `doc_auto_cfg` feature, whose
+  functionality is now part of `doc_cfg`.
+- Enable the SDK's `trace` feature with `jaeger_json_exporter`, so standalone
+  builds do not rely on other workspace crates or dev-dependencies enabling it.
+
 ## v0.25.0
 
 Released 2026-Sep-21
