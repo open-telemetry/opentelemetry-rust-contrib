@@ -19,12 +19,13 @@ use opentelemetry::InstrumentationScope;
 use opentelemetry::KeyValue;
 use opentelemetry_http::HeaderExtractor;
 use opentelemetry_semantic_conventions as semconv;
+use opentelemetry_semantic_conventions::attribute::ERROR_TYPE;
 use pin_project_lite::pin_project;
 use tower_layer::Layer as TowerLayer;
 use tower_service::Service as TowerService;
 
 use crate::common::attributes::{
-    method_kv, redact_query, split_and_format_protocol_version, url_scheme_kv,
+    error_type_kv, method_kv, redact_query, split_and_format_protocol_version, url_scheme_kv,
     DEFAULT_SENSITIVE_QUERY_PARAMETERS,
 };
 use crate::http::extractors::{
@@ -646,19 +647,29 @@ fn finalize_request<ResBody, E, ResExt>(
                 span.set_attribute(attr.clone());
             }
 
-            // Set span status based on HTTP status code. Per the HTTP semantic
-            // conventions, a server span is only an error for 5xx responses.
-            if http_status.is_server_error() {
-                span.set_status(Status::Error {
-                    description: format!("HTTP {}", http_status.as_u16()).into(),
-                });
-            }
+            // From the semantic convention: For HTTP status codes in the 4xx range
+            // span status MUST be left unset in case of SpanKind.SERVER and SHOULD
+            // be set to Error in case of SpanKind.CLIENT.
+            // For HTTP status codes in the 5xx range, as well as any other code the
+            // client failed to interpret, span status SHOULD be set to Error.
+            let error_type_kv = if http_status.is_server_error() {
+                let error_type_kv = error_type_kv(http_status);
+                span.set_attribute(error_type_kv.clone());
+                // From the semantic convention:
+                // Don’t set the span status description if the reason can be
+                // inferred from http.response.status_code.
+                span.set_status(Status::error(""));
+                Some(error_type_kv)
+            } else {
+                None
+            };
 
             // Build label superset by moving owned values where possible.
             // `url_scheme_kv` and `method_kv` are cloned for the active-requests
             // decrement; their underlying strings are typically `&'static str`
             // so the clones are allocation-free.
             let cap = 5
+                + error_type_kv.is_some() as usize
                 + route_kv_opt.is_some() as usize
                 + custom_request_attributes.len()
                 + custom_response_attributes.len();
@@ -670,6 +681,9 @@ fn finalize_request<ResBody, E, ResExt>(
             label_superset.push(status_code_kv);
             if let Some(route_kv) = route_kv_opt {
                 label_superset.push(route_kv);
+            }
+            if let Some(error_type_kv) = error_type_kv {
+                label_superset.push(error_type_kv);
             }
             // Move (not clone) the custom attribute Vecs into the label set.
             label_superset.extend(custom_request_attributes);
@@ -696,10 +710,15 @@ fn finalize_request<ResBody, E, ResExt>(
                 .add(-1, &[url_scheme_kv, method_kv]);
         }
         Err(error) => {
+            // From the semantic convention: If the request fails with an error
+            // before response status code was sent or received, error.type
+            // SHOULD be set to exception type (its fully-qualified class name,
+            // if applicable) or a component-specific low cardinality error identifier.
+            let error_type_kv = KeyValue::new(ERROR_TYPE, std::any::type_name::<E>());
+
             // Mark span as error
-            span.set_status(Status::Error {
-                description: format!("{:?}", error).into(),
-            });
+            span.set_attribute(error_type_kv.clone());
+            span.set_status(Status::error(format!("{:?}", error)));
 
             // Still record duration metric (without status code).
             let label_superset = [
@@ -707,6 +726,7 @@ fn finalize_request<ResBody, E, ResExt>(
                 protocol_version_kv,
                 url_scheme_kv.clone(),
                 method_kv.clone(),
+                error_type_kv,
             ];
 
             layer_state
@@ -750,17 +770,23 @@ mod tests {
 
     #[tokio::test(flavor = "current_thread")]
     async fn test_tracing_with_in_memory_tracer() {
+        #[derive(Debug, Clone, Copy)]
+        struct TestError;
+
         struct TestCase {
             name: &'static str,
             target: &'static str,
+            outcome: Result<StatusCode, TestError>,
             expected_span_name: &'static str,
             expected_attributes: Vec<KeyValue>,
+            expected_span_status: Status,
         }
 
         let test_cases = [
             TestCase {
                 name: "request target in absolute form",
                 target: "http://example.com/api/users/123",
+                outcome: Ok(StatusCode::OK),
                 expected_span_name: "GET /api/users/123",
                 expected_attributes: vec![
                     KeyValue::new(semconv::attribute::HTTP_REQUEST_METHOD, "GET".to_string()),
@@ -773,10 +799,12 @@ mod tests {
                     KeyValue::new(semconv::attribute::HTTP_ROUTE, "/api/users/123".to_string()),
                     KeyValue::new(semconv::attribute::HTTP_RESPONSE_STATUS_CODE, 200),
                 ],
+                expected_span_status: Status::Unset,
             },
             TestCase {
                 name: "request target in origin form",
                 target: "/api/users/123",
+                outcome: Ok(StatusCode::OK),
                 expected_span_name: "GET /api/users/123",
                 expected_attributes: vec![
                     KeyValue::new(semconv::attribute::HTTP_REQUEST_METHOD, "GET".to_string()),
@@ -789,10 +817,12 @@ mod tests {
                     KeyValue::new(semconv::attribute::HTTP_ROUTE, "/api/users/123".to_string()),
                     KeyValue::new(semconv::attribute::HTTP_RESPONSE_STATUS_CODE, 200),
                 ],
+                expected_span_status: Status::Unset,
             },
             TestCase {
                 name: "request target with a query component",
                 target: "/api/users/123?fields=name&verbose=true",
+                outcome: Ok(StatusCode::OK),
                 expected_span_name: "GET /api/users/123",
                 expected_attributes: vec![
                     KeyValue::new(semconv::attribute::HTTP_REQUEST_METHOD, "GET".to_string()),
@@ -809,10 +839,12 @@ mod tests {
                     KeyValue::new(semconv::attribute::HTTP_ROUTE, "/api/users/123".to_string()),
                     KeyValue::new(semconv::attribute::HTTP_RESPONSE_STATUS_CODE, 200),
                 ],
+                expected_span_status: Status::Unset,
             },
             TestCase {
                 name: "request target with a sensitive query parameter",
                 target: "/api/users/123?fields=name&sig=secret-signature",
+                outcome: Ok(StatusCode::OK),
                 expected_span_name: "GET /api/users/123",
                 expected_attributes: vec![
                     KeyValue::new(semconv::attribute::HTTP_REQUEST_METHOD, "GET".to_string()),
@@ -829,10 +861,12 @@ mod tests {
                     KeyValue::new(semconv::attribute::HTTP_ROUTE, "/api/users/123".to_string()),
                     KeyValue::new(semconv::attribute::HTTP_RESPONSE_STATUS_CODE, 200),
                 ],
+                expected_span_status: Status::Unset,
             },
             TestCase {
                 name: "request target with an empty query component",
                 target: "/api/users/123?",
+                outcome: Ok(StatusCode::OK),
                 expected_span_name: "GET /api/users/123",
                 expected_attributes: vec![
                     KeyValue::new(semconv::attribute::HTTP_REQUEST_METHOD, "GET".to_string()),
@@ -846,6 +880,81 @@ mod tests {
                     KeyValue::new(semconv::attribute::HTTP_ROUTE, "/api/users/123".to_string()),
                     KeyValue::new(semconv::attribute::HTTP_RESPONSE_STATUS_CODE, 200),
                 ],
+                expected_span_status: Status::Unset,
+            },
+            TestCase {
+                name: "a server error response carries error.type",
+                target: "/api/users/123",
+                outcome: Ok(StatusCode::INTERNAL_SERVER_ERROR),
+                expected_span_name: "GET /api/users/123",
+                expected_attributes: vec![
+                    KeyValue::new(semconv::attribute::HTTP_REQUEST_METHOD, "GET".to_string()),
+                    KeyValue::new(semconv::attribute::URL_SCHEME, "".to_string()),
+                    KeyValue::new(semconv::attribute::URL_PATH, "/api/users/123".to_string()),
+                    KeyValue::new(
+                        semconv::attribute::USER_AGENT_ORIGINAL,
+                        "tower-test-client/1.0".to_string(),
+                    ),
+                    KeyValue::new(semconv::attribute::HTTP_ROUTE, "/api/users/123".to_string()),
+                    KeyValue::new(semconv::attribute::HTTP_RESPONSE_STATUS_CODE, 500),
+                    KeyValue::new(ERROR_TYPE, "500"),
+                ],
+                expected_span_status: Status::error(""),
+            },
+            TestCase {
+                name: "a client error response carries no error.type",
+                target: "/api/users/123",
+                outcome: Ok(StatusCode::NOT_FOUND),
+                expected_span_name: "GET /api/users/123",
+                expected_attributes: vec![
+                    KeyValue::new(semconv::attribute::HTTP_REQUEST_METHOD, "GET".to_string()),
+                    KeyValue::new(semconv::attribute::URL_SCHEME, "".to_string()),
+                    KeyValue::new(semconv::attribute::URL_PATH, "/api/users/123".to_string()),
+                    KeyValue::new(
+                        semconv::attribute::USER_AGENT_ORIGINAL,
+                        "tower-test-client/1.0".to_string(),
+                    ),
+                    KeyValue::new(semconv::attribute::HTTP_ROUTE, "/api/users/123".to_string()),
+                    KeyValue::new(semconv::attribute::HTTP_RESPONSE_STATUS_CODE, 404),
+                ],
+                expected_span_status: Status::Unset,
+            },
+            TestCase {
+                name: "an uncommon server error response carries error.type",
+                target: "/api/users/123",
+                outcome: Ok(StatusCode::from_u16(599).unwrap()),
+                expected_span_name: "GET /api/users/123",
+                expected_attributes: vec![
+                    KeyValue::new(semconv::attribute::HTTP_REQUEST_METHOD, "GET".to_string()),
+                    KeyValue::new(semconv::attribute::URL_SCHEME, "".to_string()),
+                    KeyValue::new(semconv::attribute::URL_PATH, "/api/users/123".to_string()),
+                    KeyValue::new(
+                        semconv::attribute::USER_AGENT_ORIGINAL,
+                        "tower-test-client/1.0".to_string(),
+                    ),
+                    KeyValue::new(semconv::attribute::HTTP_ROUTE, "/api/users/123".to_string()),
+                    KeyValue::new(semconv::attribute::HTTP_RESPONSE_STATUS_CODE, 599),
+                    KeyValue::new(ERROR_TYPE, "599"),
+                ],
+                expected_span_status: Status::error(""),
+            },
+            TestCase {
+                name: "an inner-service error carries the error type name",
+                target: "/api/users/123",
+                outcome: Err(TestError),
+                expected_span_name: "GET /api/users/123",
+                expected_attributes: vec![
+                    KeyValue::new(semconv::attribute::HTTP_REQUEST_METHOD, "GET".to_string()),
+                    KeyValue::new(semconv::attribute::URL_SCHEME, "".to_string()),
+                    KeyValue::new(semconv::attribute::URL_PATH, "/api/users/123".to_string()),
+                    KeyValue::new(
+                        semconv::attribute::USER_AGENT_ORIGINAL,
+                        "tower-test-client/1.0".to_string(),
+                    ),
+                    KeyValue::new(semconv::attribute::HTTP_ROUTE, "/api/users/123".to_string()),
+                    KeyValue::new(ERROR_TYPE, std::any::type_name::<TestError>()),
+                ],
+                expected_span_status: Status::error(format!("{:?}", TestError)),
             },
         ];
 
@@ -865,9 +974,19 @@ mod tests {
                 .build()
                 .unwrap();
 
+            let outcome = test_case.outcome;
             let mut service = ServiceBuilder::new()
                 .layer(layer)
-                .service(tower::service_fn(echo));
+                .service(tower::service_fn(
+                    move |req: http::Request<String>| async move {
+                        outcome.map(|status| {
+                            http::Response::builder()
+                                .status(status)
+                                .body(req.into_body())
+                                .unwrap()
+                        })
+                    },
+                ));
 
             // Create a parent span and set it as the current context
             let parent_span = tracer.start("parent_operation");
@@ -882,7 +1001,7 @@ mod tests {
                 .unwrap();
 
             // Execute the service call within the parent span context
-            let _response = async { service.ready().await.unwrap().call(request).await.unwrap() }
+            let _response = async { service.ready().await.unwrap().call(request).await }
                 .with_context(cx)
                 .await;
 
@@ -910,13 +1029,15 @@ mod tests {
                     http_span.name.as_ref(),
                     http_span.parent_span_id,
                     http_span.span_context.trace_id(),
-                    http_span.attributes.clone()
+                    http_span.attributes.clone(),
+                    http_span.status.clone()
                 ),
                 (
                     test_case.expected_span_name,
                     parent_span.span_context.span_id(),
                     parent_span.span_context.trace_id(),
-                    test_case.expected_attributes
+                    test_case.expected_attributes,
+                    test_case.expected_span_status
                 ),
                 "{}",
                 test_case.name
@@ -1030,7 +1151,7 @@ mod tests {
 
         let _response = service.call(request).await.unwrap();
 
-        tokio::time::sleep(Duration::from_millis(500)).await;
+        meter_provider.force_flush().unwrap();
 
         let metrics = exporter.get_finished_metrics().unwrap();
         assert!(!metrics.is_empty());
@@ -1178,6 +1299,94 @@ mod tests {
                     .expect("URL scheme should be present in active requests");
                 assert_eq!(url_scheme.value.as_str(), "https");
             }
+        }
+
+        // A 5xx response adds `error.type` to the duration metric, but the
+        // active-requests decrement keeps its fixed two-element label set.
+        let exporter = InMemoryMetricExporter::default();
+        let reader = PeriodicReader::builder(exporter.clone())
+            .with_interval(Duration::from_millis(100))
+            .build();
+        let meter_provider = SdkMeterProvider::builder().with_reader(reader).build();
+
+        let layer = LayerBuilder::builder()
+            .with_meter_provider(meter_provider.clone())
+            .build()
+            .unwrap();
+
+        let service = tower::service_fn(|_req: Request<String>| async {
+            Ok::<_, std::convert::Infallible>(
+                Response::builder()
+                    .status(StatusCode::INTERNAL_SERVER_ERROR)
+                    .body(String::from("Internal Server Error"))
+                    .unwrap(),
+            )
+        });
+
+        let mut service = layer.layer(service);
+
+        let request = Request::builder()
+            .method("GET")
+            .uri("https://example.com/test")
+            .body("test body".to_string())
+            .unwrap();
+
+        let _response = service.call(request).await.unwrap();
+
+        meter_provider.force_flush().unwrap();
+
+        let metrics = exporter.get_finished_metrics().unwrap();
+        assert!(!metrics.is_empty());
+
+        let resource_metrics = &metrics[0];
+        let scope_metrics = resource_metrics
+            .scope_metrics()
+            .next()
+            .expect("Should have scope metrics");
+
+        let duration_metric = scope_metrics
+            .metrics()
+            .find(|m| m.name() == semconv::metric::HTTP_SERVER_REQUEST_DURATION)
+            .expect("Duration metric should exist");
+
+        if let AggregatedMetrics::F64(MetricData::Histogram(histogram)) = duration_metric.data() {
+            let data_point = histogram
+                .data_points()
+                .next()
+                .expect("Should have data point");
+            let attributes: Vec<_> = data_point.attributes().collect();
+
+            assert_eq!(
+                attributes.len(),
+                6,
+                "Duration metric should have exactly 6 attributes for a 5xx response"
+            );
+
+            let error_type = attributes
+                .iter()
+                .find(|kv| kv.key.as_str() == ERROR_TYPE)
+                .expect("error.type should be present");
+            assert_eq!(error_type.value.as_str(), "500");
+        } else {
+            panic!("Expected histogram data for duration metric");
+        }
+
+        let active_requests_metric = scope_metrics
+            .metrics()
+            .find(|m| m.name() == semconv::metric::HTTP_SERVER_ACTIVE_REQUESTS)
+            .expect("Active requests metric should exist");
+
+        if let AggregatedMetrics::I64(MetricData::Sum(sum)) = active_requests_metric.data() {
+            let data_point = sum.data_points().next().expect("Should have data point");
+            let attributes: Vec<_> = data_point.attributes().collect();
+
+            assert_eq!(
+                attributes.len(),
+                2,
+                "Active requests metric should have exactly 2 attributes for a 5xx response"
+            );
+        } else {
+            panic!("Expected sum data for active requests metric");
         }
     }
 
@@ -1449,7 +1658,7 @@ mod tests {
 
         let _response = service.call(request).await.unwrap();
 
-        tokio::time::sleep(Duration::from_millis(500)).await;
+        meter_provider.force_flush().unwrap();
 
         let metrics = exporter.get_finished_metrics().unwrap();
         assert!(

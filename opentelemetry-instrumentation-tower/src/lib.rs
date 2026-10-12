@@ -22,12 +22,24 @@
 //!
 //! A server span (`SpanKind::Server`) is created per request, with attributes such
 //! as `http.request.method`, `url.scheme`, `url.path`, `url.query`,
-//! `user_agent.original`, `http.route`, and `http.response.status_code`.
+//! `user_agent.original`, `http.route`, `http.response.status_code`, and
+//! `error.type`.
 //!
 //! The value of a query parameter that can carry a credential, such as `sig`, is
 //! replaced with `REDACTED`. Use
 //! [`http::server::LayerBuilder::with_sensitive_query_parameters`] to name the
 //! keys yourself.
+//!
+//! The server span carries `error.type` when a request ends with an error. A 5xx
+//! response sets `error.type` to the status code number as a string, for example
+//! `"500"`. An error from the inner service, returned before a status code
+//! exists, sets `error.type` to that error's Rust type name. The middleware
+//! wraps an arbitrary [Tower] `Service` and has no knowledge of your
+//! application's error types, so these are the two classifications it can
+//! produce on its own, with the status code taking precedence whenever one
+//! exists; see the crate [README] for how to report a domain-specific error.
+//!
+//! [README]: https://github.com/open-telemetry/opentelemetry-rust-contrib/blob/main/opentelemetry-instrumentation-tower/README.md#reported-errors
 //!
 //! # Quick start
 //!

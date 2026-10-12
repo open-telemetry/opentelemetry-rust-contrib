@@ -41,13 +41,14 @@ jobs:
         egress-policy: audit
     - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       with:
+        persist-credentials: false
         submodules: true
     - name: Resolve stable Rust pinned by rust-toolchain.toml
       run: rustup show active-toolchain
     - name: Install llvm-tools-preview for pinned stable Rust
       run: rustup component add llvm-tools-preview
     - name: cargo install cargo-llvm-cov
-      uses: taiki-e/install-action@4cef1412cce204788f482e778a0b9187f9626a29 # v2.87.21
+      uses: taiki-e/install-action@83ac0ad63c0167e6f06796fab0fce28db1bf3db0 # v2.87.22
       with:
         tool: cargo-llvm-cov
     - name: Check user_events kernel support
