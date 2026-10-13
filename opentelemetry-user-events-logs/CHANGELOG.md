@@ -2,6 +2,12 @@
 
 ## vNext
 
+## v0.18.0
+
+- Fixed UserEventsExporter handling of Event and Resource attributes to respect
+  the expected hierchy. (Event-level (Local) Attributes override Resource-level
+  (Global) Attributes)
+
 ## v0.17.0
 
 Released 2026-Sep-21

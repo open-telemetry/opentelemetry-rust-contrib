@@ -183,7 +183,7 @@ mod tests {
                 Resource::builder()
                     .with_service_name("myrolename")
                     .with_attribute(KeyValue::new("service.instance.id", "myinstance123"))
-                    .with_attribute(KeyValue::new("resource_attribute1", "v1"))
+                    .with_attribute(KeyValue::new("resource_attribute1", "resource-level-value"))
                     .with_attribute(KeyValue::new("resource_attribute2", "v2"))
                     .with_attribute(KeyValue::new("resource_attribute3", "v3"))
                     .build(),
@@ -222,6 +222,7 @@ mod tests {
             event_id = 20,
             bool_field = true,
             double_field = 1.0,
+            resource_attribute1 = "event-level-value",
             user_name = "otel user",
             user_email = "otel.user@opentelemetry.com",
             message = "This is a test message",
@@ -298,7 +299,11 @@ mod tests {
         // Validate PartC
         let part_c = &event["PartC"];
         assert_eq!(part_c["user_name"].as_str().unwrap(), "otel user");
-        assert_eq!(part_c["resource_attribute1"].as_str().unwrap(), "v1");
+        assert_eq!(
+            part_c["resource_attribute1"].as_str().unwrap(),
+            "event-level-value",
+            "event-level attributes should override resource-level attributes"
+        );
         assert_eq!(part_c["resource_attribute2"].as_str().unwrap(), "v2");
         assert!(
             part_c.get("resource_attribute3").is_none(),

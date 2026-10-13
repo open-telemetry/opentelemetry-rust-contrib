@@ -302,6 +302,20 @@ where
                 let (mut is_event_id, mut event_id) = (false, 0);
                 let (mut is_part_c_present, mut cs_c_bookmark, mut cs_c_count) = (false, 0, 0);
 
+                // Add Resource Attributes to PartC
+                if !self.attributes_from_resource.is_empty() {
+                    if !is_part_c_present {
+                        eb.add_struct_with_bookmark("PartC", 1, 0, &mut cs_c_bookmark);
+                        is_part_c_present = true;
+                    }
+
+                    for (key, value) in &self.attributes_from_resource {
+                        self.add_attribute_to_event(&mut eb, (key, value));
+                        cs_c_count += 1;
+                    }
+                }
+
+                // Add Event Attributes to PartC
                 for (key, value) in log_record.attributes_iter() {
                     match (key.as_str(), value) {
                         (EVENT_ID, AnyValue::Int(value)) => {
@@ -317,18 +331,6 @@ where
                             self.add_attribute_to_event(&mut eb, (key, value));
                             cs_c_count += 1;
                         }
-                    }
-                }
-
-                if !self.attributes_from_resource.is_empty() {
-                    if !is_part_c_present {
-                        eb.add_struct_with_bookmark("PartC", 1, 0, &mut cs_c_bookmark);
-                        is_part_c_present = true;
-                    }
-
-                    for (key, value) in &self.attributes_from_resource {
-                        self.add_attribute_to_event(&mut eb, (key, value));
-                        cs_c_count += 1;
                     }
                 }
 
