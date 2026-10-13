@@ -450,6 +450,23 @@ pin_project! {
         otel_cx: OtelContext,
         finalization: Option<RequestFinalization<ResExt>>,
     }
+
+    impl<F, ResExt> PinnedDrop for ResponseFuture<F, ResExt> {
+        fn drop(this: Pin<&mut Self>) {
+            // Dropped before completion, so `finalize_request` never ran.
+            if let Some(finalization) = this.project().finalization.take() {
+                let RequestData {
+                    url_scheme_kv,
+                    method_kv,
+                    ..
+                } = finalization.request_data;
+                finalization
+                    .layer_state
+                    .server_active_requests
+                    .add(-1, &[url_scheme_kv, method_kv]);
+            }
+        }
+    }
 }
 
 impl<F, ResBody, E, ResExt> Future for ResponseFuture<F, ResExt>
@@ -1385,6 +1402,51 @@ mod tests {
                 2,
                 "Active requests metric should have exactly 2 attributes for a 5xx response"
             );
+        } else {
+            panic!("Expected sum data for active requests metric");
+        }
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn test_dropped_request_releases_active_requests() {
+        let exporter = InMemoryMetricExporter::default();
+        let reader = PeriodicReader::builder(exporter.clone())
+            .with_interval(Duration::from_millis(100))
+            .build();
+        let meter_provider = SdkMeterProvider::builder().with_reader(reader).build();
+
+        let layer = LayerBuilder::builder()
+            .with_meter_provider(meter_provider.clone())
+            .with_tracing(false)
+            .build()
+            .unwrap();
+
+        let service = tower::service_fn(|_req: Request<String>| async {
+            std::future::pending::<Result<Response<String>, std::convert::Infallible>>().await
+        });
+        let mut service = layer.layer(service);
+
+        let request = Request::builder()
+            .method("GET")
+            .uri("https://example.com/test")
+            .body(String::new())
+            .unwrap();
+
+        let _ = tokio::time::timeout(Duration::from_millis(10), service.call(request)).await;
+
+        meter_provider.force_flush().unwrap();
+
+        let metrics = exporter.get_finished_metrics().unwrap();
+        let active_requests = metrics
+            .iter()
+            .flat_map(|resource_metrics| resource_metrics.scope_metrics())
+            .flat_map(|scope_metrics| scope_metrics.metrics())
+            .find(|m| m.name() == semconv::metric::HTTP_SERVER_ACTIVE_REQUESTS)
+            .expect("Active requests metric should exist");
+
+        if let AggregatedMetrics::I64(MetricData::Sum(sum)) = active_requests.data() {
+            let total: i64 = sum.data_points().map(|dp| dp.value()).sum();
+            assert_eq!(total, 0, "dropped request must not leak active_requests");
         } else {
             panic!("Expected sum data for active requests metric");
         }

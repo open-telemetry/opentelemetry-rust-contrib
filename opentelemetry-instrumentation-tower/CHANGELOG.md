@@ -2,6 +2,12 @@
 
 ## vNext
 
+### Fixed
+
+* `http.server.active_requests` no longer leaks when a request is dropped
+  before the response is produced, for example when the client disconnects.
+  [#839](https://github.com/open-telemetry/opentelemetry-rust-contrib/issues/839)
+
 ### Added
 
 * The server span, and the `http.server.request.duration`,
