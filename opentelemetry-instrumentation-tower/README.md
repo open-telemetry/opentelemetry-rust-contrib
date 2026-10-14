@@ -64,15 +64,18 @@ The server span carries `error.type` when a request ends with an error:
   cannot tell these causes apart. The semantic conventions exempt a cancelled
   request from being an error only for HTTP client spans, so the server span
   status is `Error`.
+- A panic in the inner service or in a response extractor sets `error.type` to
+  `"panic"`. Rust has no exception type that the conventions could name, so
+  the layer uses its own identifier.
 - A 2xx, 3xx or 4xx response carries no `error.type`. Per the HTTP span status
   rules, a 4xx is not a server error.
 
 The middleware wraps an arbitrary Tower `Service` and has no knowledge of your
 application's error types, so it can only report the classifications it can
 produce on its own: the HTTP status code once one exists, the error's Rust type
-name before one does, or `"cancelled"` when no result exists. A status code always wins when one is
-available, and it never substitutes exception detail for a status code that 
-is already present.
+name before one does, or `"cancelled"` or `"panic"` when no result exists. A
+status code always wins when one is available, and it never substitutes
+exception detail for a status code that is already present.
 
 To report a domain-specific error, for example `"payment_declined"`, add your
 own attribute with `http::server::LayerBuilder::with_response_extractor`. Do

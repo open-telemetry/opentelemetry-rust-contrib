@@ -56,6 +56,13 @@ const HTTP_SERVER_RESPONSE_BODY_SIZE_UNIT: &str = "By";
 /// [`error.type` registry](https://opentelemetry.io/docs/specs/semconv/registry/attributes/error/#error-type).
 const CANCELLED_ERROR_TYPE: &str = "cancelled";
 
+/// `error.type` of a request that ends with a panic, in the inner service or in
+/// a response extractor.
+///
+/// Rust has no exception type that the conventions could name, so this is a
+/// component-specific identifier, like [`CANCELLED_ERROR_TYPE`].
+const PANIC_ERROR_TYPE: &str = "panic";
+
 /// State scoped to the entire middleware [`Layer`].
 struct LayerState {
     server_request_duration: Histogram<f64>,
@@ -488,6 +495,10 @@ pin_project! {
         inner: F,
         otel_cx: OtelContext,
         finalization: Option<RequestFinalization<ResExt>>,
+        // Stays `true` when `poll` panics, because `poll` clears it only
+        // before it returns. The runtime catches the panic and drops the
+        // future later, so `std::thread::panicking` is already `false` then.
+        polling: bool,
     }
 
     impl<F, ResExt> PinnedDrop for ResponseFuture<F, ResExt> {
@@ -497,6 +508,9 @@ pin_project! {
         // covers only HTTP client spans, so a server request that never sends
         // its response ends with an error. See the span status rules:
         // https://opentelemetry.io/docs/specs/semconv/http/http-spans/#status
+        //
+        // A panic in the inner service or in a response extractor also ends
+        // up here, after the runtime catches it.
         fn drop(this: Pin<&mut Self>) {
             let this = this.project();
             if let Some(RequestFinalization {
@@ -506,13 +520,19 @@ pin_project! {
                 ..
             }) = this.finalization.take()
             {
-                let error_type_kv = KeyValue::new(ERROR_TYPE, CANCELLED_ERROR_TYPE);
+                let error_type = if *this.polling {
+                    PANIC_ERROR_TYPE
+                } else {
+                    CANCELLED_ERROR_TYPE
+                };
+                let error_type_kv = KeyValue::new(ERROR_TYPE, error_type);
 
                 let span = this.otel_cx.span();
                 span.set_attribute(error_type_kv.clone());
                 span.set_status(Status::error(""));
 
                 record_failed_request(request_data, &layer_state, error_type_kv);
+                span.end();
             }
         }
     }
@@ -530,15 +550,37 @@ where
     fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
         let this = self.project();
         let _guard = this.otel_cx.clone().attach();
-        let result = std::task::ready!(this.inner.poll(cx));
+        *this.polling = true;
+        let result = match this.inner.poll(cx) {
+            Poll::Ready(result) => result,
+            Poll::Pending => {
+                *this.polling = false;
+                return Poll::Pending;
+            }
+        };
+        // The response extractor is user code that can panic. It runs before
+        // `finalization` is taken, so that the drop handler still records the
+        // failed request when it does.
+        let custom_response_attributes = match (&result, this.finalization.as_ref()) {
+            (Ok(response), Some(finalization)) => {
+                finalization.response_extractor.extract_attributes(response)
+            }
+            _ => Vec::new(),
+        };
+        *this.polling = false;
         if let Some(RequestFinalization {
             request_data,
             layer_state,
-            response_extractor,
             active_request: _active_request,
+            ..
         }) = this.finalization.take()
         {
-            finalize_request(&result, request_data, &layer_state, &response_extractor);
+            finalize_request(
+                &result,
+                request_data,
+                &layer_state,
+                custom_response_attributes,
+            );
         }
         Poll::Ready(result)
     }
@@ -670,19 +712,19 @@ where
                 response_extractor,
                 active_request,
             }),
+            polling: false,
         }
     }
 }
 
 /// Finalizes the request by updating the span and recording metrics after the response is received.
-fn finalize_request<ResBody, E, ResExt>(
+fn finalize_request<ResBody, E>(
     result: &std::result::Result<http::Response<ResBody>, E>,
     request_data: RequestData,
     layer_state: &Arc<LayerState>,
-    response_extractor: &ResExt,
+    custom_response_attributes: Vec<KeyValue>,
 ) where
     ResBody: http_body::Body,
-    ResExt: ResponseAttributeExtractor<ResBody>,
     E: std::fmt::Debug,
 {
     let cx = OtelContext::current();
@@ -706,9 +748,6 @@ fn finalize_request<ResBody, E, ResExt>(
                 semconv::attribute::HTTP_RESPONSE_STATUS_CODE,
                 i64::from(http_status.as_u16()),
             );
-
-            // Extract custom response attributes (empty/non-allocating for NoOp).
-            let custom_response_attributes = response_extractor.extract_attributes(response);
 
             // Update span
             span.set_attribute(status_code_kv.clone());
@@ -785,6 +824,12 @@ fn finalize_request<ResBody, E, ResExt>(
             record_failed_request(request_data, layer_state, error_type_kv);
         }
     }
+
+    // A handler can keep the context, and with it the span, alive after the
+    // response, for example in a background task. The span ends here so that
+    // its duration matches `http.server.request.duration`, see
+    // https://opentelemetry.io/docs/specs/semconv/http/http-metrics/#metric-httpserverrequestduration
+    span.end();
 }
 
 /// Records the metrics of a request that ended before the server had a
@@ -868,6 +913,7 @@ mod tests {
             name: &'static str,
             target: &'static str,
             service: TestService,
+            response_extractor: fn(&Response<String>) -> Vec<KeyValue>,
             expected_span_name: &'static str,
             expected_attributes: Vec<KeyValue>,
             expected_span_status: Status,
@@ -883,6 +929,7 @@ mod tests {
                         .body(req.into_body())
                         .unwrap())
                 })),
+                response_extractor: |_| Vec::new(),
                 expected_span_name: "GET /api/users/123",
                 expected_attributes: vec![
                     KeyValue::new(semconv::attribute::HTTP_REQUEST_METHOD, "GET".to_string()),
@@ -906,6 +953,7 @@ mod tests {
                         .body(req.into_body())
                         .unwrap())
                 })),
+                response_extractor: |_| Vec::new(),
                 expected_span_name: "GET /api/users/123",
                 expected_attributes: vec![
                     KeyValue::new(semconv::attribute::HTTP_REQUEST_METHOD, "GET".to_string()),
@@ -929,6 +977,7 @@ mod tests {
                         .body(req.into_body())
                         .unwrap())
                 })),
+                response_extractor: |_| Vec::new(),
                 expected_span_name: "GET /api/users/123",
                 expected_attributes: vec![
                     KeyValue::new(semconv::attribute::HTTP_REQUEST_METHOD, "GET".to_string()),
@@ -956,6 +1005,7 @@ mod tests {
                         .body(req.into_body())
                         .unwrap())
                 })),
+                response_extractor: |_| Vec::new(),
                 expected_span_name: "GET /api/users/123",
                 expected_attributes: vec![
                     KeyValue::new(semconv::attribute::HTTP_REQUEST_METHOD, "GET".to_string()),
@@ -983,6 +1033,7 @@ mod tests {
                         .body(req.into_body())
                         .unwrap())
                 })),
+                response_extractor: |_| Vec::new(),
                 expected_span_name: "GET /api/users/123",
                 expected_attributes: vec![
                     KeyValue::new(semconv::attribute::HTTP_REQUEST_METHOD, "GET".to_string()),
@@ -1007,6 +1058,7 @@ mod tests {
                         .body(req.into_body())
                         .unwrap())
                 })),
+                response_extractor: |_| Vec::new(),
                 expected_span_name: "GET /api/users/123",
                 expected_attributes: vec![
                     KeyValue::new(semconv::attribute::HTTP_REQUEST_METHOD, "GET".to_string()),
@@ -1031,6 +1083,7 @@ mod tests {
                         .body(req.into_body())
                         .unwrap())
                 })),
+                response_extractor: |_| Vec::new(),
                 expected_span_name: "GET /api/users/123",
                 expected_attributes: vec![
                     KeyValue::new(semconv::attribute::HTTP_REQUEST_METHOD, "GET".to_string()),
@@ -1054,6 +1107,7 @@ mod tests {
                         .body(req.into_body())
                         .unwrap())
                 })),
+                response_extractor: |_| Vec::new(),
                 expected_span_name: "GET /api/users/123",
                 expected_attributes: vec![
                     KeyValue::new(semconv::attribute::HTTP_REQUEST_METHOD, "GET".to_string()),
@@ -1075,6 +1129,7 @@ mod tests {
                 service: BoxService::new(tower::service_fn(|_req: Request<String>| async {
                     Err(TestError)
                 })),
+                response_extractor: |_| Vec::new(),
                 expected_span_name: "GET /api/users/123",
                 expected_attributes: vec![
                     KeyValue::new(semconv::attribute::HTTP_REQUEST_METHOD, "GET".to_string()),
@@ -1095,6 +1150,7 @@ mod tests {
                 service: BoxService::new(tower::service_fn(|_req: Request<String>| {
                     std::future::pending()
                 })),
+                response_extractor: |_| Vec::new(),
                 expected_span_name: "GET /api/users/123",
                 expected_attributes: vec![
                     KeyValue::new(semconv::attribute::HTTP_REQUEST_METHOD, "GET".to_string()),
@@ -1108,6 +1164,76 @@ mod tests {
                     KeyValue::new(ERROR_TYPE, CANCELLED_ERROR_TYPE),
                 ],
                 expected_span_status: Status::error(""),
+            },
+            TestCase {
+                name: "a response extractor that panics",
+                target: "/api/users/123",
+                service: BoxService::new(tower::service_fn(|req: Request<String>| async {
+                    Ok(Response::builder()
+                        .status(StatusCode::OK)
+                        .body(req.into_body())
+                        .unwrap())
+                })),
+                response_extractor: |_| panic!("response extractor panicked"),
+                expected_span_name: "GET /api/users/123",
+                expected_attributes: vec![
+                    KeyValue::new(semconv::attribute::HTTP_REQUEST_METHOD, "GET".to_string()),
+                    KeyValue::new(semconv::attribute::URL_SCHEME, "".to_string()),
+                    KeyValue::new(semconv::attribute::URL_PATH, "/api/users/123".to_string()),
+                    KeyValue::new(
+                        semconv::attribute::USER_AGENT_ORIGINAL,
+                        "tower-test-client/1.0".to_string(),
+                    ),
+                    KeyValue::new(semconv::attribute::HTTP_ROUTE, "/api/users/123".to_string()),
+                    KeyValue::new(ERROR_TYPE, PANIC_ERROR_TYPE),
+                ],
+                expected_span_status: Status::error(""),
+            },
+            TestCase {
+                name: "an inner service that panics",
+                target: "/api/users/123",
+                service: BoxService::new(tower::service_fn(|_req: Request<String>| async {
+                    panic!("inner service panicked")
+                })),
+                response_extractor: |_| Vec::new(),
+                expected_span_name: "GET /api/users/123",
+                expected_attributes: vec![
+                    KeyValue::new(semconv::attribute::HTTP_REQUEST_METHOD, "GET".to_string()),
+                    KeyValue::new(semconv::attribute::URL_SCHEME, "".to_string()),
+                    KeyValue::new(semconv::attribute::URL_PATH, "/api/users/123".to_string()),
+                    KeyValue::new(
+                        semconv::attribute::USER_AGENT_ORIGINAL,
+                        "tower-test-client/1.0".to_string(),
+                    ),
+                    KeyValue::new(semconv::attribute::HTTP_ROUTE, "/api/users/123".to_string()),
+                    KeyValue::new(ERROR_TYPE, PANIC_ERROR_TYPE),
+                ],
+                expected_span_status: Status::error(""),
+            },
+            TestCase {
+                name: "a handler that keeps the context alive after the response",
+                target: "/api/users/123",
+                // A handler that spawns a background task with the current
+                // context keeps the context alive after the response, in the
+                // same way.
+                service: BoxService::new(tower::service_fn(|req: Request<String>| async {
+                    std::mem::forget(OtelContext::current());
+                    Ok(Response::new(req.into_body()))
+                })),
+                response_extractor: |_| Vec::new(),
+                expected_span_name: "GET /api/users/123",
+                expected_attributes: vec![
+                    KeyValue::new(semconv::attribute::HTTP_REQUEST_METHOD, "GET".to_string()),
+                    KeyValue::new(semconv::attribute::URL_SCHEME, "".to_string()),
+                    KeyValue::new(semconv::attribute::URL_PATH, "/api/users/123".to_string()),
+                    KeyValue::new(
+                        semconv::attribute::USER_AGENT_ORIGINAL,
+                        "tower-test-client/1.0".to_string(),
+                    ),
+                    KeyValue::new(semconv::attribute::HTTP_ROUTE, "/api/users/123".to_string()),
+                    KeyValue::new(semconv::attribute::HTTP_RESPONSE_STATUS_CODE, 200),
+                ],
+                expected_span_status: Status::Unset,
             },
         ];
 
@@ -1123,6 +1249,7 @@ mod tests {
 
             let layer = LayerBuilder::builder()
                 .with_route_extractor(PathExtractor)
+                .with_response_extractor_fn(test_case.response_extractor)
                 .with_tracer_provider(tracer_provider.clone())
                 .build()
                 .unwrap();
@@ -1145,11 +1272,15 @@ mod tests {
 
             // Poll the response future once within the parent span context,
             // then drop it. A server does the same when the client disconnects
-            // before the response is ready.
+            // before the response is ready. A panic during the poll unwinds
+            // the same way as it does in a server task, so the test catches it
+            // and continues.
             async {
                 let mut response_future = Box::pin(service.ready().await.unwrap().call(request));
                 let _ = std::future::poll_fn(|task_cx| {
-                    Poll::Ready(response_future.as_mut().poll(task_cx))
+                    Poll::Ready(std::panic::catch_unwind(std::panic::AssertUnwindSafe(
+                        || response_future.as_mut().poll(task_cx),
+                    )))
                 })
                 .await;
             }
@@ -1618,7 +1749,30 @@ mod tests {
                 })),
                 response_extractor: |_| panic!("response extractor panicked"),
                 expected_active_requests: Some(0),
-                expected_duration_attributes: None,
+                expected_duration_attributes: Some(vec![
+                    KeyValue::new(ERROR_TYPE, PANIC_ERROR_TYPE),
+                    KeyValue::new(semconv::attribute::HTTP_REQUEST_METHOD, "GET"),
+                    KeyValue::new(semconv::attribute::HTTP_ROUTE, "/test"),
+                    KeyValue::new(semconv::attribute::NETWORK_PROTOCOL_NAME, "http"),
+                    KeyValue::new(semconv::attribute::NETWORK_PROTOCOL_VERSION, "1.1"),
+                    KeyValue::new(semconv::attribute::URL_SCHEME, "https"),
+                ]),
+            },
+            TestCase {
+                name: "an inner service that panics",
+                service: BoxService::new(tower::service_fn(|_req: Request<String>| async {
+                    panic!("inner service panicked")
+                })),
+                response_extractor: |_| Vec::new(),
+                expected_active_requests: Some(0),
+                expected_duration_attributes: Some(vec![
+                    KeyValue::new(ERROR_TYPE, PANIC_ERROR_TYPE),
+                    KeyValue::new(semconv::attribute::HTTP_REQUEST_METHOD, "GET"),
+                    KeyValue::new(semconv::attribute::HTTP_ROUTE, "/test"),
+                    KeyValue::new(semconv::attribute::NETWORK_PROTOCOL_NAME, "http"),
+                    KeyValue::new(semconv::attribute::NETWORK_PROTOCOL_VERSION, "1.1"),
+                    KeyValue::new(semconv::attribute::URL_SCHEME, "https"),
+                ]),
             },
         ];
 

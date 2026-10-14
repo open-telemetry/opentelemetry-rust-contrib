@@ -24,10 +24,21 @@
 * `http.server.active_requests` no longer grows when the server drops a request
   before the response is ready, for example after the client disconnects, or
   when a response extractor panics. The layer now decrements the counter in a
-  drop guard, so the decrement runs on every path. The layer also records `http.server.request.duration` for the dropped request,
-  and sets `error.type` to `"cancelled"` and the status to `Error` on the
-  server span, as the semantic conventions require for a server request that
-  ends without a response.
+  drop guard, so the decrement runs on every path. The layer also records
+  `http.server.request.duration` for the dropped request, and sets `error.type`
+  to `"cancelled"` and the status to `Error` on the server span, as the
+  semantic conventions require for a server request that ends without a
+  response.
+  [#TBD](https://github.com/open-telemetry/opentelemetry-rust-contrib/pull/TBD)
+* A panic in the inner service or in a response extractor no longer leaves the
+  server span untagged. The span gets `error.type` `"panic"` and the status
+  `Error`, and `http.server.request.duration` records the request with the
+  same `error.type`.
+  [#TBD](https://github.com/open-telemetry/opentelemetry-rust-contrib/pull/TBD)
+* The server span now ends when the response is ready, also when the handler
+  keeps the request context alive, for example in a background task. Before,
+  such a span ended only when the last copy of the context was dropped, or
+  never. Its duration now matches `http.server.request.duration`.
   [#TBD](https://github.com/open-telemetry/opentelemetry-rust-contrib/pull/TBD)
 * `http.server.request.duration` now carries `http.route` and the custom
   request attributes when the inner service returns an error. The semantic
