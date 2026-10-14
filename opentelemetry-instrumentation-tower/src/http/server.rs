@@ -441,6 +441,33 @@ struct RequestFinalization<ResExt> {
     request_data: RequestData,
     layer_state: Arc<LayerState>,
     response_extractor: ResExt,
+    active_request: ActiveRequestGuard,
+}
+
+/// Counts a request in `http.server.active_requests` until the guard is
+/// dropped.
+///
+/// The decrement lives in `Drop`, so it also runs when the response future is
+/// dropped early or when a response extractor panics.
+struct ActiveRequestGuard {
+    server_active_requests: UpDownCounter<i64>,
+    attributes: [KeyValue; 2],
+}
+
+impl ActiveRequestGuard {
+    fn new(server_active_requests: &UpDownCounter<i64>, attributes: [KeyValue; 2]) -> Self {
+        server_active_requests.add(1, &attributes);
+        ActiveRequestGuard {
+            server_active_requests: server_active_requests.clone(),
+            attributes,
+        }
+    }
+}
+
+impl Drop for ActiveRequestGuard {
+    fn drop(&mut self) {
+        self.server_active_requests.add(-1, &self.attributes);
+    }
 }
 
 pin_project! {
@@ -466,6 +493,7 @@ pin_project! {
             if let Some(RequestFinalization {
                 request_data,
                 layer_state,
+                active_request: _active_request,
                 ..
             }) = this.finalization.take()
             {
@@ -498,6 +526,7 @@ where
             request_data,
             layer_state,
             response_extractor,
+            active_request: _active_request,
         }) = this.finalization.take()
         {
             finalize_request(&result, request_data, &layer_state, &response_extractor);
@@ -602,9 +631,10 @@ where
 
         let cx = parent_cx.with_span(span);
 
-        self.state
-            .server_active_requests
-            .add(1, &[url_scheme_kv.clone(), method_kv.clone()]);
+        let active_request = ActiveRequestGuard::new(
+            &self.state.server_active_requests,
+            [url_scheme_kv.clone(), method_kv.clone()],
+        );
 
         let request_data = RequestData {
             duration_start,
@@ -629,6 +659,7 @@ where
                 request_data,
                 layer_state,
                 response_extractor,
+                active_request,
             }),
         }
     }
@@ -694,9 +725,6 @@ fn finalize_request<ResBody, E, ResExt>(
             };
 
             // Build label superset by moving owned values where possible.
-            // `url_scheme_kv` and `method_kv` are cloned for the active-requests
-            // decrement; their underlying strings are typically `&'static str`
-            // so the clones are allocation-free.
             let cap = 5
                 + error_type_kv.is_some() as usize
                 + route_kv_opt.is_some() as usize
@@ -705,8 +733,8 @@ fn finalize_request<ResBody, E, ResExt>(
             let mut label_superset = Vec::with_capacity(cap);
             label_superset.push(protocol_name_kv);
             label_superset.push(protocol_version_kv);
-            label_superset.push(url_scheme_kv.clone());
-            label_superset.push(method_kv.clone());
+            label_superset.push(url_scheme_kv);
+            label_superset.push(method_kv);
             label_superset.push(status_code_kv);
             if let Some(route_kv) = route_kv_opt {
                 label_superset.push(route_kv);
@@ -733,10 +761,6 @@ fn finalize_request<ResBody, E, ResExt>(
                     .server_response_body_size
                     .record(resp_content_length, &label_superset);
             }
-
-            layer_state
-                .server_active_requests
-                .add(-1, &[url_scheme_kv, method_kv]);
         }
         Err(error) => {
             // From the semantic convention: If the request fails with an error
@@ -776,8 +800,8 @@ fn record_failed_request(
     let mut label_superset = Vec::with_capacity(cap);
     label_superset.push(protocol_name_kv);
     label_superset.push(protocol_version_kv);
-    label_superset.push(url_scheme_kv.clone());
-    label_superset.push(method_kv.clone());
+    label_superset.push(url_scheme_kv);
+    label_superset.push(method_kv);
     label_superset.push(error_type_kv);
     if let Some(route_kv) = route_kv_opt {
         label_superset.push(route_kv);
@@ -787,10 +811,6 @@ fn record_failed_request(
     layer_state
         .server_request_duration
         .record(duration_start.elapsed().as_secs_f64(), &label_superset);
-
-    layer_state
-        .server_active_requests
-        .add(-1, &[url_scheme_kv, method_kv]);
 }
 
 #[cfg(test)]
@@ -1493,6 +1513,7 @@ mod tests {
         struct TestCase {
             name: &'static str,
             outcome: Outcome,
+            response_extractor_panics: bool,
             expected_active_requests: Option<i64>,
             expected_duration_attributes: Option<Vec<KeyValue>>,
         }
@@ -1501,6 +1522,7 @@ mod tests {
             TestCase {
                 name: "a completed request",
                 outcome: Outcome::Respond(StatusCode::OK),
+                response_extractor_panics: false,
                 expected_active_requests: Some(0),
                 expected_duration_attributes: Some(vec![
                     KeyValue::new(semconv::attribute::HTTP_REQUEST_METHOD, "GET"),
@@ -1514,6 +1536,7 @@ mod tests {
             TestCase {
                 name: "an inner-service error",
                 outcome: Outcome::Fail,
+                response_extractor_panics: false,
                 expected_active_requests: Some(0),
                 expected_duration_attributes: Some(vec![
                     KeyValue::new(ERROR_TYPE, std::any::type_name::<TestError>()),
@@ -1527,6 +1550,7 @@ mod tests {
             TestCase {
                 name: "a request that the server drops before the response is ready",
                 outcome: Outcome::NeverFinish,
+                response_extractor_panics: false,
                 expected_active_requests: Some(0),
                 expected_duration_attributes: Some(vec![
                     KeyValue::new(ERROR_TYPE, CANCELLED_ERROR_TYPE),
@@ -1537,6 +1561,13 @@ mod tests {
                     KeyValue::new(semconv::attribute::URL_SCHEME, "https"),
                 ]),
             },
+            TestCase {
+                name: "a response extractor that panics",
+                outcome: Outcome::Respond(StatusCode::OK),
+                response_extractor_panics: true,
+                expected_active_requests: Some(0),
+                expected_duration_attributes: None,
+            },
         ];
 
         for test_case in test_cases {
@@ -1544,8 +1575,15 @@ mod tests {
             let reader = PeriodicReader::builder(exporter.clone()).build();
             let meter_provider = SdkMeterProvider::builder().with_reader(reader).build();
 
+            let response_extractor_panics = test_case.response_extractor_panics;
             let layer = LayerBuilder::builder()
                 .with_route_extractor(PathExtractor)
+                .with_response_extractor_fn(move |_res: &Response<String>| {
+                    if response_extractor_panics {
+                        panic!("response extractor panicked");
+                    }
+                    Vec::new()
+                })
                 .with_meter_provider(meter_provider.clone())
                 .build()
                 .unwrap();
@@ -1570,8 +1608,15 @@ mod tests {
 
             // Poll the response future once, then drop it. A server does the
             // same when the client disconnects before the response is ready.
+            // A panic during the poll unwinds the same way as it does in a
+            // server task, so the test catches it and continues.
             let mut response_future = Box::pin(service.call(request));
-            let _ = std::future::poll_fn(|cx| Poll::Ready(response_future.as_mut().poll(cx))).await;
+            let _ = std::future::poll_fn(|cx| {
+                Poll::Ready(std::panic::catch_unwind(std::panic::AssertUnwindSafe(
+                    || response_future.as_mut().poll(cx),
+                )))
+            })
+            .await;
             drop(response_future);
 
             meter_provider.force_flush().unwrap();

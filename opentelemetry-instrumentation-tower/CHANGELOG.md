@@ -22,17 +22,17 @@
 ### Fixed
 
 * `http.server.active_requests` no longer grows when the server drops a request
-  before the response is ready, for example after the client disconnects. The
-  layer now decrements the counter when the response future is dropped. The
-  layer also records `http.server.request.duration` for the dropped request,
+  before the response is ready, for example after the client disconnects, or
+  when a response extractor panics. The layer now decrements the counter in a
+  drop guard, so the decrement runs on every path. The layer also records `http.server.request.duration` for the dropped request,
   and sets `error.type` to `"cancelled"` and the status to `Error` on the
   server span, as the semantic conventions require for a server request that
   ends without a response.
-  [#839](https://github.com/open-telemetry/opentelemetry-rust-contrib/issues/839)
+  [#TBD](https://github.com/open-telemetry/opentelemetry-rust-contrib/pull/TBD)
 * `http.server.request.duration` now carries `http.route` and the custom
   request attributes when the inner service returns an error. The semantic
   conventions require `http.route` whenever it is available.
-  [#839](https://github.com/open-telemetry/opentelemetry-rust-contrib/issues/839)
+  [#TBD](https://github.com/open-telemetry/opentelemetry-rust-contrib/pull/TBD)
 
 ## v0.19.0
 
