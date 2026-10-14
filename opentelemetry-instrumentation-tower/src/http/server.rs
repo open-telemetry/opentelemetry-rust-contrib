@@ -48,6 +48,12 @@ const HTTP_SERVER_RESPONSE_BODY_SIZE_UNIT: &str = "By";
 
 /// `error.type` of a request that the server drops before the response is
 /// ready.
+///
+/// The conventions define no HTTP-specific value for this case. They ask for
+/// "a component-specific low cardinality error identifier", see the note on
+/// [`error.type`](https://opentelemetry.io/docs/specs/semconv/http/http-metrics/#metric-httpserverrequestduration)
+/// and the
+/// [`error.type` registry](https://opentelemetry.io/docs/specs/semconv/registry/attributes/error/#error-type).
 const CANCELLED_ERROR_TYPE: &str = "cancelled";
 
 /// State scoped to the entire middleware [`Layer`].
@@ -448,7 +454,9 @@ struct RequestFinalization<ResExt> {
 /// dropped.
 ///
 /// The decrement lives in `Drop`, so it also runs when the response future is
-/// dropped early or when a response extractor panics.
+/// dropped early or when a response extractor panics. Otherwise the counter
+/// would keep counting requests that are no longer active, see
+/// [`http.server.active_requests`](https://opentelemetry.io/docs/specs/semconv/http/http-metrics/#metric-httpserveractive_requests).
 struct ActiveRequestGuard {
     server_active_requests: UpDownCounter<i64>,
     attributes: [KeyValue; 2],
@@ -487,7 +495,8 @@ pin_project! {
         // example when the client disconnects. `finalize_request` never runs
         // in that case. The cancellation exception in the semantic conventions
         // covers only HTTP client spans, so a server request that never sends
-        // its response ends with an error.
+        // its response ends with an error. See the span status rules:
+        // https://opentelemetry.io/docs/specs/semconv/http/http-spans/#status
         fn drop(this: Pin<&mut Self>) {
             let this = this.project();
             if let Some(RequestFinalization {
@@ -780,6 +789,12 @@ fn finalize_request<ResBody, E, ResExt>(
 
 /// Records the metrics of a request that ended before the server had a
 /// response status code.
+///
+/// The conventions require
+/// [`http.server.request.duration`](https://opentelemetry.io/docs/specs/semconv/http/http-metrics/#metric-httpserverrequestduration)
+/// for every request, with the same `error.type` as the span. They also
+/// require `http.route` whenever it is available, so a failed request keeps
+/// it.
 fn record_failed_request(
     request_data: RequestData,
     layer_state: &LayerState,
