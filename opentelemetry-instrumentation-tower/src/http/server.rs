@@ -433,10 +433,38 @@ struct RequestData {
     custom_request_attributes: Vec<KeyValue>,
 }
 
+/// Counts a request in `http.server.active_requests` for as long as it is alive.
+///
+/// The decrement runs on drop, so it also happens when the response future is
+/// cancelled or finalization panics.
+struct ActiveRequestGuard {
+    layer_state: Arc<LayerState>,
+    attributes: [KeyValue; 2],
+}
+
+impl ActiveRequestGuard {
+    fn new(layer_state: Arc<LayerState>, attributes: [KeyValue; 2]) -> Self {
+        layer_state.server_active_requests.add(1, &attributes);
+        Self {
+            layer_state,
+            attributes,
+        }
+    }
+}
+
+impl Drop for ActiveRequestGuard {
+    fn drop(&mut self) {
+        self.layer_state
+            .server_active_requests
+            .add(-1, &self.attributes);
+    }
+}
+
 struct RequestFinalization<ResExt> {
     request_data: RequestData,
     layer_state: Arc<LayerState>,
     response_extractor: ResExt,
+    active_request_guard: ActiveRequestGuard,
 }
 
 pin_project! {
@@ -449,23 +477,6 @@ pin_project! {
         inner: F,
         otel_cx: OtelContext,
         finalization: Option<RequestFinalization<ResExt>>,
-    }
-
-    impl<F, ResExt> PinnedDrop for ResponseFuture<F, ResExt> {
-        fn drop(this: Pin<&mut Self>) {
-            // Dropped before completion, so `finalize_request` never ran.
-            if let Some(finalization) = this.project().finalization.take() {
-                let RequestData {
-                    url_scheme_kv,
-                    method_kv,
-                    ..
-                } = finalization.request_data;
-                finalization
-                    .layer_state
-                    .server_active_requests
-                    .add(-1, &[url_scheme_kv, method_kv]);
-            }
-        }
     }
 }
 
@@ -486,6 +497,7 @@ where
             request_data,
             layer_state,
             response_extractor,
+            active_request_guard: _active_request_guard,
         }) = this.finalization.take()
         {
             finalize_request(&result, request_data, &layer_state, &response_extractor);
@@ -590,9 +602,10 @@ where
 
         let cx = parent_cx.with_span(span);
 
-        self.state
-            .server_active_requests
-            .add(1, &[url_scheme_kv.clone(), method_kv.clone()]);
+        let active_request_guard = ActiveRequestGuard::new(
+            self.state.clone(),
+            [url_scheme_kv.clone(), method_kv.clone()],
+        );
 
         let request_data = RequestData {
             duration_start,
@@ -617,6 +630,7 @@ where
                 request_data,
                 layer_state,
                 response_extractor,
+                active_request_guard,
             }),
         }
     }
@@ -682,9 +696,6 @@ fn finalize_request<ResBody, E, ResExt>(
             };
 
             // Build label superset by moving owned values where possible.
-            // `url_scheme_kv` and `method_kv` are cloned for the active-requests
-            // decrement; their underlying strings are typically `&'static str`
-            // so the clones are allocation-free.
             let cap = 5
                 + error_type_kv.is_some() as usize
                 + route_kv_opt.is_some() as usize
@@ -693,8 +704,8 @@ fn finalize_request<ResBody, E, ResExt>(
             let mut label_superset = Vec::with_capacity(cap);
             label_superset.push(protocol_name_kv);
             label_superset.push(protocol_version_kv);
-            label_superset.push(url_scheme_kv.clone());
-            label_superset.push(method_kv.clone());
+            label_superset.push(url_scheme_kv);
+            label_superset.push(method_kv);
             label_superset.push(status_code_kv);
             if let Some(route_kv) = route_kv_opt {
                 label_superset.push(route_kv);
@@ -721,10 +732,6 @@ fn finalize_request<ResBody, E, ResExt>(
                     .server_response_body_size
                     .record(resp_content_length, &label_superset);
             }
-
-            layer_state
-                .server_active_requests
-                .add(-1, &[url_scheme_kv, method_kv]);
         }
         Err(error) => {
             // From the semantic convention: If the request fails with an error
@@ -741,18 +748,14 @@ fn finalize_request<ResBody, E, ResExt>(
             let label_superset = [
                 protocol_name_kv,
                 protocol_version_kv,
-                url_scheme_kv.clone(),
-                method_kv.clone(),
+                url_scheme_kv,
+                method_kv,
                 error_type_kv,
             ];
 
             layer_state
                 .server_request_duration
                 .record(duration_start.elapsed().as_secs_f64(), &label_superset);
-
-            layer_state
-                .server_active_requests
-                .add(-1, &[url_scheme_kv, method_kv]);
         }
     }
 }
@@ -1407,6 +1410,22 @@ mod tests {
         }
     }
 
+    fn active_requests_total(exporter: &InMemoryMetricExporter) -> i64 {
+        let metrics = exporter.get_finished_metrics().unwrap();
+        let active_requests = metrics
+            .iter()
+            .flat_map(|resource_metrics| resource_metrics.scope_metrics())
+            .flat_map(|scope_metrics| scope_metrics.metrics())
+            .find(|m| m.name() == semconv::metric::HTTP_SERVER_ACTIVE_REQUESTS)
+            .expect("Active requests metric should exist");
+
+        if let AggregatedMetrics::I64(MetricData::Sum(sum)) = active_requests.data() {
+            sum.data_points().map(|dp| dp.value()).sum()
+        } else {
+            panic!("Expected sum data for active requests metric");
+        }
+    }
+
     #[tokio::test(flavor = "current_thread")]
     async fn test_dropped_request_releases_active_requests() {
         let exporter = InMemoryMetricExporter::default();
@@ -1436,20 +1455,51 @@ mod tests {
 
         meter_provider.force_flush().unwrap();
 
-        let metrics = exporter.get_finished_metrics().unwrap();
-        let active_requests = metrics
-            .iter()
-            .flat_map(|resource_metrics| resource_metrics.scope_metrics())
-            .flat_map(|scope_metrics| scope_metrics.metrics())
-            .find(|m| m.name() == semconv::metric::HTTP_SERVER_ACTIVE_REQUESTS)
-            .expect("Active requests metric should exist");
+        assert_eq!(
+            active_requests_total(&exporter),
+            0,
+            "dropped request must not leak active_requests"
+        );
+    }
 
-        if let AggregatedMetrics::I64(MetricData::Sum(sum)) = active_requests.data() {
-            let total: i64 = sum.data_points().map(|dp| dp.value()).sum();
-            assert_eq!(total, 0, "dropped request must not leak active_requests");
-        } else {
-            panic!("Expected sum data for active requests metric");
-        }
+    #[tokio::test(flavor = "current_thread")]
+    async fn test_panicking_response_extractor_releases_active_requests() {
+        let exporter = InMemoryMetricExporter::default();
+        let reader = PeriodicReader::builder(exporter.clone())
+            .with_interval(Duration::from_millis(100))
+            .build();
+        let meter_provider = SdkMeterProvider::builder().with_reader(reader).build();
+
+        let layer = LayerBuilder::builder()
+            .with_meter_provider(meter_provider.clone())
+            .with_tracing(false)
+            .with_response_extractor_fn(|_res: &Response<String>| -> Vec<KeyValue> {
+                panic!("response extractor panicked")
+            })
+            .build()
+            .unwrap();
+
+        let service = tower::service_fn(|_req: Request<String>| async {
+            Ok::<_, std::convert::Infallible>(Response::new(String::new()))
+        });
+        let mut service = layer.layer(service);
+
+        let request = Request::builder()
+            .method("GET")
+            .uri("https://example.com/test")
+            .body(String::new())
+            .unwrap();
+
+        let result = tokio::spawn(async move { service.call(request).await }).await;
+        assert!(result.unwrap_err().is_panic());
+
+        meter_provider.force_flush().unwrap();
+
+        assert_eq!(
+            active_requests_total(&exporter),
+            0,
+            "panicking extractor must not leak active_requests"
+        );
     }
 
     #[tokio::test(flavor = "current_thread")]
