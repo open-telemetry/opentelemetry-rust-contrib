@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+### Added
+
+- Add `UploadError::ConfigService` variant, distinguishing failures to fetch/refresh ingestion info from the Geneva Config Service (GCS) from ingestion-gateway (GIG) upload failures (previously both surfaced as `UploadError::Other`).
+
 ## [0.8.1] - 2026-10-02
 
 ### Fixed
