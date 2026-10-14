@@ -58,13 +58,19 @@ The server span carries `error.type` when a request ends with an error:
 - An error from the inner service, returned before a status code exists, sets
   `error.type` to the Rust type name of that error, for example
   `"my_crate::MyError"`, obtained with `std::any::type_name`.
+- A request that the server drops before the response is ready sets
+  `error.type` to `"cancelled"`. The server drops the request, for example,
+  when the client disconnects or an outer timeout layer gives up. The layer
+  cannot tell these causes apart. The semantic conventions exempt a cancelled
+  request from being an error only for HTTP client spans, so the server span
+  status is `Error`.
 - A 2xx, 3xx or 4xx response carries no `error.type`. Per the HTTP span status
   rules, a 4xx is not a server error.
 
 The middleware wraps an arbitrary Tower `Service` and has no knowledge of your
-application's error types, so it can only report the two classifications it
-can produce on its own: the HTTP status code once one exists, or the error's
-Rust type name before one does. A status code always wins when one is
+application's error types, so it can only report the classifications it can
+produce on its own: the HTTP status code once one exists, the error's Rust type
+name before one does, or `"cancelled"` when no result exists. A status code always wins when one is
 available, and it never substitutes exception detail for a status code that 
 is already present.
 

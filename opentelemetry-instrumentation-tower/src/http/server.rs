@@ -46,6 +46,10 @@ const HTTP_SERVER_REQUEST_BODY_SIZE_UNIT: &str = "By";
 
 const HTTP_SERVER_RESPONSE_BODY_SIZE_UNIT: &str = "By";
 
+/// `error.type` of a request that the server drops before the response is
+/// ready.
+const CANCELLED_ERROR_TYPE: &str = "cancelled";
+
 /// State scoped to the entire middleware [`Layer`].
 struct LayerState {
     server_request_duration: Histogram<f64>,
@@ -450,6 +454,31 @@ pin_project! {
         otel_cx: OtelContext,
         finalization: Option<RequestFinalization<ResExt>>,
     }
+
+    impl<F, ResExt> PinnedDrop for ResponseFuture<F, ResExt> {
+        // The server drops the future without polling it to completion, for
+        // example when the client disconnects. `finalize_request` never runs
+        // in that case. The cancellation exception in the semantic conventions
+        // covers only HTTP client spans, so a server request that never sends
+        // its response ends with an error.
+        fn drop(this: Pin<&mut Self>) {
+            let this = this.project();
+            if let Some(RequestFinalization {
+                request_data,
+                layer_state,
+                ..
+            }) = this.finalization.take()
+            {
+                let error_type_kv = KeyValue::new(ERROR_TYPE, CANCELLED_ERROR_TYPE);
+
+                let span = this.otel_cx.span();
+                span.set_attribute(error_type_kv.clone());
+                span.set_status(Status::error(""));
+
+                record_failed_request(request_data, &layer_state, error_type_kv);
+            }
+        }
+    }
 }
 
 impl<F, ResBody, E, ResExt> Future for ResponseFuture<F, ResExt>
@@ -616,22 +645,22 @@ fn finalize_request<ResBody, E, ResExt>(
     ResExt: ResponseAttributeExtractor<ResBody>,
     E: std::fmt::Debug,
 {
-    let RequestData {
-        duration_start,
-        req_body_size,
-        protocol_name_kv,
-        protocol_version_kv,
-        url_scheme_kv,
-        method_kv,
-        route_kv_opt,
-        custom_request_attributes,
-    } = request_data;
-
     let cx = OtelContext::current();
     let span = cx.span();
 
     match result {
         Ok(response) => {
+            let RequestData {
+                duration_start,
+                req_body_size,
+                protocol_name_kv,
+                protocol_version_kv,
+                url_scheme_kv,
+                method_kv,
+                route_kv_opt,
+                custom_request_attributes,
+            } = request_data;
+
             let http_status = response.status();
             let status_code_kv = KeyValue::new(
                 semconv::attribute::HTTP_RESPONSE_STATUS_CODE,
@@ -720,24 +749,48 @@ fn finalize_request<ResBody, E, ResExt>(
             span.set_attribute(error_type_kv.clone());
             span.set_status(Status::error(format!("{:?}", error)));
 
-            // Still record duration metric (without status code).
-            let label_superset = [
-                protocol_name_kv,
-                protocol_version_kv,
-                url_scheme_kv.clone(),
-                method_kv.clone(),
-                error_type_kv,
-            ];
-
-            layer_state
-                .server_request_duration
-                .record(duration_start.elapsed().as_secs_f64(), &label_superset);
-
-            layer_state
-                .server_active_requests
-                .add(-1, &[url_scheme_kv, method_kv]);
+            record_failed_request(request_data, layer_state, error_type_kv);
         }
     }
+}
+
+/// Records the metrics of a request that ended before the server had a
+/// response status code.
+fn record_failed_request(
+    request_data: RequestData,
+    layer_state: &LayerState,
+    error_type_kv: KeyValue,
+) {
+    let RequestData {
+        duration_start,
+        protocol_name_kv,
+        protocol_version_kv,
+        url_scheme_kv,
+        method_kv,
+        route_kv_opt,
+        custom_request_attributes,
+        ..
+    } = request_data;
+
+    let cap = 5 + route_kv_opt.is_some() as usize + custom_request_attributes.len();
+    let mut label_superset = Vec::with_capacity(cap);
+    label_superset.push(protocol_name_kv);
+    label_superset.push(protocol_version_kv);
+    label_superset.push(url_scheme_kv.clone());
+    label_superset.push(method_kv.clone());
+    label_superset.push(error_type_kv);
+    if let Some(route_kv) = route_kv_opt {
+        label_superset.push(route_kv);
+    }
+    label_superset.extend(custom_request_attributes);
+
+    layer_state
+        .server_request_duration
+        .record(duration_start.elapsed().as_secs_f64(), &label_superset);
+
+    layer_state
+        .server_active_requests
+        .add(-1, &[url_scheme_kv, method_kv]);
 }
 
 #[cfg(test)]
@@ -773,10 +826,17 @@ mod tests {
         #[derive(Debug, Clone, Copy)]
         struct TestError;
 
+        #[derive(Clone, Copy)]
+        enum Outcome {
+            Respond(StatusCode),
+            Fail,
+            NeverFinish,
+        }
+
         struct TestCase {
             name: &'static str,
             target: &'static str,
-            outcome: Result<StatusCode, TestError>,
+            outcome: Outcome,
             expected_span_name: &'static str,
             expected_attributes: Vec<KeyValue>,
             expected_span_status: Status,
@@ -786,7 +846,7 @@ mod tests {
             TestCase {
                 name: "request target in absolute form",
                 target: "http://example.com/api/users/123",
-                outcome: Ok(StatusCode::OK),
+                outcome: Outcome::Respond(StatusCode::OK),
                 expected_span_name: "GET /api/users/123",
                 expected_attributes: vec![
                     KeyValue::new(semconv::attribute::HTTP_REQUEST_METHOD, "GET".to_string()),
@@ -804,7 +864,7 @@ mod tests {
             TestCase {
                 name: "request target in origin form",
                 target: "/api/users/123",
-                outcome: Ok(StatusCode::OK),
+                outcome: Outcome::Respond(StatusCode::OK),
                 expected_span_name: "GET /api/users/123",
                 expected_attributes: vec![
                     KeyValue::new(semconv::attribute::HTTP_REQUEST_METHOD, "GET".to_string()),
@@ -822,7 +882,7 @@ mod tests {
             TestCase {
                 name: "request target with a query component",
                 target: "/api/users/123?fields=name&verbose=true",
-                outcome: Ok(StatusCode::OK),
+                outcome: Outcome::Respond(StatusCode::OK),
                 expected_span_name: "GET /api/users/123",
                 expected_attributes: vec![
                     KeyValue::new(semconv::attribute::HTTP_REQUEST_METHOD, "GET".to_string()),
@@ -844,7 +904,7 @@ mod tests {
             TestCase {
                 name: "request target with a sensitive query parameter",
                 target: "/api/users/123?fields=name&sig=secret-signature",
-                outcome: Ok(StatusCode::OK),
+                outcome: Outcome::Respond(StatusCode::OK),
                 expected_span_name: "GET /api/users/123",
                 expected_attributes: vec![
                     KeyValue::new(semconv::attribute::HTTP_REQUEST_METHOD, "GET".to_string()),
@@ -866,7 +926,7 @@ mod tests {
             TestCase {
                 name: "request target with an empty query component",
                 target: "/api/users/123?",
-                outcome: Ok(StatusCode::OK),
+                outcome: Outcome::Respond(StatusCode::OK),
                 expected_span_name: "GET /api/users/123",
                 expected_attributes: vec![
                     KeyValue::new(semconv::attribute::HTTP_REQUEST_METHOD, "GET".to_string()),
@@ -885,7 +945,7 @@ mod tests {
             TestCase {
                 name: "a server error response carries error.type",
                 target: "/api/users/123",
-                outcome: Ok(StatusCode::INTERNAL_SERVER_ERROR),
+                outcome: Outcome::Respond(StatusCode::INTERNAL_SERVER_ERROR),
                 expected_span_name: "GET /api/users/123",
                 expected_attributes: vec![
                     KeyValue::new(semconv::attribute::HTTP_REQUEST_METHOD, "GET".to_string()),
@@ -904,7 +964,7 @@ mod tests {
             TestCase {
                 name: "a client error response carries no error.type",
                 target: "/api/users/123",
-                outcome: Ok(StatusCode::NOT_FOUND),
+                outcome: Outcome::Respond(StatusCode::NOT_FOUND),
                 expected_span_name: "GET /api/users/123",
                 expected_attributes: vec![
                     KeyValue::new(semconv::attribute::HTTP_REQUEST_METHOD, "GET".to_string()),
@@ -922,7 +982,7 @@ mod tests {
             TestCase {
                 name: "an uncommon server error response carries error.type",
                 target: "/api/users/123",
-                outcome: Ok(StatusCode::from_u16(599).unwrap()),
+                outcome: Outcome::Respond(StatusCode::from_u16(599).unwrap()),
                 expected_span_name: "GET /api/users/123",
                 expected_attributes: vec![
                     KeyValue::new(semconv::attribute::HTTP_REQUEST_METHOD, "GET".to_string()),
@@ -941,7 +1001,7 @@ mod tests {
             TestCase {
                 name: "an inner-service error carries the error type name",
                 target: "/api/users/123",
-                outcome: Err(TestError),
+                outcome: Outcome::Fail,
                 expected_span_name: "GET /api/users/123",
                 expected_attributes: vec![
                     KeyValue::new(semconv::attribute::HTTP_REQUEST_METHOD, "GET".to_string()),
@@ -955,6 +1015,24 @@ mod tests {
                     KeyValue::new(ERROR_TYPE, std::any::type_name::<TestError>()),
                 ],
                 expected_span_status: Status::error(format!("{:?}", TestError)),
+            },
+            TestCase {
+                name: "a request that the server drops before the response is ready",
+                target: "/api/users/123",
+                outcome: Outcome::NeverFinish,
+                expected_span_name: "GET /api/users/123",
+                expected_attributes: vec![
+                    KeyValue::new(semconv::attribute::HTTP_REQUEST_METHOD, "GET".to_string()),
+                    KeyValue::new(semconv::attribute::URL_SCHEME, "".to_string()),
+                    KeyValue::new(semconv::attribute::URL_PATH, "/api/users/123".to_string()),
+                    KeyValue::new(
+                        semconv::attribute::USER_AGENT_ORIGINAL,
+                        "tower-test-client/1.0".to_string(),
+                    ),
+                    KeyValue::new(semconv::attribute::HTTP_ROUTE, "/api/users/123".to_string()),
+                    KeyValue::new(ERROR_TYPE, CANCELLED_ERROR_TYPE),
+                ],
+                expected_span_status: Status::error(""),
             },
         ];
 
@@ -979,12 +1057,14 @@ mod tests {
                 .layer(layer)
                 .service(tower::service_fn(
                     move |req: http::Request<String>| async move {
-                        outcome.map(|status| {
-                            http::Response::builder()
+                        match outcome {
+                            Outcome::Respond(status) => Ok(http::Response::builder()
                                 .status(status)
                                 .body(req.into_body())
-                                .unwrap()
-                        })
+                                .unwrap()),
+                            Outcome::Fail => Err(TestError),
+                            Outcome::NeverFinish => std::future::pending().await,
+                        }
                     },
                 ));
 
@@ -1000,10 +1080,18 @@ mod tests {
                 .body(request_body)
                 .unwrap();
 
-            // Execute the service call within the parent span context
-            let _response = async { service.ready().await.unwrap().call(request).await }
-                .with_context(cx)
+            // Poll the response future once within the parent span context,
+            // then drop it. A server does the same when the client disconnects
+            // before the response is ready.
+            async {
+                let mut response_future = Box::pin(service.ready().await.unwrap().call(request));
+                let _ = std::future::poll_fn(|task_cx| {
+                    Poll::Ready(response_future.as_mut().poll(task_cx))
+                })
                 .await;
+            }
+            .with_context(cx)
+            .await;
 
             tracer_provider.force_flush().unwrap();
 
@@ -1387,6 +1475,145 @@ mod tests {
             );
         } else {
             panic!("Expected sum data for active requests metric");
+        }
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn test_metrics_when_a_request_ends() {
+        #[derive(Debug, Clone, Copy)]
+        struct TestError;
+
+        #[derive(Clone, Copy)]
+        enum Outcome {
+            Respond(StatusCode),
+            Fail,
+            NeverFinish,
+        }
+
+        struct TestCase {
+            name: &'static str,
+            outcome: Outcome,
+            expected_active_requests: Option<i64>,
+            expected_duration_attributes: Option<Vec<KeyValue>>,
+        }
+
+        let test_cases = [
+            TestCase {
+                name: "a completed request",
+                outcome: Outcome::Respond(StatusCode::OK),
+                expected_active_requests: Some(0),
+                expected_duration_attributes: Some(vec![
+                    KeyValue::new(semconv::attribute::HTTP_REQUEST_METHOD, "GET"),
+                    KeyValue::new(semconv::attribute::HTTP_RESPONSE_STATUS_CODE, 200),
+                    KeyValue::new(semconv::attribute::HTTP_ROUTE, "/test"),
+                    KeyValue::new(semconv::attribute::NETWORK_PROTOCOL_NAME, "http"),
+                    KeyValue::new(semconv::attribute::NETWORK_PROTOCOL_VERSION, "1.1"),
+                    KeyValue::new(semconv::attribute::URL_SCHEME, "https"),
+                ]),
+            },
+            TestCase {
+                name: "an inner-service error",
+                outcome: Outcome::Fail,
+                expected_active_requests: Some(0),
+                expected_duration_attributes: Some(vec![
+                    KeyValue::new(ERROR_TYPE, std::any::type_name::<TestError>()),
+                    KeyValue::new(semconv::attribute::HTTP_REQUEST_METHOD, "GET"),
+                    KeyValue::new(semconv::attribute::HTTP_ROUTE, "/test"),
+                    KeyValue::new(semconv::attribute::NETWORK_PROTOCOL_NAME, "http"),
+                    KeyValue::new(semconv::attribute::NETWORK_PROTOCOL_VERSION, "1.1"),
+                    KeyValue::new(semconv::attribute::URL_SCHEME, "https"),
+                ]),
+            },
+            TestCase {
+                name: "a request that the server drops before the response is ready",
+                outcome: Outcome::NeverFinish,
+                expected_active_requests: Some(0),
+                expected_duration_attributes: Some(vec![
+                    KeyValue::new(ERROR_TYPE, CANCELLED_ERROR_TYPE),
+                    KeyValue::new(semconv::attribute::HTTP_REQUEST_METHOD, "GET"),
+                    KeyValue::new(semconv::attribute::HTTP_ROUTE, "/test"),
+                    KeyValue::new(semconv::attribute::NETWORK_PROTOCOL_NAME, "http"),
+                    KeyValue::new(semconv::attribute::NETWORK_PROTOCOL_VERSION, "1.1"),
+                    KeyValue::new(semconv::attribute::URL_SCHEME, "https"),
+                ]),
+            },
+        ];
+
+        for test_case in test_cases {
+            let exporter = InMemoryMetricExporter::default();
+            let reader = PeriodicReader::builder(exporter.clone()).build();
+            let meter_provider = SdkMeterProvider::builder().with_reader(reader).build();
+
+            let layer = LayerBuilder::builder()
+                .with_route_extractor(PathExtractor)
+                .with_meter_provider(meter_provider.clone())
+                .build()
+                .unwrap();
+
+            let outcome = test_case.outcome;
+            let mut service =
+                layer.layer(tower::service_fn(move |req: Request<String>| async move {
+                    match outcome {
+                        Outcome::Respond(status) => Ok(Response::builder()
+                            .status(status)
+                            .body(req.into_body())
+                            .unwrap()),
+                        Outcome::Fail => Err(TestError),
+                        Outcome::NeverFinish => std::future::pending().await,
+                    }
+                }));
+
+            let request = Request::builder()
+                .uri("https://example.com/test")
+                .body(String::new())
+                .unwrap();
+
+            // Poll the response future once, then drop it. A server does the
+            // same when the client disconnects before the response is ready.
+            let mut response_future = Box::pin(service.call(request));
+            let _ = std::future::poll_fn(|cx| Poll::Ready(response_future.as_mut().poll(cx))).await;
+            drop(response_future);
+
+            meter_provider.force_flush().unwrap();
+
+            let metrics = exporter.get_finished_metrics().unwrap();
+            let find_metric = |name: &str| {
+                metrics
+                    .last()
+                    .and_then(|resource_metrics| resource_metrics.scope_metrics().next())
+                    .and_then(|scope_metrics| scope_metrics.metrics().find(|m| m.name() == name))
+                    .map(|metric| metric.data())
+            };
+
+            let active_requests = match find_metric(semconv::metric::HTTP_SERVER_ACTIVE_REQUESTS) {
+                Some(AggregatedMetrics::I64(MetricData::Sum(sum))) => sum
+                    .data_points()
+                    .map(|data_point| data_point.value())
+                    .next(),
+                _ => None,
+            };
+            let duration_attributes =
+                match find_metric(semconv::metric::HTTP_SERVER_REQUEST_DURATION) {
+                    Some(AggregatedMetrics::F64(MetricData::Histogram(histogram))) => {
+                        histogram.data_points().next().map(|data_point| {
+                            let mut attributes: Vec<KeyValue> =
+                                data_point.attributes().cloned().collect();
+                            attributes.sort_by(|a, b| a.key.cmp(&b.key));
+                            attributes
+                        })
+                    }
+                    _ => None,
+                };
+
+            assert_eq!(
+                (active_requests, duration_attributes),
+                (
+                    test_case.expected_active_requests,
+                    test_case.expected_duration_attributes
+                ),
+                "{}",
+                test_case.name
+            );
         }
     }
 

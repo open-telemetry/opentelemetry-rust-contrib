@@ -33,11 +33,13 @@
 //! The server span carries `error.type` when a request ends with an error. A 5xx
 //! response sets `error.type` to the status code number as a string, for example
 //! `"500"`. An error from the inner service, returned before a status code
-//! exists, sets `error.type` to that error's Rust type name. The middleware
-//! wraps an arbitrary [Tower] `Service` and has no knowledge of your
-//! application's error types, so these are the two classifications it can
-//! produce on its own, with the status code taking precedence whenever one
-//! exists; see the crate [README] for how to report a domain-specific error.
+//! exists, sets `error.type` to that error's Rust type name. A request that the
+//! server drops before the response is ready, for example because the client
+//! disconnected, sets `error.type` to `"cancelled"`. The middleware wraps an
+//! arbitrary [Tower] `Service` and has no knowledge of your application's error
+//! types, so these are the classifications it can produce on its own, with the
+//! status code taking precedence whenever one exists; see the crate [README] for
+//! how to report a domain-specific error.
 //!
 //! [README]: https://github.com/open-telemetry/opentelemetry-rust-contrib/blob/main/opentelemetry-instrumentation-tower/README.md#reported-errors
 //!
