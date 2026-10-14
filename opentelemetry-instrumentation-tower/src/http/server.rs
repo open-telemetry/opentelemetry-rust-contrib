@@ -836,6 +836,7 @@ mod tests {
     use std::result::Result;
     use std::sync::Mutex;
     use std::time::Duration;
+    use tower::util::BoxService;
     use tower::{ServiceBuilder, ServiceExt};
 
     #[cfg(feature = "axum")]
@@ -846,17 +847,12 @@ mod tests {
         #[derive(Debug, Clone, Copy)]
         struct TestError;
 
-        #[derive(Clone, Copy)]
-        enum Outcome {
-            Respond(StatusCode),
-            Fail,
-            NeverFinish,
-        }
+        type TestService = BoxService<Request<String>, Response<String>, TestError>;
 
         struct TestCase {
             name: &'static str,
             target: &'static str,
-            outcome: Outcome,
+            service: TestService,
             expected_span_name: &'static str,
             expected_attributes: Vec<KeyValue>,
             expected_span_status: Status,
@@ -866,7 +862,12 @@ mod tests {
             TestCase {
                 name: "request target in absolute form",
                 target: "http://example.com/api/users/123",
-                outcome: Outcome::Respond(StatusCode::OK),
+                service: BoxService::new(tower::service_fn(|req: Request<String>| async {
+                    Ok(Response::builder()
+                        .status(StatusCode::OK)
+                        .body(req.into_body())
+                        .unwrap())
+                })),
                 expected_span_name: "GET /api/users/123",
                 expected_attributes: vec![
                     KeyValue::new(semconv::attribute::HTTP_REQUEST_METHOD, "GET".to_string()),
@@ -884,7 +885,12 @@ mod tests {
             TestCase {
                 name: "request target in origin form",
                 target: "/api/users/123",
-                outcome: Outcome::Respond(StatusCode::OK),
+                service: BoxService::new(tower::service_fn(|req: Request<String>| async {
+                    Ok(Response::builder()
+                        .status(StatusCode::OK)
+                        .body(req.into_body())
+                        .unwrap())
+                })),
                 expected_span_name: "GET /api/users/123",
                 expected_attributes: vec![
                     KeyValue::new(semconv::attribute::HTTP_REQUEST_METHOD, "GET".to_string()),
@@ -902,7 +908,12 @@ mod tests {
             TestCase {
                 name: "request target with a query component",
                 target: "/api/users/123?fields=name&verbose=true",
-                outcome: Outcome::Respond(StatusCode::OK),
+                service: BoxService::new(tower::service_fn(|req: Request<String>| async {
+                    Ok(Response::builder()
+                        .status(StatusCode::OK)
+                        .body(req.into_body())
+                        .unwrap())
+                })),
                 expected_span_name: "GET /api/users/123",
                 expected_attributes: vec![
                     KeyValue::new(semconv::attribute::HTTP_REQUEST_METHOD, "GET".to_string()),
@@ -924,7 +935,12 @@ mod tests {
             TestCase {
                 name: "request target with a sensitive query parameter",
                 target: "/api/users/123?fields=name&sig=secret-signature",
-                outcome: Outcome::Respond(StatusCode::OK),
+                service: BoxService::new(tower::service_fn(|req: Request<String>| async {
+                    Ok(Response::builder()
+                        .status(StatusCode::OK)
+                        .body(req.into_body())
+                        .unwrap())
+                })),
                 expected_span_name: "GET /api/users/123",
                 expected_attributes: vec![
                     KeyValue::new(semconv::attribute::HTTP_REQUEST_METHOD, "GET".to_string()),
@@ -946,7 +962,12 @@ mod tests {
             TestCase {
                 name: "request target with an empty query component",
                 target: "/api/users/123?",
-                outcome: Outcome::Respond(StatusCode::OK),
+                service: BoxService::new(tower::service_fn(|req: Request<String>| async {
+                    Ok(Response::builder()
+                        .status(StatusCode::OK)
+                        .body(req.into_body())
+                        .unwrap())
+                })),
                 expected_span_name: "GET /api/users/123",
                 expected_attributes: vec![
                     KeyValue::new(semconv::attribute::HTTP_REQUEST_METHOD, "GET".to_string()),
@@ -965,7 +986,12 @@ mod tests {
             TestCase {
                 name: "a server error response carries error.type",
                 target: "/api/users/123",
-                outcome: Outcome::Respond(StatusCode::INTERNAL_SERVER_ERROR),
+                service: BoxService::new(tower::service_fn(|req: Request<String>| async {
+                    Ok(Response::builder()
+                        .status(StatusCode::INTERNAL_SERVER_ERROR)
+                        .body(req.into_body())
+                        .unwrap())
+                })),
                 expected_span_name: "GET /api/users/123",
                 expected_attributes: vec![
                     KeyValue::new(semconv::attribute::HTTP_REQUEST_METHOD, "GET".to_string()),
@@ -984,7 +1010,12 @@ mod tests {
             TestCase {
                 name: "a client error response carries no error.type",
                 target: "/api/users/123",
-                outcome: Outcome::Respond(StatusCode::NOT_FOUND),
+                service: BoxService::new(tower::service_fn(|req: Request<String>| async {
+                    Ok(Response::builder()
+                        .status(StatusCode::NOT_FOUND)
+                        .body(req.into_body())
+                        .unwrap())
+                })),
                 expected_span_name: "GET /api/users/123",
                 expected_attributes: vec![
                     KeyValue::new(semconv::attribute::HTTP_REQUEST_METHOD, "GET".to_string()),
@@ -1002,7 +1033,12 @@ mod tests {
             TestCase {
                 name: "an uncommon server error response carries error.type",
                 target: "/api/users/123",
-                outcome: Outcome::Respond(StatusCode::from_u16(599).unwrap()),
+                service: BoxService::new(tower::service_fn(|req: Request<String>| async {
+                    Ok(Response::builder()
+                        .status(StatusCode::from_u16(599).unwrap())
+                        .body(req.into_body())
+                        .unwrap())
+                })),
                 expected_span_name: "GET /api/users/123",
                 expected_attributes: vec![
                     KeyValue::new(semconv::attribute::HTTP_REQUEST_METHOD, "GET".to_string()),
@@ -1021,7 +1057,9 @@ mod tests {
             TestCase {
                 name: "an inner-service error carries the error type name",
                 target: "/api/users/123",
-                outcome: Outcome::Fail,
+                service: BoxService::new(tower::service_fn(|_req: Request<String>| async {
+                    Err(TestError)
+                })),
                 expected_span_name: "GET /api/users/123",
                 expected_attributes: vec![
                     KeyValue::new(semconv::attribute::HTTP_REQUEST_METHOD, "GET".to_string()),
@@ -1039,7 +1077,9 @@ mod tests {
             TestCase {
                 name: "a request that the server drops before the response is ready",
                 target: "/api/users/123",
-                outcome: Outcome::NeverFinish,
+                service: BoxService::new(tower::service_fn(|_req: Request<String>| {
+                    std::future::pending()
+                })),
                 expected_span_name: "GET /api/users/123",
                 expected_attributes: vec![
                     KeyValue::new(semconv::attribute::HTTP_REQUEST_METHOD, "GET".to_string()),
@@ -1072,21 +1112,9 @@ mod tests {
                 .build()
                 .unwrap();
 
-            let outcome = test_case.outcome;
             let mut service = ServiceBuilder::new()
                 .layer(layer)
-                .service(tower::service_fn(
-                    move |req: http::Request<String>| async move {
-                        match outcome {
-                            Outcome::Respond(status) => Ok(http::Response::builder()
-                                .status(status)
-                                .body(req.into_body())
-                                .unwrap()),
-                            Outcome::Fail => Err(TestError),
-                            Outcome::NeverFinish => std::future::pending().await,
-                        }
-                    },
-                ));
+                .service(test_case.service);
 
             // Create a parent span and set it as the current context
             let parent_span = tracer.start("parent_operation");
@@ -1503,17 +1531,12 @@ mod tests {
         #[derive(Debug, Clone, Copy)]
         struct TestError;
 
-        #[derive(Clone, Copy)]
-        enum Outcome {
-            Respond(StatusCode),
-            Fail,
-            NeverFinish,
-        }
+        type TestService = BoxService<Request<String>, Response<String>, TestError>;
 
         struct TestCase {
             name: &'static str,
-            outcome: Outcome,
-            response_extractor_panics: bool,
+            service: TestService,
+            response_extractor: fn(&Response<String>) -> Vec<KeyValue>,
             expected_active_requests: Option<i64>,
             expected_duration_attributes: Option<Vec<KeyValue>>,
         }
@@ -1521,8 +1544,13 @@ mod tests {
         let test_cases = [
             TestCase {
                 name: "a completed request",
-                outcome: Outcome::Respond(StatusCode::OK),
-                response_extractor_panics: false,
+                service: BoxService::new(tower::service_fn(|req: Request<String>| async {
+                    Ok(Response::builder()
+                        .status(StatusCode::OK)
+                        .body(req.into_body())
+                        .unwrap())
+                })),
+                response_extractor: |_| Vec::new(),
                 expected_active_requests: Some(0),
                 expected_duration_attributes: Some(vec![
                     KeyValue::new(semconv::attribute::HTTP_REQUEST_METHOD, "GET"),
@@ -1535,8 +1563,10 @@ mod tests {
             },
             TestCase {
                 name: "an inner-service error",
-                outcome: Outcome::Fail,
-                response_extractor_panics: false,
+                service: BoxService::new(tower::service_fn(|_req: Request<String>| async {
+                    Err(TestError)
+                })),
+                response_extractor: |_| Vec::new(),
                 expected_active_requests: Some(0),
                 expected_duration_attributes: Some(vec![
                     KeyValue::new(ERROR_TYPE, std::any::type_name::<TestError>()),
@@ -1549,8 +1579,10 @@ mod tests {
             },
             TestCase {
                 name: "a request that the server drops before the response is ready",
-                outcome: Outcome::NeverFinish,
-                response_extractor_panics: false,
+                service: BoxService::new(tower::service_fn(|_req: Request<String>| {
+                    std::future::pending()
+                })),
+                response_extractor: |_| Vec::new(),
                 expected_active_requests: Some(0),
                 expected_duration_attributes: Some(vec![
                     KeyValue::new(ERROR_TYPE, CANCELLED_ERROR_TYPE),
@@ -1563,8 +1595,13 @@ mod tests {
             },
             TestCase {
                 name: "a response extractor that panics",
-                outcome: Outcome::Respond(StatusCode::OK),
-                response_extractor_panics: true,
+                service: BoxService::new(tower::service_fn(|req: Request<String>| async {
+                    Ok(Response::builder()
+                        .status(StatusCode::OK)
+                        .body(req.into_body())
+                        .unwrap())
+                })),
+                response_extractor: |_| panic!("response extractor panicked"),
                 expected_active_requests: Some(0),
                 expected_duration_attributes: None,
             },
@@ -1575,31 +1612,14 @@ mod tests {
             let reader = PeriodicReader::builder(exporter.clone()).build();
             let meter_provider = SdkMeterProvider::builder().with_reader(reader).build();
 
-            let response_extractor_panics = test_case.response_extractor_panics;
             let layer = LayerBuilder::builder()
                 .with_route_extractor(PathExtractor)
-                .with_response_extractor_fn(move |_res: &Response<String>| {
-                    if response_extractor_panics {
-                        panic!("response extractor panicked");
-                    }
-                    Vec::new()
-                })
+                .with_response_extractor_fn(test_case.response_extractor)
                 .with_meter_provider(meter_provider.clone())
                 .build()
                 .unwrap();
 
-            let outcome = test_case.outcome;
-            let mut service =
-                layer.layer(tower::service_fn(move |req: Request<String>| async move {
-                    match outcome {
-                        Outcome::Respond(status) => Ok(Response::builder()
-                            .status(status)
-                            .body(req.into_body())
-                            .unwrap()),
-                        Outcome::Fail => Err(TestError),
-                        Outcome::NeverFinish => std::future::pending().await,
-                    }
-                }));
+            let mut service = layer.layer(test_case.service);
 
             let request = Request::builder()
                 .uri("https://example.com/test")
