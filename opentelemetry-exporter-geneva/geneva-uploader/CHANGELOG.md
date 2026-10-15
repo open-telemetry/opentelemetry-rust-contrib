@@ -1,10 +1,16 @@
 # Changelog
 
-## vNext
+## Unreleased
 
 ### Changed
 
 - Update reqwest to 0.13 and use its renamed TLS features. Ordinary rustls clients now use the platform certificate verifier; rustls certificate authentication continues to load native roots explicitly and use the caller-installed crypto provider.
+
+## [0.8.1] - 2026-10-02
+
+### Fixed
+
+- Name log and span Bond schemas `MdsContainer`, instead of `telemetry.OtlpLogRecord` and `telemetry.OtlpSpanRecord`. Geneva On Behalf Of (OBO) processing prefixes every field with any other struct name, so OBO resource logs could not resolve top-level fields such as `category`, and Azure Monitor delivered them nested and unrouted.
 
 ## [0.8.0] - 2026-09-22
 

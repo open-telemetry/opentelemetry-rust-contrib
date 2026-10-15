@@ -50,6 +50,7 @@ jobs:
         df -h
     - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       with:
+        persist-credentials: false
         submodules: true
     - name: Resolve stable Rust pinned by rust-toolchain.toml
       if: ${{ matrix.rust == 'stable' }}
@@ -85,6 +86,7 @@ jobs:
         egress-policy: audit
     - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       with:
+        persist-credentials: false
         submodules: true
     - name: Resolve stable Rust pinned by rust-toolchain.toml
       run: rustup show active-toolchain
@@ -107,6 +109,7 @@ jobs:
 
     - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       with:
+        persist-credentials: false
         submodules: true
     - name: Resolve stable Rust pinned by rust-toolchain.toml
       run: rustup show active-toolchain
@@ -136,10 +139,11 @@ jobs:
 
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
+          persist-credentials: false
           submodules: true
       - name: Resolve stable Rust pinned by rust-toolchain.toml
         run: rustup show active-toolchain
-      - uses: taiki-e/install-action@4cef1412cce204788f482e778a0b9187f9626a29 # v2.87.21
+      - uses: taiki-e/install-action@83ac0ad63c0167e6f06796fab0fce28db1bf3db0 # v2.87.22
         with:
           tool: cargo-msrv
       # cargo-msrv verify runs `cargo check` in workspace context for each crate.
@@ -179,10 +183,11 @@ jobs:
 
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
+          persist-credentials: false
           submodules: true
       - name: Install Rust 1.88.0
         run: rustup toolchain install 1.88.0 --profile minimal
-      - uses: taiki-e/install-action@4cef1412cce204788f482e778a0b9187f9626a29 # v2.87.21
+      - uses: taiki-e/install-action@83ac0ad63c0167e6f06796fab0fce28db1bf3db0 # v2.87.22
         with:
           tool: cargo-msrv
       - name: Check MSRV for Geneva crates
@@ -199,6 +204,8 @@ jobs:
           egress-policy: audit
 
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
       - uses: EmbarkStudios/cargo-deny-action@3c6349835b2b7b196a839186cb8b78e02f7b5f25 # v2.1.1
         with:
           command: check advisories
@@ -211,6 +218,8 @@ jobs:
         with:
           egress-policy: audit
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
       - name: Resolve stable Rust pinned by rust-toolchain.toml
         run: rustup show active-toolchain
       - uses: arduino/setup-protoc@c65c819552d16ad3c9b72d9dfd5ba5237b9c906b # v3.0.0
@@ -232,6 +241,7 @@ jobs:
 
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
+          persist-credentials: false
           submodules: true
       - name: Resolve stable Rust pinned by rust-toolchain.toml
         run: rustup show active-toolchain
@@ -241,7 +251,7 @@ jobs:
         with:
             repo-token: ${{ secrets.GITHUB_TOKEN }}
       - name: cargo install cargo-llvm-cov
-        uses: taiki-e/install-action@4cef1412cce204788f482e778a0b9187f9626a29 # v2.87.21
+        uses: taiki-e/install-action@83ac0ad63c0167e6f06796fab0fce28db1bf3db0 # v2.87.22
         with:
           tool: cargo-llvm-cov
       - name: cargo generate-lockfile
@@ -264,10 +274,11 @@ jobs:
 
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
+          persist-credentials: false
           submodules: true
       - name: Resolve stable Rust pinned by rust-toolchain.toml
         run: rustup show active-toolchain
-      - uses: taiki-e/install-action@4cef1412cce204788f482e778a0b9187f9626a29 # v2.87.21
+      - uses: taiki-e/install-action@83ac0ad63c0167e6f06796fab0fce28db1bf3db0 # v2.87.22
         with:
           tool: cargo-machete
       - name: cargo machete
@@ -283,10 +294,11 @@ jobs:
 
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
+          persist-credentials: false
           submodules: true
       - name: Resolve stable Rust pinned by rust-toolchain.toml
         run: rustup show active-toolchain
-      - uses: taiki-e/install-action@4cef1412cce204788f482e778a0b9187f9626a29 # v2.87.21
+      - uses: taiki-e/install-action@83ac0ad63c0167e6f06796fab0fce28db1bf3db0 # v2.87.22
         with:
           tool: cargo-workspace-lints
       - name: cargo workspace-lints
