@@ -304,10 +304,8 @@ where
 
                 // Add Resource Attributes to PartC
                 if !self.attributes_from_resource.is_empty() {
-                    if !is_part_c_present {
-                        eb.add_struct_with_bookmark("PartC", 1, 0, &mut cs_c_bookmark);
-                        is_part_c_present = true;
-                    }
+                    eb.add_struct_with_bookmark("PartC", 1, 0, &mut cs_c_bookmark);
+                    is_part_c_present = true;
 
                     for (key, value) in &self.attributes_from_resource {
                         self.add_attribute_to_event(&mut eb, (key, value));

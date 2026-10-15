@@ -4,9 +4,10 @@
 
 ## v0.18.0
 
-- Fixed UserEventsExporter handling of Event and Resource attributes to respect
-  the expected hierchy. (Event-level (Local) Attributes override Resource-level
-  (Global) Attributes)
+- **Breaking:** Changed UserEventsExporter to serialize resource attributes
+  before log-record attributes in PartC, aligning with the ETW exporter.
+  Both fields are retained when keys collide; consumers that resolve
+  duplicates by field order may observe a different value.
 
 ## v0.17.0
 

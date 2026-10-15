@@ -183,7 +183,7 @@ mod tests {
                 Resource::builder()
                     .with_service_name("myrolename")
                     .with_attribute(KeyValue::new("service.instance.id", "myinstance123"))
-                    .with_attribute(KeyValue::new("resource_attribute1", "resource-level-value"))
+                    .with_attribute(KeyValue::new("resource_attribute1", "v1"))
                     .with_attribute(KeyValue::new("resource_attribute2", "v2"))
                     .with_attribute(KeyValue::new("resource_attribute3", "v3"))
                     .build(),
@@ -243,7 +243,6 @@ mod tests {
           { "n": "myprovider:Log", "__csver__": 1024, "PartA": { "time": "2025-03-07T16:31:28.279214367+00:00", "ext_cloud_role": "myrolename"  }, "PartC": { "user_name": "otel user", "user_email": "otel.user@opentelemetry.com" }, "PartB": { "_typeName": "Log", "severityNumber": 2, "severityText": "ERROR", "eventId": 20, "name": "my-event-name" }, "meta": { "time": 81252.403220286, "cpu": 4, "pid": 21084, "tid": 21085, "level": 2, "keyword": "0x1" } } ]
         }
                  */
-
         let json_value: Value = from_str(&formatted_output).expect("Failed to parse JSON");
         let perf_data_key = json_value
             .as_object()
@@ -299,11 +298,27 @@ mod tests {
         // Validate PartC
         let part_c = &event["PartC"];
         assert_eq!(part_c["user_name"].as_str().unwrap(), "otel user");
+
+        // We want to ensure that both resource-level and event-level attributes are present in the raw JSON output.
+        // serde_json::Value keeps only the last duplicate key, so check both in the raw JSON.
         assert_eq!(
-            part_c["resource_attribute1"].as_str().unwrap(),
-            "event-level-value",
-            "event-level attributes should override resource-level attributes"
+            formatted_output
+                .matches(r#""resource_attribute1":"#)
+                .count(),
+            2,
+            "both resource-level and event-level attributes should be emitted"
         );
+        let resource_attribute_position = formatted_output
+            .find(r#""resource_attribute1": "v1""#)
+            .expect("resource-level resource_attribute1 is missing");
+        let event_attribute_position = formatted_output
+            .find(r#""resource_attribute1": "event-level-value""#)
+            .expect("event-level resource_attribute1 is missing");
+        assert!(
+            resource_attribute_position < event_attribute_position,
+            "event-level resource_attribute1 should follow the resource-level value"
+        );
+
         assert_eq!(part_c["resource_attribute2"].as_str().unwrap(), "v2");
         assert!(
             part_c.get("resource_attribute3").is_none(),
