@@ -2,12 +2,19 @@
 
 ## vNext
 
+## v0.18.0
+
+Released 2026-Oct-16
+
 - Bump OpenTelemetry dependencies to 0.33.1.
 
-- **Breaking:** Changed UserEventsExporter to serialize resource attributes
-  before log-record attributes in PartC, aligning with the ETW exporter.
-  Both fields are retained when keys collide; consumers that resolve
-  duplicates by field order may observe a different value.
+- Changed UserEventsExporter to serialize resource attributes before
+  log-record attributes in PartC, aligning with the ETW exporter.
+  Both fields are still emitted when keys collide.
+  **Compatibility note:** Consumers or decoders that keep only the first
+  occurrence will now select the resource value; those that keep only the
+  last occurrence will now select the log-record value. Previously, these
+  selections were reversed.
 
 ## v0.17.0
 
