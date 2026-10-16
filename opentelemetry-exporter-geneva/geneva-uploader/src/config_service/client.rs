@@ -1417,7 +1417,6 @@ impl GenevaConfigClient {
                 name: "config_client.fetch_ingestion_info.error_status",
                 target: "geneva-uploader",
                 status = status.as_u16(),
-                url = %url,
                 body = %body,
                 "Config service returned error"
             );
