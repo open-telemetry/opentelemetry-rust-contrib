@@ -1,6 +1,7 @@
 // Geneva Config Client with TLS (PKCS#12), Azure Workload Identity, and Azure Managed Identity support, including local endpoint resource-ID flow.
 
 use base64::{engine::general_purpose, Engine as _};
+use bytes::Bytes;
 use reqwest::{
     header::{HeaderMap, HeaderValue, ACCEPT, AUTHORIZATION, USER_AGENT},
     Client, Url,
@@ -23,10 +24,11 @@ use native_tls::{Identity, Protocol};
 use std::collections::HashMap;
 use std::fmt;
 use std::fmt::Write;
-#[cfg(feature = "certificate-auth")]
-use std::fs;
-use std::path::PathBuf;
+use std::fs::{self, File};
+use std::io::Read;
+use std::path::{Path, PathBuf};
 use std::sync::RwLock;
+use url::Host;
 
 // Azure Identity imports for MSI and Workload Identity authentication
 use azure_core::credentials::TokenCredential;
@@ -258,6 +260,205 @@ struct MsiTokenResponse {
     access_token: String,
 }
 
+const MAX_ARC_KEY_BYTES: usize = 4096;
+const MAX_ARC_RESPONSE_BYTES: usize = 64 * 1024;
+
+/// Parses the Azure Arc key file path from a `WWW-Authenticate: Basic realm=<path>` header.
+fn parse_arc_key_path(www_authenticate: &str) -> Option<PathBuf> {
+    let remainder = www_authenticate.split_once("realm=")?.1.trim_start();
+    let realm = if let Some(quoted) = remainder.strip_prefix('"') {
+        quoted.split_once('"')?.0
+    } else {
+        remainder.split(',').next()?.trim()
+    };
+    if realm.is_empty() {
+        return None;
+    }
+    Some(PathBuf::from(realm))
+}
+
+/// Returns the platform-specific directory where the Azure Connected Machine Agent writes
+/// managed identity key files.
+fn arc_tokens_dir() -> Result<PathBuf> {
+    #[cfg(windows)]
+    {
+        let program_data = std::env::var("ProgramData").map_err(|_| {
+            GenevaConfigClientError::MsiAuth(
+                "ProgramData environment variable is not set; cannot locate the Azure Arc tokens directory".to_string(),
+            )
+        })?;
+        Ok(PathBuf::from(program_data)
+            .join("AzureConnectedMachineAgent")
+            .join("Tokens"))
+    }
+    #[cfg(not(windows))]
+    {
+        Ok(PathBuf::from("/var/opt/azcmagent/tokens"))
+    }
+}
+
+/// Validates that an Azure Arc key file path is safe to read and returns its canonical path.
+fn validate_arc_key_path(path: &Path, expected_dir: &Path) -> Result<PathBuf> {
+    if path.extension().and_then(|e| e.to_str()) != Some("key") {
+        return Err(GenevaConfigClientError::MsiAuth(format!(
+            "Azure Arc key file '{}' does not have the expected '.key' extension",
+            path.display()
+        )));
+    }
+
+    let canonical_dir = fs::canonicalize(expected_dir).map_err(|e| {
+        GenevaConfigClientError::MsiAuth(format!(
+            "Failed to resolve the Azure Arc tokens directory '{}': {e}",
+            expected_dir.display()
+        ))
+    })?;
+    let canonical_path = fs::canonicalize(path).map_err(|e| {
+        GenevaConfigClientError::MsiAuth(format!(
+            "Failed to resolve Azure Arc key file '{}': {e}",
+            path.display()
+        ))
+    })?;
+    let canonical_parent = canonical_path.parent().ok_or_else(|| {
+        GenevaConfigClientError::MsiAuth(format!(
+            "Azure Arc key file '{}' has no parent directory",
+            canonical_path.display()
+        ))
+    })?;
+    if canonical_parent != canonical_dir {
+        return Err(GenevaConfigClientError::MsiAuth(format!(
+            "Azure Arc key file '{}' is not located in the expected Arc tokens directory '{}'",
+            path.display(),
+            expected_dir.display()
+        )));
+    }
+
+    Ok(canonical_path)
+}
+
+fn read_arc_key(path: &Path, expected_dir: &Path) -> Result<Zeroizing<Vec<u8>>> {
+    let canonical_path = validate_arc_key_path(path, expected_dir)?;
+    let file = File::open(&canonical_path).map_err(|e| {
+        GenevaConfigClientError::MsiAuth(format!(
+            "Failed to read Azure Arc identity key file '{}': {e}. The process must run with sufficient privileges to read the Arc token file.",
+            canonical_path.display()
+        ))
+    })?;
+    let mut secret = Zeroizing::new(Vec::with_capacity(MAX_ARC_KEY_BYTES));
+    file.take((MAX_ARC_KEY_BYTES + 1) as u64)
+        .read_to_end(&mut secret)
+        .map_err(|e| {
+            GenevaConfigClientError::MsiAuth(format!(
+                "Failed to read Azure Arc identity key file '{}': {e}",
+                canonical_path.display()
+            ))
+        })?;
+    if secret.len() > MAX_ARC_KEY_BYTES {
+        return Err(GenevaConfigClientError::MsiAuth(format!(
+            "Azure Arc key file '{}' exceeds the maximum allowed size of {MAX_ARC_KEY_BYTES} bytes",
+            canonical_path.display()
+        )));
+    }
+
+    Ok(secret)
+}
+
+fn arc_authorization_header(secret: &[u8]) -> Result<HeaderValue> {
+    let secret = secret.strip_prefix(b"\xef\xbb\xbf").unwrap_or(secret);
+    let start = secret
+        .iter()
+        .position(|byte| !byte.is_ascii_whitespace())
+        .unwrap_or(secret.len());
+    let end = secret
+        .iter()
+        .rposition(|byte| !byte.is_ascii_whitespace())
+        .map_or(start, |index| index + 1);
+    let secret = &secret[start..end];
+    if secret.is_empty() {
+        return Err(GenevaConfigClientError::MsiAuth(
+            "Azure Arc identity key file is empty".to_string(),
+        ));
+    }
+
+    let mut value = Zeroizing::new(Vec::with_capacity(b"Basic ".len() + secret.len()));
+    value.extend_from_slice(b"Basic ");
+    value.extend_from_slice(secret);
+    let mut header = HeaderValue::from_maybe_shared(Bytes::from_owner(value)).map_err(|e| {
+        GenevaConfigClientError::MsiAuth(format!(
+            "Azure Arc identity key file contains an invalid header value: {e}"
+        ))
+    })?;
+    header.set_sensitive(true);
+    Ok(header)
+}
+
+fn validate_arc_identity_endpoint(endpoint: &Url) -> Result<()> {
+    let is_loopback = match endpoint.host() {
+        Some(Host::Domain(host)) => host.eq_ignore_ascii_case("localhost"),
+        Some(Host::Ipv4(address)) => address.is_loopback(),
+        Some(Host::Ipv6(address)) => address.is_loopback(),
+        None => false,
+    };
+    if endpoint.scheme() != "http"
+        || !is_loopback
+        || !endpoint.username().is_empty()
+        || endpoint.password().is_some()
+    {
+        return Err(GenevaConfigClientError::MsiAuth(
+            "IDENTITY_ENDPOINT for Azure Arc must be an HTTP loopback URL without credentials"
+                .to_string(),
+        ));
+    }
+    Ok(())
+}
+
+fn detect_arc_identity_endpoint(
+    identity_endpoint: Option<&str>,
+    identity_header: Option<&str>,
+    imds_endpoint: Option<&str>,
+) -> Result<Option<Url>> {
+    let Some(identity_endpoint) = identity_endpoint.filter(|value| !value.is_empty()) else {
+        return Ok(None);
+    };
+    if identity_header.is_some_and(|value| !value.is_empty())
+        || !imds_endpoint.is_some_and(|value| !value.is_empty())
+    {
+        return Ok(None);
+    }
+
+    let endpoint = Url::parse(identity_endpoint).map_err(|e| {
+        GenevaConfigClientError::MsiAuth(format!("IDENTITY_ENDPOINT is not a valid URL: {e}"))
+    })?;
+    validate_arc_identity_endpoint(&endpoint)?;
+    Ok(Some(endpoint))
+}
+
+async fn read_arc_response_body(mut response: reqwest::Response) -> Result<Zeroizing<Vec<u8>>> {
+    if response
+        .content_length()
+        .is_some_and(|length| length > MAX_ARC_RESPONSE_BYTES as u64)
+    {
+        return Err(GenevaConfigClientError::MsiAuth(format!(
+            "Azure Arc identity response exceeds the maximum allowed size of {MAX_ARC_RESPONSE_BYTES} bytes"
+        )));
+    }
+
+    let mut body = Zeroizing::new(Vec::new());
+    while let Some(chunk) = response.chunk().await? {
+        let new_len = body.len().checked_add(chunk.len()).ok_or_else(|| {
+            GenevaConfigClientError::MsiAuth(
+                "Azure Arc identity response size overflowed".to_string(),
+            )
+        })?;
+        if new_len > MAX_ARC_RESPONSE_BYTES {
+            return Err(GenevaConfigClientError::MsiAuth(format!(
+                "Azure Arc identity response exceeds the maximum allowed size of {MAX_ARC_RESPONSE_BYTES} bytes"
+            )));
+        }
+        body.extend_from_slice(&chunk);
+    }
+    Ok(body)
+}
+
 #[allow(dead_code)]
 struct CachedAuthData {
     // Store the complete token and moniker info
@@ -272,6 +473,7 @@ struct CachedAuthData {
 pub(crate) struct GenevaConfigClient {
     config: GenevaConfigClientConfig,
     http_client: Client,
+    arc_http_client: Client,
     // TODO: revisit if the lock can be removed
     cached_data: RwLock<Option<CachedAuthData>>,
     precomputed_url_prefix: String,
@@ -480,9 +682,16 @@ impl GenevaConfigClient {
         ).map_err(|e| GenevaConfigClientError::InternalError(format!("Failed to write URL: {e}")))?;
 
         let http_client = client_builder.build()?;
+        let arc_http_client = Client::builder()
+            .http1_only()
+            .timeout(Duration::from_secs(30))
+            .no_proxy()
+            .redirect(reqwest::redirect::Policy::none())
+            .build()?;
         Ok(Self {
             config,
             http_client,
+            arc_http_client,
             cached_data: RwLock::new(None),
             precomputed_url_prefix: pre_url,
             agent_identity: agent_identity.to_string(), // TODO make this configurable
@@ -627,6 +836,17 @@ impl GenevaConfigClient {
             scope_candidates.push(format!("{base}/"));
         }
 
+        // Azure Arc-enabled servers expose managed identity through a challenge-response endpoint
+        // that `azure_identity` 1.0 explicitly rejects ("Azure Arc managed identity isn't
+        // supported"). Arc only supports the system-assigned identity, so try the Arc flow first
+        // for that auth method; when not running on Arc this returns None and we fall through to
+        // the standard `azure_identity` credential below.
+        if matches!(self.config.auth_method, AuthMethod::SystemManagedIdentity) {
+            if let Some(token) = self.try_get_arc_managed_identity_token(base).await? {
+                return Ok(token);
+            }
+        }
+
         let user_assigned_id = match &self.config.auth_method {
             AuthMethod::SystemManagedIdentity => None,
             AuthMethod::UserManagedIdentity { client_id } => {
@@ -717,10 +937,9 @@ impl GenevaConfigClient {
             GenevaConfigClientError::MsiAuth(format!("IDENTITY_ENDPOINT is not a valid URL: {e}"))
         })?;
 
-        // `azure_identity` 0.29 treats IDENTITY_ENDPOINT + IDENTITY_HEADER as the App Service
+        // `azure_identity` treats IDENTITY_ENDPOINT + IDENTITY_HEADER as the App Service
         // local endpoint and does not forward `UserAssignedId::ResourceId` as `msi_res_id`.
         // See https://github.com/Azure/azure-sdk-for-rust/issues/2407.
-        // TODO: Re-evaluate this workaround when upgrading azure_identity beyond 0.29.
         // Selecting a user-assigned identity by Azure resource ID against this local endpoint
         // requires sending `msi_res_id` directly, so this branch issues the request explicitly.
         let response = self
@@ -793,6 +1012,163 @@ impl GenevaConfigClient {
             "Successfully acquired Local Managed Identity token"
         );
         Ok(Some(token_response.access_token))
+    }
+
+    /// Acquires a managed identity token on Azure Arc-enabled servers using the Arc
+    /// challenge-response protocol.
+    ///
+    /// `azure_identity` 1.0 refuses to run on Azure Arc (`ManagedIdentityCredential::new`
+    /// returns "Azure Arc managed identity isn't supported"), so the flow is implemented here.
+    /// Azure Arc only supports the system-assigned managed identity.
+    ///
+    /// The protocol is:
+    /// 1. Issue an unauthenticated GET to `IDENTITY_ENDPOINT`; Arc responds with `401` and a
+    ///    `WWW-Authenticate: Basic realm=<key-file-path>` header.
+    /// 2. Read the secret from that key file (written by the Azure Connected Machine Agent with
+    ///    restricted permissions).
+    /// 3. Repeat the GET with `Authorization: Basic <secret>` to obtain the token.
+    ///
+    /// Returns `Ok(None)` when the process is not running on Azure Arc, so the caller can fall
+    /// back to the standard `azure_identity` credential.
+    async fn try_get_arc_managed_identity_token(
+        &self,
+        msi_resource: &str,
+    ) -> Result<Option<String>> {
+        // Azure Arc is identified by IDENTITY_ENDPOINT + IMDS_ENDPOINT without IDENTITY_HEADER
+        // (IDENTITY_HEADER present indicates App Service / Service Fabric). This mirrors the
+        // detection logic in `azure_identity`.
+        let identity_endpoint = std::env::var("IDENTITY_ENDPOINT").ok();
+        let identity_header = std::env::var("IDENTITY_HEADER").ok();
+        let imds_endpoint = std::env::var("IMDS_ENDPOINT").ok();
+        let Some(endpoint_url) = detect_arc_identity_endpoint(
+            identity_endpoint.as_deref(),
+            identity_header.as_deref(),
+            imds_endpoint.as_deref(),
+        )?
+        else {
+            return Ok(None);
+        };
+
+        debug!(
+            name: "config_client.get_arc_msi_token",
+            target: "geneva-uploader",
+            "Azure Arc environment detected; acquiring managed identity token via Arc challenge-response flow"
+        );
+
+        let tokens_dir = arc_tokens_dir()?;
+        self.get_arc_managed_identity_token(msi_resource, endpoint_url, &tokens_dir)
+            .await
+            .map(Some)
+    }
+
+    async fn get_arc_managed_identity_token(
+        &self,
+        msi_resource: &str,
+        endpoint_url: Url,
+        tokens_dir: &Path,
+    ) -> Result<String> {
+        // The Azure Arc HIMDS endpoint only accepts this api-version; using a newer IMDS/App
+        // Service value (e.g. 2018-02-01 / 2020-06-01) results in `400 Bad Request`. This matches
+        // the value used by the official Azure Identity SDKs (Python, Go, .NET).
+        const ARC_API_VERSION: &str = "2019-11-01";
+
+        // Step 1: unauthenticated request to obtain the WWW-Authenticate challenge.
+        let challenge = self
+            .arc_http_client
+            .get(endpoint_url.clone())
+            .header("Metadata", "true")
+            .query(&[("api-version", ARC_API_VERSION), ("resource", msi_resource)])
+            .send()
+            .await
+            .map_err(|e| {
+                debug!(
+                    name: "config_client.get_arc_msi_token.challenge_error",
+                    target: "geneva-uploader",
+                    error = %e,
+                    "Azure Arc identity challenge request failed"
+                );
+                GenevaConfigClientError::Http(e)
+            })?;
+
+        // Arc returns 401 with the key file path in WWW-Authenticate; any other status is unexpected.
+        if challenge.status() != reqwest::StatusCode::UNAUTHORIZED {
+            let status = challenge.status();
+            return Err(GenevaConfigClientError::MsiAuth(format!(
+                "Azure Arc identity endpoint returned unexpected status {status} for the challenge request (expected 401 Unauthorized)"
+            )));
+        }
+
+        let www_authenticate = challenge
+            .headers()
+            .get(reqwest::header::WWW_AUTHENTICATE)
+            .and_then(|v| v.to_str().ok())
+            .ok_or_else(|| {
+                GenevaConfigClientError::MsiAuth(
+                    "Azure Arc identity endpoint did not return a WWW-Authenticate challenge header"
+                        .to_string(),
+                )
+            })?;
+
+        let key_path = parse_arc_key_path(www_authenticate).ok_or_else(|| {
+            GenevaConfigClientError::MsiAuth(format!(
+                "Could not parse Azure Arc key file path from WWW-Authenticate header: {www_authenticate}"
+            ))
+        })?;
+
+        let secret = read_arc_key(&key_path, tokens_dir)?;
+        let auth_header = arc_authorization_header(&secret)?;
+
+        // Step 2: authenticated request using the secret from the key file.
+        let response = self
+            .arc_http_client
+            .get(endpoint_url)
+            .header("Metadata", "true")
+            .header(AUTHORIZATION, auth_header)
+            .query(&[("api-version", ARC_API_VERSION), ("resource", msi_resource)])
+            .send()
+            .await
+            .map_err(|e| {
+                debug!(
+                    name: "config_client.get_arc_msi_token.http_error",
+                    target: "geneva-uploader",
+                    error = %e,
+                    "Azure Arc identity token request failed"
+                );
+                GenevaConfigClientError::Http(e)
+            })?;
+
+        if !response.status().is_success() {
+            let status = response.status();
+            error!(
+                name: "config_client.get_arc_msi_token.failed",
+                target: "geneva-uploader",
+                status = %status.as_u16(),
+                api_version = %ARC_API_VERSION,
+                resource = %msi_resource,
+                "Azure Arc identity token request returned non-success status"
+            );
+            return Err(GenevaConfigClientError::MsiAuth(format!(
+                "Azure Arc identity token request failed with status {status} (api-version={ARC_API_VERSION}, resource={msi_resource})"
+            )));
+        }
+
+        let body = read_arc_response_body(response).await?;
+        let token_response: MsiTokenResponse = serde_json::from_slice(&body).map_err(|e| {
+            debug!(
+                name: "config_client.get_arc_msi_token.parse_error",
+                target: "geneva-uploader",
+                error = %e,
+                "Failed to parse Azure Arc identity token response"
+            );
+            GenevaConfigClientError::SerdeJson(e)
+        })?;
+
+        info!(
+            name: "config_client.get_arc_msi_token.success",
+            target: "geneva-uploader",
+            "Successfully acquired Azure Arc managed identity token"
+        );
+        Ok(token_response.access_token)
     }
 
     /// Retrieves ingestion gateway information from the Geneva Config Service.
@@ -1309,5 +1685,425 @@ mod account_selection_tests {
 
         assert_eq!(selected.get("NsDiag").map(String::as_str), Some("upper"));
         assert_eq!(selected.get("nsdiag").map(String::as_str), Some("lower"));
+    }
+}
+
+#[cfg(test)]
+mod arc_helper_tests {
+    use super::{
+        arc_authorization_header, detect_arc_identity_endpoint, parse_arc_key_path, read_arc_key,
+        validate_arc_identity_endpoint, validate_arc_key_path, AuthMethod, GenevaConfigClient,
+        GenevaConfigClientConfig, Url, MAX_ARC_KEY_BYTES, MAX_ARC_RESPONSE_BYTES,
+    };
+    use std::fs;
+    use wiremock::matchers::{header, method, path, query_param};
+    use wiremock::{Mock, MockServer, Request, ResponseTemplate};
+
+    fn test_client() -> GenevaConfigClient {
+        GenevaConfigClient::new(GenevaConfigClientConfig {
+            endpoint: "http://localhost".to_string(),
+            environment: "test".to_string(),
+            account: "test".to_string(),
+            namespace: "test".to_string(),
+            region: "test".to_string(),
+            config_major_version: 1,
+            auth_method: AuthMethod::SystemManagedIdentity,
+            msi_resource: Some("https://monitor.azure.com".to_string()),
+            test_root_ca_pem: None,
+        })
+        .expect("test client should build")
+    }
+
+    #[test]
+    fn parse_arc_key_path_extracts_realm() {
+        let header = "Basic realm=/var/opt/azcmagent/tokens/abc123.key";
+        let path = parse_arc_key_path(header).expect("path should parse");
+        assert_eq!(
+            path.to_string_lossy(),
+            "/var/opt/azcmagent/tokens/abc123.key"
+        );
+    }
+
+    #[test]
+    fn parse_arc_key_path_extracts_quoted_realm() {
+        let header = r#"Basic realm="/var/opt/azcmagent/tokens/abc123.key", charset="UTF-8""#;
+        let path = parse_arc_key_path(header).expect("quoted path should parse");
+        assert_eq!(
+            path.to_string_lossy(),
+            "/var/opt/azcmagent/tokens/abc123.key"
+        );
+    }
+
+    #[test]
+    fn parse_arc_key_path_rejects_missing_realm() {
+        assert!(parse_arc_key_path("Basic").is_none());
+        assert!(parse_arc_key_path("Basic realm=").is_none());
+        assert!(parse_arc_key_path(r#"Basic realm="/tmp/unterminated.key"#).is_none());
+    }
+
+    #[test]
+    fn validate_arc_key_path_rejects_non_key_extension() {
+        let tokens_dir = tempfile::tempdir().expect("temporary tokens directory should build");
+        let bad = tokens_dir.path().join("secret.txt");
+        fs::write(&bad, "secret").expect("test key should be written");
+        assert!(validate_arc_key_path(&bad, tokens_dir.path()).is_err());
+    }
+
+    #[test]
+    fn validate_arc_key_path_rejects_key_outside_tokens_dir() {
+        let tokens_dir = tempfile::tempdir().expect("temporary tokens directory should build");
+        let outside_dir = tempfile::tempdir().expect("outside directory should build");
+        let bad = outside_dir.path().join("evil.key");
+        fs::write(&bad, "secret").expect("test key should be written");
+        assert!(validate_arc_key_path(&bad, tokens_dir.path()).is_err());
+    }
+
+    #[test]
+    fn validate_arc_key_path_rejects_missing_directory_or_key() {
+        let tokens_dir = tempfile::tempdir().expect("temporary tokens directory should build");
+        let missing_dir = tokens_dir.path().join("missing");
+        let missing_key = tokens_dir.path().join("missing.key");
+
+        assert!(validate_arc_key_path(&missing_key, &missing_dir).is_err());
+        assert!(validate_arc_key_path(&missing_key, tokens_dir.path()).is_err());
+    }
+
+    #[test]
+    fn validate_arc_key_path_accepts_canonical_key_in_tokens_dir() {
+        let tokens_dir = tempfile::tempdir().expect("temporary tokens directory should build");
+        let key_path = tokens_dir.path().join("identity.key");
+        fs::write(&key_path, "secret").expect("test key should be written");
+
+        let validated = validate_arc_key_path(&key_path, tokens_dir.path())
+            .expect("key in tokens directory should be accepted");
+
+        assert_eq!(
+            validated,
+            fs::canonicalize(key_path).expect("key path should canonicalize")
+        );
+    }
+
+    #[test]
+    fn read_arc_key_rejects_oversized_file() {
+        let tokens_dir = tempfile::tempdir().expect("temporary tokens directory should build");
+        let key_path = tokens_dir.path().join("oversized.key");
+        fs::write(&key_path, vec![b'x'; MAX_ARC_KEY_BYTES + 1])
+            .expect("test key should be written");
+
+        let error = read_arc_key(&key_path, tokens_dir.path())
+            .expect_err("oversized Arc key should be rejected");
+
+        assert!(error
+            .to_string()
+            .contains("exceeds the maximum allowed size"));
+    }
+
+    #[test]
+    fn arc_authorization_header_is_sensitive_and_trims_key() {
+        let header = arc_authorization_header(b"\xef\xbb\xbf  arc-secret\r\n")
+            .expect("Arc key should produce a header");
+
+        assert_eq!(header, "Basic arc-secret");
+        assert!(header.is_sensitive());
+    }
+
+    #[test]
+    fn arc_authorization_header_rejects_empty_or_invalid_key() {
+        assert!(arc_authorization_header(b" \r\n\t").is_err());
+        assert!(arc_authorization_header(b"secret\ninjection").is_err());
+    }
+
+    #[test]
+    fn arc_identity_endpoint_must_be_loopback_http() {
+        for endpoint in [
+            "https://localhost:40342/metadata/identity/oauth2/token",
+            "http://example.com:40342/metadata/identity/oauth2/token",
+            "http://user@localhost:40342/metadata/identity/oauth2/token",
+            "file:///metadata/identity/oauth2/token",
+        ] {
+            assert!(validate_arc_identity_endpoint(&Url::parse(endpoint).unwrap()).is_err());
+        }
+
+        for endpoint in [
+            "http://localhost:40342/metadata/identity/oauth2/token",
+            "http://127.0.0.1:40342/metadata/identity/oauth2/token",
+            "http://[::1]:40342/metadata/identity/oauth2/token",
+        ] {
+            validate_arc_identity_endpoint(&Url::parse(endpoint).unwrap())
+                .expect("loopback HTTP endpoint should be accepted");
+        }
+    }
+
+    #[test]
+    fn arc_identity_detection_requires_arc_environment_contract() {
+        let endpoint = "http://localhost:40342/metadata/identity/oauth2/token";
+
+        assert!(
+            detect_arc_identity_endpoint(None, None, Some("http://localhost:40342"))
+                .unwrap()
+                .is_none()
+        );
+        assert!(
+            detect_arc_identity_endpoint(Some(""), None, Some("http://localhost:40342"))
+                .unwrap()
+                .is_none()
+        );
+        assert!(
+            detect_arc_identity_endpoint(Some(endpoint), Some("app-service"), Some("imds"))
+                .unwrap()
+                .is_none()
+        );
+        assert!(detect_arc_identity_endpoint(Some(endpoint), None, None)
+            .unwrap()
+            .is_none());
+        assert!(detect_arc_identity_endpoint(Some("not a URL"), None, Some("imds")).is_err());
+        assert!(
+            detect_arc_identity_endpoint(Some("http://example.com/token"), None, Some("imds"))
+                .is_err()
+        );
+
+        assert_eq!(
+            detect_arc_identity_endpoint(Some(endpoint), None, Some("imds"))
+                .expect("valid Arc environment should parse")
+                .expect("Arc endpoint should be detected")
+                .as_str(),
+            endpoint
+        );
+    }
+
+    #[tokio::test]
+    async fn arc_exchange_sends_challenge_response_contract() {
+        let server = MockServer::start().await;
+        let tokens_dir = tempfile::tempdir().expect("temporary tokens directory should build");
+        let key_path = tokens_dir.path().join("identity.key");
+        fs::write(&key_path, b"\xef\xbb\xbf arc-secret\r\n").expect("test key should be written");
+        let challenge = format!(r#"Basic realm="{}""#, key_path.display());
+
+        Mock::given(method("GET"))
+            .and(path("/metadata/identity/oauth2/token"))
+            .and(header("Metadata", "true"))
+            .and(query_param("api-version", "2019-11-01"))
+            .and(query_param("resource", "https://monitor.azure.com"))
+            .respond_with(move |request: &Request| {
+                match request
+                    .headers
+                    .get("authorization")
+                    .and_then(|value| value.to_str().ok())
+                {
+                    None => ResponseTemplate::new(401)
+                        .insert_header("WWW-Authenticate", challenge.as_str()),
+                    Some("Basic arc-secret") => ResponseTemplate::new(200)
+                        .set_body_json(serde_json::json!({"access_token": "arc-token"})),
+                    Some(_) => ResponseTemplate::new(403),
+                }
+            })
+            .expect(2)
+            .mount(&server)
+            .await;
+
+        let endpoint =
+            Url::parse(&format!("{}/metadata/identity/oauth2/token", server.uri())).unwrap();
+        let token = test_client()
+            .get_arc_managed_identity_token(
+                "https://monitor.azure.com",
+                endpoint,
+                tokens_dir.path(),
+            )
+            .await
+            .expect("Arc exchange should succeed");
+
+        assert_eq!(token, "arc-token");
+    }
+
+    #[tokio::test]
+    async fn arc_exchange_rejects_unexpected_challenge_status() {
+        let server = MockServer::start().await;
+        let tokens_dir = tempfile::tempdir().expect("temporary tokens directory should build");
+        Mock::given(method("GET"))
+            .and(path("/metadata/identity/oauth2/token"))
+            .respond_with(ResponseTemplate::new(500))
+            .expect(1)
+            .mount(&server)
+            .await;
+
+        let endpoint =
+            Url::parse(&format!("{}/metadata/identity/oauth2/token", server.uri())).unwrap();
+        let error = test_client()
+            .get_arc_managed_identity_token(
+                "https://monitor.azure.com",
+                endpoint,
+                tokens_dir.path(),
+            )
+            .await
+            .expect_err("unexpected challenge status should fail");
+
+        assert!(error.to_string().contains("expected 401 Unauthorized"));
+    }
+
+    #[tokio::test]
+    async fn arc_exchange_rejects_missing_challenge_header() {
+        let server = MockServer::start().await;
+        let tokens_dir = tempfile::tempdir().expect("temporary tokens directory should build");
+        Mock::given(method("GET"))
+            .and(path("/metadata/identity/oauth2/token"))
+            .respond_with(ResponseTemplate::new(401))
+            .expect(1)
+            .mount(&server)
+            .await;
+
+        let endpoint =
+            Url::parse(&format!("{}/metadata/identity/oauth2/token", server.uri())).unwrap();
+        let error = test_client()
+            .get_arc_managed_identity_token(
+                "https://monitor.azure.com",
+                endpoint,
+                tokens_dir.path(),
+            )
+            .await
+            .expect_err("missing challenge header should fail");
+
+        assert!(error
+            .to_string()
+            .contains("did not return a WWW-Authenticate"));
+    }
+
+    #[tokio::test]
+    async fn arc_exchange_rejects_malformed_challenge_header() {
+        let server = MockServer::start().await;
+        let tokens_dir = tempfile::tempdir().expect("temporary tokens directory should build");
+        Mock::given(method("GET"))
+            .and(path("/metadata/identity/oauth2/token"))
+            .respond_with(
+                ResponseTemplate::new(401).insert_header("WWW-Authenticate", "Basic malformed"),
+            )
+            .expect(1)
+            .mount(&server)
+            .await;
+
+        let endpoint =
+            Url::parse(&format!("{}/metadata/identity/oauth2/token", server.uri())).unwrap();
+        let error = test_client()
+            .get_arc_managed_identity_token(
+                "https://monitor.azure.com",
+                endpoint,
+                tokens_dir.path(),
+            )
+            .await
+            .expect_err("malformed challenge header should fail");
+
+        assert!(error
+            .to_string()
+            .contains("Could not parse Azure Arc key file path"));
+    }
+
+    #[tokio::test]
+    async fn arc_exchange_does_not_expose_error_body() {
+        let server = MockServer::start().await;
+        let tokens_dir = tempfile::tempdir().expect("temporary tokens directory should build");
+        let key_path = tokens_dir.path().join("identity.key");
+        fs::write(&key_path, "arc-secret").expect("test key should be written");
+        let challenge = format!("Basic realm={}", key_path.display());
+
+        Mock::given(method("GET"))
+            .and(path("/metadata/identity/oauth2/token"))
+            .respond_with(move |request: &Request| {
+                if request.headers.get("authorization").is_none() {
+                    ResponseTemplate::new(401).insert_header("WWW-Authenticate", challenge.as_str())
+                } else {
+                    ResponseTemplate::new(403).set_body_string("sensitive endpoint detail")
+                }
+            })
+            .expect(2)
+            .mount(&server)
+            .await;
+
+        let endpoint =
+            Url::parse(&format!("{}/metadata/identity/oauth2/token", server.uri())).unwrap();
+        let error = test_client()
+            .get_arc_managed_identity_token(
+                "https://monitor.azure.com",
+                endpoint,
+                tokens_dir.path(),
+            )
+            .await
+            .expect_err("Arc endpoint failure should be returned");
+
+        assert!(!error.to_string().contains("sensitive endpoint detail"));
+    }
+
+    #[tokio::test]
+    async fn arc_exchange_rejects_oversized_token_response() {
+        let server = MockServer::start().await;
+        let tokens_dir = tempfile::tempdir().expect("temporary tokens directory should build");
+        let key_path = tokens_dir.path().join("identity.key");
+        fs::write(&key_path, "arc-secret").expect("test key should be written");
+        let challenge = format!("Basic realm={}", key_path.display());
+        let oversized_body = vec![b'x'; MAX_ARC_RESPONSE_BYTES + 1];
+
+        Mock::given(method("GET"))
+            .and(path("/metadata/identity/oauth2/token"))
+            .respond_with(move |request: &Request| {
+                if request.headers.get("authorization").is_none() {
+                    ResponseTemplate::new(401).insert_header("WWW-Authenticate", challenge.as_str())
+                } else {
+                    ResponseTemplate::new(200).set_body_bytes(oversized_body.clone())
+                }
+            })
+            .expect(2)
+            .mount(&server)
+            .await;
+
+        let endpoint =
+            Url::parse(&format!("{}/metadata/identity/oauth2/token", server.uri())).unwrap();
+        let error = test_client()
+            .get_arc_managed_identity_token(
+                "https://monitor.azure.com",
+                endpoint,
+                tokens_dir.path(),
+            )
+            .await
+            .expect_err("oversized Arc response should be rejected");
+
+        assert!(error
+            .to_string()
+            .contains("exceeds the maximum allowed size"));
+    }
+
+    #[tokio::test]
+    async fn arc_exchange_rejects_invalid_token_response() {
+        let server = MockServer::start().await;
+        let tokens_dir = tempfile::tempdir().expect("temporary tokens directory should build");
+        let key_path = tokens_dir.path().join("identity.key");
+        fs::write(&key_path, "arc-secret").expect("test key should be written");
+        let challenge = format!("Basic realm={}", key_path.display());
+
+        Mock::given(method("GET"))
+            .and(path("/metadata/identity/oauth2/token"))
+            .respond_with(move |request: &Request| {
+                if request.headers.get("authorization").is_none() {
+                    ResponseTemplate::new(401).insert_header("WWW-Authenticate", challenge.as_str())
+                } else {
+                    ResponseTemplate::new(200).set_body_string("not-json")
+                }
+            })
+            .expect(2)
+            .mount(&server)
+            .await;
+
+        let endpoint =
+            Url::parse(&format!("{}/metadata/identity/oauth2/token", server.uri())).unwrap();
+        let error = test_client()
+            .get_arc_managed_identity_token(
+                "https://monitor.azure.com",
+                endpoint,
+                tokens_dir.path(),
+            )
+            .await
+            .expect_err("invalid token response should fail");
+
+        assert!(matches!(
+            error,
+            super::GenevaConfigClientError::SerdeJson(_)
+        ));
     }
 }

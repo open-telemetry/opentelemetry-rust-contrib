@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+### Added
+
+- Added Azure Arc-enabled server support for system-assigned managed identity. `azure_identity` 1.0 rejects Azure Arc environments (`ManagedIdentityCredential::new` returns "Azure Arc managed identity isn't supported"), so the Arc challenge-response flow is now implemented directly. The Arc key-file path returned by the endpoint is validated (expected tokens directory, `.key` extension, size limit) before it is read.
+
+### Changed
+
+- Updated `azure_core` dependency from 0.29 to 1.0 and `azure_identity` to 1.0. `azure_core` 1.0 no longer exposes a `reqwest_native_tls` feature; the native-TLS backend is now selected solely through the crate's own `tls-native` feature (`reqwest/native-tls`), which the shared `reqwest` client picks up transitively.
 ### Changed
 
 - Update reqwest to 0.13 and use its renamed TLS features. Ordinary rustls clients now use the platform certificate verifier; rustls certificate authentication continues to load native roots explicitly and use the caller-installed crypto provider.
