@@ -1,3 +1,5 @@
+use std::borrow::Cow;
+use std::collections::HashSet;
 use std::error::Error;
 use std::fmt::Debug;
 use std::time::Duration;
@@ -109,11 +111,41 @@ impl SpanProcessor for Processor {
 #[derive(Debug)]
 pub struct ProcessorBuilder<'a> {
     provider_name: &'a str,
+    resource_attribute_keys: HashSet<Cow<'static, str>>,
 }
 
 impl<'a> ProcessorBuilder<'a> {
     fn new(provider_name: &'a str) -> Self {
-        Self { provider_name }
+        Self {
+            provider_name,
+            resource_attribute_keys: HashSet::new(),
+        }
+    }
+
+    /// Specifies additional resource attribute keys to export in Part C.
+    ///
+    /// By default, only `service.name` and `service.instance.id` are exported,
+    /// as Part A fields. They remain in Part A even when selected here.
+    /// Other selected attributes are appended after span attributes, retaining
+    /// duplicate keys. Missing attributes are ignored. Calling this method again
+    /// replaces the previous selection.
+    ///
+    /// # Performance Considerations
+    ///
+    /// Each selected resource attribute is serialized and sent with EVERY span,
+    /// rather than once per batch as in OTLP. Be selective: a local agent can
+    /// often determine host, infrastructure, and deployment attributes itself.
+    /// Prefer attributes specific to your application instance.
+    ///
+    /// Values are cached when the provider sets the resource, avoiding the need
+    /// to attach these attributes explicitly to every span.
+    pub fn with_resource_attributes<I, S>(mut self, attributes: I) -> Self
+    where
+        I: IntoIterator<Item = S>,
+        S: Into<Cow<'static, str>>,
+    {
+        self.resource_attribute_keys = attributes.into_iter().map(Into::into).collect();
+        self
     }
 
     /// Builds the processor, returning an error if its configuration is invalid.
@@ -122,7 +154,8 @@ impl<'a> ProcessorBuilder<'a> {
             return Err("Provider name cannot be empty.".into());
         }
 
-        let exporter = UserEventsSpanExporter::new(self.provider_name)?;
+        let exporter =
+            UserEventsSpanExporter::new(self.provider_name, self.resource_attribute_keys)?;
         Ok(Processor { exporter })
     }
 }
@@ -130,6 +163,22 @@ impl<'a> ProcessorBuilder<'a> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn resource_attribute_selection() {
+        let builder = Processor::builder("test_provider");
+        assert!(builder.resource_attribute_keys.is_empty());
+
+        let builder = builder.with_resource_attributes(["service.version", "service.version"]);
+        assert_eq!(builder.resource_attribute_keys.len(), 1);
+        assert!(builder.resource_attribute_keys.contains("service.version"));
+
+        let builder = builder.with_resource_attributes(vec!["custom.attribute".to_string()]);
+        assert_eq!(builder.resource_attribute_keys.len(), 1);
+        assert!(builder.resource_attribute_keys.contains("custom.attribute"));
+        assert!(!builder.resource_attribute_keys.contains("service.version"));
+        assert!(builder.build().is_ok());
+    }
 
     #[test]
     fn processor_lifecycle() {
