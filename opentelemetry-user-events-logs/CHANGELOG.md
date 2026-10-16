@@ -2,6 +2,11 @@
 
 ## vNext
 
+- **Breaking:** Changed UserEventsExporter to serialize resource attributes
+  before log-record attributes in PartC, aligning with the ETW exporter.
+  Both fields are retained when keys collide; consumers that resolve
+  duplicates by field order may observe a different value.
+
 ## v0.17.0
 
 Released 2026-Sep-21
