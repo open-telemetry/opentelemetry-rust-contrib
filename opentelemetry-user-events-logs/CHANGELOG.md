@@ -1,5 +1,7 @@
 # Changelog
 
+## vNext
+
 ## v0.18.0
 
 Released 2026-Oct-16
