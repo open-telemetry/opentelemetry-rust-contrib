@@ -437,26 +437,64 @@ struct RequestData {
 ///
 /// The decrement runs on drop, so it also happens when the response future is
 /// cancelled or finalization panics.
-struct ActiveRequestGuard {
+///
+/// Also ends the span on drop. If finalization did not complete, records the
+/// request duration with the request attributes and `error.type`.
+struct RequestGuard {
     layer_state: Arc<LayerState>,
     attributes: [KeyValue; 2],
+    otel_cx: OtelContext,
+    duration_start: Instant,
+    duration_attributes: Vec<KeyValue>,
+    completed: bool,
 }
 
-impl ActiveRequestGuard {
-    fn new(layer_state: Arc<LayerState>, attributes: [KeyValue; 2]) -> Self {
+impl RequestGuard {
+    fn new(layer_state: Arc<LayerState>, otel_cx: OtelContext, data: &RequestData) -> Self {
+        let attributes = [data.url_scheme_kv.clone(), data.method_kv.clone()];
+        let mut duration_attributes = vec![
+            data.protocol_name_kv.clone(),
+            data.protocol_version_kv.clone(),
+            data.url_scheme_kv.clone(),
+            data.method_kv.clone(),
+        ];
+        duration_attributes.extend(data.route_kv_opt.clone());
+        duration_attributes.extend(data.custom_request_attributes.clone());
         layer_state.server_active_requests.add(1, &attributes);
         Self {
             layer_state,
             attributes,
+            otel_cx,
+            duration_start: data.duration_start,
+            duration_attributes,
+            completed: false,
         }
     }
 }
 
-impl Drop for ActiveRequestGuard {
+impl Drop for RequestGuard {
     fn drop(&mut self) {
         self.layer_state
             .server_active_requests
             .add(-1, &self.attributes);
+        let span = self.otel_cx.span();
+        if !self.completed {
+            let error_type = if std::thread::panicking() {
+                "panic"
+            } else {
+                "cancelled"
+            };
+            let error = KeyValue::new(ERROR_TYPE, error_type);
+            span.set_attribute(error.clone());
+            span.set_status(Status::error(error_type));
+            self.duration_attributes.push(error);
+            let _guard = self.otel_cx.clone().attach();
+            self.layer_state.server_request_duration.record(
+                self.duration_start.elapsed().as_secs_f64(),
+                &self.duration_attributes,
+            );
+        }
+        span.end();
     }
 }
 
@@ -464,7 +502,7 @@ struct RequestFinalization<ResExt> {
     request_data: RequestData,
     layer_state: Arc<LayerState>,
     response_extractor: ResExt,
-    active_request_guard: ActiveRequestGuard,
+    active_request_guard: RequestGuard,
 }
 
 pin_project! {
@@ -497,10 +535,11 @@ where
             request_data,
             layer_state,
             response_extractor,
-            active_request_guard: _active_request_guard,
+            mut active_request_guard,
         }) = this.finalization.take()
         {
             finalize_request(&result, request_data, &layer_state, &response_extractor);
+            active_request_guard.completed = true;
         }
         Poll::Ready(result)
     }
@@ -602,11 +641,6 @@ where
 
         let cx = parent_cx.with_span(span);
 
-        let active_request_guard = ActiveRequestGuard::new(
-            self.state.clone(),
-            [url_scheme_kv.clone(), method_kv.clone()],
-        );
-
         let request_data = RequestData {
             duration_start,
             req_body_size: content_length,
@@ -617,6 +651,7 @@ where
             route_kv_opt,
             custom_request_attributes,
         };
+        let active_request_guard = RequestGuard::new(self.state.clone(), cx.clone(), &request_data);
 
         let layer_state = self.state.clone();
         let response_extractor = self.response_extractor.clone();
@@ -745,13 +780,15 @@ fn finalize_request<ResBody, E, ResExt>(
             span.set_status(Status::error(format!("{:?}", error)));
 
             // Still record duration metric (without status code).
-            let label_superset = [
+            let mut label_superset = vec![
                 protocol_name_kv,
                 protocol_version_kv,
                 url_scheme_kv,
                 method_kv,
                 error_type_kv,
             ];
+            label_superset.extend(route_kv_opt);
+            label_superset.extend(custom_request_attributes);
 
             layer_state
                 .server_request_duration
@@ -1423,6 +1460,143 @@ mod tests {
             sum.data_points().map(|dp| dp.value()).sum()
         } else {
             panic!("Expected sum data for active requests metric");
+        }
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn test_request_finalization_records_duration_and_ends_span() {
+        for outcome in ["unpolled", "cancelled", "service_error", "success", "panic"] {
+            let exporter = InMemoryMetricExporter::default();
+            let meter_provider = SdkMeterProvider::builder()
+                .with_reader(PeriodicReader::builder(exporter.clone()).build())
+                .build();
+            let trace_exporter = InMemorySpanExporterBuilder::new().build();
+            let tracer_provider = SdkTracerProvider::builder()
+                .with_simple_exporter(trace_exporter.clone())
+                .build();
+            let layer = LayerBuilder::builder()
+                .with_meter_provider(meter_provider.clone())
+                .with_tracer_provider(tracer_provider.clone())
+                .with_route_extractor(PathExtractor)
+                .with_request_extractor_fn(|_req: &Request<String>| {
+                    vec![KeyValue::new("custom.request", "value")]
+                })
+                .with_response_extractor_fn(move |_res: &Response<String>| {
+                    assert_ne!(outcome, "panic", "response extractor panicked");
+                    Vec::new()
+                })
+                .build()
+                .unwrap();
+            let mut service =
+                layer.layer(tower::service_fn(move |_req: Request<String>| async move {
+                    if outcome == "cancelled" {
+                        std::future::pending::<()>().await;
+                    }
+                    if outcome == "service_error" {
+                        Err("service failed")
+                    } else {
+                        Ok(Response::new(String::new()))
+                    }
+                }));
+            let mut future = Box::pin(
+                service.call(
+                    Request::builder()
+                        .method("GET")
+                        .uri("https://example.com/test")
+                        .body(String::new())
+                        .unwrap(),
+                ),
+            );
+            // Keep a span reference alive to prove finalization explicitly ends it.
+            let retained_context = future.otel_cx.clone();
+            match outcome {
+                "unpolled" => drop(future),
+                "cancelled" => {
+                    assert!(tokio::time::timeout(Duration::from_millis(10), future)
+                        .await
+                        .is_err());
+                }
+                "panic" => {
+                    assert!(tokio::spawn(future).await.unwrap_err().is_panic());
+                }
+                _ => {
+                    let result = future.as_mut().await;
+                    assert_eq!(result.is_err(), outcome == "service_error");
+                    // A completed future can also retain the context until it is dropped.
+                    assert!(!retained_context.span().is_recording(), "{outcome}");
+                }
+            }
+            meter_provider.force_flush().unwrap();
+            tracer_provider.force_flush().unwrap();
+            let spans = trace_exporter.get_finished_spans().unwrap();
+            assert_eq!(spans.len(), 1, "{outcome}");
+            assert_eq!(active_requests_total(&exporter), 0, "{outcome}");
+
+            let expected_error = match outcome {
+                "unpolled" | "cancelled" => Some("cancelled"),
+                "panic" => Some("panic"),
+                "service_error" => Some(std::any::type_name::<&str>()),
+                _ => None,
+            };
+            let metrics = exporter.get_finished_metrics().unwrap();
+            let active_requests = metrics
+                .iter()
+                .flat_map(|rm| rm.scope_metrics())
+                .flat_map(|sm| sm.metrics())
+                .find(|m| m.name() == semconv::metric::HTTP_SERVER_ACTIVE_REQUESTS)
+                .unwrap();
+            let AggregatedMetrics::I64(MetricData::Sum(sum)) = active_requests.data() else {
+                panic!("Expected active requests sum");
+            };
+            for point in sum.data_points() {
+                assert_eq!(point.value(), 0, "{outcome}");
+                let attributes: Vec<_> = point.attributes().cloned().collect();
+                assert_eq!(attributes.len(), 2, "{outcome}");
+                assert!(attributes.contains(&KeyValue::new(
+                    semconv::attribute::HTTP_REQUEST_METHOD,
+                    "GET"
+                )));
+                assert!(
+                    attributes.contains(&KeyValue::new(semconv::attribute::URL_SCHEME, "https"))
+                );
+            }
+            let duration = metrics
+                .iter()
+                .flat_map(|rm| rm.scope_metrics())
+                .flat_map(|sm| sm.metrics())
+                .find(|m| m.name() == semconv::metric::HTTP_SERVER_REQUEST_DURATION)
+                .expect("duration should be recorded for every outcome");
+            let AggregatedMetrics::F64(MetricData::Histogram(histogram)) = duration.data() else {
+                panic!("Expected duration histogram");
+            };
+            let points: Vec<_> = histogram.data_points().collect();
+            assert_eq!(points.len(), 1, "{outcome}");
+            assert_eq!(points[0].count(), 1, "{outcome}");
+            assert!(points[0].sum() > 0.0, "{outcome}");
+            let attributes: Vec<_> = points[0].attributes().cloned().collect();
+            for attribute in [
+                KeyValue::new(semconv::attribute::HTTP_REQUEST_METHOD, "GET"),
+                KeyValue::new(semconv::attribute::URL_SCHEME, "https"),
+                KeyValue::new(semconv::attribute::HTTP_ROUTE, "/test"),
+                KeyValue::new(semconv::attribute::NETWORK_PROTOCOL_VERSION, "1.1"),
+                KeyValue::new("custom.request", "value"),
+            ] {
+                assert!(attributes.contains(&attribute), "{outcome}: {attribute:?}");
+            }
+            assert_eq!(
+                attributes
+                    .iter()
+                    .any(|kv| kv.key.as_str() == semconv::attribute::HTTP_RESPONSE_STATUS_CODE),
+                outcome == "success"
+            );
+            if let Some(error) = expected_error {
+                let error = KeyValue::new(ERROR_TYPE, error);
+                assert!(attributes.contains(&error), "{outcome}");
+                assert!(spans[0].attributes.contains(&error), "{outcome}");
+                assert!(matches!(spans[0].status, Status::Error { .. }), "{outcome}");
+            } else {
+                assert!(!attributes.iter().any(|kv| kv.key.as_str() == ERROR_TYPE));
+            }
         }
     }
 
