@@ -14,6 +14,7 @@
 
 ### Changed
 
+* Bump OpenTelemetry dependencies to 0.33.1.
 * The span status of a 5xx response no longer carries an `HTTP {code}`
   description. The reader can derive the reason from
   `http.response.status_code`.

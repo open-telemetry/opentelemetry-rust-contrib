@@ -1,5 +1,11 @@
 # Changelog
 
+## Unreleased
+
+### Changed
+
+- Update `opentelemetry-proto` to 0.33.1.
+
 ## [0.8.1] - 2026-10-05
 
 ### Changed

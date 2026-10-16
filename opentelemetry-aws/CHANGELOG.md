@@ -7,6 +7,10 @@
 - `BeanstalkResourceDetector` (`detector-aws-beanstalk` feature)
 - `AwsXrayRemoteSampler` (`xray-sampler` feature) that samples spans using the fixed rates of X-Ray sampling rules
 
+### Changed
+
+- Bump OpenTelemetry dependencies to 0.33.1.
+
 ### Fixed
 
 - Added missing replacement for deprecated attributes in value builders: `RPC_SYSTEM` -> `RPC_SYSTEM_NAME` and `PEER_SERVICE` -> `SERVICE_PEER_NAME`. Deprecated attributes also kept for retro-compatibility.
