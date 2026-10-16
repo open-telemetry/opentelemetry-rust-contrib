@@ -2,6 +2,8 @@
 
 ## vNext
 
+- Bump OpenTelemetry dependencies to 0.33.1.
+
 - **Breaking:** Changed UserEventsExporter to serialize resource attributes
   before log-record attributes in PartC, aligning with the ETW exporter.
   Both fields are retained when keys collide; consumers that resolve
