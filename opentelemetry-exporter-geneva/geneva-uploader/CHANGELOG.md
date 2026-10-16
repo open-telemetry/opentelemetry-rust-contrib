@@ -9,6 +9,9 @@
 ### Changed
 
 - Updated `azure_core` dependency from 0.29 to 1.0 and `azure_identity` to 1.0. `azure_core` 1.0 no longer exposes a `reqwest_native_tls` feature; the native-TLS backend is now selected solely through the crate's own `tls-native` feature (`reqwest/native-tls`), which the shared `reqwest` client picks up transitively.
+### Changed
+
+- Update reqwest to 0.13 and use its renamed TLS features. Ordinary rustls clients now use the platform certificate verifier; rustls certificate authentication continues to load native roots explicitly and use the caller-installed crypto provider.
 
 ## [0.8.1] - 2026-10-02
 
