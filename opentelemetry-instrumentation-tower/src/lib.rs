@@ -22,13 +22,19 @@
 //!
 //! A server span (`SpanKind::Server`) is created per request, with attributes such
 //! as `http.request.method`, `url.scheme`, `url.path`, `url.query`,
-//! `user_agent.original`, `http.route`, `http.response.status_code`, and
-//! `error.type`.
+//! `user_agent.original`, `http.route`, `http.response.status_code`,
+//! `error.type`, and `client.address`.
 //!
 //! The value of a query parameter that can carry a credential, such as `sig`, is
 //! replaced with `REDACTED`. Use
 //! [`http::server::LayerBuilder::with_sensitive_query_parameters`] to name the
 //! keys yourself.
+//!
+//! `client.address` holds the original client address behind all proxies. The
+//! layer reads the first `X-Forwarded-For` entry, then the `Forwarded` header,
+//! and falls back to the socket address of the immediate peer when the
+//! `axum-connect-info` feature is enabled; see the crate [README] for the
+//! details and for how to trust these headers.
 //!
 //! The server span carries `error.type` when a request ends with an error. A 5xx
 //! response sets `error.type` to the status code number as a string, for example
@@ -39,7 +45,7 @@
 //! produce on its own, with the status code taking precedence whenever one
 //! exists; see the crate [README] for how to report a domain-specific error.
 //!
-//! [README]: https://github.com/open-telemetry/opentelemetry-rust-contrib/blob/main/opentelemetry-instrumentation-tower/README.md#reported-errors
+//! [README]: https://github.com/open-telemetry/opentelemetry-rust-contrib/blob/main/opentelemetry-instrumentation-tower/README.md
 //!
 //! # Quick start
 //!
