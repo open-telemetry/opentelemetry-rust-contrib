@@ -4,6 +4,13 @@
 
 ### Added
 
+* The server span now carries `client.address` when a source for the client
+  address is available. The layer reads the first entry of
+  `X-Forwarded-For`, which is the original client behind a chain of proxies,
+  then the `for` directive of the `Forwarded` header, and falls back to the
+  socket address of the immediate peer. The socket address fallback requires
+  the new `axum-connect-info` feature.
+  [#848](https://github.com/open-telemetry/opentelemetry-rust-contrib/pull/848)
 * The server span, and the `http.server.request.duration`,
   `http.server.request.body.size` and `http.server.response.body.size` metrics,
   now carry `error.type` when a request ends with an error. A 5xx response sets

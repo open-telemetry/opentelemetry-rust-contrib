@@ -23,6 +23,9 @@
 //! - **Tracing + Metrics (500)**: Same as above, but the handler answers with a
 //!   500 response, to baseline the extra `error.type` attribute, span status,
 //!   and metric label
+//! - **Tracing + Metrics (X-Forwarded-For)**: Same as the 200 scenario, but the
+//!   request carries an `X-Forwarded-For` header, to baseline the extra
+//!   `client.address` attribute
 //!
 //! Each tracing scenario sets the global `TracerProvider` before building the layer so
 //! that no tracer state leaks between scenarios.  Scenarios that do not need traces use
@@ -93,22 +96,28 @@
 //!
 //! | Scenario                | Median   | vs baseline |
 //! | ----------------------- | -------- | ----------- |
-//! | baseline                |   48 ns  | —           |
-//! | noop                    |  381 ns  | +333 ns     |
-//! | tracing                 |  489 ns  | +442 ns     |
-//! | tracing-query           |  561 ns  | +513 ns     |
-//! | tracing-query-redacted  |  594 ns  | +546 ns     |
-//! | tracing-sampled-out     |  399 ns  | +351 ns     |
-//! | metrics                 |  687 ns  | +640 ns     |
-//! | tracing + metrics       |  823 ns  | +775 ns     |
-//! | tracing + metrics-500   |  858 ns  | +810 ns     |
+//! | baseline                |   42 ns  | —           |
+//! | noop                    |  355 ns  | +313 ns     |
+//! | tracing                 |  457 ns  | +415 ns     |
+//! | tracing-query           |  500 ns  | +458 ns     |
+//! | tracing-query-redacted  |  528 ns  | +486 ns     |
+//! | tracing-sampled-out     |  406 ns  | +364 ns     |
+//! | metrics                 |  671 ns  | +629 ns     |
+//! | tracing + metrics       |  737 ns  | +695 ns     |
+//! | tracing + metrics-500   |  862 ns  | +820 ns     |
+//! | tracing + metrics-xff   |  832 ns  | +790 ns     |
 //!
 //! `tracing + metrics-500` isolates the `error.type` code path: the extra
 //! span attribute, span status, and metric label on a 5xx response cost
-//! about 35 ns more than `tracing + metrics`.
+//! about 125 ns more than `tracing + metrics`. `tracing + metrics-xff`
+//! isolates the `client.address` code path: reading the two forwarded
+//! headers by `HeaderName` and adding the attribute costs about 95 ns more
+//! than `tracing + metrics`. Both forwarded lookups use `HeaderName` keys
+//! so the `http` crate skips the per-request header-name parse that a
+//! `&str` key would pay.
 //!
 //! Captured on: MacBook Pro, Apple M4 Max (12P + 4E cores), 48 GB RAM,
-//! macOS 26.7, rustc 1.98.0, OpenTelemetry 0.32.
+//! macOS 26.7, rustc 1.98.0, OpenTelemetry 0.33.
 //!
 
 use criterion::{criterion_group, criterion_main, BatchSize, BenchmarkId, Criterion, Throughput};
@@ -143,6 +152,15 @@ fn build_request(target: &'static str) -> http::Request<String> {
     http::Request::builder()
         .method("GET")
         .uri(target)
+        .body(String::new())
+        .unwrap()
+}
+
+fn build_request_with_x_forwarded_for(target: &'static str) -> http::Request<String> {
+    http::Request::builder()
+        .method("GET")
+        .uri(target)
+        .header("X-Forwarded-For", "203.0.113.195, 70.41.3.18")
         .body(String::new())
         .unwrap()
 }
@@ -369,6 +387,30 @@ fn benchmark_http_server(c: &mut Criterion) {
         rt.block_on(service.ready()).unwrap();
         b.to_async(&rt).iter_batched(
             || build_request("http://example.com/users/123"),
+            |req| {
+                let response = service.call(req);
+                async move {
+                    black_box(response.await.unwrap());
+                }
+            },
+            BatchSize::SmallInput,
+        );
+    });
+
+    // Scenario 10: Both tracing + metrics, with an X-Forwarded-For header.
+    // Comparing this against scenario 8 isolates the cost of the
+    // `client.address` code path, since both scenarios have the same signals
+    // active and differ only in the presence of the forwarded header.
+    group.bench_function(BenchmarkId::new("request", "tracing+metrics-xff"), |b| {
+        let _tracer_provider = setup_tracer();
+        let (_meter_provider, _metric_exporter) = setup_meter();
+        let layer = LayerBuilder::builder().build().unwrap();
+        let mut service = ServiceBuilder::new()
+            .layer(layer.clone())
+            .service(tower::service_fn(handler));
+        rt.block_on(service.ready()).unwrap();
+        b.to_async(&rt).iter_batched(
+            || build_request_with_x_forwarded_for("http://example.com/users/123"),
             |req| {
                 let response = service.call(req);
                 async move {

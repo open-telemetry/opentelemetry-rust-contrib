@@ -74,6 +74,28 @@ not reuse the `error.type` key: on a 5xx response, the layer sets `error.type`
 to the status code after extractors run, so it overwrites any `error.type` an
 extractor sets, instead use `myapp.error.type`.
 
+## Client address
+
+The server span carries `client.address`, which the conventions define as the
+original client address behind all proxies. The middleware reports the first
+address it can find in this order:
+
+- The first entry of the `X-Forwarded-For` header. A chain of proxies prepends
+  one address per hop, so the first entry is the original client:
+  `X-Forwarded-For: 203.0.113.195, 70.41.3.18` reports `203.0.113.195`.
+- The node name of the first `for` directive in the `Forwarded` header, for
+  example `192.0.2.43` for `Forwarded: for=192.0.2.43;by=203.0.113.60`.
+- The host of the socket address of the immediate peer. A Tower `Service` does
+  not see the socket, so this source needs the service in front to expose the
+  peer address. With Axum, build the router with
+  `Router::into_make_service_with_connect_info::<SocketAddr>()` and enable the
+  `axum-connect-info` feature of this crate. Without the feature, or without a
+  socket address in the request extensions, the attribute is not emitted.
+
+Trust these headers only when a proxy in front of your service sets or strips
+them. A client can send its own `X-Forwarded-For` value, and the middleware
+cannot tell a proxy-added entry from a spoofed one.
+
 ## Quick start
 
 With the default `axum` feature, applying the middleware is a single layer call:
