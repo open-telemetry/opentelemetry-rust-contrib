@@ -503,6 +503,13 @@ impl GenevaClient {
             }
             AuthMethod::Certificate { .. } => {}
             AuthMethod::WorkloadIdentity { .. } => {}
+            AuthMethod::ExternalToken { ref resource, .. } => {
+                if resource.trim().is_empty() {
+                    return Err(
+                        "resource must not be empty for external token authentication".to_string(),
+                    );
+                }
+            }
             #[cfg(feature = "mock_auth")]
             AuthMethod::MockAuth => {}
         }
@@ -831,6 +838,15 @@ mod tests {
     use prost::Message as _;
     use std::collections::HashMap;
 
+    #[derive(Debug)]
+    struct TestGcsTokenProvider;
+
+    impl crate::GcsTokenProvider for TestGcsTokenProvider {
+        fn get_token<'a>(&'a self, _resource: &'a str) -> crate::GcsTokenFuture<'a> {
+            Box::pin(async { Ok("test-token".to_string().into()) })
+        }
+    }
+
     fn build_config(logs: Option<&str>, spans: Option<&str>) -> GenevaClientConfig {
         GenevaClientConfig {
             endpoint: "https://example.test".to_string(),
@@ -861,6 +877,22 @@ mod tests {
 
     fn build_client(logs: Option<&str>, spans: Option<&str>) -> GenevaClient {
         GenevaClient::new(build_config(logs, spans)).expect("client should initialize")
+    }
+
+    #[test]
+    fn external_token_auth_rejects_empty_resource() {
+        let mut config = build_config(Some("Log"), None);
+        config.auth_method = AuthMethod::ExternalToken {
+            resource: "  ".to_string(),
+            provider: Arc::new(TestGcsTokenProvider),
+        };
+
+        let error = match GenevaClient::new(config) {
+            Ok(_) => panic!("empty resource must fail"),
+            Err(error) => error,
+        };
+
+        assert!(error.contains("resource must not be empty"));
     }
 
     /// Scenario: Geneva transport uses a GCS environment and configuration version.

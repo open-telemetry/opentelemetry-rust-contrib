@@ -2,10 +2,13 @@ use crate::config_service::client::{
     extract_endpoint_from_token, GenevaConfigClient, GenevaConfigClientError,
 };
 use crate::payload_encoder::central_blob::BatchMetadata;
-use bytes::Bytes;
+use crate::secret_header::bearer_authorization_header as build_bearer_authorization_header;
+#[cfg(test)]
+use crate::secret_header::header_value_from_zeroizing_buffer;
 use reqwest::{header, Client};
+#[cfg(test)]
 use secrecy::zeroize::Zeroizing;
-use secrecy::{ExposeSecret, SecretString};
+use secrecy::SecretString;
 use serde::Deserialize;
 use serde_json::Value;
 use std::collections::HashMap;
@@ -142,29 +145,12 @@ struct ResolvedIngestion {
     endpoint_query_param: String,
 }
 
-/// Builds a sensitive header whose application-owned buffer is zeroized after
-/// the last request/header clone is dropped. The HTTP/TLS stack may still copy
-/// the bytes into transport-owned buffers.
-fn header_value_from_zeroizing_buffer(value: Zeroizing<Vec<u8>>) -> Result<header::HeaderValue> {
-    // `HeaderValue::from_maybe_shared` avoids copying only for `http`'s
-    // internal `Bytes` type. Passing the zeroizing buffer directly would
-    // copy the token into non-zeroizing header storage.
-    let mut header =
-        header::HeaderValue::from_maybe_shared(Bytes::from_owner(value)).map_err(|error| {
-            GenevaUploaderError::InternalError(format!(
-                "Invalid bearer token for Authorization header: {error}"
-            ))
-        })?;
-    header.set_sensitive(true);
-    Ok(header)
-}
-
 fn bearer_authorization_header(token: &SecretString) -> Result<header::HeaderValue> {
-    let token = token.expose_secret().as_bytes();
-    let mut value = Zeroizing::new(Vec::with_capacity(b"Bearer ".len() + token.len()));
-    value.extend_from_slice(b"Bearer ");
-    value.extend_from_slice(token);
-    header_value_from_zeroizing_buffer(value)
+    build_bearer_authorization_header(token).map_err(|error| {
+        GenevaUploaderError::InternalError(format!(
+            "Invalid bearer token for Authorization header: {error}"
+        ))
+    })
 }
 
 impl IngestionSource {

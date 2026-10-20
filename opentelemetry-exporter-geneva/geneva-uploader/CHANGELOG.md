@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+### Added
+
+- Add external Entra token providers for GCS authentication. Applications can
+  own identity selection, acquisition, caching, and refresh while the uploader
+  continues to manage the GCS exchange and Geneva ingestion credentials.
+
 ### Changed
 
 - Update `opentelemetry-proto` to 0.33.1.
