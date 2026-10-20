@@ -78,6 +78,7 @@ compile_error!(
 /// ```
 #[allow(dead_code)]
 #[derive(Clone, Debug)]
+#[non_exhaustive]
 pub enum AuthMethod {
     /// Certificate-based authentication
     ///
