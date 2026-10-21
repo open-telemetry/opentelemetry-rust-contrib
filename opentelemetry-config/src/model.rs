@@ -4,11 +4,10 @@
 //! used in OpenTelemetry SDKs.
 
 pub mod metrics;
+pub mod resource;
 
-use std::collections::HashMap;
-
+use crate::model::resource::ResourceConfig;
 use serde::Deserialize;
-use serde_yaml::Value;
 
 use crate::model::metrics::Metrics;
 
@@ -21,7 +20,7 @@ pub(crate) struct Telemetry {
 
     /// Resource attributes to be associated with all telemetry data
     #[serde(default)]
-    pub resource: HashMap<String, Value>,
+    pub resource: ResourceConfig,
 }
 
 #[cfg(test)]
@@ -38,14 +37,23 @@ mod tests {
                   exporter:
                     console: {}
           resource:
-            service.name: "example-service"
-            service.version: "1.0.0"
+            attributes:
+              - name: service.name
+                value: "example-service"
+              - name: service.version
+                value: "1.0.0"
         "#;
         let telemetry: Telemetry = serde_yaml::from_str(yaml_str).unwrap();
         assert!(telemetry.metrics.is_some());
-        let resource = telemetry.resource;
-        assert_eq!(resource.get("service.name").unwrap(), "example-service");
-        assert_eq!(resource.get("service.version").unwrap(), "1.0.0");
+        let resource = telemetry.resource.to_resource().unwrap();
+        assert_eq!(
+            resource.get(&opentelemetry::Key::new("service.name")),
+            Some("example-service".into())
+        );
+        assert_eq!(
+            resource.get(&opentelemetry::Key::new("service.version")),
+            Some("1.0.0".into())
+        );
     }
 
     #[test]
@@ -57,8 +65,11 @@ mod tests {
                   exporter:
                     console: {}
           resource:
-            service.name: "example-service"
-            service.version: "1.0.0"
+            attributes:
+              - name: service.name
+                value: "example-service"
+              - name: service.version
+                value: "1.0.0"
           "#;
         let telemetry_result: Result<Telemetry, _> = serde_yaml::from_str(yaml_str);
 

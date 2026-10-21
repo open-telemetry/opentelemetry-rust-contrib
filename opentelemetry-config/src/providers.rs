@@ -5,9 +5,6 @@
 
 mod meter_provider;
 
-use std::collections::HashMap;
-
-use opentelemetry::KeyValue;
 use opentelemetry_sdk::{
     logs::SdkLoggerProvider, metrics::SdkMeterProvider, trace::SdkTracerProvider, Resource,
 };
@@ -57,7 +54,7 @@ impl TelemetryProviders {
         configuration_registry: &ConfigurationProviderRegistry,
         config: &Telemetry,
     ) -> Result<TelemetryProviders, ProviderError> {
-        let resource: Resource = Self::as_resource(&config.resource);
+        let resource: Resource = config.resource.to_resource()?;
 
         let meter_provider_option: Option<SdkMeterProvider>;
         if let Some(metrics_config) = &config.metrics {
@@ -101,37 +98,6 @@ impl TelemetryProviders {
             ))
         })?;
         Self::configure(configuration_registry, &config)
-    }
-
-    /// Converts resource attributes from HashMap to Resource
-    fn as_resource(attributes: &HashMap<String, serde_yaml::Value>) -> Resource {
-        let mut builder = Resource::builder();
-
-        for (key, value) in attributes {
-            let resource_attribute = Self::as_resource_attribute(key, value);
-            builder = builder.with_attribute(resource_attribute);
-        }
-
-        builder.build()
-    }
-
-    /// Converts a single resource attribute from serde_yaml::Value to KeyValue
-    fn as_resource_attribute(key: &str, value: &serde_yaml::Value) -> KeyValue {
-        // TODO: Add support for arrays.
-        match value {
-            serde_yaml::Value::String(s) => KeyValue::new(key.to_string(), s.clone()),
-            serde_yaml::Value::Number(n) => {
-                if let Some(i) = n.as_i64() {
-                    KeyValue::new(key.to_string(), i)
-                } else if let Some(f) = n.as_f64() {
-                    KeyValue::new(key.to_string(), f)
-                } else {
-                    KeyValue::new(key.to_string(), n.to_string())
-                }
-            }
-            serde_yaml::Value::Bool(b) => KeyValue::new(key.to_string(), *b),
-            _ => KeyValue::new(key.to_string(), format!("{:?}", value)),
-        }
     }
 }
 
@@ -191,11 +157,20 @@ mod tests {
                     console:
                         temporality: delta
         resource:
-          service.name: "test-service"
-          service.version: "1.0.0"
-          replica.count: 3
-          cores: 4.5
-          development: true
+          attributes:
+            - name: service.name
+              value: "test-service"
+            - name: service.version
+              value: "1.0.0"
+            - name: replica.count
+              value: 3
+              type: int
+            - name: cores
+              value: 4.5
+              type: double
+            - name: development
+              value: true
+              type: bool
         "#;
 
         let mut registry = ConfigurationProviderRegistry::default();
@@ -210,7 +185,7 @@ mod tests {
     fn test_telemetry_provider_default() {
         let configuration_registry = ConfigurationProviderRegistry::default();
         let telemetry = Telemetry {
-            resource: HashMap::new(),
+            resource: crate::model::resource::ResourceConfig::default(),
             metrics: None,
         };
         let providers = TelemetryProviders::configure(&configuration_registry, &telemetry).unwrap();
