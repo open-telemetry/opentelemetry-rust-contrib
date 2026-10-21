@@ -3,7 +3,8 @@
 //! This module provides providers for setting up metrics readers
 //! in OpenTelemetry SDKs using declarative YAML configurations.
 
-use opentelemetry_sdk::metrics::MeterProviderBuilder;
+use opentelemetry_sdk::metrics::{MeterProviderBuilder, PeriodicReader, Temporality};
+use std::time::Duration;
 
 use crate::{
     model::metrics::reader::{PeriodicReaderConfig, Reader},
@@ -40,6 +41,9 @@ impl PeriodicReaderProvider {
         meter_provider_builder: MeterProviderBuilder,
         config: &PeriodicReaderConfig,
     ) -> Result<MeterProviderBuilder, ProviderError> {
+        let interval_ms = config.interval_ms();
+        let interval_duration = Duration::from_millis(interval_ms);
+
         let exporter_map = config
             .exporter
             .as_ref()
@@ -50,12 +54,44 @@ impl PeriodicReaderProvider {
                 )
             })?;
 
-        let (key_val, _) = exporter_map.iter().next().unwrap();
+        let (key_val, val) = exporter_map.iter().next().unwrap();
         let exporter_name = key_val.as_str().ok_or_else(|| {
             ProviderError::InvalidConfiguration("Exporter name must be a string".to_string())
         })?;
 
         match exporter_name {
+            "console" => {
+                let mut temporality = None;
+                if let Some(console_map) = val.as_mapping() {
+                    if let Some(temp_val) = console_map.get("temporality_preference") {
+                        if let Some(temp_str) = temp_val.as_str() {
+                            match temp_str {
+                                "cumulative" => temporality = Some(Temporality::Cumulative),
+                                "delta" => temporality = Some(Temporality::Delta),
+                                "low_memory" => temporality = Some(Temporality::LowMemory),
+                                _ => {
+                                    return Err(ProviderError::InvalidConfiguration(format!(
+                                        "Unsupported temporality preference '{}' for console exporter",
+                                        temp_str
+                                    )));
+                                }
+                            }
+                        }
+                    }
+                }
+
+                let mut exporter_builder = opentelemetry_stdout::MetricExporter::builder();
+                if let Some(t) = temporality {
+                    exporter_builder = exporter_builder.with_temporality(t);
+                }
+                let exporter = exporter_builder.build();
+
+                let reader = PeriodicReader::builder(exporter)
+                    .with_interval(interval_duration)
+                    .build();
+
+                Ok(meter_provider_builder.with_reader(reader))
+            }
             "otlp_http" | "otlp_grpc" | "otlp_file/development" | "otlp_file"
             | "prometheus/development" | "prometheus" => {
                 Err(ProviderError::UnsupportedExporter(format!(
@@ -92,48 +128,65 @@ impl PeriodicReaderProvider {
 
 #[cfg(test)]
 mod tests {
-
     use super::*;
     use crate::ConfigurationError;
+    use opentelemetry_sdk::metrics::SdkMeterProvider;
+
     fn parse(yaml: &str) -> Result<Reader, ProviderError> {
         Reader::from_value(&serde_yaml::from_str(yaml).unwrap())
     }
-    use opentelemetry_sdk::metrics::SdkMeterProvider;
 
     pub fn register_mock_exporter_factory(
         builder: MeterProviderBuilder,
         _config: &str,
     ) -> Result<MeterProviderBuilder, ConfigurationError> {
-        // Mock implementation: just return the builder as is
         Ok(builder)
     }
 
     #[test]
-    fn test_reader_provider_configure() {
-        let mut registry = crate::ConfigurationProviderRegistry::default();
-        let name = "console";
-        registry.register_metric_exporter_factory(name, register_mock_exporter_factory);
+    fn test_reader_provider_configure_console() {
+        let registry = MeterProviderRegistry::default();
         let meter_provider_builder = SdkMeterProvider::builder();
 
         let config = parse(
             r#"
             periodic:
-                interval: 60000
+                interval: 5000
                 exporter:
-                    console:
-                        temporality_preference: cumulative
+                    console: {}
             "#,
         )
         .unwrap();
 
-        let metrics_registry = registry.metrics;
-
-        _ = ReaderProvider::configure(&metrics_registry, meter_provider_builder, &config).unwrap();
+        let result = ReaderProvider::configure(&registry, meter_provider_builder, &config);
+        assert!(result.is_ok());
     }
 
     #[test]
-    fn test_reader_provider_configure_console_factory_not_registered() {
-        let metrics_registry = MeterProviderRegistry::default();
+    fn test_reader_provider_configure_console_with_temporality() {
+        let registry = MeterProviderRegistry::default();
+        let meter_provider_builder = SdkMeterProvider::builder();
+
+        let config = parse(
+            r#"
+            periodic:
+                interval: 5000
+                exporter:
+                    console:
+                        temporality_preference: delta
+            "#,
+        )
+        .unwrap();
+
+        let result = ReaderProvider::configure(&registry, meter_provider_builder, &config);
+        assert!(result.is_ok());
+    }
+
+    #[test]
+    fn test_reader_provider_configure_custom_registered() {
+        let mut registry = MeterProviderRegistry::default();
+        let name = "my_custom_exporter";
+        registry.register_exporter_factory(name, register_mock_exporter_factory);
         let meter_provider_builder = SdkMeterProvider::builder();
 
         let config = parse(
@@ -141,47 +194,58 @@ mod tests {
             periodic:
                 interval: 60000
                 exporter:
-                    console:
-                        temporality_preference: cumulative
+                    my_custom_exporter:
+                        custom_field: "test"
             "#,
         )
         .unwrap();
 
-        let result = ReaderProvider::configure(&metrics_registry, meter_provider_builder, &config);
-        if let Err(e) = result {
-            println!("Error: {}", e);
-            assert!(e
-                .to_string()
-                .contains("No provider found for periodic exporter 'console'"));
-        } else {
-            panic!("Expected error due to missing provider, but got Ok");
+        let result = ReaderProvider::configure(&registry, meter_provider_builder, &config);
+        assert!(result.is_ok());
+    }
+
+    #[test]
+    fn test_reader_provider_configure_custom_not_registered() {
+        let registry = MeterProviderRegistry::default();
+        let meter_provider_builder = SdkMeterProvider::builder();
+
+        let config = parse(
+            r#"
+            periodic:
+                interval: 60000
+                exporter:
+                    unregistered_custom: {}
+            "#,
+        )
+        .unwrap();
+
+        let result = ReaderProvider::configure(&registry, meter_provider_builder, &config);
+        match result {
+            Err(ProviderError::NotRegisteredProvider(msg)) => {
+                assert!(msg.contains("unregistered_custom"));
+            }
+            other => panic!("Expected NotRegisteredProvider, got {:?}", other),
         }
     }
 
     #[test]
-    fn test_reader_provider_provide_otlp_factory_not_registered() {
-        let metrics_registry = MeterProviderRegistry::default();
-        let meter_provider_builder = SdkMeterProvider::builder();
-
-        let config = parse(
-            r#"
-            periodic:
-                interval: 60000
-                exporter:
-                    otlp:
-                        protocol: http/protobuf
-                        endpoint: http://localhost:4317
-            "#,
-        )
-        .unwrap();
-
-        let result = ReaderProvider::configure(&metrics_registry, meter_provider_builder, &config);
-        if let Err(e) = result {
-            assert!(e
-                .to_string()
-                .contains("No provider found for periodic exporter 'otlp'"));
-        } else {
-            panic!("Expected error due to missing provider, but got Ok");
+    fn test_reader_parser_rejects_unsupported_standard_exporter() {
+        let result = parse("periodic:\n  exporter:\n    otlp_http: {}\n");
+        match result {
+            Err(ProviderError::UnsupportedExporter(msg)) => assert!(msg.contains("otlp_http")),
+            other => panic!("Expected UnsupportedExporter, got {:?}", other),
         }
+    }
+
+    #[test]
+    fn test_pull_reader_rejected() {
+        let err = parse("pull:\n  exporter:\n    prometheus: {}\n").unwrap_err();
+        assert!(err.to_string().contains("Pull readers are not supported"));
+    }
+
+    #[test]
+    fn test_timeout_rejected() {
+        let err = parse("periodic:\n  timeout: 500\n  exporter: {console: {}}\n").unwrap_err();
+        assert!(err.to_string().contains("timeout is not supported"));
     }
 }

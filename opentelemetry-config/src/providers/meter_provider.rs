@@ -45,8 +45,7 @@ mod tests {
         "#;
         let value = serde_yaml::from_str(yaml_str).unwrap();
         let metrics_config = MeterProviderConfig::from_value(&value).unwrap();
-        let mut registry = MeterProviderRegistry::default();
-        registry.register_exporter_factory("console", |builder, _| Ok(builder));
+        let registry = MeterProviderRegistry::default();
         let meter_provider_builder = SdkMeterProvider::builder();
         let result = MeterProvider::configure(&registry, meter_provider_builder, &metrics_config);
         assert!(result.is_ok());

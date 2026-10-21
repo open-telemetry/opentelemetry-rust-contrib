@@ -107,49 +107,7 @@ impl TelemetryProviders {
 
 #[cfg(test)]
 mod tests {
-    use crate::ConfigurationError;
-    use opentelemetry_sdk::{
-        error::OTelSdkResult,
-        metrics::{
-            data::ResourceMetrics, exporter::PushMetricExporter, MeterProviderBuilder, Temporality,
-        },
-    };
-
     use super::*;
-
-    #[derive(Default)]
-    struct MockExporter {}
-
-    impl PushMetricExporter for MockExporter {
-        async fn export(&self, _metrics: &ResourceMetrics) -> OTelSdkResult {
-            Ok(())
-        }
-
-        fn force_flush(&self) -> OTelSdkResult {
-            Ok(())
-        }
-
-        fn shutdown_with_timeout(&self, _timeout: std::time::Duration) -> OTelSdkResult {
-            Ok(())
-        }
-
-        fn temporality(&self) -> Temporality {
-            Temporality::Delta
-        }
-
-        fn shutdown(&self) -> OTelSdkResult {
-            self.shutdown_with_timeout(std::time::Duration::from_secs(5))
-        }
-    }
-
-    pub fn register_mock_reader_factory(
-        mut builder: MeterProviderBuilder,
-        _config_yaml: &str,
-    ) -> Result<MeterProviderBuilder, ConfigurationError> {
-        let exporter = MockExporter::default();
-        builder = builder.with_periodic_exporter(exporter);
-        Ok(builder)
-    }
 
     #[test]
     fn test_configure_telemetry_from_yaml() {
@@ -159,8 +117,8 @@ mod tests {
           readers:
             - periodic:
                 exporter:
-                    console:
-                        temporality_preference: delta
+                  console:
+                    temporality_preference: delta
         resource:
           attributes:
             - name: service.name
@@ -178,12 +136,9 @@ mod tests {
               type: bool
         "#;
 
-        let mut registry = ConfigurationProviderRegistry::default();
-        let name = "console";
-        registry.register_metric_exporter_factory(name, register_mock_reader_factory);
-
+        let registry = ConfigurationProviderRegistry::default();
         let providers = TelemetryProviders::configure_from_yaml_str(&registry, yaml_str).unwrap();
-        assert!(providers.meter_provider.is_some());
+        assert!(providers.meter_provider().is_some());
     }
 
     #[test]
