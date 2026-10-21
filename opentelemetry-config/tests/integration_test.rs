@@ -328,6 +328,127 @@ meter_provider:
 }
 
 #[test]
+fn test_validation_resource_attributes_type_mismatch() {
+    let registry = ConfigurationProviderRegistry::default();
+
+    // String declared, number provided
+    let yaml_string_err = r#"
+file_format: "1.2"
+resource:
+  attributes:
+    - name: service.name
+      value: 123
+      type: string
+"#;
+    let err = TelemetryProviders::configure_from_yaml_str(&registry, yaml_string_err).unwrap_err();
+    assert!(err
+        .to_string()
+        .contains("declared as type 'string' but value is not a string"));
+
+    // Bool declared, string provided
+    let yaml_bool_err = r#"
+file_format: "1.2"
+resource:
+  attributes:
+    - name: is_active
+      value: "true"
+      type: bool
+"#;
+    let err = TelemetryProviders::configure_from_yaml_str(&registry, yaml_bool_err).unwrap_err();
+    assert!(err
+        .to_string()
+        .contains("declared as type 'bool' but value is not a boolean"));
+
+    // Int declared, string provided
+    let yaml_int_err = r#"
+file_format: "1.2"
+resource:
+  attributes:
+    - name: count
+      value: "10"
+      type: int
+"#;
+    let err = TelemetryProviders::configure_from_yaml_str(&registry, yaml_int_err).unwrap_err();
+    assert!(err
+        .to_string()
+        .contains("declared as type 'int' but value is not an integer"));
+
+    // Array type unsupported
+    let yaml_array_err = r#"
+file_format: "1.2"
+resource:
+  attributes:
+    - name: tags
+      value: ["a", "b"]
+      type: string_array
+"#;
+    let err = TelemetryProviders::configure_from_yaml_str(&registry, yaml_array_err).unwrap_err();
+    assert!(err
+        .to_string()
+        .contains("uses array type 'string_array' which is not supported"));
+
+    // Array value unsupported
+    let yaml_raw_array_err = r#"
+file_format: "1.2"
+resource:
+  attributes:
+    - name: tags
+      value: [1, 2]
+"#;
+    let err =
+        TelemetryProviders::configure_from_yaml_str(&registry, yaml_raw_array_err).unwrap_err();
+    assert!(err
+        .to_string()
+        .contains("declared as type 'string' but value is not a string"));
+
+    // The schema permits repeated names; the SDK retains the last non-null value.
+    let yaml_dup = r#"
+file_format: "1.2"
+resource:
+  attributes:
+    - name: service.name
+      value: "one"
+    - name: service.name
+      value: "two"
+"#;
+    TelemetryProviders::configure_from_yaml_str(&registry, yaml_dup).unwrap();
+}
+
+#[test]
+fn test_validation_unsupported_resource_fields() {
+    let registry = ConfigurationProviderRegistry::default();
+    let yaml_detection = r#"
+file_format: "1.2"
+resource:
+  detection/development: {}
+"#;
+    let err = TelemetryProviders::configure_from_yaml_str(&registry, yaml_detection).unwrap_err();
+    assert!(err
+        .to_string()
+        .contains("`resource.detection` is not supported"));
+
+    let yaml_schema = r#"
+file_format: "1.2"
+resource:
+  schema_url: "https://opentelemetry.io/schemas/1.2.0"
+"#;
+    let err = TelemetryProviders::configure_from_yaml_str(&registry, yaml_schema).unwrap_err();
+    assert!(err
+        .to_string()
+        .contains("`resource.schema_url` is not supported"));
+
+    let yaml_attr_list = r#"
+file_format: "1.2"
+resource:
+  attributes_list: "key=val"
+"#;
+    let err = TelemetryProviders::configure_from_yaml_str(&registry, yaml_attr_list).unwrap_err();
+    assert!(err
+        .to_string()
+        .contains("`resource.attributes_list` is not supported"));
+}
+
+#[test]
 fn test_resource_does_not_implicitly_read_env_vars() {
     // If running in child process, execute the test assertion with environment variables active
     if std::env::var("RUN_RESOURCE_ENV_TEST_CHILD").as_deref() == Ok("1") {
@@ -656,6 +777,55 @@ fn test_validation_rejects_malformed_configuration_shapes() {
 
     for (yaml, expected_message) in cases {
         assert_invalid_config(yaml, expected_message);
+    }
+}
+
+#[test]
+fn test_validation_rejects_invalid_resource_attribute_types() {
+    for (attribute, expected_message) in [
+        (
+            "name: '  '\n      value: ignored",
+            "Resource attribute name must not be empty",
+        ),
+        (
+            "name: amount\n      value: invalid\n      type: double",
+            "declared as type 'double' but value is not a double",
+        ),
+        (
+            "name: amount\n      value: 1\n      type: custom",
+            "has unsupported type 'custom'",
+        ),
+        (
+            "name: amount\n      value: null\n      type: invalid_type",
+            "has unsupported type 'invalid_type'",
+        ),
+        (
+            "name: amount\n      value: null\n      type: string_array",
+            "uses array type 'string_array' which is not supported",
+        ),
+        (
+            "name: amount\n      value: 'val'\n      type: null",
+            "type cannot be null",
+        ),
+        (
+            "name: amount\n      value: null\n      type: null",
+            "type cannot be null",
+        ),
+        (
+            "name: amount\n      value: 'val'\n      type: ~",
+            "type cannot be null",
+        ),
+        (
+            "name: amount\n      value: null\n      type: ~",
+            "type cannot be null",
+        ),
+        (
+            "name: amount\n      value: null\n      type: 123",
+            "type must be a string",
+        ),
+    ] {
+        let yaml = format!("file_format: '1.2'\nresource:\n  attributes:\n    - {attribute}\n");
+        assert_invalid_config(&yaml, expected_message);
     }
 }
 
