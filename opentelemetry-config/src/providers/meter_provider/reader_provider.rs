@@ -4,9 +4,11 @@
 //! in OpenTelemetry SDKs using declarative YAML configurations.
 
 use opentelemetry_sdk::metrics::MeterProviderBuilder;
-use serde_yaml::Value;
 
-use crate::{model::metrics::reader::Reader, MeterProviderRegistry, ProviderError};
+use crate::{
+    model::metrics::reader::{PeriodicReaderConfig, Reader},
+    MeterProviderRegistry, ProviderError,
+};
 
 /// Provider for Metrics readers
 pub(crate) struct ReaderProvider {}
@@ -15,19 +17,16 @@ impl ReaderProvider {
     /// Configures a metrics reader based on the provided configuration
     pub(crate) fn configure(
         metrics_registry: &MeterProviderRegistry,
-        mut meter_provider_builder: MeterProviderBuilder,
+        meter_provider_builder: MeterProviderBuilder,
         config: &Reader,
     ) -> Result<MeterProviderBuilder, ProviderError> {
         match config {
-            crate::model::metrics::reader::Reader::Periodic(periodic_config) => {
-                meter_provider_builder = PeriodicReaderProvider::configure(
-                    metrics_registry,
-                    meter_provider_builder,
-                    periodic_config,
-                )?;
-            }
+            Reader::Periodic(periodic_config) => PeriodicReaderProvider::configure(
+                metrics_registry,
+                meter_provider_builder,
+                periodic_config,
+            ),
         }
-        Ok(meter_provider_builder)
     }
 }
 
@@ -38,86 +37,56 @@ impl PeriodicReaderProvider {
     /// Configures a periodic metrics reader based on the provided configuration
     fn configure(
         metrics_registry: &MeterProviderRegistry,
-        mut meter_provider_builder: opentelemetry_sdk::metrics::MeterProviderBuilder,
-        config: &Value,
-    ) -> Result<opentelemetry_sdk::metrics::MeterProviderBuilder, ProviderError> {
-        meter_provider_builder =
-            PeriodicExporterProvider::configure(metrics_registry, meter_provider_builder, config)?;
-        Ok(meter_provider_builder)
-    }
-}
+        meter_provider_builder: MeterProviderBuilder,
+        config: &PeriodicReaderConfig,
+    ) -> Result<MeterProviderBuilder, ProviderError> {
+        let exporter_map = config
+            .exporter
+            .as_ref()
+            .and_then(|e| e.as_mapping())
+            .ok_or_else(|| {
+                ProviderError::InvalidConfiguration(
+                    "Missing or invalid `exporter` in periodic reader".to_string(),
+                )
+            })?;
 
-/// Periodic exporter provider
-struct PeriodicExporterProvider {}
+        let (key_val, _) = exporter_map.iter().next().unwrap();
+        let exporter_name = key_val.as_str().ok_or_else(|| {
+            ProviderError::InvalidConfiguration("Exporter name must be a string".to_string())
+        })?;
 
-impl PeriodicExporterProvider {
-    /// Configures a periodic metrics exporter based on the provided configuration
-    fn configure(
-        metrics_registry: &MeterProviderRegistry,
-        mut meter_provider_builder: opentelemetry_sdk::metrics::MeterProviderBuilder,
-        periodic_config: &Value,
-    ) -> Result<opentelemetry_sdk::metrics::MeterProviderBuilder, ProviderError> {
-        let config = &periodic_config["exporter"];
-        match config.as_mapping() {
-            Some(exporter_map) => {
-                for key in exporter_map.keys() {
-                    match key {
-                        Value::String(exporter_name) => {
-                            let reader_factory_option =
-                                metrics_registry.provider_factory(exporter_name);
-                            match reader_factory_option {
-                                Some(factory_function) => {
-                                    let periodic_config_str =
-                                        serde_yaml::to_string(&periodic_config).map_err(|e| {
-                                            ProviderError::RegistrationError(format!(
-                                                "Failed to serialize periodic configuration: {}",
-                                                e
-                                            ))
-                                        })?;
-
-                                    let meter_provider_builder_result = factory_function(
-                                        meter_provider_builder,
-                                        &periodic_config_str,
-                                    );
-                                    meter_provider_builder = match meter_provider_builder_result {
-                                        Ok(builder) => builder,
-                                        Err(e) => match e {
-                                            crate::ConfigurationError::InvalidConfiguration(
-                                                msg,
-                                            ) => {
-                                                return Err(ProviderError::InvalidConfiguration(
-                                                    msg,
-                                                ));
-                                            }
-                                            crate::ConfigurationError::RegistrationError(msg) => {
-                                                return Err(ProviderError::RegistrationError(msg));
-                                            }
-                                        },
-                                    };
-                                }
-                                None => {
-                                    return Err(ProviderError::NotRegisteredProvider(format!(
-                                        "No provider found for periodic exporter '{}'. Make sure it is registered with its factory.",
-                                        exporter_name
-                                    )));
-                                }
+        match exporter_name {
+            "otlp_http" | "otlp_grpc" | "otlp_file/development" | "otlp_file"
+            | "prometheus/development" | "prometheus" => {
+                Err(ProviderError::UnsupportedExporter(format!(
+                    "Exporter '{}' is not supported in this milestone",
+                    exporter_name
+                )))
+            }
+            custom_exporter_name => {
+                match metrics_registry.provider_factory(custom_exporter_name) {
+                    Some(factory_function) => {
+                        let periodic_config_str = &config.raw_yaml;
+                        let updated_builder = factory_function(
+                            meter_provider_builder,
+                            periodic_config_str,
+                        ).map_err(|e| match e {
+                            crate::ConfigurationError::InvalidConfiguration(msg) => {
+                                ProviderError::InvalidConfiguration(msg)
                             }
-                        }
-                        _ => {
-                            return Err(ProviderError::InvalidConfiguration(
-                                "Exporter name must be a string.".to_string(),
-                            ));
-                        }
+                            crate::ConfigurationError::RegistrationError(msg) => {
+                                ProviderError::RegistrationError(msg)
+                            }
+                        })?;
+                        Ok(updated_builder)
                     }
+                    None => Err(ProviderError::NotRegisteredProvider(format!(
+                        "No provider found for periodic exporter '{}'. Make sure it is registered with its factory.",
+                        custom_exporter_name
+                    ))),
                 }
             }
-            None => {
-                return Err(ProviderError::InvalidConfiguration(
-                    "Expecting a configuration object for periodic exporter.".to_string(),
-                ));
-            }
         }
-        Ok(meter_provider_builder)
     }
 }
 
