@@ -1388,7 +1388,7 @@ fn test_validation_rejects_invalid_resource_attribute_types() {
 }
 
 #[test]
-fn test_console_interval_environment_fallback() {
+fn test_console_interval_overrides_environment() {
     if std::env::var("RUN_INTERVAL_ENV_TEST_CHILD").as_deref() == Ok("1") {
         let registry = ConfigurationProviderRegistry::default();
         for interval in [
@@ -1413,10 +1413,10 @@ fn test_console_interval_environment_fallback() {
                 })
                 .build();
 
-            if matches!(interval, "interval: 0" | "interval: 5") {
+            if interval == "interval: 5" {
                 receiver
                     .recv_timeout(Duration::from_secs(5))
-                    .expect("zero and short intervals should trigger collection");
+                    .expect("the configured short interval should trigger collection");
             } else {
                 assert_eq!(
                     receiver.recv_timeout(Duration::from_millis(100)),
@@ -1431,7 +1431,7 @@ fn test_console_interval_environment_fallback() {
 
     let output = std::process::Command::new(std::env::current_exe().unwrap())
         .arg("--exact")
-        .arg("test_console_interval_environment_fallback")
+        .arg("test_console_interval_overrides_environment")
         .arg("--nocapture")
         .env("RUN_INTERVAL_ENV_TEST_CHILD", "1")
         .env("OTEL_METRIC_EXPORT_INTERVAL", "1")

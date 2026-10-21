@@ -338,18 +338,13 @@ impl PeriodicReaderConfig {
         Ok(())
     }
 
-    /// Returns the configured interval in milliseconds (defaulting to 60,000 if not specified).
+    /// Returns the SDK interval in milliseconds, using 60,000 for omitted, null, or zero values.
     pub(crate) fn interval_ms(&self) -> u64 {
-        if let Some(serde_yaml::Value::Number(n)) = &self.interval {
-            if let Some(i) = n.as_i64() {
-                if i >= 0 {
-                    return i as u64;
-                }
-            } else if let Some(u) = n.as_u64() {
-                return u;
-            }
-        }
-        60_000
+        self.interval
+            .as_ref()
+            .and_then(serde_yaml::Value::as_u64)
+            .filter(|interval| *interval > 0)
+            .unwrap_or(60_000)
     }
 }
 

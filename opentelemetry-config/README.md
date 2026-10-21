@@ -153,7 +153,7 @@ To avoid silent configuration drift or unexpected runtime behavior, the crate pe
 ## Known SDK Limitations
 
 - **Synchronous Periodic Reader Timeout**: The upstream OpenTelemetry configuration schema specifies an optional `timeout` on periodic readers. However, the synchronous `PeriodicReader` in OpenTelemetry Rust SDK 0.33 does not enforce collection or export timeouts. Rather than silently ignoring this option and giving a false expectation of timeout enforcement, explicitly specifying `timeout` returns an `InvalidConfiguration` error in this milestone.
-- **Interval = 0**: The schema permits an `interval` of 0 ms. In the OpenTelemetry Rust SDK synchronous reader, passing an interval of 0 causes the SDK to revert to its default interval of 60 seconds.
+- **Interval = 0**: The schema permits an `interval` of 0 ms. The built-in console reader uses 60 seconds for this value, explicitly overriding `OTEL_METRIC_EXPORT_INTERVAL`.
 
 ## Deferred Features (Future Milestones)
 
