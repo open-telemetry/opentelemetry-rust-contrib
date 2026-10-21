@@ -3,7 +3,9 @@ use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use opentelemetry::{metrics::MeterProvider as _, KeyValue};
-use opentelemetry_config::{providers::TelemetryProviders, ConfigurationProviderRegistry};
+use opentelemetry_config::{
+    providers::TelemetryProviders, ConfigurationProviderRegistry, ProviderError,
+};
 use opentelemetry_sdk::{
     error::OTelSdkResult,
     metrics::{
@@ -328,6 +330,166 @@ meter_provider:
 }
 
 #[test]
+fn test_validation_periodic_no_exporter() {
+    let registry = ConfigurationProviderRegistry::default();
+    let yaml = r#"
+file_format: "1.2"
+meter_provider:
+  readers:
+    - periodic:
+        interval: 1000
+"#;
+    let err = TelemetryProviders::configure_from_yaml_str(&registry, yaml).unwrap_err();
+    assert!(err
+        .to_string()
+        .contains("Missing required field `exporter`"));
+}
+
+#[test]
+fn test_validation_periodic_empty_exporter() {
+    let registry = ConfigurationProviderRegistry::default();
+    let yaml = r#"
+file_format: "1.2"
+meter_provider:
+  readers:
+    - periodic:
+        exporter: {}
+"#;
+    let err = TelemetryProviders::configure_from_yaml_str(&registry, yaml).unwrap_err();
+    assert!(err.to_string().contains("found 0"));
+}
+
+#[test]
+fn test_validation_periodic_multiple_exporters() {
+    let registry = ConfigurationProviderRegistry::default();
+    let yaml = r#"
+file_format: "1.2"
+meter_provider:
+  readers:
+    - periodic:
+        exporter:
+          console: {}
+          custom: {}
+"#;
+    let err = TelemetryProviders::configure_from_yaml_str(&registry, yaml).unwrap_err();
+    assert!(err.to_string().contains("found 2"));
+}
+
+#[test]
+fn test_validation_explicit_timeout_rejected() {
+    let registry = ConfigurationProviderRegistry::default();
+    let yaml = r#"
+file_format: "1.2"
+meter_provider:
+  readers:
+    - periodic:
+        interval: 1000
+        timeout: 500
+        exporter:
+          console: {}
+"#;
+    let err = TelemetryProviders::configure_from_yaml_str(&registry, yaml).unwrap_err();
+    assert!(err
+        .to_string()
+        .contains("periodic reader timeout is not supported"));
+}
+
+#[test]
+fn test_validation_pull_reader_rejected() {
+    let registry = ConfigurationProviderRegistry::default();
+    let yaml = r#"
+file_format: "1.2"
+meter_provider:
+  readers:
+    - pull:
+        exporter:
+          prometheus: {}
+"#;
+    let err = TelemetryProviders::configure_from_yaml_str(&registry, yaml).unwrap_err();
+    assert!(err.to_string().contains("Pull readers are not supported"));
+}
+
+#[test]
+fn test_validation_unsupported_standard_exporters() {
+    let registry = ConfigurationProviderRegistry::default();
+    for exporter in &["otlp_http", "otlp_grpc", "prometheus"] {
+        let yaml = format!(
+            r#"
+file_format: "1.2"
+meter_provider:
+  readers:
+    - periodic:
+        exporter:
+          {}: {{}}
+"#,
+            exporter
+        );
+        let err = TelemetryProviders::configure_from_yaml_str(&registry, &yaml).unwrap_err();
+        match err {
+            ProviderError::UnsupportedExporter(msg) => {
+                assert!(msg.contains(exporter));
+            }
+            other => panic!(
+                "Expected UnsupportedExporter for {}, got {:?}",
+                exporter, other
+            ),
+        }
+    }
+}
+
+#[test]
+fn test_validation_unregistered_custom_exporter() {
+    let registry = ConfigurationProviderRegistry::default();
+    let yaml = r#"
+file_format: "1.2"
+meter_provider:
+  readers:
+    - periodic:
+        exporter:
+          non_existent_exporter: {}
+"#;
+    let err = TelemetryProviders::configure_from_yaml_str(&registry, yaml).unwrap_err();
+    match err {
+        ProviderError::NotRegisteredProvider(msg) => {
+            assert!(msg.contains("non_existent_exporter"));
+        }
+        other => panic!("Expected NotRegisteredProvider, got {:?}", other),
+    }
+}
+
+#[test]
+fn test_validation_unsupported_meter_provider_fields() {
+    let registry = ConfigurationProviderRegistry::default();
+    let yaml_views = r#"
+file_format: "1.2"
+meter_provider:
+  readers:
+    - periodic:
+        exporter:
+          console: {}
+  views: []
+"#;
+    let err = TelemetryProviders::configure_from_yaml_str(&registry, yaml_views).unwrap_err();
+    assert!(err
+        .to_string()
+        .contains("`meter_provider.views` is not supported"));
+
+    let yaml_exemplar = r#"
+file_format: "1.2"
+meter_provider:
+  readers:
+    - periodic:
+        exporter:
+          console: {}
+  exemplar_filter: trace_based
+"#;
+    let err = TelemetryProviders::configure_from_yaml_str(&registry, yaml_exemplar).unwrap_err();
+    assert!(err
+        .to_string()
+        .contains("`meter_provider.exemplar_filter` is not supported"));
+}
+
+#[test]
 fn test_validation_resource_attributes_type_mismatch() {
     let registry = ConfigurationProviderRegistry::default();
 
@@ -649,6 +811,402 @@ meter_provider:
 }
 
 #[test]
+fn test_validation_allowed_null_fields() {
+    let registry = ConfigurationProviderRegistry::default();
+
+    // 1. console: null is allowed by schema v1.2.0 (defaults to standard console exporter)
+    let yaml_console_null = r#"
+file_format: "1.2"
+meter_provider:
+  readers:
+    - periodic:
+        exporter:
+          console: null
+"#;
+    let providers =
+        TelemetryProviders::configure_from_yaml_str(&registry, yaml_console_null).unwrap();
+    assert!(providers.meter_provider().is_some());
+
+    // 2. periodic.interval: null is allowed by schema v1.2.0 (defaults to 60000 ms)
+    let yaml_interval_null = r#"
+file_format: "1.2"
+meter_provider:
+  readers:
+    - periodic:
+        interval: null
+        exporter:
+          console: {}
+"#;
+    let providers =
+        TelemetryProviders::configure_from_yaml_str(&registry, yaml_interval_null).unwrap();
+    assert!(providers.meter_provider().is_some());
+
+    // 3. console.temporality_preference: null is allowed by schema v1.2.0 (defaults to cumulative)
+    let yaml_temp_null = r#"
+file_format: "1.2"
+meter_provider:
+  readers:
+    - periodic:
+        exporter:
+          console:
+            temporality_preference: null
+"#;
+    let providers = TelemetryProviders::configure_from_yaml_str(&registry, yaml_temp_null).unwrap();
+    assert!(providers.meter_provider().is_some());
+
+    // 4. console.default_histogram_aggregation: null is allowed by schema v1.2.0 (defaults to explicit_bucket_histogram)
+    let yaml_hist_null = r#"
+file_format: "1.2"
+meter_provider:
+  readers:
+    - periodic:
+        exporter:
+          console:
+            default_histogram_aggregation: null
+"#;
+    let providers = TelemetryProviders::configure_from_yaml_str(&registry, yaml_hist_null).unwrap();
+    assert!(providers.meter_provider().is_some());
+
+    // 5. console.default_histogram_aggregation: explicit_bucket_histogram is explicitly supported
+    let yaml_hist_explicit = r#"
+file_format: "1.2"
+meter_provider:
+  readers:
+    - periodic:
+        exporter:
+          console:
+            default_histogram_aggregation: explicit_bucket_histogram
+"#;
+    let providers =
+        TelemetryProviders::configure_from_yaml_str(&registry, yaml_hist_explicit).unwrap();
+    assert!(providers.meter_provider().is_some());
+
+    // 6. Combined nulls all together
+    let yaml_combined_nulls = r#"
+file_format: "1.2"
+meter_provider:
+  readers:
+    - periodic:
+        interval: null
+        exporter:
+          console:
+            temporality_preference: null
+            default_histogram_aggregation: null
+"#;
+    let providers =
+        TelemetryProviders::configure_from_yaml_str(&registry, yaml_combined_nulls).unwrap();
+    assert!(providers.meter_provider().is_some());
+
+    // 7. Resource attributes with valid types and null values are permitted and ignored
+    let yaml_resource_null_attrs = r#"
+file_format: "1.2"
+resource:
+  attributes:
+    - name: string.null
+      type: string
+      value: null
+    - name: bool.null
+      type: bool
+      value: null
+    - name: int.null
+      type: int
+      value: null
+    - name: double.null
+      type: double
+      value: null
+    - name: omitted.null
+      value: null
+    - name: valid.attr
+      value: "kept"
+meter_provider:
+  readers:
+    - periodic:
+        exporter:
+          console: {}
+"#;
+    let providers =
+        TelemetryProviders::configure_from_yaml_str(&registry, yaml_resource_null_attrs).unwrap();
+    assert!(providers.meter_provider().is_some());
+}
+
+#[test]
+fn test_validation_rejects_invalid_console_options() {
+    for (console, expected_message) in [
+        ("'not-an-object'", "Field 'console' must be an object or null"),
+        ("42", "Field 'console' must be an object or null"),
+        (
+            "{temporality_preference: unsupported}",
+            "Unsupported temporality preference 'unsupported'",
+        ),
+        (
+            "{temporality_preference: 123}",
+            "`console.temporality_preference` must be a string",
+        ),
+        (
+            "{default_histogram_aggregation: base2_exponential_bucket_histogram}",
+            "value 'base2_exponential_bucket_histogram' is not supported in this milestone",
+        ),
+        (
+            "{default_histogram_aggregation: unknown_histogram}",
+            "value 'unknown_histogram' is not supported; only 'explicit_bucket_histogram' is supported",
+        ),
+        (
+            "{default_histogram_aggregation: 42}",
+            "`console.default_histogram_aggregation` must be a string",
+        ),
+        (
+            "{unknown_option: fail}",
+            "Unknown field 'unknown_option' in console exporter configuration",
+        ),
+    ] {
+        let yaml = format!(
+            "file_format: '1.2'\nmeter_provider:\n  readers:\n    - periodic:\n        exporter:\n          console: {console}\n"
+        );
+        assert_invalid_config(&yaml, expected_message);
+    }
+}
+
+#[test]
+fn test_validation_rejects_invalid_intervals() {
+    for (interval, expected_message) in [
+        ("-100", "`periodic.interval` must be non-negative"),
+        (
+            "'fast'",
+            "`periodic.interval` must be a non-negative integer",
+        ),
+        (
+            "'60000'",
+            "`periodic.interval` must be a non-negative integer",
+        ),
+        ("1.5", "`periodic.interval` must be an integer"),
+    ] {
+        let yaml = format!(
+            "file_format: '1.2'\nmeter_provider:\n  readers:\n    - periodic:\n        interval: {interval}\n        exporter: {{console: {{}}}}\n"
+        );
+        assert_invalid_config(&yaml, expected_message);
+    }
+}
+
+#[test]
+fn test_validation_null_cannot_bypass_unsupported_fields() {
+    let registry = ConfigurationProviderRegistry::default();
+
+    // tracer_provider: null
+    let yaml = r#"
+file_format: "1.2"
+tracer_provider: null
+"#;
+    let err = TelemetryProviders::configure_from_yaml_str(&registry, yaml).unwrap_err();
+    assert!(err
+        .to_string()
+        .contains("`tracer_provider` is not supported"));
+
+    // logger_provider: null
+    let yaml = r#"
+file_format: "1.2"
+logger_provider: null
+"#;
+    let err = TelemetryProviders::configure_from_yaml_str(&registry, yaml).unwrap_err();
+    assert!(err
+        .to_string()
+        .contains("`logger_provider` is not supported"));
+
+    // metrics: null
+    let yaml = r#"
+file_format: "1.2"
+metrics: null
+"#;
+    let err = TelemetryProviders::configure_from_yaml_str(&registry, yaml).unwrap_err();
+    assert!(err
+        .to_string()
+        .contains("Old 'metrics' configuration format is not supported"));
+
+    // views: null
+    let yaml = r#"
+file_format: "1.2"
+meter_provider:
+  views: null
+  readers:
+    - periodic:
+        exporter:
+          console: {}
+"#;
+    let err = TelemetryProviders::configure_from_yaml_str(&registry, yaml).unwrap_err();
+    assert!(err
+        .to_string()
+        .contains("`meter_provider.views` is not supported"));
+
+    // exemplar_filter: null
+    let yaml = r#"
+file_format: "1.2"
+meter_provider:
+  exemplar_filter: null
+  readers:
+    - periodic:
+        exporter:
+          console: {}
+"#;
+    let err = TelemetryProviders::configure_from_yaml_str(&registry, yaml).unwrap_err();
+    assert!(err
+        .to_string()
+        .contains("`meter_provider.exemplar_filter` is not supported"));
+
+    // periodic.timeout: null
+    let yaml = r#"
+file_format: "1.2"
+meter_provider:
+  readers:
+    - periodic:
+        timeout: null
+        exporter:
+          console: {}
+"#;
+    let err = TelemetryProviders::configure_from_yaml_str(&registry, yaml).unwrap_err();
+    assert!(err
+        .to_string()
+        .contains("periodic reader timeout is not supported"));
+
+    // resource.detection: null
+    let yaml = r#"
+file_format: "1.2"
+resource:
+  detection/development: null
+"#;
+    let err = TelemetryProviders::configure_from_yaml_str(&registry, yaml).unwrap_err();
+    assert!(err
+        .to_string()
+        .contains("`resource.detection` is not supported"));
+
+    // resource.schema_url: null
+    let yaml = r#"
+file_format: "1.2"
+resource:
+  schema_url: null
+"#;
+    let err = TelemetryProviders::configure_from_yaml_str(&registry, yaml).unwrap_err();
+    assert!(err
+        .to_string()
+        .contains("`resource.schema_url` is not supported"));
+
+    // resource.attributes_list: null
+    let yaml = r#"
+file_format: "1.2"
+resource:
+  attributes_list: null
+"#;
+    let err = TelemetryProviders::configure_from_yaml_str(&registry, yaml).unwrap_err();
+    assert!(err
+        .to_string()
+        .contains("`resource.attributes_list` is not supported"));
+
+    // pull reader: null
+    let yaml = r#"
+file_format: "1.2"
+meter_provider:
+  readers:
+    - pull: null
+"#;
+    let err = TelemetryProviders::configure_from_yaml_str(&registry, yaml).unwrap_err();
+    assert!(err.to_string().contains("Pull readers are not supported"));
+}
+
+#[test]
+fn test_validation_custom_push_exporter_values() {
+    let mut registry = ConfigurationProviderRegistry::default();
+    registry.register_metric_exporter_factory(
+        "custom_mock",
+        move |builder: MeterProviderBuilder, _config: &str| Ok(builder),
+    );
+
+    // Valid: custom exporter with object
+    let yaml_obj = r#"
+file_format: "1.2"
+meter_provider:
+  readers:
+    - periodic:
+        exporter:
+          custom_mock: {}
+"#;
+    assert!(TelemetryProviders::configure_from_yaml_str(&registry, yaml_obj).is_ok());
+
+    // Valid: custom exporter with explicit null per v1.2 PushMetricExporter extension rule
+    let yaml_null = r#"
+file_format: "1.2"
+meter_provider:
+  readers:
+    - periodic:
+        exporter:
+          custom_mock: null
+"#;
+    assert!(TelemetryProviders::configure_from_yaml_str(&registry, yaml_null).is_ok());
+
+    // Negative: scalar string
+    let yaml_string = r#"
+file_format: "1.2"
+meter_provider:
+  readers:
+    - periodic:
+        exporter:
+          custom_mock: "invalid_scalar"
+"#;
+    let err = TelemetryProviders::configure_from_yaml_str(&registry, yaml_string).unwrap_err();
+    assert!(err
+        .to_string()
+        .contains("Custom exporter 'custom_mock' configuration must be an object or null"));
+
+    // Negative: scalar integer
+    let yaml_int = r#"
+file_format: "1.2"
+meter_provider:
+  readers:
+    - periodic:
+        exporter:
+          custom_mock: 12345
+"#;
+    let err = TelemetryProviders::configure_from_yaml_str(&registry, yaml_int).unwrap_err();
+    assert!(err
+        .to_string()
+        .contains("Custom exporter 'custom_mock' configuration must be an object or null"));
+
+    // Negative: scalar boolean
+    let yaml_bool = r#"
+file_format: "1.2"
+meter_provider:
+  readers:
+    - periodic:
+        exporter:
+          custom_mock: true
+"#;
+    let err = TelemetryProviders::configure_from_yaml_str(&registry, yaml_bool).unwrap_err();
+    assert!(err
+        .to_string()
+        .contains("Custom exporter 'custom_mock' configuration must be an object or null"));
+
+    // Negative: array sequence
+    let yaml_seq = r#"
+file_format: "1.2"
+meter_provider:
+  readers:
+    - periodic:
+        exporter:
+          custom_mock: [1, 2, 3]
+"#;
+    let err = TelemetryProviders::configure_from_yaml_str(&registry, yaml_seq).unwrap_err();
+    assert!(err
+        .to_string()
+        .contains("Custom exporter 'custom_mock' configuration must be an object or null"));
+}
+
+fn assert_invalid_config(yaml: &str, expected_message: &str) {
+    let registry = ConfigurationProviderRegistry::default();
+    let err = TelemetryProviders::configure_from_yaml_str(&registry, yaml).unwrap_err();
+    assert!(
+        err.to_string().contains(expected_message),
+        "expected error containing {expected_message:?}, got {err}"
+    );
+}
+
+#[test]
 fn test_validation_rejects_unsupported_configuration_fields() {
     let cases = [
         ("propagator: {}", "`propagator` is not supported"),
@@ -827,13 +1385,4 @@ fn test_validation_rejects_invalid_resource_attribute_types() {
         let yaml = format!("file_format: '1.2'\nresource:\n  attributes:\n    - {attribute}\n");
         assert_invalid_config(&yaml, expected_message);
     }
-}
-
-fn assert_invalid_config(yaml: &str, expected_message: &str) {
-    let registry = ConfigurationProviderRegistry::default();
-    let err = TelemetryProviders::configure_from_yaml_str(&registry, yaml).unwrap_err();
-    assert!(
-        err.to_string().contains(expected_message),
-        "expected error containing {expected_message:?}, got {err}"
-    );
 }
