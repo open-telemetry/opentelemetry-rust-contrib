@@ -1,8 +1,24 @@
 //! # Library for declarative configuration of OpenTelemetry.
 //!
-//! This library provides a way to configure OpenTelemetry SDK components
-//! using a declarative approach. It allows users to define configurations
-//! for metrics, traces, and exporters in a structured manner.
+//! This library provides declarative configuration for applications instrumented
+//! with OpenTelemetry, aligned with the OpenTelemetry Declarative Configuration schema
+//! version **v1.2.0**.
+//!
+//! ## Implemented Subset (v1.2.0)
+//! - `file_format: "1.2"`
+//! - `resource`: explicit scalar attributes with declared types (`string`, `bool`, `int`, `double`)
+//! - `meter_provider.readers`: one or more `periodic` readers with:
+//!   - Built-in standard `console` exporter (`console: {}`) with optional `temporality_preference`
+//!   - Configurable non-negative `interval` in milliseconds (schema default: 60000 ms)
+//!   - Custom periodic exporters via [`ConfigurationProviderRegistry::register_metric_exporter_factory`]
+//!
+//! ## Limitations & Unsupported Features
+//! - Periodic reader `timeout` is not supported because the synchronous metric reader in
+//!   OpenTelemetry Rust SDK 0.33 does not enforce collection or export timeouts. Supplying
+//!   `timeout` explicitly returns a validation error.
+//! - Non-default histogram aggregation on console exporter is not supported.
+//! - OTLP HTTP/gRPC, Prometheus, pull readers, views, exemplar filters, logger provider,
+//!   and tracer provider are deferred to future milestones.
 
 use std::{
     collections::HashMap,
