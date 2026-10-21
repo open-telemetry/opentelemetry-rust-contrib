@@ -1,39 +1,69 @@
 //! Metrics Reader Configuration models
 //!
-//! This module defines the configuration structures and factory traits
-//! for Metrics readers used in OpenTelemetry SDKs.
+//! This module defines the configuration structures and validation
+//! for Metrics readers used in OpenTelemetry SDKs according to the v1.2.0 schema.
 
-use std::collections::HashMap;
+use crate::ProviderError;
 
-use serde::Deserialize;
-use serde_yaml::Value;
-
-/// Metrics reader configuration
+/// Supported metric reader configuration.
 #[derive(Debug)]
 pub(crate) enum Reader {
-    Periodic(Value),
-    Pull(Value),
+    Periodic(serde_yaml::Value),
 }
 
-/// Custom deserialization for Reader enum to handle different reader types
-impl<'de> Deserialize<'de> for Reader {
-    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
-    where
-        D: serde::Deserializer<'de>,
-    {
-        let map: HashMap<String, serde_yaml::Value> = HashMap::deserialize(deserializer)?;
+impl Reader {
+    /// Constructs and validates a `Reader` from a parsed YAML Value.
+    pub(crate) fn from_value(value: &serde_yaml::Value) -> Result<Self, ProviderError> {
+        if value.is_null() {
+            return Err(ProviderError::InvalidConfiguration(
+                "Reader must be an object, but got null".to_string(),
+            ));
+        }
 
-        if let Some((key, value)) = map.into_iter().next() {
-            match key.as_str() {
-                "periodic" => Ok(Reader::Periodic(value)),
-                "pull" => Ok(Reader::Pull(value)),
-                _ => Err(serde::de::Error::unknown_variant(
-                    &key,
-                    &["periodic", "pull"],
-                )),
+        let mapping = value.as_mapping().ok_or_else(|| {
+            ProviderError::InvalidConfiguration("Reader must be an object".to_string())
+        })?;
+
+        if mapping.is_empty() {
+            return Err(ProviderError::InvalidConfiguration(
+                "Reader must specify exactly one reader type ('periodic' or 'pull'), found 0"
+                    .to_string(),
+            ));
+        }
+
+        if mapping.len() > 1 {
+            return Err(ProviderError::InvalidConfiguration(format!(
+                "Reader must specify exactly one reader type ('periodic' or 'pull'), found {}",
+                mapping.len()
+            )));
+        }
+
+        let (key_val, val) = mapping.iter().next().unwrap();
+        let key_str = key_val.as_str().ok_or_else(|| {
+            ProviderError::InvalidConfiguration("Reader key must be a string".to_string())
+        })?;
+
+        match key_str {
+            "periodic" => {
+                if val.is_null() {
+                    return Err(ProviderError::InvalidConfiguration(
+                        "Field 'periodic' must be an object, but got null".to_string(),
+                    ));
+                }
+                if !val.is_mapping() {
+                    return Err(ProviderError::InvalidConfiguration(
+                        "Field 'periodic' must be an object".to_string(),
+                    ));
+                }
+                Ok(Reader::Periodic(val.clone()))
             }
-        } else {
-            Err(serde::de::Error::custom("Empty map"))
+            "pull" => Err(ProviderError::InvalidConfiguration(
+                "Pull readers are not supported in this milestone".to_string(),
+            )),
+            unknown => Err(ProviderError::InvalidConfiguration(format!(
+                "Unknown reader type '{}'; expected 'periodic' or 'pull'",
+                unknown
+            ))),
         }
     }
 }
@@ -41,78 +71,11 @@ impl<'de> Deserialize<'de> for Reader {
 #[cfg(test)]
 mod tests {
     use super::*;
-
     #[test]
-    fn test_deserialize_periodic_reader() {
-        let yaml_data = r#"
-        periodic:
-          exporter:
-            console:
-              temporality: cumulative
-        "#;
-        let reader: Reader = serde_yaml::from_str(yaml_data).unwrap();
-        match reader {
-            Reader::Periodic(periodic) => {
-                let exporter = periodic["exporter"].clone();
-                if let serde_yaml::Value::Mapping(exporter_map) = exporter {
-                    assert!(exporter_map
-                        .get(serde_yaml::Value::String("console".to_string()))
-                        .is_some());
-                } else {
-                    panic!("Expected Mapping for exporter");
-                }
-            }
-            _ => panic!("Expected Periodic reader"),
+    fn reader_parser_rejects_invalid_variants() {
+        for yaml in ["{}", "periodic: {}\npull: {}", "unknown: {}", "pull: {}"] {
+            let value = serde_yaml::from_str(yaml).unwrap();
+            assert!(Reader::from_value(&value).is_err());
         }
-    }
-
-    #[test]
-    fn test_deserialize_pull_reader() {
-        let yaml_data = r#"
-        pull:
-          exporter:
-            prometheus:
-              host: "localhost"
-              port: 9090
-        "#;
-        let reader: Reader = serde_yaml::from_str(yaml_data).unwrap();
-        match reader {
-            Reader::Pull(pull) => {
-                let exporter = pull["exporter"].as_mapping().unwrap();
-                assert!(exporter
-                    .get(serde_yaml::Value::String("prometheus".to_string()))
-                    .is_some());
-                let prometheus = exporter
-                    .get(serde_yaml::Value::String("prometheus".to_string()))
-                    .unwrap();
-                if let serde_yaml::Value::Mapping(prometheus_map) = prometheus {
-                    assert_eq!(
-                        prometheus_map
-                            .get(serde_yaml::Value::String("host".to_string()))
-                            .unwrap(),
-                        "localhost"
-                    );
-                    assert_eq!(
-                        prometheus_map
-                            .get(serde_yaml::Value::String("port".to_string()))
-                            .unwrap(),
-                        9090
-                    );
-                } else {
-                    panic!("Expected Mapping for prometheus");
-                }
-            }
-            _ => panic!("Expected Pull reader"),
-        }
-    }
-
-    #[test]
-    fn test_deserialize_invalid_reader() {
-        let yaml_data = r#"
-        unknown:
-          some_field: value
-        "#;
-        let result: Result<Reader, _> = serde_yaml::from_str(yaml_data);
-        assert!(result.is_err());
     }
 }

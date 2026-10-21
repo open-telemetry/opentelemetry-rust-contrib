@@ -13,16 +13,6 @@ pub(crate) struct ResourceConfig {
     pub attributes: Option<Vec<AttributeConfig>>,
 }
 
-impl<'de> Deserialize<'de> for ResourceConfig {
-    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
-    where
-        D: serde::Deserializer<'de>,
-    {
-        let value = serde_yaml::Value::deserialize(deserializer)?;
-        Self::from_value(&value).map_err(serde::de::Error::custom)
-    }
-}
-
 /// The declared type of a resource attribute.
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub(crate) enum AttributeTypeConfig {

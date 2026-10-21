@@ -15,6 +15,7 @@ use crate::{
 };
 
 /// Holds the configured telemetry providers
+#[derive(Debug)]
 pub struct TelemetryProviders {
     meter_provider: Option<SdkMeterProvider>,
     logs_provider: Option<SdkLoggerProvider>,
@@ -49,21 +50,23 @@ impl TelemetryProviders {
         self.traces_provider.as_ref()
     }
 
-    /// Configures the Telemetry providers based on the provided configuration
-    fn configure(
+    /// Configures telemetry providers from a configuration validated by `Telemetry::from_value`.
+    pub(crate) fn configure(
         configuration_registry: &ConfigurationProviderRegistry,
         config: &Telemetry,
     ) -> Result<TelemetryProviders, ProviderError> {
-        let resource: Resource = config.resource.to_resource()?;
+        let resource: Resource = match &config.resource {
+            Some(res_config) => res_config.to_resource()?,
+            None => crate::model::resource::ResourceConfig::default().to_resource()?,
+        };
 
         let meter_provider_option: Option<SdkMeterProvider>;
-        if let Some(metrics_config) = &config.metrics {
-            let mut meter_provider_builder =
-                SdkMeterProvider::builder().with_resource(resource.clone());
+        if let Some(meter_provider_config) = &config.meter_provider {
+            let mut meter_provider_builder = SdkMeterProvider::builder().with_resource(resource);
             meter_provider_builder = MeterProvider::configure(
                 &configuration_registry.metrics,
                 meter_provider_builder,
-                metrics_config,
+                meter_provider_config,
             )?;
             let meter_provider = meter_provider_builder.build();
             meter_provider_option = Some(meter_provider);
@@ -91,12 +94,13 @@ impl TelemetryProviders {
         configuration_registry: &ConfigurationProviderRegistry,
         yaml_str: &str,
     ) -> Result<TelemetryProviders, ProviderError> {
-        let config: crate::model::Telemetry = serde_yaml::from_str(yaml_str).map_err(|e| {
+        let value: serde_yaml::Value = serde_yaml::from_str(yaml_str).map_err(|e| {
             ProviderError::InvalidConfiguration(format!(
                 "Failed to parse YAML configuration: {}",
                 e
             ))
         })?;
+        let config = crate::model::Telemetry::from_value(&value)?;
         Self::configure(configuration_registry, &config)
     }
 }
@@ -150,12 +154,13 @@ mod tests {
     #[test]
     fn test_configure_telemetry_from_yaml() {
         let yaml_str = r#"
-        metrics:    
+        file_format: "1.2"
+        meter_provider:
           readers:
             - periodic:
                 exporter:
                     console:
-                        temporality: delta
+                        temporality_preference: delta
         resource:
           attributes:
             - name: service.name
@@ -182,21 +187,21 @@ mod tests {
     }
 
     #[test]
-    fn test_telemetry_provider_default() {
+    fn test_telemetry_provider_without_meter_provider() {
         let configuration_registry = ConfigurationProviderRegistry::default();
-        let telemetry = Telemetry {
-            resource: crate::model::resource::ResourceConfig::default(),
-            metrics: None,
-        };
+        let value = serde_yaml::from_str("file_format: '1.2'").unwrap();
+        let telemetry = Telemetry::from_value(&value).unwrap();
         let providers = TelemetryProviders::configure(&configuration_registry, &telemetry).unwrap();
-        assert!(providers.meter_provider.is_none());
+        assert!(providers.meter_provider().is_none());
     }
 
     #[test]
-    fn test_telemetry_provider_default_empty_yaml() {
+    fn test_telemetry_provider_missing_file_format() {
         let configuration_registry = ConfigurationProviderRegistry::default();
-        let telemetry: Telemetry = serde_yaml::from_str("").unwrap();
-        let providers = TelemetryProviders::configure(&configuration_registry, &telemetry).unwrap();
-        assert!(providers.meter_provider.is_none());
+        let err =
+            TelemetryProviders::configure_from_yaml_str(&configuration_registry, "").unwrap_err();
+        assert!(err
+            .to_string()
+            .contains("Missing required field `file_format`"));
     }
 }

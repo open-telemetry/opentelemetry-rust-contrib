@@ -26,13 +26,6 @@ impl ReaderProvider {
                     periodic_config,
                 )?;
             }
-            crate::model::metrics::reader::Reader::Pull(pull_config) => {
-                meter_provider_builder = PullReaderProvider::configure(
-                    metrics_registry,
-                    meter_provider_builder,
-                    pull_config,
-                )?;
-            }
         }
         Ok(meter_provider_builder)
     }
@@ -128,53 +121,14 @@ impl PeriodicExporterProvider {
     }
 }
 
-// Pull reader provider
-struct PullReaderProvider {}
-
-impl PullReaderProvider {
-    /// Configures a pull metrics reader based on the provided configuration
-    fn configure(
-        metrics_registry: &MeterProviderRegistry,
-        mut meter_provider_builder: opentelemetry_sdk::metrics::MeterProviderBuilder,
-        config: &Value,
-    ) -> Result<opentelemetry_sdk::metrics::MeterProviderBuilder, ProviderError> {
-        if let Some(exporter_config) = config["exporter"].as_mapping() {
-            meter_provider_builder = PullExporterProvider::configure(
-                metrics_registry,
-                meter_provider_builder,
-                &Value::Mapping(exporter_config.clone()),
-            )?;
-        }
-        Ok(meter_provider_builder)
-    }
-}
-
-/// Pull exporter provider
-struct PullExporterProvider {}
-
-impl PullExporterProvider {
-    /// Configures a pull metrics exporter based on the provided configuration
-    fn configure(
-        _metrics_registry: &MeterProviderRegistry,
-        meter_provider_builder: opentelemetry_sdk::metrics::MeterProviderBuilder,
-        config: &Value,
-    ) -> Result<opentelemetry_sdk::metrics::MeterProviderBuilder, ProviderError> {
-        // TODO: Implement other pull exporters.
-        if let Some(_prometheus_config) = config["prometheus"].as_mapping() {
-            // Explicitly Prometheus exporter is not supported in this provider.
-            return Err(ProviderError::UnsupportedExporter(
-                "Prometheus exporter is not supported.".to_string(),
-            ));
-        }
-        Ok(meter_provider_builder)
-    }
-}
-
 #[cfg(test)]
 mod tests {
 
     use super::*;
     use crate::ConfigurationError;
+    fn parse(yaml: &str) -> Result<Reader, ProviderError> {
+        Reader::from_value(&serde_yaml::from_str(yaml).unwrap())
+    }
     use opentelemetry_sdk::metrics::SdkMeterProvider;
 
     pub fn register_mock_exporter_factory(
@@ -192,13 +146,13 @@ mod tests {
         registry.register_metric_exporter_factory(name, register_mock_exporter_factory);
         let meter_provider_builder = SdkMeterProvider::builder();
 
-        let config: Reader = serde_yaml::from_str(
+        let config = parse(
             r#"
             periodic:
                 interval: 60000
                 exporter:
                     console:
-                        temporality: cumulative
+                        temporality_preference: cumulative
             "#,
         )
         .unwrap();
@@ -213,13 +167,13 @@ mod tests {
         let metrics_registry = MeterProviderRegistry::default();
         let meter_provider_builder = SdkMeterProvider::builder();
 
-        let config: Reader = serde_yaml::from_str(
+        let config = parse(
             r#"
             periodic:
                 interval: 60000
                 exporter:
                     console:
-                        temporality: cumulative
+                        temporality_preference: cumulative
             "#,
         )
         .unwrap();
@@ -240,7 +194,7 @@ mod tests {
         let metrics_registry = MeterProviderRegistry::default();
         let meter_provider_builder = SdkMeterProvider::builder();
 
-        let config: Reader = serde_yaml::from_str(
+        let config = parse(
             r#"
             periodic:
                 interval: 60000
@@ -260,43 +214,5 @@ mod tests {
         } else {
             panic!("Expected error due to missing provider, but got Ok");
         }
-    }
-
-    #[test]
-    fn test_periodic_exporter_provider_configure_unsupported_exporter() {
-        let metrics_provider_manager = MeterProviderRegistry::default();
-        let meter_provider_builder = SdkMeterProvider::builder();
-        let confg_yaml = r#"
-            prometheus:
-                host: localhost
-                port: 9090
-        "#;
-        let config: Value = serde_yaml::from_str(confg_yaml).unwrap();
-        let result = PullExporterProvider::configure(
-            &metrics_provider_manager,
-            meter_provider_builder,
-            &config,
-        );
-        if let Err(e) = result {
-            assert!(e
-                .to_string()
-                .contains("Prometheus exporter is not supported."));
-        } else {
-            panic!("Expected error due to unsupported exporter, but got Ok");
-        }
-    }
-
-    #[test]
-    fn test_pull_reader_provider_configure_basic() {
-        let configuration_registry = crate::ConfigurationProviderRegistry::default();
-        let meter_provider_builder = SdkMeterProvider::builder();
-
-        let config_yaml = "";
-        let config: Value = serde_yaml::from_str(config_yaml).unwrap();
-
-        let metrics_registry = configuration_registry.metrics;
-
-        _ = PullReaderProvider::configure(&metrics_registry, meter_provider_builder, &config)
-            .unwrap();
     }
 }
