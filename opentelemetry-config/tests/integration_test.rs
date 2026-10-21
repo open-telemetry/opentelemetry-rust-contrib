@@ -222,6 +222,112 @@ meter_provider:
 }
 
 #[test]
+fn test_validation_missing_file_format() {
+    let registry = ConfigurationProviderRegistry::default();
+    let yaml = r#"
+meter_provider:
+  readers:
+    - periodic:
+        exporter:
+          console: {}
+"#;
+    let err = TelemetryProviders::configure_from_yaml_str(&registry, yaml).unwrap_err();
+    assert!(err
+        .to_string()
+        .contains("Missing required field `file_format`"));
+}
+
+#[test]
+fn test_validation_unsupported_file_format() {
+    let registry = ConfigurationProviderRegistry::default();
+    let yaml = r#"
+file_format: "1.1"
+meter_provider:
+  readers:
+    - periodic:
+        exporter:
+          console: {}
+"#;
+    let err = TelemetryProviders::configure_from_yaml_str(&registry, yaml).unwrap_err();
+    assert!(err
+        .to_string()
+        .contains("Unsupported file format version '1.1'"));
+}
+
+#[test]
+fn test_validation_old_metrics_format_rejected() {
+    let registry = ConfigurationProviderRegistry::default();
+    let yaml = r#"
+file_format: "1.2"
+metrics:
+  readers:
+    - periodic:
+        exporter:
+          console: {}
+"#;
+    let err = TelemetryProviders::configure_from_yaml_str(&registry, yaml).unwrap_err();
+    assert!(err
+        .to_string()
+        .contains("Old 'metrics' configuration format is not supported"));
+}
+
+#[test]
+fn test_validation_missing_readers() {
+    let registry = ConfigurationProviderRegistry::default();
+    let yaml = r#"
+file_format: "1.2"
+meter_provider: {}
+"#;
+    let err = TelemetryProviders::configure_from_yaml_str(&registry, yaml).unwrap_err();
+    assert!(err
+        .to_string()
+        .contains("Missing required field `meter_provider.readers`"));
+}
+
+#[test]
+fn test_validation_empty_readers() {
+    let registry = ConfigurationProviderRegistry::default();
+    let yaml = r#"
+file_format: "1.2"
+meter_provider:
+  readers: []
+"#;
+    let err = TelemetryProviders::configure_from_yaml_str(&registry, yaml).unwrap_err();
+    assert!(err.to_string().contains("must contain at least one reader"));
+}
+
+#[test]
+fn test_validation_reader_no_variant() {
+    let registry = ConfigurationProviderRegistry::default();
+    let yaml = r#"
+file_format: "1.2"
+meter_provider:
+  readers:
+    - {}
+"#;
+    let err = TelemetryProviders::configure_from_yaml_str(&registry, yaml).unwrap_err();
+    assert!(err.to_string().contains("found 0"));
+}
+
+#[test]
+fn test_validation_reader_multiple_variants() {
+    let registry = ConfigurationProviderRegistry::default();
+    let yaml = r#"
+file_format: "1.2"
+meter_provider:
+  readers:
+    - periodic:
+        exporter:
+          console: {}
+      pull:
+        exporter:
+          prometheus: {}
+"#;
+    let err = TelemetryProviders::configure_from_yaml_str(&registry, yaml).unwrap_err();
+    assert!(err.to_string().contains("found 2"));
+}
+
+#[test]
 fn test_resource_does_not_implicitly_read_env_vars() {
     // If running in child process, execute the test assertion with environment variables active
     if std::env::var("RUN_RESOURCE_ENV_TEST_CHILD").as_deref() == Ok("1") {
@@ -323,5 +429,241 @@ meter_provider:
         "Child test process failed:\nSTDOUT: {}\nSTDERR: {}",
         String::from_utf8_lossy(&output.stdout),
         String::from_utf8_lossy(&output.stderr)
+    );
+}
+
+#[test]
+fn test_validation_explicit_null_on_objects_rejected() {
+    let registry = ConfigurationProviderRegistry::default();
+
+    // meter_provider: null
+    let yaml_null_mp = r#"
+file_format: "1.2"
+meter_provider: null
+"#;
+    let err = TelemetryProviders::configure_from_yaml_str(&registry, yaml_null_mp).unwrap_err();
+    assert!(err
+        .to_string()
+        .contains("Field 'meter_provider' must be an object, but got null"));
+
+    // meter_provider: ~ (YAML tilde null)
+    let yaml_tilde_mp = r#"
+file_format: "1.2"
+meter_provider: ~
+"#;
+    let err = TelemetryProviders::configure_from_yaml_str(&registry, yaml_tilde_mp).unwrap_err();
+    assert!(err
+        .to_string()
+        .contains("Field 'meter_provider' must be an object, but got null"));
+
+    // resource: null
+    let yaml_null_res = r#"
+file_format: "1.2"
+resource: null
+meter_provider:
+  readers:
+    - periodic:
+        exporter:
+          console: {}
+"#;
+    let err = TelemetryProviders::configure_from_yaml_str(&registry, yaml_null_res).unwrap_err();
+    assert!(err
+        .to_string()
+        .contains("Field 'resource' must be an object, but got null"));
+
+    // periodic: null
+    let yaml_null_periodic = r#"
+file_format: "1.2"
+meter_provider:
+  readers:
+    - periodic: null
+"#;
+    let err =
+        TelemetryProviders::configure_from_yaml_str(&registry, yaml_null_periodic).unwrap_err();
+    assert!(err
+        .to_string()
+        .contains("Field 'periodic' must be an object, but got null"));
+
+    // exporter: null
+    let yaml_null_exporter = r#"
+file_format: "1.2"
+meter_provider:
+  readers:
+    - periodic:
+        exporter: null
+"#;
+    let err =
+        TelemetryProviders::configure_from_yaml_str(&registry, yaml_null_exporter).unwrap_err();
+    assert!(err
+        .to_string()
+        .contains("Field 'exporter' must be an object, but got null"));
+
+    // readers: null
+    let yaml_null_readers = r#"
+file_format: "1.2"
+meter_provider:
+  readers: null
+"#;
+    let err =
+        TelemetryProviders::configure_from_yaml_str(&registry, yaml_null_readers).unwrap_err();
+    assert!(err
+        .to_string()
+        .contains("Field 'meter_provider.readers' must be an array, but got null"));
+
+    // attributes: null
+    let yaml_null_attrs = r#"
+file_format: "1.2"
+resource:
+  attributes: null
+meter_provider:
+  readers:
+    - periodic:
+        exporter:
+          console: {}
+"#;
+    let err = TelemetryProviders::configure_from_yaml_str(&registry, yaml_null_attrs).unwrap_err();
+    assert!(err
+        .to_string()
+        .contains("Field 'resource.attributes' must be an array, but got null"));
+}
+
+#[test]
+fn test_validation_rejects_unsupported_configuration_fields() {
+    let cases = [
+        ("propagator: {}", "`propagator` is not supported"),
+        ("disabled: true", "`disabled` is not supported"),
+        ("attribute_limits: {}", "`attribute_limits` is not supported"),
+        ("log_level: info", "`log_level` is not supported"),
+        (
+            "meter_provider:\n  readers: []\n  meter_configurator/development: {}",
+            "`meter_provider.meter_configurator` is not supported",
+        ),
+        (
+            "meter_provider:\n  readers: []\n  view_matching_mode/development: strict",
+            "`meter_provider.view_matching_mode` is not supported",
+        ),
+        (
+            "meter_provider:\n  readers:\n    - periodic:\n        exporter: {console: {}}\n        producers: []",
+            "`periodic.producers` is not supported",
+        ),
+        (
+            "meter_provider:\n  readers:\n    - periodic:\n        exporter: {console: {}}\n        cardinality_limits: {}",
+            "`periodic.cardinality_limits` is not supported",
+        ),
+        (
+            "meter_provider:\n  readers:\n    - periodic:\n        exporter: {console: {}}\n        max_export_batch_size/development: 10",
+            "`periodic.max_export_batch_size` is not supported",
+        ),
+    ];
+
+    for (fields, expected_message) in cases {
+        let yaml = format!("file_format: '1.2'\n{fields}\n");
+        assert_invalid_config(&yaml, expected_message);
+    }
+}
+
+#[test]
+fn test_validation_rejects_malformed_configuration_shapes() {
+    let cases = [
+        ("[]", "Configuration root must be an object"),
+        (
+            "file_format: null",
+            "Field 'file_format' must be a string, but got null",
+        ),
+        ("file_format: true", "Field 'file_format' must be a string"),
+        (
+            "file_format: '1.2'\nunknown_field: value",
+            "Unknown field 'unknown_field' in configuration",
+        ),
+        (
+            "{file_format: '1.2', 1: value}",
+            "Configuration keys must be strings",
+        ),
+        ("file_format: '1.2'\nresource: 1", "Field 'resource' must be an object"),
+        (
+            "file_format: '1.2'\nresource: {1: value}",
+            "Resource keys must be strings",
+        ),
+        (
+            "file_format: '1.2'\nresource:\n  attributes: {}",
+            "Field 'resource.attributes' must be an array",
+        ),
+        (
+            "file_format: '1.2'\nresource:\n  attributes: []",
+            "`resource.attributes` must not be empty",
+        ),
+        (
+            "file_format: '1.2'\nresource:\n  attributes: [null]",
+            "Resource attribute must be an object, but got null",
+        ),
+        (
+            "file_format: '1.2'\nresource:\n  attributes: [scalar]",
+            "Resource attribute must be an object",
+        ),
+        (
+            "file_format: '1.2'\nmeter_provider: 1",
+            "Field 'meter_provider' must be an object",
+        ),
+        (
+            "file_format: '1.2'\nmeter_provider: {1: value}",
+            "MeterProvider keys must be strings",
+        ),
+        (
+            "file_format: '1.2'\nmeter_provider: {unknown: value}",
+            "Unknown field 'meter_provider.unknown'",
+        ),
+        (
+            "file_format: '1.2'\nmeter_provider:\n  readers: {}",
+            "Field 'meter_provider.readers' must be an array",
+        ),
+        (
+            "file_format: '1.2'\nmeter_provider:\n  readers: [null]",
+            "Reader must be an object, but got null",
+        ),
+        (
+            "file_format: '1.2'\nmeter_provider:\n  readers: [scalar]",
+            "Reader must be an object",
+        ),
+        (
+            "file_format: '1.2'\nmeter_provider:\n  readers:\n    - {1: {}}",
+            "Reader key must be a string",
+        ),
+        (
+            "file_format: '1.2'\nmeter_provider:\n  readers:\n    - unknown: {}",
+            "Unknown reader type 'unknown'",
+        ),
+        (
+            "file_format: '1.2'\nmeter_provider:\n  readers:\n    - periodic: []",
+            "Field 'periodic' must be an object",
+        ),
+        (
+            "file_format: '1.2'\nmeter_provider:\n  readers:\n    - periodic:\n        exporter: {console: {}}\n        mystery: true",
+            "Unknown field 'periodic.mystery'",
+        ),
+        (
+            "file_format: '1.2'\nmeter_provider:\n  readers:\n    - periodic:\n        exporter: scalar",
+            "`exporter` in periodic reader must be an object",
+        ),
+        (
+            "file_format: '1.2'\nmeter_provider:\n  readers:\n    - periodic:\n        exporter: {1: {}}",
+            "Exporter name must be a string",
+        ),
+        (
+            "file_format: '1.2'\nmeter_provider:\n  readers:\n    - periodic:\n        exporter:\n          console: {1: value}",
+            "Console configuration keys must be strings",
+        ),
+    ];
+
+    for (yaml, expected_message) in cases {
+        assert_invalid_config(yaml, expected_message);
+    }
+}
+
+fn assert_invalid_config(yaml: &str, expected_message: &str) {
+    let registry = ConfigurationProviderRegistry::default();
+    let err = TelemetryProviders::configure_from_yaml_str(&registry, yaml).unwrap_err();
+    assert!(
+        err.to_string().contains(expected_message),
+        "expected error containing {expected_message:?}, got {err}"
     );
 }
