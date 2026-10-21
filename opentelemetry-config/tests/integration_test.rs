@@ -1386,3 +1386,62 @@ fn test_validation_rejects_invalid_resource_attribute_types() {
         assert_invalid_config(&yaml, expected_message);
     }
 }
+
+#[test]
+fn test_console_interval_environment_fallback() {
+    if std::env::var("RUN_INTERVAL_ENV_TEST_CHILD").as_deref() == Ok("1") {
+        let registry = ConfigurationProviderRegistry::default();
+        for interval in [
+            "",
+            "interval: null",
+            "interval: 0",
+            "interval: 60000",
+            "interval: 5",
+        ] {
+            let yaml = format!(
+                "file_format: '1.2'\nmeter_provider:\n  readers:\n    - periodic:\n        {interval}\n        exporter: {{console: {{}}}}\n"
+            );
+            let providers = TelemetryProviders::configure_from_yaml_str(&registry, &yaml).unwrap();
+            let provider = providers.meter_provider().unwrap();
+            let (sender, receiver) = std::sync::mpsc::channel();
+            let _counter = provider
+                .meter("interval_test")
+                .u64_observable_counter("collections")
+                .with_callback(move |observer| {
+                    observer.observe(1, &[]);
+                    let _ = sender.send(());
+                })
+                .build();
+
+            if matches!(interval, "interval: 0" | "interval: 5") {
+                receiver
+                    .recv_timeout(Duration::from_secs(5))
+                    .expect("zero and short intervals should trigger collection");
+            } else {
+                assert_eq!(
+                    receiver.recv_timeout(Duration::from_millis(100)),
+                    Err(std::sync::mpsc::RecvTimeoutError::Timeout),
+                    "{interval:?} unexpectedly used the 1 ms environment interval"
+                );
+            }
+            provider.shutdown().unwrap();
+        }
+        return;
+    }
+
+    let output = std::process::Command::new(std::env::current_exe().unwrap())
+        .arg("--exact")
+        .arg("test_console_interval_environment_fallback")
+        .arg("--nocapture")
+        .env("RUN_INTERVAL_ENV_TEST_CHILD", "1")
+        .env("OTEL_METRIC_EXPORT_INTERVAL", "1")
+        .output()
+        .expect("child process should execute successfully");
+
+    assert!(
+        output.status.success(),
+        "Child test process failed:\nSTDOUT: {}\nSTDERR: {}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+}
