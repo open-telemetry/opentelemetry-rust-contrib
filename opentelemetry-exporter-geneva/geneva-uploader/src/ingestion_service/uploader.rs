@@ -51,8 +51,19 @@ pub(crate) enum GenevaUploaderError {
 
 impl From<GenevaConfigClientError> for GenevaUploaderError {
     fn from(err: GenevaConfigClientError) -> Self {
-        // This preserves the original error message format from the code
-        GenevaUploaderError::ConfigClient(format!("GenevaConfigClient error: {err}"))
+        let mut message = format!("GenevaConfigClient error: {err}");
+
+        if let GenevaConfigClientError::ExternalTokenProvider(provider_error) = &err {
+            let mut source = provider_error.source();
+            let mut index = 0;
+            while let Some(cause) = source {
+                write!(message, ", cause[{index}]: {cause}").ok();
+                source = cause.source();
+                index += 1;
+            }
+        }
+
+        GenevaUploaderError::ConfigClient(message)
     }
 }
 

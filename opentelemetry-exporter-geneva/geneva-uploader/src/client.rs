@@ -847,6 +847,36 @@ mod tests {
         }
     }
 
+    #[derive(Debug)]
+    struct NestedTokenProviderError {
+        source: std::io::Error,
+    }
+
+    impl fmt::Display for NestedTokenProviderError {
+        fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+            f.write_str("token provider context")
+        }
+    }
+
+    impl std::error::Error for NestedTokenProviderError {
+        fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+            Some(&self.source)
+        }
+    }
+
+    #[derive(Debug)]
+    struct FailingGcsTokenProvider;
+
+    impl crate::GcsTokenProvider for FailingGcsTokenProvider {
+        fn get_token<'a>(&'a self, _resource: &'a str) -> crate::GcsTokenFuture<'a> {
+            Box::pin(async {
+                Err(Box::new(NestedTokenProviderError {
+                    source: std::io::Error::other("nested token acquisition failure"),
+                }) as crate::GcsTokenProviderError)
+            })
+        }
+    }
+
     fn build_config(logs: Option<&str>, spans: Option<&str>) -> GenevaClientConfig {
         GenevaClientConfig {
             endpoint: "https://example.test".to_string(),
@@ -893,6 +923,43 @@ mod tests {
         };
 
         assert!(error.contains("resource must not be empty"));
+    }
+
+    #[tokio::test]
+    async fn upload_error_preserves_nested_external_token_provider_failure() {
+        let mut config = build_config(Some("Log"), None);
+        config.auth_method = AuthMethod::ExternalToken {
+            resource: "https://monitor.azure.com".to_string(),
+            provider: Arc::new(FailingGcsTokenProvider),
+        };
+        let client = GenevaClient::new(config).expect("client should initialize");
+
+        let request = ExportLogsServiceRequest {
+            resource_logs: vec![ResourceLogs {
+                scope_logs: vec![ScopeLogs {
+                    log_records: vec![LogRecord::default()],
+                    ..Default::default()
+                }],
+                ..Default::default()
+            }],
+        };
+        let bytes = request.encode_to_vec();
+        let view = RawLogsData::new(&bytes);
+        let batch = client
+            .encode_and_compress_logs(&view)
+            .expect("log encoding should succeed")
+            .pop()
+            .expect("one log batch should be encoded");
+
+        let error = client
+            .upload_batch(&batch)
+            .await
+            .expect_err("provider failure should fail the upload");
+
+        assert!(matches!(error, UploadError::Other(_)));
+        assert!(error
+            .to_string()
+            .contains("nested token acquisition failure"));
     }
 
     /// Scenario: Geneva transport uses a GCS environment and configuration version.
