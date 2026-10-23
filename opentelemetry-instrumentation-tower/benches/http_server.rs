@@ -176,24 +176,25 @@ fn benchmark_http_server(c: &mut Criterion) {
     let mut group = c.benchmark_group("tower-http-server");
     group.throughput(Throughput::Elements(1));
 
-    let session = &Session::new();
+    let alloc_session = &Session::new();
 
     // Scenario 1: Baseline - no middleware
     group.bench_function(BenchmarkId::new("request", "baseline"), |b| {
         let mut service = tower::service_fn(handler);
         rt.block_on(service.ready()).unwrap();
-        let operation = session.operation("baseline");
+        let alloc_op = alloc_session.operation("baseline");
         b.to_async(&rt).iter_batched(
             || build_request("http://example.com/users/123"),
             |req| {
-                let span = operation.measure_thread();
+                let alloc_span = alloc_op.measure_thread();
                 let response = service.call(req);
                 async move {
                     let response = black_box(response.await.unwrap());
-                    (response, span.iterations(1))
+                    _ = alloc_span.iterations(1); // Measurement span must move into block and drop
+                    response
                 }
             },
-            BatchSize::PerIteration,
+            BatchSize::SmallInput,
         );
     });
 
@@ -210,18 +211,19 @@ fn benchmark_http_server(c: &mut Criterion) {
             .layer(layer)
             .service(tower::service_fn(handler));
         rt.block_on(service.ready()).unwrap();
-        let operation = session.operation("noop");
+        let alloc_op = alloc_session.operation("noop");
         b.to_async(&rt).iter_batched(
             || build_request("http://example.com/users/123"),
             |req| {
-                let span = operation.measure_thread();
+                let alloc_span = alloc_op.measure_thread();
                 let response = service.call(req);
                 async move {
                     let response = black_box(response.await.unwrap());
-                    (response, span.iterations(1))
+                    _ = alloc_span.iterations(1); // Measurement span must move into block and drop
+                    response
                 }
             },
-            BatchSize::PerIteration,
+            BatchSize::SmallInput,
         );
     });
 
@@ -233,18 +235,19 @@ fn benchmark_http_server(c: &mut Criterion) {
             .layer(layer.clone())
             .service(tower::service_fn(handler));
         rt.block_on(service.ready()).unwrap();
-        let operation = session.operation("tracing");
+        let alloc_op = alloc_session.operation("tracing");
         b.to_async(&rt).iter_batched(
             || build_request("http://example.com/users/123"),
             |req| {
-                let span = operation.measure_thread();
+                let alloc_span = alloc_op.measure_thread();
                 let response = service.call(req);
                 async move {
                     let response = black_box(response.await.unwrap());
-                    (response, span.iterations(1))
+                    _ = alloc_span.iterations(1); // Measurement span must move into block and drop
+                    response
                 }
             },
-            BatchSize::PerIteration,
+            BatchSize::SmallInput,
         );
     });
 
@@ -257,18 +260,19 @@ fn benchmark_http_server(c: &mut Criterion) {
             .layer(layer.clone())
             .service(tower::service_fn(handler));
         rt.block_on(service.ready()).unwrap();
-        let operation = session.operation("tracing-query");
+        let alloc_op = alloc_session.operation("tracing-query");
         b.to_async(&rt).iter_batched(
             || build_request("http://example.com/users/123?fields=name&verbose=true"),
             |req| {
-                let span = operation.measure_thread();
+                let alloc_span = alloc_op.measure_thread();
                 let response = service.call(req);
                 async move {
                     let response = black_box(response.await.unwrap());
-                    (response, span.iterations(1))
+                    _ = alloc_span.iterations(1); // Measurement span must move into block and drop
+                    response
                 }
             },
-            BatchSize::PerIteration,
+            BatchSize::SmallInput,
         );
     });
 
@@ -281,18 +285,19 @@ fn benchmark_http_server(c: &mut Criterion) {
             .layer(layer.clone())
             .service(tower::service_fn(handler));
         rt.block_on(service.ready()).unwrap();
-        let operation = session.operation("tracing-query-redacted");
+        let alloc_op = alloc_session.operation("tracing-query-redacted");
         b.to_async(&rt).iter_batched(
             || build_request("http://example.com/users/123?fields=name&sig=secret-signature"),
             |req| {
-                let span = operation.measure_thread();
+                let alloc_span = alloc_op.measure_thread();
                 let response = service.call(req);
                 async move {
                     let response = black_box(response.await.unwrap());
-                    (response, span.iterations(1))
+                    _ = alloc_span.iterations(1); // Measurement span must move into block and drop
+                    response
                 }
             },
-            BatchSize::PerIteration,
+            BatchSize::SmallInput,
         );
     });
 
@@ -304,18 +309,19 @@ fn benchmark_http_server(c: &mut Criterion) {
             .layer(layer.clone())
             .service(tower::service_fn(handler));
         rt.block_on(service.ready()).unwrap();
-        let operation = session.operation("tracing-sampled-out");
+        let alloc_op = alloc_session.operation("tracing-sampled-out");
         b.to_async(&rt).iter_batched(
             || build_request("http://example.com/users/123"),
             |req| {
-                let span = operation.measure_thread();
+                let alloc_span = alloc_op.measure_thread();
                 let response = service.call(req);
                 async move {
                     let response = black_box(response.await.unwrap());
-                    (response, span.iterations(1))
+                    _ = alloc_span.iterations(1); // Measurement span must move into block and drop
+                    response
                 }
             },
-            BatchSize::PerIteration,
+            BatchSize::SmallInput,
         );
     });
 
@@ -328,18 +334,19 @@ fn benchmark_http_server(c: &mut Criterion) {
             .layer(layer.clone())
             .service(tower::service_fn(handler));
         rt.block_on(service.ready()).unwrap();
-        let operation = session.operation("metrics");
+        let alloc_op = alloc_session.operation("metrics");
         b.to_async(&rt).iter_batched(
             || build_request("http://example.com/users/123"),
             |req| {
-                let span = operation.measure_thread();
+                let alloc_span = alloc_op.measure_thread();
                 let response = service.call(req);
                 async move {
                     let response = black_box(response.await.unwrap());
-                    (response, span.iterations(1))
+                    _ = alloc_span.iterations(1); // Measurement span must move into block and drop
+                    response
                 }
             },
-            BatchSize::PerIteration,
+            BatchSize::SmallInput,
         );
     });
 
@@ -352,18 +359,19 @@ fn benchmark_http_server(c: &mut Criterion) {
             .layer(layer.clone())
             .service(tower::service_fn(handler));
         rt.block_on(service.ready()).unwrap();
-        let operation = session.operation("tracing+metrics");
+        let alloc_op = alloc_session.operation("tracing+metrics");
         b.to_async(&rt).iter_batched(
             || build_request("http://example.com/users/123"),
             |req| {
-                let span = operation.measure_thread();
+                let alloc_span = alloc_op.measure_thread();
                 let response = service.call(req);
                 async move {
                     let response = black_box(response.await.unwrap());
-                    (response, span.iterations(1))
+                    _ = alloc_span.iterations(1); // Measurement span must move into block and drop
+                    response
                 }
             },
-            BatchSize::PerIteration,
+            BatchSize::SmallInput,
         );
     });
 }
