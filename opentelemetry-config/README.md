@@ -25,7 +25,7 @@ The configuration model targets the official [OpenTelemetry Configuration Schema
 ### Implemented Subset (v1.2.0)
 
 - **Root schema**:
-  - `file_format: "1.2"` (required)
+  - `file_format` is required; `1.0`, `1.1`, and `1.2` are accepted. Newer `1.x` versions are accepted with a warning; unsupported fields still fail validation.
 - **Resource attributes**:
   - `resource.attributes`: list of `{ name, value, type? }` entries
   - Explicit scalar attribute types: `string` (default), `bool`, `int` (64-bit integer), and `double` (64-bit float)
@@ -117,16 +117,17 @@ cargo run -p opentelemetry-config --example console
 External or experimental periodic exporters can be plugged into the declarative configuration using the provider registry:
 
 ```rust
-use opentelemetry_config::{ConfigurationProviderRegistry, ConfigurationError};
-use opentelemetry_sdk::metrics::MeterProviderBuilder;
+use opentelemetry_config::ConfigurationProviderRegistry;
+use opentelemetry_stdout::MetricExporter;
 
 let mut registry = ConfigurationProviderRegistry::default();
 
-registry.register_metric_exporter_factory("my_custom_exporter", |builder: MeterProviderBuilder, periodic_yaml: &str| {
-    // Deserialize custom configuration from periodic_yaml and attach reader to builder
-    Ok(builder)
+registry.register_metric_exporter_factory("my_console", |_config| {
+    Ok(MetricExporter::default())
 });
 ```
+
+Factories receive only the YAML value under their exporter name and return a `PushMetricExporter`. The crate constructs periodic readers for both built-in and custom exporters, applies the resolved interval, and shuts down previously created readers if a later factory fails. Factories no longer receive or return a `MeterProviderBuilder`.
 
 See [examples/custom](examples/custom) for a full runnable custom exporter example.
 
@@ -137,7 +138,8 @@ To avoid silent configuration drift or unexpected runtime behavior, the crate pe
 | Rule | Behavior |
 |---|---|
 | Missing `file_format` | Rejected with `InvalidConfiguration("Missing required field 'file_format'")` |
-| Unsupported `file_format` | Any value other than `"1.2"` is rejected |
+| `file_format` compatibility | Accepts `1.<minor>`; newer minors warn through OpenTelemetry internal logging. Malformed versions and other major versions are rejected. |
+| Environment references | Values containing `${` are rejected; environment substitution is deferred. |
 | Old `metrics` key | Rejected with an informative message instructing to use `meter_provider` |
 | Empty or missing `readers` | Rejected; `meter_provider.readers` must contain at least one reader |
 | Reader cardinality | Each reader must contain exactly one variant (`periodic` or `pull`) |
@@ -153,7 +155,8 @@ To avoid silent configuration drift or unexpected runtime behavior, the crate pe
 ## Known SDK Limitations
 
 - **Synchronous Periodic Reader Timeout**: The upstream OpenTelemetry configuration schema specifies an optional `timeout` on periodic readers. However, the synchronous `PeriodicReader` in OpenTelemetry Rust SDK 0.33 does not enforce collection or export timeouts. Rather than silently ignoring this option and giving a false expectation of timeout enforcement, explicitly specifying `timeout` returns an `InvalidConfiguration` error in this milestone.
-- **Interval = 0**: The schema permits an `interval` of 0 ms. The built-in console reader uses 60 seconds for this value, explicitly overriding `OTEL_METRIC_EXPORT_INTERVAL`.
+- **Interval = 0**: The schema permits an `interval` of 0 ms. Both built-in and custom readers use 60 seconds for zero, omitted, or null intervals, explicitly overriding `OTEL_METRIC_EXPORT_INTERVAL`.
+- **Environment Substitution**: Environment references such as `${env:SERVICE_NAME}` and `${env:INTERVAL:-60000}` are not expanded. Values containing `${`, including escaped references, are rejected before creating providers. Resolve these values before loading the configuration. Comments and plain dollar signs are unaffected.
 
 ## Deferred Features (Future Milestones)
 

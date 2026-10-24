@@ -21,8 +21,19 @@ impl MeterProvider {
         config: &MeterProviderConfig,
     ) -> Result<MeterProviderBuilder, ProviderError> {
         for reader in &config.readers {
-            meter_provider_builder =
-                ReaderProvider::configure(metrics_registry, meter_provider_builder, reader)?;
+            if let Err(error) =
+                ReaderProvider::configure(metrics_registry, &mut meter_provider_builder, reader)
+            {
+                // Give the readers a pipeline before asking the SDK to shut them down.
+                let provider = meter_provider_builder.build();
+                if let Err(shutdown_error) = provider.shutdown() {
+                    opentelemetry::otel_warn!(
+                        name: "Configuration.ReaderShutdownFailed",
+                        error = shutdown_error.to_string(),
+                    );
+                }
+                return Err(error);
+            }
         }
 
         Ok(meter_provider_builder)
@@ -48,7 +59,7 @@ mod tests {
         let registry = MeterProviderRegistry::default();
         let meter_provider_builder = SdkMeterProvider::builder();
         let result = MeterProvider::configure(&registry, meter_provider_builder, &metrics_config);
-        assert!(result.is_ok());
+        result.unwrap().build().shutdown().unwrap();
     }
 
     #[test]

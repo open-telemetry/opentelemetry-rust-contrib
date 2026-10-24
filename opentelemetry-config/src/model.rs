@@ -107,11 +107,23 @@ impl Telemetry {
             ProviderError::InvalidConfiguration("Field 'file_format' must be a string".to_string())
         })?;
 
-        if file_format != "1.2" {
-            return Err(ProviderError::InvalidConfiguration(format!(
-                "Unsupported file format version '{}'; expected '1.2'",
-                file_format
-            )));
+        let minor = file_format
+            .strip_prefix("1.")
+            .filter(|minor| !minor.is_empty() && minor.bytes().all(|byte| byte.is_ascii_digit()))
+            .and_then(|minor| minor.parse::<u64>().ok())
+            .ok_or_else(|| {
+                ProviderError::InvalidConfiguration(format!(
+                    "Unsupported file format version '{}'; expected '1.<minor>'",
+                    file_format
+                ))
+            })?;
+
+        if minor > 2 {
+            opentelemetry::otel_warn!(
+                name: "Configuration.NewerFileFormat",
+                version = file_format,
+                message = "Configuration targets a newer minor version than 1.2; unsupported fields will be rejected",
+            );
         }
 
         // 5. Validate resource (if present, must be an object and not null)
@@ -201,7 +213,7 @@ mod tests {
     #[test]
     fn test_unsupported_file_format() {
         let yaml_str = r#"
-          file_format: "1.0"
+          file_format: "2.0"
           meter_provider:
             readers:
               - periodic:
@@ -211,7 +223,7 @@ mod tests {
         let err = parse(yaml_str).unwrap_err();
         assert!(err
             .to_string()
-            .contains("Unsupported file format version '1.0'"));
+            .contains("Unsupported file format version '2.0'"));
     }
 
     #[test]

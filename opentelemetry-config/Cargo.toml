@@ -18,6 +18,10 @@ rust-version = "1.75.0"
 all-features = true
 rustdoc-args = ["--cfg", "docsrs"]
 
+[features]
+default = ["internal-logs"]
+internal-logs = ["opentelemetry/internal-logs"]
+
 [dependencies]
 opentelemetry = { workspace = true }
 opentelemetry-stdout = { workspace = true, features = ["metrics"] }

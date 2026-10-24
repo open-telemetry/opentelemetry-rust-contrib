@@ -55,10 +55,7 @@ impl Reader {
                         "Field 'periodic' must be an object".to_string(),
                     ));
                 }
-                let raw_yaml = serde_yaml::to_string(val)
-                    .map_err(|e| ProviderError::InvalidConfiguration(e.to_string()))?;
-                let mut config = PeriodicReaderConfig::from_value(val)?;
-                config.raw_yaml = raw_yaml;
+                let config = PeriodicReaderConfig::from_value(val)?;
                 Ok(Reader::Periodic(Box::new(config)))
             }
             "pull" => Err(ProviderError::InvalidConfiguration(
@@ -80,9 +77,6 @@ pub(crate) struct PeriodicReaderConfig {
 
     /// Configured exporter (required).
     pub exporter: Option<serde_yaml::Value>,
-
-    /// Raw YAML representation of the periodic reader configuration for custom factory callbacks.
-    pub raw_yaml: String,
 }
 
 impl PeriodicReaderConfig {
@@ -169,7 +163,6 @@ impl PeriodicReaderConfig {
         let config = PeriodicReaderConfig {
             interval,
             exporter: Some(exporter_val.clone()),
-            raw_yaml: String::new(),
         };
 
         config.validate()?;

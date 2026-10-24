@@ -4,14 +4,14 @@ use std::time::Duration;
 
 use opentelemetry::{metrics::MeterProvider as _, KeyValue};
 use opentelemetry_config::{
-    providers::TelemetryProviders, ConfigurationProviderRegistry, ProviderError,
+    providers::TelemetryProviders, ConfigurationError, ConfigurationProviderRegistry, ProviderError,
 };
 use opentelemetry_sdk::{
-    error::OTelSdkResult,
+    error::{OTelSdkError, OTelSdkResult},
     metrics::{
         data::{AggregatedMetrics, MetricData, ResourceMetrics},
         exporter::PushMetricExporter,
-        MeterProviderBuilder, PeriodicReader, Temporality,
+        Temporality,
     },
 };
 
@@ -19,6 +19,8 @@ use opentelemetry_sdk::{
 struct CapturedData {
     resource_attributes: Vec<(String, String)>,
     metrics: Vec<(String, u64)>,
+    shutdown_count: usize,
+    fail_shutdown: bool,
 }
 
 #[derive(Clone)]
@@ -55,7 +57,13 @@ impl PushMetricExporter for TestMetricExporter {
     }
 
     fn shutdown(&self) -> OTelSdkResult {
-        Ok(())
+        let mut captured = self.captured.lock().unwrap();
+        captured.shutdown_count += 1;
+        if captured.fail_shutdown {
+            Err(OTelSdkError::InternalFailure("shutdown failed".to_string()))
+        } else {
+            Ok(())
+        }
     }
 
     fn shutdown_with_timeout(&self, _timeout: Duration) -> OTelSdkResult {
@@ -75,20 +83,14 @@ fn test_end_to_end_metric_recording_export_and_resource_attributes() {
     let mut registry = ConfigurationProviderRegistry::default();
     registry.register_metric_exporter_factory(
         "test_recorder",
-        move |builder: MeterProviderBuilder, config: &str| {
-            let config: serde_yaml::Value = serde_yaml::from_str(config).unwrap();
-            assert_eq!(config["interval"].as_u64(), Some(10_000));
+        move |config: &serde_yaml::Value| {
             assert_eq!(
-                config["exporter"]["test_recorder"],
-                serde_yaml::Value::Mapping(serde_yaml::Mapping::new())
+                config,
+                &serde_yaml::Value::Mapping(serde_yaml::Mapping::new())
             );
-            let exporter = TestMetricExporter {
+            Ok(TestMetricExporter {
                 captured: Arc::clone(&captured_clone),
-            };
-            let reader = PeriodicReader::builder(exporter)
-                .with_interval(Duration::from_millis(config["interval"].as_u64().unwrap()))
-                .build();
-            Ok(builder.with_reader(reader))
+            })
         },
     );
 
@@ -243,7 +245,7 @@ meter_provider:
 fn test_validation_unsupported_file_format() {
     let registry = ConfigurationProviderRegistry::default();
     let yaml = r#"
-file_format: "1.1"
+file_format: "2.0"
 meter_provider:
   readers:
     - periodic:
@@ -253,7 +255,7 @@ meter_provider:
     let err = TelemetryProviders::configure_from_yaml_str(&registry, yaml).unwrap_err();
     assert!(err
         .to_string()
-        .contains("Unsupported file format version '1.1'"));
+        .contains("Unsupported file format version '2.0'"));
 }
 
 #[test]
@@ -620,14 +622,10 @@ fn test_resource_does_not_implicitly_read_env_vars() {
         let mut registry = ConfigurationProviderRegistry::default();
         registry.register_metric_exporter_factory(
             "test_recorder",
-            move |builder: MeterProviderBuilder, _config: &str| {
-                let exporter = TestMetricExporter {
+            move |_config: &serde_yaml::Value| {
+                Ok(TestMetricExporter {
                     captured: Arc::clone(&captured_clone),
-                };
-                let reader = PeriodicReader::builder(exporter)
-                    .with_interval(Duration::from_millis(60_000))
-                    .build();
-                Ok(builder.with_reader(reader))
+                })
             },
         );
 
@@ -1113,10 +1111,11 @@ meter_provider:
 #[test]
 fn test_validation_custom_push_exporter_values() {
     let mut registry = ConfigurationProviderRegistry::default();
-    registry.register_metric_exporter_factory(
-        "custom_mock",
-        move |builder: MeterProviderBuilder, _config: &str| Ok(builder),
-    );
+    registry.register_metric_exporter_factory("custom_mock", move |_config: &serde_yaml::Value| {
+        Ok(TestMetricExporter {
+            captured: Arc::new(Mutex::new(CapturedData::default())),
+        })
+    });
 
     // Valid: custom exporter with object
     let yaml_obj = r#"
@@ -1388,50 +1387,58 @@ fn test_validation_rejects_invalid_resource_attribute_types() {
 }
 
 #[test]
-fn test_console_interval_overrides_environment() {
+fn test_periodic_intervals_override_environment() {
     if std::env::var("RUN_INTERVAL_ENV_TEST_CHILD").as_deref() == Ok("1") {
-        let registry = ConfigurationProviderRegistry::default();
-        for interval in [
-            "",
-            "interval: null",
-            "interval: 0",
-            "interval: 60000",
-            "interval: 5",
-        ] {
-            let yaml = format!(
-                "file_format: '1.2'\nmeter_provider:\n  readers:\n    - periodic:\n        {interval}\n        exporter: {{console: {{}}}}\n"
-            );
-            let providers = TelemetryProviders::configure_from_yaml_str(&registry, &yaml).unwrap();
-            let provider = providers.meter_provider().unwrap();
-            let (sender, receiver) = std::sync::mpsc::channel();
-            let _counter = provider
-                .meter("interval_test")
-                .u64_observable_counter("collections")
-                .with_callback(move |observer| {
-                    observer.observe(1, &[]);
-                    let _ = sender.send(());
-                })
-                .build();
-
-            if interval == "interval: 5" {
-                receiver
-                    .recv_timeout(Duration::from_secs(5))
-                    .expect("the configured short interval should trigger collection");
-            } else {
-                assert_eq!(
-                    receiver.recv_timeout(Duration::from_millis(100)),
-                    Err(std::sync::mpsc::RecvTimeoutError::Timeout),
-                    "{interval:?} unexpectedly used the 1 ms environment interval"
+        let mut registry = ConfigurationProviderRegistry::default();
+        registry.register_metric_exporter_factory("test_recorder", |_| {
+            Ok(TestMetricExporter {
+                captured: Arc::new(Mutex::new(CapturedData::default())),
+            })
+        });
+        for exporter in ["console", "test_recorder"] {
+            for interval in [
+                "",
+                "interval: null",
+                "interval: 0",
+                "interval: 60000",
+                "interval: 5",
+            ] {
+                let yaml = format!(
+                    "file_format: '1.2'\nmeter_provider:\n  readers:\n    - periodic:\n        {interval}\n        exporter: {{{exporter}: {{}}}}\n"
                 );
+                let providers =
+                    TelemetryProviders::configure_from_yaml_str(&registry, &yaml).unwrap();
+                let provider = providers.meter_provider().unwrap();
+                let (sender, receiver) = std::sync::mpsc::channel();
+                let _counter = provider
+                    .meter("interval_test")
+                    .u64_observable_counter("collections")
+                    .with_callback(move |observer| {
+                        observer.observe(1, &[]);
+                        let _ = sender.send(());
+                    })
+                    .build();
+
+                if interval == "interval: 5" {
+                    receiver
+                        .recv_timeout(Duration::from_secs(5))
+                        .expect("the configured short interval should trigger collection");
+                } else {
+                    assert_eq!(
+                        receiver.recv_timeout(Duration::from_millis(100)),
+                        Err(std::sync::mpsc::RecvTimeoutError::Timeout),
+                        "{exporter} with {interval:?} unexpectedly used the 1 ms environment interval"
+                    );
+                }
+                provider.shutdown().unwrap();
             }
-            provider.shutdown().unwrap();
         }
         return;
     }
 
     let output = std::process::Command::new(std::env::current_exe().unwrap())
         .arg("--exact")
-        .arg("test_console_interval_overrides_environment")
+        .arg("test_periodic_intervals_override_environment")
         .arg("--nocapture")
         .env("RUN_INTERVAL_ENV_TEST_CHILD", "1")
         .env("OTEL_METRIC_EXPORT_INTERVAL", "1")
@@ -1444,4 +1451,136 @@ fn test_console_interval_overrides_environment() {
         String::from_utf8_lossy(&output.stdout),
         String::from_utf8_lossy(&output.stderr)
     );
+}
+
+#[test]
+fn test_configuration_failure_shuts_down_all_started_readers() {
+    for fail_shutdown in [false, true] {
+        for failure in ["unregistered", "invalid", "registration"] {
+            let first = Arc::new(Mutex::new(CapturedData {
+                fail_shutdown,
+                ..CapturedData::default()
+            }));
+            let second = Arc::new(Mutex::new(CapturedData::default()));
+            let mut registry = ConfigurationProviderRegistry::default();
+            for (name, captured) in [("first", &first), ("second", &second)] {
+                let captured = Arc::clone(captured);
+                registry.register_metric_exporter_factory(name, move |_| {
+                    Ok(TestMetricExporter {
+                        captured: Arc::clone(&captured),
+                    })
+                });
+            }
+            registry.register_metric_exporter_factory("invalid", |_| {
+                Err::<TestMetricExporter, _>(ConfigurationError::InvalidConfiguration(
+                    "exporter configuration failed".to_string(),
+                ))
+            });
+            registry.register_metric_exporter_factory("registration", |_| {
+                Err::<TestMetricExporter, _>(ConfigurationError::RegistrationError(
+                    "exporter registration failed".to_string(),
+                ))
+            });
+
+            let yaml = format!(
+                "file_format: '1.2'
+meter_provider:
+  readers:
+    - periodic:
+        exporter: {{console: {{}}}}
+    - periodic:
+        exporter: {{first: {{}}}}
+    - periodic:
+        exporter: {{second: {{}}}}
+    - periodic:
+        exporter: {{{failure}: {{}}}}
+"
+            );
+            let error = TelemetryProviders::configure_from_yaml_str(&registry, &yaml).unwrap_err();
+            match (failure, error) {
+                ("unregistered", ProviderError::NotRegisteredProvider(message)) => {
+                    assert!(message.contains("unregistered"));
+                }
+                ("invalid", ProviderError::InvalidConfiguration(message)) => {
+                    assert_eq!(message, "exporter configuration failed");
+                }
+                ("registration", ProviderError::RegistrationError(message)) => {
+                    assert_eq!(message, "exporter registration failed");
+                }
+                (_, error) => panic!("unexpected error for {failure}: {error:?}"),
+            }
+            assert_eq!(first.lock().unwrap().shutdown_count, 1);
+            assert_eq!(second.lock().unwrap().shutdown_count, 1);
+        }
+    }
+}
+
+#[test]
+fn test_compatible_file_formats_accept_supported_fields() {
+    let registry = ConfigurationProviderRegistry::default();
+    for version in ["1.0", "1.1", "1.2", "1.3", "1.10"] {
+        let yaml = format!(
+            "file_format: '{version}'
+meter_provider:
+  readers:
+    - periodic:
+        exporter: {{console: {{}}}}
+"
+        );
+        let providers = TelemetryProviders::configure_from_yaml_str(&registry, &yaml).unwrap();
+        providers.meter_provider().unwrap().shutdown().unwrap();
+        assert_invalid_config(
+            &format!("{yaml}  views: []\n"),
+            "`meter_provider.views` is not supported",
+        );
+    }
+}
+
+#[test]
+fn test_malformed_and_incompatible_file_formats_are_rejected() {
+    for version in [
+        "", "1", "1.", "1.x", "1.-1", "1.+1", "1.2.0", "1.2 ", "v1.2", "0.2", "2.0",
+    ] {
+        assert_invalid_config(
+            &format!("file_format: '{version}'"),
+            "Unsupported file format version",
+        );
+    }
+}
+
+#[test]
+fn test_environment_references_are_rejected_before_factories_run() {
+    let mut registry = ConfigurationProviderRegistry::default();
+    registry.register_metric_exporter_factory(
+        "test_recorder",
+        |_| -> Result<TestMetricExporter, ConfigurationError> {
+            panic!("environment references must be rejected before creating exporters");
+        },
+    );
+    for fields in [
+        "resource:\n  attributes: [{name: service.name, value: '${env:SERVICE_NAME}'}]",
+        "resource:\n  attributes: [{name: service.name, value: '$${env:SERVICE_NAME}'}]",
+        "meter_provider:\n  readers:\n    - periodic:\n        interval: '${env:INTERVAL:-60000}'\n        exporter: {test_recorder: {}}",
+        "meter_provider:\n  readers:\n    - periodic:\n        exporter: {test_recorder: {nested: ['${SERVICE_NAME}']}}",
+    ] {
+        let error = TelemetryProviders::configure_from_yaml_str(
+            &registry,
+            &format!("file_format: '1.2'\n{fields}\n"),
+        )
+        .unwrap_err();
+        assert!(matches!(error, ProviderError::InvalidConfiguration(ref message)
+            if message.contains("Environment variable substitution is not supported")));
+    }
+}
+
+#[test]
+fn test_environment_reference_comments_and_plain_dollar_values_are_allowed() {
+    let registry = ConfigurationProviderRegistry::default();
+    let yaml = "file_format: '1.2'
+# ${env:SERVICE_NAME} is only a comment.
+resource:
+  attributes: [{name: price, value: '$5'}]
+";
+    let providers = TelemetryProviders::configure_from_yaml_str(&registry, yaml).unwrap();
+    assert!(providers.meter_provider().is_none());
 }

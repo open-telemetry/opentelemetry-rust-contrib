@@ -18,9 +18,9 @@ impl ReaderProvider {
     /// Configures a metrics reader based on the provided configuration
     pub(crate) fn configure(
         metrics_registry: &MeterProviderRegistry,
-        meter_provider_builder: MeterProviderBuilder,
+        meter_provider_builder: &mut MeterProviderBuilder,
         config: &Reader,
-    ) -> Result<MeterProviderBuilder, ProviderError> {
+    ) -> Result<(), ProviderError> {
         match config {
             Reader::Periodic(periodic_config) => PeriodicReaderProvider::configure(
                 metrics_registry,
@@ -38,9 +38,9 @@ impl PeriodicReaderProvider {
     /// Configures a periodic metrics reader based on the provided configuration
     fn configure(
         metrics_registry: &MeterProviderRegistry,
-        meter_provider_builder: MeterProviderBuilder,
+        meter_provider_builder: &mut MeterProviderBuilder,
         config: &PeriodicReaderConfig,
-    ) -> Result<MeterProviderBuilder, ProviderError> {
+    ) -> Result<(), ProviderError> {
         let interval_ms = config.interval_ms();
         let interval_duration = Duration::from_millis(interval_ms);
 
@@ -90,7 +90,8 @@ impl PeriodicReaderProvider {
                     .with_interval(interval_duration)
                     .build();
 
-                Ok(meter_provider_builder.with_reader(reader))
+                *meter_provider_builder = std::mem::take(meter_provider_builder).with_reader(reader);
+                Ok(())
             }
             "otlp_http" | "otlp_grpc" | "otlp_file/development" | "otlp_file"
             | "prometheus/development" | "prometheus" => {
@@ -101,21 +102,19 @@ impl PeriodicReaderProvider {
             }
             custom_exporter_name => {
                 match metrics_registry.provider_factory(custom_exporter_name) {
-                    Some(factory_function) => {
-                        let periodic_config_str = &config.raw_yaml;
-                        let updated_builder = factory_function(
-                            meter_provider_builder,
-                            periodic_config_str,
-                        ).map_err(|e| match e {
-                            crate::ConfigurationError::InvalidConfiguration(msg) => {
-                                ProviderError::InvalidConfiguration(msg)
-                            }
-                            crate::ConfigurationError::RegistrationError(msg) => {
-                                ProviderError::RegistrationError(msg)
-                            }
-                        })?;
-                        Ok(updated_builder)
-                    }
+                    Some(factory_function) => factory_function(
+                        meter_provider_builder,
+                        interval_duration,
+                        val,
+                    )
+                    .map_err(|e| match e {
+                        crate::ConfigurationError::InvalidConfiguration(msg) => {
+                            ProviderError::InvalidConfiguration(msg)
+                        }
+                        crate::ConfigurationError::RegistrationError(msg) => {
+                            ProviderError::RegistrationError(msg)
+                        }
+                    }),
                     None => Err(ProviderError::NotRegisteredProvider(format!(
                         "No provider found for periodic exporter '{}'. Make sure it is registered with its factory.",
                         custom_exporter_name
@@ -137,16 +136,15 @@ mod tests {
     }
 
     pub fn register_mock_exporter_factory(
-        builder: MeterProviderBuilder,
-        _config: &str,
-    ) -> Result<MeterProviderBuilder, ConfigurationError> {
-        Ok(builder)
+        _config: &serde_yaml::Value,
+    ) -> Result<opentelemetry_stdout::MetricExporter, ConfigurationError> {
+        Ok(opentelemetry_stdout::MetricExporter::default())
     }
 
     #[test]
     fn test_reader_provider_configure_console() {
         let registry = MeterProviderRegistry::default();
-        let meter_provider_builder = SdkMeterProvider::builder();
+        let mut meter_provider_builder = SdkMeterProvider::builder();
 
         let config = parse(
             r#"
@@ -158,14 +156,15 @@ mod tests {
         )
         .unwrap();
 
-        let result = ReaderProvider::configure(&registry, meter_provider_builder, &config);
-        assert!(result.is_ok());
+        let result = ReaderProvider::configure(&registry, &mut meter_provider_builder, &config);
+        result.unwrap();
+        meter_provider_builder.build().shutdown().unwrap();
     }
 
     #[test]
     fn test_reader_provider_configure_console_with_temporality() {
         let registry = MeterProviderRegistry::default();
-        let meter_provider_builder = SdkMeterProvider::builder();
+        let mut meter_provider_builder = SdkMeterProvider::builder();
 
         let config = parse(
             r#"
@@ -178,8 +177,9 @@ mod tests {
         )
         .unwrap();
 
-        let result = ReaderProvider::configure(&registry, meter_provider_builder, &config);
-        assert!(result.is_ok());
+        let result = ReaderProvider::configure(&registry, &mut meter_provider_builder, &config);
+        result.unwrap();
+        meter_provider_builder.build().shutdown().unwrap();
     }
 
     #[test]
@@ -187,7 +187,7 @@ mod tests {
         let mut registry = MeterProviderRegistry::default();
         let name = "my_custom_exporter";
         registry.register_exporter_factory(name, register_mock_exporter_factory);
-        let meter_provider_builder = SdkMeterProvider::builder();
+        let mut meter_provider_builder = SdkMeterProvider::builder();
 
         let config = parse(
             r#"
@@ -200,14 +200,15 @@ mod tests {
         )
         .unwrap();
 
-        let result = ReaderProvider::configure(&registry, meter_provider_builder, &config);
-        assert!(result.is_ok());
+        let result = ReaderProvider::configure(&registry, &mut meter_provider_builder, &config);
+        result.unwrap();
+        meter_provider_builder.build().shutdown().unwrap();
     }
 
     #[test]
     fn test_reader_provider_configure_custom_not_registered() {
         let registry = MeterProviderRegistry::default();
-        let meter_provider_builder = SdkMeterProvider::builder();
+        let mut meter_provider_builder = SdkMeterProvider::builder();
 
         let config = parse(
             r#"
@@ -219,7 +220,7 @@ mod tests {
         )
         .unwrap();
 
-        let result = ReaderProvider::configure(&registry, meter_provider_builder, &config);
+        let result = ReaderProvider::configure(&registry, &mut meter_provider_builder, &config);
         match result {
             Err(ProviderError::NotRegisteredProvider(msg)) => {
                 assert!(msg.contains("unregistered_custom"));

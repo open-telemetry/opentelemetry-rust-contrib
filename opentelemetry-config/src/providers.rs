@@ -100,9 +100,33 @@ impl TelemetryProviders {
                 e
             ))
         })?;
+        reject_environment_references(&value)?;
         let config = crate::model::Telemetry::from_value(&value)?;
         Self::configure(configuration_registry, &config)
     }
+}
+
+fn reject_environment_references(value: &serde_yaml::Value) -> Result<(), ProviderError> {
+    match value {
+        serde_yaml::Value::String(value) if value.contains("${") => {
+            return Err(ProviderError::InvalidConfiguration(
+                "Environment variable substitution is not supported in this milestone; resolve references before loading the configuration".to_string(),
+            ));
+        }
+        serde_yaml::Value::Sequence(values) => {
+            for value in values {
+                reject_environment_references(value)?;
+            }
+        }
+        serde_yaml::Value::Mapping(values) => {
+            for value in values.values() {
+                reject_environment_references(value)?;
+            }
+        }
+        serde_yaml::Value::Tagged(value) => reject_environment_references(&value.value)?,
+        _ => {}
+    }
+    Ok(())
 }
 
 #[cfg(test)]
