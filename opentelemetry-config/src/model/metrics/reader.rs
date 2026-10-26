@@ -177,6 +177,11 @@ impl PeriodicReaderConfig {
                     // Allowed by schema v1.2.0: defaults to 60000 ms
                 }
                 serde_yaml::Value::Number(n) => {
+                    if n.as_u64() == Some(0) {
+                        return Err(ProviderError::InvalidConfiguration(
+                            "`periodic.interval` of 0 is not supported: the synchronous metric reader in OpenTelemetry SDK 0.33 cannot honor a zero interval".to_string(),
+                        ));
+                    }
                     if let Some(i) = n.as_i64() {
                         if i < 0 {
                             return Err(ProviderError::InvalidConfiguration(
@@ -331,12 +336,11 @@ impl PeriodicReaderConfig {
         Ok(())
     }
 
-    /// Returns the SDK interval in milliseconds, using 60,000 for omitted, null, or zero values.
+    /// Returns the validated interval in milliseconds, using 60,000 for omitted or null values.
     pub(crate) fn interval_ms(&self) -> u64 {
         self.interval
             .as_ref()
             .and_then(serde_yaml::Value::as_u64)
-            .filter(|interval| *interval > 0)
             .unwrap_or(60_000)
     }
 }

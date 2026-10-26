@@ -1387,6 +1387,27 @@ fn test_validation_rejects_invalid_resource_attribute_types() {
 }
 
 #[test]
+fn test_zero_interval_is_rejected_before_factories_run() {
+    let mut registry = ConfigurationProviderRegistry::default();
+    registry.register_metric_exporter_factory(
+        "test_recorder",
+        |_| -> Result<TestMetricExporter, ConfigurationError> {
+            panic!("zero intervals must be rejected before creating exporters");
+        },
+    );
+    for exporter in ["console", "test_recorder"] {
+        let yaml = format!(
+            "file_format: '1.2'\nmeter_provider:\n  readers:\n    - periodic:\n        interval: 0\n        exporter: {{{exporter}: {{}}}}\n"
+        );
+        let error = TelemetryProviders::configure_from_yaml_str(&registry, &yaml).unwrap_err();
+        assert!(
+            matches!(error, ProviderError::InvalidConfiguration(ref message)
+            if message.contains("`periodic.interval` of 0 is not supported"))
+        );
+    }
+}
+
+#[test]
 fn test_periodic_intervals_override_environment() {
     if std::env::var("RUN_INTERVAL_ENV_TEST_CHILD").as_deref() == Ok("1") {
         let mut registry = ConfigurationProviderRegistry::default();
@@ -1396,13 +1417,7 @@ fn test_periodic_intervals_override_environment() {
             })
         });
         for exporter in ["console", "test_recorder"] {
-            for interval in [
-                "",
-                "interval: null",
-                "interval: 0",
-                "interval: 60000",
-                "interval: 5",
-            ] {
+            for interval in ["", "interval: null", "interval: 60000", "interval: 5"] {
                 let yaml = format!(
                     "file_format: '1.2'\nmeter_provider:\n  readers:\n    - periodic:\n        {interval}\n        exporter: {{{exporter}: {{}}}}\n"
                 );

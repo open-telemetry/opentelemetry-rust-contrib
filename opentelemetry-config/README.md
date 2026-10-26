@@ -32,7 +32,7 @@ The configuration model targets the official [OpenTelemetry Configuration Schema
   - `null` attribute values are ignored according to schema semantics
 - **MeterProvider**:
   - `meter_provider.readers`: list of one or more `periodic` readers
-  - `periodic.interval`: optional non-negative integer in milliseconds (schema default: 60,000 ms)
+  - `periodic.interval`: optional positive integer in milliseconds (schema default: 60,000 ms); zero is rejected due to an SDK limitation
   - Built-in standard `console` exporter (`console: {}`) with optional `temporality_preference` (`cumulative`, `delta`, or `low_memory`)
   - Custom periodic exporter factories registered via `ConfigurationProviderRegistry`
 - **End-to-end telemetry lifecycle**:
@@ -155,7 +155,7 @@ To avoid silent configuration drift or unexpected runtime behavior, the crate pe
 ## Known SDK Limitations
 
 - **Synchronous Periodic Reader Timeout**: The upstream OpenTelemetry configuration schema specifies an optional `timeout` on periodic readers. However, the synchronous `PeriodicReader` in OpenTelemetry Rust SDK 0.33 does not enforce collection or export timeouts. Rather than silently ignoring this option and giving a false expectation of timeout enforcement, explicitly specifying `timeout` returns an `InvalidConfiguration` error in this milestone.
-- **Interval = 0**: The schema permits an `interval` of 0 ms. Both built-in and custom readers use 60 seconds for zero, omitted, or null intervals, explicitly overriding `OTEL_METRIC_EXPORT_INTERVAL`.
+- **Interval = 0**: The schema permits an `interval` of 0 ms, but the synchronous SDK reader cannot honor it. Explicit zero intervals return `InvalidConfiguration` for both built-in and custom exporters. Omitted or null intervals use 60 seconds, explicitly overriding `OTEL_METRIC_EXPORT_INTERVAL`.
 - **Environment Substitution**: Environment references such as `${env:SERVICE_NAME}` and `${env:INTERVAL:-60000}` are not expanded. Values containing `${`, including escaped references, are rejected before creating providers. Resolve these values before loading the configuration. Comments and plain dollar signs are unaffected.
 
 ## Deferred Features (Future Milestones)

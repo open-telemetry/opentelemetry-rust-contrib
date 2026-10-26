@@ -9,7 +9,7 @@
 //! - `resource`: explicit scalar attributes with declared types (`string`, `bool`, `int`, `double`)
 //! - `meter_provider.readers`: one or more `periodic` readers with:
 //!   - Built-in standard `console` exporter (`console: {}`) with optional `temporality_preference`
-//!   - Configurable non-negative `interval` in milliseconds (schema default: 60000 ms)
+//!   - Configurable positive `interval` in milliseconds (schema default: 60000 ms)
 //!   - Custom periodic exporters via [`ConfigurationProviderRegistry::register_metric_exporter_factory`]
 //!
 //! ## Limitations & Unsupported Features
@@ -18,6 +18,7 @@
 //! - Periodic reader `timeout` is not supported because the synchronous metric reader in
 //!   OpenTelemetry Rust SDK 0.33 does not enforce collection or export timeouts. Supplying
 //!   `timeout` explicitly returns a validation error.
+//! - A zero `interval` is rejected because the synchronous metric reader cannot honor it.
 //! - Non-default histogram aggregation on console exporter is not supported.
 //! - OTLP HTTP/gRPC, Prometheus, pull readers, views, exemplar filters, logger provider,
 //!   and tracer provider are deferred to future milestones.
