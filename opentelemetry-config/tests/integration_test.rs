@@ -81,9 +81,8 @@ fn test_end_to_end_metric_recording_export_and_resource_attributes() {
     let captured_clone = Arc::clone(&captured);
 
     let mut registry = ConfigurationProviderRegistry::default();
-    registry.register_metric_exporter_factory(
-        "test_recorder",
-        move |config: &serde_yaml::Value| {
+    registry
+        .register_metric_exporter_factory("test_recorder", move |config: &serde_yaml::Value| {
             assert_eq!(
                 config,
                 &serde_yaml::Value::Mapping(serde_yaml::Mapping::new())
@@ -91,8 +90,8 @@ fn test_end_to_end_metric_recording_export_and_resource_attributes() {
             Ok(TestMetricExporter {
                 captured: Arc::clone(&captured_clone),
             })
-        },
-    );
+        })
+        .unwrap();
 
     let yaml_config = r#"
 file_format: "1.2"
@@ -414,7 +413,7 @@ meter_provider:
 #[test]
 fn test_validation_unsupported_standard_exporters() {
     let registry = ConfigurationProviderRegistry::default();
-    for exporter in &["otlp_http", "otlp_grpc", "prometheus"] {
+    for exporter in &["otlp_http", "otlp_grpc", "otlp_file/development"] {
         let yaml = format!(
             r#"
 file_format: "1.2"
@@ -620,14 +619,16 @@ fn test_resource_does_not_implicitly_read_env_vars() {
         let captured_clone = Arc::clone(&captured);
 
         let mut registry = ConfigurationProviderRegistry::default();
-        registry.register_metric_exporter_factory(
-            "test_recorder",
-            move |_config: &serde_yaml::Value| {
-                Ok(TestMetricExporter {
-                    captured: Arc::clone(&captured_clone),
-                })
-            },
-        );
+        registry
+            .register_metric_exporter_factory(
+                "test_recorder",
+                move |_config: &serde_yaml::Value| {
+                    Ok(TestMetricExporter {
+                        captured: Arc::clone(&captured_clone),
+                    })
+                },
+            )
+            .unwrap();
 
         let yaml_config = r#"
 file_format: "1.2"
@@ -1111,11 +1112,13 @@ meter_provider:
 #[test]
 fn test_validation_custom_push_exporter_values() {
     let mut registry = ConfigurationProviderRegistry::default();
-    registry.register_metric_exporter_factory("custom_mock", move |_config: &serde_yaml::Value| {
-        Ok(TestMetricExporter {
-            captured: Arc::new(Mutex::new(CapturedData::default())),
+    registry
+        .register_metric_exporter_factory("custom_mock", move |_config: &serde_yaml::Value| {
+            Ok(TestMetricExporter {
+                captured: Arc::new(Mutex::new(CapturedData::default())),
+            })
         })
-    });
+        .unwrap();
 
     // Valid: custom exporter with object
     let yaml_obj = r#"
@@ -1385,12 +1388,14 @@ fn test_validation_rejects_invalid_resource_attribute_types() {
 #[test]
 fn test_zero_interval_is_rejected_before_factories_run() {
     let mut registry = ConfigurationProviderRegistry::default();
-    registry.register_metric_exporter_factory(
-        "test_recorder",
-        |_| -> Result<TestMetricExporter, ConfigurationError> {
-            panic!("zero intervals must be rejected before creating exporters");
-        },
-    );
+    registry
+        .register_metric_exporter_factory(
+            "test_recorder",
+            |_| -> Result<TestMetricExporter, ConfigurationError> {
+                panic!("zero intervals must be rejected before creating exporters");
+            },
+        )
+        .unwrap();
     for exporter in ["console", "test_recorder"] {
         let yaml = format!(
             "file_format: '1.2'\nmeter_provider:\n  readers:\n    - periodic:\n        interval: 0\n        exporter: {{{exporter}: {{}}}}\n"
@@ -1404,14 +1409,50 @@ fn test_zero_interval_is_rejected_before_factories_run() {
 }
 
 #[test]
+fn test_nonstandard_exporter_names_reach_registered_factories() {
+    for name in ["otlp_file", "prometheus", "prometheus/development"] {
+        for config in ["{endpoint: custom}", "null"] {
+            let captured = Arc::new(Mutex::new(CapturedData::default()));
+            let captured_clone = Arc::clone(&captured);
+            let expected_config: serde_yaml::Value = serde_yaml::from_str(config).unwrap();
+            let mut registry = ConfigurationProviderRegistry::default();
+            registry
+                .register_metric_exporter_factory(name, move |config| {
+                    assert_eq!(config, &expected_config);
+                    Ok(TestMetricExporter {
+                        captured: Arc::clone(&captured_clone),
+                    })
+                })
+                .unwrap();
+            let yaml = format!(
+                "file_format: '1.2'\nmeter_provider:\n  readers:\n    - periodic:\n        exporter: {{{name}: {config}}}\n"
+            );
+            let providers = TelemetryProviders::configure_from_yaml_str(&registry, &yaml).unwrap();
+            let provider = providers.meter_provider().unwrap();
+            provider
+                .meter("extension_test")
+                .u64_counter("events")
+                .build()
+                .add(1, &[]);
+            provider.shutdown().unwrap();
+            let captured = captured.lock().unwrap();
+            assert_eq!(captured.metrics, vec![("events".to_string(), 1)]);
+            assert_eq!(captured.shutdown_count, 1);
+        }
+    }
+}
+
+#[test]
 fn test_periodic_intervals_override_environment() {
     if std::env::var("RUN_INTERVAL_ENV_TEST_CHILD").as_deref() == Ok("1") {
         let mut registry = ConfigurationProviderRegistry::default();
-        registry.register_metric_exporter_factory("test_recorder", |_| {
-            Ok(TestMetricExporter {
-                captured: Arc::new(Mutex::new(CapturedData::default())),
+        registry
+            .register_metric_exporter_factory("test_recorder", |_| {
+                Ok(TestMetricExporter {
+                    captured: Arc::new(Mutex::new(CapturedData::default())),
+                })
             })
-        });
+            .unwrap();
         for exporter in ["console", "test_recorder"] {
             for interval in ["", "interval: null", "interval: 60000", "interval: 5"] {
                 let yaml = format!(
@@ -1476,22 +1517,28 @@ fn test_configuration_failure_shuts_down_all_started_readers() {
             let mut registry = ConfigurationProviderRegistry::default();
             for (name, captured) in [("first", &first), ("second", &second)] {
                 let captured = Arc::clone(captured);
-                registry.register_metric_exporter_factory(name, move |_| {
-                    Ok(TestMetricExporter {
-                        captured: Arc::clone(&captured),
+                registry
+                    .register_metric_exporter_factory(name, move |_| {
+                        Ok(TestMetricExporter {
+                            captured: Arc::clone(&captured),
+                        })
                     })
-                });
+                    .unwrap();
             }
-            registry.register_metric_exporter_factory("invalid", |_| {
-                Err::<TestMetricExporter, _>(ConfigurationError::InvalidConfiguration(
-                    "exporter configuration failed".to_string(),
-                ))
-            });
-            registry.register_metric_exporter_factory("registration", |_| {
-                Err::<TestMetricExporter, _>(ConfigurationError::RegistrationError(
-                    "exporter registration failed".to_string(),
-                ))
-            });
+            registry
+                .register_metric_exporter_factory("invalid", |_| {
+                    Err::<TestMetricExporter, _>(ConfigurationError::InvalidConfiguration(
+                        "exporter configuration failed".to_string(),
+                    ))
+                })
+                .unwrap();
+            registry
+                .register_metric_exporter_factory("registration", |_| {
+                    Err::<TestMetricExporter, _>(ConfigurationError::RegistrationError(
+                        "exporter registration failed".to_string(),
+                    ))
+                })
+                .unwrap();
 
             let yaml = format!(
                 "file_format: '1.2'
@@ -1562,12 +1609,14 @@ fn test_malformed_and_incompatible_file_formats_are_rejected() {
 #[test]
 fn test_environment_references_are_rejected_before_factories_run() {
     let mut registry = ConfigurationProviderRegistry::default();
-    registry.register_metric_exporter_factory(
-        "test_recorder",
-        |_| -> Result<TestMetricExporter, ConfigurationError> {
-            panic!("environment references must be rejected before creating exporters");
-        },
-    );
+    registry
+        .register_metric_exporter_factory(
+            "test_recorder",
+            |_| -> Result<TestMetricExporter, ConfigurationError> {
+                panic!("environment references must be rejected before creating exporters");
+            },
+        )
+        .unwrap();
     for fields in [
         "resource:\n  attributes: [{name: service.name, value: '${env:SERVICE_NAME}'}]",
         "resource:\n  attributes: [{name: service.name, value: '$${env:SERVICE_NAME}'}]",

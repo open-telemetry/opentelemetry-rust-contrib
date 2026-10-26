@@ -7,7 +7,7 @@ use opentelemetry_sdk::metrics::{MeterProviderBuilder, PeriodicReader, Temporali
 use std::time::Duration;
 
 use crate::{
-    model::metrics::reader::{PeriodicReaderConfig, Reader},
+    model::metrics::reader::{is_standard_exporter, PeriodicReaderConfig, Reader},
     MeterProviderRegistry, ProviderError,
 };
 
@@ -93,8 +93,7 @@ impl PeriodicReaderProvider {
                 *meter_provider_builder = std::mem::take(meter_provider_builder).with_reader(reader);
                 Ok(())
             }
-            "otlp_http" | "otlp_grpc" | "otlp_file/development" | "otlp_file"
-            | "prometheus/development" | "prometheus" => {
+            name if is_standard_exporter(name) => {
                 Err(ProviderError::UnsupportedExporter(format!(
                     "Exporter '{}' is not supported in this milestone",
                     exporter_name
@@ -186,7 +185,9 @@ mod tests {
     fn test_reader_provider_configure_custom_registered() {
         let mut registry = MeterProviderRegistry::default();
         let name = "my_custom_exporter";
-        registry.register_exporter_factory(name, register_mock_exporter_factory);
+        registry
+            .register_exporter_factory(name, register_mock_exporter_factory)
+            .unwrap();
         let mut meter_provider_builder = SdkMeterProvider::builder();
 
         let config = parse(

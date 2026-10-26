@@ -45,7 +45,7 @@ pub fn main() -> Result<(), Box<dyn std::error::Error>> {
     let mut registry = ConfigurationProviderRegistry::default();
 
     // Register the custom exporter provider.
-    MockPeriodicExporterProvider::register_into(&mut registry);
+    MockPeriodicExporterProvider::register_into(&mut registry)?;
 
     // Configure telemetry from the provided YAML file.
     let providers = match TelemetryProviders::configure_from_yaml_str(&registry, &config_yaml) {
@@ -100,11 +100,13 @@ struct CustomData {
 struct MockPeriodicExporterProvider {}
 
 impl MockPeriodicExporterProvider {
-    pub fn register_into(registry: &mut opentelemetry_config::ConfigurationProviderRegistry) {
+    pub fn register_into(
+        registry: &mut opentelemetry_config::ConfigurationProviderRegistry,
+    ) -> Result<(), ConfigurationError> {
         registry.register_metric_exporter_factory(
             "custom",
             MockPeriodicExporterProvider::register_mock_exporter_factory,
-        );
+        )
     }
 
     pub fn register_mock_exporter_factory(

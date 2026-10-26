@@ -50,12 +50,17 @@ impl ConfigurationProviderRegistry {
     /// The factory receives only the value under its exporter name and returns an
     /// exporter or a [`ConfigurationError`]. This crate applies the resolved reader
     /// settings and shuts down created readers if configuration fails.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`ConfigurationError::RegistrationError`] if `name` is a standard
+    /// push exporter name (`console`, `otlp_http`, `otlp_grpc`, or `otlp_file/development`).
     pub fn register_metric_exporter_factory<E: PushMetricExporter>(
         &mut self,
         name: &str,
         factory: impl Fn(&serde_yaml::Value) -> Result<E, ConfigurationError> + 'static,
-    ) {
-        self.metrics.register_exporter_factory(name, factory);
+    ) -> Result<(), ConfigurationError> {
+        self.metrics.register_exporter_factory(name, factory)
     }
 }
 
@@ -71,7 +76,13 @@ impl MeterProviderRegistry {
         &mut self,
         name: &str,
         factory: impl Fn(&serde_yaml::Value) -> Result<E, ConfigurationError> + 'static,
-    ) {
+    ) -> Result<(), ConfigurationError> {
+        if model::metrics::reader::is_standard_exporter(name) {
+            return Err(ConfigurationError::RegistrationError(format!(
+                "Exporter name '{}' is reserved by the standard schema",
+                name
+            )));
+        }
         self.provider_factories.insert(
             name.to_string(),
             Box::new(move |builder, interval, config| {
@@ -83,6 +94,7 @@ impl MeterProviderRegistry {
                 Ok(())
             }),
         );
+        Ok(())
     }
 
     /// Retrieves a provider factory by name.
@@ -214,7 +226,9 @@ mod tests {
         let mut registry = ConfigurationProviderRegistry::default();
 
         let name = "custom";
-        registry.register_metric_exporter_factory(name, register_mock_reader_closure);
+        registry
+            .register_metric_exporter_factory(name, register_mock_reader_closure)
+            .unwrap();
 
         assert!(registry.metrics.provider_factories.contains_key(name));
         let exporter_config = serde_yaml::from_str("test_field: value").unwrap();
@@ -223,6 +237,26 @@ mod tests {
         factory(&mut builder, Duration::from_secs(1), &exporter_config).unwrap();
         assert_eq!(call_count.get(), 1);
         builder.build().shutdown().unwrap();
+    }
+
+    #[test]
+    fn test_reserved_exporter_registration_fails_without_inserting_factory() {
+        let mut registry = ConfigurationProviderRegistry::default();
+        for name in ["console", "otlp_http", "otlp_grpc", "otlp_file/development"] {
+            let error = registry
+                .register_metric_exporter_factory(
+                    name,
+                    |_| -> Result<opentelemetry_stdout::MetricExporter, ConfigurationError> {
+                        panic!("reserved exporter factories must not be called");
+                    },
+                )
+                .unwrap_err();
+            assert!(
+                matches!(error, ConfigurationError::RegistrationError(ref message)
+                if message == &format!("Exporter name '{}' is reserved by the standard schema", name))
+            );
+            assert!(registry.metrics.provider_factories.is_empty());
+        }
     }
 
     #[test]
@@ -242,9 +276,12 @@ mod tests {
         let mut registry = MeterProviderRegistry::default();
         let name = "test_factory";
         assert!(!registry.provider_factories.contains_key(name));
-        registry.register_exporter_factory(name, |_| {
-            Ok(opentelemetry_stdout::MetricExporter::default())
-        });
+        registry
+            .register_exporter_factory(
+                name,
+                |_| Ok(opentelemetry_stdout::MetricExporter::default()),
+            )
+            .unwrap();
         assert!(registry.provider_factories.contains_key(name));
     }
 }

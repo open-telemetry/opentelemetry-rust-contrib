@@ -125,10 +125,12 @@ let mut registry = ConfigurationProviderRegistry::default();
 
 registry.register_metric_exporter_factory("my_console", |_config| {
     Ok(MetricExporter::default())
-});
+})?;
 ```
 
 Factories receive only the YAML value under their exporter name and return a `PushMetricExporter`. The crate constructs periodic readers for both built-in and custom exporters, applies the resolved interval, and shuts down previously created readers if a later factory fails. Factories no longer receive or return a `MeterProviderBuilder`.
+
+Registration returns a `Result` and rejects the standard push exporter names `console`, `otlp_http`, `otlp_grpc`, and `otlp_file/development` with `ConfigurationError::RegistrationError`. Other names, including `otlp_file` and `prometheus`, can be registered as extensions.
 
 See [examples/custom](examples/custom) for a full runnable custom exporter example.
 
@@ -148,7 +150,7 @@ To avoid silent configuration drift or unexpected runtime behavior, the crate pe
 | Pull readers | Rejected with `InvalidConfiguration` (pull readers deferred to future milestones) |
 | Exporter cardinality | Each periodic reader must specify exactly one exporter in `exporter` |
 | Periodic reader `timeout` | **Rejected**. See [Known SDK Limitations](#known-sdk-limitations) |
-| Standard unsupported exporters | `otlp_http`, `otlp_grpc`, `prometheus`, etc. return `UnsupportedExporter` |
+| Standard unsupported push exporters | `otlp_http`, `otlp_grpc`, and `otlp_file/development` return `UnsupportedExporter` |
 | Unregistered custom exporter | Returns `NotRegisteredProvider` indicating missing registration |
 | Resource attributes | Attribute name must not be empty; declared type must match the value. Null-valued entries are ignored; repeated names use the last non-null value. |
 | Unsupported resource features | `resource.detection`, `resource.schema_url`, `resource.attributes_list` are rejected if supplied |

@@ -312,12 +312,7 @@ impl PeriodicReaderConfig {
                     }
                 }
             }
-            "otlp_http"
-            | "otlp_grpc"
-            | "otlp_file/development"
-            | "otlp_file"
-            | "prometheus/development"
-            | "prometheus" => {
+            name if is_standard_exporter(name) => {
                 return Err(ProviderError::UnsupportedExporter(format!(
                     "Exporter '{}' is not supported in this milestone",
                     exporter_name
@@ -343,6 +338,13 @@ impl PeriodicReaderConfig {
             .and_then(serde_yaml::Value::as_u64)
             .unwrap_or(60_000)
     }
+}
+
+pub(crate) fn is_standard_exporter(name: &str) -> bool {
+    matches!(
+        name,
+        "console" | "otlp_http" | "otlp_grpc" | "otlp_file/development"
+    )
 }
 
 #[cfg(test)]
