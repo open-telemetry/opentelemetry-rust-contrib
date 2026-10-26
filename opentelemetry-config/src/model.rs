@@ -73,16 +73,17 @@ impl Telemetry {
             ));
         }
 
-        // 3. Reject unknown top-level fields
+        // The root schema allows vendor extensions; supported nested objects remain strict.
         for (k, _) in mapping {
             if let Some(k_str) = k.as_str() {
                 match k_str {
                     "file_format" | "meter_provider" | "resource" => {}
                     unknown => {
-                        return Err(ProviderError::InvalidConfiguration(format!(
-                            "Unknown field '{}' in configuration",
-                            unknown
-                        )));
+                        opentelemetry::otel_warn!(
+                            name: "Configuration.UnknownRootProperty",
+                            field = unknown,
+                            message = "Ignoring unknown root configuration property",
+                        );
                     }
                 }
             } else {
@@ -122,7 +123,7 @@ impl Telemetry {
             opentelemetry::otel_warn!(
                 name: "Configuration.NewerFileFormat",
                 version = file_format,
-                message = "Configuration targets a newer minor version than 1.2; unsupported fields will be rejected",
+                message = "Configuration targets a newer minor version than 1.2; unsupported fields in known components will be rejected",
             );
         }
 
@@ -285,12 +286,33 @@ mod tests {
     }
 
     #[test]
-    fn test_unknown_top_level_field_rejected() {
+    fn test_unknown_top_level_properties_are_ignored() {
         let yaml_str = r#"
           file_format: "1.2"
           unknown_field: 123
+          vendor:
+            enabled: true
+          resource:
+            attributes:
+              - name: service.name
+                value: example
         "#;
-        let result = parse(yaml_str);
-        assert!(result.is_err());
+        let telemetry = parse(yaml_str).unwrap();
+        let resource = telemetry.resource.unwrap().to_resource().unwrap();
+        assert_eq!(
+            resource.get(&opentelemetry::Key::new("service.name")),
+            Some(opentelemetry::Value::from("example"))
+        );
+        assert!(telemetry.meter_provider.is_none());
+    }
+
+    #[test]
+    fn test_root_extensions_do_not_bypass_nested_validation() {
+        let error =
+            parse("file_format: '1.2'\nvendor: {}\nmeter_provider: {unknown: value}").unwrap_err();
+        assert!(
+            matches!(error, ProviderError::InvalidConfiguration(ref message)
+            if message == "Unknown field 'meter_provider.unknown'")
+        );
     }
 }

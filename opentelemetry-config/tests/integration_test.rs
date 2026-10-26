@@ -1250,10 +1250,6 @@ fn test_validation_rejects_malformed_configuration_shapes() {
         ),
         ("file_format: true", "Field 'file_format' must be a string"),
         (
-            "file_format: '1.2'\nunknown_field: value",
-            "Unknown field 'unknown_field' in configuration",
-        ),
-        (
             "{file_format: '1.2', 1: value}",
             "Configuration keys must be strings",
         ),

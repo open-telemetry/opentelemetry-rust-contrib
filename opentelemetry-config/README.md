@@ -20,12 +20,13 @@ This crate provides a declarative, YAML-based configuration approach for the Ope
 
 The configuration model targets the official [OpenTelemetry Configuration Schema v1.2.0](https://github.com/open-telemetry/opentelemetry-configuration/releases/tag/v1.2.0).
 
-> **Note**: This milestone implements a working, schema-aligned subset of declarative `MeterProvider` configuration. It does **not** claim full schema compliance. Unsupported or unimplemented schema fields are validated and explicitly rejected with informative errors rather than silently ignored.
+> **Note**: This milestone implements a working, schema-aligned subset of declarative `MeterProvider` configuration. It does **not** claim full schema compliance. Unsupported standard fields and unknown nested fields are explicitly rejected with informative errors. Unknown root properties are ignored with a warning, as the root schema permits extensions.
 
 ### Implemented Subset (v1.2.0)
 
 - **Root schema**:
   - `file_format` is required; `1.0`, `1.1`, and `1.2` are accepted. Newer `1.x` versions are accepted with a warning; unsupported fields still fail validation.
+  - Unknown root properties are ignored with a warning; supported nested configuration objects remain strict.
 - **Resource attributes**:
   - `resource.attributes`: list of `{ name, value, type? }` entries
   - Explicit scalar attribute types: `string` (default), `bool`, `int` (64-bit integer), and `double` (64-bit float)
@@ -139,6 +140,7 @@ To avoid silent configuration drift or unexpected runtime behavior, the crate pe
 |---|---|
 | Missing `file_format` | Rejected with `InvalidConfiguration("Missing required field 'file_format'")` |
 | `file_format` compatibility | Accepts `1.<minor>`; newer minors warn through OpenTelemetry internal logging. Malformed versions and other major versions are rejected. |
+| Unknown root properties | Ignored with a warning through OpenTelemetry internal logging; unknown nested fields are rejected. |
 | Environment references | Values containing `${` are rejected; environment substitution is deferred. |
 | Old `metrics` key | Rejected with an informative message instructing to use `meter_provider` |
 | Empty or missing `readers` | Rejected; `meter_provider.readers` must contain at least one reader |
