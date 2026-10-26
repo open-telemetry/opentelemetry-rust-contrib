@@ -37,7 +37,7 @@ The configuration model targets the official [OpenTelemetry Configuration Schema
   - Built-in standard `console` exporter (`console: {}`) with optional `temporality_preference` (`cumulative`, `delta`, or `low_memory`)
   - Custom periodic exporter factories registered via `ConfigurationProviderRegistry`
 - **End-to-end telemetry lifecycle**:
-  - Deserialization → Validation → `SdkMeterProvider` construction → Metric recording → Export → `force_flush` → `shutdown`
+  - Deserialization → Validation → `SdkMeterProvider` construction → Metric recording → Export → `shutdown`
 
 ## Quick Start
 
@@ -69,7 +69,7 @@ meter_provider:
             temporality_preference: cumulative
 ```
 
-### 2. Configure, Record Metrics, Flush, and Shutdown
+### 2. Configure, Record Metrics, and Shutdown
 
 ```rust
 use std::error::Error;
@@ -94,10 +94,7 @@ fn main() -> Result<(), Box<dyn Error>> {
         // 3. Record metrics
         requests_counter.add(1, &[KeyValue::new("route", "/users")]);
 
-        // 4. Flush metrics to exporters
-        meter_provider.force_flush()?;
-
-        // 5. Clean shutdown
+        // 4. Shut down the provider and export remaining metrics.
         meter_provider.shutdown()?;
     }
 

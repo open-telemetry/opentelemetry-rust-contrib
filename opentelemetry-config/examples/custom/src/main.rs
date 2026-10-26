@@ -65,8 +65,7 @@ pub fn main() -> Result<(), Box<dyn std::error::Error>> {
             opentelemetry::metrics::MeterProvider::meter(meter_provider, "custom_example_meter");
         let counter = meter.u64_counter("custom_events_total").build();
         counter.add(1, &[opentelemetry::KeyValue::new("example", "custom")]);
-        println!("Recorded metric event. Flushing provider...");
-        meter_provider.force_flush()?;
+        println!("Recorded metric event.");
         println!("Shutting down meter provider...");
         meter_provider.shutdown()?;
     } else {

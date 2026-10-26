@@ -63,14 +63,9 @@ fn main() -> Result<(), Box<dyn Error>> {
         ],
     );
 
-    println!("=== Flushing MeterProvider (exporting to console) ===");
-
-    // 6. Flush the provider so the periodic reader immediately exports recorded metrics to console
-    meter_provider.force_flush()?;
-
     println!("=== Shutting down MeterProvider ===");
 
-    // 7. Clean shutdown
+    // 6. Shut down the provider and export remaining metrics.
     meter_provider.shutdown()?;
 
     println!("=== Completed successfully ===");
