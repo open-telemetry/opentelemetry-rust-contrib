@@ -5,6 +5,11 @@
 ### Added
 
 - `BeanstalkResourceDetector` (`detector-aws-beanstalk` feature)
+- `AwsXrayRemoteSampler` (`xray-sampler` feature) that samples spans using the fixed rates of X-Ray sampling rules
+
+### Changed
+
+- Bump OpenTelemetry dependencies to 0.33.1.
 
 ### Fixed
 

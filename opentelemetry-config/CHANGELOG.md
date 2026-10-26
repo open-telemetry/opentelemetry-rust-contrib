@@ -2,6 +2,9 @@
 
 ## vNext
 
+### Changed
+
+- Bump OpenTelemetry dependencies to 0.33.1.
 - Align metrics configuration with OpenTelemetry Declarative Configuration schema v1.2.0. YAML now requires `file_format` (for example, `file_format: "1.2"`) and uses `meter_provider` instead of the old `metrics` key.
 - Add resource attribute entries with `name`, `value`, and an optional `type`. Supported scalar types are `string` (the default), `bool`, `int`, and `double`; valid null-valued attributes are ignored.
 - Add the built-in `console` metric exporter with configurable temporality.
