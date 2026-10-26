@@ -18,8 +18,19 @@ pub type GcsTokenFuture<'a> =
 /// `resource`, sufficiently fresh for a GCS request, and must not include an
 /// authorization scheme prefix.
 ///
+/// `resource` is passed to [`GcsTokenProvider::get_token`] unchanged. Providers
+/// are responsible for any conversion required by their credential API, such as
+/// appending `/.default`.
+///
+/// Token acquisition is not covered by the Geneva Config Service HTTP timeout.
+/// Implementations must bound acquisition time. Returned futures must be
+/// cancellation-safe because callers may drop them before completion.
+///
 /// Calls may occur concurrently. Implementations must not perform blocking work
 /// while their returned future is polled on the caller's async executor.
+///
+/// Provider errors and [`Debug`] output must not contain access tokens, client
+/// secrets, or other sensitive credential material.
 pub trait GcsTokenProvider: Send + Sync + Debug {
     /// Returns a current Entra access token for `resource`.
     fn get_token<'a>(&'a self, resource: &'a str) -> GcsTokenFuture<'a>;

@@ -83,6 +83,42 @@ mod tests {
         }
     }
 
+    #[derive(Debug)]
+    struct RotatingTestTokenProvider {
+        tokens: Vec<String>,
+        expected_resource: String,
+        calls: AtomicUsize,
+    }
+
+    impl RotatingTestTokenProvider {
+        fn new(tokens: &[&str], expected_resource: &str) -> Self {
+            Self {
+                tokens: tokens.iter().map(|token| (*token).to_string()).collect(),
+                expected_resource: expected_resource.to_string(),
+                calls: AtomicUsize::new(0),
+            }
+        }
+
+        fn calls(&self) -> usize {
+            self.calls.load(Ordering::Relaxed)
+        }
+    }
+
+    impl GcsTokenProvider for RotatingTestTokenProvider {
+        fn get_token<'a>(&'a self, resource: &'a str) -> GcsTokenFuture<'a> {
+            assert_eq!(resource, self.expected_resource);
+            let call = self.calls.fetch_add(1, Ordering::Relaxed);
+            let token = self.tokens.get(call).cloned();
+            Box::pin(async move {
+                token.map(Into::into).ok_or_else(|| {
+                    Box::new(std::io::Error::other(
+                        "test token provider called more times than expected",
+                    )) as crate::GcsTokenProviderError
+                })
+            })
+        }
+    }
+
     /// Install a rustls CryptoProvider for tests that use certificate auth.
     /// In production, callers must install their own provider (e.g. rustls-symcrypt).
     #[cfg(all(feature = "certificate-auth", feature = "tls-rustls"))]
@@ -659,6 +695,78 @@ mod tests {
         assert_eq!(first.0.auth_token.expose_secret(), valid_token);
         assert_eq!(first.2, jwt_endpoint);
         assert_eq!(second.0.auth_token.expose_secret(), valid_token);
+    }
+
+    /// Scenario: A cached Geneva credential needs refresh after the provider rotates its token.
+    /// Guarantees: The refresh uses the replacement provider token and caches the new credential.
+    #[tokio::test(flavor = "current_thread")]
+    async fn external_token_renews_when_ingestion_cache_expires() {
+        let config_server = MockServer::start().await;
+        let (mock_response, _, valid_token) = config_service_response();
+        let resource = "https://monitor.azure.com";
+        let provider = Arc::new(RotatingTestTokenProvider::new(
+            &["provider-token-a", "provider-token-b"],
+            resource,
+        ));
+
+        let mut expiring_response: serde_json::Value =
+            serde_json::from_str(&mock_response).unwrap();
+        expiring_response["IngestionGatewayInfo"]["AuthTokenExpiryTime"] =
+            serde_json::Value::String(
+                (chrono::Utc::now() + chrono::Duration::minutes(1)).to_rfc3339(),
+            );
+
+        let mut refreshed_response: serde_json::Value =
+            serde_json::from_str(&mock_response).unwrap();
+        refreshed_response["IngestionGatewayInfo"]["AuthTokenExpiryTime"] =
+            serde_json::Value::String(
+                (chrono::Utc::now() + chrono::Duration::hours(1)).to_rfc3339(),
+            );
+
+        Mock::given(method("GET"))
+            .and(path(
+                "/userapi/agent/v3/mockenv/mockacct/MonitoringStorageKeys/",
+            ))
+            .and(header("Authorization", "Bearer provider-token-a"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(expiring_response))
+            .expect(1)
+            .mount(&config_server)
+            .await;
+
+        Mock::given(method("GET"))
+            .and(path(
+                "/userapi/agent/v3/mockenv/mockacct/MonitoringStorageKeys/",
+            ))
+            .and(header("Authorization", "Bearer provider-token-b"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(refreshed_response))
+            .expect(1)
+            .mount(&config_server)
+            .await;
+
+        let config = GenevaConfigClientConfig {
+            endpoint: config_server.uri(),
+            environment: "mockenv".into(),
+            account: "mockacct".into(),
+            namespace: "mockns".into(),
+            region: "mockregion".into(),
+            config_major_version: 1,
+            auth_method: AuthMethod::ExternalToken {
+                resource: resource.to_string(),
+                provider: provider.clone(),
+            },
+            msi_resource: None,
+            test_root_ca_pem: None,
+        };
+
+        let client = GenevaConfigClient::new(config).unwrap();
+        let first = client.get_ingestion_info().await.unwrap();
+        let refreshed = client.get_ingestion_info().await.unwrap();
+        let cached = client.get_ingestion_info().await.unwrap();
+
+        assert_eq!(provider.calls(), 2);
+        assert_eq!(first.0.auth_token.expose_secret(), valid_token);
+        assert_eq!(refreshed.0.auth_token.expose_secret(), valid_token);
+        assert_eq!(cached.0.auth_token.expose_secret(), valid_token);
     }
 
     /// Scenario: The external token provider cannot acquire a token.
