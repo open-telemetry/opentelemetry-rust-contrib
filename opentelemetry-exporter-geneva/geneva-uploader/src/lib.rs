@@ -1,6 +1,8 @@
 mod config_service;
+mod gcs_token_provider;
 mod ingestion_service;
 mod payload_encoder;
+mod secret_header;
 
 pub mod client;
 
@@ -26,3 +28,4 @@ pub use client::{
     SpanEventNameMapping, SpanEventNameRoutingKey, TracesConfig, UploadError,
 };
 pub use config_service::client::AuthMethod;
+pub use gcs_token_provider::{GcsTokenFuture, GcsTokenProvider, GcsTokenProviderError};
