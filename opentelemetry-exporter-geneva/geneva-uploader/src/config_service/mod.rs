@@ -698,7 +698,7 @@ mod tests {
     }
 
     /// Scenario: A cached Geneva credential needs refresh after the provider rotates its token.
-    /// Guarantees: The refresh uses the replacement provider token and caches the new credential.
+    /// Guarantees: The refresh uses the replacement provider token and cache hits reuse the new ingestion token.
     #[tokio::test(flavor = "current_thread")]
     async fn external_token_renews_when_ingestion_cache_expires() {
         let config_server = MockServer::start().await;
@@ -718,6 +718,9 @@ mod tests {
 
         let mut refreshed_response: serde_json::Value =
             serde_json::from_str(&mock_response).unwrap();
+        let refreshed_token = format!("{valid_token}-refreshed");
+        refreshed_response["IngestionGatewayInfo"]["AuthToken"] =
+            serde_json::Value::String(refreshed_token.clone());
         refreshed_response["IngestionGatewayInfo"]["AuthTokenExpiryTime"] =
             serde_json::Value::String(
                 (chrono::Utc::now() + chrono::Duration::hours(1)).to_rfc3339(),
@@ -765,8 +768,8 @@ mod tests {
 
         assert_eq!(provider.calls(), 2);
         assert_eq!(first.0.auth_token.expose_secret(), valid_token);
-        assert_eq!(refreshed.0.auth_token.expose_secret(), valid_token);
-        assert_eq!(cached.0.auth_token.expose_secret(), valid_token);
+        assert_eq!(refreshed.0.auth_token.expose_secret(), refreshed_token);
+        assert_eq!(cached.0.auth_token.expose_secret(), refreshed_token);
     }
 
     /// Scenario: The external token provider cannot acquire a token.
