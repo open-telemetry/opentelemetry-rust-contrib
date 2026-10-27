@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+## [0.9.0] - 2026-10-27
+
 ### Added
 
 - **Breaking:** Add external Entra token providers for GCS authentication
@@ -9,8 +11,7 @@
   now non-exhaustive so future authentication modes can be added compatibly.
   Applications can own identity selection, acquisition, caching, and refresh
   while the uploader continues to manage the GCS exchange and Geneva ingestion
-  credentials. This change requires the next `geneva-uploader` release to be
-  `0.9.0`.
+  credentials.
 
 ### Changed
 
