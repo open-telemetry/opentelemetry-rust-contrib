@@ -261,7 +261,7 @@ where
     ) -> opentelemetry_sdk::error::OTelSdkResult {
         let otel_severity = log_record
             .severity_number()
-            .ok_or(OTelSdkError::InternalFailure(
+            .ok_or_else(|| OTelSdkError::InternalFailure(
                 "Severity number is required for user-events exporter".to_string(),
             ))?;
         let level = get_severity_level(otel_severity);
