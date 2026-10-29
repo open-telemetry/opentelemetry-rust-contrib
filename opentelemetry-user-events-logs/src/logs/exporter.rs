@@ -259,11 +259,11 @@ where
         log_record: &opentelemetry_sdk::logs::SdkLogRecord,
         _instrumentation: &opentelemetry::InstrumentationScope,
     ) -> opentelemetry_sdk::error::OTelSdkResult {
-        let otel_severity = log_record
-            .severity_number()
-            .ok_or(OTelSdkError::InternalFailure(
+        let otel_severity = log_record.severity_number().ok_or_else(|| {
+            OTelSdkError::InternalFailure(
                 "Severity number is required for user-events exporter".to_string(),
-            ))?;
+            )
+        })?;
         let level = get_severity_level(otel_severity);
 
         // EventSets are stored in the same order as their int representation,
