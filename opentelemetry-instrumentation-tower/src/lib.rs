@@ -32,7 +32,7 @@
 //!
 //! A client span (`SpanKind::Client`) is created per request, with attributes such
 //! as `http.request.method`, `url.full`, `url.scheme`, `server.address`,
-//! `server.port`, and `http.response.status_code`.
+//! `server.port`, `http.response.status_code`, and `error.type`.
 //!
 //! The value of a query parameter that can carry a credential, such as `sig`, is
 //! replaced with `REDACTED` in `url.query` and `url.full`. The client layer also
@@ -41,10 +41,11 @@
 //! [`http::client::LayerBuilder::with_sensitive_query_parameters`] to name the
 //! keys yourself.
 //!
-//! The server span carries `error.type` when a request ends with an error. A 5xx
-//! response sets `error.type` to the status code number as a string, for example
-//! `"500"`. An error from the inner service, returned before a status code
-//! exists, sets `error.type` to that error's Rust type name. The middleware
+//! The server and the client span carry `error.type` when a request ends with an
+//! error. An error response sets `error.type` to the status code number as a
+//! string, for example `"500"`. For the server, an error response is a 5xx. For
+//! the client, it is a 4xx or a 5xx. An error from the inner service, returned
+//! before a status code exists, sets `error.type` to that error's Rust type name. The middleware
 //! wraps an arbitrary [Tower] `Service` and has no knowledge of your
 //! application's error types, so these are the two classifications it can
 //! produce on its own, with the status code taking precedence whenever one

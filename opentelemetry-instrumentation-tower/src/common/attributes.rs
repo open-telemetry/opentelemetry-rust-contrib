@@ -2,11 +2,9 @@
 
 use std::borrow::Cow;
 
-#[cfg(feature = "http-server")]
 use http::StatusCode;
 use opentelemetry::KeyValue;
 use opentelemetry_semantic_conventions as semconv;
-#[cfg(feature = "http-server")]
 use opentelemetry_semantic_conventions::attribute::ERROR_TYPE;
 
 /// Maps common HTTP methods to a `&'static str` so the resulting `KeyValue`
@@ -74,16 +72,21 @@ pub(crate) fn split_and_format_protocol_version(
 /// Builds the `error.type` [`KeyValue`] for a response whose status code the
 /// HTTP conventions treat as an error.
 ///
-/// Promotes common 5xx codes to a `&'static str` for an
+/// Promotes common 4xx and 5xx codes to a `&'static str` for an
 /// allocation-free clone in the hot path, and falls back to an owned `String`
 /// for every other status code.
-#[cfg(feature = "http-server")]
 #[inline]
 pub(crate) fn error_type_kv(status: http::StatusCode) -> KeyValue {
     // From the semantic convention: once a status code exists and indicates an
     // error, `error.type` should be "the status code number (represented as a
     // string)".
     match status {
+        StatusCode::BAD_REQUEST => KeyValue::new(ERROR_TYPE, "400"),
+        StatusCode::UNAUTHORIZED => KeyValue::new(ERROR_TYPE, "401"),
+        StatusCode::FORBIDDEN => KeyValue::new(ERROR_TYPE, "403"),
+        StatusCode::NOT_FOUND => KeyValue::new(ERROR_TYPE, "404"),
+        StatusCode::CONFLICT => KeyValue::new(ERROR_TYPE, "409"),
+        StatusCode::TOO_MANY_REQUESTS => KeyValue::new(ERROR_TYPE, "429"),
         StatusCode::INTERNAL_SERVER_ERROR => KeyValue::new(ERROR_TYPE, "500"),
         StatusCode::NOT_IMPLEMENTED => KeyValue::new(ERROR_TYPE, "501"),
         StatusCode::BAD_GATEWAY => KeyValue::new(ERROR_TYPE, "502"),
@@ -379,7 +382,6 @@ mod tests {
         }
     }
 
-    #[cfg(feature = "http-server")]
     #[test]
     fn error_type_kv_builds_the_error_type_attribute() {
         struct TestCase {
@@ -389,6 +391,36 @@ mod tests {
         }
 
         let test_cases = [
+            TestCase {
+                name: "400 uses the static path",
+                status: http::StatusCode::BAD_REQUEST,
+                expected: KeyValue::new(semconv::attribute::ERROR_TYPE, "400"),
+            },
+            TestCase {
+                name: "401 uses the static path",
+                status: http::StatusCode::UNAUTHORIZED,
+                expected: KeyValue::new(semconv::attribute::ERROR_TYPE, "401"),
+            },
+            TestCase {
+                name: "403 uses the static path",
+                status: http::StatusCode::FORBIDDEN,
+                expected: KeyValue::new(semconv::attribute::ERROR_TYPE, "403"),
+            },
+            TestCase {
+                name: "404 uses the static path",
+                status: http::StatusCode::NOT_FOUND,
+                expected: KeyValue::new(semconv::attribute::ERROR_TYPE, "404"),
+            },
+            TestCase {
+                name: "409 uses the static path",
+                status: http::StatusCode::CONFLICT,
+                expected: KeyValue::new(semconv::attribute::ERROR_TYPE, "409"),
+            },
+            TestCase {
+                name: "429 uses the static path",
+                status: http::StatusCode::TOO_MANY_REQUESTS,
+                expected: KeyValue::new(semconv::attribute::ERROR_TYPE, "429"),
+            },
             TestCase {
                 name: "500 uses the static path",
                 status: http::StatusCode::INTERNAL_SERVER_ERROR,

@@ -31,6 +31,14 @@
 * The client instrumentation scope carries the OpenTelemetry semantic
   conventions schema URL, the same as the server scope.
   [#700](https://github.com/open-telemetry/opentelemetry-rust-contrib/pull/700)
+* The client span, and the `http.client.request.duration`,
+  `http.client.request.body.size` and `http.client.response.body.size` metrics,
+  carry `error.type` when a request ends with an error. A 4xx or 5xx response
+  sets `error.type` to the status code number as a string. An error from the
+  inner service, returned before a status code exists, sets `error.type` to
+  that error's Rust type name. The span status of an error response carries no
+  description, the same as the server span.
+  [#700](https://github.com/open-telemetry/opentelemetry-rust-contrib/pull/700)
 * The server span, and the `http.server.request.duration`,
   `http.server.request.body.size` and `http.server.response.body.size` metrics,
   now carry `error.type` when a request ends with an error. A 5xx response sets

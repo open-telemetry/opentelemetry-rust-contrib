@@ -17,6 +17,9 @@
 //! - **Tracing (sampled-out)**: `AlwaysOff` sampler (non-sampled code path)
 //! - **Metrics**: active meter, no-op tracer
 //! - **Tracing + Metrics**: both active
+//! - **Tracing + Metrics (404)**: Same as above, but the transport answers with
+//!   a 404 response, to baseline the extra `error.type` attribute, span status,
+//!   and metric label
 //!
 //! Like the server benchmark, this runs with the default no-op text-map
 //! propagator so the numbers reflect the layer's own overhead rather than the
@@ -61,6 +64,18 @@ use tower::{Service, ServiceBuilder, ServiceExt};
 /// Minimal transport — returns an empty response, standing in for a real client.
 async fn transport(_req: http::Request<String>) -> Result<http::Response<String>, Infallible> {
     Ok(http::Response::new(String::new()))
+}
+
+/// Transport that always answers with a 404. Isolates the additional cost of
+/// the `error.type` code path: the extra span attribute, the span status, and
+/// the extra metric label.
+async fn error_transport(
+    _req: http::Request<String>,
+) -> Result<http::Response<String>, Infallible> {
+    Ok(http::Response::builder()
+        .status(http::StatusCode::NOT_FOUND)
+        .body(String::new())
+        .unwrap())
 }
 
 fn build_request() -> http::Request<String> {
@@ -202,6 +217,28 @@ fn benchmark_http_client(c: &mut Criterion) {
                 let service = ServiceBuilder::new()
                     .layer(layer.clone())
                     .service(tower::service_fn(transport));
+                (service, build_request())
+            },
+            |(mut service, req)| async move {
+                black_box(service.ready().await.unwrap().call(req).await.unwrap());
+            },
+            BatchSize::SmallInput,
+        );
+    });
+
+    // Scenario 7: Both tracing + metrics, with a 404 response. Comparing this
+    // against scenario 6 isolates the cost of the `error.type` code path,
+    // since both scenarios have the same signals active and differ only in
+    // the response status.
+    group.bench_function(BenchmarkId::new("request", "tracing+metrics-404"), |b| {
+        let _tracer_provider = setup_tracer();
+        let (_meter_provider, _metric_exporter) = setup_meter();
+        let layer = LayerBuilder::builder().build().unwrap();
+        b.to_async(&rt).iter_batched(
+            || {
+                let service = ServiceBuilder::new()
+                    .layer(layer.clone())
+                    .service(tower::service_fn(error_transport));
                 (service, build_request())
             },
             |(mut service, req)| async move {

@@ -19,12 +19,13 @@ use opentelemetry::Context as OtelContext;
 use opentelemetry::KeyValue;
 use opentelemetry_http::HeaderInjector;
 use opentelemetry_semantic_conventions as semconv;
+use opentelemetry_semantic_conventions::attribute::ERROR_TYPE;
 use pin_project_lite::pin_project;
 use tower_layer::Layer as TowerLayer;
 use tower_service::Service as TowerService;
 
 use crate::common::attributes::{
-    method_kv, redact_url_full, split_and_format_protocol_version, url_scheme_kv,
+    error_type_kv, method_kv, redact_url_full, split_and_format_protocol_version, url_scheme_kv,
     DEFAULT_SENSITIVE_QUERY_PARAMETERS,
 };
 use crate::common::instrumentation_scope;
@@ -89,6 +90,7 @@ impl Default for Layer {
 /// Builder for the HTTP client [`Layer`].
 pub struct LayerBuilder<RouteExt = NoRouteExtractor, ReqExt = NoOpExtractor, ResExt = NoOpExtractor>
 {
+    tracer: Option<Arc<BoxedTracer>>,
     meter: Option<Meter>,
     req_dur_bounds: Option<Vec<f64>>,
     tracing_enabled: bool,
@@ -102,6 +104,7 @@ pub struct LayerBuilder<RouteExt = NoRouteExtractor, ReqExt = NoOpExtractor, Res
 impl LayerBuilder {
     pub fn builder() -> Self {
         LayerBuilder {
+            tracer: None,
             meter: None,
             req_dur_bounds: Some(Vec::from(OTEL_DEFAULT_HTTP_CLIENT_DURATION_BOUNDS)),
             tracing_enabled: true,
@@ -126,6 +129,7 @@ impl<RouteExt, ReqExt, ResExt> LayerBuilder<RouteExt, ReqExt, ResExt> {
         extractor: NewRoute,
     ) -> LayerBuilder<NewRoute, ReqExt, ResExt> {
         LayerBuilder {
+            tracer: self.tracer,
             meter: self.meter,
             req_dur_bounds: self.req_dur_bounds,
             tracing_enabled: self.tracing_enabled,
@@ -157,6 +161,7 @@ impl<RouteExt, ReqExt, ResExt> LayerBuilder<RouteExt, ReqExt, ResExt> {
         NewReqExt: RequestAttributeExtractor<B>,
     {
         LayerBuilder {
+            tracer: self.tracer,
             meter: self.meter,
             req_dur_bounds: self.req_dur_bounds,
             tracing_enabled: self.tracing_enabled,
@@ -177,6 +182,7 @@ impl<RouteExt, ReqExt, ResExt> LayerBuilder<RouteExt, ReqExt, ResExt> {
         NewResExt: ResponseAttributeExtractor<B>,
     {
         LayerBuilder {
+            tracer: self.tracer,
             meter: self.meter,
             req_dur_bounds: self.req_dur_bounds,
             tracing_enabled: self.tracing_enabled,
@@ -216,7 +222,8 @@ impl<RouteExt, ReqExt, ResExt> LayerBuilder<RouteExt, ReqExt, ResExt> {
             .unwrap_or_else(|| Vec::from(OTEL_DEFAULT_HTTP_CLIENT_DURATION_BOUNDS));
 
         let tracer = if self.tracing_enabled {
-            Arc::new(global::tracer_with_scope(instrumentation_scope()))
+            self.tracer
+                .unwrap_or_else(|| Arc::new(global::tracer_with_scope(instrumentation_scope())))
         } else {
             Arc::new(BoxedTracer::new(Box::new(
                 NoopTracerProvider::new().tracer_with_scope(instrumentation_scope()),
@@ -240,7 +247,7 @@ impl<RouteExt, ReqExt, ResExt> LayerBuilder<RouteExt, ReqExt, ResExt> {
             };
 
         Ok(Layer {
-            state: Arc::from(Self::make_state(
+            state: Arc::from(make_state(
                 meter,
                 req_dur_bounds,
                 sensitive_query_parameters,
@@ -301,37 +308,48 @@ impl<RouteExt, ReqExt, ResExt> LayerBuilder<RouteExt, ReqExt, ResExt> {
         self
     }
 
-    /// Override the meter used for metrics collection (test-only).
     #[cfg(test)]
-    fn with_meter(mut self, meter: Meter) -> Self {
-        self.meter = Some(meter);
+    fn with_tracer_provider<P>(mut self, tracer_provider: P) -> Self
+    where
+        P: TracerProvider,
+        P::Tracer: opentelemetry::global::ObjectSafeTracer + Send + Sync + 'static,
+    {
+        self.tracer = Some(Arc::new(BoxedTracer::new(Box::new(
+            tracer_provider.tracer_with_scope(instrumentation_scope()),
+        ))));
         self
     }
 
-    fn make_state(
-        meter: Meter,
-        req_dur_bounds: Vec<f64>,
-        sensitive_query_parameters: Box<[Cow<'static, str>]>,
-    ) -> LayerState {
-        LayerState {
-            client_request_duration: meter
-                .f64_histogram(Cow::from(semconv::metric::HTTP_CLIENT_REQUEST_DURATION))
-                .with_description("Duration of HTTP client requests.")
-                .with_unit(Cow::from(HTTP_CLIENT_DURATION_UNIT))
-                .with_boundaries(req_dur_bounds)
-                .build(),
-            client_request_body_size: meter
-                .u64_histogram(semconv::metric::HTTP_CLIENT_REQUEST_BODY_SIZE)
-                .with_description("Size of HTTP client request bodies.")
-                .with_unit(HTTP_CLIENT_REQUEST_BODY_SIZE_UNIT)
-                .build(),
-            client_response_body_size: meter
-                .u64_histogram(semconv::metric::HTTP_CLIENT_RESPONSE_BODY_SIZE)
-                .with_description("Size of HTTP client response bodies.")
-                .with_unit(HTTP_CLIENT_RESPONSE_BODY_SIZE_UNIT)
-                .build(),
-            sensitive_query_parameters,
-        }
+    #[cfg(test)]
+    fn with_meter_provider(mut self, meter_provider: impl MeterProvider) -> Self {
+        self.meter = Some(meter_provider.meter_with_scope(instrumentation_scope()));
+        self
+    }
+}
+
+fn make_state(
+    meter: Meter,
+    req_dur_bounds: Vec<f64>,
+    sensitive_query_parameters: Box<[Cow<'static, str>]>,
+) -> LayerState {
+    LayerState {
+        client_request_duration: meter
+            .f64_histogram(Cow::from(semconv::metric::HTTP_CLIENT_REQUEST_DURATION))
+            .with_description("Duration of HTTP client requests.")
+            .with_unit(Cow::from(HTTP_CLIENT_DURATION_UNIT))
+            .with_boundaries(req_dur_bounds)
+            .build(),
+        client_request_body_size: meter
+            .u64_histogram(semconv::metric::HTTP_CLIENT_REQUEST_BODY_SIZE)
+            .with_description("Size of HTTP client request bodies.")
+            .with_unit(HTTP_CLIENT_REQUEST_BODY_SIZE_UNIT)
+            .build(),
+        client_response_body_size: meter
+            .u64_histogram(semconv::metric::HTTP_CLIENT_RESPONSE_BODY_SIZE)
+            .with_description("Size of HTTP client response bodies.")
+            .with_unit(HTTP_CLIENT_RESPONSE_BODY_SIZE_UNIT)
+            .build(),
+        sensitive_query_parameters,
     }
 }
 
@@ -401,13 +419,13 @@ where
         let this = self.project();
         let _guard = this.otel_cx.clone().attach();
         let result = std::task::ready!(this.inner.poll(cx));
-        if let Some(fin) = this.finalization.take() {
-            finalize_request(
-                &result,
-                &fin.request_data,
-                &fin.layer_state,
-                &fin.response_extractor,
-            );
+        if let Some(RequestFinalization {
+            request_data,
+            layer_state,
+            response_extractor,
+        }) = this.finalization.take()
+        {
+            finalize_request(&result, request_data, &layer_state, &response_extractor);
         }
         Poll::Ready(result)
     }
@@ -538,7 +556,7 @@ where
 
 fn finalize_request<ResBody, E, ResExt>(
     result: &std::result::Result<http::Response<ResBody>, E>,
-    request_data: &RequestData,
+    request_data: RequestData,
     layer_state: &Arc<LayerState>,
     response_extractor: &ResExt,
 ) where
@@ -546,60 +564,87 @@ fn finalize_request<ResBody, E, ResExt>(
     ResExt: ResponseAttributeExtractor<ResBody>,
     E: std::fmt::Debug,
 {
+    let RequestData {
+        duration_start,
+        req_body_size,
+        protocol_name_kv,
+        protocol_version_kv,
+        url_scheme_kv,
+        method_kv,
+        route_kv_opt,
+        server_address_kv_opt,
+        server_port_kv_opt,
+        custom_request_attributes,
+    } = request_data;
+
     let cx = OtelContext::current();
     let span = cx.span();
-
-    let mut base_labels = vec![
-        request_data.protocol_name_kv.clone(),
-        request_data.protocol_version_kv.clone(),
-        request_data.url_scheme_kv.clone(),
-        request_data.method_kv.clone(),
-    ];
-    if let Some(route_kv) = &request_data.route_kv_opt {
-        base_labels.push(route_kv.clone());
-    }
-    if let Some(server_address_kv) = &request_data.server_address_kv_opt {
-        base_labels.push(server_address_kv.clone());
-    }
-    if let Some(server_port_kv) = &request_data.server_port_kv_opt {
-        base_labels.push(server_port_kv.clone());
-    }
 
     match result {
         Ok(response) => {
             let http_status = response.status();
-
-            let mut label_superset = base_labels;
-            label_superset.push(KeyValue::new(
+            let status_code_kv = KeyValue::new(
                 semconv::attribute::HTTP_RESPONSE_STATUS_CODE,
                 i64::from(http_status.as_u16()),
-            ));
-            label_superset.extend(request_data.custom_request_attributes.clone());
+            );
 
             let custom_response_attributes = response_extractor.extract_attributes(response);
-            label_superset.extend(custom_response_attributes.clone());
 
-            span.set_attribute(KeyValue::new(
-                semconv::attribute::HTTP_RESPONSE_STATUS_CODE,
-                http_status.as_u16() as i64,
-            ));
-
+            span.set_attribute(status_code_kv.clone());
             for attr in &custom_response_attributes {
                 span.set_attribute(attr.clone());
             }
 
-            if http_status.is_client_error() || http_status.is_server_error() {
-                span.set_status(Status::Error {
-                    description: format!("HTTP {}", http_status.as_u16()).into(),
-                });
+            // From the semantic convention: For HTTP status codes in the 4xx range
+            // span status MUST be left unset in case of SpanKind.SERVER and SHOULD
+            // be set to Error in case of SpanKind.CLIENT.
+            // For HTTP status codes in the 5xx range, as well as any other code the
+            // client failed to interpret, span status SHOULD be set to Error.
+            let error_type_kv = if http_status.is_client_error() || http_status.is_server_error() {
+                let error_type_kv = error_type_kv(http_status);
+                span.set_attribute(error_type_kv.clone());
+                // From the semantic convention:
+                // Don’t set the span status description if the reason can be
+                // inferred from http.response.status_code.
+                span.set_status(Status::error(""));
+                Some(error_type_kv)
+            } else {
+                None
+            };
+
+            let cap = 5
+                + error_type_kv.is_some() as usize
+                + route_kv_opt.is_some() as usize
+                + server_address_kv_opt.is_some() as usize
+                + server_port_kv_opt.is_some() as usize
+                + custom_request_attributes.len()
+                + custom_response_attributes.len();
+            let mut label_superset = Vec::with_capacity(cap);
+            label_superset.push(protocol_name_kv);
+            label_superset.push(protocol_version_kv);
+            label_superset.push(url_scheme_kv);
+            label_superset.push(method_kv);
+            label_superset.push(status_code_kv);
+            if let Some(route_kv) = route_kv_opt {
+                label_superset.push(route_kv);
             }
+            if let Some(server_address_kv) = server_address_kv_opt {
+                label_superset.push(server_address_kv);
+            }
+            if let Some(server_port_kv) = server_port_kv_opt {
+                label_superset.push(server_port_kv);
+            }
+            if let Some(error_type_kv) = error_type_kv {
+                label_superset.push(error_type_kv);
+            }
+            label_superset.extend(custom_request_attributes);
+            label_superset.extend(custom_response_attributes);
 
-            layer_state.client_request_duration.record(
-                request_data.duration_start.elapsed().as_secs_f64(),
-                &label_superset,
-            );
+            layer_state
+                .client_request_duration
+                .record(duration_start.elapsed().as_secs_f64(), &label_superset);
 
-            if let Some(req_content_length) = request_data.req_body_size {
+            if let Some(req_content_length) = req_body_size {
                 layer_state
                     .client_request_body_size
                     .record(req_content_length, &label_superset);
@@ -612,14 +657,38 @@ fn finalize_request<ResBody, E, ResExt>(
             }
         }
         Err(error) => {
-            span.set_status(Status::Error {
-                description: format!("{:?}", error).into(),
-            });
+            // From the semantic convention: If the request fails with an error
+            // before response status code was sent or received, error.type
+            // SHOULD be set to exception type (its fully-qualified class name,
+            // if applicable) or a component-specific low cardinality error identifier.
+            let error_type_kv = KeyValue::new(ERROR_TYPE, std::any::type_name::<E>());
 
-            layer_state.client_request_duration.record(
-                request_data.duration_start.elapsed().as_secs_f64(),
-                &base_labels,
+            span.set_attribute(error_type_kv.clone());
+            span.set_status(Status::error(format!("{:?}", error)));
+
+            let mut label_superset = Vec::with_capacity(
+                5 + route_kv_opt.is_some() as usize
+                    + server_address_kv_opt.is_some() as usize
+                    + server_port_kv_opt.is_some() as usize,
             );
+            label_superset.push(protocol_name_kv);
+            label_superset.push(protocol_version_kv);
+            label_superset.push(url_scheme_kv);
+            label_superset.push(method_kv);
+            if let Some(route_kv) = route_kv_opt {
+                label_superset.push(route_kv);
+            }
+            if let Some(server_address_kv) = server_address_kv_opt {
+                label_superset.push(server_address_kv);
+            }
+            if let Some(server_port_kv) = server_port_kv_opt {
+                label_superset.push(server_port_kv);
+            }
+            label_superset.push(error_type_kv);
+
+            layer_state
+                .client_request_duration
+                .record(duration_start.elapsed().as_secs_f64(), &label_superset);
         }
     }
 }
@@ -631,9 +700,7 @@ mod tests {
     use crate::http::extractors::PathExtractor;
 
     use http::{Request, Response, StatusCode};
-    use opentelemetry::global::BoxedTracer;
-    use opentelemetry::metrics::MeterProvider;
-    use opentelemetry::trace::{FutureExt, SpanKind, TraceContextExt, Tracer, TracerProvider};
+    use opentelemetry::trace::{FutureExt, Span, SpanKind, TraceContextExt, Tracer};
     use opentelemetry_sdk::metrics::{
         data::{AggregatedMetrics, MetricData},
         InMemoryMetricExporter, PeriodicReader, SdkMeterProvider,
@@ -642,6 +709,9 @@ mod tests {
     use opentelemetry_sdk::trace::{InMemorySpanExporterBuilder, SdkTracerProvider};
     use std::time::Duration;
     use tower::{ServiceBuilder, ServiceExt};
+
+    #[derive(Debug, Clone, Copy)]
+    struct TestError;
 
     fn ok_service() -> impl TowerService<
         Request<String>,
@@ -658,19 +728,36 @@ mod tests {
         })
     }
 
+    fn outcome_service(
+        outcome: std::result::Result<StatusCode, TestError>,
+    ) -> impl TowerService<Request<String>, Response = Response<String>, Error = TestError> + Clone
+    {
+        tower::service_fn(move |_req: Request<String>| async move {
+            outcome.map(|status| {
+                Response::builder()
+                    .status(status)
+                    .body(String::from("body"))
+                    .unwrap()
+            })
+        })
+    }
+
     #[tokio::test(flavor = "current_thread")]
     async fn test_client_span_is_child_with_client_kind() {
         struct TestCase {
             name: &'static str,
             target: &'static str,
+            outcome: std::result::Result<StatusCode, TestError>,
             expected_span_name: &'static str,
             expected_attributes: Vec<KeyValue>,
+            expected_span_status: Status,
         }
 
         let test_cases = [
             TestCase {
                 name: "plain URL",
                 target: "http://example.com/api/users/123",
+                outcome: Ok(StatusCode::OK),
                 expected_span_name: "GET /api/users/123",
                 expected_attributes: vec![
                     KeyValue::new(semconv::attribute::HTTP_REQUEST_METHOD, "GET".to_string()),
@@ -686,10 +773,12 @@ mod tests {
                     KeyValue::new(semconv::attribute::HTTP_ROUTE, "/api/users/123".to_string()),
                     KeyValue::new(semconv::attribute::HTTP_RESPONSE_STATUS_CODE, 200),
                 ],
+                expected_span_status: Status::Unset,
             },
             TestCase {
                 name: "URL with a query component",
                 target: "http://example.com/api/users/123?fields=name&verbose=true",
+                outcome: Ok(StatusCode::OK),
                 expected_span_name: "GET /api/users/123",
                 expected_attributes: vec![
                     KeyValue::new(semconv::attribute::HTTP_REQUEST_METHOD, "GET".to_string()),
@@ -705,10 +794,12 @@ mod tests {
                     KeyValue::new(semconv::attribute::HTTP_ROUTE, "/api/users/123".to_string()),
                     KeyValue::new(semconv::attribute::HTTP_RESPONSE_STATUS_CODE, 200),
                 ],
+                expected_span_status: Status::Unset,
             },
             TestCase {
                 name: "URL with a sensitive query parameter",
                 target: "https://example.com:8443/api/users/123?fields=name&sig=secret",
+                outcome: Ok(StatusCode::OK),
                 expected_span_name: "GET /api/users/123",
                 expected_attributes: vec![
                     KeyValue::new(semconv::attribute::HTTP_REQUEST_METHOD, "GET".to_string()),
@@ -726,10 +817,12 @@ mod tests {
                     KeyValue::new(semconv::attribute::HTTP_ROUTE, "/api/users/123".to_string()),
                     KeyValue::new(semconv::attribute::HTTP_RESPONSE_STATUS_CODE, 200),
                 ],
+                expected_span_status: Status::Unset,
             },
             TestCase {
                 name: "URL with user information",
                 target: "http://user:password@example.com/api/users/123",
+                outcome: Ok(StatusCode::OK),
                 expected_span_name: "GET /api/users/123",
                 expected_attributes: vec![
                     KeyValue::new(semconv::attribute::HTTP_REQUEST_METHOD, "GET".to_string()),
@@ -745,10 +838,12 @@ mod tests {
                     KeyValue::new(semconv::attribute::HTTP_ROUTE, "/api/users/123".to_string()),
                     KeyValue::new(semconv::attribute::HTTP_RESPONSE_STATUS_CODE, 200),
                 ],
+                expected_span_status: Status::Unset,
             },
             TestCase {
                 name: "URL with an empty query component",
                 target: "http://example.com/api/users/123?",
+                outcome: Ok(StatusCode::OK),
                 expected_span_name: "GET /api/users/123",
                 expected_attributes: vec![
                     KeyValue::new(semconv::attribute::HTTP_REQUEST_METHOD, "GET".to_string()),
@@ -764,6 +859,115 @@ mod tests {
                     KeyValue::new(semconv::attribute::HTTP_ROUTE, "/api/users/123".to_string()),
                     KeyValue::new(semconv::attribute::HTTP_RESPONSE_STATUS_CODE, 200),
                 ],
+                expected_span_status: Status::Unset,
+            },
+            TestCase {
+                name: "a client error response carries error.type",
+                target: "http://example.com/api/users/123",
+                outcome: Ok(StatusCode::NOT_FOUND),
+                expected_span_name: "GET /api/users/123",
+                expected_attributes: vec![
+                    KeyValue::new(semconv::attribute::HTTP_REQUEST_METHOD, "GET".to_string()),
+                    KeyValue::new(
+                        semconv::attribute::URL_FULL,
+                        "http://example.com/api/users/123".to_string(),
+                    ),
+                    KeyValue::new(semconv::attribute::URL_SCHEME, "http".to_string()),
+                    KeyValue::new(
+                        semconv::attribute::SERVER_ADDRESS,
+                        "example.com".to_string(),
+                    ),
+                    KeyValue::new(semconv::attribute::HTTP_ROUTE, "/api/users/123".to_string()),
+                    KeyValue::new(semconv::attribute::HTTP_RESPONSE_STATUS_CODE, 404),
+                    KeyValue::new(ERROR_TYPE, "404"),
+                ],
+                expected_span_status: Status::error(""),
+            },
+            TestCase {
+                name: "a server error response carries error.type",
+                target: "http://example.com/api/users/123",
+                outcome: Ok(StatusCode::INTERNAL_SERVER_ERROR),
+                expected_span_name: "GET /api/users/123",
+                expected_attributes: vec![
+                    KeyValue::new(semconv::attribute::HTTP_REQUEST_METHOD, "GET".to_string()),
+                    KeyValue::new(
+                        semconv::attribute::URL_FULL,
+                        "http://example.com/api/users/123".to_string(),
+                    ),
+                    KeyValue::new(semconv::attribute::URL_SCHEME, "http".to_string()),
+                    KeyValue::new(
+                        semconv::attribute::SERVER_ADDRESS,
+                        "example.com".to_string(),
+                    ),
+                    KeyValue::new(semconv::attribute::HTTP_ROUTE, "/api/users/123".to_string()),
+                    KeyValue::new(semconv::attribute::HTTP_RESPONSE_STATUS_CODE, 500),
+                    KeyValue::new(ERROR_TYPE, "500"),
+                ],
+                expected_span_status: Status::error(""),
+            },
+            TestCase {
+                name: "an uncommon error response carries error.type",
+                target: "http://example.com/api/users/123",
+                outcome: Ok(StatusCode::from_u16(499).unwrap()),
+                expected_span_name: "GET /api/users/123",
+                expected_attributes: vec![
+                    KeyValue::new(semconv::attribute::HTTP_REQUEST_METHOD, "GET".to_string()),
+                    KeyValue::new(
+                        semconv::attribute::URL_FULL,
+                        "http://example.com/api/users/123".to_string(),
+                    ),
+                    KeyValue::new(semconv::attribute::URL_SCHEME, "http".to_string()),
+                    KeyValue::new(
+                        semconv::attribute::SERVER_ADDRESS,
+                        "example.com".to_string(),
+                    ),
+                    KeyValue::new(semconv::attribute::HTTP_ROUTE, "/api/users/123".to_string()),
+                    KeyValue::new(semconv::attribute::HTTP_RESPONSE_STATUS_CODE, 499),
+                    KeyValue::new(ERROR_TYPE, "499"),
+                ],
+                expected_span_status: Status::error(""),
+            },
+            TestCase {
+                name: "a redirect response carries no error.type",
+                target: "http://example.com/api/users/123",
+                outcome: Ok(StatusCode::MOVED_PERMANENTLY),
+                expected_span_name: "GET /api/users/123",
+                expected_attributes: vec![
+                    KeyValue::new(semconv::attribute::HTTP_REQUEST_METHOD, "GET".to_string()),
+                    KeyValue::new(
+                        semconv::attribute::URL_FULL,
+                        "http://example.com/api/users/123".to_string(),
+                    ),
+                    KeyValue::new(semconv::attribute::URL_SCHEME, "http".to_string()),
+                    KeyValue::new(
+                        semconv::attribute::SERVER_ADDRESS,
+                        "example.com".to_string(),
+                    ),
+                    KeyValue::new(semconv::attribute::HTTP_ROUTE, "/api/users/123".to_string()),
+                    KeyValue::new(semconv::attribute::HTTP_RESPONSE_STATUS_CODE, 301),
+                ],
+                expected_span_status: Status::Unset,
+            },
+            TestCase {
+                name: "an inner-service error carries the error type name",
+                target: "http://example.com/api/users/123",
+                outcome: Err(TestError),
+                expected_span_name: "GET /api/users/123",
+                expected_attributes: vec![
+                    KeyValue::new(semconv::attribute::HTTP_REQUEST_METHOD, "GET".to_string()),
+                    KeyValue::new(
+                        semconv::attribute::URL_FULL,
+                        "http://example.com/api/users/123".to_string(),
+                    ),
+                    KeyValue::new(semconv::attribute::URL_SCHEME, "http".to_string()),
+                    KeyValue::new(
+                        semconv::attribute::SERVER_ADDRESS,
+                        "example.com".to_string(),
+                    ),
+                    KeyValue::new(semconv::attribute::HTTP_ROUTE, "/api/users/123".to_string()),
+                    KeyValue::new(ERROR_TYPE, std::any::type_name::<TestError>()),
+                ],
+                expected_span_status: Status::error(format!("{:?}", TestError)),
             },
         ];
 
@@ -772,17 +976,17 @@ mod tests {
             let tracer_provider = SdkTracerProvider::builder()
                 .with_simple_exporter(trace_exporter.clone())
                 .build();
-            let tracer = Arc::new(BoxedTracer::new(Box::new(
-                tracer_provider.tracer("test_tracer"),
-            )));
+            let tracer = tracer_provider.tracer("test_tracer");
 
-            let mut layer = LayerBuilder::builder()
+            let layer = LayerBuilder::builder()
                 .with_route_extractor(PathExtractor)
+                .with_tracer_provider(tracer_provider.clone())
                 .build()
                 .unwrap();
-            layer.tracer = tracer.clone();
 
-            let mut service = ServiceBuilder::new().layer(layer).service(ok_service());
+            let mut service = ServiceBuilder::new()
+                .layer(layer)
+                .service(outcome_service(test_case.outcome));
 
             let parent_span = tracer.start("parent_operation");
             let cx = OtelContext::current_with_span(parent_span);
@@ -793,7 +997,7 @@ mod tests {
                 .body("test".to_string())
                 .unwrap();
 
-            let _response = async { service.ready().await.unwrap().call(request).await.unwrap() }
+            let _response = async { service.ready().await.unwrap().call(request).await }
                 .with_context(cx)
                 .await;
 
@@ -822,14 +1026,16 @@ mod tests {
                     client_span.span_kind.clone(),
                     client_span.parent_span_id,
                     client_span.span_context.trace_id(),
-                    client_span.attributes.clone()
+                    client_span.attributes.clone(),
+                    client_span.status.clone()
                 ),
                 (
                     test_case.expected_span_name,
                     SpanKind::Client,
                     parent_span.span_context.span_id(),
                     parent_span.span_context.trace_id(),
-                    test_case.expected_attributes
+                    test_case.expected_attributes,
+                    test_case.expected_span_status
                 ),
                 "{}",
                 test_case.name
@@ -868,16 +1074,12 @@ mod tests {
             let tracer_provider = SdkTracerProvider::builder()
                 .with_simple_exporter(trace_exporter.clone())
                 .build();
-            let builder = LayerBuilder::builder();
+            let builder = LayerBuilder::builder().with_tracer_provider(tracer_provider.clone());
             let builder = match test_case.sensitive {
                 Some(sensitive) => builder.with_sensitive_query_parameters(sensitive),
                 None => builder,
             };
-            let mut layer = builder.build().unwrap();
-            layer.tracer = Arc::new(BoxedTracer::new(Box::new(
-                tracer_provider.tracer("test_tracer"),
-            )));
-            let mut service = layer.layer(ok_service());
+            let mut service = builder.build().unwrap().layer(ok_service());
 
             let request = Request::builder()
                 .method("GET")
@@ -911,122 +1113,188 @@ mod tests {
 
     #[tokio::test(flavor = "current_thread")]
     async fn test_client_injects_context_into_headers() {
-        opentelemetry::global::set_text_map_propagator(TraceContextPropagator::new());
+        struct TestCase {
+            name: &'static str,
+            tracing_enabled: bool,
+            expect_parent_span_id: bool,
+        }
 
-        let tracer_provider = SdkTracerProvider::builder().build();
-        let tracer = Arc::new(BoxedTracer::new(Box::new(
-            tracer_provider.tracer("test_tracer"),
-        )));
+        let test_cases = [
+            TestCase {
+                name: "tracing enabled injects the client span",
+                tracing_enabled: true,
+                expect_parent_span_id: false,
+            },
+            TestCase {
+                name: "tracing disabled still injects the parent span",
+                tracing_enabled: false,
+                expect_parent_span_id: true,
+            },
+        ];
 
-        let mut layer = LayerBuilder::builder().build().unwrap();
-        layer.tracer = tracer.clone();
+        global::set_text_map_propagator(TraceContextPropagator::new());
 
-        let mut service = ServiceBuilder::new()
-            .layer(layer)
-            .service(tower::service_fn(|req: Request<String>| async move {
-                assert!(
-                    req.headers().contains_key("traceparent"),
-                    "outgoing request should carry an injected traceparent header"
-                );
-                Ok::<_, std::convert::Infallible>(
-                    Response::builder()
-                        .status(StatusCode::OK)
-                        .body(String::from("OK"))
-                        .unwrap(),
-                )
-            }));
+        for test_case in test_cases {
+            let tracer_provider = SdkTracerProvider::builder().build();
+            let tracer = tracer_provider.tracer("test_tracer");
 
-        let parent_span = tracer.start("parent_operation");
-        let cx = OtelContext::current_with_span(parent_span);
+            let layer = LayerBuilder::builder()
+                .with_tracer_provider(tracer_provider.clone())
+                .with_tracing(test_case.tracing_enabled)
+                .build()
+                .unwrap();
 
-        let request = Request::builder()
-            .method("GET")
-            .uri("http://example.com/api")
-            .body("test".to_string())
-            .unwrap();
+            let injected = Arc::new(std::sync::Mutex::new(None::<String>));
+            let injected_clone = injected.clone();
+            let mut service = ServiceBuilder::new()
+                .layer(layer)
+                .service(tower::service_fn(move |req: Request<String>| {
+                    let injected = injected_clone.clone();
+                    async move {
+                        *injected.lock().unwrap() = req
+                            .headers()
+                            .get("traceparent")
+                            .and_then(|value| value.to_str().ok())
+                            .map(str::to_owned);
+                        Ok::<_, std::convert::Infallible>(
+                            Response::builder()
+                                .status(StatusCode::OK)
+                                .body(String::from("OK"))
+                                .unwrap(),
+                        )
+                    }
+                }));
 
-        let response = async { service.ready().await.unwrap().call(request).await.unwrap() }
-            .with_context(cx)
-            .await;
+            let parent_span = tracer.start("parent_operation");
+            let parent_span_context = parent_span.span_context().clone();
+            let cx = OtelContext::current_with_span(parent_span);
 
-        assert_eq!(response.status(), StatusCode::OK);
+            let request = Request::builder()
+                .method("GET")
+                .uri("http://example.com/api")
+                .body("test".to_string())
+                .unwrap();
+
+            let _response = async { service.ready().await.unwrap().call(request).await.unwrap() }
+                .with_context(cx)
+                .await;
+
+            let traceparent = injected
+                .lock()
+                .unwrap()
+                .clone()
+                .expect("outgoing request should carry an injected traceparent header");
+            let parts: Vec<&str> = traceparent.split('-').collect();
+
+            assert_eq!(
+                (
+                    parts[1],
+                    parts[2] == parent_span_context.span_id().to_string()
+                ),
+                (
+                    parent_span_context.trace_id().to_string().as_str(),
+                    test_case.expect_parent_span_id
+                ),
+                "{}",
+                test_case.name
+            );
+        }
     }
 
     #[tokio::test(flavor = "current_thread")]
     async fn test_client_metrics() {
-        let exporter = InMemoryMetricExporter::default();
-        let reader = PeriodicReader::builder(exporter.clone())
-            .with_interval(Duration::from_millis(100))
-            .build();
-        let meter_provider = SdkMeterProvider::builder().with_reader(reader).build();
-        let meter = meter_provider.meter("test");
+        struct TestCase {
+            name: &'static str,
+            outcome: std::result::Result<StatusCode, TestError>,
+            expected_attributes: Vec<KeyValue>,
+        }
 
-        let layer = LayerBuilder::builder().with_meter(meter).build().unwrap();
+        let test_cases = [
+            TestCase {
+                name: "a successful response",
+                outcome: Ok(StatusCode::OK),
+                expected_attributes: vec![
+                    KeyValue::new(semconv::attribute::HTTP_REQUEST_METHOD, "GET"),
+                    KeyValue::new(semconv::attribute::HTTP_RESPONSE_STATUS_CODE, 200),
+                    KeyValue::new(semconv::attribute::NETWORK_PROTOCOL_NAME, "http"),
+                    KeyValue::new(semconv::attribute::NETWORK_PROTOCOL_VERSION, "1.1"),
+                    KeyValue::new(semconv::attribute::SERVER_ADDRESS, "example.com"),
+                    KeyValue::new(semconv::attribute::URL_SCHEME, "https"),
+                ],
+            },
+            TestCase {
+                name: "a client error response carries error.type",
+                outcome: Ok(StatusCode::NOT_FOUND),
+                expected_attributes: vec![
+                    KeyValue::new(ERROR_TYPE, "404"),
+                    KeyValue::new(semconv::attribute::HTTP_REQUEST_METHOD, "GET"),
+                    KeyValue::new(semconv::attribute::HTTP_RESPONSE_STATUS_CODE, 404),
+                    KeyValue::new(semconv::attribute::NETWORK_PROTOCOL_NAME, "http"),
+                    KeyValue::new(semconv::attribute::NETWORK_PROTOCOL_VERSION, "1.1"),
+                    KeyValue::new(semconv::attribute::SERVER_ADDRESS, "example.com"),
+                    KeyValue::new(semconv::attribute::URL_SCHEME, "https"),
+                ],
+            },
+            TestCase {
+                name: "an inner-service error carries the error type name",
+                outcome: Err(TestError),
+                expected_attributes: vec![
+                    KeyValue::new(ERROR_TYPE, std::any::type_name::<TestError>()),
+                    KeyValue::new(semconv::attribute::HTTP_REQUEST_METHOD, "GET"),
+                    KeyValue::new(semconv::attribute::NETWORK_PROTOCOL_NAME, "http"),
+                    KeyValue::new(semconv::attribute::NETWORK_PROTOCOL_VERSION, "1.1"),
+                    KeyValue::new(semconv::attribute::SERVER_ADDRESS, "example.com"),
+                    KeyValue::new(semconv::attribute::URL_SCHEME, "https"),
+                ],
+            },
+        ];
 
-        let service = tower::service_fn(|_req: Request<String>| async {
-            Ok::<_, std::convert::Infallible>(
-                Response::builder()
-                    .status(StatusCode::OK)
-                    .body(String::from("Hello, World!"))
-                    .unwrap(),
-            )
-        });
+        for test_case in test_cases {
+            let exporter = InMemoryMetricExporter::default();
+            let reader = PeriodicReader::builder(exporter.clone())
+                .with_interval(Duration::from_millis(100))
+                .build();
+            let meter_provider = SdkMeterProvider::builder().with_reader(reader).build();
 
-        let mut service = layer.layer(service);
+            let layer = LayerBuilder::builder()
+                .with_meter_provider(meter_provider.clone())
+                .build()
+                .unwrap();
 
-        let request = Request::builder()
-            .method("GET")
-            .uri("https://example.com/test")
-            .body("test body".to_string())
-            .unwrap();
+            let mut service = layer.layer(outcome_service(test_case.outcome));
 
-        let _response = service.call(request).await.unwrap();
+            let request = Request::builder()
+                .method("GET")
+                .uri("https://example.com/test")
+                .body("test body".to_string())
+                .unwrap();
 
-        tokio::time::sleep(Duration::from_millis(500)).await;
+            let _response = service.call(request).await;
 
-        let metrics = exporter.get_finished_metrics().unwrap();
-        assert!(!metrics.is_empty());
+            meter_provider.force_flush().unwrap();
 
-        let scope_metrics = metrics[0]
-            .scope_metrics()
-            .next()
-            .expect("Should have scope metrics");
+            let metrics = exporter.get_finished_metrics().unwrap();
+            let duration_metric = metrics
+                .iter()
+                .flat_map(|resource_metrics| resource_metrics.scope_metrics())
+                .flat_map(|scope_metrics| scope_metrics.metrics())
+                .find(|metric| metric.name() == semconv::metric::HTTP_CLIENT_REQUEST_DURATION)
+                .expect("Client duration metric should exist");
 
-        let duration_metric = scope_metrics
-            .metrics()
-            .find(|m| m.name() == semconv::metric::HTTP_CLIENT_REQUEST_DURATION)
-            .expect("Client duration metric should exist");
-
-        if let AggregatedMetrics::F64(MetricData::Histogram(histogram)) = duration_metric.data() {
-            let data_point = histogram
+            let AggregatedMetrics::F64(MetricData::Histogram(histogram)) = duration_metric.data()
+            else {
+                panic!("Expected histogram data for client duration metric");
+            };
+            let mut result: Vec<KeyValue> = histogram
                 .data_points()
                 .next()
-                .expect("Should have data point");
-            let attributes: Vec<_> = data_point.attributes().collect();
+                .expect("Should have data point")
+                .attributes()
+                .cloned()
+                .collect();
+            result.sort_by(|a, b| a.key.as_str().cmp(b.key.as_str()));
 
-            let method = attributes
-                .iter()
-                .find(|kv| kv.key.as_str() == semconv::attribute::HTTP_REQUEST_METHOD)
-                .expect("HTTP method should be present");
-            assert_eq!(method.value.as_str(), "GET");
-
-            let server_address = attributes
-                .iter()
-                .find(|kv| kv.key.as_str() == semconv::attribute::SERVER_ADDRESS)
-                .expect("server.address should be present");
-            assert_eq!(server_address.value.as_str(), "example.com");
-
-            let status_code = attributes
-                .iter()
-                .find(|kv| kv.key.as_str() == semconv::attribute::HTTP_RESPONSE_STATUS_CODE)
-                .expect("Status code should be present");
-            if let opentelemetry::Value::I64(code) = &status_code.value {
-                assert_eq!(*code, 200);
-            } else {
-                panic!("Expected i64 status code");
-            }
-        } else {
-            panic!("Expected histogram data for client duration metric");
+            assert_eq!(result, test_case.expected_attributes, "{}", test_case.name);
         }
     }
 
@@ -1036,22 +1304,15 @@ mod tests {
         let tracer_provider = SdkTracerProvider::builder()
             .with_simple_exporter(trace_exporter.clone())
             .build();
-        let tracer = Arc::new(BoxedTracer::new(Box::new(
-            tracer_provider.tracer("test_tracer"),
-        )));
+        let tracer = tracer_provider.tracer("test_tracer");
 
-        let layer = LayerBuilder::builder().with_tracing(false).build().unwrap();
+        let layer = LayerBuilder::builder()
+            .with_tracer_provider(tracer_provider.clone())
+            .with_tracing(false)
+            .build()
+            .unwrap();
 
-        let mut service = ServiceBuilder::new()
-            .layer(layer)
-            .service(tower::service_fn(|_req: Request<String>| async {
-                Ok::<_, std::convert::Infallible>(
-                    Response::builder()
-                        .status(StatusCode::OK)
-                        .body(String::from("OK"))
-                        .unwrap(),
-                )
-            }));
+        let mut service = ServiceBuilder::new().layer(layer).service(ok_service());
 
         // A surrounding span keeps context/propagation intact even with the
         // layer's own tracing disabled.
@@ -1081,26 +1342,16 @@ mod tests {
         let tracer_provider = SdkTracerProvider::builder()
             .with_simple_exporter(trace_exporter.clone())
             .build();
-        let tracer = Arc::new(BoxedTracer::new(Box::new(
-            tracer_provider.tracer("test_tracer"),
-        )));
 
         // Default builder uses NoRouteExtractor, which returns None for every
         // request. Span names should be method-only (e.g. "GET") regardless of
         // the request path, and no http.route attribute should be set.
-        let mut layer = LayerBuilder::builder().build().unwrap();
-        layer.tracer = tracer.clone();
+        let layer = LayerBuilder::builder()
+            .with_tracer_provider(tracer_provider.clone())
+            .build()
+            .unwrap();
 
-        let mut service = ServiceBuilder::new()
-            .layer(layer)
-            .service(tower::service_fn(|_req: Request<String>| async {
-                Ok::<_, std::convert::Infallible>(
-                    Response::builder()
-                        .status(StatusCode::OK)
-                        .body(String::from("OK"))
-                        .unwrap(),
-                )
-            }));
+        let mut service = ServiceBuilder::new().layer(layer).service(ok_service());
 
         let request = Request::builder()
             .method("GET")
@@ -1135,24 +1386,14 @@ mod tests {
             .with_interval(Duration::from_millis(100))
             .build();
         let meter_provider = SdkMeterProvider::builder().with_reader(reader).build();
-        let meter = meter_provider.meter("test");
 
         let layer = LayerBuilder::builder()
-            .with_meter(meter)
+            .with_meter_provider(meter_provider.clone())
             .with_metrics(false)
             .build()
             .unwrap();
 
-        let service = tower::service_fn(|_req: Request<String>| async {
-            Ok::<_, std::convert::Infallible>(
-                Response::builder()
-                    .status(StatusCode::OK)
-                    .body(String::from("OK"))
-                    .unwrap(),
-            )
-        });
-
-        let mut service = layer.layer(service);
+        let mut service = layer.layer(ok_service());
 
         let request = Request::builder()
             .method("GET")

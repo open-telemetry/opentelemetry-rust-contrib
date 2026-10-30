@@ -55,15 +55,20 @@ case-sensitively.
 
 ## Reported errors
 
-The server span carries `error.type` when a request ends with an error:
+The server and the client span carry `error.type` when a request ends with an
+error. The duration and body size metrics carry the same `error.type`.
 
-- A 5xx response sets `error.type` to the status code number as a string, for
-  example `"500"`.
+- On the server, a 5xx response sets `error.type` to the status code number as
+  a string, for example `"500"`. A 2xx, 3xx or 4xx response carries no
+  `error.type`. Per the HTTP span status rules, a 4xx is not a server error.
+- On the client, a 4xx or 5xx response sets `error.type` to the status code
+  number as a string, for example `"404"`. Per the HTTP span status rules, a
+  4xx is an error for the client.
 - An error from the inner service, returned before a status code exists, sets
   `error.type` to the Rust type name of that error, for example
-  `"my_crate::MyError"`, obtained with `std::any::type_name`.
-- A 2xx, 3xx or 4xx response carries no `error.type`. Per the HTTP span status
-  rules, a 4xx is not a server error.
+  `"my_crate::MyError"`, obtained with `std::any::type_name`. On the client,
+  the inner service is the transport, so a connection error is reported this
+  way.
 
 The middleware wraps an arbitrary Tower `Service` and has no knowledge of your
 application's error types, so it can only report the two classifications it
@@ -73,10 +78,10 @@ available, and it never substitutes exception detail for a status code that
 is already present.
 
 To report a domain-specific error, for example `"payment_declined"`, add your
-own attribute with `http::server::LayerBuilder::with_response_extractor`. Do
-not reuse the `error.type` key: on a 5xx response, the layer sets `error.type`
-to the status code after extractors run, so it overwrites any `error.type` an
-extractor sets, instead use `myapp.error.type`.
+own attribute with `with_response_extractor` on the server or the client
+`LayerBuilder`. Do not reuse the `error.type` key: on an error response, the
+layer sets `error.type` to the status code after extractors run, so it
+overwrites any `error.type` an extractor sets, instead use `myapp.error.type`.
 
 ## Quick start
 
