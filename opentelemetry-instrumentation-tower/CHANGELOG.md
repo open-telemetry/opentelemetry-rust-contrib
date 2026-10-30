@@ -4,6 +4,41 @@
 
 ### Added
 
+* HTTP client instrumentation layer (`http::client::Layer`) producing a
+  `SpanKind::Client` span and the standard `http.client.*` metrics, and
+  injecting the current trace context into outgoing request headers.
+  Tracing and metrics can be toggled per layer via `with_tracing(bool)` and
+  `with_metrics(bool)` (both enabled by default).
+  [#700](https://github.com/open-telemetry/opentelemetry-rust-contrib/pull/700)
+* Cargo features to select which layers are compiled: `http-server` and
+  `http-client` (both enabled by default).
+  [#700](https://github.com/open-telemetry/opentelemetry-rust-contrib/pull/700)
+* The **client** layer always defaults to `NoRouteExtractor` (method-only span
+  names); the `axum` matched-path extractor only applies to server routing.
+  [#700](https://github.com/open-telemetry/opentelemetry-rust-contrib/pull/700)
+* `hyper-http-client` and `reqwest-http-client` examples demonstrating the
+  client layer with Hyper and reqwest clients via `tower-reqwest`, with OTLP
+  export.
+  [#700](https://github.com/open-telemetry/opentelemetry-rust-contrib/pull/700)
+* The client span redacts `url.full`: the user information becomes
+  `REDACTED:REDACTED`, and the value of a sensitive query parameter becomes
+  `REDACTED`.
+  [#700](https://github.com/open-telemetry/opentelemetry-rust-contrib/pull/700)
+* `http::client::LayerBuilder::with_sensitive_query_parameters` to name the
+  query parameter keys whose values the client layer redacts in `url.full`.
+  The default list is the same as the one of the server layer.
+  [#700](https://github.com/open-telemetry/opentelemetry-rust-contrib/pull/700)
+* The client instrumentation scope carries the OpenTelemetry semantic
+  conventions schema URL, the same as the server scope.
+  [#700](https://github.com/open-telemetry/opentelemetry-rust-contrib/pull/700)
+* The client span, and the `http.client.request.duration`,
+  `http.client.request.body.size` and `http.client.response.body.size` metrics,
+  carry `error.type` when a request ends with an error. A 4xx or 5xx response
+  sets `error.type` to the status code number as a string. An error from the
+  inner service, returned before a status code exists, sets `error.type` to
+  that error's Rust type name. The span status of an error response carries no
+  description, the same as the server span.
+  [#700](https://github.com/open-telemetry/opentelemetry-rust-contrib/pull/700)
 * The server span, and the `http.server.request.duration`,
   `http.server.request.body.size` and `http.server.response.body.size` metrics,
   now carry `error.type` when a request ends with an error. A 5xx response sets
@@ -19,6 +54,9 @@
   description. The reader can derive the reason from
   `http.response.status_code`.
   [#801](https://github.com/open-telemetry/opentelemetry-rust-contrib/pull/801)
+* `http::extractors` now serves the `http::server` and the `http::client`
+  layers.
+  [#700](https://github.com/open-telemetry/opentelemetry-rust-contrib/pull/700)
 
 ## v0.19.0
 
