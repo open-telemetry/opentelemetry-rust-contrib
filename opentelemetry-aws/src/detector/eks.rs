@@ -365,7 +365,7 @@ fn is_valid_container_id(candidate: &str) -> bool {
 ///
 /// The authoritative region→partition rules are published by AWS in
 /// `botocore/data/partitions.json`.
-/// See https://github.com/boto/botocore/blob/develop/botocore/data/partitions.json
+/// See <https://github.com/boto/botocore/blob/develop/botocore/data/partitions.json>
 fn map_region_to_partition(region: &str) -> &'static str {
     // Specific prefixes must be tested before the generic single-word prefixes
     // they share (e.g. "us-iso-" before "us-", "us-gov-" before "us-").

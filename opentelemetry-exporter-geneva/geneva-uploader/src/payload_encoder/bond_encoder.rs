@@ -115,9 +115,14 @@ pub(crate) struct DynamicSchema<'a> {
 
 impl<'a> DynamicSchema<'a> {
     pub(crate) fn new(name: &str, namespace: &str, fields: &'a [FieldDef]) -> Self {
+        let qualified_name = if namespace.is_empty() {
+            name.to_string()
+        } else {
+            format!("{namespace}.{name}")
+        };
         Self {
             struct_name: name.to_string(),
-            qualified_name: format!("{namespace}.{name}"),
+            qualified_name,
             fields,
         }
     }
@@ -406,6 +411,18 @@ impl Clone for BondEncodedSchema {
 mod tests {
     use super::*;
     use std::borrow::Cow;
+
+    #[test]
+    fn qualified_name_omits_empty_namespace() {
+        assert_eq!(
+            DynamicSchema::new("MdsContainer", "", &[]).qualified_name,
+            "MdsContainer"
+        );
+        assert_eq!(
+            DynamicSchema::new("TestStruct", "test.namespace", &[]).qualified_name,
+            "test.namespace.TestStruct"
+        );
+    }
 
     #[test]
     fn test_dynamic_schema() {

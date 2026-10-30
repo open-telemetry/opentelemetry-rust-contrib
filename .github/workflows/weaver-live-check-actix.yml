@@ -41,11 +41,13 @@ jobs:
     timeout-minutes: 15
     steps:
       - name: Harden the runner (Audit all outbound calls)
-        uses: step-security/harden-runner@05e31511f85b41b11d1cf0ef85d0992719546e2c # v2.21.0
+        uses: step-security/harden-runner@e14015d583714f6e62063499dc959a02595150a1 # v2.21.1
         with:
           egress-policy: audit
 
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
 
       - name: Cache cargo
         uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
@@ -61,13 +63,13 @@ jobs:
         run: cargo build --release
 
       - name: Setup weaver
-        uses: open-telemetry/weaver/.github/actions/setup-weaver@26c685ff52b925056ff1d53476c6022638c01220 # v0.25.1
+        uses: open-telemetry/weaver/.github/actions/setup-weaver@38befce4bc68fe320d20f189465c93835ac20c12 # v0.26.1
         with:
           version: ${{ env.WEAVER_VERSION }}
 
       - name: Start weaver live-check
         id: live-check
-        uses: open-telemetry/weaver/.github/actions/weaver-live-check-start@26c685ff52b925056ff1d53476c6022638c01220 # v0.25.1
+        uses: open-telemetry/weaver/.github/actions/weaver-live-check-start@38befce4bc68fe320d20f189465c93835ac20c12 # v0.26.1
         with:
           registry: ${{ env.SEMCONV_REGISTRY }}
 
@@ -81,11 +83,12 @@ jobs:
           OTEL_METRIC_EXPORT_INTERVAL: '2000'
           OTEL_BSP_SCHEDULE_DELAY: '1000'
           OTEL_EXPORTER_OTLP_ENDPOINT: ${{ steps.live-check.outputs.otlp-grpc-endpoint }}
+          STATE_DIR: ${{ steps.live-check.outputs.state-dir }}
         run: |
           set -euo pipefail
 
           echo "::group::Start example service"
-          ../target/release/example-live-check-actix > "${{ steps.live-check.outputs.state-dir }}/example.log" 2>&1 &
+          ../target/release/example-live-check-actix > "$STATE_DIR/example.log" 2>&1 &
           APP_PID=$!
           echo "app pid: $APP_PID"
           echo "::endgroup::"
@@ -126,7 +129,7 @@ jobs:
 
       - name: Stop weaver live-check
         if: always()
-        uses: open-telemetry/weaver/.github/actions/weaver-live-check-stop@26c685ff52b925056ff1d53476c6022638c01220 # v0.25.1
+        uses: open-telemetry/weaver/.github/actions/weaver-live-check-stop@38befce4bc68fe320d20f189465c93835ac20c12 # v0.26.1
         with:
           fail-on: violation
 

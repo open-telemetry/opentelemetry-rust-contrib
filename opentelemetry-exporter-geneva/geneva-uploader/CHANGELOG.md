@@ -1,5 +1,29 @@
 # Changelog
 
+## Unreleased
+
+## [0.9.0] - 2026-10-27
+
+### Added
+
+- **Breaking:** Add external Entra token providers for GCS authentication
+  through `GcsTokenProvider` and `AuthMethod::ExternalToken`. `AuthMethod` is
+  now non-exhaustive so future authentication modes can be added compatibly.
+  Applications can own identity selection, acquisition, caching, and refresh
+  while the uploader continues to manage the GCS exchange and Geneva ingestion
+  credentials.
+
+### Changed
+
+- Update `opentelemetry-proto` to 0.33.1.
+- Update reqwest to 0.13 and use its renamed TLS features. Ordinary rustls clients now use the platform certificate verifier; rustls certificate authentication continues to load native roots explicitly and use the caller-installed crypto provider.
+
+## [0.8.1] - 2026-10-02
+
+### Fixed
+
+- Name log and span Bond schemas `MdsContainer`, instead of `telemetry.OtlpLogRecord` and `telemetry.OtlpSpanRecord`. Geneva On Behalf Of (OBO) processing prefixes every field with any other struct name, so OBO resource logs could not resolve top-level fields such as `category`, and Azure Monitor delivered them nested and unrouted.
+
 ## [0.8.0] - 2026-09-22
 
 ### Changed
