@@ -8,7 +8,9 @@ pub mod model;
 use std::env;
 
 use crate::mock_provider::MockPeriodicExporterProvider;
-use opentelemetry_config::{providers::TelemetryProviders, ConfigurationProviderRegistry};
+use opentelemetry_config::{
+    providers::TelemetryProviders, ConfigurationError, ConfigurationProviderRegistry,
+};
 
 pub fn main() -> Result<(), Box<dyn std::error::Error>> {
     let args: Vec<String> = env::args().collect();
@@ -54,7 +56,7 @@ pub fn main() -> Result<(), Box<dyn std::error::Error>> {
     );
 
     // Setup configuration registry with custom providers.
-    let registry = initialize_telemetry_registry();
+    let registry = initialize_telemetry_registry()?;
 
     // Configure telemetry from the application configuration.
     let telemetry_config_yaml = serde_yaml::to_string(&app_config.service.telemetry)?;
@@ -94,16 +96,16 @@ pub fn main() -> Result<(), Box<dyn std::error::Error>> {
 }
 
 /// Initializes the telemetry configuration registry with custom providers.
-fn initialize_telemetry_registry() -> ConfigurationProviderRegistry {
+fn initialize_telemetry_registry() -> Result<ConfigurationProviderRegistry, ConfigurationError> {
     let mut registry = ConfigurationProviderRegistry::default();
 
     // Register the custom exporter factory.
     registry.register_metric_exporter_factory(
         "custom",
         MockPeriodicExporterProvider::register_mock_exporter_factory,
-    );
+    )?;
 
-    registry
+    Ok(registry)
 }
 
 /// Configures telemetry providers from the given telemetry configuration.
@@ -111,6 +113,6 @@ fn configure_telemetry(
     registry: &ConfigurationProviderRegistry,
     telemetry_config: &str,
 ) -> Result<TelemetryProviders, Box<dyn std::error::Error>> {
-    let providers = TelemetryProviders::configure_from_yaml_str(&registry, telemetry_config)?;
+    let providers = TelemetryProviders::configure_from_yaml_str(registry, telemetry_config)?;
     Ok(providers)
 }
