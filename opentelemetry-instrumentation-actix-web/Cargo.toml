@@ -39,9 +39,9 @@ serde = "1.0"
 time = ">=0.3.47"
 
 [dev-dependencies]
-actix-rt = "2"
-actix-web = { version = "4.12", features = ["macros"] }
-awc = { version = "3.8", default-features = false, features = ["compress-zstd"] }
+actix-rt = "=2.15.0"
+actix-web = { version = "=4.18.1", features = ["macros"] }
+awc = { version = "=3.11.0", default-features = false, features = ["compress-zstd"] }
 criterion = { workspace = true, features = ["async_tokio"] }
 opentelemetry_sdk = { workspace = true, features = [
   "metrics",
@@ -49,8 +49,8 @@ opentelemetry_sdk = { workspace = true, features = [
   "testing",
 ] }
 opentelemetry-stdout = { workspace = true, features = ["trace", "metrics"] }
-serial_test = "4"
-tokio = { version = "1", features = ["rt-multi-thread"] }
+serial_test = "=4.0.1"
+tokio = { version = "=1.54.1", features = ["rt-multi-thread"] }
 
 [[example]]
 name = "client"

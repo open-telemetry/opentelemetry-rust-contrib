@@ -38,6 +38,6 @@ workspace = true
 
 [dev-dependencies]
 otlp_builder = { path = "examples/otlp_builder" }
-wiremock = "0.6"
-base64 = "0.23"
-chrono = "0.4"
+wiremock = "=0.6.5"
+base64 = "=0.23.1"
+chrono = "=0.4.45"

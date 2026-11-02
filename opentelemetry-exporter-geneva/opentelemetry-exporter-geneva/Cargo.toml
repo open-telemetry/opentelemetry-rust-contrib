@@ -31,10 +31,10 @@ certificate-auth = ["geneva-uploader/certificate-auth"]
 opentelemetry-appender-tracing = { workspace = true }
 opentelemetry = { workspace = true }
 opentelemetry_sdk = { workspace = true, default-features = true, features = ["logs", "trace", "experimental_logs_batch_log_processor_with_async_runtime", "experimental_async_runtime", "rt-tokio"] }
-tracing = { version = "0.1", default-features = false, features = ["std"] }
-tracing-core = "0.1.31"
-tracing-subscriber = { version = "0.3.0", default-features = false, features = ["env-filter", "fmt", "registry", "std"] }
-tokio = { version = "1", features = ["rt-multi-thread", "macros"] }
+tracing = { version = "=0.1.44", default-features = false, features = ["std"] }
+tracing-core = "=0.1.36"
+tracing-subscriber = { version = "=0.3.23", default-features = false, features = ["env-filter", "fmt", "registry", "std"] }
+tokio = { version = "=1.54.1", features = ["rt-multi-thread", "macros"] }
 
 [lints]
 workspace = true

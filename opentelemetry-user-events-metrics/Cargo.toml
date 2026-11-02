@@ -18,14 +18,14 @@ eventheader = { version = "= 0.5.0" }
 prost = "0.14"
 
 [dev-dependencies]
-tokio = { version = "1.0", features = ["full"] }
-tracing-subscriber = { version = "0.3", features = ["env-filter","registry", "std", "fmt"] }
+tokio = { version = "=1.54.1", features = ["full"] }
+tracing-subscriber = { version = "=0.3.23", features = ["env-filter","registry", "std", "fmt"] }
 
 # Linux-only: in-process user_events consumer used by the integration tests to
 # read the `otlp_metrics` tracepoint directly from the perf ring buffer instead
 # of shelling out to `perf record` + `perf-decode`.
 [target.'cfg(target_os = "linux")'.dev-dependencies]
-one_collect = "0.1.34532"
+one_collect = "=0.1.35021"
 
 [features]
 internal-logs = ["opentelemetry/internal-logs", "opentelemetry_sdk/internal-logs", "opentelemetry-proto/internal-logs"]
