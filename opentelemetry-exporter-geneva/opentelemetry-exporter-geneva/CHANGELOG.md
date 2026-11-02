@@ -1,5 +1,20 @@
 # Changelog
 
+## Unreleased
+
+## [0.9.0] - 2026-10-27
+
+### Changed
+
+- Update `geneva-uploader` to 0.9.0.
+- Update OpenTelemetry dependencies to 0.33.1.
+
+## [0.8.1] - 2026-10-02
+
+### Changed
+
+- Update `geneva-uploader` to 0.8.1.
+
 ## [0.8.0] - 2026-09-22
 
 ### Changed

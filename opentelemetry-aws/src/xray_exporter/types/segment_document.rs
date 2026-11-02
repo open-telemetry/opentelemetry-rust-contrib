@@ -442,7 +442,7 @@ impl<'a, DBT: DocumentBuilderType> DocumentBuilder<'a, DBT> {
     }
 
     #[cfg(feature = "xray-subsegment-nesting")]
-    /// Adds a subsegment to the segment by consuming a [SubsegmentBuilder].
+    /// Adds a subsegment to the segment by consuming a [SubsegmentDocumentBuilder].
     pub fn subsegment(
         &mut self,
         mut subsegment_builder: SubsegmentDocumentBuilder<'a>,

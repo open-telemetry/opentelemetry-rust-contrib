@@ -49,6 +49,31 @@ Use `http::server::LayerBuilder::with_sensitive_query_parameters` to name the
 keys yourself. The list replaces the default one, it does not extend it, and an
 empty list disables redaction. Keys are matched case-sensitively.
 
+## Reported errors
+
+The server span carries `error.type` when a request ends with an error:
+
+- A 5xx response sets `error.type` to the status code number as a string, for
+  example `"500"`.
+- An error from the inner service, returned before a status code exists, sets
+  `error.type` to the Rust type name of that error, for example
+  `"my_crate::MyError"`, obtained with `std::any::type_name`.
+- A 2xx, 3xx or 4xx response carries no `error.type`. Per the HTTP span status
+  rules, a 4xx is not a server error.
+
+The middleware wraps an arbitrary Tower `Service` and has no knowledge of your
+application's error types, so it can only report the two classifications it
+can produce on its own: the HTTP status code once one exists, or the error's
+Rust type name before one does. A status code always wins when one is
+available, and it never substitutes exception detail for a status code that 
+is already present.
+
+To report a domain-specific error, for example `"payment_declined"`, add your
+own attribute with `http::server::LayerBuilder::with_response_extractor`. Do
+not reuse the `error.type` key: on a 5xx response, the layer sets `error.type`
+to the status code after extractors run, so it overwrites any `error.type` an
+extractor sets, instead use `myapp.error.type`.
+
 ## Quick start
 
 With the default `axum` feature, applying the middleware is a single layer call:
