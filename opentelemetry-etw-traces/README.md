@@ -49,6 +49,15 @@ Part B/C fields keep their existing names, types, and values without the
 wrapper structures. `__csver__` and `_typeName` are not emitted in this mode.
 Collection and routing still need to be configured in the agent.
 
+Attribute names are not validated in this mode, to avoid per-attribute
+overhead. Because every field is written at the top level, a span or promoted
+resource attribute with the same name as an emitted field (`env_*`, `name`,
+`kind`, `startTime`, `parentId`, `links`, `statusMessage`, `success`, or a
+mapped Part B name such as `httpMethod`) produces duplicate field names; how
+duplicates are handled depends on the collector. Collectors that replace
+characters such as `.` with `_` can also create duplicates (for example,
+`env.time` and `env_time`). Avoid these names for custom attributes.
+
 Omitting `.with_geneva_mapping(...)`, or passing `false`, retains the current
 output. Use a consistent mode for processors sharing a provider/event name;
 enabling this option changes the event's schema.
