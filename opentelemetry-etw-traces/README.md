@@ -26,11 +26,17 @@ Spans are encoded following the [Microsoft Common Schema v4.0](https://learn.mic
 [![Documentation](https://docs.rs/opentelemetry-etw-traces/badge.svg)](https://docs.rs/opentelemetry-etw-traces)
 [![Slack](https://img.shields.io/badge/slack-@cncf/otel/rust-brightgreen.svg?logo=slack)](https://cloud-native.slack.com/archives/C03GDP0H023)
 
-## Optional Geneva-compatible output
+## Optional Geneva-compatible output (experimental)
 
 The default output uses `__csver__` and nested `PartA`, `PartB`, and `PartC`
 structures. For collectors that do not translate that representation into
-Geneva DGrep field names, enable the mapping when initializing the processor:
+Geneva field names, enable the `experimental-geneva-mapping` Cargo feature:
+
+```sh
+cargo add opentelemetry-etw-traces --features experimental-geneva-mapping
+```
+
+Then enable the mapping when initializing the processor:
 
 ```rust
 use opentelemetry_etw_traces::Processor;
@@ -58,9 +64,11 @@ duplicates are handled depends on the collector. Collectors that replace
 characters such as `.` with `_` can also create duplicates (for example,
 `env.time` and `env_time`). Avoid these names for custom attributes.
 
-Omitting `.with_geneva_mapping(...)`, or passing `false`, retains the current
-output. Use a consistent mode for processors sharing a provider/event name;
-enabling this option changes the event's schema.
+Omitting the feature or `.with_geneva_mapping(...)`, or passing `false`,
+retains the current output. Use a consistent mode for processors sharing a
+provider/event name; enabling this option changes the event's schema. This
+feature is experimental and may be removed once the Geneva agent performs this
+mapping itself.
 
 ## Viewing ETW Traces
 

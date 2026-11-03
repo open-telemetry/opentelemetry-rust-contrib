@@ -36,18 +36,22 @@
 //!   `parentId`, `links`, `statusMessage`, `success`
 //! - **Part C** (extensions): promoted resource attributes, span's attributes
 //!
-//! ## Geneva DGrep Mapping
+//! ## Experimental Geneva Mapping
 //!
 //! For collectors that do not convert the TraceLogging Common Schema layout
-//! into Geneva's field names, opt in during initialization:
+//! into Geneva's field names, enable the `experimental-geneva-mapping` Cargo
+//! feature and opt in during initialization:
 //!
 //! ```no_run
+//! # #[cfg(feature = "experimental-geneva-mapping")]
+//! # {
 //! use opentelemetry_etw_traces::Processor;
 //!
 //! let processor = Processor::builder("MyAppTracing")
 //!     .with_geneva_mapping(true)
 //!     .build()
 //!     .expect("Failed to create ETW processor");
+//! # }
 //! ```
 //!
 //! This writes a flat event with `env_ver="4.0"`, `env_name` (the ETW event
@@ -55,8 +59,10 @@
 //! nonzero `env_dt_traceFlags`, and optional `env_cloud_role` and
 //! `env_cloud_roleInstance`. Part B/C fields retain their names and values but
 //! are written without wrapper structures. The TraceLogging-only `__csver__`
-//! and `_typeName` fields are omitted. Omitting the option, or passing `false`,
-//! preserves the existing nested layout.
+//! and `_typeName` fields are omitted. Without the feature, or when the option
+//! is omitted or set to `false`, the existing nested layout is preserved. This
+//! feature is experimental and may be removed once the Geneva agent performs
+//! this mapping itself.
 //!
 //! ## Platform Support
 //!
@@ -303,9 +309,11 @@ mod integration_tests {
     #[test]
     fn integration_test_full() {
         assert_full_event(None);
+        #[cfg(feature = "experimental-geneva-mapping")]
         assert_full_event(Some(false));
     }
 
+    #[cfg(feature = "experimental-geneva-mapping")]
     #[ignore = "Requires admin privileges to start ETW trace session"]
     #[test]
     fn integration_test_geneva_mapping() {
@@ -322,12 +330,12 @@ mod integration_tests {
 
         let builder = crate::Processor::builder(provider_name)
             .with_resource_attributes(["resource_attribute1", "resource_attribute2"]);
-        let processor = match geneva_mapping {
+        #[cfg(feature = "experimental-geneva-mapping")]
+        let builder = match geneva_mapping {
             Some(enabled) => builder.with_geneva_mapping(enabled),
             None => builder,
-        }
-        .build()
-        .unwrap();
+        };
+        let processor = builder.build().unwrap();
         let geneva_mapping = geneva_mapping.unwrap_or(false);
 
         let tracer_provider = SdkTracerProvider::builder()
@@ -434,6 +442,7 @@ mod integration_tests {
         let _ = tracer_provider.shutdown();
     }
 
+    #[cfg(feature = "experimental-geneva-mapping")]
     #[ignore = "Requires admin privileges to start ETW trace session"]
     #[test]
     fn integration_test_geneva_optional_fields() {

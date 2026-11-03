@@ -61,6 +61,7 @@ pub(crate) fn populate_part_a(
     populate_resource(resource, event, field_tag);
 }
 
+#[cfg(feature = "experimental-geneva-mapping")]
 pub(crate) fn populate_geneva_envelope(
     event: &mut tld::EventBuilder,
     resource: &super::Resource,

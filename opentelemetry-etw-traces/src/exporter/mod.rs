@@ -115,6 +115,12 @@ impl ETWExporter {
             );
 
             let geneva_mapping = self.options.geneva_mapping();
+            if !geneva_mapping {
+                // Common Schema version as u16 (0x0400 = 1024)
+                event.add_u16("__csver__", 1024, tld::OutType::Unsigned, field_tag);
+                part_a::populate_part_a(event, &self.resource, span_data, field_tag);
+            }
+            #[cfg(feature = "experimental-geneva-mapping")]
             if geneva_mapping {
                 part_a::populate_geneva_envelope(
                     event,
@@ -123,10 +129,6 @@ impl ETWExporter {
                     self.options.event_name(),
                     field_tag,
                 );
-            } else {
-                // Common Schema version as u16 (0x0400 = 1024)
-                event.add_u16("__csver__", 1024, tld::OutType::Unsigned, field_tag);
-                part_a::populate_part_a(event, &self.resource, span_data, field_tag);
             }
 
             // Part C: custom data (individual typed attributes, resource attributes)

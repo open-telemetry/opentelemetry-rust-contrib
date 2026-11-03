@@ -10,7 +10,8 @@ pub(crate) struct Options {
     /// Defaults to "Span".
     event_name: String,
 
-    /// Emit the flat Geneva DGrep mapping instead of the TraceLogging mapping.
+    /// Emit the flat Geneva mapping instead of the TraceLogging mapping.
+    #[cfg(feature = "experimental-geneva-mapping")]
     geneva_mapping: bool,
 
     /// Resource attribute keys that should be exported with each span.
@@ -25,6 +26,7 @@ impl Options {
         Options {
             provider_name: provider_name.into(),
             event_name: "Span".to_string(),
+            #[cfg(feature = "experimental-geneva-mapping")]
             geneva_mapping: false,
             resource_attribute_keys: Vec::new(),
         }
@@ -40,10 +42,17 @@ impl Options {
         &self.event_name
     }
 
+    #[cfg(feature = "experimental-geneva-mapping")]
     pub(crate) fn geneva_mapping(&self) -> bool {
         self.geneva_mapping
     }
 
+    #[cfg(not(feature = "experimental-geneva-mapping"))]
+    pub(crate) fn geneva_mapping(&self) -> bool {
+        false
+    }
+
+    #[cfg(feature = "experimental-geneva-mapping")]
     pub(crate) fn with_geneva_mapping(mut self, enabled: bool) -> Self {
         self.geneva_mapping = enabled;
         self

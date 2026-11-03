@@ -133,7 +133,11 @@ impl ProcessorBuilder {
         self
     }
 
-    /// Enables the flat Geneva DGrep mapping for Common Schema spans.
+    /// Enables the experimental flat Geneva mapping for Common Schema spans.
+    ///
+    /// Available only with the `experimental-geneva-mapping` Cargo feature.
+    /// This option is experimental and may change or be removed once the
+    /// Geneva agent performs this mapping itself.
     ///
     /// Defaults to `false`, preserving the `__csver__` and nested Part A/B/C
     /// TraceLogging layout. When enabled, envelope fields are written directly
@@ -143,6 +147,7 @@ impl ProcessorBuilder {
     ///
     /// The span event timestamp remains the span's end time in either mode.
     /// Configure all processors writing to the same provider/event consistently.
+    #[cfg(feature = "experimental-geneva-mapping")]
     pub fn with_geneva_mapping(mut self, enabled: bool) -> Self {
         self.options = self.options.with_geneva_mapping(enabled);
         self
@@ -356,6 +361,7 @@ mod tests {
         assert!(processor.force_flush().is_ok());
     }
 
+    #[cfg(feature = "experimental-geneva-mapping")]
     #[test]
     fn test_geneva_mapping_export() {
         use crate::exporter::common::test_utils;
