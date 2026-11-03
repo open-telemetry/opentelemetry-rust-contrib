@@ -61,6 +61,56 @@ pub(crate) fn populate_part_a(
     populate_resource(resource, event, field_tag);
 }
 
+pub(crate) fn populate_geneva_envelope(
+    event: &mut tld::EventBuilder,
+    resource: &super::Resource,
+    span_data: &SpanData,
+    event_name: &str,
+    field_tag: u32,
+) {
+    event.add_str8("env_ver", "4.0", tld::OutType::Default, field_tag);
+    event.add_str8("env_name", event_name, tld::OutType::Default, field_tag);
+    let end_time: DateTime<Utc> = span_data.end_time.into();
+    event.add_str8(
+        "env_time",
+        end_time.to_rfc3339_opts(chrono::SecondsFormat::AutoSi, true),
+        tld::OutType::Default,
+        field_tag,
+    );
+    event.add_str8(
+        "env_dt_traceId",
+        span_data.span_context.trace_id().to_string(),
+        tld::OutType::Default,
+        field_tag,
+    );
+    event.add_str8(
+        "env_dt_spanId",
+        span_data.span_context.span_id().to_string(),
+        tld::OutType::Default,
+        field_tag,
+    );
+    let trace_flags = span_data.span_context.trace_flags().to_u8();
+    if trace_flags != 0 {
+        event.add_u32(
+            "env_dt_traceFlags",
+            u32::from(trace_flags),
+            tld::OutType::Default,
+            field_tag,
+        );
+    }
+    if let Some(role) = &resource.cloud_role {
+        event.add_str8("env_cloud_role", role, tld::OutType::Default, field_tag);
+    }
+    if let Some(instance) = &resource.cloud_role_instance {
+        event.add_str8(
+            "env_cloud_roleInstance",
+            instance,
+            tld::OutType::Default,
+            field_tag,
+        );
+    }
+}
+
 fn has_ext_cloud(resource: &super::Resource) -> u8 {
     (resource.cloud_role.is_some() || resource.cloud_role_instance.is_some()) as u8
 }

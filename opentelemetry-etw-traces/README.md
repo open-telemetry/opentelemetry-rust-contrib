@@ -26,6 +26,33 @@ Spans are encoded following the [Microsoft Common Schema v4.0](https://learn.mic
 [![Documentation](https://docs.rs/opentelemetry-etw-traces/badge.svg)](https://docs.rs/opentelemetry-etw-traces)
 [![Slack](https://img.shields.io/badge/slack-@cncf/otel/rust-brightgreen.svg?logo=slack)](https://cloud-native.slack.com/archives/C03GDP0H023)
 
+## Optional Geneva-compatible output
+
+The default output uses `__csver__` and nested `PartA`, `PartB`, and `PartC`
+structures. For collectors that do not translate that representation into
+Geneva DGrep field names, enable the mapping when initializing the processor:
+
+```rust
+use opentelemetry_etw_traces::Processor;
+
+let processor = Processor::builder("MyAppTracing")
+    .with_geneva_mapping(true)
+    .build()
+    .expect("Failed to create ETW processor");
+```
+
+This mode emits flat `env_ver` (`"4.0"`), `env_name` (the ETW event name),
+`env_time` (the span end time), `env_dt_traceId`, and `env_dt_spanId` fields.
+Nonzero trace flags are emitted as `env_dt_traceFlags`; service resource
+attributes become `env_cloud_role` and `env_cloud_roleInstance` when present.
+Part B/C fields keep their existing names, types, and values without the
+wrapper structures. `__csver__` and `_typeName` are not emitted in this mode.
+Collection and routing still need to be configured in the agent.
+
+Omitting `.with_geneva_mapping(...)`, or passing `false`, retains the current
+output. Use a consistent mode for processors sharing a provider/event name;
+enabling this option changes the event's schema.
+
 ## Viewing ETW Traces
 
 Traces exported to ETW can be viewed using tools like `logman`, `perfview` etc.

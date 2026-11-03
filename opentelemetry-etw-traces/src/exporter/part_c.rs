@@ -14,6 +14,7 @@ pub(crate) fn populate_part_c(
     span_data: &SpanData,
     resource: &super::Resource,
     field_tag: u32,
+    geneva_mapping: bool,
 ) {
     let resource_attr_count = resource.attributes_from_resource.len();
     let span_partc_attr_count = span_data
@@ -24,11 +25,13 @@ pub(crate) fn populate_part_c(
     let part_c_count = resource_attr_count + span_partc_attr_count;
 
     if part_c_count > 0 {
-        event.add_struct(
-            "PartC",
-            part_c_count.try_into().unwrap_or(u8::MAX),
-            field_tag,
-        );
+        if !geneva_mapping {
+            event.add_struct(
+                "PartC",
+                part_c_count.try_into().unwrap_or(u8::MAX),
+                field_tag,
+            );
+        }
 
         // Resource attributes first
         for (key, value) in &resource.attributes_from_resource {

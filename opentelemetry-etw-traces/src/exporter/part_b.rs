@@ -24,7 +24,12 @@ use tracelogging_dynamic as tld;
 ///     success: bool (u8 with OutType::Boolean)
 /// }
 /// ```
-pub(crate) fn populate_part_b(event: &mut tld::EventBuilder, span_data: &SpanData, field_tag: u32) {
+pub(crate) fn populate_part_b(
+    event: &mut tld::EventBuilder,
+    span_data: &SpanData,
+    field_tag: u32,
+    geneva_mapping: bool,
+) {
     // Calculate field count dynamically
     // Base fields: _typeName, name, kind, startTime, success = 5
     let mut field_count: u8 = 5;
@@ -67,9 +72,10 @@ pub(crate) fn populate_part_b(event: &mut tld::EventBuilder, span_data: &SpanDat
         .count() as u8;
     field_count += well_known_count;
 
-    event.add_struct("PartB", field_count, field_tag);
-
-    event.add_str8("_typeName", "Span", tld::OutType::Default, field_tag);
+    if !geneva_mapping {
+        event.add_struct("PartB", field_count, field_tag);
+        event.add_str8("_typeName", "Span", tld::OutType::Default, field_tag);
+    }
     event.add_str8(
         "name",
         span_data.name.as_ref(),
