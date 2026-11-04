@@ -56,8 +56,9 @@ fn encode_span(
     // Keep the Common Schema field order shared by export and serialization benchmarks.
     event.add_u16("__csver__", 1024, tld::OutType::Unsigned, field_tag);
     part_a::populate_part_a(event, resource, span_data, field_tag);
-    part_c::populate_part_c(event, span_data, resource, field_tag);
-    part_b::populate_part_b(event, span_data, field_tag);
+    let (part_b_attributes, part_c_count) = common::classify_attributes(&span_data.attributes);
+    part_c::populate_part_c(event, span_data, resource, part_c_count, field_tag);
+    part_b::populate_part_b(event, span_data, &part_b_attributes, field_tag);
 }
 
 fn enabled_callback_noop(

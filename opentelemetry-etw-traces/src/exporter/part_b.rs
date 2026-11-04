@@ -1,5 +1,4 @@
 use crate::exporter::common;
-use chrono::{DateTime, Utc};
 use opentelemetry::trace::Status;
 use opentelemetry::SpanId;
 use opentelemetry_sdk::trace::SpanData;
@@ -24,7 +23,12 @@ use tracelogging_dynamic as tld;
 ///     success: bool (u8 with OutType::Boolean)
 /// }
 /// ```
-pub(crate) fn populate_part_b(event: &mut tld::EventBuilder, span_data: &SpanData, field_tag: u32) {
+pub(crate) fn populate_part_b(
+    event: &mut tld::EventBuilder,
+    span_data: &SpanData,
+    attributes: &common::PartBAttributes<'_>,
+    field_tag: u32,
+) {
     // Calculate field count dynamically
     // Base fields: _typeName, name, kind, startTime, success = 5
     let mut field_count: u8 = 5;
@@ -44,7 +48,7 @@ pub(crate) fn populate_part_b(event: &mut tld::EventBuilder, span_data: &SpanDat
             if description.is_empty() {
                 None
             } else {
-                Some(description.to_string())
+                Some(description.as_ref())
             }
         }
         _ => None,
@@ -53,18 +57,7 @@ pub(crate) fn populate_part_b(event: &mut tld::EventBuilder, span_data: &SpanDat
         field_count += 1;
     }
 
-    // Count well-known Part B attributes that are present on this span.
-    // We iterate the static slice (rather than building a map) so the
-    // emitted field order is deterministic and matches the slice order.
-    let well_known_count = common::WELL_KNOWN_PART_B_ATTRIBUTES
-        .iter()
-        .filter(|(otel_key, _)| {
-            span_data
-                .attributes
-                .iter()
-                .any(|kv| kv.key.as_str() == *otel_key)
-        })
-        .count() as u8;
+    let well_known_count = attributes.iter().flatten().count() as u8;
     field_count += well_known_count;
 
     event.add_struct("PartB", field_count, field_tag);
@@ -82,19 +75,16 @@ pub(crate) fn populate_part_b(event: &mut tld::EventBuilder, span_data: &SpanDat
         tld::OutType::Default,
         field_tag,
     );
-    let start_time: DateTime<Utc> = span_data.start_time.into();
     event.add_str8(
         "startTime",
-        start_time
-            .to_rfc3339_opts(chrono::SecondsFormat::AutoSi, true)
-            .as_str(),
+        common::format_timestamp(span_data.start_time.into()),
         tld::OutType::Default,
         field_tag,
     );
     if has_parent_id {
         event.add_str8(
             "parentId",
-            span_data.parent_span_id.to_string(),
+            common::hex_id::<16>(&span_data.parent_span_id.to_bytes()),
             tld::OutType::Utf8,
             field_tag,
         );
@@ -109,15 +99,9 @@ pub(crate) fn populate_part_b(event: &mut tld::EventBuilder, span_data: &SpanDat
         event.add_str8("statusMessage", msg, tld::OutType::Utf8, field_tag);
     }
 
-    // Emit well-known Part B attributes using their mapped field names,
-    // in the order defined by the static slice. This avoids the need for
-    // a HashMap and guarantees a stable field ordering.
-    for (otel_key, partb_name) in common::WELL_KNOWN_PART_B_ATTRIBUTES {
-        if let Some(kv) = span_data
-            .attributes
-            .iter()
-            .find(|kv| kv.key.as_str() == *otel_key)
-        {
+    for ((_, partb_name), attribute) in common::WELL_KNOWN_PART_B_ATTRIBUTES.iter().zip(attributes)
+    {
+        if let Some(kv) = attribute {
             common::add_attribute_to_event(event, partb_name, &kv.value);
         }
     }

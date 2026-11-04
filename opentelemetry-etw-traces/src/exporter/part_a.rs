@@ -1,4 +1,4 @@
-use chrono::{DateTime, Utc};
+use super::common;
 use opentelemetry_sdk::trace::SpanData;
 use tracelogging_dynamic as tld;
 
@@ -32,12 +32,9 @@ pub(crate) fn populate_part_a(
     event.add_struct("PartA", field_count, field_tag);
 
     // time: use end_time as the event timestamp.
-    let end_time: DateTime<Utc> = span_data.end_time.into();
     event.add_str8(
         "time",
-        end_time
-            .to_rfc3339_opts(chrono::SecondsFormat::AutoSi, true)
-            .as_str(),
+        common::format_timestamp(span_data.end_time.into()),
         tld::OutType::Default,
         field_tag,
     );
@@ -47,13 +44,13 @@ pub(crate) fn populate_part_a(
     event.add_struct("ext_dt", EXT_DT_COUNT, field_tag);
     event.add_str8(
         "traceId",
-        span_data.span_context.trace_id().to_string(),
+        common::hex_id::<32>(&span_data.span_context.trace_id().to_bytes()),
         tld::OutType::Default,
         field_tag,
     );
     event.add_str8(
         "spanId",
-        span_data.span_context.span_id().to_string(),
+        common::hex_id::<16>(&span_data.span_context.span_id().to_bytes()),
         tld::OutType::Default,
         field_tag,
     );

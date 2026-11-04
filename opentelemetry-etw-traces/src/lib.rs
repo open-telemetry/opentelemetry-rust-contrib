@@ -317,6 +317,29 @@ mod integration_tests {
                 );
             }
         }
+
+        let mut span = crate::exporter::common::test_utils::create_test_span_data(Some(vec![
+            KeyValue::new("http.request.method", "GET"),
+            KeyValue::new("custom", "custom-value"),
+            KeyValue::new("db.system.name", "postgresql"),
+            KeyValue::new("http.request.method", "POST"),
+        ]));
+        span.parent_span_id = opentelemetry::trace::SpanId::from_bytes([0x0a; 8]);
+        for description in ["failure \u{2603}", ""] {
+            span.status = opentelemetry::trace::Status::error(description);
+            exporter.export(&span);
+            let exported = recv_event(&rx, "Span");
+            assert_eq!(exported.get_str("PartB.parentId"), Some("0a0a0a0a0a0a0a0a"));
+            assert_eq!(exported.get_str("PartB.httpMethod"), Some("GET"));
+            assert_eq!(exported.get_str("PartB.dbSystem"), Some("postgresql"));
+            assert_eq!(exported.get_str("PartC.custom"), Some("custom-value"));
+            assert!(!exported.has("PartC.http.request.method"));
+            assert_eq!(exported.get_bool("PartB.success"), Some(false));
+            assert_eq!(
+                exported.get_str("PartB.statusMessage"),
+                (!description.is_empty()).then_some(description)
+            );
+        }
         trace.stop().unwrap();
     }
 

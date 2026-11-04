@@ -1,18 +1,24 @@
 /*
-    Serialization and exporter-only results: 2026-11-04, rustc 1.99.0.
+    Serialization optimization comparison: 2026-11-04, rustc 1.99.0.
     Machine inventory captured with this run:
     AMD EPYC 7763; 8 guest cores / 16 logical CPUs; 63.95 GiB RAM;
     Microsoft Virtual Machine; Windows 11 Enterprise x64 10.0.26300.
     One synchronous producer thread, no affinity override (process mask 0xffff).
 
-    Criterion 0.8.2 defaults: 100 samples, 3 s warm-up, 5 s measurement,
-    100,000 resamples. Point estimates [95% confidence interval], in us/span:
+    Baseline: 97d8baa. Optimized: this implementation, before results comments.
+    Two processes per variant, ordered baseline/optimized/optimized/baseline.
+    Criterion 0.8.2: 100 samples, 1 s warm-up, 2 s measurement, 100,000 resamples.
+    Arithmetic means of the two per-process point estimates, in us/span:
 
-    | Attributes | Serialization only     | Enabled export, INCLUDING serialization |
-    |------------|------------------------|-----------------------------------------|
-    | 0          | 0.585 [0.582, 0.588]    | 1.663 [1.547, 1.780]                     |
-    | 3 mixed    | 0.732 [0.727, 0.737]    | 1.765 [1.671, 1.865]                     |
-    | 6 strings  | 0.792 [0.789, 0.795]    | 2.031 [1.917, 2.149]                     |
+    | Attributes | Serialization before | After | Enabled export before | After |
+    |------------|----------------------|-------|-----------------------|-------|
+    | 0          | 0.594                | 0.392 | 1.537                 | 1.413 |
+    | 3 mixed    | 0.730                | 0.447 | 1.675                 | 1.435 |
+    | 6 strings  | 0.797                | 0.502 | 2.016                 | 1.458 |
+
+    Serialization decreased 34.0%, 38.7%, 37.0%; enabled-export point estimates
+    decreased 8.0%, 14.4%, 27.7%. Export is noisier: the 0-attribute direction
+    reversed in the second pair, so its improvement is not established.
 
     Both stages use the same prebuilt SpanData/resource and production encoder,
     with warm reusable buffers. Export also includes the enabled check, TLS
@@ -22,12 +28,13 @@
 
     Build: cargo bench -p opentelemetry-etw-traces --bench traces --features bench-internals --no-run
     Run the resulting EXE with OTEL_ETW_BENCH_MODE=enabled and an ETW listener:
-      & $exe 'Serialization|/Export/' --bench --noplot
-    File-mode capture: keyword 0x1, level 5, 64 KiB buffers, min 128 / max 512;
-    no PID filter or clock override. Capture: 14,346,203 provider events
-    (including warm-up), zero reported lost events/buffers.
-    Results describe this implementation before these results comments were added.
-    A shorter pilot is excluded. See README.md for methodology and limitations.
+      & $exe 'Serialization|/Export/' --bench --warm-up-time 1 --measurement-time 2 --noplot
+    File-mode capture: keyword 0x1, level 5, 64 KiB buffers, min 8192 / max 16384;
+    no PID filter or clock override. All 26,789,462 captured provider events
+    (including warm-up) matched baseline metadata/payload bytes; zero reported loss.
+    Longer optimized attempts lost events and were discarded. Both variants were
+    rerun with these identical settings; Criterion defaults in code are unchanged.
+    See README.md for per-run intervals and historical pre-optimization results.
 */
 
 /*

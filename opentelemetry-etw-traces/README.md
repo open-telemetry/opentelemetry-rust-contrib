@@ -192,7 +192,84 @@ subtracting SDK lifecycle timings. Do not label their difference as a directly
 measured ETW-write cost: TLS, enabled checks, compiler placement, and measurement
 noise also differ.
 
-#### Stage results (2026-11-04)
+#### Optimization comparison (2026-11-04)
+
+The serializer now uses stack-backed lowercase ID encoding and timestamp
+formatting, borrows error descriptions, and collects references to the first
+occurrence of each well-known attribute while counting custom attributes.
+Part B emits those references in the original schema order; Part C still emits
+resource attributes first and custom span attributes in input order. Duplicate
+well-known attributes retain the original first-occurrence-wins behavior.
+
+The timestamp fast path keeps Chrono's calendar conversion and the original
+`AutoSi` fractional widths (0, 3, 6, or 9 digits). Extended years and leap seconds
+fall back to the original Chrono formatter. No unsafe Rust, dependencies, global
+caches, shared locks, or toolchain changes were introduced. The ordinary root-span
+fixtures no longer create the four temporary strings for two IDs and two
+timestamps. Parent-ID and error-description changes are covered for correctness,
+but their benefit is not measured by the root/`Status::Ok` benchmark fixtures.
+
+The baseline implementation at `97d8baa` and the optimized working tree were
+measured in four separate processes, ordered **baseline, optimized, optimized,
+baseline**. The table shows arithmetic means of the two Criterion point estimates
+per variant, in microseconds per span, not individual-span latency percentiles:
+
+| Attributes | Serialization before | After | Reduction | Enabled export before | After | Reduction |
+| ---------- | -------------------- | ----- | --------- | --------------------- | ----- | --------- |
+| 0 | 0.594 | 0.392 | 34.0% | 1.537 | 1.413 | 8.0% |
+| 3 mixed | 0.730 | 0.447 | 38.7% | 1.675 | 1.435 | 14.4% |
+| 6 strings | 0.797 | 0.502 | 37.0% | 2.016 | 1.458 | 27.7% |
+
+**Enabled export includes serialization.** SDK span creation/context/cleanup is
+excluded. Serialization improved consistently. Export was noisier: in the second
+pair, 0-attribute export was 1.385 us baseline versus 1.458 us optimized, so the
+aggregate 8.0% reduction is not an established improvement. These are limited
+single-machine results, not regression thresholds.
+
+Per-process point estimates [95% Criterion confidence interval], in microseconds:
+
+| Case | Baseline 1 | Optimized 1 | Optimized 2 | Baseline 2 |
+| ---- | ---------- | ----------- | ----------- | ---------- |
+| Serialization/0 | 0.591 [0.583, 0.600] | 0.392 [0.389, 0.396] | 0.391 [0.388, 0.395] | 0.596 [0.586, 0.610] |
+| Serialization/3 | 0.738 [0.727, 0.752] | 0.448 [0.446, 0.452] | 0.446 [0.445, 0.448] | 0.721 [0.717, 0.727] |
+| Serialization/6 | 0.799 [0.794, 0.804] | 0.497 [0.494, 0.501] | 0.507 [0.500, 0.516] | 0.795 [0.791, 0.800] |
+| Export/0 | 1.689 [1.533, 1.852] | 1.368 [1.242, 1.503] | 1.458 [1.321, 1.596] | 1.385 [1.280, 1.502] |
+| Export/3 | 1.687 [1.551, 1.829] | 1.361 [1.228, 1.501] | 1.508 [1.376, 1.640] | 1.664 [1.533, 1.805] |
+| Export/6 | 2.052 [1.897, 2.202] | 1.447 [1.309, 1.594] | 1.469 [1.331, 1.617] | 1.980 [1.821, 2.127] |
+
+Environment was recorded with this comparison: AMD EPYC 7763, 8 guest-visible
+cores / 16 logical CPUs, 63.95 GiB RAM, Microsoft VM, Windows 11 Enterprise x64
+10.0.26300, rustc 1.99.0, Criterion 0.8.2, OpenTelemetry API/SDK 0.33.1,
+Chrono 0.4.45, TraceLogging Dynamic 1.2.4. Each process had one synchronous producer
+thread, no affinity override (mask `0xffff`), and the unchanged fixtures above.
+Default crate features plus `bench-internals` were used.
+
+Build each revision with the same toolchain/dependencies and preserve its
+executable separately. For each of the four runs, start the file-mode session
+shown earlier, but use **`-bs 64 -nb 8192 16384`**, then execute:
+
+```powershell
+$env:OTEL_ETW_BENCH_MODE = "enabled"
+& $exe 'Serialization|/Export/' --bench --warm-up-time 1 --measurement-time 2 --noplot
+```
+
+These are CLI overrides, not changes to Criterion defaults: 100 samples and
+100,000 resamples remain the defaults; warm-up is 1 s and measurement is 2 s per
+case. The capture has 64 KiB buffers, minimum 8192 / maximum 16384 (512 MiB /
+1 GiB buffer capacities), keyword `0x1`, level `5`, no PID filter or clock override.
+Stop and validate each capture before starting the next process.
+
+Full-default optimized attempts lost events with smaller buffer pools, so those
+comparisons were discarded, including their baseline runs. Both variants were
+rerun with the same shorter windows and larger buffers; do not compare this table
+directly against the older single-run export numbers below. The four accepted
+captures contained **26,789,462 provider events**, including warm-up, with zero
+reported lost events/buffers. Every event's descriptor, TraceLogging schema bytes,
+and payload bytes matched one of the three original pre-optimization fixtures.
+Formatting equivalence checks also cover signed years, Chrono limits, leap
+seconds/days, pre-epoch dates, fractional precision, and ID hex formatting.
+
+#### Historical stage results (2026-11-04, before optimization)
 
 Microseconds per span, Criterion point estimates with 95% confidence intervals:
 

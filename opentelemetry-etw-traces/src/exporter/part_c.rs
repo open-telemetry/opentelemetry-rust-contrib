@@ -13,14 +13,10 @@ pub(crate) fn populate_part_c(
     event: &mut tld::EventBuilder,
     span_data: &SpanData,
     resource: &super::Resource,
+    span_partc_attr_count: usize,
     field_tag: u32,
 ) {
     let resource_attr_count = resource.attributes_from_resource.len();
-    let span_partc_attr_count = span_data
-        .attributes
-        .iter()
-        .filter(|kv| common::well_known_part_b_field(kv.key.as_str()).is_none())
-        .count();
     let part_c_count = resource_attr_count + span_partc_attr_count;
 
     if part_c_count > 0 {
@@ -37,7 +33,7 @@ pub(crate) fn populate_part_c(
 
         // Span attributes (excluding well-known Part B attributes)
         for kv in span_data.attributes.iter() {
-            if common::well_known_part_b_field(kv.key.as_str()).is_some() {
+            if common::well_known_part_b_index(kv.key.as_str()).is_some() {
                 continue;
             }
             common::add_attribute_to_event(event, kv.key.as_str(), &kv.value);
