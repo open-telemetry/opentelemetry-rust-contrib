@@ -2,6 +2,13 @@
 
 ## vNext
 
+## v0.18.1
+
+Released 2026-Nov-04
+
+- Avoid allocating an error message when the log record has a severity number.
+  [#853](https://github.com/open-telemetry/opentelemetry-rust-contrib/pull/853)
+
 ## v0.18.0
 
 Released 2026-Oct-16
