@@ -2,6 +2,9 @@
 
 ## vNext
 
+- Avoid temporary heap allocations when formatting span IDs, trace IDs, and
+  timestamps, and borrow error descriptions during serialization in both output modes.
+
 ## v0.3.0
 
 Released 2026-Nov-04

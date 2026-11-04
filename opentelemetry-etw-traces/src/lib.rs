@@ -91,7 +91,7 @@ mod integration_tests {
     use std::sync::mpsc;
     use std::sync::{Arc, Mutex};
     use std::thread;
-    use std::time::Duration;
+    use std::time::{Duration, UNIX_EPOCH};
 
     use one_collect::etw::tdh::TdhDecoder;
     use one_collect::etw::{EtwSession, LEVEL_VERBOSE};
@@ -101,7 +101,7 @@ mod integration_tests {
 
     use tracelogging_dynamic as tld;
 
-    use opentelemetry::trace::{TraceContextExt, Tracer, TracerProvider};
+    use opentelemetry::trace::{Span, Tracer, TracerProvider};
     use opentelemetry::KeyValue;
     use opentelemetry_sdk::trace::SdkTracerProvider;
     use opentelemetry_sdk::Resource;
@@ -354,18 +354,18 @@ mod integration_tests {
         std::thread::sleep(Duration::from_millis(100));
 
         let tracer = tracer_provider.tracer("test");
-        let (trace_id, span_id) = tracer.in_span("my-span", |cx| {
-            let span = cx.span();
-            span.set_attribute(KeyValue::new("custom_attr", "custom_value"));
-            span.set_attribute(KeyValue::new("int_attr", 42_i64));
-            span.set_attribute(KeyValue::new("bool_attr", true));
-            // Well-known attribute — should land in PartB, not PartC.
-            span.set_attribute(KeyValue::new("http.request.method", "GET"));
-            (
-                span.span_context().trace_id().to_string(),
-                span.span_context().span_id().to_string(),
-            )
-        });
+        let mut span = tracer
+            .span_builder("my-span")
+            .with_start_time(UNIX_EPOCH + Duration::new(10, 123_000_000))
+            .start(&tracer);
+        span.set_attribute(KeyValue::new("custom_attr", "custom_value"));
+        span.set_attribute(KeyValue::new("int_attr", 42_i64));
+        span.set_attribute(KeyValue::new("bool_attr", true));
+        // Well-known attribute — should land in PartB, not PartC.
+        span.set_attribute(KeyValue::new("http.request.method", "GET"));
+        let trace_id = span.span_context().trace_id().to_string();
+        let span_id = span.span_context().span_id().to_string();
+        span.end_with_timestamp(UNIX_EPOCH + Duration::new(20, 123_456_789));
 
         let evt = recv_event(&rx, "Span");
 
@@ -375,7 +375,10 @@ mod integration_tests {
         if geneva_mapping {
             assert_eq!(evt.get_str("env_ver"), Some("4.0"));
             assert_eq!(evt.get_str("env_name"), Some("Span"));
-            assert!(evt.has("env_time"));
+            assert_eq!(
+                evt.get_str("env_time"),
+                Some("1970-01-01T00:00:20.123456789Z")
+            );
             assert_eq!(evt.get_str("env_dt_traceId"), Some(trace_id.as_str()));
             assert_eq!(evt.get_str("env_dt_spanId"), Some(span_id.as_str()));
             assert_eq!(evt.get_u32("env_dt_traceFlags"), Some(1));
@@ -394,7 +397,10 @@ mod integration_tests {
                 evt.get_str("PartA.ext_cloud.roleInstance"),
                 Some("test_instance_1")
             );
-            assert!(evt.has("PartA.time"));
+            assert_eq!(
+                evt.get_str("PartA.time"),
+                Some("1970-01-01T00:00:20.123456789Z")
+            );
             assert_eq!(evt.get_str("PartA.ext_dt.traceId"), Some(trace_id.as_str()));
             assert_eq!(evt.get_str("PartA.ext_dt.spanId"), Some(span_id.as_str()));
             assert!(!evt.properties.keys().any(|key| key.starts_with("env_")));
@@ -406,7 +412,10 @@ mod integration_tests {
         // PartB — base fields
         assert_eq!(evt.get_str(&format!("{part_b}name")), Some("my-span"));
         assert_eq!(evt.get_u8(&format!("{part_b}kind")), Some(0)); // Internal
-        assert!(evt.has(&format!("{part_b}startTime")));
+        assert_eq!(
+            evt.get_str(&format!("{part_b}startTime")),
+            Some("1970-01-01T00:00:10.123Z")
+        );
         // Root span — no parentId.
         assert!(!evt.has(&format!("{part_b}parentId")));
         // No links, no statusMessage in this test.
@@ -448,8 +457,6 @@ mod integration_tests {
     fn integration_test_geneva_optional_fields() {
         use opentelemetry::trace::{Link, SpanContext, SpanId, SpanKind, Status, TraceFlags};
         use opentelemetry_sdk::trace::SpanProcessor;
-        use std::time::UNIX_EPOCH;
-
         let provider_name = "OTelETWTracesIntTest_GenevaOptional";
         let (trace, rx) = start_etw_trace(provider_name);
         let processor = crate::Processor::builder(provider_name)
@@ -467,8 +474,8 @@ mod integration_tests {
         );
         span.parent_span_id = SpanId::from_hex("00f067aa0ba902b8").unwrap();
         span.span_kind = SpanKind::Server;
-        span.start_time = UNIX_EPOCH + Duration::from_secs(10);
-        span.end_time = UNIX_EPOCH + Duration::from_secs(20);
+        span.start_time = UNIX_EPOCH + Duration::new(10, 123_456_000);
+        span.end_time = UNIX_EPOCH + Duration::new(20, 987_654_321);
         span.status = Status::error("request failed");
         span.links
             .links
@@ -479,8 +486,14 @@ mod integration_tests {
         let evt = recv_event(&rx, "CustomSpan");
 
         assert_eq!(evt.get_str("env_name"), Some("CustomSpan"));
-        assert_eq!(evt.get_str("env_time"), Some("1970-01-01T00:00:20Z"));
-        assert_eq!(evt.get_str("startTime"), Some("1970-01-01T00:00:10Z"));
+        assert_eq!(
+            evt.get_str("env_time"),
+            Some("1970-01-01T00:00:20.987654321Z")
+        );
+        assert_eq!(
+            evt.get_str("startTime"),
+            Some("1970-01-01T00:00:10.123456Z")
+        );
         assert_eq!(evt.get_str("name"), Some("test-span"));
         assert_eq!(evt.get_u8("kind"), Some(1));
         assert_eq!(evt.get_str("parentId"), Some("00f067aa0ba902b8"));

@@ -1,6 +1,106 @@
 use opentelemetry::trace::SpanKind;
 use std::borrow::Cow;
+use std::time::SystemTime;
 use tracelogging_dynamic as tld;
+
+pub(crate) fn format_trace_id(id: opentelemetry::TraceId) -> [u8; 32] {
+    let mut buffer = [0; 32];
+    encode_hex(&id.to_bytes(), &mut buffer);
+    buffer
+}
+
+pub(crate) fn format_span_id(id: opentelemetry::SpanId) -> [u8; 16] {
+    let mut buffer = [0; 16];
+    encode_hex(&id.to_bytes(), &mut buffer);
+    buffer
+}
+
+fn encode_hex(bytes: &[u8], buffer: &mut [u8]) {
+    const HEX: &[u8; 16] = b"0123456789abcdef";
+    debug_assert_eq!(buffer.len(), bytes.len() * 2);
+    for (byte, pair) in bytes.iter().zip(buffer.chunks_exact_mut(2)) {
+        pair[0] = HEX[(byte >> 4) as usize];
+        pair[1] = HEX[(byte & 0x0f) as usize];
+    }
+}
+
+pub(crate) struct TimestampBuffer {
+    // Chrono supports signed, six-digit years in addition to four-digit years.
+    bytes: [u8; 36],
+    len: usize,
+}
+
+impl TimestampBuffer {
+    fn write_digits(&mut self, mut value: u32, width: usize) {
+        let end = self.len + width;
+        for digit in self.bytes[self.len..end].iter_mut().rev() {
+            *digit = b'0' + (value % 10) as u8;
+            value /= 10;
+        }
+        self.len = end;
+    }
+}
+
+impl AsRef<[u8]> for TimestampBuffer {
+    fn as_ref(&self) -> &[u8] {
+        &self.bytes[..self.len]
+    }
+}
+
+pub(crate) fn format_timestamp(time: SystemTime) -> TimestampBuffer {
+    use chrono::{Datelike, Timelike};
+
+    let datetime: chrono::DateTime<chrono::Utc> = time.into();
+    let mut buffer = TimestampBuffer {
+        bytes: [0; 36],
+        len: 0,
+    };
+    let year = datetime.year();
+    if !(0..=9999).contains(&year) {
+        buffer.bytes[0] = if year < 0 { b'-' } else { b'+' };
+        buffer.len = 1;
+    }
+    let year = year.unsigned_abs();
+    let year_width = if year < 10_000 {
+        4
+    } else if year < 100_000 {
+        5
+    } else {
+        6
+    };
+    buffer.write_digits(year, year_width);
+
+    let offset = buffer.len;
+    buffer.bytes[offset..offset + 15].copy_from_slice(b"-00-00T00:00:00");
+    for (position, value) in [
+        (1, datetime.month()),
+        (4, datetime.day()),
+        (7, datetime.hour()),
+        (10, datetime.minute()),
+        (13, datetime.second()),
+    ] {
+        buffer.bytes[offset + position] = b'0' + (value / 10) as u8;
+        buffer.bytes[offset + position + 1] = b'0' + (value % 10) as u8;
+    }
+    buffer.len += 15;
+
+    let nanos = datetime.nanosecond();
+    if nanos != 0 {
+        buffer.bytes[buffer.len] = b'.';
+        buffer.len += 1;
+        // Match SecondsFormat::AutoSi: use exactly 3, 6, or 9 fractional digits.
+        if nanos % 1_000_000 == 0 {
+            buffer.write_digits(nanos / 1_000_000, 3);
+        } else if nanos % 1_000 == 0 {
+            buffer.write_digits(nanos / 1_000, 6);
+        } else {
+            buffer.write_digits(nanos, 9);
+        }
+    }
+    buffer.bytes[buffer.len] = b'Z';
+    buffer.len += 1;
+    buffer
+}
 
 /// Well-known OpenTelemetry semantic-convention attributes that map to
 /// Common Schema Part B field names. Attributes whose key matches one of
@@ -184,8 +284,109 @@ pub(crate) mod test_utils {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use chrono::{DateTime, SecondsFormat, TimeZone, Utc};
     #[cfg(feature = "serde_json")]
     use opentelemetry::trace::{Link, SpanContext, SpanId, TraceFlags, TraceId, TraceState};
+
+    #[test]
+    fn test_format_ids() {
+        for byte in 0..=u8::MAX {
+            let trace_id = opentelemetry::TraceId::from_bytes([byte; 16]);
+            let span_id = opentelemetry::SpanId::from_bytes([byte; 8]);
+            assert_eq!(format_trace_id(trace_id), trace_id.to_string().as_bytes());
+            assert_eq!(format_span_id(span_id), span_id.to_string().as_bytes());
+        }
+
+        let trace_id =
+            opentelemetry::TraceId::from_hex("0af7651916cd43dd8448eb211c80319c").unwrap();
+        let span_id = opentelemetry::SpanId::from_hex("00f067aa0ba902b7").unwrap();
+        assert_eq!(
+            format_trace_id(trace_id),
+            *b"0af7651916cd43dd8448eb211c80319c"
+        );
+        assert_eq!(format_span_id(span_id), *b"00f067aa0ba902b7");
+    }
+
+    fn assert_timestamp_matches_chrono(datetime: DateTime<Utc>) {
+        let seconds = datetime.timestamp();
+        let time = if seconds >= 0 {
+            SystemTime::UNIX_EPOCH.checked_add(std::time::Duration::from_secs(seconds as u64))
+        } else {
+            SystemTime::UNIX_EPOCH
+                .checked_sub(std::time::Duration::from_secs(seconds.unsigned_abs()))
+        }
+        .and_then(|time| {
+            time.checked_add(std::time::Duration::from_nanos(u64::from(
+                datetime.timestamp_subsec_nanos(),
+            )))
+        });
+        // SystemTime's representable range is platform-dependent.
+        if let Some(time) = time {
+            assert_eq!(
+                format_timestamp(time).as_ref(),
+                datetime
+                    .to_rfc3339_opts(SecondsFormat::AutoSi, true)
+                    .as_bytes(),
+                "{datetime:?}",
+            );
+        }
+    }
+
+    #[test]
+    fn test_format_timestamp_precision_and_pre_epoch() {
+        for seconds in [-1, 0, 1, 1_730_000_000] {
+            for nanos in [
+                0,
+                1,
+                10,
+                100,
+                1_000,
+                10_000,
+                100_000,
+                1_000_000,
+                10_000_000,
+                100_000_000,
+                123_000_000,
+                123_456_000,
+                123_456_789,
+                999_999_999,
+            ] {
+                assert_timestamp_matches_chrono(DateTime::from_timestamp(seconds, nanos).unwrap());
+            }
+        }
+    }
+
+    #[test]
+    fn test_format_timestamp_year_boundaries() {
+        for year in [-10000, -1, 0, 1, 999, 1000, 9999, 10000] {
+            for (month, day, hour, minute, second) in [(1, 1, 0, 0, 0), (12, 31, 23, 59, 59)] {
+                let datetime = Utc
+                    .with_ymd_and_hms(year, month, day, hour, minute, second)
+                    .unwrap();
+                assert_timestamp_matches_chrono(datetime);
+                assert_timestamp_matches_chrono(
+                    datetime + chrono::Duration::nanoseconds(999_999_999),
+                );
+            }
+        }
+        assert_timestamp_matches_chrono(DateTime::<Utc>::MIN_UTC);
+        assert_timestamp_matches_chrono(DateTime::<Utc>::MAX_UTC);
+    }
+
+    #[test]
+    fn test_format_timestamp_across_supported_range() {
+        let min = DateTime::<Utc>::MIN_UTC.timestamp();
+        let range = (DateTime::<Utc>::MAX_UTC.timestamp() - min) as u64 + 1;
+        let mut state = 0x1234_5678_9abc_def0_u64;
+        for _ in 0..4096 {
+            state = state
+                .wrapping_mul(6_364_136_223_846_793_005)
+                .wrapping_add(1);
+            let seconds = min + (state % range) as i64;
+            let nanos = (state.rotate_left(32) % 1_000_000_000) as u32;
+            assert_timestamp_matches_chrono(DateTime::from_timestamp(seconds, nanos).unwrap());
+        }
+    }
 
     #[test]
     fn test_span_kind_to_u8() {
