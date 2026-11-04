@@ -167,7 +167,7 @@ $env:OTEL_ETW_BENCH_MODE = "enabled"
 ```
 
 These are command-line overrides, not changes to Criterion's default
-configuration. The table previously in the benchmark source contained preliminary
+configuration. The table at the top of the benchmark source contains preliminary
 Criterion point estimates from these short runs, not stable regression baselines.
 
 The capture script records file-mode ETL capture using
@@ -176,11 +176,17 @@ level `5`, 64 KiB buffers, minimum 128 and maximum 512 buffers, and no PID filte
 No CPU-affinity or clock override was specified. The paired smoke capture's ETL
 header records Windows NT 10.0, build 26300, 64-bit, and 16 logical processors.
 
-The run artifacts do **not** establish the CPU model, physical core count, or
-whether the machine was virtual or physical. An older environment inventory is
-not sufficient per-run provenance. The preliminary table has therefore been
-removed rather than filling those gaps by inference. Record that environment
-information alongside future results before publishing a replacement table.
+The original run artifacts do **not** establish the CPU model, physical core count,
+or whether the machine was virtual or physical. The machine details accompanying
+the results were collected afterward, not as part of the measured runs. Record
+that environment information alongside future runs for complete per-run provenance.
+
+A later read-only Windows CIM inventory, queried on 2026-11-03, reports an
+AMD EPYC 7763 64-Core Processor, 8 guest-visible cores / 16 logical processors,
+63.95 GiB RAM, Microsoft Virtual Machine, and Windows 11 Enterprise x64
+10.0.26300 (build 26300). The CPU model's "64-Core" designation is not the VM's
+allocated core count. This current inventory is also noted at the top of
+`benches/traces.rs`; it does not retroactively establish the earlier run environment.
 
 ## OpenTelemetry Overview
 

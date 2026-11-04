@@ -1,8 +1,24 @@
 /*
-    See README.md for the preliminary-run commands and recorded capture settings.
-    Results are omitted because complete per-run hardware/VM provenance was not
-    recorded. ETW/Windows timings are not a controlled comparison with
-    user-events/Linux.
+    Preliminary ETW benchmark results: 2026-11-03, rustc 1.99.0.
+    Machine inventory queried after the runs, on 2026-11-03:
+    CPU: AMD EPYC 7763 64-Core Processor; guest reports 8 cores / 16 logical CPUs.
+    RAM: 63.95 GiB (approximately 64 GiB).
+    Machine: Microsoft Virtual Machine.
+    OS: Windows 11 Enterprise x64, version 10.0.26300 (build 26300).
+
+    Criterion point estimates: 10 samples, 100 ms warm-up, 200 ms measurement.
+    Enabled capture: file-mode ETL, 64 KiB buffers, min 128 / max 512,
+    keyword 0x1, level 5; no PID filter or CPU-affinity override.
+
+    | Benchmark    | ETW enabled | ETW disabled |
+    |--------------|-------------|--------------|
+    | SimpleSpan   | 3.02 us     | 379 ns       |
+    | ScopedSpan/0 | 1.83 us     | 439 ns       |
+    | ScopedSpan/3 | 2.63 us     | 502 ns       |
+
+    See README.md for exact commands and provenance limitations. These short
+    measurements are not regression thresholds or a controlled comparison with
+    user-events/Linux; the hardware inventory was not captured during the runs.
 */
 
 #[cfg(windows)]
