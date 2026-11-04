@@ -77,7 +77,7 @@ Instructions using Powershell:
 
 ## Benchmarks
 
-The Windows-only Criterion benchmark has three cases:
+The Windows-only Criterion benchmark has three lifecycle cases:
 
 | Case | Timed work |
 | ---- | ---------- |
@@ -147,6 +147,113 @@ Similar workloads do not make ETW/Windows timings a controlled comparison agains
 user-events/Linux results: the operating systems, exporters, hardware, and capture
 configurations differ.
 
+### Serialization and exporter-only costs
+
+The opt-in `bench-internals` feature adds paired stage benchmarks using the same
+prebuilt `SpanData` and resource:
+
+| Case | Timed work |
+| ---- | ---------- |
+| `ETW/Serialization/0`, `/3`, `/6` | The production `#[inline]` encoder: reset the reused EventBuilder, build Common Schema metadata and payload, format timestamps and IDs, and encode attributes. No enabled check, TLS lookup, or ETW write. |
+| `ETW/enabled/Export/0`, `/3`, `/6` | The real exporter: enabled check, TLS builder borrow, the same serialization, and synchronous ETW write. **Includes serialization**, not write-only. |
+| `ETW/disabled/Export/0`, `/3`, `/6` | Only the exporter's disabled-provider fast path; not meaningful as serialization or delivery cost. |
+
+These exclude SDK span creation, sampling, context attachment, status updates,
+input allocation, and span cleanup. The fixture is a root Server span named
+`BenchmarkOperation`, with `Status::Ok`, fixed nonzero IDs, fixed nanosecond
+timestamps, no links/events, and `service.name=etw-trace-benchmark`. `/0` has no
+attributes; `/3` has the same string, integer and boolean values as `ScopedSpan/3`;
+`/6` has `key1=value1` through `key6=value6`. The six-attribute fixture still uses
+Server/Ok, unlike `SimpleSpan`. Both stages reuse buffer capacity; cold
+allocation/initialization is not measured. `#[inline]` is a compiler hint.
+
+Run serialization alone without an ETW listener:
+
+```powershell
+cargo bench -p opentelemetry-etw-traces --bench traces --features bench-internals -- Serialization
+```
+
+For enabled export, start the same ETW session shown above and use:
+
+```powershell
+$env:OTEL_ETW_BENCH_MODE = "enabled"
+cargo bench -p opentelemetry-etw-traces --bench traces --features bench-internals -- 'Serialization|/Export/'
+```
+
+Serialization never waits for a listener. Export checks the actual exporter's
+provider before and after each batch, outside timing, and waits only when a
+selected enabled-export case first executes. Listing and unmatched filters remain
+independent of listener state. The feature exposes only a doc-hidden, unstable
+benchmark adapter; the internal resource and exporter remain private. Normal
+builds and benchmark defaults are unchanged.
+
+Serialization and enabled export are independently measured, not inferred by
+subtracting SDK lifecycle timings. Do not label their difference as a directly
+measured ETW-write cost: TLS, enabled checks, compiler placement, and measurement
+noise also differ.
+
+#### Stage results (2026-11-04)
+
+Microseconds per span, Criterion point estimates with 95% confidence intervals:
+
+| Span attributes | Serialization only | Enabled export, **including serialization** |
+| --------------- | ------------------ | ------------------------------------------- |
+| 0 | 0.585 [0.582, 0.588] | 1.663 [1.547, 1.780] |
+| 3 mixed | 0.732 [0.727, 0.737] | 1.765 [1.671, 1.865] |
+| 6 strings | 0.792 [0.789, 0.795] | 2.031 [1.917, 2.149] |
+
+Environment recorded immediately before this run: AMD EPYC 7763, **8 guest-visible
+cores / 16 logical CPUs**, 63.95 GiB RAM, Microsoft Virtual Machine, Windows 11
+Enterprise x64 10.0.26300 (build 26300). Rust **1.99.0**
+(`b940084d7`, LLVM 23.1.1), `x86_64-pc-windows-msvc`, Criterion **0.8.2**,
+OpenTelemetry API/SDK **0.33.1**, TraceLogging Dynamic **1.2.4**. Default crate
+features plus `bench-internals`; `serde_json` was not enabled for measurement.
+The repository toolchain pin and bench profile were unchanged.
+
+This was one process with **one synchronous span-producing thread**, not a
+multithread scaling test. No affinity override was applied (inherited process
+mask `0xffff`); Windows could migrate the thread among all 16 logical CPUs.
+Criterion analysis and ETW collection are outside the producer's timed work;
+the measured export call does not wait for disk persistence.
+
+The measured executable was built from `4da9a02` plus the encoder/benchmark
+changes in this branch, before the result comments and documentation were added:
+
+```powershell
+cargo bench -p opentelemetry-etw-traces --bench traces --features bench-internals --no-run
+$env:OTEL_ETW_BENCH_MODE = "enabled"
+# With the file-mode ETW session above already running:
+& $exe 'Serialization|/Export/' --bench --noplot
+```
+
+`$exe` was the resulting `traces-c8ba5eda24759944.exe`, invoked directly.
+Its SHA-256 was
+`ad2e1c93ba9a7f6345399168c7b46c07ccbc527d562aa565f787644ca8fbf22a`.
+Criterion's measurement defaults were used: **100 samples, 3 s warm-up, 5 s
+measurement per case, 100,000 resamples, 95% confidence**. Only plot generation
+was disabled. Cases ran sequentially in this order: Serialization/0, Export/0,
+Serialization/3, Export/3, Serialization/6, Export/6. A preliminary 30-sample,
+0.5 s warm-up / 1 s measurement run was noisier and is not included in this table.
+
+Both stages ran while the file-mode ETW session was active, using provider
+`{22282217-c59e-57fe-2368-a9ac925aac2a}`, keyword `0x1`, level `5`, 64 KiB buffers,
+minimum 128 / maximum 512, and no PID filter or clock override. The session
+reported zero lost events, log buffers, or realtime buffers. The separate smoke
+capture below is not included in the **14,346,203 provider events** processed by
+`tracerpt` from the measured run's ETL (which includes warm-up events). The smoke
+capture contained exactly three stage export events; serialization emitted none.
+An elevated integration test also compared decoded serialization-only output
+(written separately outside timing) against real export for 6, 0, and 3 attributes
+using reused buffers. The existing Common Schema integration test was retained;
+its fixed startup sleep was replaced with a provider-ready check.
+
+The fixtures' Windows `SystemTime` values are quantized to 100 ns and encoded as
+`2023-11-14T22:13:20.123456700Z` / `2023-11-14T22:13:21.123456700Z`. Timestamp/ID
+formatting still runs on every serialization. Results are warm, repeated-input
+costs, not arbitrary-size or cold-cache costs. The export confidence intervals
+remain wider than serialization's; this single VM run is not a regression
+threshold or a controlled comparison with the older lifecycle/FFI measurements.
+
 ### Preliminary run provenance
 
 The short validation runs on 2026-11-03 used rustc **1.99.0**, matching the
@@ -167,8 +274,9 @@ $env:OTEL_ETW_BENCH_MODE = "enabled"
 ```
 
 These are command-line overrides, not changes to Criterion's default
-configuration. The table at the top of the benchmark source contains preliminary
-Criterion point estimates from these short runs, not stable regression baselines.
+configuration. The historical lifecycle table in the benchmark source contains
+preliminary Criterion point estimates from these short runs, not stable regression
+baselines.
 
 The capture script records file-mode ETL capture using
 `-p $providerGuid 0x1 5 -bs 64 -nb 128 512 -o $etl -ets`: keyword `0x1`, Verbose

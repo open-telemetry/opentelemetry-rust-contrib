@@ -37,6 +37,29 @@ struct Resource {
     attributes_from_resource: Vec<(Key, opentelemetry::Value)>,
 }
 
+#[inline]
+fn encode_span(
+    event: &mut tld::EventBuilder,
+    span_data: &SpanData,
+    resource: &Resource,
+    event_name: &str,
+) {
+    let event_tags: u32 = 0;
+    let field_tag: u32 = 0;
+    event.reset(
+        event_name,
+        tld::Level::Verbose,
+        DEFAULT_KEYWORD_UNCATEGORIZED,
+        event_tags,
+    );
+
+    // Keep the Common Schema field order shared by export and serialization benchmarks.
+    event.add_u16("__csver__", 1024, tld::OutType::Unsigned, field_tag);
+    part_a::populate_part_a(event, resource, span_data, field_tag);
+    part_c::populate_part_c(event, span_data, resource, field_tag);
+    part_b::populate_part_b(event, span_data, field_tag);
+}
+
 fn enabled_callback_noop(
     _source_id: &tld::Guid,
     _event_control_code: u32,
@@ -103,28 +126,8 @@ impl ETWExporter {
             return;
         }
 
-        let event_tags: u32 = 0;
-        let field_tag: u32 = 0;
-
         EVENT_BUILDER.with_borrow_mut(|event| {
-            event.reset(
-                self.options.event_name(),
-                tld::Level::Verbose,
-                DEFAULT_KEYWORD_UNCATEGORIZED,
-                event_tags,
-            );
-
-            // Common Schema version as u16 (0x0400 = 1024)
-            event.add_u16("__csver__", 1024, tld::OutType::Unsigned, field_tag);
-
-            // Part A: envelope (time, traceId, spanId, cloud role)
-            part_a::populate_part_a(event, &self.resource, span_data, field_tag);
-
-            // Part C: custom data (individual typed attributes, resource attributes)
-            part_c::populate_part_c(event, span_data, &self.resource, field_tag);
-
-            // Part B: span payload (_typeName, name, kind, startTime, parentId, links, statusMessage, success)
-            part_b::populate_part_b(event, span_data, field_tag);
+            encode_span(event, span_data, &self.resource, self.options.event_name());
 
             // event.write() returns 0 on success or a diagnostic-only Win32 error on failure. Failures
             // are expected, transient conditions (e.g. buffer pressure from an active session), so the
@@ -171,6 +174,45 @@ impl ETWExporter {
 impl Debug for ETWExporter {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.write_str("ETW trace exporter")
+    }
+}
+
+/// Unstable adapters for this crate's opt-in stage benchmarks, not application APIs.
+#[cfg(feature = "bench-internals")]
+#[doc(hidden)]
+pub mod benchmark {
+    use super::*;
+
+    /// Calls the production encoder and exporter with prebuilt span data.
+    #[derive(Debug)]
+    pub struct ExportBenchmark(ETWExporter);
+
+    impl ExportBenchmark {
+        /// Registers a provider and prepares its resource outside measurement.
+        pub fn new(provider_name: &str, resource: &opentelemetry_sdk::Resource) -> Self {
+            let mut exporter = ETWExporter::new(Options::new(provider_name));
+            exporter.set_resource(resource);
+            Self(exporter)
+        }
+
+        /// Encodes into a reusable caller-owned buffer without checking or writing ETW.
+        #[inline]
+        pub fn serialize(&self, event: &mut tld::EventBuilder, span: &SpanData) {
+            encode_span(event, span, &self.0.resource, self.0.options.event_name());
+        }
+
+        /// Executes the real enabled check, TLS borrow, serialization, and ETW write.
+        #[inline]
+        pub fn export(&self, span: &SpanData) {
+            self.0.export_span_data(span);
+        }
+
+        /// Checks the actual exporter's provider rather than a second registration.
+        pub fn enabled(&self) -> bool {
+            self.0
+                .provider
+                .enabled(tld::Level::Verbose, DEFAULT_KEYWORD_UNCATEGORIZED)
+        }
     }
 }
 

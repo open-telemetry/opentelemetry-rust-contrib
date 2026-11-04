@@ -29,6 +29,7 @@ criterion = { workspace = true }
 one_collect = "0.1.34532"
 
 [features]
+bench-internals = []
 internal-logs = [
     "opentelemetry/internal-logs",
     "opentelemetry_sdk/internal-logs",

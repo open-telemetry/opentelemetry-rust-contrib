@@ -54,6 +54,10 @@ mod processor;
 pub use processor::Processor;
 pub use processor::ProcessorBuilder;
 
+#[cfg(feature = "bench-internals")]
+#[doc(hidden)]
+pub use exporter::benchmark;
+
 #[cfg(all(test, target_os = "windows"))]
 mod integration_tests {
     use std::cell::RefCell;
@@ -265,6 +269,57 @@ mod integration_tests {
     // resulting ETW events with one_collect for payload validation.
     // -----------------------------------------------------------------------
 
+    #[cfg(feature = "bench-internals")]
+    #[ignore = "Requires admin privileges to start ETW trace session"]
+    #[test]
+    fn integration_test_serialization_matches_export() {
+        let provider_name = "OTelETWTracesIntTest_Serialization";
+        let (trace, rx) = start_etw_trace(provider_name);
+        let resource = Resource::builder_empty()
+            .with_service_name("serialization-test")
+            .build();
+        let exporter = crate::benchmark::ExportBenchmark::new(provider_name, &resource);
+        let provider = Box::pin(tld::Provider::new(provider_name, &tld::Provider::options()));
+        // SAFETY: the provider remains pinned until drop unregisters the callback.
+        assert_eq!(unsafe { provider.as_ref().register() }, 0);
+        let deadline = std::time::Instant::now() + Duration::from_secs(5);
+        while !exporter.enabled() && std::time::Instant::now() < deadline {
+            std::thread::sleep(Duration::from_millis(10));
+        }
+        assert!(exporter.enabled());
+
+        let mut event = tld::EventBuilder::new();
+        // Alternate large and small payloads to exercise reset of reused buffers.
+        for count in [6, 0, 3] {
+            let attributes = (0..count)
+                .map(|i| KeyValue::new(format!("key{i}"), format!("value{i}")))
+                .collect();
+            let span = crate::exporter::common::test_utils::create_test_span_data(Some(attributes));
+            exporter.serialize(&mut event, &span);
+            assert_eq!(event.write(&provider, None, None), 0);
+            let serialized = recv_event(&rx, "Span");
+            exporter.export(&span);
+            let exported = recv_event(&rx, "Span");
+
+            assert_eq!(serialized.keyword, exported.keyword);
+            assert_eq!(serialized.properties, exported.properties);
+            assert_eq!(exported.get_str("PartB.name"), Some("test-span"));
+            assert_eq!(
+                exported.get_str("PartA.ext_cloud.role"),
+                Some("serialization-test")
+            );
+            for i in 0..6 {
+                let key = format!("PartC.key{i}");
+                let value = format!("value{i}");
+                assert_eq!(
+                    exported.get_str(&key),
+                    (i < count).then_some(value.as_str())
+                );
+            }
+        }
+        trace.stop().unwrap();
+    }
+
     /// Full test: validates PartA, PartB (incl. well-known attributes), and PartC.
     #[ignore = "Requires admin privileges to start ETW trace session"]
     #[test]
@@ -291,7 +346,14 @@ mod integration_tests {
             .with_span_processor(processor)
             .build();
 
-        std::thread::sleep(Duration::from_millis(100));
+        let probe = Box::pin(tld::Provider::new(provider_name, &tld::Provider::options()));
+        // SAFETY: the probe remains pinned until drop unregisters the callback.
+        assert_eq!(unsafe { probe.as_ref().register() }, 0);
+        let deadline = std::time::Instant::now() + Duration::from_secs(5);
+        while !probe.enabled(tld::Level::Verbose, 1) && std::time::Instant::now() < deadline {
+            std::thread::sleep(Duration::from_millis(10));
+        }
+        assert!(probe.enabled(tld::Level::Verbose, 1));
 
         let tracer = tracer_provider.tracer("test");
         tracer.in_span("my-span", |cx| {
