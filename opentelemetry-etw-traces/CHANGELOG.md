@@ -2,6 +2,10 @@
 
 ## vNext
 
+## v0.3.0
+
+Released 2026-Nov-04
+
 - Add `experimental-geneva-mapping` feature with opt-in
   `ProcessorBuilder::with_geneva_mapping` to emit flat Geneva envelope fields
   while preserving the existing TraceLogging layout by default.
