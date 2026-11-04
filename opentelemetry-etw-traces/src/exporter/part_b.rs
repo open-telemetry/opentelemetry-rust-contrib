@@ -1,5 +1,4 @@
 use crate::exporter::common;
-use chrono::{DateTime, Utc};
 use opentelemetry::trace::Status;
 use opentelemetry::SpanId;
 use opentelemetry_sdk::trace::SpanData;
@@ -49,7 +48,7 @@ pub(crate) fn populate_part_b(
             if description.is_empty() {
                 None
             } else {
-                Some(description.to_string())
+                Some(description.as_ref())
             }
         }
         _ => None,
@@ -88,19 +87,16 @@ pub(crate) fn populate_part_b(
         tld::OutType::Default,
         field_tag,
     );
-    let start_time: DateTime<Utc> = span_data.start_time.into();
     event.add_str8(
         "startTime",
-        start_time
-            .to_rfc3339_opts(chrono::SecondsFormat::AutoSi, true)
-            .as_str(),
+        common::format_timestamp(span_data.start_time),
         tld::OutType::Default,
         field_tag,
     );
     if has_parent_id {
         event.add_str8(
             "parentId",
-            span_data.parent_span_id.to_string(),
+            common::format_span_id(span_data.parent_span_id),
             tld::OutType::Utf8,
             field_tag,
         );
@@ -167,5 +163,29 @@ mod tests {
         let mut span_data = test_utils::create_test_span_data(None);
         span_data.parent_span_id = SpanId::from_hex("00f067aa0ba902b8").unwrap();
         exporter.export_span_data(&span_data);
+    }
+
+    #[test]
+    fn test_borrowed_and_owned_error_descriptions() {
+        use opentelemetry::trace::Status;
+        use std::borrow::Cow;
+
+        for geneva_mapping in [false, true] {
+            for description in ["", "request failed", "request failed: \u{00e9}"] {
+                let mut span_data = test_utils::create_test_span_data(None);
+                span_data.status = Status::Error {
+                    description: Cow::Borrowed(description),
+                };
+                let mut borrowed = tracelogging_dynamic::EventBuilder::new();
+                super::populate_part_b(&mut borrowed, &span_data, 0, geneva_mapping);
+
+                span_data.status = Status::Error {
+                    description: Cow::Owned(description.to_owned()),
+                };
+                let mut owned = tracelogging_dynamic::EventBuilder::new();
+                super::populate_part_b(&mut owned, &span_data, 0, geneva_mapping);
+                assert_eq!(format!("{borrowed:?}"), format!("{owned:?}"));
+            }
+        }
     }
 }
