@@ -2,6 +2,9 @@
 
 ## vNext
 
+- Add `experimental-geneva-mapping` feature with opt-in
+  `ProcessorBuilder::with_geneva_mapping` to emit flat Geneva envelope fields
+  while preserving the existing TraceLogging layout by default.
 - Bump OpenTelemetry dependencies to 0.33.1.
 
 ## v0.2.0

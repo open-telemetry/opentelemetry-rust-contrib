@@ -91,7 +91,7 @@ impl ETWExporter {
 
     /// Exports a single span to ETW.
     ///
-    /// Event write order follows Common Schema: reset → __csver__ → PartA → PartC → PartB → write
+    /// Uses the configured Common Schema representation for the event payload.
     pub(crate) fn export_span_data(&self, span_data: &SpanData) {
         // Skip serialization and writing if no ETW session is listening.
         if !cfg!(test)
@@ -114,17 +114,28 @@ impl ETWExporter {
                 event_tags,
             );
 
-            // Common Schema version as u16 (0x0400 = 1024)
-            event.add_u16("__csver__", 1024, tld::OutType::Unsigned, field_tag);
-
-            // Part A: envelope (time, traceId, spanId, cloud role)
-            part_a::populate_part_a(event, &self.resource, span_data, field_tag);
+            let geneva_mapping = self.options.geneva_mapping();
+            if !geneva_mapping {
+                // Common Schema version as u16 (0x0400 = 1024)
+                event.add_u16("__csver__", 1024, tld::OutType::Unsigned, field_tag);
+                part_a::populate_part_a(event, &self.resource, span_data, field_tag);
+            }
+            #[cfg(feature = "experimental-geneva-mapping")]
+            if geneva_mapping {
+                part_a::populate_geneva_envelope(
+                    event,
+                    &self.resource,
+                    span_data,
+                    self.options.event_name(),
+                    field_tag,
+                );
+            }
 
             // Part C: custom data (individual typed attributes, resource attributes)
-            part_c::populate_part_c(event, span_data, &self.resource, field_tag);
+            part_c::populate_part_c(event, span_data, &self.resource, field_tag, geneva_mapping);
 
             // Part B: span payload (_typeName, name, kind, startTime, parentId, links, statusMessage, success)
-            part_b::populate_part_b(event, span_data, field_tag);
+            part_b::populate_part_b(event, span_data, field_tag, geneva_mapping);
 
             // event.write() returns 0 on success or a diagnostic-only Win32 error on failure. Failures
             // are expected, transient conditions (e.g. buffer pressure from an active session), so the

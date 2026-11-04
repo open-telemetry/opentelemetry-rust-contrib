@@ -133,6 +133,26 @@ impl ProcessorBuilder {
         self
     }
 
+    /// Enables the experimental flat Geneva mapping for Common Schema spans.
+    ///
+    /// Available only with the `experimental-geneva-mapping` Cargo feature.
+    /// This option is experimental and may change or be removed once the
+    /// Geneva agent performs this mapping itself.
+    ///
+    /// Defaults to `false`, preserving the `__csver__` and nested Part A/B/C
+    /// TraceLogging layout. When enabled, envelope fields are written directly
+    /// as `env_*` fields, and Part B/C fields are written at the top level.
+    /// This is intended for collectors that do not translate the TraceLogging
+    /// Common Schema layout into Geneva's envelope field names.
+    ///
+    /// The span event timestamp remains the span's end time in either mode.
+    /// Configure all processors writing to the same provider/event consistently.
+    #[cfg(feature = "experimental-geneva-mapping")]
+    pub fn with_geneva_mapping(mut self, enabled: bool) -> Self {
+        self.options = self.options.with_geneva_mapping(enabled);
+        self
+    }
+
     /// Specifies additional resource attribute keys to include in Part C.
     ///
     /// # Performance Considerations
@@ -339,6 +359,36 @@ mod tests {
 
         processor.set_resource(&resource);
         assert!(processor.force_flush().is_ok());
+    }
+
+    #[cfg(feature = "experimental-geneva-mapping")]
+    #[test]
+    fn test_geneva_mapping_export() {
+        use crate::exporter::common::test_utils;
+        use opentelemetry::{trace::Status, KeyValue};
+        use opentelemetry_sdk::Resource;
+
+        let mut processor = Processor::builder("TestGenevaMapping")
+            .with_geneva_mapping(true)
+            .with_resource_attributes(["custom_resource"])
+            .build()
+            .unwrap();
+        processor.set_resource(
+            &Resource::builder()
+                .with_service_name("test-service")
+                .with_attribute(KeyValue::new("service.instance.id", "test-instance"))
+                .with_attribute(KeyValue::new("custom_resource", 42))
+                .build(),
+        );
+        let mut span = test_utils::create_test_span_data(Some(vec![
+            KeyValue::new("http.request.method", "GET"),
+            KeyValue::new("custom_attribute", true),
+        ]));
+        span.status = Status::error("request failed");
+        processor.on_end(span);
+        assert!(processor
+            .shutdown_with_timeout(Duration::from_secs(5))
+            .is_ok());
     }
 
     fn test_options() -> Options {

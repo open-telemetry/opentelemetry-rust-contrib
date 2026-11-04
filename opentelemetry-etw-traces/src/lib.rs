@@ -36,6 +36,34 @@
 //!   `parentId`, `links`, `statusMessage`, `success`
 //! - **Part C** (extensions): promoted resource attributes, span's attributes
 //!
+//! ## Experimental Geneva Mapping
+//!
+//! For collectors that do not convert the TraceLogging Common Schema layout
+//! into Geneva's field names, enable the `experimental-geneva-mapping` Cargo
+//! feature and opt in during initialization:
+//!
+//! ```no_run
+//! # #[cfg(feature = "experimental-geneva-mapping")]
+//! # {
+//! use opentelemetry_etw_traces::Processor;
+//!
+//! let processor = Processor::builder("MyAppTracing")
+//!     .with_geneva_mapping(true)
+//!     .build()
+//!     .expect("Failed to create ETW processor");
+//! # }
+//! ```
+//!
+//! This writes a flat event with `env_ver="4.0"`, `env_name` (the ETW event
+//! name), `env_time` (the span end time), `env_dt_traceId`, `env_dt_spanId`,
+//! nonzero `env_dt_traceFlags`, and optional `env_cloud_role` and
+//! `env_cloud_roleInstance`. Part B/C fields retain their names and values but
+//! are written without wrapper structures. The TraceLogging-only `__csver__`
+//! and `_typeName` fields are omitted. Without the feature, or when the option
+//! is omitted or set to `false`, the existing nested layout is preserved. This
+//! feature is experimental and may be removed once the Geneva agent performs
+//! this mapping itself.
+//!
 //! ## Platform Support
 //!
 //! This crate is Windows-only, as ETW is a Windows-specific tracing facility.
@@ -113,6 +141,13 @@ mod integration_tests {
 
         fn get_u8(&self, key: &str) -> Option<u8> {
             self.properties.get(key).and_then(|v| v.first().copied())
+        }
+
+        fn get_u32(&self, key: &str) -> Option<u32> {
+            self.properties
+                .get(key)
+                .filter(|v| v.len() >= 4)
+                .map(|v| u32::from_le_bytes(v[..4].try_into().unwrap()))
         }
 
         fn get_i64(&self, key: &str) -> Option<i64> {
@@ -229,7 +264,11 @@ mod integration_tests {
 
             session.add_event(event, None);
 
-            let _ = session.parse_until(&session_name, move || stop_worker.load(Ordering::Relaxed));
+            session
+                .parse_until(&session_name, move || stop_worker.load(Ordering::Relaxed))
+                .expect(
+                    "Failed to capture ETW events; this test requires administrator privileges",
+                );
         });
 
         (
@@ -269,14 +308,35 @@ mod integration_tests {
     #[ignore = "Requires admin privileges to start ETW trace session"]
     #[test]
     fn integration_test_full() {
-        let provider_name = "OTelETWTracesIntTest_Full";
+        assert_full_event(None);
+        #[cfg(feature = "experimental-geneva-mapping")]
+        assert_full_event(Some(false));
+    }
 
+    #[cfg(feature = "experimental-geneva-mapping")]
+    #[ignore = "Requires admin privileges to start ETW trace session"]
+    #[test]
+    fn integration_test_geneva_mapping() {
+        assert_full_event(Some(true));
+    }
+
+    fn assert_full_event(geneva_mapping: Option<bool>) {
+        let provider_name = match geneva_mapping {
+            None => "OTelETWTracesIntTest_Full",
+            Some(false) => "OTelETWTracesIntTest_ExplicitDefault",
+            Some(true) => "OTelETWTracesIntTest_Geneva",
+        };
         let (trace, rx) = start_etw_trace(provider_name);
 
-        let processor = crate::Processor::builder(provider_name)
-            .with_resource_attributes(["resource_attribute1", "resource_attribute2"])
-            .build()
-            .unwrap();
+        let builder = crate::Processor::builder(provider_name)
+            .with_resource_attributes(["resource_attribute1", "resource_attribute2"]);
+        #[cfg(feature = "experimental-geneva-mapping")]
+        let builder = match geneva_mapping {
+            Some(enabled) => builder.with_geneva_mapping(enabled),
+            None => builder,
+        };
+        let processor = builder.build().unwrap();
+        let geneva_mapping = geneva_mapping.unwrap_or(false);
 
         let tracer_provider = SdkTracerProvider::builder()
             .with_resource(
@@ -294,13 +354,17 @@ mod integration_tests {
         std::thread::sleep(Duration::from_millis(100));
 
         let tracer = tracer_provider.tracer("test");
-        tracer.in_span("my-span", |cx| {
+        let (trace_id, span_id) = tracer.in_span("my-span", |cx| {
             let span = cx.span();
             span.set_attribute(KeyValue::new("custom_attr", "custom_value"));
             span.set_attribute(KeyValue::new("int_attr", 42_i64));
             span.set_attribute(KeyValue::new("bool_attr", true));
             // Well-known attribute — should land in PartB, not PartC.
             span.set_attribute(KeyValue::new("http.request.method", "GET"));
+            (
+                span.span_context().trace_id().to_string(),
+                span.span_context().span_id().to_string(),
+            )
         });
 
         let evt = recv_event(&rx, "Span");
@@ -308,47 +372,136 @@ mod integration_tests {
         // Event metadata
         assert_eq!(evt.keyword, 1);
 
-        // __csver__
-        assert_eq!(evt.get_u16("__csver__"), Some(1024));
-
-        // PartA
-        assert_eq!(evt.get_str("PartA.ext_cloud.role"), Some("my_test_service"));
-        assert_eq!(
-            evt.get_str("PartA.ext_cloud.roleInstance"),
-            Some("test_instance_1")
-        );
-        assert!(evt.has("PartA.time"));
-        assert!(evt.has("PartA.ext_dt.traceId"));
-        assert!(evt.has("PartA.ext_dt.spanId"));
+        if geneva_mapping {
+            assert_eq!(evt.get_str("env_ver"), Some("4.0"));
+            assert_eq!(evt.get_str("env_name"), Some("Span"));
+            assert!(evt.has("env_time"));
+            assert_eq!(evt.get_str("env_dt_traceId"), Some(trace_id.as_str()));
+            assert_eq!(evt.get_str("env_dt_spanId"), Some(span_id.as_str()));
+            assert_eq!(evt.get_u32("env_dt_traceFlags"), Some(1));
+            assert_eq!(evt.get_str("env_cloud_role"), Some("my_test_service"));
+            assert_eq!(
+                evt.get_str("env_cloud_roleInstance"),
+                Some("test_instance_1")
+            );
+            assert!(!evt.has("__csver__"));
+            assert!(!evt.has("_typeName"));
+            assert!(!evt.properties.keys().any(|key| key.starts_with("Part")));
+        } else {
+            assert_eq!(evt.get_u16("__csver__"), Some(1024));
+            assert_eq!(evt.get_str("PartA.ext_cloud.role"), Some("my_test_service"));
+            assert_eq!(
+                evt.get_str("PartA.ext_cloud.roleInstance"),
+                Some("test_instance_1")
+            );
+            assert!(evt.has("PartA.time"));
+            assert_eq!(evt.get_str("PartA.ext_dt.traceId"), Some(trace_id.as_str()));
+            assert_eq!(evt.get_str("PartA.ext_dt.spanId"), Some(span_id.as_str()));
+            assert!(!evt.properties.keys().any(|key| key.starts_with("env_")));
+            assert_eq!(evt.get_str("PartB._typeName"), Some("Span"));
+        }
+        let part_b = if geneva_mapping { "" } else { "PartB." };
+        let part_c = if geneva_mapping { "" } else { "PartC." };
 
         // PartB — base fields
-        assert_eq!(evt.get_str("PartB._typeName"), Some("Span"));
-        assert_eq!(evt.get_str("PartB.name"), Some("my-span"));
-        assert_eq!(evt.get_u8("PartB.kind"), Some(0)); // Internal
-        assert!(evt.has("PartB.startTime"));
+        assert_eq!(evt.get_str(&format!("{part_b}name")), Some("my-span"));
+        assert_eq!(evt.get_u8(&format!("{part_b}kind")), Some(0)); // Internal
+        assert!(evt.has(&format!("{part_b}startTime")));
         // Root span — no parentId.
-        assert!(!evt.has("PartB.parentId"));
+        assert!(!evt.has(&format!("{part_b}parentId")));
         // No links, no statusMessage in this test.
-        assert!(!evt.has("PartB.links"));
-        assert!(!evt.has("PartB.statusMessage"));
+        assert!(!evt.has(&format!("{part_b}links")));
+        assert!(!evt.has(&format!("{part_b}statusMessage")));
         // Well-known PartB attribute (promoted from span attributes).
-        assert_eq!(evt.get_str("PartB.httpMethod"), Some("GET"));
+        assert_eq!(evt.get_str(&format!("{part_b}httpMethod")), Some("GET"));
         // success = true (status is Unset).
-        assert_eq!(evt.get_bool("PartB.success"), Some(true));
+        assert_eq!(evt.get_bool(&format!("{part_b}success")), Some(true));
 
         // PartC — opted-in resource attributes.
-        assert_eq!(evt.get_str("PartC.resource_attribute1"), Some("v1"));
-        assert_eq!(evt.get_str("PartC.resource_attribute2"), Some("v2"));
-        assert!(!evt.has("PartC.resource_attribute3")); // not opted in
+        assert_eq!(
+            evt.get_str(&format!("{part_c}resource_attribute1")),
+            Some("v1")
+        );
+        assert_eq!(
+            evt.get_str(&format!("{part_c}resource_attribute2")),
+            Some("v2")
+        );
+        assert!(!evt.has(&format!("{part_c}resource_attribute3"))); // not opted in
 
         // PartC — non-well-known span attributes.
-        assert_eq!(evt.get_str("PartC.custom_attr"), Some("custom_value"));
-        assert_eq!(evt.get_i64("PartC.int_attr"), Some(42));
-        assert_eq!(evt.get_bool("PartC.bool_attr"), Some(true));
+        assert_eq!(
+            evt.get_str(&format!("{part_c}custom_attr")),
+            Some("custom_value")
+        );
+        assert_eq!(evt.get_i64(&format!("{part_c}int_attr")), Some(42));
+        assert_eq!(evt.get_bool(&format!("{part_c}bool_attr")), Some(true));
         // Well-known attribute must NOT be duplicated in PartC.
-        assert!(!evt.has("PartC.http.request.method"));
+        assert!(!evt.has(&format!("{part_c}http.request.method")));
 
         trace.stop().unwrap();
         let _ = tracer_provider.shutdown();
+    }
+
+    #[cfg(feature = "experimental-geneva-mapping")]
+    #[ignore = "Requires admin privileges to start ETW trace session"]
+    #[test]
+    fn integration_test_geneva_optional_fields() {
+        use opentelemetry::trace::{Link, SpanContext, SpanId, SpanKind, Status, TraceFlags};
+        use opentelemetry_sdk::trace::SpanProcessor;
+        use std::time::UNIX_EPOCH;
+
+        let provider_name = "OTelETWTracesIntTest_GenevaOptional";
+        let (trace, rx) = start_etw_trace(provider_name);
+        let processor = crate::Processor::builder(provider_name)
+            .with_event_name("CustomSpan")
+            .with_geneva_mapping(true)
+            .build()
+            .unwrap();
+        let mut span = crate::exporter::common::test_utils::create_test_span_data(None);
+        span.span_context = SpanContext::new(
+            span.span_context.trace_id(),
+            span.span_context.span_id(),
+            TraceFlags::default(),
+            false,
+            Default::default(),
+        );
+        span.parent_span_id = SpanId::from_hex("00f067aa0ba902b8").unwrap();
+        span.span_kind = SpanKind::Server;
+        span.start_time = UNIX_EPOCH + Duration::from_secs(10);
+        span.end_time = UNIX_EPOCH + Duration::from_secs(20);
+        span.status = Status::error("request failed");
+        span.links
+            .links
+            .push(Link::new(span.span_context.clone(), vec![], 0));
+
+        std::thread::sleep(Duration::from_millis(100));
+        processor.on_end(span);
+        let evt = recv_event(&rx, "CustomSpan");
+
+        assert_eq!(evt.get_str("env_name"), Some("CustomSpan"));
+        assert_eq!(evt.get_str("env_time"), Some("1970-01-01T00:00:20Z"));
+        assert_eq!(evt.get_str("startTime"), Some("1970-01-01T00:00:10Z"));
+        assert_eq!(evt.get_str("name"), Some("test-span"));
+        assert_eq!(evt.get_u8("kind"), Some(1));
+        assert_eq!(evt.get_str("parentId"), Some("00f067aa0ba902b8"));
+        assert_eq!(evt.get_str("statusMessage"), Some("request failed"));
+        assert_eq!(evt.get_bool("success"), Some(false));
+        assert!(!evt.has("env_dt_traceFlags"));
+        assert!(!evt.has("env_cloud_role"));
+        assert!(!evt.has("env_cloud_roleInstance"));
+        #[cfg(feature = "serde_json")]
+        {
+            let links: serde_json::Value =
+                serde_json::from_str(evt.get_str("links").unwrap()).unwrap();
+            assert_eq!(links[0]["toTraceId"], "0af7651916cd43dd8448eb211c80319c");
+            assert_eq!(links[0]["toSpanId"], "00f067aa0ba902b7");
+        }
+        #[cfg(not(feature = "serde_json"))]
+        assert_eq!(evt.get_str("links"), Some("[]"));
+
+        trace.stop().unwrap();
+        processor
+            .shutdown_with_timeout(Duration::from_secs(5))
+            .unwrap();
     }
 }
