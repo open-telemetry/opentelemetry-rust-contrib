@@ -1,14 +1,8 @@
 /*
-    Preliminary results: Windows x64, rustc 1.99.0, 2026-11-03.
-    Criterion point estimates; 10 samples, 100 ms warm-up, 200 ms measurement.
-
-    | Benchmark    | ETW enabled | ETW disabled |
-    |--------------|-------------|--------------|
-    | SimpleSpan   | 3.02 us     | 379 ns       |
-    | ScopedSpan/0 | 1.83 us     | 439 ns       |
-    | ScopedSpan/3 | 2.63 us     | 502 ns       |
-
-    Short, machine-dependent measurements; not regression thresholds.
+    See README.md for the preliminary-run commands and recorded capture settings.
+    Results are omitted because complete per-run hardware/VM provenance was not
+    recorded. ETW/Windows timings are not a controlled comparison with
+    user-events/Linux.
 */
 
 #[cfg(windows)]
@@ -18,6 +12,7 @@ mod windows {
     use opentelemetry::{Context, KeyValue};
     use opentelemetry_sdk::trace::{Sampler, SdkTracerProvider};
     use std::env::VarError;
+    use std::sync::Once;
     use std::time::{Duration, Instant};
     use tracelogging_dynamic::{Level, Provider};
 
@@ -56,17 +51,22 @@ mod windows {
         let probe = Box::pin(Provider::new(PROVIDER_NAME, &Provider::options()));
         // SAFETY: the probe stays pinned until dropped, which unregisters its ETW callback.
         assert_eq!(unsafe { probe.as_ref().register() }, 0);
-        if enabled {
-            let deadline = Instant::now() + Duration::from_secs(5);
-            while !probe.enabled(Level::Verbose, 1) && Instant::now() < deadline {
-                std::thread::sleep(Duration::from_millis(10));
-            }
-        }
-        assert_listener_state(&probe, enabled);
+        let listener_setup = Once::new();
+        let setup_listener = || {
+            listener_setup.call_once(|| {
+                if enabled {
+                    let deadline = Instant::now() + Duration::from_secs(5);
+                    while !probe.enabled(Level::Verbose, 1) && Instant::now() < deadline {
+                        std::thread::sleep(Duration::from_millis(10));
+                    }
+                }
+            });
+            assert_listener_state(&probe, enabled);
+        };
 
         let mut group = c.benchmark_group(format!("ETW/{mode}"));
         group.bench_function("SimpleSpan", |b| {
-            assert_listener_state(&probe, enabled);
+            setup_listener();
             b.iter(|| {
                 let mut span = tracer
                     .span_builder("my-span-name")
@@ -98,7 +98,7 @@ mod windows {
                 BenchmarkId::new("ScopedSpan", count),
                 &attributes,
                 |b, attributes| {
-                    assert_listener_state(&probe, enabled);
+                    setup_listener();
                     b.iter(|| {
                         let span = tracer
                             .span_builder("BenchmarkOperation")

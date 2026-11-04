@@ -130,10 +130,11 @@ try {
 Write-Host "Capture: $etl"
 ```
 
-Results are named `ETW/enabled/...`. The benchmark waits up to five seconds for
-the provider to become enabled and fails if the requested listener state does not
-match. It checks that state before and after each timed batch, including in
-disabled mode. Do not start or stop listeners during measurement.
+Results are named `ETW/enabled/...`. When the first selected benchmark executes,
+its setup waits up to five seconds for the provider to become enabled, outside
+timing. Listener-state checks remain before and after each timed batch, including
+in disabled mode. Listing (`--list`) and filters matching no benchmarks do not
+wait for or check a listener. Do not start or stop listeners during measurement.
 
 The enable check does not prove lossless delivery. Inspect the ETL with PerfView
 or another ETW decoder to confirm `Span` events and check for lost events/buffers;
@@ -142,6 +143,44 @@ enabled results. Keep them consistent when comparing revisions. Non-Windows
 runs print a skip message rather than reporting disabled-exporter timings.
 
 These are performance measurements, not tests with fixed timing thresholds.
+Similar workloads do not make ETW/Windows timings a controlled comparison against
+user-events/Linux results: the operating systems, exporters, hardware, and capture
+configurations differ.
+
+### Preliminary run provenance
+
+The short validation runs on 2026-11-03 used rustc **1.99.0**, matching the
+repository toolchain pin. The disabled run used this command from the repository
+root:
+
+```powershell
+$env:OTEL_ETW_BENCH_MODE = "disabled"
+cargo bench -q -p opentelemetry-etw-traces --bench traces -- --sample-size 10 --warm-up-time 0.1 --measurement-time 0.2 --nresamples 1000 --noplot
+```
+
+The enabled run invoked the already-built release benchmark
+`traces-12444351cfd22eb6.exe` directly (`$exe` in the capture script):
+
+```powershell
+$env:OTEL_ETW_BENCH_MODE = "enabled"
+& $exe --bench --sample-size 10 --warm-up-time 0.1 --measurement-time 0.2 --nresamples 1000 --noplot
+```
+
+These are command-line overrides, not changes to Criterion's default
+configuration. The table previously in the benchmark source contained preliminary
+Criterion point estimates from these short runs, not stable regression baselines.
+
+The capture script records file-mode ETL capture using
+`-p $providerGuid 0x1 5 -bs 64 -nb 128 512 -o $etl -ets`: keyword `0x1`, Verbose
+level `5`, 64 KiB buffers, minimum 128 and maximum 512 buffers, and no PID filter.
+No CPU-affinity or clock override was specified. The paired smoke capture's ETL
+header records Windows NT 10.0, build 26300, 64-bit, and 16 logical processors.
+
+The run artifacts do **not** establish the CPU model, physical core count, or
+whether the machine was virtual or physical. An older environment inventory is
+not sufficient per-run provenance. The preliminary table has therefore been
+removed rather than filling those gaps by inference. Record that environment
+information alongside future results before publishing a replacement table.
 
 ## OpenTelemetry Overview
 
