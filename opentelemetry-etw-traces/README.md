@@ -75,6 +75,74 @@ Instructions using Powershell:
     - Double-click the `provider_name/Span` in the left-panel.
     - You should see the events in the right-panel.
 
+## Benchmarks
+
+The Windows-only Criterion benchmark has three cases:
+
+| Case | Timed work |
+| ---- | ---------- |
+| `SimpleSpan` | Create a span with six string attributes, end it, and drop it, matching the workload in the user-events trace benchmark. |
+| `ScopedSpan/0` | Create a Server span, attach it as the active context, set `Status::Ok`, end it, detach the context, and drop the span. |
+| `ScopedSpan/3` | The same scoped lifecycle with string, integer, and boolean attributes. |
+
+All cases use the synchronous ETW processor, an always-on sampler, and a
+`service.name` resource of `etw-trace-benchmark`. Provider initialization and
+listener checks are outside timing. Scoped attribute inputs are prepared outside
+timing; copying them into each span and final cleanup are included. There is no
+synthetic application work in the timed loop.
+
+### Without an ETW listener
+
+Run from the repository root on Windows:
+
+```powershell
+$env:OTEL_ETW_BENCH_MODE = "disabled"
+cargo bench -p opentelemetry-etw-traces --bench traces
+```
+
+`disabled` is the default. This measures SDK span lifecycle overhead with the
+exporter's disabled-provider fast path, **not serialization or ETW writes**.
+Results are named `ETW/disabled/...`.
+
+### With an ETW listener
+
+In an elevated PowerShell, start a file-mode session before running the benchmark.
+The provider name must match `OpenTelemetryEtwTraceBenchmark`:
+
+```powershell
+$source = [System.Diagnostics.Tracing.EventSource]::new("OpenTelemetryEtwTraceBenchmark")
+$providerGuid = $source.Guid.ToString("B")
+$source.Dispose()
+$session = "OtelEtwTraceBench-$PID"
+$etl = Join-Path $env:TEMP "$session.etl"
+$previousMode = $env:OTEL_ETW_BENCH_MODE
+
+logman create trace $session -p $providerGuid 0x1 5 -bs 64 -nb 128 512 -o $etl -ets
+if ($LASTEXITCODE -ne 0) { throw "Could not start the ETW capture session" }
+try {
+    $env:OTEL_ETW_BENCH_MODE = "enabled"
+    cargo bench -p opentelemetry-etw-traces --bench traces
+    if ($LASTEXITCODE -ne 0) { throw "ETW benchmark failed" }
+} finally {
+    logman stop $session -ets
+    $env:OTEL_ETW_BENCH_MODE = $previousMode
+}
+Write-Host "Capture: $etl"
+```
+
+Results are named `ETW/enabled/...`. The benchmark waits up to five seconds for
+the provider to become enabled and fails if the requested listener state does not
+match. It checks that state before and after each timed batch, including in
+disabled mode. Do not start or stop listeners during measurement.
+
+The enable check does not prove lossless delivery. Inspect the ETL with PerfView
+or another ETW decoder to confirm `Span` events and check for lost events/buffers;
+discard lossy captures. Capture I/O, machine load, and buffer configuration affect
+enabled results. Keep them consistent when comparing revisions. Non-Windows
+runs print a skip message rather than reporting disabled-exporter timings.
+
+These are performance measurements, not tests with fixed timing thresholds.
+
 ## OpenTelemetry Overview
 
 OpenTelemetry is an Observability framework and toolkit designed to create and

@@ -25,6 +25,7 @@ serde_json = { version = "1.0.113", optional = true }
 opentelemetry_sdk = { workspace = true, features = ["trace", "testing"] }
 
 [target.'cfg(windows)'.dev-dependencies]
+criterion = { workspace = true }
 one_collect = "0.1.34532"
 
 [features]
@@ -38,6 +39,10 @@ default = ["internal-logs"]
 [[example]]
 name = "basic"
 path = "examples/basic.rs"
+
+[[bench]]
+name = "traces"
+harness = false
 
 [lints]
 workspace = true
