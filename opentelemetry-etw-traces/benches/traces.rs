@@ -1,172 +1,28 @@
 /*
-    Complete EventBuilder::write results: 2026-11-04, rustc 1.99.0.
-    Pre-serialized event; standard Criterion b.iter black-boxes the returned status.
-    Timed: metadata-length finalization, three stack descriptors, provider-handle
-    access, EventWriteTransfer, and return. No SDK, serialization, exporter enabled
-    check, or EVENT_BUILDER TLS lookup in the timed loop.
-    Preparation/listener checks and one successful preflight write are untimed.
+    Latest measured results: 2026-11-04, rustc 1.99.0 (before the upstream merge).
+    Microseconds per span/call; mean of two per-process Criterion slope estimates.
 
-    Mean of two fresh-process slope estimates, us/call:
-    | Case        | Nested | Flat Geneva |
-    |-------------|--------|-------------|
-    | 0           | 0.711  | 0.684       |
-    | 3 mixed     | 0.818  | 0.927       |
-    | 6 strings   | 0.806  | 0.675       |
-    | ParentError | 0.735  | 0.748       |
+    | Layout | Case        | SDK-only | Serialize | Serialize+ETW | Write-only | End-to-end |
+    |--------|-------------|----------|-----------|---------------|------------|------------|
+    | Nested | 0 attrs     | 0.343    | 0.415     | 1.366         | 0.711      | 2.111      |
+    | Nested | 3 mixed     | 0.412    | 0.467     | 1.496         | 0.818      | 2.191      |
+    | Nested | 6 strings   | 0.446    | 0.512     | 1.554         | 0.806      | 2.333      |
+    | Nested | ParentError | 0.411    | 0.504     | 1.497         | 0.735      | 2.378      |
+    | Geneva | 0 attrs     | 0.343    | 0.382     | 1.326         | 0.684      | 1.830      |
+    | Geneva | 3 mixed     | 0.412    | 0.425     | 1.308         | 0.927      | 2.309      |
+    | Geneva | 6 strings   | 0.446    | 0.480     | 1.492         | 0.675      | 2.209      |
+    | Geneva | ParentError | 0.411    | 0.463     | 1.434         | 0.748      | 2.290      |
 
-    High variability: nested/0 was 0.542 and 0.881 us across the two runs.
-    These are noisy warm-buffer/file-capture observations, not fixed ETW costs,
-    layout rankings, or values to subtract from the other independently run tables.
-    Each case had its own process and ETW session; cases ran forward then reverse.
-    Criterion 0.8.2: 100 samples, 0.5 s warm-up, 1 s measurement, 100,000 resamples.
-    One unpinned producer, mask 0xffff; same Microsoft VM / EPYC 7763 / 8 guest
-    cores / 16 logical CPUs / 63.95 GiB / Windows 11 x64 10.0.26300.
-    ETW: 64 KiB buffers, min 8192 / max 16384, keyword 1, level 5; no PID/clock override.
-    32,301,414 measured-capture events matched reference metadata/payload, zero loss;
-    includes warm-up/preflight writes. Separate smoke: 16 events (two per case).
+    SDK-only: recording/context/cleanup, no processor; shared across layouts.
+    Serialize+ETW: enabled check, TLS builder, serialization, and real ETW write.
+    Write-only: complete EventBuilder::write() on a pre-serialized event.
+    End-to-end: actual SDK + serialization + ETW write + cleanup, measured directly.
+    ParentError: 3 mixed attributes, a nonzero parent ID, and an error description.
 
-    Build with --features bench-internals,experimental-geneva-mapping.
-    With a listener and OTEL_ETW_BENCH_MODE=enabled, select ONE case per session:
-      & $exe 'ETW/nested/enabled/WriteOnly/0' --exact --bench --warm-up-time 0.5 --measurement-time 1 --noplot
-    See README.md for all cases, per-run estimates, and capture limitations.
-*/
-
-/*
-    Idiomatic SDK / end-to-end lifecycle results: 2026-11-04, rustc 1.99.0.
-    Mean of two per-process Criterion slope estimates, us/span:
-
-    | Case        | SDK-only | Nested SDK + serialize + ETW | Flat Geneva SDK + serialize + ETW |
-    |-------------|----------|------------------------------|------------------------------------|
-    | 0           | 0.343    | 2.111                        | 1.830                              |
-    | 3 mixed     | 0.412    | 2.191                        | 2.309                              |
-    | 6 strings   | 0.446    | 2.333                        | 2.209                              |
-    | ParentError | 0.411    | 2.378                        | 2.290                              |
-
-    Shared idiomatic lifecycle: build/start a sampled Server span, clone attributes
-    into it, attach current context with an RAII guard, set status, explicitly end,
-    then detach and drop context/span on scope exit. Fresh SDK IDs/times are included.
-    Fixed keys/string values are literals. Inputs/provider/parent setup are untimed.
-    ParentError is a child of a prebuilt remote parent and has 3 mixed attributes.
-    SDK-only uses AlwaysOn with NO processor; recording is checked outside timing.
-    It excludes export-data handoff and is NOT additive with exporter-only timings.
-    EndToEnd measures the actual synchronous ETW processor and write, not a sum.
-
-    Two fresh processes; each runs SDK-only, nested EndToEnd, then Geneva EndToEnd.
-    Criterion 0.8.2: 100 samples, 1 s warm-up, 2 s measurement, 100,000 resamples.
-    One unpinned producer (mask 0xffff). Microsoft VM, EPYC 7763, 8 guest cores /
-    16 logical CPUs, 63.95 GiB RAM, Windows 11 Enterprise x64 10.0.26300.
-    ETW file capture: 64 KiB buffers, min 8192 / max 16384, keyword 1, level 5;
-    no PID/clock override. Validated 22,528,592 measured-capture events, zero loss.
-    SDK-only smoke emitted zero events; EndToEnd smoke emitted exactly eight.
-    Dynamic IDs/timestamps were validated, not compared byte-for-byte to fixed inputs.
-    End-to-end estimates are noisy; do not infer a stable layout ranking.
-    An earlier heap-owned six-string input pilot is excluded from these results.
-
-    With an ETW listener and OTEL_ETW_BENCH_MODE=enabled:
-      & $exe 'RecordingLifecycle|/EndToEnd/' --bench --warm-up-time 1 --measurement-time 2 --noplot
-    Build with --features bench-internals,experimental-geneva-mapping.
-    See README.md for the exact measurement boundaries and provenance.
-*/
-
-/*
-    Dual-layout serialization/export comparison: 2026-11-04, rustc 1.99.0.
-    All PR #877 runtime optimizations cover both layouts, including env_time,
-    envelope IDs, parent IDs, borrowed error descriptions, and extended years.
-    The attribute-classification optimization is also retained in both layouts.
-
-    Baseline: upstream 3bfc183 plus the same shared-encoder benchmark adapter.
-    Optimized: this branch's working tree based on 47b62c7, before result comments.
-    Same benchmark source/dependency tree; separate build directories.
-    Mean of two per-process Criterion slope estimates, us/span:
-
-    | Layout | Case        | Serialize before | After | Enabled export before | After |
-    |--------|-------------|------------------|-------|-----------------------|-------|
-    | nested | 0           | 0.586            | 0.415 | 1.703                 | 1.366 |
-    | nested | 3           | 0.720            | 0.467 | 1.914                 | 1.496 |
-    | nested | 6           | 0.806            | 0.512 | 1.920                 | 1.554 |
-    | nested | ParentError | 0.937            | 0.504 | 2.173                 | 1.497 |
-    | geneva | 0           | 0.568            | 0.382 | 1.798                 | 1.326 |
-    | geneva | 3           | 0.678            | 0.425 | 2.004                 | 1.308 |
-    | geneva | 6           | 0.750            | 0.480 | 2.000                 | 1.492 |
-    | geneva | ParentError | 0.903            | 0.463 | 2.168                 | 1.434 |
-
-    Enabled export INCLUDES serialization; neither stage includes SDK lifecycle.
-    ParentError has 3 mixed attributes, a nonzero parent ID, and an error description.
-    Two processes per variant, baseline/optimized/optimized/baseline order.
-    Criterion 0.8.2: 100 samples, 1 s warm-up, 2 s measurement, 100,000 resamples.
-    One synchronous producer, unpinned (mask 0xffff). Microsoft VM, EPYC 7763,
-    8 guest cores / 16 logical CPUs, 63.95 GiB RAM, Windows 11 x64 10.0.26300.
-    64 KiB ETW buffers, min 8192 / max 16384, keyword 1, level 5; no PID/clock override.
-    All 66,854,032 measured-capture events matched baseline metadata/payload bytes;
-    zero reported loss. Warm-up events included; smoke captures excluded.
-    Export estimates are noisy VM/file-capture observations, not regression thresholds.
-
-    Build: cargo bench -p opentelemetry-etw-traces --bench traces --features bench-internals,experimental-geneva-mapping --no-run
-    With an ETW listener and OTEL_ETW_BENCH_MODE=enabled:
-      & $exe 'Serialization|/Export/' --bench --warm-up-time 1 --measurement-time 2 --noplot
-    See README.md for coverage, provenance, and interpretation.
-*/
-
-/*
-    Historical nested-only optimization comparison at 47b62c7: 2026-11-04, rustc 1.99.0.
-    Machine inventory captured with this run:
-    AMD EPYC 7763; 8 guest cores / 16 logical CPUs; 63.95 GiB RAM;
-    Microsoft Virtual Machine; Windows 11 Enterprise x64 10.0.26300.
-    One synchronous producer thread, no affinity override (process mask 0xffff).
-
-    Baseline: 97d8baa. Optimized: 47b62c7, before results comments.
-    Two processes per variant, ordered baseline/optimized/optimized/baseline.
-    Criterion 0.8.2: 100 samples, 1 s warm-up, 2 s measurement, 100,000 resamples.
-    Arithmetic means of the two per-process point estimates, in us/span:
-
-    | Attributes | Serialization before | After | Enabled export before | After |
-    |------------|----------------------|-------|-----------------------|-------|
-    | 0          | 0.594                | 0.392 | 1.537                 | 1.413 |
-    | 3 mixed    | 0.730                | 0.447 | 1.675                 | 1.435 |
-    | 6 strings  | 0.797                | 0.502 | 2.016                 | 1.458 |
-
-    Serialization decreased 34.0%, 38.7%, 37.0%; enabled-export point estimates
-    decreased 8.0%, 14.4%, 27.7%. Export is noisier: the 0-attribute direction
-    reversed in the second pair, so its improvement is not established.
-
-    Both stages use the same prebuilt SpanData/resource and production encoder,
-    with warm reusable buffers. Export also includes the enabled check, TLS
-    builder borrow, and real synchronous ETW write. Neither includes SDK span
-    creation/context/cleanup. Serialization has no listener dependency.
-    This is not a write-only measurement or a full SDK lifecycle measurement.
-
-    Build: cargo bench -p opentelemetry-etw-traces --bench traces --features bench-internals --no-run
-    Run the resulting EXE with OTEL_ETW_BENCH_MODE=enabled and an ETW listener:
-      & $exe 'Serialization|/Export/' --bench --warm-up-time 1 --measurement-time 2 --noplot
-    File-mode capture: keyword 0x1, level 5, 64 KiB buffers, min 8192 / max 16384;
-    no PID filter or clock override. All 26,789,462 captured provider events
-    (including warm-up) matched baseline metadata/payload bytes; zero reported loss.
-    Longer optimized attempts lost events and were discarded. Both variants were
-    rerun with these identical settings; Criterion defaults in code are unchanged.
-    See README.md for per-run intervals and historical pre-optimization results.
-*/
-
-/*
-    Preliminary ETW benchmark results: 2026-11-03, rustc 1.99.0.
-    Machine inventory queried after the runs, on 2026-11-03:
-    CPU: AMD EPYC 7763 64-Core Processor; guest reports 8 cores / 16 logical CPUs.
-    RAM: 63.95 GiB (approximately 64 GiB).
-    Machine: Microsoft Virtual Machine.
-    OS: Windows 11 Enterprise x64, version 10.0.26300 (build 26300).
-
-    Criterion point estimates: 10 samples, 100 ms warm-up, 200 ms measurement.
-    Enabled capture: file-mode ETL, 64 KiB buffers, min 128 / max 512,
-    keyword 0x1, level 5; no PID filter or CPU-affinity override.
-
-    | Benchmark    | ETW enabled | ETW disabled |
-    |--------------|-------------|--------------|
-    | SimpleSpan   | 3.02 us     | 379 ns       |
-    | ScopedSpan/0 | 1.83 us     | 439 ns       |
-    | ScopedSpan/3 | 2.63 us     | 502 ns       |
-
-    See README.md for exact commands and provenance limitations. These short
-    measurements are not regression thresholds or a controlled comparison with
-    user-events/Linux; the hardware inventory was not captured during the runs.
+    One unpinned producer; Windows 11 Microsoft VM, EPYC 7763, 8 guest cores /
+    16 logical CPUs, 63.95 GiB RAM. Accepted ETW captures reported zero loss.
+    Columns come from separate runs and are NOT additive; write timings are noisy.
+    See README.md for commands, measurement boundaries, variability, and history.
 */
 
 #[cfg(windows)]

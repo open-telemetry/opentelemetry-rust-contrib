@@ -660,9 +660,14 @@ $env:OTEL_ETW_BENCH_MODE = "enabled"
 ```
 
 These are command-line overrides, not changes to Criterion's default
-configuration. The historical lifecycle table in the benchmark source contains
-preliminary Criterion point estimates from these short runs, not stable regression
-baselines.
+configuration. These historical lifecycle results are preliminary Criterion point
+estimates, not stable regression baselines:
+
+| Benchmark | ETW enabled | ETW disabled |
+| --------- | ----------- | ------------ |
+| SimpleSpan | 3.02 us | 379 ns |
+| ScopedSpan/0 | 1.83 us | 439 ns |
+| ScopedSpan/3 | 2.63 us | 502 ns |
 
 The capture script records file-mode ETL capture using
 `-p $providerGuid 0x1 5 -bs 64 -nb 128 512 -o $etl -ets`: keyword `0x1`, Verbose
