@@ -1,4 +1,37 @@
 /*
+    Complete EventBuilder::write results: 2026-11-04, rustc 1.99.0.
+    Pre-serialized event; standard Criterion b.iter black-boxes the returned status.
+    Timed: metadata-length finalization, three stack descriptors, provider-handle
+    access, EventWriteTransfer, and return. No SDK, serialization, exporter enabled
+    check, or EVENT_BUILDER TLS lookup in the timed loop.
+    Preparation/listener checks and one successful preflight write are untimed.
+
+    Mean of two fresh-process slope estimates, us/call:
+    | Case        | Nested | Flat Geneva |
+    |-------------|--------|-------------|
+    | 0           | 0.711  | 0.684       |
+    | 3 mixed     | 0.818  | 0.927       |
+    | 6 strings   | 0.806  | 0.675       |
+    | ParentError | 0.735  | 0.748       |
+
+    High variability: nested/0 was 0.542 and 0.881 us across the two runs.
+    These are noisy warm-buffer/file-capture observations, not fixed ETW costs,
+    layout rankings, or values to subtract from the other independently run tables.
+    Each case had its own process and ETW session; cases ran forward then reverse.
+    Criterion 0.8.2: 100 samples, 0.5 s warm-up, 1 s measurement, 100,000 resamples.
+    One unpinned producer, mask 0xffff; same Microsoft VM / EPYC 7763 / 8 guest
+    cores / 16 logical CPUs / 63.95 GiB / Windows 11 x64 10.0.26300.
+    ETW: 64 KiB buffers, min 8192 / max 16384, keyword 1, level 5; no PID/clock override.
+    32,301,414 measured-capture events matched reference metadata/payload, zero loss;
+    includes warm-up/preflight writes. Separate smoke: 16 events (two per case).
+
+    Build with --features bench-internals,experimental-geneva-mapping.
+    With a listener and OTEL_ETW_BENCH_MODE=enabled, select ONE case per session:
+      & $exe 'ETW/nested/enabled/WriteOnly/0' --exact --bench --warm-up-time 0.5 --measurement-time 1 --noplot
+    See README.md for all cases, per-run estimates, and capture limitations.
+*/
+
+/*
     Idiomatic SDK / end-to-end lifecycle results: 2026-11-04, rustc 1.99.0.
     Mean of two per-process Criterion slope estimates, us/span:
 
@@ -423,6 +456,17 @@ mod windows {
         let mode = if enabled { "enabled" } else { "disabled" };
         let listener_setup = Once::new();
 
+        let setup_listener = || {
+            listener_setup.call_once(|| {
+                if enabled {
+                    let deadline = Instant::now() + Duration::from_secs(5);
+                    while !exporter.enabled() && Instant::now() < deadline {
+                        std::thread::sleep(Duration::from_millis(10));
+                    }
+                }
+            });
+            assert_eq!(exporter.enabled(), enabled, "ETW listener state mismatch");
+        };
         for (case, count) in CASES {
             let attributes = attributes(count);
             let mut span = SpanData {
@@ -467,16 +511,20 @@ mod windows {
                 BenchmarkId::new(format!("ETW/{layout}/{mode}/Export"), case),
                 &span,
                 |b, span| {
-                    listener_setup.call_once(|| {
-                        if enabled {
-                            let deadline = Instant::now() + Duration::from_secs(5);
-                            while !exporter.enabled() && Instant::now() < deadline {
-                                std::thread::sleep(Duration::from_millis(10));
-                            }
-                        }
-                    });
-                    assert_eq!(exporter.enabled(), enabled, "ETW listener state mismatch");
+                    setup_listener();
                     b.iter(|| exporter.export(black_box(span)));
+                    assert_eq!(exporter.enabled(), enabled, "ETW listener state mismatch");
+                },
+            );
+            c.bench_with_input(
+                BenchmarkId::new(format!("ETW/{layout}/{mode}/WriteOnly"), case),
+                &span,
+                |b, span| {
+                    setup_listener();
+                    let mut event = EventBuilder::new();
+                    exporter.serialize(&mut event, span);
+                    assert_eq!(exporter.write(&mut event), 0, "ETW preflight write failed");
+                    b.iter(|| exporter.write(black_box(&mut event)));
                     assert_eq!(exporter.enabled(), enabled, "ETW listener state mismatch");
                 },
             );

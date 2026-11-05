@@ -247,6 +247,12 @@ pub mod benchmark {
             self.0.export_span_data(span);
         }
 
+        /// Calls EventBuilder::write on an already encoded event, including its status return.
+        #[inline]
+        pub fn write(&self, event: &mut tld::EventBuilder) -> u32 {
+            event.write(&self.0.provider, None, None)
+        }
+
         /// Checks the actual exporter's provider rather than a second registration.
         pub fn enabled(&self) -> bool {
             self.0

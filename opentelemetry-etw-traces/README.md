@@ -255,6 +255,7 @@ above cover both layouts.
 | ---- | ---------- |
 | `ETW/<layout>/Serialization/<case>` | The production `#[inline]` encoder: reset the reused EventBuilder, build Common Schema metadata and payload, format timestamps and IDs, and encode attributes. No enabled check, TLS lookup, or ETW write. |
 | `ETW/<layout>/enabled/Export/<case>` | The real exporter: enabled check, TLS builder borrow, the same serialization, and synchronous ETW write. **Includes serialization**, not write-only. |
+| `ETW/<layout>/enabled/WriteOnly/<case>` | The whole `EventBuilder::write()` method on an already serialized event, including metadata-length finalization, stack descriptors, provider-handle access, and the actual Windows `EventWriteTransfer` call. |
 | `ETW/<layout>/disabled/Export/<case>` | Only the exporter's disabled-provider fast path; not meaningful as serialization or delivery cost. |
 
 These exclude SDK span creation, sampling, context attachment, status updates,
@@ -294,6 +295,71 @@ subtracting SDK lifecycle timings. Do not label their difference as a directly
 measured ETW-write cost: TLS, enabled checks, compiler placement, and measurement
 noise also differ.
 
+#### Complete ETW write method (2026-11-04)
+
+`WriteOnly` prepares a caller-owned EventBuilder with the production serializer
+outside timing, then uses ordinary Criterion
+`b.iter(|| exporter.write(black_box(&mut event)))`. The narrow inline benchmark
+adapter delegates directly to `EventBuilder::write()`, and Criterion black-boxes
+the returned `u32` status. No custom timer or hand-written measurement loop is used.
+Listener checks, serialization, allocation/growth of the prepared buffers, and one
+successful preflight write are outside timing. Inside timing there is no exporter
+enabled check or `EVENT_BUILDER` TLS lookup; Windows' own write-path work is included.
+The buffer is reused without re-encoding between writes.
+
+This measures the complete library method, **not just the Windows API call**.
+It includes finalizing the metadata length and preparing three descriptors pointing
+to provider metadata, event metadata, and payload, followed by the real synchronous
+ETW call and return. It does not wait for durable disk storage or a Geneva backend.
+`disabled/WriteOnly` also calls the method, but with no listener; its timings must
+not be presented as enabled ETW delivery.
+
+Microseconds per call, arithmetic mean of two fresh-process Criterion slope
+estimates. The per-run columns show how variable the observations were:
+
+| Case | Nested mean | Nested runs 1 / 2 | Flat Geneva mean | Flat runs 1 / 2 |
+| ---- | ----------- | ----------------- | ---------------- | --------------- |
+| 0 attributes | 0.711 | 0.542 / 0.881 | 0.684 | 0.748 / 0.621 |
+| 3 mixed | 0.818 | 0.815 / 0.822 | 0.927 | 1.016 / 0.838 |
+| 6 strings | 0.806 | 0.883 / 0.729 | 0.675 | 0.523 / 0.827 |
+| ParentError (3 mixed) | 0.735 | 0.794 / 0.676 | 0.748 | 0.813 / 0.682 |
+
+**These are noisy warm-buffer observations, not a precise constant or a layout
+ranking.** For example, nested/0's per-process 95% intervals were
+0.485-0.610 us and 0.736-1.028 us. The short, isolated write-only captures differ
+from the earlier serialization/export/lifecycle runs. Do not subtract these numbers
+from those tables to attribute the remaining time to a particular operation.
+
+Each of the eight cases had its own process and file-mode ETW session; there were
+sixteen measured captures. The first sweep ran nested then Geneva, each in order
+0/3/6/ParentError; the second sweep reversed the entire sequence. Short isolated
+captures allow collection to drain between cases rather than sustaining back-to-back
+write-only bursts. Use the capture command above with `-bs 64 -nb 8192 16384`,
+keyword `0x1`, level `5`, and no PID or clock override, and run one exact case:
+
+```powershell
+cargo bench -p opentelemetry-etw-traces --bench traces --features bench-internals,experimental-geneva-mapping --no-run
+$env:OTEL_ETW_BENCH_MODE = "enabled"
+& $exe 'ETW/nested/enabled/WriteOnly/0' --exact --bench --warm-up-time 0.5 --measurement-time 1 --noplot
+```
+
+Stop and validate the session, then repeat with the other layout/case names. The
+actual runs invoked the already-built executable. Criterion 0.8.2 retained
+100 samples, 100,000 resamples, and 95% per-process confidence; CLI overrides set
+0.5 s warm-up, 1 s measurement, and no plots. Benchmark defaults were unchanged.
+
+Environment recorded with this run: rustc 1.99.0, Microsoft VM, AMD EPYC 7763,
+8 guest cores / 16 logical CPUs, 63.95 GiB RAM, Windows 11 Enterprise x64 10.0.26300.
+One producer thread per process, no affinity override (mask `0xffff`); default crate
+features plus `bench-internals,experimental-geneva-mapping`. All **32,301,414**
+events in the measured captures matched the reference descriptor/schema/payload
+bytes, with zero reported loss. Counts include untimed warm-up and preflight
+writes. The separate smoke capture contained sixteen events, one preflight and
+one Criterion test iteration for each of the eight cases.
+
+The measured source was `94c8e36` plus this branch's write-only adapter/cases,
+before these result comments were added.
+
 #### Coverage of PR #877
 
 Both layouts share the optimized encoder. The runtime optimizations from
@@ -321,7 +387,8 @@ resource mapping, parent IDs, borrowed/owned and empty/non-ASCII error
 descriptions, timestamps, and IDs. Exact timestamp fixtures use Windows-compatible
 100 ns values (`.987654300Z`, not an unrepresentable `.987654321Z`).
 The same four fixtures feed serialization and enabled-export benchmarks in each
-layout; there are sixteen stage measurements when both features are enabled.
+layout; including write-only, there are twenty-four stage measurements when both
+features are enabled, in addition to the SDK/end-to-end lifecycle groups.
 
 #### Dual-layout results (2026-11-04)
 

@@ -8,6 +8,7 @@
 - Benchmark serialization and enabled export for nested and flat Geneva output.
 - Add idiomatic SDK-only recording/context/cleanup and directly measured end-to-end
   lifecycle benchmarks for both layouts.
+- Measure the complete `EventBuilder::write()` method separately on prepared events.
 - Bump OpenTelemetry dependencies to 0.33.1.
 
 ## v0.2.0
