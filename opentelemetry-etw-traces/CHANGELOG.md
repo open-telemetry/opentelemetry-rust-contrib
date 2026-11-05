@@ -2,6 +2,13 @@
 
 ## vNext
 
+- Apply stack-backed ID/timestamp formatting, borrowed error descriptions, and
+  reduced attribute searches to both layouts, including `env_time`.
+- Benchmark serialization and enabled export for nested and flat Geneva output.
+- Add idiomatic SDK-only recording/context/cleanup and directly measured end-to-end
+  lifecycle benchmarks for both layouts.
+- Measure the complete `EventBuilder::write()` method separately on prepared events.
+
 ## v0.3.0
 
 Released 2026-Nov-04

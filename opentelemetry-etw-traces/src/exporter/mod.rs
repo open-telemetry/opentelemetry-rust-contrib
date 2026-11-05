@@ -37,6 +37,50 @@ struct Resource {
     attributes_from_resource: Vec<(Key, opentelemetry::Value)>,
 }
 
+#[inline]
+fn encode_span(
+    event: &mut tld::EventBuilder,
+    span_data: &SpanData,
+    resource: &Resource,
+    event_name: &str,
+    geneva_mapping: bool,
+) {
+    let event_tags: u32 = 0;
+    let field_tag: u32 = 0;
+    event.reset(
+        event_name,
+        tld::Level::Verbose,
+        DEFAULT_KEYWORD_UNCATEGORIZED,
+        event_tags,
+    );
+
+    // Keep the Common Schema field order shared by export and serialization benchmarks.
+    if !geneva_mapping {
+        event.add_u16("__csver__", 1024, tld::OutType::Unsigned, field_tag);
+        part_a::populate_part_a(event, resource, span_data, field_tag);
+    }
+    #[cfg(feature = "experimental-geneva-mapping")]
+    if geneva_mapping {
+        part_a::populate_geneva_envelope(event, resource, span_data, event_name, field_tag);
+    }
+    let (part_b_attributes, part_c_count) = common::classify_attributes(&span_data.attributes);
+    part_c::populate_part_c(
+        event,
+        span_data,
+        resource,
+        part_c_count,
+        field_tag,
+        geneva_mapping,
+    );
+    part_b::populate_part_b(
+        event,
+        span_data,
+        &part_b_attributes,
+        field_tag,
+        geneva_mapping,
+    );
+}
+
 fn enabled_callback_noop(
     _source_id: &tld::Guid,
     _event_control_code: u32,
@@ -103,39 +147,14 @@ impl ETWExporter {
             return;
         }
 
-        let event_tags: u32 = 0;
-        let field_tag: u32 = 0;
-
         EVENT_BUILDER.with_borrow_mut(|event| {
-            event.reset(
+            encode_span(
+                event,
+                span_data,
+                &self.resource,
                 self.options.event_name(),
-                tld::Level::Verbose,
-                DEFAULT_KEYWORD_UNCATEGORIZED,
-                event_tags,
+                self.options.geneva_mapping(),
             );
-
-            let geneva_mapping = self.options.geneva_mapping();
-            if !geneva_mapping {
-                // Common Schema version as u16 (0x0400 = 1024)
-                event.add_u16("__csver__", 1024, tld::OutType::Unsigned, field_tag);
-                part_a::populate_part_a(event, &self.resource, span_data, field_tag);
-            }
-            #[cfg(feature = "experimental-geneva-mapping")]
-            if geneva_mapping {
-                part_a::populate_geneva_envelope(
-                    event,
-                    &self.resource,
-                    span_data,
-                    self.options.event_name(),
-                    field_tag,
-                );
-            }
-
-            // Part C: custom data (individual typed attributes, resource attributes)
-            part_c::populate_part_c(event, span_data, &self.resource, field_tag, geneva_mapping);
-
-            // Part B: span payload (_typeName, name, kind, startTime, parentId, links, statusMessage, success)
-            part_b::populate_part_b(event, span_data, field_tag, geneva_mapping);
 
             // event.write() returns 0 on success or a diagnostic-only Win32 error on failure. Failures
             // are expected, transient conditions (e.g. buffer pressure from an active session), so the
@@ -182,6 +201,64 @@ impl ETWExporter {
 impl Debug for ETWExporter {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.write_str("ETW trace exporter")
+    }
+}
+
+/// Unstable adapters for this crate's opt-in stage benchmarks, not application APIs.
+#[cfg(feature = "bench-internals")]
+#[doc(hidden)]
+pub mod benchmark {
+    use super::*;
+
+    /// Calls the production encoder and exporter with prebuilt span data.
+    #[derive(Debug)]
+    pub struct ExportBenchmark(ETWExporter);
+
+    impl ExportBenchmark {
+        /// Registers a provider and prepares its resource outside measurement.
+        pub fn new(provider_name: &str, resource: &opentelemetry_sdk::Resource) -> Self {
+            let mut exporter = ETWExporter::new(Options::new(provider_name));
+            exporter.set_resource(resource);
+            Self(exporter)
+        }
+
+        /// Selects the same experimental layout as the public processor builder.
+        #[cfg(feature = "experimental-geneva-mapping")]
+        pub fn with_geneva_mapping(mut self, enabled: bool) -> Self {
+            self.0.options = self.0.options.with_geneva_mapping(enabled);
+            self
+        }
+
+        /// Encodes into a reusable caller-owned buffer without checking or writing ETW.
+        #[inline]
+        pub fn serialize(&self, event: &mut tld::EventBuilder, span: &SpanData) {
+            encode_span(
+                event,
+                span,
+                &self.0.resource,
+                self.0.options.event_name(),
+                self.0.options.geneva_mapping(),
+            );
+        }
+
+        /// Executes the real enabled check, TLS borrow, serialization, and ETW write.
+        #[inline]
+        pub fn export(&self, span: &SpanData) {
+            self.0.export_span_data(span);
+        }
+
+        /// Calls EventBuilder::write on an already encoded event, including its status return.
+        #[inline]
+        pub fn write(&self, event: &mut tld::EventBuilder) -> u32 {
+            event.write(&self.0.provider, None, None)
+        }
+
+        /// Checks the actual exporter's provider rather than a second registration.
+        pub fn enabled(&self) -> bool {
+            self.0
+                .provider
+                .enabled(tld::Level::Verbose, DEFAULT_KEYWORD_UNCATEGORIZED)
+        }
     }
 }
 
