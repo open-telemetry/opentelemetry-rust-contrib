@@ -4,6 +4,23 @@ The geneva-uploader is designed for Microsoft products to send data to public-fa
 
 Core uploader responsible for encoding and sending telemetry data to the Geneva backend.
 
+## Externally supplied Entra tokens
+
+Applications that already own identity acquisition can use
+`AuthMethod::ExternalToken` with an `Arc<dyn GcsTokenProvider>`. The provider
+returns the Entra access token used to authenticate a Geneva Config Service
+request. It owns identity selection, token caching, refresh, retry, and execution
+policy.
+
+The uploader keeps the credentials separate: it uses the provider's Entra token
+only for GCS, then caches the Geneva ingestion credential, endpoint, and routing
+returned by GCS. Uploads continue to use a valid cached Geneva credential without
+calling the provider.
+
+The provider API is runtime-neutral and does not require Tokio. Its returned
+future must not perform blocking work on the caller's async executor. Provider
+failures are returned without falling back to another authentication method.
+
 ## Ingestion paths
 
 There are two ways to send logs:

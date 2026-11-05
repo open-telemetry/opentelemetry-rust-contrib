@@ -26,6 +26,50 @@ Spans are encoded following the [Microsoft Common Schema v4.0](https://learn.mic
 [![Documentation](https://docs.rs/opentelemetry-etw-traces/badge.svg)](https://docs.rs/opentelemetry-etw-traces)
 [![Slack](https://img.shields.io/badge/slack-@cncf/otel/rust-brightgreen.svg?logo=slack)](https://cloud-native.slack.com/archives/C03GDP0H023)
 
+## Optional Geneva-compatible output (experimental)
+
+The default output uses `__csver__` and nested `PartA`, `PartB`, and `PartC`
+structures. For collectors that do not translate that representation into
+Geneva field names, enable the `experimental-geneva-mapping` Cargo feature:
+
+```sh
+cargo add opentelemetry-etw-traces --features experimental-geneva-mapping
+```
+
+Then enable the mapping when initializing the processor:
+
+```rust
+use opentelemetry_etw_traces::Processor;
+
+let processor = Processor::builder("MyAppTracing")
+    .with_geneva_mapping(true)
+    .build()
+    .expect("Failed to create ETW processor");
+```
+
+This mode emits flat `env_ver` (`"4.0"`), `env_name` (the ETW event name),
+`env_time` (the span end time), `env_dt_traceId`, and `env_dt_spanId` fields.
+Nonzero trace flags are emitted as `env_dt_traceFlags`; service resource
+attributes become `env_cloud_role` and `env_cloud_roleInstance` when present.
+Part B/C fields keep their existing names, types, and values without the
+wrapper structures. `__csver__` and `_typeName` are not emitted in this mode.
+Collection and routing still need to be configured in the agent.
+
+Attribute names are not validated in this mode, to avoid per-attribute
+overhead. Because every field is written at the top level, a span or promoted
+resource attribute with the same name as an emitted field (`env_*`, `name`,
+`kind`, `startTime`, `parentId`, `links`, `statusMessage`, `success`, or a
+mapped Part B name such as `httpMethod`) produces duplicate field names; how
+duplicates are handled depends on the collector. Collectors that replace
+characters such as `.` with `_` can also create duplicates (for example,
+`env.time` and `env_time`). Avoid these names for custom attributes.
+
+Omitting the feature or `.with_geneva_mapping(...)`, or passing `false`,
+retains the current output. Use a consistent mode for processors sharing a
+provider/event name; enabling this option changes the event's schema. This
+feature is experimental and may be removed once the Geneva agent performs this
+mapping itself.
+
 ## Viewing ETW Traces
 
 Traces exported to ETW can be viewed using tools like `logman`, `perfview` etc.

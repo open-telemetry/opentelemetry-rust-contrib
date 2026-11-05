@@ -135,7 +135,7 @@ impl ETWExporter {
 
     /// Exports a single span to ETW.
     ///
-    /// Event write order follows Common Schema: reset → __csver__ → PartA → PartC → PartB → write
+    /// Uses the configured Common Schema representation for the event payload.
     pub(crate) fn export_span_data(&self, span_data: &SpanData) {
         // Skip serialization and writing if no ETW session is listening.
         if !cfg!(test)

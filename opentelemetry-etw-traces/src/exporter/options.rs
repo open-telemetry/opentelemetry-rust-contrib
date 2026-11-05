@@ -10,6 +10,7 @@ pub(crate) struct Options {
     /// Defaults to "Span".
     event_name: String,
 
+    /// Emit the flat Geneva mapping instead of the TraceLogging mapping.
     #[cfg(feature = "experimental-geneva-mapping")]
     geneva_mapping: bool,
 
@@ -41,15 +42,14 @@ impl Options {
         &self.event_name
     }
 
+    #[cfg(feature = "experimental-geneva-mapping")]
     pub(crate) fn geneva_mapping(&self) -> bool {
-        #[cfg(feature = "experimental-geneva-mapping")]
-        {
-            self.geneva_mapping
-        }
-        #[cfg(not(feature = "experimental-geneva-mapping"))]
-        {
-            false
-        }
+        self.geneva_mapping
+    }
+
+    #[cfg(not(feature = "experimental-geneva-mapping"))]
+    pub(crate) fn geneva_mapping(&self) -> bool {
+        false
     }
 
     #[cfg(feature = "experimental-geneva-mapping")]
