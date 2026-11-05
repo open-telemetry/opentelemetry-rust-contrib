@@ -1,5 +1,6 @@
 /*
-    Latest measured results: 2026-11-04, rustc 1.99.0 (before the upstream merge).
+    Measured results: 2026-11-04. Original rows: rustc 1.99.0, before upstream merge.
+    MixedMapped: rustc 1.99.1, measured separately after the merge.
     Microseconds per span/call; mean of two per-process Criterion slope estimates.
 
     | Layout | Case        | SDK-only | Serialize | Serialize+ETW | Write-only | End-to-end |
@@ -8,16 +9,23 @@
     | Nested | 3 mixed     | 0.412    | 0.467     | 1.496         | 0.818      | 2.191      |
     | Nested | 6 strings   | 0.446    | 0.512     | 1.554         | 0.806      | 2.333      |
     | Nested | ParentError | 0.411    | 0.504     | 1.497         | 0.735      | 2.378      |
+    | Nested | MixedMapped | -        | 0.549     | 1.579         | -          | -          |
     | Geneva | 0 attrs     | 0.343    | 0.382     | 1.326         | 0.684      | 1.830      |
     | Geneva | 3 mixed     | 0.412    | 0.425     | 1.308         | 0.927      | 2.309      |
     | Geneva | 6 strings   | 0.446    | 0.480     | 1.492         | 0.675      | 2.209      |
     | Geneva | ParentError | 0.411    | 0.463     | 1.434         | 0.748      | 2.290      |
+    | Geneva | MixedMapped | -        | 0.521     | 1.661         | -          | -          |
 
     SDK-only: recording/context/cleanup, no processor; shared across layouts.
     Serialize+ETW: enabled check, TLS builder, serialization, and real ETW write.
     Write-only: complete EventBuilder::write() on a pre-serialized event.
     End-to-end: actual SDK + serialization + ETW write + cleanup, measured directly.
     ParentError: 3 mixed attributes, a nonzero parent ID, and an error description.
+    MixedMapped: 4 mapped HTTP/DB attributes + 3 custom attributes; "-" = not measured.
+    MixedMapped used 100 samples, 1 s warm-up / 2 s measurement in two processes:
+      & $exe MixedMapped --bench --warm-up-time 1 --measurement-time 2 --noplot
+    File capture: 64 KiB buffers, min 8192 / max 16384, keyword 1, level 5.
+    All 9,825,050 captured events (including warm-up) matched the validated fixture.
 
     One unpinned producer; Windows 11 Microsoft VM, EPYC 7763, 8 guest cores /
     16 logical CPUs, 63.95 GiB RAM. Accepted ETW captures reported zero loss.
@@ -323,8 +331,22 @@ mod windows {
             });
             assert_eq!(exporter.enabled(), enabled, "ETW listener state mismatch");
         };
-        for (case, count) in CASES {
-            let attributes = attributes(count);
+        let cases = CASES
+            .into_iter()
+            .map(|(case, count)| (case, attributes(count)))
+            .chain([(
+                "MixedMapped",
+                vec![
+                    KeyValue::new("http.request.method", "GET"),
+                    KeyValue::new("url.full", "https://example.test/items/42"),
+                    KeyValue::new("http.response.status_code", 200_i64),
+                    KeyValue::new("db.system.name", "postgresql"),
+                    KeyValue::new("string_key", "benchmark-value"),
+                    KeyValue::new("integer_key", 42_i64),
+                    KeyValue::new("bool_key", true),
+                ],
+            )]);
+        for (case, attributes) in cases {
             let mut span = SpanData {
                 span_context: SpanContext::new(
                     TraceId::from_bytes([0x12; 16]),
@@ -363,6 +385,10 @@ mod windows {
                     });
                 },
             );
+            // The mixed fixture covers only serialization and enabled export.
+            if case == "MixedMapped" && !enabled {
+                continue;
+            }
             c.bench_with_input(
                 BenchmarkId::new(format!("ETW/{layout}/{mode}/Export"), case),
                 &span,
@@ -372,6 +398,9 @@ mod windows {
                     assert_eq!(exporter.enabled(), enabled, "ETW listener state mismatch");
                 },
             );
+            if case == "MixedMapped" {
+                continue;
+            }
             c.bench_with_input(
                 BenchmarkId::new(format!("ETW/{layout}/{mode}/WriteOnly"), case),
                 &span,
