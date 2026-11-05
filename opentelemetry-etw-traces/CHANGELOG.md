@@ -2,6 +2,12 @@
 
 ## vNext
 
+- Add the opt-in `experimental-geneva-mapping` layout from upstream #874.
+- Apply stack-backed ID/timestamp formatting, borrowed error descriptions, and
+  reduced attribute searches to both layouts, including `env_time`.
+- Benchmark serialization and enabled export for nested and flat Geneva output.
+- Add idiomatic SDK-only recording/context/cleanup and directly measured end-to-end
+  lifecycle benchmarks for both layouts.
 - Bump OpenTelemetry dependencies to 0.33.1.
 
 ## v0.2.0

@@ -30,6 +30,7 @@ one_collect = "0.1.34532"
 
 [features]
 bench-internals = []
+experimental-geneva-mapping = []
 internal-logs = [
     "opentelemetry/internal-logs",
     "opentelemetry_sdk/internal-logs",

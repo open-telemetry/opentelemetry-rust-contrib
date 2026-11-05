@@ -133,6 +133,21 @@ impl ProcessorBuilder {
         self
     }
 
+    /// Enables the experimental flat Geneva Common Schema mapping.
+    ///
+    /// Requires the `experimental-geneva-mapping` feature and defaults to `false`.
+    /// When enabled, envelope fields use `env_*` names, while Part B/C fields
+    /// are emitted at the top level. The event timestamp remains the span end time.
+    /// Configure all processors writing to the same provider/event consistently.
+    ///
+    /// This option follows upstream's experimental mapping and may change or be
+    /// removed when the Geneva collector performs the translation itself.
+    #[cfg(feature = "experimental-geneva-mapping")]
+    pub fn with_geneva_mapping(mut self, enabled: bool) -> Self {
+        self.options = self.options.with_geneva_mapping(enabled);
+        self
+    }
+
     /// Specifies additional resource attribute keys to include in Part C.
     ///
     /// # Performance Considerations

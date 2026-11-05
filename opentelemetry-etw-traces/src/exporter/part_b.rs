@@ -28,6 +28,7 @@ pub(crate) fn populate_part_b(
     span_data: &SpanData,
     attributes: &common::PartBAttributes<'_>,
     field_tag: u32,
+    geneva_mapping: bool,
 ) {
     // Calculate field count dynamically
     // Base fields: _typeName, name, kind, startTime, success = 5
@@ -60,9 +61,10 @@ pub(crate) fn populate_part_b(
     let well_known_count = attributes.iter().flatten().count() as u8;
     field_count += well_known_count;
 
-    event.add_struct("PartB", field_count, field_tag);
-
-    event.add_str8("_typeName", "Span", tld::OutType::Default, field_tag);
+    if !geneva_mapping {
+        event.add_struct("PartB", field_count, field_tag);
+        event.add_str8("_typeName", "Span", tld::OutType::Default, field_tag);
+    }
     event.add_str8(
         "name",
         span_data.name.as_ref(),

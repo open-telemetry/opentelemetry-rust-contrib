@@ -43,6 +43,7 @@ fn encode_span(
     span_data: &SpanData,
     resource: &Resource,
     event_name: &str,
+    geneva_mapping: bool,
 ) {
     let event_tags: u32 = 0;
     let field_tag: u32 = 0;
@@ -54,11 +55,30 @@ fn encode_span(
     );
 
     // Keep the Common Schema field order shared by export and serialization benchmarks.
-    event.add_u16("__csver__", 1024, tld::OutType::Unsigned, field_tag);
-    part_a::populate_part_a(event, resource, span_data, field_tag);
+    if !geneva_mapping {
+        event.add_u16("__csver__", 1024, tld::OutType::Unsigned, field_tag);
+        part_a::populate_part_a(event, resource, span_data, field_tag);
+    }
+    #[cfg(feature = "experimental-geneva-mapping")]
+    if geneva_mapping {
+        part_a::populate_geneva_envelope(event, resource, span_data, event_name, field_tag);
+    }
     let (part_b_attributes, part_c_count) = common::classify_attributes(&span_data.attributes);
-    part_c::populate_part_c(event, span_data, resource, part_c_count, field_tag);
-    part_b::populate_part_b(event, span_data, &part_b_attributes, field_tag);
+    part_c::populate_part_c(
+        event,
+        span_data,
+        resource,
+        part_c_count,
+        field_tag,
+        geneva_mapping,
+    );
+    part_b::populate_part_b(
+        event,
+        span_data,
+        &part_b_attributes,
+        field_tag,
+        geneva_mapping,
+    );
 }
 
 fn enabled_callback_noop(
@@ -128,7 +148,13 @@ impl ETWExporter {
         }
 
         EVENT_BUILDER.with_borrow_mut(|event| {
-            encode_span(event, span_data, &self.resource, self.options.event_name());
+            encode_span(
+                event,
+                span_data,
+                &self.resource,
+                self.options.event_name(),
+                self.options.geneva_mapping(),
+            );
 
             // event.write() returns 0 on success or a diagnostic-only Win32 error on failure. Failures
             // are expected, transient conditions (e.g. buffer pressure from an active session), so the
@@ -196,10 +222,23 @@ pub mod benchmark {
             Self(exporter)
         }
 
+        /// Selects the same experimental layout as the public processor builder.
+        #[cfg(feature = "experimental-geneva-mapping")]
+        pub fn with_geneva_mapping(mut self, enabled: bool) -> Self {
+            self.0.options = self.0.options.with_geneva_mapping(enabled);
+            self
+        }
+
         /// Encodes into a reusable caller-owned buffer without checking or writing ETW.
         #[inline]
         pub fn serialize(&self, event: &mut tld::EventBuilder, span: &SpanData) {
-            encode_span(event, span, &self.0.resource, self.0.options.event_name());
+            encode_span(
+                event,
+                span,
+                &self.0.resource,
+                self.0.options.event_name(),
+                self.0.options.geneva_mapping(),
+            );
         }
 
         /// Executes the real enabled check, TLS borrow, serialization, and ETW write.

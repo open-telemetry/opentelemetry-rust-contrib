@@ -41,24 +41,34 @@ pub(crate) fn format_timestamp(time: DateTime<Utc>) -> Timestamp {
         len: 0,
     };
     let year = time.year();
-    let nanos = time.nanosecond();
-    // Keep Chrono's original representation for extended years and leap seconds.
-    // Its full signed-year range plus nanoseconds and the UTC suffix fits in 40 bytes.
-    if !(0..=9999).contains(&year) || nanos >= 1_000_000_000 {
-        let text = time.to_rfc3339_opts(chrono::SecondsFormat::AutoSi, true);
-        result.bytes[..text.len()].copy_from_slice(text.as_bytes());
-        result.len = text.len();
-        return result;
+    let nano = time.nanosecond();
+    // Match Chrono's signed extended years without an allocating fallback.
+    if !(0..=9999).contains(&year) {
+        result.bytes[0] = if year < 0 { b'-' } else { b'+' };
+        result.len = 1;
     }
-
-    result.bytes[..19].copy_from_slice(b"0000-00-00T00:00:00");
-    write_decimal(year as u32, &mut result.bytes[..4]);
-    write_decimal(time.month(), &mut result.bytes[5..7]);
-    write_decimal(time.day(), &mut result.bytes[8..10]);
-    write_decimal(time.hour(), &mut result.bytes[11..13]);
-    write_decimal(time.minute(), &mut result.bytes[14..16]);
-    write_decimal(time.second(), &mut result.bytes[17..19]);
-    result.len = 19;
+    let year = year.unsigned_abs();
+    let width = if year < 10_000 {
+        4
+    } else if year < 100_000 {
+        5
+    } else {
+        6
+    };
+    write_decimal(year, &mut result.bytes[result.len..result.len + width]);
+    result.len += width;
+    let offset = result.len;
+    result.bytes[offset..offset + 15].copy_from_slice(b"-00-00T00:00:00");
+    write_decimal(time.month(), &mut result.bytes[offset + 1..offset + 3]);
+    write_decimal(time.day(), &mut result.bytes[offset + 4..offset + 6]);
+    write_decimal(time.hour(), &mut result.bytes[offset + 7..offset + 9]);
+    write_decimal(time.minute(), &mut result.bytes[offset + 10..offset + 12]);
+    write_decimal(
+        time.second() + nano / 1_000_000_000,
+        &mut result.bytes[offset + 13..offset + 15],
+    );
+    result.len += 15;
+    let nanos = nano % 1_000_000_000;
     if nanos != 0 {
         let (fraction, digits) = if nanos % 1_000_000 == 0 {
             (nanos / 1_000_000, 3)
@@ -67,9 +77,10 @@ pub(crate) fn format_timestamp(time: DateTime<Utc>) -> Timestamp {
         } else {
             (nanos, 9)
         };
-        result.bytes[19] = b'.';
-        write_decimal(fraction, &mut result.bytes[20..20 + digits]);
-        result.len = 20 + digits;
+        result.bytes[result.len] = b'.';
+        result.len += 1;
+        write_decimal(fraction, &mut result.bytes[result.len..result.len + digits]);
+        result.len += digits;
     }
     result.bytes[result.len] = b'Z';
     result.len += 1;
@@ -309,7 +320,8 @@ mod tests {
         assert_matches(DateTime::<Utc>::MIN_UTC);
         assert_matches(DateTime::<Utc>::MAX_UTC);
         for year in [
-            -262_143, -10_000, -1, 0, 1, 999, 1969, 1970, 2000, 2024, 9999, 10_000, 262_142,
+            -262_143, -100_000, -99_999, -10_000, -9999, -1, 0, 1, 999, 1000, 1969, 1970, 2000,
+            2024, 9999, 10_000, 99_999, 100_000, 262_142,
         ] {
             for (month, day) in [(1, 1), (2, 28), (2, 29), (12, 31)] {
                 let Some(date) = NaiveDate::from_ymd_opt(year, month, day) else {

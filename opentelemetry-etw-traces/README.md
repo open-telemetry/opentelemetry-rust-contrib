@@ -77,6 +77,17 @@ Instructions using Powershell:
 
 ## Benchmarks
 
+### Experimental flat Geneva layout
+
+This benchmark branch includes the opt-in mapping from upstream
+[#874](https://github.com/open-telemetry/opentelemetry-rust-contrib/pull/874).
+Enable the `experimental-geneva-mapping` Cargo feature and select
+`Processor::builder("MyProvider").with_geneva_mapping(true)` before `build()`.
+The default remains the nested Common Schema layout. Flat mode emits `env_*`
+envelope fields and top-level span/custom fields, without `__csver__`, Part A/B/C
+structs, or `_typeName`. Configure production processors sharing a provider/event
+consistently; this API remains experimental.
+
 The Windows-only Criterion benchmark has three lifecycle cases:
 
 | Case | Timed work |
@@ -85,7 +96,7 @@ The Windows-only Criterion benchmark has three lifecycle cases:
 | `ScopedSpan/0` | Create a Server span, attach it as the active context, set `Status::Ok`, end it, detach the context, and drop the span. |
 | `ScopedSpan/3` | The same scoped lifecycle with string, integer, and boolean attributes. |
 
-All cases use the synchronous ETW processor, an always-on sampler, and a
+These three legacy cases use the synchronous ETW processor, an always-on sampler, and a
 `service.name` resource of `etw-trace-benchmark`. Provider initialization and
 listener checks are outside timing. Scoped attribute inputs are prepared outside
 timing; copying them into each span and final cleanup are included. There is no
@@ -147,37 +158,128 @@ Similar workloads do not make ETW/Windows timings a controlled comparison agains
 user-events/Linux results: the operating systems, exporters, hardware, and capture
 configurations differ.
 
-### Serialization and exporter-only costs
+### SDK-only and directly measured end-to-end lifecycle
 
-The opt-in `bench-internals` feature adds paired stage benchmarks using the same
-prebuilt `SpanData` and resource:
+With `bench-internals`, the benchmark also registers matched idiomatic lifecycle
+cases. Add `experimental-geneva-mapping` to include the flat Geneva end-to-end path.
 
 | Case | Timed work |
 | ---- | ---------- |
-| `ETW/Serialization/0`, `/3`, `/6` | The production `#[inline]` encoder: reset the reused EventBuilder, build Common Schema metadata and payload, format timestamps and IDs, and encode attributes. No enabled check, TLS lookup, or ETW write. |
-| `ETW/enabled/Export/0`, `/3`, `/6` | The real exporter: enabled check, TLS builder borrow, the same serialization, and synchronous ETW write. **Includes serialization**, not write-only. |
-| `ETW/disabled/Export/0`, `/3`, `/6` | Only the exporter's disabled-provider fast path; not meaningful as serialization or delivery cost. |
+| `SDK/RecordingLifecycle/<case>` | Real SDK recording with `Sampler::AlwaysOn` and **no span processor**: span creation, sampling/ID generation, clock reads, attribute cloning into the span, context attachment, status update, end, context restoration, and cleanup. No serialization or ETW write. |
+| `ETW/<layout>/enabled/EndToEnd/<case>` | The same lifecycle, plus SDK export-data handoff, the synchronous ETW processor, enabled check, serialization, and actual ETW write. |
+| `ETW/<layout>/disabled/EndToEnd/<case>` | The lifecycle with the processor's disabled-provider fast path; this does **not** measure an ETW write. |
+
+The shared `record_span` helper uses the public SDK span builder and
+`Context::current_with_span`, keeps an RAII context guard alive while setting status
+and ending the span, and lets Rust drop the guard/context/span at scope exit.
+There is no FFI or synthetic application work. Provider/tracer construction,
+input-vector preparation, listener checks, and setup of the surrounding parent
+context are outside timing. Parent-context restoration is checked after each batch.
+
+Cases `0`, `3`, and `6` are fresh root Server spans named `BenchmarkOperation` with
+`Status::Ok` and respectively zero, three mixed, or six string attributes.
+Fixed keys and string values use literals, including `key1=value1` through
+`key6=value6`, rather than constructing heap-owned strings for constant inputs.
+Copying attributes into each SDK span is timed. `ParentError` has three mixed
+attributes and `Status::Error("request failed")`; a fixed sampled remote parent
+context is constructed outside timing. Each iteration creates a new child span,
+not an additional parent span. All use `service.name=etw-trace-benchmark`.
+
+**SDK-only is a separate pipeline, not a subtractable phase of end-to-end.**
+Its recording state is checked outside timing to exclude a no-op tracer. With no
+processor the SDK does not build the export handoff data, whereas end-to-end does.
+The earlier serialization/export-only cases use prebuilt span data with fixed
+IDs/timestamps; lifecycle cases generate real IDs and timestamps in every
+iteration. Do not add the separate timings and label the sum end-to-end.
+
+#### Lifecycle results (2026-11-04)
+
+Microseconds per span; arithmetic mean of the two per-process Criterion slope
+estimates, not individual-span percentiles:
+
+| Case | SDK-only recording/context/cleanup | Nested end-to-end | Flat Geneva end-to-end |
+| ---- | ---------------------------------- | ----------------- | ---------------------- |
+| 0 attributes | 0.343 | 2.111 | 1.830 |
+| 3 mixed attributes | 0.412 | 2.191 | 2.309 |
+| 6 string attributes | 0.446 | 2.333 | 2.209 |
+| ParentError (3 mixed attributes) | 0.411 | 2.378 | 2.290 |
+
+Each end-to-end number includes **SDK + serialization + real synchronous ETW
+write + cleanup**. A returned ETW write does not imply disk persistence or delivery
+to a Geneva backend. End-to-end was noisy: Geneva/0 estimates were 1.663 and
+1.997 us in the two processes. Layout order was fixed, not counterbalanced, so
+this table does not establish a universally faster layout or a regression threshold.
+
+Build the current working tree (based on `47b62c7`, including the dual-layout and
+lifecycle additions), then invoke the resulting executable in an active ETW session:
+
+```powershell
+cargo bench -p opentelemetry-etw-traces --bench traces --features bench-internals,experimental-geneva-mapping --no-run
+$env:OTEL_ETW_BENCH_MODE = "enabled"
+& $exe 'RecordingLifecycle|/EndToEnd/' --bench --warm-up-time 1 --measurement-time 2 --noplot
+```
+
+SDK-only can also run without any listener by filtering `RecordingLifecycle`.
+Its result has no ETW enabled/disabled label because no ETW processor is installed.
+
+The measured executable was built before the result comments were added.
+Rust 1.99.0, Criterion 0.8.2, OpenTelemetry API/SDK 0.33.1, Chrono 0.4.45 and
+TraceLogging Dynamic 1.2.4 were unchanged. Default crate features plus
+`bench-internals,experimental-geneva-mapping` were enabled; no `serde_json`.
+Two fresh processes each ran SDK-only, nested end-to-end, then Geneva end-to-end;
+within each group, order was 0, 3, 6, ParentError. Criterion used 100 samples,
+100,000 resamples and 95% per-process confidence, with CLI overrides of 1 s warm-up,
+2 s measurement, and no plots. Defaults in code were not changed.
+
+Environment recorded with the run: Microsoft VM, AMD EPYC 7763, 8 guest cores /
+16 logical CPUs, 63.95 GiB RAM, Windows 11 Enterprise x64 10.0.26300. One synchronous
+producer thread, no affinity override (mask `0xffff`). Each file-mode capture used
+the same provider GUID, keyword `0x1`, level `5`, `-bs 64 -nb 8192 16384`, no PID
+filter and no clock override. SDK-only smoke emitted **zero events**; end-to-end
+smoke emitted exactly **eight**, one per case/layout. The two measured captures
+contained **22,528,592 events**, including warm-up, with zero reported loss.
+Every event's schema and fixed payload fields were checked against the earlier
+fixtures; generated IDs and timestamp formats were validated rather than
+incorrectly requiring equality with prebuilt IDs/times. An earlier pilot using
+heap-owned generated strings for the six-string case is excluded.
+
+### Serialization and exporter-only costs
+
+The opt-in `bench-internals` feature adds paired stage benchmarks using the same
+prebuilt `SpanData` and resource. `<layout>` is `nested`; enabling
+`experimental-geneva-mapping` additionally registers the `geneva` cases.
+The three legacy lifecycle cases remain nested-only; the new `EndToEnd` groups
+above cover both layouts.
+
+| Case | Timed work |
+| ---- | ---------- |
+| `ETW/<layout>/Serialization/<case>` | The production `#[inline]` encoder: reset the reused EventBuilder, build Common Schema metadata and payload, format timestamps and IDs, and encode attributes. No enabled check, TLS lookup, or ETW write. |
+| `ETW/<layout>/enabled/Export/<case>` | The real exporter: enabled check, TLS builder borrow, the same serialization, and synchronous ETW write. **Includes serialization**, not write-only. |
+| `ETW/<layout>/disabled/Export/<case>` | Only the exporter's disabled-provider fast path; not meaningful as serialization or delivery cost. |
 
 These exclude SDK span creation, sampling, context attachment, status updates,
-input allocation, and span cleanup. The fixture is a root Server span named
+input allocation, and span cleanup. Cases `0`, `3`, and `6` use a root Server span named
 `BenchmarkOperation`, with `Status::Ok`, fixed nonzero IDs, fixed nanosecond
 timestamps, no links/events, and `service.name=etw-trace-benchmark`. `/0` has no
 attributes; `/3` has the same string, integer and boolean values as `ScopedSpan/3`;
 `/6` has `key1=value1` through `key6=value6`. The six-attribute fixture still uses
-Server/Ok, unlike `SimpleSpan`. Both stages reuse buffer capacity; cold
+Server/Ok, unlike `SimpleSpan`. `ParentError` uses the three mixed attributes,
+parent ID `0a0a0a0a0a0a0a0a`, and `Status::Error` with description `request failed`,
+so parent-ID formatting and error-description borrowing are exercised too.
+Both stages reuse buffer capacity; cold
 allocation/initialization is not measured. `#[inline]` is a compiler hint.
 
 Run serialization alone without an ETW listener:
 
 ```powershell
-cargo bench -p opentelemetry-etw-traces --bench traces --features bench-internals -- Serialization
+cargo bench -p opentelemetry-etw-traces --bench traces --features bench-internals,experimental-geneva-mapping -- Serialization
 ```
 
 For enabled export, start the same ETW session shown above and use:
 
 ```powershell
 $env:OTEL_ETW_BENCH_MODE = "enabled"
-cargo bench -p opentelemetry-etw-traces --bench traces --features bench-internals -- 'Serialization|/Export/'
+cargo bench -p opentelemetry-etw-traces --bench traces --features bench-internals,experimental-geneva-mapping -- 'Serialization|/Export/'
 ```
 
 Serialization never waits for a listener. Export checks the actual exporter's
@@ -192,18 +294,114 @@ subtracting SDK lifecycle timings. Do not label their difference as a directly
 measured ETW-write cost: TLS, enabled checks, compiler placement, and measurement
 noise also differ.
 
-#### Optimization comparison (2026-11-04)
+#### Coverage of PR #877
 
-The serializer now uses stack-backed lowercase ID encoding and timestamp
+Both layouts share the optimized encoder. The runtime optimizations from
+[#877](https://github.com/open-telemetry/opentelemetry-rust-contrib/pull/877)
+are covered, including the flat envelope path missing from our earlier branch:
+
+| Optimization | Nested layout | Flat Geneva layout |
+| ------------ | ------------- | ------------------ |
+| Stack-backed trace/span IDs | `PartA.ext_dt.traceId`, `spanId` | `env_dt_traceId`, `env_dt_spanId` |
+| Stack-backed end timestamp | `PartA.time` | `env_time` |
+| Stack-backed start timestamp | `PartB.startTime` | `startTime` |
+| Stack-backed parent ID | `PartB.parentId` | `parentId` |
+| Borrowed error description | `PartB.statusMessage` | `statusMessage` |
+
+Extended signed years now stay on the stack too, removing our earlier fallback
+allocation. The shared formatter retains Chrono calendar conversion and matches
+its fractional widths and leap-second representation. In addition to PR #877's
+changes, our existing attribute-classification optimization applies to both
+layouts and preserves schema order and first-occurrence-wins semantics.
+JSON links/arrays and initialization allocations remain outside these changes,
+as in PR #877.
+
+Both layouts have real-ETW integration coverage for encoding/export parity,
+resource mapping, parent IDs, borrowed/owned and empty/non-ASCII error
+descriptions, timestamps, and IDs. Exact timestamp fixtures use Windows-compatible
+100 ns values (`.987654300Z`, not an unrepresentable `.987654321Z`).
+The same four fixtures feed serialization and enabled-export benchmarks in each
+layout; there are sixteen stage measurements when both features are enabled.
+
+#### Dual-layout results (2026-11-04)
+
+Both paths were measured against upstream `3bfc183` (the pre-#877 implementation
+with experimental Geneva mapping). The baseline received only the shared encoder
+extraction and benchmark adapter, so its serialization-only case calls the same
+code as its real exporter. The optimized implementation is this branch's working
+tree based on `47b62c7`, including the scoped #874 mapping port and the remaining
+#877 optimization coverage, before result comments were added.
+
+Mean of two per-process Criterion regression-slope estimates, **microseconds per
+span**. This is not an individual-span latency percentile or a pooled confidence
+interval. Enabled export **includes serialization**; SDK lifecycle is excluded.
+
+| Layout | Case | Serialization before | After | Reduction | Enabled export before | After | Reduction |
+| ------ | ---- | -------------------- | ----- | --------- | --------------------- | ----- | --------- |
+| Nested | 0 | 0.586 | 0.415 | 29.1% | 1.703 | 1.366 | 19.8% |
+| Nested | 3 mixed | 0.720 | 0.467 | 35.1% | 1.914 | 1.496 | 21.9% |
+| Nested | 6 strings | 0.806 | 0.512 | 36.4% | 1.920 | 1.554 | 19.1% |
+| Nested | ParentError | 0.937 | 0.504 | 46.2% | 2.173 | 1.497 | 31.1% |
+| Flat Geneva | 0 | 0.568 | 0.382 | 32.8% | 1.798 | 1.326 | 26.3% |
+| Flat Geneva | 3 mixed | 0.678 | 0.425 | 37.3% | 2.004 | 1.308 | 34.8% |
+| Flat Geneva | 6 strings | 0.750 | 0.480 | 35.9% | 2.000 | 1.492 | 25.4% |
+| Flat Geneva | ParentError | 0.903 | 0.463 | 48.8% | 2.168 | 1.434 | 33.8% |
+
+Each variant ran twice in separate processes, ordered baseline/optimized/optimized/
+baseline. Each process ran nested cases first, then Geneva cases; within a layout,
+serialization and export alternate for 0, 3, 6, and ParentError. Layout order was
+not counterbalanced: do not infer a statistically established nested-versus-flat
+winner from this table. Export remains noisy and dependent on file capture; for
+example, optimized Geneva/3 export estimates were 1.416 and 1.199 us in the two
+processes. These limited observations are not regression thresholds.
+
+The exact shared benchmark source was compiled with rustc **1.99.0**, the existing
+optimized bench profile, and default features plus `bench-internals` and
+`experimental-geneva-mapping`, without `serde_json`. Separate target directories
+were used. The selected benchmark's dependency versions and enabled features
+matched exactly: Criterion 0.8.2, OpenTelemetry API/SDK 0.33.1, Chrono 0.4.45,
+TraceLogging Dynamic 1.2.4. The baseline crate's package version is 0.3.0; the
+benchmark branch retains its 0.2.0 package metadata. No package version is encoded
+in these event fixtures.
+
+Environment was recorded with this run: Microsoft Virtual Machine, AMD EPYC 7763,
+8 guest-visible cores / 16 logical CPUs, 63.95 GiB RAM, Windows 11 Enterprise x64
+10.0.26300. One synchronous producer thread per process, no affinity override
+(mask `0xffff`). For each process, start the earlier file-mode session using
+`-bs 64 -nb 8192 16384` (512 MiB minimum / 1 GiB maximum buffer capacities), keyword
+`0x1`, level `5`, no PID filter or clock override, then run:
+
+```powershell
+cargo bench -p opentelemetry-etw-traces --bench traces --features bench-internals,experimental-geneva-mapping --no-run
+$env:OTEL_ETW_BENCH_MODE = "enabled"
+& $exe 'Serialization|/Export/' --bench --warm-up-time 1 --measurement-time 2 --noplot
+```
+
+The actual runs invoked the already-built executables. Criterion kept 100 samples,
+100,000 resamples, and 95% per-process confidence; only warm-up (1 s), measurement
+(2 s), and plot generation were overridden. Stop and validate each capture before
+the next process. The four measured captures contained **66,854,032 provider
+events**, including warm-up, with zero reported lost events/buffers. Every event's
+descriptor, TraceLogging schema bytes, and payload bytes matched the corresponding
+pre-optimization fixture. Separate baseline/optimized smoke captures each contained
+exactly eight events and are excluded from that total.
+
+This is a Windows enabled-ETW comparison, not a reproduction of PR #877's Linux
+serialization-only numbers: its fixture, platform, affinity, and resource differ.
+The original full-default and nested-only historical results below remain separate.
+
+#### Historical nested optimization comparison (2026-11-04, `47b62c7`)
+
+At `47b62c7`, the serializer used stack-backed lowercase ID encoding and timestamp
 formatting, borrows error descriptions, and collects references to the first
 occurrence of each well-known attribute while counting custom attributes.
 Part B emits those references in the original schema order; Part C still emits
 resource attributes first and custom span attributes in input order. Duplicate
 well-known attributes retain the original first-occurrence-wins behavior.
 
-The timestamp fast path keeps Chrono's calendar conversion and the original
+That version's timestamp fast path kept Chrono's calendar conversion and the original
 `AutoSi` fractional widths (0, 3, 6, or 9 digits). Extended years and leap seconds
-fall back to the original Chrono formatter. No unsafe Rust, dependencies, global
+fell back to the original Chrono formatter. No unsafe Rust, dependencies, global
 caches, shared locks, or toolchain changes were introduced. The ordinary root-span
 fixtures no longer create the four temporary strings for two IDs and two
 timestamps. Parent-ID and error-description changes are covered for correctness,

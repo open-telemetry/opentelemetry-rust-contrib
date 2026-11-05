@@ -1,11 +1,87 @@
 /*
-    Serialization optimization comparison: 2026-11-04, rustc 1.99.0.
+    Idiomatic SDK / end-to-end lifecycle results: 2026-11-04, rustc 1.99.0.
+    Mean of two per-process Criterion slope estimates, us/span:
+
+    | Case        | SDK-only | Nested SDK + serialize + ETW | Flat Geneva SDK + serialize + ETW |
+    |-------------|----------|------------------------------|------------------------------------|
+    | 0           | 0.343    | 2.111                        | 1.830                              |
+    | 3 mixed     | 0.412    | 2.191                        | 2.309                              |
+    | 6 strings   | 0.446    | 2.333                        | 2.209                              |
+    | ParentError | 0.411    | 2.378                        | 2.290                              |
+
+    Shared idiomatic lifecycle: build/start a sampled Server span, clone attributes
+    into it, attach current context with an RAII guard, set status, explicitly end,
+    then detach and drop context/span on scope exit. Fresh SDK IDs/times are included.
+    Fixed keys/string values are literals. Inputs/provider/parent setup are untimed.
+    ParentError is a child of a prebuilt remote parent and has 3 mixed attributes.
+    SDK-only uses AlwaysOn with NO processor; recording is checked outside timing.
+    It excludes export-data handoff and is NOT additive with exporter-only timings.
+    EndToEnd measures the actual synchronous ETW processor and write, not a sum.
+
+    Two fresh processes; each runs SDK-only, nested EndToEnd, then Geneva EndToEnd.
+    Criterion 0.8.2: 100 samples, 1 s warm-up, 2 s measurement, 100,000 resamples.
+    One unpinned producer (mask 0xffff). Microsoft VM, EPYC 7763, 8 guest cores /
+    16 logical CPUs, 63.95 GiB RAM, Windows 11 Enterprise x64 10.0.26300.
+    ETW file capture: 64 KiB buffers, min 8192 / max 16384, keyword 1, level 5;
+    no PID/clock override. Validated 22,528,592 measured-capture events, zero loss.
+    SDK-only smoke emitted zero events; EndToEnd smoke emitted exactly eight.
+    Dynamic IDs/timestamps were validated, not compared byte-for-byte to fixed inputs.
+    End-to-end estimates are noisy; do not infer a stable layout ranking.
+    An earlier heap-owned six-string input pilot is excluded from these results.
+
+    With an ETW listener and OTEL_ETW_BENCH_MODE=enabled:
+      & $exe 'RecordingLifecycle|/EndToEnd/' --bench --warm-up-time 1 --measurement-time 2 --noplot
+    Build with --features bench-internals,experimental-geneva-mapping.
+    See README.md for the exact measurement boundaries and provenance.
+*/
+
+/*
+    Dual-layout serialization/export comparison: 2026-11-04, rustc 1.99.0.
+    All PR #877 runtime optimizations cover both layouts, including env_time,
+    envelope IDs, parent IDs, borrowed error descriptions, and extended years.
+    The attribute-classification optimization is also retained in both layouts.
+
+    Baseline: upstream 3bfc183 plus the same shared-encoder benchmark adapter.
+    Optimized: this branch's working tree based on 47b62c7, before result comments.
+    Same benchmark source/dependency tree; separate build directories.
+    Mean of two per-process Criterion slope estimates, us/span:
+
+    | Layout | Case        | Serialize before | After | Enabled export before | After |
+    |--------|-------------|------------------|-------|-----------------------|-------|
+    | nested | 0           | 0.586            | 0.415 | 1.703                 | 1.366 |
+    | nested | 3           | 0.720            | 0.467 | 1.914                 | 1.496 |
+    | nested | 6           | 0.806            | 0.512 | 1.920                 | 1.554 |
+    | nested | ParentError | 0.937            | 0.504 | 2.173                 | 1.497 |
+    | geneva | 0           | 0.568            | 0.382 | 1.798                 | 1.326 |
+    | geneva | 3           | 0.678            | 0.425 | 2.004                 | 1.308 |
+    | geneva | 6           | 0.750            | 0.480 | 2.000                 | 1.492 |
+    | geneva | ParentError | 0.903            | 0.463 | 2.168                 | 1.434 |
+
+    Enabled export INCLUDES serialization; neither stage includes SDK lifecycle.
+    ParentError has 3 mixed attributes, a nonzero parent ID, and an error description.
+    Two processes per variant, baseline/optimized/optimized/baseline order.
+    Criterion 0.8.2: 100 samples, 1 s warm-up, 2 s measurement, 100,000 resamples.
+    One synchronous producer, unpinned (mask 0xffff). Microsoft VM, EPYC 7763,
+    8 guest cores / 16 logical CPUs, 63.95 GiB RAM, Windows 11 x64 10.0.26300.
+    64 KiB ETW buffers, min 8192 / max 16384, keyword 1, level 5; no PID/clock override.
+    All 66,854,032 measured-capture events matched baseline metadata/payload bytes;
+    zero reported loss. Warm-up events included; smoke captures excluded.
+    Export estimates are noisy VM/file-capture observations, not regression thresholds.
+
+    Build: cargo bench -p opentelemetry-etw-traces --bench traces --features bench-internals,experimental-geneva-mapping --no-run
+    With an ETW listener and OTEL_ETW_BENCH_MODE=enabled:
+      & $exe 'Serialization|/Export/' --bench --warm-up-time 1 --measurement-time 2 --noplot
+    See README.md for coverage, provenance, and interpretation.
+*/
+
+/*
+    Historical nested-only optimization comparison at 47b62c7: 2026-11-04, rustc 1.99.0.
     Machine inventory captured with this run:
     AMD EPYC 7763; 8 guest cores / 16 logical CPUs; 63.95 GiB RAM;
     Microsoft Virtual Machine; Windows 11 Enterprise x64 10.0.26300.
     One synchronous producer thread, no affinity override (process mask 0xffff).
 
-    Baseline: 97d8baa. Optimized: this implementation, before results comments.
+    Baseline: 97d8baa. Optimized: 47b62c7, before results comments.
     Two processes per variant, ordered baseline/optimized/optimized/baseline.
     Criterion 0.8.2: 100 samples, 1 s warm-up, 2 s measurement, 100,000 resamples.
     Arithmetic means of the two per-process point estimates, in us/span:
@@ -72,6 +148,29 @@ mod windows {
     use tracelogging_dynamic::{Level, Provider};
 
     const PROVIDER_NAME: &str = "OpenTelemetryEtwTraceBenchmark";
+
+    #[cfg(feature = "bench-internals")]
+    const CASES: [(&str, usize); 4] = [("0", 0), ("3", 3), ("6", 6), ("ParentError", 3)];
+
+    #[cfg(feature = "bench-internals")]
+    fn attributes(count: usize) -> Vec<KeyValue> {
+        match count {
+            0 => vec![],
+            3 => vec![
+                KeyValue::new("string_key", "benchmark-value"),
+                KeyValue::new("integer_key", 42_i64),
+                KeyValue::new("bool_key", true),
+            ],
+            _ => vec![
+                KeyValue::new("key1", "value1"),
+                KeyValue::new("key2", "value2"),
+                KeyValue::new("key3", "value3"),
+                KeyValue::new("key4", "value4"),
+                KeyValue::new("key5", "value5"),
+                KeyValue::new("key6", "value6"),
+            ],
+        }
+    }
 
     fn assert_listener_state(probe: &Provider, expected: bool) {
         assert_eq!(
@@ -181,6 +280,131 @@ mod windows {
 
     #[cfg(feature = "bench-internals")]
     pub fn stages(c: &mut Criterion) {
+        stage(c, false);
+        #[cfg(feature = "experimental-geneva-mapping")]
+        stage(c, true);
+    }
+
+    #[cfg(feature = "bench-internals")]
+    pub fn lifecycles(c: &mut Criterion) {
+        lifecycle_group(c, None);
+        lifecycle_group(c, Some(false));
+        #[cfg(feature = "experimental-geneva-mapping")]
+        lifecycle_group(c, Some(true));
+    }
+
+    #[cfg(feature = "bench-internals")]
+    fn record_span(
+        tracer: &opentelemetry_sdk::trace::SdkTracer,
+        attributes: &[KeyValue],
+        error: bool,
+    ) {
+        let span = tracer
+            .span_builder("BenchmarkOperation")
+            .with_kind(SpanKind::Server)
+            .with_attributes(attributes.iter().cloned())
+            .start(tracer);
+        let context = Context::current_with_span(span);
+        let _guard = context.clone().attach();
+        context.span().set_status(if error {
+            Status::error("request failed")
+        } else {
+            Status::Ok
+        });
+        context.span().end();
+    }
+
+    #[cfg(feature = "bench-internals")]
+    fn lifecycle_group(c: &mut Criterion, geneva: Option<bool>) {
+        use opentelemetry::trace::{SpanContext, SpanId, TraceFlags, TraceId, TraceState};
+
+        let mut builder = SdkTracerProvider::builder()
+            .with_sampler(Sampler::AlwaysOn)
+            .with_resource(
+                opentelemetry_sdk::Resource::builder_empty()
+                    .with_service_name("etw-trace-benchmark")
+                    .build(),
+            );
+        if geneva.is_some() {
+            let processor = opentelemetry_etw_traces::Processor::builder(PROVIDER_NAME);
+            #[cfg(feature = "experimental-geneva-mapping")]
+            let processor = processor.with_geneva_mapping(geneva.unwrap_or(false));
+            builder = builder
+                .with_span_processor(processor.build().expect("Valid benchmark provider name"));
+        }
+        let provider = builder.build();
+        let tracer = provider.tracer("etw-trace-benchmark");
+        let enabled = enabled_mode();
+        let mode = if enabled { "enabled" } else { "disabled" };
+        let name = match geneva {
+            None => "SDK/RecordingLifecycle".to_owned(),
+            Some(false) => format!("ETW/nested/{mode}/EndToEnd"),
+            Some(true) => format!("ETW/geneva/{mode}/EndToEnd"),
+        };
+        let probe = geneva.map(|_| {
+            let probe = Box::pin(Provider::new(PROVIDER_NAME, &Provider::options()));
+            // SAFETY: the probe stays pinned until drop unregisters its ETW callback.
+            assert_eq!(unsafe { probe.as_ref().register() }, 0);
+            probe
+        });
+        if geneva.is_none() {
+            let span = tracer.start("recording-check");
+            assert!(
+                span.is_recording(),
+                "SDK-only must not measure a no-op tracer"
+            );
+        }
+        let listener_setup = Once::new();
+        let mut group = c.benchmark_group(name);
+        for (case, count) in CASES {
+            let attributes = attributes(count);
+            let error = case == "ParentError";
+            let parent = if error {
+                Context::new().with_remote_span_context(SpanContext::new(
+                    TraceId::from_bytes([0x12; 16]),
+                    SpanId::from_bytes([0x0a; 8]),
+                    TraceFlags::SAMPLED,
+                    true,
+                    TraceState::default(),
+                ))
+            } else {
+                Context::new()
+            };
+            group.bench_with_input(
+                BenchmarkId::from_parameter(case),
+                &attributes,
+                |b, attributes| {
+                    if let Some(probe) = &probe {
+                        listener_setup.call_once(|| {
+                            if enabled {
+                                let deadline = Instant::now() + Duration::from_secs(5);
+                                while !probe.enabled(Level::Verbose, 1) && Instant::now() < deadline
+                                {
+                                    std::thread::sleep(Duration::from_millis(10));
+                                }
+                            }
+                        });
+                        assert_listener_state(probe, enabled);
+                    }
+                    let _parent_guard = parent.clone().attach();
+                    b.iter(|| record_span(&tracer, attributes, error));
+                    assert_eq!(
+                        Context::current().span().span_context(),
+                        parent.span().span_context(),
+                        "Lifecycle did not restore the parent context"
+                    );
+                    if let Some(probe) = &probe {
+                        assert_listener_state(probe, enabled);
+                    }
+                },
+            );
+        }
+        group.finish();
+        provider.shutdown().expect("SDK provider shutdown");
+    }
+
+    #[cfg(feature = "bench-internals")]
+    fn stage(c: &mut Criterion, geneva: bool) {
         use opentelemetry::trace::{SpanContext, SpanId, TraceFlags, TraceId, TraceState};
         use opentelemetry_etw_traces::benchmark::ExportBenchmark;
         use opentelemetry_sdk::trace::SpanData;
@@ -192,23 +416,16 @@ mod windows {
             .with_service_name("etw-trace-benchmark")
             .build();
         let exporter = ExportBenchmark::new(PROVIDER_NAME, &resource);
+        #[cfg(feature = "experimental-geneva-mapping")]
+        let exporter = exporter.with_geneva_mapping(geneva);
+        let layout = if geneva { "geneva" } else { "nested" };
         let enabled = enabled_mode();
         let mode = if enabled { "enabled" } else { "disabled" };
         let listener_setup = Once::new();
 
-        for count in [0, 3, 6] {
-            let attributes = match count {
-                0 => vec![],
-                3 => vec![
-                    KeyValue::new("string_key", "benchmark-value"),
-                    KeyValue::new("integer_key", 42_i64),
-                    KeyValue::new("bool_key", true),
-                ],
-                _ => (1..=6)
-                    .map(|i| KeyValue::new(format!("key{i}"), format!("value{i}")))
-                    .collect(),
-            };
-            let span = SpanData {
+        for (case, count) in CASES {
+            let attributes = attributes(count);
+            let mut span = SpanData {
                 span_context: SpanContext::new(
                     TraceId::from_bytes([0x12; 16]),
                     SpanId::from_bytes([0x34; 8]),
@@ -229,9 +446,13 @@ mod windows {
                 status: Status::Ok,
                 instrumentation_scope: Default::default(),
             };
+            if case == "ParentError" {
+                span.parent_span_id = SpanId::from_bytes([0x0a; 8]);
+                span.status = Status::error("request failed");
+            }
 
             c.bench_with_input(
-                BenchmarkId::new("ETW/Serialization", count),
+                BenchmarkId::new(format!("ETW/{layout}/Serialization"), case),
                 &span,
                 |b, span| {
                     let mut event = EventBuilder::new();
@@ -243,7 +464,7 @@ mod windows {
                 },
             );
             c.bench_with_input(
-                BenchmarkId::new(format!("ETW/{mode}/Export"), count),
+                BenchmarkId::new(format!("ETW/{layout}/{mode}/Export"), case),
                 &span,
                 |b, span| {
                     listener_setup.call_once(|| {
@@ -266,7 +487,12 @@ mod windows {
 #[cfg(all(windows, not(feature = "bench-internals")))]
 criterion::criterion_group!(benches, windows::benchmark);
 #[cfg(all(windows, feature = "bench-internals"))]
-criterion::criterion_group!(benches, windows::benchmark, windows::stages);
+criterion::criterion_group!(
+    benches,
+    windows::benchmark,
+    windows::stages,
+    windows::lifecycles
+);
 #[cfg(windows)]
 criterion::criterion_main!(benches);
 
