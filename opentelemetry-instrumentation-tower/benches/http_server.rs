@@ -111,7 +111,7 @@
 //! macOS 26.7, rustc 1.98.0, OpenTelemetry 0.32.
 //!
 
-use criterion::{criterion_group, criterion_main, BatchSize, BenchmarkId, Criterion, Throughput};
+use benchfmt::{Bencher, CountingAlloc, Suite};
 use opentelemetry::global;
 use opentelemetry::trace::noop::NoopTracerProvider;
 use opentelemetry_instrumentation_tower::http::server::LayerBuilder;
@@ -120,9 +120,21 @@ use opentelemetry_sdk::{
     trace::{Sampler, SdkTracerProvider},
 };
 use std::convert::Infallible;
+use std::fmt::Debug;
+use std::future::Future;
 use std::hint::black_box;
 use std::time::Duration;
+use tokio::runtime::Runtime;
 use tower::{Service, ServiceBuilder, ServiceExt};
+
+/// Counts allocations per thread. The benchmark loop drives every future with
+/// `block_on` on the calling thread, so no allocation escapes to a worker thread.
+#[global_allocator]
+static ALLOC: CountingAlloc = CountingAlloc::new();
+
+const TARGET: &str = "http://example.com/users/123";
+const TARGET_QUERY: &str = "http://example.com/users/123?fields=name&verbose=true";
+const TARGET_QUERY_REDACTED: &str = "http://example.com/users/123?fields=name&sig=secret-signature";
 
 /// Minimal handler — returns an empty body to keep baseline noise as low as possible.
 async fn handler(_req: http::Request<String>) -> Result<http::Response<String>, Infallible> {
@@ -183,202 +195,107 @@ fn setup_meter() -> (SdkMeterProvider, InMemoryMetricExporter) {
     (provider, exporter)
 }
 
-fn benchmark_http_server(c: &mut Criterion) {
-    // Use tokio runtime since Criterion's AsyncExecutor is implemented for tokio
-    let rt = tokio::runtime::Runtime::new().unwrap();
+/// Wrap `inner` in the server layer under test.
+/// Call this after the global tracer and meter providers are set.
+fn layered<F, Fut>(
+    inner: F,
+) -> impl Service<http::Request<String>, Response = http::Response<String>, Error = Infallible>
+where
+    F: FnMut(http::Request<String>) -> Fut,
+    Fut: Future<Output = Result<http::Response<String>, Infallible>> + Send,
+{
+    let layer = LayerBuilder::builder().build().unwrap();
+    ServiceBuilder::new()
+        .layer(layer)
+        .service(tower::service_fn(inner))
+}
 
-    let mut group = c.benchmark_group("tower-http-server");
-    group.throughput(Throughput::Elements(1));
-
-    // Scenario 1: Baseline - no middleware
-    group.bench_function(BenchmarkId::new("request", "baseline"), |b| {
-        let mut service = tower::service_fn(handler);
-        rt.block_on(service.ready()).unwrap();
-        b.to_async(&rt).iter_batched(
-            || build_request("http://example.com/users/123"),
-            |req| {
-                let response = service.call(req);
-                async move {
-                    black_box(response.await.unwrap());
-                }
-            },
-            BatchSize::SmallInput,
-        );
-    });
-
-    // Scenario 2: Middleware present, but both tracer and meter are no-ops.
-    // Measures the pure overhead of the server::Layer machinery (attribute extraction,
-    // context propagation hooks, etc.) when no real telemetry is produced.
-    group.bench_function(BenchmarkId::new("request", "noop"), |b| {
-        // reset any tracer left from a previous run
-        // meter is not set, so meter instruments are already no-op
-        noop_tracer();
-
-        let layer = LayerBuilder::builder().build().unwrap();
-        let mut service = ServiceBuilder::new()
-            .layer(layer)
-            .service(tower::service_fn(handler));
-        rt.block_on(service.ready()).unwrap();
-        b.to_async(&rt).iter_batched(
-            || build_request("http://example.com/users/123"),
-            |req| {
-                let response = service.call(req);
-                async move {
-                    black_box(response.await.unwrap());
-                }
-            },
-            BatchSize::SmallInput,
-        );
-    });
-
-    // Scenario 3: Tracing only (global meter not set, so meter instruments are no-op)
-    group.bench_function(BenchmarkId::new("request", "tracing"), |b| {
-        let _tracer_provider = setup_tracer();
-        let layer = LayerBuilder::builder().build().unwrap();
-        let mut service = ServiceBuilder::new()
-            .layer(layer.clone())
-            .service(tower::service_fn(handler));
-        rt.block_on(service.ready()).unwrap();
-        b.to_async(&rt).iter_batched(
-            || build_request("http://example.com/users/123"),
-            |req| {
-                let response = service.call(req);
-                async move {
-                    black_box(response.await.unwrap());
-                }
-            },
-            BatchSize::SmallInput,
-        );
-    });
-
-    // Scenario 4: Tracing, request target with a query string that holds no
-    // sensitive parameter (measures `url.query` and the scan for a key to redact)
-    group.bench_function(BenchmarkId::new("request", "tracing-query"), |b| {
-        let _tracer_provider = setup_tracer();
-        let layer = LayerBuilder::builder().build().unwrap();
-        let mut service = ServiceBuilder::new()
-            .layer(layer.clone())
-            .service(tower::service_fn(handler));
-        rt.block_on(service.ready()).unwrap();
-        b.to_async(&rt).iter_batched(
-            || build_request("http://example.com/users/123?fields=name&verbose=true"),
-            |req| {
-                let response = service.call(req);
-                async move {
-                    black_box(response.await.unwrap());
-                }
-            },
-            BatchSize::SmallInput,
-        );
-    });
-
-    // Scenario 5: Tracing, request target with a query string that holds a
-    // credential (measures redaction, which has to rewrite the value)
-    group.bench_function(BenchmarkId::new("request", "tracing-query-redacted"), |b| {
-        let _tracer_provider = setup_tracer();
-        let layer = LayerBuilder::builder().build().unwrap();
-        let mut service = ServiceBuilder::new()
-            .layer(layer.clone())
-            .service(tower::service_fn(handler));
-        rt.block_on(service.ready()).unwrap();
-        b.to_async(&rt).iter_batched(
-            || build_request("http://example.com/users/123?fields=name&sig=secret-signature"),
-            |req| {
-                let response = service.call(req);
-                async move {
-                    black_box(response.await.unwrap());
-                }
-            },
-            BatchSize::SmallInput,
-        );
-    });
-
-    // Scenario 6: Tracing with AlwaysOff sampler (global meter not set, so meter instruments are no-op)
-    group.bench_function(BenchmarkId::new("request", "tracing-sampled-out"), |b| {
-        let _tracer_provider = setup_sampled_out_tracer();
-        let layer = LayerBuilder::builder().build().unwrap();
-        let mut service = ServiceBuilder::new()
-            .layer(layer.clone())
-            .service(tower::service_fn(handler));
-        rt.block_on(service.ready()).unwrap();
-        b.to_async(&rt).iter_batched(
-            || build_request("http://example.com/users/123"),
-            |req| {
-                let response = service.call(req);
-                async move {
-                    black_box(response.await.unwrap());
-                }
-            },
-            BatchSize::SmallInput,
-        );
-    });
-
-    // Scenario 7: Metrics only (tracer reset to NoopTracerProvider)
-    group.bench_function(BenchmarkId::new("request", "metrics"), |b| {
-        noop_tracer();
-        let (_meter_provider, _metric_exporter) = setup_meter();
-        let layer = LayerBuilder::builder().build().unwrap();
-        let mut service = ServiceBuilder::new()
-            .layer(layer.clone())
-            .service(tower::service_fn(handler));
-        rt.block_on(service.ready()).unwrap();
-        b.to_async(&rt).iter_batched(
-            || build_request("http://example.com/users/123"),
-            |req| {
-                let response = service.call(req);
-                async move {
-                    black_box(response.await.unwrap());
-                }
-            },
-            BatchSize::SmallInput,
-        );
-    });
-
-    // Scenario 8: Both tracing + metrics
-    group.bench_function(BenchmarkId::new("request", "tracing+metrics"), |b| {
-        let _tracer_provider = setup_tracer();
-        let (_meter_provider, _metric_exporter) = setup_meter();
-        let layer = LayerBuilder::builder().build().unwrap();
-        let mut service = ServiceBuilder::new()
-            .layer(layer.clone())
-            .service(tower::service_fn(handler));
-        rt.block_on(service.ready()).unwrap();
-        b.to_async(&rt).iter_batched(
-            || build_request("http://example.com/users/123"),
-            |req| {
-                let response = service.call(req);
-                async move {
-                    black_box(response.await.unwrap());
-                }
-            },
-            BatchSize::SmallInput,
-        );
-    });
-
-    // Scenario 9: Both tracing + metrics, with a 500 response. Comparing this
-    // against scenario 8 isolates the cost of the `error.type` code path,
-    // since both scenarios have the same signals active and differ only in
-    // the response status.
-    group.bench_function(BenchmarkId::new("request", "tracing+metrics-500"), |b| {
-        let _tracer_provider = setup_tracer();
-        let (_meter_provider, _metric_exporter) = setup_meter();
-        let layer = LayerBuilder::builder().build().unwrap();
-        let mut service = ServiceBuilder::new()
-            .layer(layer.clone())
-            .service(tower::service_fn(error_handler));
-        rt.block_on(service.ready()).unwrap();
-        b.to_async(&rt).iter_batched(
-            || build_request("http://example.com/users/123"),
-            |req| {
-                let response = service.call(req);
-                async move {
-                    black_box(response.await.unwrap());
-                }
-            },
-            BatchSize::SmallInput,
-        );
+/// Measurement loop shared by all scenarios.
+///
+/// Everything before the loop is one-time setup and stays out of the measurement.
+/// The whole loop runs inside a single `block_on`, so the runtime entry cost is paid once
+/// and not once per request.
+/// Each request is a clone of one prebuilt request.
+/// The `baseline` scenario pays the same clone cost, so compare scenarios against it.
+fn measure<S>(b: &mut Bencher<'_>, rt: &Runtime, mut service: S, target: &'static str)
+where
+    S: Service<http::Request<String>, Response = http::Response<String>>,
+    S::Error: Debug,
+{
+    let request = build_request(target);
+    rt.block_on(async {
+        service.ready().await.unwrap();
+        b.report_allocs();
+        while b.keep_running() {
+            let response = service.call(request.clone()).await;
+            black_box(response.unwrap());
+        }
     });
 }
 
-criterion_group!(benches, benchmark_http_server);
-criterion_main!(benches);
+fn main() {
+    // A current-thread runtime keeps all work, and so all allocations, on the calling thread.
+    let rt = tokio::runtime::Builder::new_current_thread()
+        .build()
+        .unwrap();
+
+    Suite::from_env("opentelemetry-instrumentation-tower")
+        .with_alloc(&ALLOC)
+        // Scenario 1: Baseline - no middleware
+        .bench("HttpServer/scenario=baseline", |b| {
+            measure(b, &rt, tower::service_fn(handler), TARGET);
+        })
+        // Scenario 2: Middleware present, but both tracer and meter are no-ops.
+        // Measures the pure overhead of the server::Layer machinery (attribute extraction,
+        // context propagation hooks, etc.) when no real telemetry is produced.
+        .bench("HttpServer/scenario=noop", |b| {
+            // reset any tracer left from a previous run
+            // meter is not set, so meter instruments are already no-op
+            noop_tracer();
+            measure(b, &rt, layered(handler), TARGET);
+        })
+        // Scenario 3: Tracing only (global meter not set, so meter instruments are no-op)
+        .bench("HttpServer/scenario=tracing", |b| {
+            let _tracer_provider = setup_tracer();
+            measure(b, &rt, layered(handler), TARGET);
+        })
+        // Scenario 4: Tracing, request target with a query string that holds no
+        // sensitive parameter (measures `url.query` and the scan for a key to redact)
+        .bench("HttpServer/scenario=tracing-query", |b| {
+            let _tracer_provider = setup_tracer();
+            measure(b, &rt, layered(handler), TARGET_QUERY);
+        })
+        // Scenario 5: Tracing, request target with a query string that holds a
+        // credential (measures redaction, which has to rewrite the value)
+        .bench("HttpServer/scenario=tracing-query-redacted", |b| {
+            let _tracer_provider = setup_tracer();
+            measure(b, &rt, layered(handler), TARGET_QUERY_REDACTED);
+        })
+        // Scenario 6: Tracing with AlwaysOff sampler (global meter not set, so meter instruments are no-op)
+        .bench("HttpServer/scenario=tracing-sampled-out", |b| {
+            let _tracer_provider = setup_sampled_out_tracer();
+            measure(b, &rt, layered(handler), TARGET);
+        })
+        // Scenario 7: Metrics only (tracer reset to NoopTracerProvider)
+        .bench("HttpServer/scenario=metrics", |b| {
+            noop_tracer();
+            let (_meter_provider, _metric_exporter) = setup_meter();
+            measure(b, &rt, layered(handler), TARGET);
+        })
+        // Scenario 8: Both tracing + metrics
+        .bench("HttpServer/scenario=tracing+metrics", |b| {
+            let _tracer_provider = setup_tracer();
+            let (_meter_provider, _metric_exporter) = setup_meter();
+            measure(b, &rt, layered(handler), TARGET);
+        })
+        // Scenario 9: Both tracing + metrics, with a 500 response. Comparing this
+        // against scenario 8 isolates the cost of the `error.type` code path,
+        // since both scenarios have the same signals active and differ only in
+        // the response status.
+        .bench("HttpServer/scenario=tracing+metrics-500", |b| {
+            let _tracer_provider = setup_tracer();
+            let (_meter_provider, _metric_exporter) = setup_meter();
+            measure(b, &rt, layered(error_handler), TARGET);
+        })
+        .run();
+}
