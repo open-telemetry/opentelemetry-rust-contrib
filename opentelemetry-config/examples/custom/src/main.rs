@@ -10,9 +10,7 @@ use opentelemetry_config::{
 
 use opentelemetry_sdk::{
     error::OTelSdkResult,
-    metrics::{
-        data::ResourceMetrics, exporter::PushMetricExporter, MeterProviderBuilder, PeriodicReader,
-    },
+    metrics::{data::ResourceMetrics, exporter::PushMetricExporter},
 };
 use std::time::Duration;
 use std::{env, fs};
@@ -47,7 +45,7 @@ pub fn main() -> Result<(), Box<dyn std::error::Error>> {
     let mut registry = ConfigurationProviderRegistry::default();
 
     // Register the custom exporter provider.
-    MockPeriodicExporterProvider::register_into(&mut registry);
+    MockPeriodicExporterProvider::register_into(&mut registry)?;
 
     // Configure telemetry from the provided YAML file.
     let providers = match TelemetryProviders::configure_from_yaml_str(&registry, &config_yaml) {
@@ -62,7 +60,13 @@ pub fn main() -> Result<(), Box<dyn std::error::Error>> {
     };
 
     if let Some(meter_provider) = providers.meter_provider() {
-        println!("Meter provider configured successfully. Shutting it down...");
+        println!("Meter provider configured successfully.");
+        let meter =
+            opentelemetry::metrics::MeterProvider::meter(meter_provider, "custom_example_meter");
+        let counter = meter.u64_counter("custom_events_total").build();
+        counter.add(1, &[opentelemetry::KeyValue::new("example", "custom")]);
+        println!("Recorded metric event.");
+        println!("Shutting down meter provider...");
         meter_provider.shutdown()?;
     } else {
         println!("No Meter provider configured.");
@@ -87,19 +91,6 @@ pub fn main() -> Result<(), Box<dyn std::error::Error>> {
 
 #[derive(Debug, serde::Deserialize)]
 #[serde(deny_unknown_fields)]
-struct PeriodicConfig {
-    pub interval: Option<u64>,
-    pub exporter: MockCustomConfig,
-}
-
-#[derive(Debug, serde::Deserialize)]
-#[serde(deny_unknown_fields)]
-struct MockCustomConfig {
-    pub custom: CustomData,
-}
-
-#[derive(Debug, serde::Deserialize)]
-#[serde(deny_unknown_fields)]
 struct CustomData {
     pub custom_string_field: String,
     pub custom_int_field: i32,
@@ -110,50 +101,31 @@ struct MockPeriodicExporterProvider {}
 impl MockPeriodicExporterProvider {
     pub fn register_into(
         registry: &mut opentelemetry_config::ConfigurationProviderRegistry,
-    ) {
+    ) -> Result<(), ConfigurationError> {
         registry.register_metric_exporter_factory(
             "custom",
             MockPeriodicExporterProvider::register_mock_exporter_factory,
-        );
+        )
     }
 
     pub fn register_mock_exporter_factory(
-        mut meter_provider_builder: MeterProviderBuilder,
-        periodic_config_str: &str,
-    ) -> Result<MeterProviderBuilder, ConfigurationError> {
-        let periodic_config: PeriodicConfig =
-            serde_yaml::from_str(periodic_config_str).map_err(|e| {
-                ConfigurationError::InvalidConfiguration(format!(
-                    "Failed to parse PeriodicConfig: {}",
-                    e
-                ))
-            })?;
-
-        let exporter_config = periodic_config.exporter;
+        config: &serde_yaml::Value,
+    ) -> Result<MockCustomExporter, ConfigurationError> {
+        let custom_config: CustomData = serde_yaml::from_value(config.clone()).map_err(|e| {
+            ConfigurationError::InvalidConfiguration(format!("Failed to parse CustomData: {}", e))
+        })?;
 
         println!(
             "Configuring MockCustomExporter with string field: {} and int field: {}",
-            exporter_config.custom.custom_string_field, exporter_config.custom.custom_int_field
+            custom_config.custom_string_field, custom_config.custom_int_field
         );
 
-        let exporter = MockCustomExporter {
-            custom_config: exporter_config,
-        };
-
-        let interval_millis = periodic_config.interval.unwrap_or(60000);
-
-        // TODO: Add timeout from config
-        let reader = PeriodicReader::builder(exporter)
-            .with_interval(std::time::Duration::from_millis(interval_millis))
-            .build();
-
-        meter_provider_builder = meter_provider_builder.with_reader(reader);
-        Ok(meter_provider_builder)
+        Ok(MockCustomExporter { custom_config })
     }
 }
 
-struct MockCustomExporter {
-    custom_config: MockCustomConfig,
+pub(crate) struct MockCustomExporter {
+    custom_config: CustomData,
 }
 
 impl PushMetricExporter for MockCustomExporter {
