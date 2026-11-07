@@ -75,19 +75,19 @@ default = ["tls-native"]
 
 [dev-dependencies]
 geneva-test-server = { path = "../geneva-test-server", features = ["testing"] }
-otap-df-pdata = { package = "otel-arrow-dfe-pdata", version = "0.54.1" }
-prost = "0.14"
-tokio = { version = "1", features = ["full"] }
-rcgen = "0.14"
-rustls = { version = "0.23", features = ["ring"] }
-openssl = { version = "0.10", features = ["vendored"] }
-tempfile = "3.5"
-wiremock = "0.6"
-futures = "0.3"
-num_cpus = "1.16"
-lz4_flex = { version = "0.11" }
-criterion = {version = "0.8"}
-rand = {version = "0.9"}
+otap-df-pdata = { package = "otel-arrow-dfe-pdata", version = "=0.54.1" }
+prost = "=0.14.4"
+tokio = { version = "=1.54.1", features = ["full"] }
+rcgen = "=0.14.10"
+rustls = { version = "=0.23.46", features = ["ring"] }
+openssl = { version = "=0.10.82", features = ["vendored"] }
+tempfile = "=3.27.0"
+wiremock = "=0.6.5"
+futures = "=0.3.34"
+num_cpus = "=1.17.0"
+lz4_flex = { version = "=0.11.6" }
+criterion = {version = "=0.8.2"}
+rand = {version = "=0.9.5"}
 
 [[test]]
 name = "geneva_test_server_integration"

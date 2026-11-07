@@ -18,20 +18,20 @@ opentelemetry_sdk = { workspace = true, features = ["trace"] }
 chrono = { version = "0.4", default-features = false, features = ["std"] }
 
 [dev-dependencies]
-tracing = { version = "0.1", default-features = false, features = ["std"] }
-tracing-core = "0.1.31"
-tracing-subscriber = { version = "0.3.0", default-features = false, features = ["env-filter", "fmt", "registry", "std"] }
-ctrlc = "3.4"
-criterion = "0.8"
-serde_json = "1.0.140"
+tracing = { version = "=0.1.44", default-features = false, features = ["std"] }
+tracing-core = "=0.1.36"
+tracing-subscriber = { version = "=0.3.23", default-features = false, features = ["env-filter", "fmt", "registry", "std"] }
+ctrlc = "=3.5.2"
+criterion = "=0.8.2"
+serde_json = "=1.0.154"
 
 # Linux-only: in-process user_events consumer/decoder used by the integration
 # tests to read EventHeader events directly from the perf ring buffer
 # (`one_collect`) and decode them (`tracepoint_decode`), instead of shelling out
 # to `perf record` + `perf-decode`.
 [target.'cfg(target_os = "linux")'.dev-dependencies]
-one_collect = "0.1.34532"
-tracepoint_decode = "0.5.0"
+one_collect = "=0.1.35021"
+tracepoint_decode = "=0.5.0"
 
 [features]
 internal-logs = ["opentelemetry/internal-logs", "opentelemetry_sdk/internal-logs"]
