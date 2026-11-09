@@ -350,7 +350,7 @@ mod tests {
 
     #[test]
     fn fetches_rules_in_background() {
-        let (endpoint, server) = client::tests::serve_once(
+        let (endpoint, server) = crate::test_util::serve_once(
             "200 OK",
             r#"{"SamplingRuleRecords": [{"SamplingRule": {"RuleName": "all", "Priority": 1, "FixedRate": 1.0,
                 "URLPath": "*", "Host": "*", "HTTPMethod": "*", "ServiceName": "*", "ServiceType": "*",
