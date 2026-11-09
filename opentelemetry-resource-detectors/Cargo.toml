@@ -19,6 +19,10 @@ opentelemetry-semantic-conventions = { workspace = true }
 
 [dev-dependencies]
 temp-env = "0.3.6"
+tempfile = "3.27.0"
 
 [lints]
 workspace = true
+
+[target.'cfg(any(unix, windows, target_os = "redox"))'.dependencies]
+hostname = "0.4.2"

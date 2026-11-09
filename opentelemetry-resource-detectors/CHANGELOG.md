@@ -2,6 +2,7 @@
 
 ## vNext
 
+- Avoid PATH-based command lookup in `HostResourceDetector`: use native hostname APIs and an absolute path to `ioreg` on macOS.
 - Bump OpenTelemetry dependencies to 0.33.1.
 
 ## v0.13.0
