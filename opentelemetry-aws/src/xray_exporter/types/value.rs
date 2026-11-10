@@ -19,7 +19,7 @@ impl StrList for Vec<String> {
     }
 
     fn get(&self, i: usize) -> Option<&str> {
-        self[..].get(i).map(|s| s.as_str())
+        self.as_slice().get(i).map(|s| s.as_str())
     }
 }
 
