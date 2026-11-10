@@ -126,7 +126,7 @@ write costs for the nested and experimental flat Geneva layouts, with separate
 listener-enabled and listener-disabled runs.
 
 See [Benchmarks](BENCHMARKS.md) for run commands, ETW capture and loss checks,
-measurement boundaries, detailed results, and machine/run provenance.
+benchmark groups, reference results, and guidance for comparing revisions.
 
 ## OpenTelemetry Overview
 
