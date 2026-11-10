@@ -150,10 +150,10 @@ jobs:
       # Geneva crates (and stress, which depends on geneva-uploader) pull
       # `otap-df-pdata-views` from otel-arrow. That dependency requires a newer
       # compiler and breaks the 1.75 workspace-wide sweep for unrelated crates.
-      # `opentelemetry-instrumentation-actix-web` pulls actix-http 3.12+ which
-      # requires Rust 1.88 (via sha1 0.11 edition2024).
+      # `opentelemetry-instrumentation-actix-web` requires Rust 1.89 for
+      # the patched actix-http and actix-web releases.
       # For the 1.75 run, temporarily remove these members from workspace.
-      # These crates are validated separately in the `msrv-1.88` job.
+      # These crates are validated at their declared MSRVs in `msrv-geneva`.
       - name: Temporarily exclude crates with higher MSRV from workspace for 1.75 sweep
         shell: bash
         run: |
@@ -185,12 +185,12 @@ jobs:
         with:
           persist-credentials: false
           submodules: true
-      - name: Install Rust 1.88.0
-        run: rustup toolchain install 1.88.0 --profile minimal
+      - name: Install Rust 1.88.0 (Geneva) and 1.89.0 (Actix)
+        run: rustup toolchain install 1.88.0 1.89.0 --profile minimal
       - uses: taiki-e/install-action@1919c4a95903d2c33e4a221102edca87309fc14b # v2.89.0
         with:
           tool: cargo-msrv
-      - name: Check MSRV for Geneva crates
+      - name: Check declared MSRV for Geneva and Actix crates
         run: bash ./scripts/msrv.sh
         env:
           MSRV_ONLY_PACKAGES: geneva-uploader,geneva-uploader-ffi,opentelemetry-exporter-geneva,opentelemetry-instrumentation-actix-web

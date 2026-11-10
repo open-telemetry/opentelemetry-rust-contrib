@@ -9,7 +9,7 @@ categories = ["api-bindings"]
 keywords = ["actix", "actix-web", "opentelemetry"]
 license = "Apache-2.0"
 edition = "2021"
-rust-version = "1.88.0"
+rust-version = "1.89.0"
 
 [features]
 default = ["metrics"]
@@ -17,10 +17,10 @@ metrics = ["opentelemetry/metrics"]
 sync-middleware = []
 
 [dependencies]
-actix-http = { version = "3.11", default-features = false, features = [
+actix-http = { version = "3.20.3", default-features = false, features = [
   "compress-zstd",
 ] }
-actix-web = { version = "4.12", default-features = false, features = [
+actix-web = { version = "4.18.2", default-features = false, features = [
   "compress-zstd",
 ] }
 awc = { version = "3.8", optional = true, default-features = false, features = [
@@ -40,7 +40,7 @@ time = ">=0.3.47"
 
 [dev-dependencies]
 actix-rt = "2"
-actix-web = { version = "4.12", features = ["macros"] }
+actix-web = { version = "4.18.2", features = ["macros"] }
 awc = { version = "3.8", default-features = false, features = ["compress-zstd"] }
 criterion = { workspace = true, features = ["async_tokio"] }
 opentelemetry_sdk = { workspace = true, features = [
