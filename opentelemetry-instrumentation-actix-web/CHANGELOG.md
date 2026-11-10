@@ -2,6 +2,10 @@
 
 ## vNext
 
+- Require actix-http 3.20.3 and actix-web 4.18.2 or later to address request
+  smuggling and decompression advisories (RUSTSEC-2026-0446, -0447, -0448, -0455).
+- Raise MSRV to Rust 1.89.0, required by the patched Actix releases.
+
 - Bump OpenTelemetry dependencies to 0.33.1.
 
 ## v0.25.0
