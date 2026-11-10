@@ -338,9 +338,6 @@ mod integration_tests {
         let exporter = crate::benchmark::ExportBenchmark::new(provider_name, &resource);
         #[cfg(feature = "experimental-geneva-mapping")]
         let exporter = exporter.with_geneva_mapping(geneva);
-        let provider = Box::pin(tld::Provider::new(provider_name, &tld::Provider::options()));
-        // SAFETY: the provider remains pinned until drop unregisters the callback.
-        assert_eq!(unsafe { provider.as_ref().register() }, 0);
         let deadline = std::time::Instant::now() + Duration::from_secs(5);
         while !exporter.enabled() && std::time::Instant::now() < deadline {
             std::thread::sleep(Duration::from_millis(10));
@@ -358,7 +355,7 @@ mod integration_tests {
             span.start_time = std::time::UNIX_EPOCH + Duration::new(10, 123_456_000);
             span.end_time = std::time::UNIX_EPOCH + Duration::new(20, 987_654_300);
             exporter.serialize(&mut event, &span);
-            assert_eq!(event.write(&provider, None, None), 0);
+            assert_eq!(exporter.write(&mut event), 0);
             let serialized = recv_event(&rx, "Span");
             exporter.export(&span);
             let exported = recv_event(&rx, "Span");

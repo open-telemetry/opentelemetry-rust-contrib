@@ -30,7 +30,7 @@
     One unpinned producer; Windows 11 Microsoft VM, EPYC 7763, 8 guest cores /
     16 logical CPUs, 63.95 GiB RAM. Accepted ETW captures reported zero loss.
     Columns come from separate runs and are NOT additive; write timings are noisy.
-    See README.md for commands, measurement boundaries, variability, and history.
+    See BENCHMARKS.md for commands, measurement boundaries, variability, and history.
 */
 
 #[cfg(windows)]
@@ -69,12 +69,24 @@ mod windows {
         }
     }
 
+    // Call only from selected benchmark callbacks, before timed work.
+    fn wait_for_listener(setup: &Once, expected: bool, is_enabled: impl Fn() -> bool) {
+        setup.call_once(|| {
+            if expected {
+                let deadline = Instant::now() + Duration::from_secs(5);
+                while !is_enabled() && Instant::now() < deadline {
+                    std::thread::sleep(Duration::from_millis(10));
+                }
+            }
+        });
+    }
+
     fn assert_listener_state(probe: &Provider, expected: bool) {
         assert_eq!(
             probe.enabled(Level::Verbose, 1),
             expected,
             "ETW listener state does not match OTEL_ETW_BENCH_MODE; \
-             see the crate README for capture instructions"
+             see BENCHMARKS.md for capture instructions"
         );
     }
 
@@ -108,13 +120,8 @@ mod windows {
         assert_eq!(unsafe { probe.as_ref().register() }, 0);
         let listener_setup = Once::new();
         let setup_listener = || {
-            listener_setup.call_once(|| {
-                if enabled {
-                    let deadline = Instant::now() + Duration::from_secs(5);
-                    while !probe.enabled(Level::Verbose, 1) && Instant::now() < deadline {
-                        std::thread::sleep(Duration::from_millis(10));
-                    }
-                }
+            wait_for_listener(&listener_setup, enabled, || {
+                probe.enabled(Level::Verbose, 1)
             });
             assert_listener_state(&probe, enabled);
         };
@@ -272,14 +279,8 @@ mod windows {
                 &attributes,
                 |b, attributes| {
                     if let Some(probe) = &probe {
-                        listener_setup.call_once(|| {
-                            if enabled {
-                                let deadline = Instant::now() + Duration::from_secs(5);
-                                while !probe.enabled(Level::Verbose, 1) && Instant::now() < deadline
-                                {
-                                    std::thread::sleep(Duration::from_millis(10));
-                                }
-                            }
+                        wait_for_listener(&listener_setup, enabled, || {
+                            probe.enabled(Level::Verbose, 1)
                         });
                         assert_listener_state(probe, enabled);
                     }
@@ -321,14 +322,7 @@ mod windows {
         let listener_setup = Once::new();
 
         let setup_listener = || {
-            listener_setup.call_once(|| {
-                if enabled {
-                    let deadline = Instant::now() + Duration::from_secs(5);
-                    while !exporter.enabled() && Instant::now() < deadline {
-                        std::thread::sleep(Duration::from_millis(10));
-                    }
-                }
-            });
+            wait_for_listener(&listener_setup, enabled, || exporter.enabled());
             assert_eq!(exporter.enabled(), enabled, "ETW listener state mismatch");
         };
         let cases = CASES
