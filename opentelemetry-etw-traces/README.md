@@ -119,6 +119,15 @@ Instructions using Powershell:
     - Double-click the `provider_name/Span` in the left-panel.
     - You should see the events in the right-panel.
 
+## Benchmarks
+
+Windows-only Criterion benchmarks measure span lifecycle, serialization, and ETW
+write costs for the nested and experimental flat Geneva layouts, with separate
+listener-enabled and listener-disabled runs.
+
+See [Benchmarks](BENCHMARKS.md) for run commands, ETW capture and loss checks,
+benchmark groups, reference results, and guidance for comparing revisions.
+
 ## OpenTelemetry Overview
 
 OpenTelemetry is an Observability framework and toolkit designed to create and

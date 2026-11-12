@@ -82,6 +82,10 @@ mod processor;
 pub use processor::Processor;
 pub use processor::ProcessorBuilder;
 
+#[cfg(feature = "bench-internals")]
+#[doc(hidden)]
+pub use exporter::benchmark;
+
 #[cfg(all(test, target_os = "windows"))]
 mod integration_tests {
     use std::cell::RefCell;
@@ -304,6 +308,150 @@ mod integration_tests {
     // resulting ETW events with one_collect for payload validation.
     // -----------------------------------------------------------------------
 
+    #[cfg(feature = "bench-internals")]
+    #[ignore = "Requires admin privileges to start ETW trace session"]
+    #[test]
+    fn integration_test_serialization_matches_export() {
+        assert_serialization_matches_export(false);
+    }
+
+    #[cfg(all(feature = "bench-internals", feature = "experimental-geneva-mapping"))]
+    #[ignore = "Requires admin privileges to start ETW trace session"]
+    #[test]
+    fn integration_test_geneva_serialization_matches_export() {
+        assert_serialization_matches_export(true);
+    }
+
+    #[cfg(feature = "bench-internals")]
+    fn assert_serialization_matches_export(geneva: bool) {
+        let provider_name = if geneva {
+            "OTelETWTracesIntTest_GenevaSerialization"
+        } else {
+            "OTelETWTracesIntTest_Serialization"
+        };
+        let part_b = if geneva { "" } else { "PartB." };
+        let part_c = if geneva { "" } else { "PartC." };
+        let (trace, rx) = start_etw_trace(provider_name);
+        let resource = Resource::builder_empty()
+            .with_service_name("serialization-test")
+            .build();
+        let exporter = crate::benchmark::ExportBenchmark::new(provider_name, &resource);
+        #[cfg(feature = "experimental-geneva-mapping")]
+        let exporter = exporter.with_geneva_mapping(geneva);
+        let deadline = std::time::Instant::now() + Duration::from_secs(5);
+        while !exporter.enabled() && std::time::Instant::now() < deadline {
+            std::thread::sleep(Duration::from_millis(10));
+        }
+        assert!(exporter.enabled());
+
+        let mut event = tld::EventBuilder::new();
+        // Alternate large and small payloads to exercise reset of reused buffers.
+        for count in [6, 0, 3] {
+            let attributes = (0..count)
+                .map(|i| KeyValue::new(format!("key{i}"), format!("value{i}")))
+                .collect();
+            let mut span =
+                crate::exporter::common::test_utils::create_test_span_data(Some(attributes));
+            span.start_time = std::time::UNIX_EPOCH + Duration::new(10, 123_456_000);
+            span.end_time = std::time::UNIX_EPOCH + Duration::new(20, 987_654_300);
+            exporter.serialize(&mut event, &span);
+            assert_eq!(exporter.write(&mut event), 0);
+            let serialized = recv_event(&rx, "Span");
+            exporter.export(&span);
+            let exported = recv_event(&rx, "Span");
+
+            assert_eq!(serialized.keyword, exported.keyword);
+            assert_eq!(serialized.properties, exported.properties);
+            assert_eq!(
+                exported.get_str(&format!("{part_b}name")),
+                Some("test-span")
+            );
+            assert_eq!(
+                exported.get_str(if geneva { "env_time" } else { "PartA.time" }),
+                Some("1970-01-01T00:00:20.987654300Z")
+            );
+            assert_eq!(
+                exported.get_str(&format!("{part_b}startTime")),
+                Some("1970-01-01T00:00:10.123456Z")
+            );
+            assert_eq!(
+                exported.get_str(if geneva {
+                    "env_dt_traceId"
+                } else {
+                    "PartA.ext_dt.traceId"
+                }),
+                Some(span.span_context.trace_id().to_string().as_str())
+            );
+            assert_eq!(
+                exported.get_str(if geneva {
+                    "env_dt_spanId"
+                } else {
+                    "PartA.ext_dt.spanId"
+                }),
+                Some(span.span_context.span_id().to_string().as_str())
+            );
+            assert_eq!(
+                exported.get_str(if geneva {
+                    "env_cloud_role"
+                } else {
+                    "PartA.ext_cloud.role"
+                }),
+                Some("serialization-test")
+            );
+            for i in 0..6 {
+                let key = format!("{part_c}key{i}");
+                let value = format!("value{i}");
+                assert_eq!(
+                    exported.get_str(&key),
+                    (i < count).then_some(value.as_str())
+                );
+            }
+        }
+
+        let mut span = crate::exporter::common::test_utils::create_test_span_data(Some(vec![
+            KeyValue::new("http.request.method", "GET"),
+            KeyValue::new("custom", "custom-value"),
+            KeyValue::new("db.system.name", "postgresql"),
+            KeyValue::new("http.request.method", "POST"),
+        ]));
+        span.parent_span_id = opentelemetry::trace::SpanId::from_bytes([0x0a; 8]);
+        for description in ["failure \u{2603}", ""] {
+            for description in [
+                std::borrow::Cow::Borrowed(description),
+                std::borrow::Cow::Owned(description.to_string()),
+            ] {
+                span.status = opentelemetry::trace::Status::Error {
+                    description: description.clone(),
+                };
+                exporter.export(&span);
+                let exported = recv_event(&rx, "Span");
+                assert_eq!(
+                    exported.get_str(&format!("{part_b}parentId")),
+                    Some("0a0a0a0a0a0a0a0a")
+                );
+                assert_eq!(
+                    exported.get_str(&format!("{part_b}httpMethod")),
+                    Some("GET")
+                );
+                assert_eq!(
+                    exported.get_str(&format!("{part_b}dbSystem")),
+                    Some("postgresql")
+                );
+                assert_eq!(
+                    exported.get_str(&format!("{part_c}custom")),
+                    Some("custom-value")
+                );
+                assert!(!exported.has(&format!("{part_c}http.request.method")));
+                assert_eq!(exported.get_bool(&format!("{part_b}success")), Some(false));
+                assert_eq!(
+                    exported.get_str(&format!("{part_b}statusMessage")),
+                    (!description.is_empty()).then_some(description.as_ref())
+                );
+            }
+        }
+        trace.stop().unwrap();
+    }
+
     /// Full test: validates PartA, PartB (incl. well-known attributes), and PartC.
     #[ignore = "Requires admin privileges to start ETW trace session"]
     #[test]
@@ -351,7 +499,14 @@ mod integration_tests {
             .with_span_processor(processor)
             .build();
 
-        std::thread::sleep(Duration::from_millis(100));
+        let probe = Box::pin(tld::Provider::new(provider_name, &tld::Provider::options()));
+        // SAFETY: the probe remains pinned until drop unregisters the callback.
+        assert_eq!(unsafe { probe.as_ref().register() }, 0);
+        let deadline = std::time::Instant::now() + Duration::from_secs(5);
+        while !probe.enabled(tld::Level::Verbose, 1) && std::time::Instant::now() < deadline {
+            std::thread::sleep(Duration::from_millis(10));
+        }
+        assert!(probe.enabled(tld::Level::Verbose, 1));
 
         let tracer = tracer_provider.tracer("test");
         let (trace_id, span_id) = tracer.in_span("my-span", |cx| {
@@ -474,7 +629,14 @@ mod integration_tests {
             .links
             .push(Link::new(span.span_context.clone(), vec![], 0));
 
-        std::thread::sleep(Duration::from_millis(100));
+        let probe = Box::pin(tld::Provider::new(provider_name, &tld::Provider::options()));
+        // SAFETY: the probe remains pinned until drop unregisters the callback.
+        assert_eq!(unsafe { probe.as_ref().register() }, 0);
+        let deadline = std::time::Instant::now() + Duration::from_secs(5);
+        while !probe.enabled(tld::Level::Verbose, 1) && std::time::Instant::now() < deadline {
+            std::thread::sleep(Duration::from_millis(10));
+        }
+        assert!(probe.enabled(tld::Level::Verbose, 1));
         processor.on_end(span);
         let evt = recv_event(&rx, "CustomSpan");
 
