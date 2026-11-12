@@ -2,6 +2,10 @@
 
 ## vNext
 
+## v0.3.1
+
+Released 2026-Nov-12
+
 - Apply stack-backed ID/timestamp formatting, borrowed error descriptions, and
   reduced attribute searches to both layouts, including `env_time`.
 - Benchmark serialization and enabled export for nested and flat Geneva output.
