@@ -30,7 +30,7 @@ services:
       - "5000:5000"
 
   otel-collector:
-    image: otel/opentelemetry-collector-contrib:latest
+    image: otel/opentelemetry-collector-contrib:latest@sha256:e40d61f10c9a617cca1ffd1be4d7e2b3a4b0f0001798ff07e58cabe82e618cea
     container_name: otel-collector
     command:
       - "--config=/etc/otel-collector-config.yaml"
@@ -42,7 +42,7 @@ services:
       - ./config/otel-collector-config.yaml:/etc/otel-collector-config.yaml
 
   mimir:
-    image: grafana/mimir:latest
+    image: grafana/mimir:latest@sha256:245ce851e2f5d27db6bd37720d9ab12bcb017f4b4e20340d9b58266435dbe4b6
     container_name: mimir
     command: [ "-config.file=/mimir/config/mimir.yaml" ]
     networks:
@@ -53,7 +53,7 @@ services:
       - ./config/mimir.yaml:/mimir/config/mimir.yaml
 
   grafana:
-    image: grafana/grafana:latest
+    image: grafana/grafana:latest@sha256:0615ec4fbd4072004b7d86b46ded63013a74b7d6eb1119273dd89e8fa25c13cf
     container_name: grafana
     environment:
       - GF_AUTH_ANONYMOUS_ENABLED=true
@@ -66,7 +66,7 @@ services:
       - ./config/grafana-datasource-mimir.yaml:/etc/grafana/provisioning/datasources/mimir.yaml
 
   k6-load-gen:
-    image: grafana/k6:latest
+    image: grafana/k6:latest@sha256:3d8e5c7f1d53ec59408c2ffbd9943602a0985ffcbd4a2430ec00f3ffca89796e
     container_name: k6-load-gen
     command:
       - "run"
