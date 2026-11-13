@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+### Changed
+
+- Encode CentralBlob metadata and event names directly into the output buffer,
+  avoiding temporary UTF-16LE buffers and an intermediate event vector.
+
 ## [0.9.0] - 2026-10-27
 
 ### Added
