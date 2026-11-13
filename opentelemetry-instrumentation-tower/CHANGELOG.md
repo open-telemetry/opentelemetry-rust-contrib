@@ -2,6 +2,16 @@
 
 ## vNext
 
+### Fixed
+
+* `http.server.active_requests` no longer leaks when a request is dropped
+  before the response is produced, for example when the client disconnects.
+  Dropped requests record duration and end the span, with `error.type` set to
+  `cancelled` or `panic` during unwinding.
+  [#839](https://github.com/open-telemetry/opentelemetry-rust-contrib/issues/839)
+* Failed requests retain route and custom request attributes on duration metrics.
+  Spans end on completion even when the application retains their context.
+
 ### Added
 
 * The server span, and the `http.server.request.duration`,
