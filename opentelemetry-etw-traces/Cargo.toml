@@ -26,7 +26,7 @@ opentelemetry_sdk = { workspace = true, features = ["trace", "testing"] }
 
 [target.'cfg(windows)'.dev-dependencies]
 criterion = { workspace = true }
-one_collect = "0.1.34532"
+one_collect = "=0.1.35021"
 
 [features]
 bench-internals = []

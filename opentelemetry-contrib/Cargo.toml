@@ -35,12 +35,12 @@ serde_json = { version = "1", optional = true }
 tokio = { version = "1.0", features = ["fs", "io-util"], optional = true }
 
 [dev-dependencies]
-criterion = { version = "0.5", features = ["html_reports"] } #TODO - bump to 0.8 or higher once pprof supports it
-futures-util = { version = "0.3", default-features = false, features = ["std"] }
+criterion = { version = "=0.5.1", features = ["html_reports"] } #TODO - bump to 0.8 or higher once pprof supports it
+futures-util = { version = "=0.3.34", default-features = false, features = ["std"] }
 opentelemetry_sdk = { workspace = true, features = ["trace", "testing"] }
 
 [target.'cfg(not(target_os = "windows"))'.dev-dependencies]
-pprof = { version = "0.15", features = ["flamegraph", "criterion"] }
+pprof = { version = "=0.15.0", features = ["flamegraph", "criterion"] }
 
 [[bench]]
 name = "new_span"
