@@ -6,6 +6,7 @@
 
 - `BeanstalkResourceDetector` (`detector-aws-beanstalk` feature)
 - `AwsXrayRemoteSampler` (`xray-sampler` feature) that samples spans using the fixed rates of X-Ray sampling rules
+- `detector-aws-eks-cluster-arn` feature, with which the EKS detector reads `aws.eks.cluster.arn` from EKS `DescribeCluster`. Requires `eks:DescribeCluster` permission.
 
 ### Changed
 

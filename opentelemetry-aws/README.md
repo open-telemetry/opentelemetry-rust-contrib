@@ -83,6 +83,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 | `detector-aws-ec2` | No | AWS EC2 resource detector |
 | `detector-aws-ecs` | No | AWS ECS resource detector |
 | `detector-aws-eks` | No | AWS EKS resource detector |
+| `detector-aws-eks-cluster-arn` | No | The EKS detector reads `aws.eks.cluster.arn` from EKS `DescribeCluster`|
 | `detector-aws-beanstalk` | No | AWS Elastic Beanstalk resource detector |
 
 [`OpenTelemetry`]: https://crates.io/crates/opentelemetry
