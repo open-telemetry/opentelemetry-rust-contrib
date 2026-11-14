@@ -48,7 +48,7 @@ jobs:
     - name: Install llvm-tools-preview for pinned stable Rust
       run: rustup component add llvm-tools-preview
     - name: cargo install cargo-llvm-cov
-      uses: taiki-e/install-action@1919c4a95903d2c33e4a221102edca87309fc14b # v2.89.0
+      uses: taiki-e/install-action@4a76afe23f9e08d2d9550fb56e556444e8611d21 # v2.90.4
       with:
         tool: cargo-llvm-cov
     - name: Check user_events kernel support
