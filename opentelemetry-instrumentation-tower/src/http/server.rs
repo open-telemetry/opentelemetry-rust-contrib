@@ -10,6 +10,9 @@ use std::sync::Arc;
 use std::task::{Context, Poll};
 use std::time::Instant;
 
+#[cfg(feature = "axum-connect-info")]
+use axum::extract::connect_info::ConnectInfo;
+use http::header::{HeaderName, FORWARDED};
 use opentelemetry::global::{self, BoxedTracer};
 use opentelemetry::metrics::{Histogram, Meter, MeterProvider, NoopMeterProvider, UpDownCounter};
 use opentelemetry::trace::noop::NoopTracerProvider;
@@ -21,12 +24,14 @@ use opentelemetry_http::HeaderExtractor;
 use opentelemetry_semantic_conventions as semconv;
 use opentelemetry_semantic_conventions::attribute::ERROR_TYPE;
 use pin_project_lite::pin_project;
+#[cfg(feature = "axum-connect-info")]
+use std::net::SocketAddr;
 use tower_layer::Layer as TowerLayer;
 use tower_service::Service as TowerService;
 
 use crate::common::attributes::{
-    error_type_kv, method_kv, redact_query, split_and_format_protocol_version, url_scheme_kv,
-    DEFAULT_SENSITIVE_QUERY_PARAMETERS,
+    client_address_kv, error_type_kv, method_kv, redact_query, split_and_format_protocol_version,
+    url_scheme_kv, DEFAULT_SENSITIVE_QUERY_PARAMETERS,
 };
 use crate::http::extractors::{
     DefaultRouteExtractor, NoOpExtractor, RequestAttributeExtractor, ResponseAttributeExtractor,
@@ -45,6 +50,10 @@ const HTTP_SERVER_ACTIVE_REQUESTS_UNIT: &str = "{request}";
 const HTTP_SERVER_REQUEST_BODY_SIZE_UNIT: &str = "By";
 
 const HTTP_SERVER_RESPONSE_BODY_SIZE_UNIT: &str = "By";
+
+/// Header name for the de-facto standard forwarded-client header. The `http`
+/// crate has no constant for it because it is not a standard header.
+const X_FORWARDED_FOR: HeaderName = HeaderName::from_static("x-forwarded-for");
 
 /// State scoped to the entire middleware [`Layer`].
 struct LayerState {
@@ -558,6 +567,34 @@ where
             ));
         }
 
+        // From the semantic convention: `client.address` SHOULD represent the
+        // client address behind any intermediaries, for example proxies, if it's
+        // available. The forwarded headers describe that original client, and
+        // the socket address of the immediate peer is the fallback.
+        let forwarded_for = req
+            .headers()
+            .get(&X_FORWARDED_FOR)
+            .and_then(|value| value.to_str().ok());
+        let forwarded = req
+            .headers()
+            .get(&FORWARDED)
+            .and_then(|value| value.to_str().ok());
+        #[cfg(feature = "axum-connect-info")]
+        let connect_info = req
+            .extensions()
+            .get::<ConnectInfo<SocketAddr>>()
+            .map(|info| info.0.to_string());
+        #[cfg(feature = "axum-connect-info")]
+        if let Some(client_address) =
+            client_address_kv(forwarded_for, forwarded, connect_info.as_deref())
+        {
+            span_attributes.push(client_address);
+        }
+        #[cfg(not(feature = "axum-connect-info"))]
+        if let Some(client_address) = client_address_kv(forwarded_for, forwarded, None) {
+            span_attributes.push(client_address);
+        }
+
         if let Some(r) = &route {
             span_attributes.push(KeyValue::new(semconv::attribute::HTTP_ROUTE, r.clone()));
         }
@@ -767,15 +804,27 @@ mod tests {
 
     #[cfg(feature = "axum")]
     use crate::http::extractors::AxumMatchedPathExtractor;
+    use opentelemetry_semantic_conventions::attribute::CLIENT_ADDRESS;
 
     #[tokio::test(flavor = "current_thread")]
     async fn test_tracing_with_in_memory_tracer() {
         #[derive(Debug, Clone, Copy)]
         struct TestError;
 
+        struct Header {
+            name: &'static str,
+            value: &'static str,
+        }
+
+        const USER_AGENT: Header = Header {
+            name: "User-Agent",
+            value: "tower-test-client/1.0",
+        };
+
         struct TestCase {
             name: &'static str,
             target: &'static str,
+            headers: &'static [Header],
             outcome: Result<StatusCode, TestError>,
             expected_span_name: &'static str,
             expected_attributes: Vec<KeyValue>,
@@ -786,6 +835,7 @@ mod tests {
             TestCase {
                 name: "request target in absolute form",
                 target: "http://example.com/api/users/123",
+                headers: &[USER_AGENT],
                 outcome: Ok(StatusCode::OK),
                 expected_span_name: "GET /api/users/123",
                 expected_attributes: vec![
@@ -804,6 +854,7 @@ mod tests {
             TestCase {
                 name: "request target in origin form",
                 target: "/api/users/123",
+                headers: &[USER_AGENT],
                 outcome: Ok(StatusCode::OK),
                 expected_span_name: "GET /api/users/123",
                 expected_attributes: vec![
@@ -822,6 +873,7 @@ mod tests {
             TestCase {
                 name: "request target with a query component",
                 target: "/api/users/123?fields=name&verbose=true",
+                headers: &[USER_AGENT],
                 outcome: Ok(StatusCode::OK),
                 expected_span_name: "GET /api/users/123",
                 expected_attributes: vec![
@@ -844,6 +896,7 @@ mod tests {
             TestCase {
                 name: "request target with a sensitive query parameter",
                 target: "/api/users/123?fields=name&sig=secret-signature",
+                headers: &[USER_AGENT],
                 outcome: Ok(StatusCode::OK),
                 expected_span_name: "GET /api/users/123",
                 expected_attributes: vec![
@@ -866,6 +919,7 @@ mod tests {
             TestCase {
                 name: "request target with an empty query component",
                 target: "/api/users/123?",
+                headers: &[USER_AGENT],
                 outcome: Ok(StatusCode::OK),
                 expected_span_name: "GET /api/users/123",
                 expected_attributes: vec![
@@ -885,6 +939,7 @@ mod tests {
             TestCase {
                 name: "a server error response carries error.type",
                 target: "/api/users/123",
+                headers: &[USER_AGENT],
                 outcome: Ok(StatusCode::INTERNAL_SERVER_ERROR),
                 expected_span_name: "GET /api/users/123",
                 expected_attributes: vec![
@@ -904,6 +959,7 @@ mod tests {
             TestCase {
                 name: "a client error response carries no error.type",
                 target: "/api/users/123",
+                headers: &[USER_AGENT],
                 outcome: Ok(StatusCode::NOT_FOUND),
                 expected_span_name: "GET /api/users/123",
                 expected_attributes: vec![
@@ -922,6 +978,7 @@ mod tests {
             TestCase {
                 name: "an uncommon server error response carries error.type",
                 target: "/api/users/123",
+                headers: &[USER_AGENT],
                 outcome: Ok(StatusCode::from_u16(599).unwrap()),
                 expected_span_name: "GET /api/users/123",
                 expected_attributes: vec![
@@ -941,6 +998,7 @@ mod tests {
             TestCase {
                 name: "an inner-service error carries the error type name",
                 target: "/api/users/123",
+                headers: &[USER_AGENT],
                 outcome: Err(TestError),
                 expected_span_name: "GET /api/users/123",
                 expected_attributes: vec![
@@ -955,6 +1013,113 @@ mod tests {
                     KeyValue::new(ERROR_TYPE, std::any::type_name::<TestError>()),
                 ],
                 expected_span_status: Status::error(format!("{:?}", TestError)),
+            },
+            TestCase {
+                name: "an X-Forwarded-For header names the original client",
+                target: "/api/users/123",
+                headers: &[
+                    USER_AGENT,
+                    Header {
+                        name: "X-Forwarded-For",
+                        value: "203.0.113.195, 70.41.3.18",
+                    },
+                ],
+                outcome: Ok(StatusCode::OK),
+                expected_span_name: "GET /api/users/123",
+                expected_attributes: vec![
+                    KeyValue::new(semconv::attribute::HTTP_REQUEST_METHOD, "GET".to_string()),
+                    KeyValue::new(semconv::attribute::URL_SCHEME, "".to_string()),
+                    KeyValue::new(semconv::attribute::URL_PATH, "/api/users/123".to_string()),
+                    KeyValue::new(
+                        semconv::attribute::USER_AGENT_ORIGINAL,
+                        "tower-test-client/1.0".to_string(),
+                    ),
+                    KeyValue::new(CLIENT_ADDRESS, "203.0.113.195"),
+                    KeyValue::new(semconv::attribute::HTTP_ROUTE, "/api/users/123".to_string()),
+                    KeyValue::new(semconv::attribute::HTTP_RESPONSE_STATUS_CODE, 200),
+                ],
+                expected_span_status: Status::Unset,
+            },
+            TestCase {
+                name: "a Forwarded header names the original client",
+                target: "/api/users/123",
+                headers: &[
+                    USER_AGENT,
+                    Header {
+                        name: "Forwarded",
+                        value: "for=192.0.2.43;by=203.0.113.60",
+                    },
+                ],
+                outcome: Ok(StatusCode::OK),
+                expected_span_name: "GET /api/users/123",
+                expected_attributes: vec![
+                    KeyValue::new(semconv::attribute::HTTP_REQUEST_METHOD, "GET".to_string()),
+                    KeyValue::new(semconv::attribute::URL_SCHEME, "".to_string()),
+                    KeyValue::new(semconv::attribute::URL_PATH, "/api/users/123".to_string()),
+                    KeyValue::new(
+                        semconv::attribute::USER_AGENT_ORIGINAL,
+                        "tower-test-client/1.0".to_string(),
+                    ),
+                    KeyValue::new(CLIENT_ADDRESS, "192.0.2.43"),
+                    KeyValue::new(semconv::attribute::HTTP_ROUTE, "/api/users/123".to_string()),
+                    KeyValue::new(semconv::attribute::HTTP_RESPONSE_STATUS_CODE, 200),
+                ],
+                expected_span_status: Status::Unset,
+            },
+            TestCase {
+                name: "X-Forwarded-For wins over the Forwarded header",
+                target: "/api/users/123",
+                headers: &[
+                    USER_AGENT,
+                    Header {
+                        name: "X-Forwarded-For",
+                        value: "203.0.113.195",
+                    },
+                    Header {
+                        name: "Forwarded",
+                        value: "for=192.0.2.43",
+                    },
+                ],
+                outcome: Ok(StatusCode::OK),
+                expected_span_name: "GET /api/users/123",
+                expected_attributes: vec![
+                    KeyValue::new(semconv::attribute::HTTP_REQUEST_METHOD, "GET".to_string()),
+                    KeyValue::new(semconv::attribute::URL_SCHEME, "".to_string()),
+                    KeyValue::new(semconv::attribute::URL_PATH, "/api/users/123".to_string()),
+                    KeyValue::new(
+                        semconv::attribute::USER_AGENT_ORIGINAL,
+                        "tower-test-client/1.0".to_string(),
+                    ),
+                    KeyValue::new(CLIENT_ADDRESS, "203.0.113.195"),
+                    KeyValue::new(semconv::attribute::HTTP_ROUTE, "/api/users/123".to_string()),
+                    KeyValue::new(semconv::attribute::HTTP_RESPONSE_STATUS_CODE, 200),
+                ],
+                expected_span_status: Status::Unset,
+            },
+            TestCase {
+                name: "an empty X-Forwarded-For header emits no client.address",
+                target: "/api/users/123",
+                headers: &[
+                    USER_AGENT,
+                    Header {
+                        name: "X-Forwarded-For",
+                        value: "",
+                    },
+                ],
+                outcome: Ok(StatusCode::OK),
+                expected_span_name: "GET /api/users/123",
+                expected_attributes: vec![
+                    KeyValue::new(semconv::attribute::HTTP_REQUEST_METHOD, "GET".to_string()),
+                    KeyValue::new(semconv::attribute::URL_SCHEME, "".to_string()),
+                    KeyValue::new(semconv::attribute::URL_PATH, "/api/users/123".to_string()),
+                    KeyValue::new(
+                        semconv::attribute::USER_AGENT_ORIGINAL,
+                        "tower-test-client/1.0".to_string(),
+                    ),
+                    KeyValue::new(semconv::attribute::HTTP_ROUTE, "/api/users/123".to_string()),
+                    KeyValue::new(semconv::attribute::HTTP_RESPONSE_STATUS_CODE, 200),
+                ],
+                expected_span_status: Status::Unset,
             },
         ];
 
@@ -993,10 +1158,12 @@ mod tests {
             let cx = OtelContext::current_with_span(parent_span);
 
             let request_body = "test".to_string();
-            let request = http::Request::builder()
-                .uri(test_case.target)
+            let mut request_builder = http::Request::builder().uri(test_case.target);
+            for header in test_case.headers {
+                request_builder = request_builder.header(header.name, header.value);
+            }
+            let request = request_builder
                 .header("Content-Length", request_body.len().to_string())
-                .header("User-Agent", "tower-test-client/1.0")
                 .body(request_body)
                 .unwrap();
 
@@ -1047,6 +1214,80 @@ mod tests {
 
     async fn echo(req: http::Request<String>) -> Result<http::Response<String>, Error> {
         Ok(http::Response::new(req.into_body()))
+    }
+
+    #[cfg(feature = "axum-connect-info")]
+    #[tokio::test(flavor = "current_thread")]
+    async fn the_socket_address_of_the_immediate_peer_is_the_client_address_fallback() {
+        struct TestCase {
+            name: &'static str,
+            connect_info: Option<SocketAddr>,
+            expected_client_address: Option<&'static str>,
+        }
+
+        let test_cases = [
+            TestCase {
+                name: "a socket address contributes its host",
+                connect_info: Some(SocketAddr::from(([10, 1, 2, 80], 65123))),
+                expected_client_address: Some("10.1.2.80"),
+            },
+            TestCase {
+                name: "an IPv6 socket address contributes its host without brackets",
+                connect_info: Some("[2001:db8::1]:443".parse().unwrap()),
+                expected_client_address: Some("2001:db8::1"),
+            },
+            TestCase {
+                name: "a missing socket address emits no client.address",
+                connect_info: None,
+                expected_client_address: None,
+            },
+        ];
+
+        for test_case in test_cases {
+            let trace_exporter = InMemorySpanExporterBuilder::new().build();
+            let tracer_provider = SdkTracerProvider::builder()
+                .with_simple_exporter(trace_exporter.clone())
+                .build();
+
+            let layer = LayerBuilder::builder()
+                .with_route_extractor(NoRouteExtractor)
+                .with_tracer_provider(tracer_provider.clone())
+                .build()
+                .unwrap();
+
+            let mut service = ServiceBuilder::new()
+                .layer(layer)
+                .service(tower::service_fn(echo));
+
+            let mut request = Request::builder()
+                .method("GET")
+                .uri("/api/users/123")
+                .body(String::from("body"))
+                .unwrap();
+            if let Some(connect_info) = test_case.connect_info {
+                request
+                    .extensions_mut()
+                    .insert(ConnectInfo::<SocketAddr>(connect_info));
+            }
+            let _response = service.call(request).await.unwrap();
+
+            tracer_provider.force_flush().unwrap();
+            let spans = trace_exporter.get_finished_spans().unwrap();
+            assert_eq!(spans.len(), 1, "{}", test_case.name);
+
+            let result = spans[0]
+                .attributes
+                .iter()
+                .find(|kv| kv.key.as_str() == CLIENT_ADDRESS)
+                .map(|kv| kv.value.as_str().to_string());
+
+            assert_eq!(
+                result.as_deref(),
+                test_case.expected_client_address,
+                "{}",
+                test_case.name
+            );
+        }
     }
 
     #[tokio::test(flavor = "current_thread")]

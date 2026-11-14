@@ -5,7 +5,7 @@ use std::borrow::Cow;
 use http::StatusCode;
 use opentelemetry::KeyValue;
 use opentelemetry_semantic_conventions as semconv;
-use opentelemetry_semantic_conventions::attribute::ERROR_TYPE;
+use opentelemetry_semantic_conventions::attribute::{CLIENT_ADDRESS, ERROR_TYPE};
 
 /// Maps common HTTP methods to a `&'static str` so the resulting `KeyValue`
 /// stores the method as a static string (no heap allocation, allocation-free
@@ -91,6 +91,71 @@ pub(crate) fn error_type_kv(status: http::StatusCode) -> KeyValue {
     }
 }
 
+/// Extracts the `client.address` value from an `X-Forwarded-For` header value.
+///
+/// The conventions ask for the original client address behind all proxies. When
+/// a chain of proxies has forwarded the request, the first entry of the header
+/// is the original client, and every following entry was added by an
+/// intermediary.
+pub(crate) fn client_address_from_forwarded_for(value: &str) -> &str {
+    match value.find(',') {
+        Some(index) => value[..index].trim(),
+        None => value.trim(),
+    }
+}
+
+/// Builds the `client.address` [`KeyValue`] for a server request.
+///
+/// The conventions ask for the original client address behind all proxies when
+/// one is available, and for the immediate peer address otherwise. A Tower
+/// `Service` sees the request after the network stack has parsed it, so this
+/// reads the forwarded headers, and falls back to the socket address of the
+/// immediate peer when the caller can provide one.
+#[inline]
+pub(crate) fn client_address_kv(
+    forwarded_for: Option<&str>,
+    forwarded: Option<&str>,
+    connect_info: Option<&str>,
+) -> Option<KeyValue> {
+    let address = forwarded_for
+        .map(client_address_from_forwarded_for)
+        .filter(|address| !address.is_empty())
+        .or_else(|| forwarded.and_then(for_node_name).filter(|a| !a.is_empty()))
+        .or_else(|| connect_info.and_then(parse_socket_address_host));
+    address.map(|address| KeyValue::new(CLIENT_ADDRESS, address.to_owned()))
+}
+
+/// Extracts the node name from an RFC 7239 `Forwarded` header value.
+///
+/// The `for` directive can appear several times, one per proxy hop, and the
+/// first one describes the original client. The node name may be quoted and may
+/// carry an obfuscated identifier, which the conventions accept as
+/// `client.address`.
+fn for_node_name(value: &str) -> Option<&str> {
+    let start = value.find("for=")?;
+    let after = &value[start + 4..];
+    if after.is_empty() {
+        return None;
+    }
+    if let Some(quoted) = after.strip_prefix('"') {
+        return quoted.find('"').map(|end| &quoted[..end]);
+    }
+    Some(after.split(';').next().unwrap_or(after))
+}
+
+/// Extracts the host from a socket address, for example `"10.1.2.80:65123"` or
+/// `"[2001:db8::1]:443"`.
+fn parse_socket_address_host(socket_address: &str) -> Option<&str> {
+    match socket_address.rsplit_once(':') {
+        Some((host, port))
+            if !port.is_empty() && port.bytes().all(|byte| byte.is_ascii_digit()) =>
+        {
+            Some(host.trim_start_matches('[').trim_end_matches(']'))
+        }
+        _ => None,
+    }
+}
+
 /// Query parameter keys whose values the conventions ask instrumentations to
 /// redact by default.
 ///
@@ -151,6 +216,107 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn client_address_kv_prefers_the_first_forwarded_for_entry() {
+        struct TestCase {
+            name: &'static str,
+            forwarded_for: Option<&'static str>,
+            forwarded: Option<&'static str>,
+            connect_info: Option<&'static str>,
+            expected: Option<KeyValue>,
+        }
+
+        let test_cases = [
+            TestCase {
+                name: "the first entry of a forwarded chain is the original client",
+                forwarded_for: Some("203.0.113.195, 70.41.3.18, 150.172.238.178"),
+                forwarded: None,
+                connect_info: Some("10.1.2.80:65123"),
+                expected: Some(KeyValue::new(CLIENT_ADDRESS, "203.0.113.195")),
+            },
+            TestCase {
+                name: "a single entry is the client itself",
+                forwarded_for: Some("203.0.113.195"),
+                forwarded: None,
+                connect_info: Some("10.1.2.80:65123"),
+                expected: Some(KeyValue::new(CLIENT_ADDRESS, "203.0.113.195")),
+            },
+            TestCase {
+                name: "a value with spaces around it is trimmed",
+                forwarded_for: Some(" 203.0.113.195 , 70.41.3.18"),
+                forwarded: None,
+                connect_info: Some("10.1.2.80:65123"),
+                expected: Some(KeyValue::new(CLIENT_ADDRESS, "203.0.113.195")),
+            },
+            TestCase {
+                name: "an empty header falls back to the next source",
+                forwarded_for: Some(""),
+                forwarded: None,
+                connect_info: Some("10.1.2.80:65123"),
+                expected: Some(KeyValue::new(CLIENT_ADDRESS, "10.1.2.80")),
+            },
+            TestCase {
+                name: "a Forwarded header is used when X-Forwarded-For is absent",
+                forwarded_for: None,
+                forwarded: Some("for=192.0.2.43;by=203.0.113.60, for=198.51.100.17"),
+                connect_info: Some("10.1.2.80:65123"),
+                expected: Some(KeyValue::new(CLIENT_ADDRESS, "192.0.2.43")),
+            },
+            TestCase {
+                name: "a quoted Forwarded node name keeps its inner value",
+                forwarded_for: None,
+                forwarded: Some("for=\"[2001:db8:cafe::17]:4711\""),
+                connect_info: Some("10.1.2.80:65123"),
+                expected: Some(KeyValue::new(CLIENT_ADDRESS, "[2001:db8:cafe::17]:4711")),
+            },
+            TestCase {
+                name: "an obfuscated Forwarded identifier is accepted as an address",
+                forwarded_for: None,
+                forwarded: Some("for=_hidden"),
+                connect_info: Some("10.1.2.80:65123"),
+                expected: Some(KeyValue::new(CLIENT_ADDRESS, "_hidden")),
+            },
+            TestCase {
+                name: "a Forwarded header without a for directive falls back",
+                forwarded_for: None,
+                forwarded: Some("by=203.0.113.60;host=example.com"),
+                connect_info: Some("10.1.2.80:65123"),
+                expected: Some(KeyValue::new(CLIENT_ADDRESS, "10.1.2.80")),
+            },
+            TestCase {
+                name: "an IPv6 socket address keeps its brackets",
+                forwarded_for: None,
+                forwarded: None,
+                connect_info: Some("[2001:db8::1]:443"),
+                expected: Some(KeyValue::new(CLIENT_ADDRESS, "2001:db8::1")),
+            },
+            TestCase {
+                name: "a Unix domain socket path is not a host and port pair",
+                forwarded_for: None,
+                forwarded: None,
+                connect_info: Some("/tmp/my.sock"),
+                expected: None,
+            },
+            TestCase {
+                name: "no source at all emits no attribute",
+                forwarded_for: None,
+                forwarded: None,
+                connect_info: None,
+                expected: None,
+            },
+        ];
+
+        for test_case in test_cases {
+            let result = client_address_kv(
+                test_case.forwarded_for,
+                test_case.forwarded,
+                test_case.connect_info,
+            );
+
+            assert_eq!(result, test_case.expected, "{}", test_case.name);
+        }
+    }
 
     #[test]
     fn redact_query_replaces_sensitive_values() {
