@@ -5,6 +5,7 @@
 ## v0.13.1
 
 Released 2026-Nov-16
+
 - Avoid PATH-based command lookup in `HostResourceDetector`: use native hostname APIs and an absolute path to `ioreg` on macOS.
 - Bump OpenTelemetry dependencies to 0.33.1.
 
