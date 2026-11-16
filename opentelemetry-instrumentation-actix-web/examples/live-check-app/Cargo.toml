@@ -2,7 +2,7 @@
 name = "example-live-check-actix"
 version = "0.1.0-alpha.0"
 edition = "2021"
-rust-version = "1.88.0"
+rust-version = "1.89.0"
 publish = false
 
 # Purpose-built example used by the `weaver-live-check-actix` CI workflow
@@ -12,7 +12,7 @@ publish = false
 
 [dependencies]
 opentelemetry-instrumentation-actix-web = { path = "../../", default-features = false, features = ["metrics"] }
-actix-web = { version = "4.12", default-features = false, features = ["macros", "compress-zstd"] }
+actix-web = { version = "4.18.2", default-features = false, features = ["macros", "compress-zstd"] }
 opentelemetry = { workspace = true }
 opentelemetry_sdk = { workspace = true, default-features = false, features = ["rt-tokio"] }
 opentelemetry-otlp = { workspace = true, features = ["grpc-tonic", "metrics", "trace"] }

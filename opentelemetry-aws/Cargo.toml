@@ -46,6 +46,14 @@ xray-daemon-client = ["xray-exporter"]
 xray-stdout-client = ["xray-exporter"]
 xray-subsegment-nesting = ["xray-exporter"]
 
+xray-sampler = [
+    "opentelemetry/trace",
+    "opentelemetry_sdk/trace",
+    "dep:opentelemetry-semantic-conventions",
+    "dep:serde",
+    "dep:ureq"
+]
+
 [dependencies]
 http = { version = "1.4.0", optional = true }
 opentelemetry = { workspace = true }

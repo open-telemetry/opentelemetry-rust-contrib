@@ -1,6 +1,6 @@
 [package]
 name = "opentelemetry-etw-traces"
-version = "0.2.0"
+version = "0.3.1"
 description = "OpenTelemetry exporter for ETW (Event Tracing for Windows) traces using TraceLogging Dynamic"
 homepage = "https://github.com/open-telemetry/opentelemetry-rust-contrib/tree/main/opentelemetry-etw-traces"
 repository = "https://github.com/open-telemetry/opentelemetry-rust-contrib/tree/main/opentelemetry-etw-traces"
@@ -25,19 +25,26 @@ serde_json = { version = "1.0.113", optional = true }
 opentelemetry_sdk = { workspace = true, features = ["trace", "testing"] }
 
 [target.'cfg(windows)'.dev-dependencies]
+criterion = { workspace = true }
 one_collect = "0.1.34532"
 
 [features]
+bench-internals = []
 internal-logs = [
     "opentelemetry/internal-logs",
     "opentelemetry_sdk/internal-logs",
 ]
 serde_json = ["dep:serde_json"]
+experimental-geneva-mapping = []
 default = ["internal-logs"]
 
 [[example]]
 name = "basic"
 path = "examples/basic.rs"
+
+[[bench]]
+name = "traces"
+harness = false
 
 [lints]
 workspace = true
