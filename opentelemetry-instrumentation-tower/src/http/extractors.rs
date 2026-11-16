@@ -1,4 +1,4 @@
-//! Pluggable extractors for the HTTP server layer.
+//! Pluggable extractors shared by the HTTP server and client layers.
 //!
 //! - [`RouteExtractor`] decides how the `http.route` attribute (and span name) is
 //!   produced.
@@ -129,10 +129,10 @@ where
     }
 }
 
-#[cfg(feature = "axum")]
+#[cfg(all(feature = "http-server", feature = "axum"))]
 pub(crate) type DefaultRouteExtractor = AxumMatchedPathExtractor;
 
-#[cfg(not(feature = "axum"))]
+#[cfg(all(feature = "http-server", not(feature = "axum")))]
 pub(crate) type DefaultRouteExtractor = NoRouteExtractor;
 
 /// Trait for extracting custom attributes from HTTP requests.
