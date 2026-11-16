@@ -92,6 +92,9 @@ address it can find in this order:
   `axum-connect-info` feature of this crate. Without the feature, or without a
   socket address in the request extensions, the attribute is not emitted.
 
+The middleware removes the port and the IPv6 brackets from every source, so
+`Forwarded: for="[2001:db8::1]:4711"` reports `2001:db8::1`.
+
 Trust these headers only when a proxy in front of your service sets or strips
 them. A client can send its own `X-Forwarded-For` value, and the middleware
 cannot tell a proxy-added entry from a spoofed one.

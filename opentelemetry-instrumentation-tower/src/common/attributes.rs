@@ -117,12 +117,35 @@ pub(crate) fn client_address_kv(
     forwarded: Option<&str>,
     connect_info: Option<&str>,
 ) -> Option<KeyValue> {
-    let address = forwarded_for
-        .map(client_address_from_forwarded_for)
-        .filter(|address| !address.is_empty())
-        .or_else(|| forwarded.and_then(for_node_name).filter(|a| !a.is_empty()))
-        .or_else(|| connect_info.and_then(parse_socket_address_host));
-    address.map(|address| KeyValue::new(CLIENT_ADDRESS, address.to_owned()))
+    client_node(forwarded_for, forwarded, connect_info)
+        .map(|(address, _)| KeyValue::new(CLIENT_ADDRESS, address.to_owned()))
+}
+
+/// Finds the host and port of the client from the first source that names one.
+///
+/// The port belongs to the same source as the host. A forwarded address
+/// without a port therefore has no port, even when the socket address has one.
+fn client_node<'a>(
+    forwarded_for: Option<&'a str>,
+    forwarded: Option<&'a str>,
+    connect_info: Option<&'a str>,
+) -> Option<(&'a str, Option<&'a str>)> {
+    let non_empty =
+        |(host, port): (&'a str, Option<&'a str>)| (!host.is_empty()).then_some((host, port));
+    forwarded_for
+        .map(|value| split_host_port(client_address_from_forwarded_for(value)))
+        .and_then(non_empty)
+        .or_else(|| {
+            forwarded
+                .and_then(for_node_name)
+                .map(split_host_port)
+                .and_then(non_empty)
+        })
+        .or_else(|| {
+            connect_info
+                .map(split_host_port)
+                .filter(|(_, port)| port.is_some())
+        })
 }
 
 /// Extracts the node name from an RFC 7239 `Forwarded` header value.
@@ -177,16 +200,31 @@ fn split_unquoted(value: &str, separator: u8) -> impl Iterator<Item = &str> {
     })
 }
 
-/// Extracts the host from a socket address, for example `"10.1.2.80:65123"` or
-/// `"[2001:db8::1]:443"`.
-fn parse_socket_address_host(socket_address: &str) -> Option<&str> {
-    match socket_address.rsplit_once(':') {
-        Some((host, port))
-            if !port.is_empty() && port.bytes().all(|byte| byte.is_ascii_digit()) =>
-        {
-            Some(host.trim_start_matches('[').trim_end_matches(']'))
-        }
-        _ => None,
+/// Splits a node into its host and port, for example `"10.1.2.80:65123"`,
+/// `"[2001:db8::1]:443"` or `"[2001:db8::1]"`.
+///
+/// A port after an IPv6 address needs brackets around the address, so a bare
+/// IPv6 address such as `"2001:db8::1"` has no port. RFC 7239 also allows an
+/// obfuscated port that starts with `_`.
+fn split_host_port(node: &str) -> (&str, Option<&str>) {
+    let is_port = |port: &str| {
+        let digits = !port.is_empty() && port.bytes().all(|byte| byte.is_ascii_digit());
+        let obfuscated = port.len() > 1 && port.starts_with('_');
+        digits || obfuscated
+    };
+    if let Some(bracketed) = node.strip_prefix('[') {
+        return match bracketed.split_once(']') {
+            Some((host, "")) => (host, None),
+            Some((host, rest)) => match rest.strip_prefix(':') {
+                Some(port) if is_port(port) => (host, Some(port)),
+                _ => (node, None),
+            },
+            None => (node, None),
+        };
+    }
+    match node.split_once(':') {
+        Some((host, port)) if is_port(port) => (host, Some(port)),
+        _ => (node, None),
     }
 }
 
@@ -298,11 +336,60 @@ mod tests {
                 expected: Some(KeyValue::new(CLIENT_ADDRESS, "192.0.2.43")),
             },
             TestCase {
-                name: "a quoted Forwarded node name keeps its inner value",
+                name: "a quoted Forwarded IPv6 node loses its brackets and port",
                 forwarded_for: None,
-                forwarded: Some("for=\"[2001:db8:cafe::17]:4711\""),
+                forwarded: Some("for=\"[2001:db8::1]:4711\""),
                 connect_info: Some("10.1.2.80:65123"),
-                expected: Some(KeyValue::new(CLIENT_ADDRESS, "[2001:db8:cafe::17]:4711")),
+                expected: Some(KeyValue::new(CLIENT_ADDRESS, "2001:db8::1")),
+            },
+            TestCase {
+                name: "a quoted Forwarded IPv6 node without a port loses its brackets",
+                forwarded_for: None,
+                forwarded: Some("for=\"[2001:db8::1]\""),
+                connect_info: Some("10.1.2.80:65123"),
+                expected: Some(KeyValue::new(CLIENT_ADDRESS, "2001:db8::1")),
+            },
+            TestCase {
+                name: "a Forwarded IPv4 node loses its port",
+                forwarded_for: None,
+                forwarded: Some("for=\"192.0.2.43:4711\""),
+                connect_info: Some("10.1.2.80:65123"),
+                expected: Some(KeyValue::new(CLIENT_ADDRESS, "192.0.2.43")),
+            },
+            TestCase {
+                name: "a Forwarded node loses its obfuscated port",
+                forwarded_for: None,
+                forwarded: Some("for=\"_hidden:_port\""),
+                connect_info: Some("10.1.2.80:65123"),
+                expected: Some(KeyValue::new(CLIENT_ADDRESS, "_hidden")),
+            },
+            TestCase {
+                name: "an X-Forwarded-For IPv4 entry loses its port",
+                forwarded_for: Some("203.0.113.195:4711, 70.41.3.18"),
+                forwarded: None,
+                connect_info: Some("10.1.2.80:65123"),
+                expected: Some(KeyValue::new(CLIENT_ADDRESS, "203.0.113.195")),
+            },
+            TestCase {
+                name: "an X-Forwarded-For IPv6 entry loses its brackets and port",
+                forwarded_for: Some("[2001:db8::1]:4711"),
+                forwarded: None,
+                connect_info: Some("10.1.2.80:65123"),
+                expected: Some(KeyValue::new(CLIENT_ADDRESS, "2001:db8::1")),
+            },
+            TestCase {
+                name: "a bare X-Forwarded-For IPv6 entry is kept whole",
+                forwarded_for: Some("2001:db8::1, 70.41.3.18"),
+                forwarded: None,
+                connect_info: Some("10.1.2.80:65123"),
+                expected: Some(KeyValue::new(CLIENT_ADDRESS, "2001:db8::1")),
+            },
+            TestCase {
+                name: "an X-Forwarded-For entry with only a port falls back",
+                forwarded_for: Some(":4711"),
+                forwarded: None,
+                connect_info: Some("10.1.2.80:65123"),
+                expected: Some(KeyValue::new(CLIENT_ADDRESS, "10.1.2.80")),
             },
             TestCase {
                 name: "an obfuscated Forwarded identifier is accepted as an address",
