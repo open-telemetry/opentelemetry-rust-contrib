@@ -77,36 +77,50 @@ extractor sets, instead use `myapp.error.type`.
 
 ## Client address
 
-The server span carries `client.address`, which the conventions define as the
-original client address behind all proxies. The middleware reports the first
-address it can find in this order:
+The server span carries `client.address`. The conventions define it as the
+original client address behind all proxies, if it is known, and as the
+immediate peer otherwise. Only your application knows which proxies it can
+trust, so you pick the source with
+`http::server::LayerBuilder::with_client_address_extractor`:
 
-- The first entry of the `X-Forwarded-For` header. A chain of proxies prepends
-  one address per hop, so the first entry is the original client:
-  `X-Forwarded-For: 203.0.113.195, 70.41.3.18` reports `203.0.113.195`.
-- The node name of the first `for` directive in the `Forwarded` header, for
-  example `192.0.2.43` for `Forwarded: for=192.0.2.43;by=203.0.113.60`.
-- The host of the socket address of the immediate peer. A Tower `Service` does
-  not see the socket, so this source needs the service in front to expose the
-  peer address. With Axum, build the router with
+- `SocketAddressExtractor` is the default. It reports the host of the socket
+  address of the immediate peer, which a client cannot spoof. A Tower `Service`
+  does not see the socket, so the service in front must expose the peer
+  address. With Axum, build the router with
   `Router::into_make_service_with_connect_info::<SocketAddr>()` and enable the
   `axum-connect-info` feature of this crate. Without the feature, or without a
   socket address in the request extensions, the attribute is not emitted.
+- `ForwardedHeadersExtractor` reads the forwarded headers. It reports the first
+  entry of `X-Forwarded-For`, then the first `for` directive of `Forwarded`,
+  and falls back to the socket address. A chain of proxies appends one address
+  per hop, so `X-Forwarded-For: 203.0.113.195, 70.41.3.18` reports
+  `203.0.113.195`. The extractor removes the port and the IPv6 brackets, so
+  `Forwarded: for="[2001:db8::1]:4711"` reports `2001:db8::1`.
+- `with_client_address_extractor_fn` runs your own function. Use it to apply
+  your trusted-proxy policy, for example with
+  [`axum-client-ip`](https://docs.rs/axum-client-ip).
 
-The middleware removes the port and the IPv6 brackets from every source, so
-`Forwarded: for="[2001:db8::1]:4711"` reports `2001:db8::1`.
+Use `ForwardedHeadersExtractor` only when a proxy in front of your service sets
+or strips these headers. A client can send its own `X-Forwarded-For` value, and
+the extractor cannot tell a proxy-added entry from a spoofed one.
+
+```rust
+use opentelemetry_instrumentation_tower::http::extractors::ForwardedHeadersExtractor;
+use opentelemetry_instrumentation_tower::http::server::LayerBuilder;
+
+let layer = LayerBuilder::builder()
+    .with_client_address_extractor(ForwardedHeadersExtractor)
+    .build()
+    .unwrap();
+```
 
 The
 [HTTP server span conventions](https://opentelemetry.io/docs/specs/semconv/http/http-spans/#http-server-span)
 mark `client.port` as `Opt-In`. Enable it with
 `http::server::LayerBuilder::with_client_port(true)`. The port comes from the
 same source as `client.address`, so `X-Forwarded-For: 203.0.113.195:4711`
-reports `4711`. When that source has no port, the span carries no
-`client.port`, even when the socket address has one.
-
-Trust these headers only when a proxy in front of your service sets or strips
-them. A client can send its own `X-Forwarded-For` value, and the middleware
-cannot tell a proxy-added entry from a spoofed one.
+reports `4711` with `ForwardedHeadersExtractor`. When that source has no port,
+the span carries no `client.port`, even when the socket address has one.
 
 ## Quick start
 

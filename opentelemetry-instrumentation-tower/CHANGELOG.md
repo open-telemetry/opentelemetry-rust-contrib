@@ -5,13 +5,14 @@
 ### Added
 
 * The server span now carries `client.address` when a source for the client
-  address is available. The layer reads the first entry of
-  `X-Forwarded-For`, which is the original client behind a chain of proxies,
-  then the `for` directive of the `Forwarded` header, and falls back to the
-  socket address of the immediate peer. The socket address fallback requires
-  the new `axum-connect-info` feature. The layer removes the port from every
-  source. The new `LayerBuilder::with_client_port` switch adds the `Opt-In`
-  `client.port` attribute with the port of the same source.
+  address is available. The new `ClientAddressExtractor` decides the source,
+  and `LayerBuilder::with_client_address_extractor` sets it. The default
+  `SocketAddressExtractor` reports the socket address of the immediate peer
+  and requires the new `axum-connect-info` feature. The opt-in
+  `ForwardedHeadersExtractor` reads `X-Forwarded-For` and `Forwarded`, and
+  `FnClientAddressExtractor` runs your own trusted-proxy policy. The new
+  `LayerBuilder::with_client_port` switch adds the `Opt-In` `client.port`
+  attribute with the port of the same source.
   [#848](https://github.com/open-telemetry/opentelemetry-rust-contrib/pull/848)
 * The server span, and the `http.server.request.duration`,
   `http.server.request.body.size` and `http.server.response.body.size` metrics,
