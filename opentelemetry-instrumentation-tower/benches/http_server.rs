@@ -123,6 +123,7 @@
 use criterion::{criterion_group, criterion_main, BatchSize, BenchmarkId, Criterion, Throughput};
 use opentelemetry::global;
 use opentelemetry::trace::noop::NoopTracerProvider;
+use opentelemetry_instrumentation_tower::http::extractors::ForwardedHeadersExtractor;
 use opentelemetry_instrumentation_tower::http::server::LayerBuilder;
 use opentelemetry_sdk::{
     metrics::{InMemoryMetricExporter, PeriodicReader, SdkMeterProvider},
@@ -397,14 +398,18 @@ fn benchmark_http_server(c: &mut Criterion) {
         );
     });
 
-    // Scenario 10: Both tracing + metrics, with an X-Forwarded-For header.
+    // Scenario 10: Both tracing + metrics, with an X-Forwarded-For header that
+    // the opt-in `ForwardedHeadersExtractor` reads.
     // Comparing this against scenario 8 isolates the cost of the
     // `client.address` code path, since both scenarios have the same signals
     // active and differ only in the presence of the forwarded header.
     group.bench_function(BenchmarkId::new("request", "tracing+metrics-xff"), |b| {
         let _tracer_provider = setup_tracer();
         let (_meter_provider, _metric_exporter) = setup_meter();
-        let layer = LayerBuilder::builder().build().unwrap();
+        let layer = LayerBuilder::builder()
+            .with_client_address_extractor(ForwardedHeadersExtractor)
+            .build()
+            .unwrap();
         let mut service = ServiceBuilder::new()
             .layer(layer.clone())
             .service(tower::service_fn(handler));

@@ -10,9 +10,6 @@ use std::sync::Arc;
 use std::task::{Context, Poll};
 use std::time::Instant;
 
-#[cfg(feature = "axum-connect-info")]
-use axum::extract::connect_info::ConnectInfo;
-use http::header::{HeaderName, FORWARDED};
 use opentelemetry::global::{self, BoxedTracer};
 use opentelemetry::metrics::{Histogram, Meter, MeterProvider, NoopMeterProvider, UpDownCounter};
 use opentelemetry::trace::noop::NoopTracerProvider;
@@ -22,20 +19,19 @@ use opentelemetry::InstrumentationScope;
 use opentelemetry::KeyValue;
 use opentelemetry_http::HeaderExtractor;
 use opentelemetry_semantic_conventions as semconv;
-use opentelemetry_semantic_conventions::attribute::ERROR_TYPE;
+use opentelemetry_semantic_conventions::attribute::{CLIENT_ADDRESS, CLIENT_PORT, ERROR_TYPE};
 use pin_project_lite::pin_project;
-#[cfg(feature = "axum-connect-info")]
-use std::net::SocketAddr;
 use tower_layer::Layer as TowerLayer;
 use tower_service::Service as TowerService;
 
 use crate::common::attributes::{
-    client_address_kv, client_port_kv, error_type_kv, method_kv, redact_query,
-    split_and_format_protocol_version, url_scheme_kv, DEFAULT_SENSITIVE_QUERY_PARAMETERS,
+    error_type_kv, method_kv, redact_query, split_and_format_protocol_version, url_scheme_kv,
+    DEFAULT_SENSITIVE_QUERY_PARAMETERS,
 };
 use crate::http::extractors::{
-    DefaultRouteExtractor, NoOpExtractor, RequestAttributeExtractor, ResponseAttributeExtractor,
-    RouteExtractor,
+    ClientAddress, ClientAddressExtractor, DefaultRouteExtractor, FnClientAddressExtractor,
+    NoOpExtractor, RequestAttributeExtractor, ResponseAttributeExtractor, RouteExtractor,
+    SocketAddressExtractor,
 };
 use crate::Result;
 
@@ -50,10 +46,6 @@ const HTTP_SERVER_ACTIVE_REQUESTS_UNIT: &str = "{request}";
 const HTTP_SERVER_REQUEST_BODY_SIZE_UNIT: &str = "By";
 
 const HTTP_SERVER_RESPONSE_BODY_SIZE_UNIT: &str = "By";
-
-/// Header name for the de-facto standard forwarded-client header. The `http`
-/// crate has no constant for it because it is not a standard header.
-const X_FORWARDED_FOR: HeaderName = HeaderName::from_static("x-forwarded-for");
 
 /// State scoped to the entire middleware [`Layer`].
 struct LayerState {
@@ -72,22 +64,30 @@ pub struct Service<
     RouteExt = DefaultRouteExtractor,
     ReqExt = NoOpExtractor,
     ResExt = NoOpExtractor,
+    ClientExt = SocketAddressExtractor,
 > {
     state: Arc<LayerState>,
     route_extractor: RouteExt,
     request_extractor: ReqExt,
     response_extractor: ResExt,
+    client_address_extractor: ClientExt,
     inner_service: S,
     tracer: Arc<BoxedTracer>,
 }
 
 #[derive(Clone)]
 /// [`tower_layer::Layer`] which applies OpenTelemetry HTTP server metrics and tracing.
-pub struct Layer<RouteExt = DefaultRouteExtractor, ReqExt = NoOpExtractor, ResExt = NoOpExtractor> {
+pub struct Layer<
+    RouteExt = DefaultRouteExtractor,
+    ReqExt = NoOpExtractor,
+    ResExt = NoOpExtractor,
+    ClientExt = SocketAddressExtractor,
+> {
     state: Arc<LayerState>,
     route_extractor: RouteExt,
     request_extractor: ReqExt,
     response_extractor: ResExt,
+    client_address_extractor: ClientExt,
     tracer: Arc<BoxedTracer>,
 }
 
@@ -109,6 +109,7 @@ pub struct LayerBuilder<
     RouteExt = DefaultRouteExtractor,
     ReqExt = NoOpExtractor,
     ResExt = NoOpExtractor,
+    ClientExt = SocketAddressExtractor,
 > {
     tracer: Option<Arc<BoxedTracer>>,
     meter: Option<Meter>,
@@ -120,6 +121,7 @@ pub struct LayerBuilder<
     route_extractor: RouteExt,
     request_extractor: ReqExt,
     response_extractor: ResExt,
+    client_address_extractor: ClientExt,
 }
 
 impl LayerBuilder {
@@ -135,11 +137,12 @@ impl LayerBuilder {
             route_extractor: DefaultRouteExtractor::default(),
             request_extractor: NoOpExtractor,
             response_extractor: NoOpExtractor,
+            client_address_extractor: SocketAddressExtractor,
         }
     }
 }
 
-impl<RouteExt, ReqExt, ResExt> LayerBuilder<RouteExt, ReqExt, ResExt> {
+impl<RouteExt, ReqExt, ResExt, ClientExt> LayerBuilder<RouteExt, ReqExt, ResExt, ClientExt> {
     /// Set a custom route extractor.
     ///
     /// The route extractor determines how the route is extracted from requests.
@@ -160,7 +163,7 @@ impl<RouteExt, ReqExt, ResExt> LayerBuilder<RouteExt, ReqExt, ResExt> {
     pub fn with_route_extractor<NewRoute>(
         self,
         extractor: NewRoute,
-    ) -> LayerBuilder<NewRoute, ReqExt, ResExt> {
+    ) -> LayerBuilder<NewRoute, ReqExt, ResExt, ClientExt> {
         LayerBuilder {
             tracer: self.tracer,
             meter: self.meter,
@@ -172,6 +175,7 @@ impl<RouteExt, ReqExt, ResExt> LayerBuilder<RouteExt, ReqExt, ResExt> {
             route_extractor: extractor,
             request_extractor: self.request_extractor,
             response_extractor: self.response_extractor,
+            client_address_extractor: self.client_address_extractor,
         }
     }
 
@@ -191,7 +195,7 @@ impl<RouteExt, ReqExt, ResExt> LayerBuilder<RouteExt, ReqExt, ResExt> {
     pub fn with_route_extractor_fn<F, B>(
         self,
         f: F,
-    ) -> LayerBuilder<crate::http::extractors::FnRouteExtractor<F>, ReqExt, ResExt>
+    ) -> LayerBuilder<crate::http::extractors::FnRouteExtractor<F>, ReqExt, ResExt, ClientExt>
     where
         F: Fn(&http::Request<B>) -> Option<String> + Clone + Send + Sync + 'static,
     {
@@ -202,7 +206,7 @@ impl<RouteExt, ReqExt, ResExt> LayerBuilder<RouteExt, ReqExt, ResExt> {
     pub fn with_request_extractor<NewReqExt, B>(
         self,
         extractor: NewReqExt,
-    ) -> LayerBuilder<RouteExt, NewReqExt, ResExt>
+    ) -> LayerBuilder<RouteExt, NewReqExt, ResExt, ClientExt>
     where
         NewReqExt: RequestAttributeExtractor<B>,
     {
@@ -217,6 +221,7 @@ impl<RouteExt, ReqExt, ResExt> LayerBuilder<RouteExt, ReqExt, ResExt> {
             route_extractor: self.route_extractor,
             request_extractor: extractor,
             response_extractor: self.response_extractor,
+            client_address_extractor: self.client_address_extractor,
         }
     }
 
@@ -224,7 +229,7 @@ impl<RouteExt, ReqExt, ResExt> LayerBuilder<RouteExt, ReqExt, ResExt> {
     pub fn with_response_extractor<NewResExt, B>(
         self,
         extractor: NewResExt,
-    ) -> LayerBuilder<RouteExt, ReqExt, NewResExt>
+    ) -> LayerBuilder<RouteExt, ReqExt, NewResExt, ClientExt>
     where
         NewResExt: ResponseAttributeExtractor<B>,
     {
@@ -239,6 +244,7 @@ impl<RouteExt, ReqExt, ResExt> LayerBuilder<RouteExt, ReqExt, ResExt> {
             route_extractor: self.route_extractor,
             request_extractor: self.request_extractor,
             response_extractor: extractor,
+            client_address_extractor: self.client_address_extractor,
         }
     }
 
@@ -246,7 +252,7 @@ impl<RouteExt, ReqExt, ResExt> LayerBuilder<RouteExt, ReqExt, ResExt> {
     pub fn with_request_extractor_fn<F, B>(
         self,
         f: F,
-    ) -> LayerBuilder<RouteExt, crate::http::extractors::FnRequestExtractor<F>, ResExt>
+    ) -> LayerBuilder<RouteExt, crate::http::extractors::FnRequestExtractor<F>, ResExt, ClientExt>
     where
         F: Fn(&http::Request<B>) -> Vec<KeyValue> + Clone + Send + Sync + 'static,
     {
@@ -257,14 +263,71 @@ impl<RouteExt, ReqExt, ResExt> LayerBuilder<RouteExt, ReqExt, ResExt> {
     pub fn with_response_extractor_fn<F, B>(
         self,
         f: F,
-    ) -> LayerBuilder<RouteExt, ReqExt, crate::http::extractors::FnResponseExtractor<F>>
+    ) -> LayerBuilder<RouteExt, ReqExt, crate::http::extractors::FnResponseExtractor<F>, ClientExt>
     where
         F: Fn(&http::Response<B>) -> Vec<KeyValue> + Clone + Send + Sync + 'static,
     {
         self.with_response_extractor(crate::http::extractors::FnResponseExtractor::new(f))
     }
 
-    pub fn build(self) -> Result<Layer<RouteExt, ReqExt, ResExt>> {
+    /// Set the client address extractor.
+    ///
+    /// The extractor decides where the `client.address` and `client.port`
+    /// attributes come from. The default is [`SocketAddressExtractor`], which
+    /// reports the immediate peer. See [`ClientAddressExtractor`] for the other
+    /// choices.
+    ///
+    /// # Example
+    ///
+    /// ```ignore
+    /// let layer = LayerBuilder::builder()
+    ///     .with_client_address_extractor(ForwardedHeadersExtractor)
+    ///     .build()
+    ///     .unwrap();
+    /// ```
+    pub fn with_client_address_extractor<NewClientExt>(
+        self,
+        extractor: NewClientExt,
+    ) -> LayerBuilder<RouteExt, ReqExt, ResExt, NewClientExt> {
+        LayerBuilder {
+            tracer: self.tracer,
+            meter: self.meter,
+            tracing_enabled: self.tracing_enabled,
+            metrics_enabled: self.metrics_enabled,
+            req_dur_bounds: self.req_dur_bounds,
+            sensitive_query_parameters: self.sensitive_query_parameters,
+            client_port_enabled: self.client_port_enabled,
+            route_extractor: self.route_extractor,
+            request_extractor: self.request_extractor,
+            response_extractor: self.response_extractor,
+            client_address_extractor: extractor,
+        }
+    }
+
+    /// Convenience method to set a function-based client address extractor.
+    ///
+    /// # Example
+    ///
+    /// ```ignore
+    /// let layer = LayerBuilder::builder()
+    ///     .with_client_address_extractor_fn(|req: &http::Request<_>| {
+    ///         // Apply your trusted-proxy policy here.
+    ///         my_trusted_client_address(req)
+    ///     })
+    ///     .build()
+    ///     .unwrap();
+    /// ```
+    pub fn with_client_address_extractor_fn<F, B>(
+        self,
+        f: F,
+    ) -> LayerBuilder<RouteExt, ReqExt, ResExt, FnClientAddressExtractor<F>>
+    where
+        F: Fn(&http::Request<B>) -> Option<ClientAddress> + Clone + Send + Sync + 'static,
+    {
+        self.with_client_address_extractor(FnClientAddressExtractor::new(f))
+    }
+
+    pub fn build(self) -> Result<Layer<RouteExt, ReqExt, ResExt, ClientExt>> {
         let req_dur_bounds = self
             .req_dur_bounds
             .unwrap_or_else(|| Vec::from(OTEL_DEFAULT_HTTP_SERVER_DURATION_BOUNDS));
@@ -304,6 +367,7 @@ impl<RouteExt, ReqExt, ResExt> LayerBuilder<RouteExt, ReqExt, ResExt> {
             route_extractor: self.route_extractor,
             request_extractor: self.request_extractor,
             response_extractor: self.response_extractor,
+            client_address_extractor: self.client_address_extractor,
             tracer,
         })
     }
@@ -427,13 +491,15 @@ fn make_state(
     }
 }
 
-impl<S, RouteExt, ReqExt, ResExt> TowerLayer<S> for Layer<RouteExt, ReqExt, ResExt>
+impl<S, RouteExt, ReqExt, ResExt, ClientExt> TowerLayer<S>
+    for Layer<RouteExt, ReqExt, ResExt, ClientExt>
 where
     RouteExt: Clone,
     ReqExt: Clone,
     ResExt: Clone,
+    ClientExt: Clone,
 {
-    type Service = Service<S, RouteExt, ReqExt, ResExt>;
+    type Service = Service<S, RouteExt, ReqExt, ResExt, ClientExt>;
 
     fn layer(&self, service: S) -> Self::Service {
         Service {
@@ -441,6 +507,7 @@ where
             route_extractor: self.route_extractor.clone(),
             request_extractor: self.request_extractor.clone(),
             response_extractor: self.response_extractor.clone(),
+            client_address_extractor: self.client_address_extractor.clone(),
             inner_service: service,
             tracer: self.tracer.clone(),
         }
@@ -506,8 +573,8 @@ where
     }
 }
 
-impl<S, ReqBody, ResBody, RouteExt, ReqExt, ResExt> TowerService<http::Request<ReqBody>>
-    for Service<S, RouteExt, ReqExt, ResExt>
+impl<S, ReqBody, ResBody, RouteExt, ReqExt, ResExt, ClientExt> TowerService<http::Request<ReqBody>>
+    for Service<S, RouteExt, ReqExt, ResExt, ClientExt>
 where
     S: TowerService<http::Request<ReqBody>, Response = http::Response<ResBody>>,
     S::Future: Send,
@@ -516,6 +583,7 @@ where
     RouteExt: RouteExtractor<ReqBody>,
     ReqExt: RequestAttributeExtractor<ReqBody>,
     ResExt: ResponseAttributeExtractor<ResBody>,
+    ClientExt: ClientAddressExtractor<ReqBody>,
 {
     type Response = S::Response;
     type Error = S::Error;
@@ -589,35 +657,14 @@ where
 
         // From the semantic convention: `client.address` SHOULD represent the
         // client address behind any intermediaries, for example proxies, if it's
-        // available. The forwarded headers describe that original client, and
-        // the socket address of the immediate peer is the fallback.
-        let forwarded_for = req
-            .headers()
-            .get(&X_FORWARDED_FOR)
-            .and_then(|value| value.to_str().ok());
-        let forwarded = req
-            .headers()
-            .get(&FORWARDED)
-            .and_then(|value| value.to_str().ok());
-        #[cfg(feature = "axum-connect-info")]
-        let connect_info = req
-            .extensions()
-            .get::<ConnectInfo<SocketAddr>>()
-            .map(|info| info.0.to_string());
-        #[cfg(not(feature = "axum-connect-info"))]
-        let connect_info: Option<String> = None;
-        if let Some(client_address) =
-            client_address_kv(forwarded_for, forwarded, connect_info.as_deref())
-        {
-            span_attributes.push(client_address);
-        }
-        // From the semantic convention: `client.port` is Opt-In, and it is "the
-        // port of whichever client was captured in `client.address`".
-        if self.state.client_port_enabled {
-            if let Some(client_port) =
-                client_port_kv(forwarded_for, forwarded, connect_info.as_deref())
-            {
-                span_attributes.push(client_port);
+        // available. Only the application knows which intermediaries it can
+        // trust, so the client address extractor decides the source.
+        if let Some(client) = self.client_address_extractor.extract_client_address(&req) {
+            span_attributes.push(KeyValue::new(CLIENT_ADDRESS, client.address));
+            // From the semantic convention: `client.port` is Opt-In, and it is
+            // "the port of whichever client was captured in `client.address`".
+            if let Some(port) = client.port.filter(|_| self.state.client_port_enabled) {
+                span_attributes.push(KeyValue::new(CLIENT_PORT, i64::from(port)));
             }
         }
 
@@ -807,8 +854,12 @@ fn finalize_request<ResBody, E, ResExt>(
 mod tests {
     use super::*;
 
-    use crate::http::extractors::{NoRouteExtractor, PathExtractor};
+    use crate::http::extractors::{ForwardedHeadersExtractor, NoRouteExtractor, PathExtractor};
     use crate::Error;
+    #[cfg(feature = "axum-connect-info")]
+    use axum::extract::connect_info::ConnectInfo;
+    #[cfg(feature = "axum-connect-info")]
+    use std::net::SocketAddr;
 
     use http::{Request, Response, StatusCode};
     use opentelemetry::global::BoxedTracer;
@@ -1230,6 +1281,7 @@ mod tests {
 
             let layer = LayerBuilder::builder()
                 .with_route_extractor(PathExtractor)
+                .with_client_address_extractor(ForwardedHeadersExtractor)
                 .with_client_port(test_case.client_port_enabled)
                 .with_tracer_provider(tracer_provider.clone())
                 .build()
