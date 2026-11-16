@@ -23,7 +23,8 @@ conventions, and a server span per request, which follows the
 [HTTP spans](https://opentelemetry.io/docs/specs/semconv/http/http-spans/)
 conventions. The goal is every `Required`, `Conditionally Required`, and
 `Recommended` attribute that a Tower service can read. `Opt-In` attributes, such
-as `http.request.header.<key>`, are not emitted. Add them with
+as `http.request.header.<key>`, are not emitted by default. `client.port` has a
+builder switch, see [Client address](#client-address). Add the other ones with
 `http::server::LayerBuilder::with_request_extractor`.
 
 ## Query string redaction
@@ -94,6 +95,14 @@ address it can find in this order:
 
 The middleware removes the port and the IPv6 brackets from every source, so
 `Forwarded: for="[2001:db8::1]:4711"` reports `2001:db8::1`.
+
+The
+[HTTP server span conventions](https://opentelemetry.io/docs/specs/semconv/http/http-spans/#http-server-span)
+mark `client.port` as `Opt-In`. Enable it with
+`http::server::LayerBuilder::with_client_port(true)`. The port comes from the
+same source as `client.address`, so `X-Forwarded-For: 203.0.113.195:4711`
+reports `4711`. When that source has no port, the span carries no
+`client.port`, even when the socket address has one.
 
 Trust these headers only when a proxy in front of your service sets or strips
 them. A client can send its own `X-Forwarded-For` value, and the middleware

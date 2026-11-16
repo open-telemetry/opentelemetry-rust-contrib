@@ -9,7 +9,9 @@
   `X-Forwarded-For`, which is the original client behind a chain of proxies,
   then the `for` directive of the `Forwarded` header, and falls back to the
   socket address of the immediate peer. The socket address fallback requires
-  the new `axum-connect-info` feature.
+  the new `axum-connect-info` feature. The layer removes the port from every
+  source. The new `LayerBuilder::with_client_port` switch adds the `Opt-In`
+  `client.port` attribute with the port of the same source.
   [#848](https://github.com/open-telemetry/opentelemetry-rust-contrib/pull/848)
 * The server span, and the `http.server.request.duration`,
   `http.server.request.body.size` and `http.server.response.body.size` metrics,

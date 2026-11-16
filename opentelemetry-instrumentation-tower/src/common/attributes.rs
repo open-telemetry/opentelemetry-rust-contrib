@@ -5,7 +5,7 @@ use std::borrow::Cow;
 use http::StatusCode;
 use opentelemetry::KeyValue;
 use opentelemetry_semantic_conventions as semconv;
-use opentelemetry_semantic_conventions::attribute::{CLIENT_ADDRESS, ERROR_TYPE};
+use opentelemetry_semantic_conventions::attribute::{CLIENT_ADDRESS, CLIENT_PORT, ERROR_TYPE};
 
 /// Maps common HTTP methods to a `&'static str` so the resulting `KeyValue`
 /// stores the method as a static string (no heap allocation, allocation-free
@@ -119,6 +119,21 @@ pub(crate) fn client_address_kv(
 ) -> Option<KeyValue> {
     client_node(forwarded_for, forwarded, connect_info)
         .map(|(address, _)| KeyValue::new(CLIENT_ADDRESS, address.to_owned()))
+}
+
+/// Builds the opt-in `client.port` [`KeyValue`] for a server request.
+///
+/// The port comes from the same source as `client.address`. An obfuscated
+/// `Forwarded` port is not a number, so it emits no attribute.
+#[inline]
+pub(crate) fn client_port_kv(
+    forwarded_for: Option<&str>,
+    forwarded: Option<&str>,
+    connect_info: Option<&str>,
+) -> Option<KeyValue> {
+    let (_, port) = client_node(forwarded_for, forwarded, connect_info)?;
+    let port = port?.parse::<u16>().ok()?;
+    Some(KeyValue::new(CLIENT_PORT, i64::from(port)))
 }
 
 /// Finds the host and port of the client from the first source that names one.
@@ -472,6 +487,79 @@ mod tests {
 
         for test_case in test_cases {
             let result = client_address_kv(
+                test_case.forwarded_for,
+                test_case.forwarded,
+                test_case.connect_info,
+            );
+
+            assert_eq!(result, test_case.expected, "{}", test_case.name);
+        }
+    }
+
+    #[test]
+    fn client_port_kv_takes_the_port_of_the_client_address_source() {
+        struct TestCase {
+            name: &'static str,
+            forwarded_for: Option<&'static str>,
+            forwarded: Option<&'static str>,
+            connect_info: Option<&'static str>,
+            expected: Option<KeyValue>,
+        }
+
+        let test_cases = [
+            TestCase {
+                name: "an X-Forwarded-For entry with a port",
+                forwarded_for: Some("203.0.113.195:4711, 70.41.3.18:80"),
+                forwarded: None,
+                connect_info: Some("10.1.2.80:65123"),
+                expected: Some(KeyValue::new(CLIENT_PORT, 4711)),
+            },
+            TestCase {
+                name: "an X-Forwarded-For entry without a port does not take the socket port",
+                forwarded_for: Some("203.0.113.195"),
+                forwarded: None,
+                connect_info: Some("10.1.2.80:65123"),
+                expected: None,
+            },
+            TestCase {
+                name: "a Forwarded IPv6 node with a port",
+                forwarded_for: None,
+                forwarded: Some("for=\"[2001:db8::1]:4711\""),
+                connect_info: Some("10.1.2.80:65123"),
+                expected: Some(KeyValue::new(CLIENT_PORT, 4711)),
+            },
+            TestCase {
+                name: "an obfuscated Forwarded port is not a number",
+                forwarded_for: None,
+                forwarded: Some("for=\"_hidden:_port\""),
+                connect_info: Some("10.1.2.80:65123"),
+                expected: None,
+            },
+            TestCase {
+                name: "a port above the port range is not a port",
+                forwarded_for: Some("203.0.113.195:65536"),
+                forwarded: None,
+                connect_info: Some("10.1.2.80:65123"),
+                expected: None,
+            },
+            TestCase {
+                name: "the socket address of the immediate peer",
+                forwarded_for: None,
+                forwarded: None,
+                connect_info: Some("[2001:db8::1]:443"),
+                expected: Some(KeyValue::new(CLIENT_PORT, 443)),
+            },
+            TestCase {
+                name: "no source at all emits no attribute",
+                forwarded_for: None,
+                forwarded: None,
+                connect_info: None,
+                expected: None,
+            },
+        ];
+
+        for test_case in test_cases {
+            let result = client_port_kv(
                 test_case.forwarded_for,
                 test_case.forwarded,
                 test_case.connect_info,

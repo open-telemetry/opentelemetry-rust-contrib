@@ -30,8 +30,8 @@ use tower_layer::Layer as TowerLayer;
 use tower_service::Service as TowerService;
 
 use crate::common::attributes::{
-    client_address_kv, error_type_kv, method_kv, redact_query, split_and_format_protocol_version,
-    url_scheme_kv, DEFAULT_SENSITIVE_QUERY_PARAMETERS,
+    client_address_kv, client_port_kv, error_type_kv, method_kv, redact_query,
+    split_and_format_protocol_version, url_scheme_kv, DEFAULT_SENSITIVE_QUERY_PARAMETERS,
 };
 use crate::http::extractors::{
     DefaultRouteExtractor, NoOpExtractor, RequestAttributeExtractor, ResponseAttributeExtractor,
@@ -62,6 +62,7 @@ struct LayerState {
     server_request_body_size: Histogram<u64>,
     server_response_body_size: Histogram<u64>,
     sensitive_query_parameters: Box<[Cow<'static, str>]>,
+    client_port_enabled: bool,
 }
 
 #[derive(Clone)]
@@ -115,6 +116,7 @@ pub struct LayerBuilder<
     metrics_enabled: bool,
     req_dur_bounds: Option<Vec<f64>>,
     sensitive_query_parameters: Option<Vec<Cow<'static, str>>>,
+    client_port_enabled: bool,
     route_extractor: RouteExt,
     request_extractor: ReqExt,
     response_extractor: ResExt,
@@ -129,6 +131,7 @@ impl LayerBuilder {
             metrics_enabled: true,
             req_dur_bounds: Some(Vec::from(OTEL_DEFAULT_HTTP_SERVER_DURATION_BOUNDS)),
             sensitive_query_parameters: None,
+            client_port_enabled: false,
             route_extractor: DefaultRouteExtractor::default(),
             request_extractor: NoOpExtractor,
             response_extractor: NoOpExtractor,
@@ -165,6 +168,7 @@ impl<RouteExt, ReqExt, ResExt> LayerBuilder<RouteExt, ReqExt, ResExt> {
             metrics_enabled: self.metrics_enabled,
             req_dur_bounds: self.req_dur_bounds,
             sensitive_query_parameters: self.sensitive_query_parameters,
+            client_port_enabled: self.client_port_enabled,
             route_extractor: extractor,
             request_extractor: self.request_extractor,
             response_extractor: self.response_extractor,
@@ -209,6 +213,7 @@ impl<RouteExt, ReqExt, ResExt> LayerBuilder<RouteExt, ReqExt, ResExt> {
             metrics_enabled: self.metrics_enabled,
             req_dur_bounds: self.req_dur_bounds,
             sensitive_query_parameters: self.sensitive_query_parameters,
+            client_port_enabled: self.client_port_enabled,
             route_extractor: self.route_extractor,
             request_extractor: extractor,
             response_extractor: self.response_extractor,
@@ -230,6 +235,7 @@ impl<RouteExt, ReqExt, ResExt> LayerBuilder<RouteExt, ReqExt, ResExt> {
             metrics_enabled: self.metrics_enabled,
             req_dur_bounds: self.req_dur_bounds,
             sensitive_query_parameters: self.sensitive_query_parameters,
+            client_port_enabled: self.client_port_enabled,
             route_extractor: self.route_extractor,
             request_extractor: self.request_extractor,
             response_extractor: extractor,
@@ -293,6 +299,7 @@ impl<RouteExt, ReqExt, ResExt> LayerBuilder<RouteExt, ReqExt, ResExt> {
                 meter,
                 req_dur_bounds,
                 sensitive_query_parameters,
+                self.client_port_enabled,
             )),
             route_extractor: self.route_extractor,
             request_extractor: self.request_extractor,
@@ -327,6 +334,17 @@ impl<RouteExt, ReqExt, ResExt> LayerBuilder<RouteExt, ReqExt, ResExt> {
                 .map(|parameter| Cow::Owned(parameter.as_ref().to_owned()))
                 .collect(),
         );
+        self
+    }
+
+    /// Enable or disable the `client.port` attribute on the server span.
+    ///
+    /// The attribute is disabled by default, because the HTTP span conventions
+    /// mark it as `Opt-In`. The port comes from the same source as
+    /// `client.address`. When that source has no port, the span carries no
+    /// `client.port`.
+    pub fn with_client_port(mut self, enabled: bool) -> Self {
+        self.client_port_enabled = enabled;
         self
     }
 
@@ -380,6 +398,7 @@ fn make_state(
     meter: Meter,
     req_dur_bounds: Vec<f64>,
     sensitive_query_parameters: Box<[Cow<'static, str>]>,
+    client_port_enabled: bool,
 ) -> LayerState {
     LayerState {
         server_request_duration: meter
@@ -404,6 +423,7 @@ fn make_state(
             .with_unit(HTTP_SERVER_RESPONSE_BODY_SIZE_UNIT)
             .build(),
         sensitive_query_parameters,
+        client_port_enabled,
     }
 }
 
@@ -584,15 +604,21 @@ where
             .extensions()
             .get::<ConnectInfo<SocketAddr>>()
             .map(|info| info.0.to_string());
-        #[cfg(feature = "axum-connect-info")]
+        #[cfg(not(feature = "axum-connect-info"))]
+        let connect_info: Option<String> = None;
         if let Some(client_address) =
             client_address_kv(forwarded_for, forwarded, connect_info.as_deref())
         {
             span_attributes.push(client_address);
         }
-        #[cfg(not(feature = "axum-connect-info"))]
-        if let Some(client_address) = client_address_kv(forwarded_for, forwarded, None) {
-            span_attributes.push(client_address);
+        // From the semantic convention: `client.port` is Opt-In, and it is "the
+        // port of whichever client was captured in `client.address`".
+        if self.state.client_port_enabled {
+            if let Some(client_port) =
+                client_port_kv(forwarded_for, forwarded, connect_info.as_deref())
+            {
+                span_attributes.push(client_port);
+            }
         }
 
         if let Some(r) = &route {
@@ -804,7 +830,7 @@ mod tests {
 
     #[cfg(feature = "axum")]
     use crate::http::extractors::AxumMatchedPathExtractor;
-    use opentelemetry_semantic_conventions::attribute::CLIENT_ADDRESS;
+    use opentelemetry_semantic_conventions::attribute::{CLIENT_ADDRESS, CLIENT_PORT};
 
     #[tokio::test(flavor = "current_thread")]
     async fn test_tracing_with_in_memory_tracer() {
@@ -824,6 +850,7 @@ mod tests {
         struct TestCase {
             name: &'static str,
             target: &'static str,
+            client_port_enabled: bool,
             headers: &'static [Header],
             outcome: Result<StatusCode, TestError>,
             expected_span_name: &'static str,
@@ -835,6 +862,7 @@ mod tests {
             TestCase {
                 name: "request target in absolute form",
                 target: "http://example.com/api/users/123",
+                client_port_enabled: false,
                 headers: &[USER_AGENT],
                 outcome: Ok(StatusCode::OK),
                 expected_span_name: "GET /api/users/123",
@@ -854,6 +882,7 @@ mod tests {
             TestCase {
                 name: "request target in origin form",
                 target: "/api/users/123",
+                client_port_enabled: false,
                 headers: &[USER_AGENT],
                 outcome: Ok(StatusCode::OK),
                 expected_span_name: "GET /api/users/123",
@@ -873,6 +902,7 @@ mod tests {
             TestCase {
                 name: "request target with a query component",
                 target: "/api/users/123?fields=name&verbose=true",
+                client_port_enabled: false,
                 headers: &[USER_AGENT],
                 outcome: Ok(StatusCode::OK),
                 expected_span_name: "GET /api/users/123",
@@ -896,6 +926,7 @@ mod tests {
             TestCase {
                 name: "request target with a sensitive query parameter",
                 target: "/api/users/123?fields=name&sig=secret-signature",
+                client_port_enabled: false,
                 headers: &[USER_AGENT],
                 outcome: Ok(StatusCode::OK),
                 expected_span_name: "GET /api/users/123",
@@ -919,6 +950,7 @@ mod tests {
             TestCase {
                 name: "request target with an empty query component",
                 target: "/api/users/123?",
+                client_port_enabled: false,
                 headers: &[USER_AGENT],
                 outcome: Ok(StatusCode::OK),
                 expected_span_name: "GET /api/users/123",
@@ -939,6 +971,7 @@ mod tests {
             TestCase {
                 name: "a server error response carries error.type",
                 target: "/api/users/123",
+                client_port_enabled: false,
                 headers: &[USER_AGENT],
                 outcome: Ok(StatusCode::INTERNAL_SERVER_ERROR),
                 expected_span_name: "GET /api/users/123",
@@ -959,6 +992,7 @@ mod tests {
             TestCase {
                 name: "a client error response carries no error.type",
                 target: "/api/users/123",
+                client_port_enabled: false,
                 headers: &[USER_AGENT],
                 outcome: Ok(StatusCode::NOT_FOUND),
                 expected_span_name: "GET /api/users/123",
@@ -978,6 +1012,7 @@ mod tests {
             TestCase {
                 name: "an uncommon server error response carries error.type",
                 target: "/api/users/123",
+                client_port_enabled: false,
                 headers: &[USER_AGENT],
                 outcome: Ok(StatusCode::from_u16(599).unwrap()),
                 expected_span_name: "GET /api/users/123",
@@ -998,6 +1033,7 @@ mod tests {
             TestCase {
                 name: "an inner-service error carries the error type name",
                 target: "/api/users/123",
+                client_port_enabled: false,
                 headers: &[USER_AGENT],
                 outcome: Err(TestError),
                 expected_span_name: "GET /api/users/123",
@@ -1017,6 +1053,7 @@ mod tests {
             TestCase {
                 name: "an X-Forwarded-For header names the original client",
                 target: "/api/users/123",
+                client_port_enabled: false,
                 headers: &[
                     USER_AGENT,
                     Header {
@@ -1043,6 +1080,7 @@ mod tests {
             TestCase {
                 name: "a Forwarded header names the original client",
                 target: "/api/users/123",
+                client_port_enabled: false,
                 headers: &[
                     USER_AGENT,
                     Header {
@@ -1069,6 +1107,7 @@ mod tests {
             TestCase {
                 name: "X-Forwarded-For wins over the Forwarded header",
                 target: "/api/users/123",
+                client_port_enabled: false,
                 headers: &[
                     USER_AGENT,
                     Header {
@@ -1097,8 +1136,64 @@ mod tests {
                 expected_span_status: Status::Unset,
             },
             TestCase {
+                name: "client.port is opt-in, so the default emits only client.address",
+                target: "/api/users/123",
+                client_port_enabled: false,
+                headers: &[
+                    USER_AGENT,
+                    Header {
+                        name: "X-Forwarded-For",
+                        value: "203.0.113.195:4711",
+                    },
+                ],
+                outcome: Ok(StatusCode::OK),
+                expected_span_name: "GET /api/users/123",
+                expected_attributes: vec![
+                    KeyValue::new(semconv::attribute::HTTP_REQUEST_METHOD, "GET".to_string()),
+                    KeyValue::new(semconv::attribute::URL_SCHEME, "".to_string()),
+                    KeyValue::new(semconv::attribute::URL_PATH, "/api/users/123".to_string()),
+                    KeyValue::new(
+                        semconv::attribute::USER_AGENT_ORIGINAL,
+                        "tower-test-client/1.0".to_string(),
+                    ),
+                    KeyValue::new(CLIENT_ADDRESS, "203.0.113.195"),
+                    KeyValue::new(semconv::attribute::HTTP_ROUTE, "/api/users/123".to_string()),
+                    KeyValue::new(semconv::attribute::HTTP_RESPONSE_STATUS_CODE, 200),
+                ],
+                expected_span_status: Status::Unset,
+            },
+            TestCase {
+                name: "an enabled client.port carries the port of the client address",
+                target: "/api/users/123",
+                client_port_enabled: true,
+                headers: &[
+                    USER_AGENT,
+                    Header {
+                        name: "X-Forwarded-For",
+                        value: "203.0.113.195:4711",
+                    },
+                ],
+                outcome: Ok(StatusCode::OK),
+                expected_span_name: "GET /api/users/123",
+                expected_attributes: vec![
+                    KeyValue::new(semconv::attribute::HTTP_REQUEST_METHOD, "GET".to_string()),
+                    KeyValue::new(semconv::attribute::URL_SCHEME, "".to_string()),
+                    KeyValue::new(semconv::attribute::URL_PATH, "/api/users/123".to_string()),
+                    KeyValue::new(
+                        semconv::attribute::USER_AGENT_ORIGINAL,
+                        "tower-test-client/1.0".to_string(),
+                    ),
+                    KeyValue::new(CLIENT_ADDRESS, "203.0.113.195"),
+                    KeyValue::new(CLIENT_PORT, 4711),
+                    KeyValue::new(semconv::attribute::HTTP_ROUTE, "/api/users/123".to_string()),
+                    KeyValue::new(semconv::attribute::HTTP_RESPONSE_STATUS_CODE, 200),
+                ],
+                expected_span_status: Status::Unset,
+            },
+            TestCase {
                 name: "an empty X-Forwarded-For header emits no client.address",
                 target: "/api/users/123",
+                client_port_enabled: false,
                 headers: &[
                     USER_AGENT,
                     Header {
@@ -1135,6 +1230,7 @@ mod tests {
 
             let layer = LayerBuilder::builder()
                 .with_route_extractor(PathExtractor)
+                .with_client_port(test_case.client_port_enabled)
                 .with_tracer_provider(tracer_provider.clone())
                 .build()
                 .unwrap();
