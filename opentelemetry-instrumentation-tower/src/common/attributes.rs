@@ -131,16 +131,50 @@ pub(crate) fn client_address_kv(
 /// first one describes the original client. The node name may be quoted and may
 /// carry an obfuscated identifier, which the conventions accept as
 /// `client.address`.
+///
+/// RFC 7239 separates the elements of each hop with `,`, separates the pairs
+/// of an element with `;`, and treats parameter names case-insensitively. A
+/// quoted value can contain both separators.
 fn for_node_name(value: &str) -> Option<&str> {
-    let start = value.find("for=")?;
-    let after = &value[start + 4..];
-    if after.is_empty() {
-        return None;
-    }
-    if let Some(quoted) = after.strip_prefix('"') {
-        return quoted.find('"').map(|end| &quoted[..end]);
-    }
-    Some(after.split(';').next().unwrap_or(after))
+    split_unquoted(value, b',')
+        .flat_map(|element| split_unquoted(element, b';'))
+        .find_map(|pair| {
+            let (name, value) = pair.trim().split_once('=')?;
+            if !name.eq_ignore_ascii_case("for") {
+                return None;
+            }
+            match value.strip_prefix('"') {
+                Some(quoted) => quoted.strip_suffix('"'),
+                None => Some(value),
+            }
+        })
+}
+
+/// Splits `value` at every `separator` that is outside a quoted string.
+///
+/// The separator must be an ASCII byte, so every split lands on a UTF-8
+/// character boundary.
+fn split_unquoted(value: &str, separator: u8) -> impl Iterator<Item = &str> {
+    let mut rest = Some(value);
+    std::iter::from_fn(move || {
+        let current = rest?;
+        let mut quoted = false;
+        let mut escaped = false;
+        for (index, byte) in current.bytes().enumerate() {
+            if escaped {
+                escaped = false;
+            } else if quoted && byte == b'\\' {
+                escaped = true;
+            } else if byte == b'"' {
+                quoted = !quoted;
+            } else if !quoted && byte == separator {
+                rest = Some(&current[index + 1..]);
+                return Some(&current[..index]);
+            }
+        }
+        rest = None;
+        Some(current)
+    })
 }
 
 /// Extracts the host from a socket address, for example `"10.1.2.80:65123"` or
@@ -276,6 +310,48 @@ mod tests {
                 forwarded: Some("for=_hidden"),
                 connect_info: Some("10.1.2.80:65123"),
                 expected: Some(KeyValue::new(CLIENT_ADDRESS, "_hidden")),
+            },
+            TestCase {
+                name: "the first of several Forwarded elements is the original client",
+                forwarded_for: None,
+                forwarded: Some("for=192.0.2.43, for=198.51.100.17"),
+                connect_info: Some("10.1.2.80:65123"),
+                expected: Some(KeyValue::new(CLIENT_ADDRESS, "192.0.2.43")),
+            },
+            TestCase {
+                name: "a Forwarded parameter name is matched case-insensitively",
+                forwarded_for: None,
+                forwarded: Some("For=192.0.2.43"),
+                connect_info: Some("10.1.2.80:65123"),
+                expected: Some(KeyValue::new(CLIENT_ADDRESS, "192.0.2.43")),
+            },
+            TestCase {
+                name: "a for directive after other pairs of the element is found",
+                forwarded_for: None,
+                forwarded: Some("by=203.0.113.60; for=192.0.2.43"),
+                connect_info: Some("10.1.2.80:65123"),
+                expected: Some(KeyValue::new(CLIENT_ADDRESS, "192.0.2.43")),
+            },
+            TestCase {
+                name: "a parameter name that ends with for is not the for directive",
+                forwarded_for: None,
+                forwarded: Some("xfor=192.0.2.1;for=192.0.2.43"),
+                connect_info: Some("10.1.2.80:65123"),
+                expected: Some(KeyValue::new(CLIENT_ADDRESS, "192.0.2.43")),
+            },
+            TestCase {
+                name: "separators inside a quoted value do not end the value",
+                forwarded_for: None,
+                forwarded: Some("by=\"a,b;c\";for=_hidden, for=198.51.100.17"),
+                connect_info: Some("10.1.2.80:65123"),
+                expected: Some(KeyValue::new(CLIENT_ADDRESS, "_hidden")),
+            },
+            TestCase {
+                name: "an unterminated quoted value falls back",
+                forwarded_for: None,
+                forwarded: Some("for=\"192.0.2.43"),
+                connect_info: Some("10.1.2.80:65123"),
+                expected: Some(KeyValue::new(CLIENT_ADDRESS, "10.1.2.80")),
             },
             TestCase {
                 name: "a Forwarded header without a for directive falls back",
