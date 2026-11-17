@@ -292,10 +292,27 @@ fn socket_address<B>(_req: &http::Request<B>) -> Option<ClientAddress> {
 /// # Warning: Untrusted input
 ///
 /// A client can send its own `X-Forwarded-For` and `Forwarded` values, and this
-/// extractor cannot tell a proxy-added entry from a spoofed one. Use it only
-/// when a proxy in front of your service sets or strips these headers.
-/// Otherwise, use [`FnClientAddressExtractor`] with your own trusted-proxy
-/// policy.
+/// extractor cannot tell a proxy-added entry from a spoofed one. It reports the
+/// first entry, which is the entry that the client controls. Use it only when
+/// the proxy in front of your service meets all of these conditions:
+///
+/// - The proxy removes the incoming values and writes its own value. A proxy
+///   that only appends its entry keeps the client's entry in the first place.
+/// - The proxy does this for both `X-Forwarded-For` and `Forwarded`. The
+///   extractor reads `X-Forwarded-For` first, so a spoofed `X-Forwarded-For`
+///   wins over a clean `Forwarded`.
+/// - The proxy removes every line of a repeated header. Several lines of one
+///   header form a single list, and the first line holds the first entry.
+/// - Clients cannot reach your service without the proxy.
+///
+/// When your deployment keeps the incoming chains, use
+/// [`FnClientAddressExtractor`] with your own trusted-proxy policy, for example
+/// one that walks the list from the right and skips your trusted proxies. See
+/// the [MDN security notes for `X-Forwarded-For`] and
+/// [RFC 7239, section 8.1] for the background.
+///
+/// [MDN security notes for `X-Forwarded-For`]: https://developer.mozilla.org/en-US/docs/Web/HTTP/Reference/Headers/X-Forwarded-For#security_and_privacy_concerns
+/// [RFC 7239, section 8.1]: https://www.rfc-editor.org/rfc/rfc7239#section-8.1
 #[derive(Clone, Default)]
 pub struct ForwardedHeadersExtractor;
 
