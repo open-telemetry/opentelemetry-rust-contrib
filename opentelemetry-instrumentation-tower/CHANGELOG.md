@@ -14,6 +14,16 @@
 
 ### Added
 
+* The server span now carries `client.address` when a source for the client
+  address is available. The new `ClientAddressExtractor` decides the source,
+  and `LayerBuilder::with_client_address_extractor` sets it. The default
+  `SocketAddressExtractor` reports the socket address of the immediate peer
+  and requires the new `axum-connect-info` feature. The opt-in
+  `ForwardedHeadersExtractor` reads `X-Forwarded-For` and `Forwarded`, and
+  `FnClientAddressExtractor` runs your own trusted-proxy policy. The new
+  `LayerBuilder::with_client_port` switch adds the `Opt-In` `client.port`
+  attribute with the port of the same source.
+  [#848](https://github.com/open-telemetry/opentelemetry-rust-contrib/pull/848)
 * The server span, and the `http.server.request.duration`,
   `http.server.request.body.size` and `http.server.response.body.size` metrics,
   now carry `error.type` when a request ends with an error. A 5xx response sets

@@ -19,7 +19,7 @@ use opentelemetry::InstrumentationScope;
 use opentelemetry::KeyValue;
 use opentelemetry_http::HeaderExtractor;
 use opentelemetry_semantic_conventions as semconv;
-use opentelemetry_semantic_conventions::attribute::ERROR_TYPE;
+use opentelemetry_semantic_conventions::attribute::{CLIENT_ADDRESS, CLIENT_PORT, ERROR_TYPE};
 use pin_project_lite::pin_project;
 use tower_layer::Layer as TowerLayer;
 use tower_service::Service as TowerService;
@@ -29,8 +29,9 @@ use crate::common::attributes::{
     DEFAULT_SENSITIVE_QUERY_PARAMETERS,
 };
 use crate::http::extractors::{
-    DefaultRouteExtractor, NoOpExtractor, RequestAttributeExtractor, ResponseAttributeExtractor,
-    RouteExtractor,
+    ClientAddress, ClientAddressExtractor, DefaultRouteExtractor, FnClientAddressExtractor,
+    NoOpExtractor, RequestAttributeExtractor, ResponseAttributeExtractor, RouteExtractor,
+    SocketAddressExtractor,
 };
 use crate::Result;
 
@@ -53,6 +54,7 @@ struct LayerState {
     server_request_body_size: Histogram<u64>,
     server_response_body_size: Histogram<u64>,
     sensitive_query_parameters: Box<[Cow<'static, str>]>,
+    client_port_enabled: bool,
 }
 
 #[derive(Clone)]
@@ -62,22 +64,30 @@ pub struct Service<
     RouteExt = DefaultRouteExtractor,
     ReqExt = NoOpExtractor,
     ResExt = NoOpExtractor,
+    ClientExt = SocketAddressExtractor,
 > {
     state: Arc<LayerState>,
     route_extractor: RouteExt,
     request_extractor: ReqExt,
     response_extractor: ResExt,
+    client_address_extractor: ClientExt,
     inner_service: S,
     tracer: Arc<BoxedTracer>,
 }
 
 #[derive(Clone)]
 /// [`tower_layer::Layer`] which applies OpenTelemetry HTTP server metrics and tracing.
-pub struct Layer<RouteExt = DefaultRouteExtractor, ReqExt = NoOpExtractor, ResExt = NoOpExtractor> {
+pub struct Layer<
+    RouteExt = DefaultRouteExtractor,
+    ReqExt = NoOpExtractor,
+    ResExt = NoOpExtractor,
+    ClientExt = SocketAddressExtractor,
+> {
     state: Arc<LayerState>,
     route_extractor: RouteExt,
     request_extractor: ReqExt,
     response_extractor: ResExt,
+    client_address_extractor: ClientExt,
     tracer: Arc<BoxedTracer>,
 }
 
@@ -99,6 +109,7 @@ pub struct LayerBuilder<
     RouteExt = DefaultRouteExtractor,
     ReqExt = NoOpExtractor,
     ResExt = NoOpExtractor,
+    ClientExt = SocketAddressExtractor,
 > {
     tracer: Option<Arc<BoxedTracer>>,
     meter: Option<Meter>,
@@ -106,9 +117,11 @@ pub struct LayerBuilder<
     metrics_enabled: bool,
     req_dur_bounds: Option<Vec<f64>>,
     sensitive_query_parameters: Option<Vec<Cow<'static, str>>>,
+    client_port_enabled: bool,
     route_extractor: RouteExt,
     request_extractor: ReqExt,
     response_extractor: ResExt,
+    client_address_extractor: ClientExt,
 }
 
 impl LayerBuilder {
@@ -120,14 +133,16 @@ impl LayerBuilder {
             metrics_enabled: true,
             req_dur_bounds: Some(Vec::from(OTEL_DEFAULT_HTTP_SERVER_DURATION_BOUNDS)),
             sensitive_query_parameters: None,
+            client_port_enabled: false,
             route_extractor: DefaultRouteExtractor::default(),
             request_extractor: NoOpExtractor,
             response_extractor: NoOpExtractor,
+            client_address_extractor: SocketAddressExtractor,
         }
     }
 }
 
-impl<RouteExt, ReqExt, ResExt> LayerBuilder<RouteExt, ReqExt, ResExt> {
+impl<RouteExt, ReqExt, ResExt, ClientExt> LayerBuilder<RouteExt, ReqExt, ResExt, ClientExt> {
     /// Set a custom route extractor.
     ///
     /// The route extractor determines how the route is extracted from requests.
@@ -148,7 +163,7 @@ impl<RouteExt, ReqExt, ResExt> LayerBuilder<RouteExt, ReqExt, ResExt> {
     pub fn with_route_extractor<NewRoute>(
         self,
         extractor: NewRoute,
-    ) -> LayerBuilder<NewRoute, ReqExt, ResExt> {
+    ) -> LayerBuilder<NewRoute, ReqExt, ResExt, ClientExt> {
         LayerBuilder {
             tracer: self.tracer,
             meter: self.meter,
@@ -156,9 +171,11 @@ impl<RouteExt, ReqExt, ResExt> LayerBuilder<RouteExt, ReqExt, ResExt> {
             metrics_enabled: self.metrics_enabled,
             req_dur_bounds: self.req_dur_bounds,
             sensitive_query_parameters: self.sensitive_query_parameters,
+            client_port_enabled: self.client_port_enabled,
             route_extractor: extractor,
             request_extractor: self.request_extractor,
             response_extractor: self.response_extractor,
+            client_address_extractor: self.client_address_extractor,
         }
     }
 
@@ -178,7 +195,7 @@ impl<RouteExt, ReqExt, ResExt> LayerBuilder<RouteExt, ReqExt, ResExt> {
     pub fn with_route_extractor_fn<F, B>(
         self,
         f: F,
-    ) -> LayerBuilder<crate::http::extractors::FnRouteExtractor<F>, ReqExt, ResExt>
+    ) -> LayerBuilder<crate::http::extractors::FnRouteExtractor<F>, ReqExt, ResExt, ClientExt>
     where
         F: Fn(&http::Request<B>) -> Option<String> + Clone + Send + Sync + 'static,
     {
@@ -189,7 +206,7 @@ impl<RouteExt, ReqExt, ResExt> LayerBuilder<RouteExt, ReqExt, ResExt> {
     pub fn with_request_extractor<NewReqExt, B>(
         self,
         extractor: NewReqExt,
-    ) -> LayerBuilder<RouteExt, NewReqExt, ResExt>
+    ) -> LayerBuilder<RouteExt, NewReqExt, ResExt, ClientExt>
     where
         NewReqExt: RequestAttributeExtractor<B>,
     {
@@ -200,9 +217,11 @@ impl<RouteExt, ReqExt, ResExt> LayerBuilder<RouteExt, ReqExt, ResExt> {
             metrics_enabled: self.metrics_enabled,
             req_dur_bounds: self.req_dur_bounds,
             sensitive_query_parameters: self.sensitive_query_parameters,
+            client_port_enabled: self.client_port_enabled,
             route_extractor: self.route_extractor,
             request_extractor: extractor,
             response_extractor: self.response_extractor,
+            client_address_extractor: self.client_address_extractor,
         }
     }
 
@@ -210,7 +229,7 @@ impl<RouteExt, ReqExt, ResExt> LayerBuilder<RouteExt, ReqExt, ResExt> {
     pub fn with_response_extractor<NewResExt, B>(
         self,
         extractor: NewResExt,
-    ) -> LayerBuilder<RouteExt, ReqExt, NewResExt>
+    ) -> LayerBuilder<RouteExt, ReqExt, NewResExt, ClientExt>
     where
         NewResExt: ResponseAttributeExtractor<B>,
     {
@@ -221,9 +240,11 @@ impl<RouteExt, ReqExt, ResExt> LayerBuilder<RouteExt, ReqExt, ResExt> {
             metrics_enabled: self.metrics_enabled,
             req_dur_bounds: self.req_dur_bounds,
             sensitive_query_parameters: self.sensitive_query_parameters,
+            client_port_enabled: self.client_port_enabled,
             route_extractor: self.route_extractor,
             request_extractor: self.request_extractor,
             response_extractor: extractor,
+            client_address_extractor: self.client_address_extractor,
         }
     }
 
@@ -231,7 +252,7 @@ impl<RouteExt, ReqExt, ResExt> LayerBuilder<RouteExt, ReqExt, ResExt> {
     pub fn with_request_extractor_fn<F, B>(
         self,
         f: F,
-    ) -> LayerBuilder<RouteExt, crate::http::extractors::FnRequestExtractor<F>, ResExt>
+    ) -> LayerBuilder<RouteExt, crate::http::extractors::FnRequestExtractor<F>, ResExt, ClientExt>
     where
         F: Fn(&http::Request<B>) -> Vec<KeyValue> + Clone + Send + Sync + 'static,
     {
@@ -242,14 +263,71 @@ impl<RouteExt, ReqExt, ResExt> LayerBuilder<RouteExt, ReqExt, ResExt> {
     pub fn with_response_extractor_fn<F, B>(
         self,
         f: F,
-    ) -> LayerBuilder<RouteExt, ReqExt, crate::http::extractors::FnResponseExtractor<F>>
+    ) -> LayerBuilder<RouteExt, ReqExt, crate::http::extractors::FnResponseExtractor<F>, ClientExt>
     where
         F: Fn(&http::Response<B>) -> Vec<KeyValue> + Clone + Send + Sync + 'static,
     {
         self.with_response_extractor(crate::http::extractors::FnResponseExtractor::new(f))
     }
 
-    pub fn build(self) -> Result<Layer<RouteExt, ReqExt, ResExt>> {
+    /// Set the client address extractor.
+    ///
+    /// The extractor decides where the `client.address` and `client.port`
+    /// attributes come from. The default is [`SocketAddressExtractor`], which
+    /// reports the immediate peer. See [`ClientAddressExtractor`] for the other
+    /// choices.
+    ///
+    /// # Example
+    ///
+    /// ```ignore
+    /// let layer = LayerBuilder::builder()
+    ///     .with_client_address_extractor(ForwardedHeadersExtractor)
+    ///     .build()
+    ///     .unwrap();
+    /// ```
+    pub fn with_client_address_extractor<NewClientExt>(
+        self,
+        extractor: NewClientExt,
+    ) -> LayerBuilder<RouteExt, ReqExt, ResExt, NewClientExt> {
+        LayerBuilder {
+            tracer: self.tracer,
+            meter: self.meter,
+            tracing_enabled: self.tracing_enabled,
+            metrics_enabled: self.metrics_enabled,
+            req_dur_bounds: self.req_dur_bounds,
+            sensitive_query_parameters: self.sensitive_query_parameters,
+            client_port_enabled: self.client_port_enabled,
+            route_extractor: self.route_extractor,
+            request_extractor: self.request_extractor,
+            response_extractor: self.response_extractor,
+            client_address_extractor: extractor,
+        }
+    }
+
+    /// Convenience method to set a function-based client address extractor.
+    ///
+    /// # Example
+    ///
+    /// ```ignore
+    /// let layer = LayerBuilder::builder()
+    ///     .with_client_address_extractor_fn(|req: &http::Request<_>| {
+    ///         // Apply your trusted-proxy policy here.
+    ///         my_trusted_client_address(req)
+    ///     })
+    ///     .build()
+    ///     .unwrap();
+    /// ```
+    pub fn with_client_address_extractor_fn<F, B>(
+        self,
+        f: F,
+    ) -> LayerBuilder<RouteExt, ReqExt, ResExt, FnClientAddressExtractor<F>>
+    where
+        F: Fn(&http::Request<B>) -> Option<ClientAddress> + Clone + Send + Sync + 'static,
+    {
+        self.with_client_address_extractor(FnClientAddressExtractor::new(f))
+    }
+
+    pub fn build(self) -> Result<Layer<RouteExt, ReqExt, ResExt, ClientExt>> {
         let req_dur_bounds = self
             .req_dur_bounds
             .unwrap_or_else(|| Vec::from(OTEL_DEFAULT_HTTP_SERVER_DURATION_BOUNDS));
@@ -284,10 +362,12 @@ impl<RouteExt, ReqExt, ResExt> LayerBuilder<RouteExt, ReqExt, ResExt> {
                 meter,
                 req_dur_bounds,
                 sensitive_query_parameters,
+                self.client_port_enabled,
             )),
             route_extractor: self.route_extractor,
             request_extractor: self.request_extractor,
             response_extractor: self.response_extractor,
+            client_address_extractor: self.client_address_extractor,
             tracer,
         })
     }
@@ -318,6 +398,17 @@ impl<RouteExt, ReqExt, ResExt> LayerBuilder<RouteExt, ReqExt, ResExt> {
                 .map(|parameter| Cow::Owned(parameter.as_ref().to_owned()))
                 .collect(),
         );
+        self
+    }
+
+    /// Enable or disable the `client.port` attribute on the server span.
+    ///
+    /// The attribute is disabled by default, because the HTTP span conventions
+    /// mark it as `Opt-In`. The port comes from the same source as
+    /// `client.address`. When that source has no port, the span carries no
+    /// `client.port`.
+    pub fn with_client_port(mut self, enabled: bool) -> Self {
+        self.client_port_enabled = enabled;
         self
     }
 
@@ -371,6 +462,7 @@ fn make_state(
     meter: Meter,
     req_dur_bounds: Vec<f64>,
     sensitive_query_parameters: Box<[Cow<'static, str>]>,
+    client_port_enabled: bool,
 ) -> LayerState {
     LayerState {
         server_request_duration: meter
@@ -395,16 +487,19 @@ fn make_state(
             .with_unit(HTTP_SERVER_RESPONSE_BODY_SIZE_UNIT)
             .build(),
         sensitive_query_parameters,
+        client_port_enabled,
     }
 }
 
-impl<S, RouteExt, ReqExt, ResExt> TowerLayer<S> for Layer<RouteExt, ReqExt, ResExt>
+impl<S, RouteExt, ReqExt, ResExt, ClientExt> TowerLayer<S>
+    for Layer<RouteExt, ReqExt, ResExt, ClientExt>
 where
     RouteExt: Clone,
     ReqExt: Clone,
     ResExt: Clone,
+    ClientExt: Clone,
 {
-    type Service = Service<S, RouteExt, ReqExt, ResExt>;
+    type Service = Service<S, RouteExt, ReqExt, ResExt, ClientExt>;
 
     fn layer(&self, service: S) -> Self::Service {
         Service {
@@ -412,6 +507,7 @@ where
             route_extractor: self.route_extractor.clone(),
             request_extractor: self.request_extractor.clone(),
             response_extractor: self.response_extractor.clone(),
+            client_address_extractor: self.client_address_extractor.clone(),
             inner_service: service,
             tracer: self.tracer.clone(),
         }
@@ -545,8 +641,8 @@ where
     }
 }
 
-impl<S, ReqBody, ResBody, RouteExt, ReqExt, ResExt> TowerService<http::Request<ReqBody>>
-    for Service<S, RouteExt, ReqExt, ResExt>
+impl<S, ReqBody, ResBody, RouteExt, ReqExt, ResExt, ClientExt> TowerService<http::Request<ReqBody>>
+    for Service<S, RouteExt, ReqExt, ResExt, ClientExt>
 where
     S: TowerService<http::Request<ReqBody>, Response = http::Response<ResBody>>,
     S::Future: Send,
@@ -555,6 +651,7 @@ where
     RouteExt: RouteExtractor<ReqBody>,
     ReqExt: RequestAttributeExtractor<ReqBody>,
     ResExt: ResponseAttributeExtractor<ResBody>,
+    ClientExt: ClientAddressExtractor<ReqBody>,
 {
     type Response = S::Response;
     type Error = S::Error;
@@ -624,6 +721,19 @@ where
                 semconv::attribute::USER_AGENT_ORIGINAL,
                 user_agent.to_string(),
             ));
+        }
+
+        // From the semantic convention: `client.address` SHOULD represent the
+        // client address behind any intermediaries, for example proxies, if it's
+        // available. Only the application knows which intermediaries it can
+        // trust, so the client address extractor decides the source.
+        if let Some(client) = self.client_address_extractor.extract_client_address(&req) {
+            span_attributes.push(KeyValue::new(CLIENT_ADDRESS, client.address));
+            // From the semantic convention: `client.port` is Opt-In, and it is
+            // "the port of whichever client was captured in `client.address`".
+            if let Some(port) = client.port.filter(|_| self.state.client_port_enabled) {
+                span_attributes.push(KeyValue::new(CLIENT_PORT, i64::from(port)));
+            }
         }
 
         if let Some(r) = &route {
@@ -801,8 +911,12 @@ fn finalize_request<ResBody, E, ResExt>(
 mod tests {
     use super::*;
 
-    use crate::http::extractors::{NoRouteExtractor, PathExtractor};
+    use crate::http::extractors::{ForwardedHeadersExtractor, NoRouteExtractor, PathExtractor};
     use crate::Error;
+    #[cfg(feature = "axum-connect-info")]
+    use axum::extract::connect_info::ConnectInfo;
+    #[cfg(feature = "axum-connect-info")]
+    use std::net::SocketAddr;
 
     use http::{Request, Response, StatusCode};
     use opentelemetry::global::BoxedTracer;
@@ -824,15 +938,28 @@ mod tests {
 
     #[cfg(feature = "axum")]
     use crate::http::extractors::AxumMatchedPathExtractor;
+    use opentelemetry_semantic_conventions::attribute::{CLIENT_ADDRESS, CLIENT_PORT};
 
     #[tokio::test(flavor = "current_thread")]
     async fn test_tracing_with_in_memory_tracer() {
         #[derive(Debug, Clone, Copy)]
         struct TestError;
 
+        struct Header {
+            name: &'static str,
+            value: &'static str,
+        }
+
+        const USER_AGENT: Header = Header {
+            name: "User-Agent",
+            value: "tower-test-client/1.0",
+        };
+
         struct TestCase {
             name: &'static str,
             target: &'static str,
+            client_port_enabled: bool,
+            headers: &'static [Header],
             outcome: Result<StatusCode, TestError>,
             expected_span_name: &'static str,
             expected_attributes: Vec<KeyValue>,
@@ -843,6 +970,8 @@ mod tests {
             TestCase {
                 name: "request target in absolute form",
                 target: "http://example.com/api/users/123",
+                client_port_enabled: false,
+                headers: &[USER_AGENT],
                 outcome: Ok(StatusCode::OK),
                 expected_span_name: "GET /api/users/123",
                 expected_attributes: vec![
@@ -861,6 +990,8 @@ mod tests {
             TestCase {
                 name: "request target in origin form",
                 target: "/api/users/123",
+                client_port_enabled: false,
+                headers: &[USER_AGENT],
                 outcome: Ok(StatusCode::OK),
                 expected_span_name: "GET /api/users/123",
                 expected_attributes: vec![
@@ -879,6 +1010,8 @@ mod tests {
             TestCase {
                 name: "request target with a query component",
                 target: "/api/users/123?fields=name&verbose=true",
+                client_port_enabled: false,
+                headers: &[USER_AGENT],
                 outcome: Ok(StatusCode::OK),
                 expected_span_name: "GET /api/users/123",
                 expected_attributes: vec![
@@ -901,6 +1034,8 @@ mod tests {
             TestCase {
                 name: "request target with a sensitive query parameter",
                 target: "/api/users/123?fields=name&sig=secret-signature",
+                client_port_enabled: false,
+                headers: &[USER_AGENT],
                 outcome: Ok(StatusCode::OK),
                 expected_span_name: "GET /api/users/123",
                 expected_attributes: vec![
@@ -923,6 +1058,8 @@ mod tests {
             TestCase {
                 name: "request target with an empty query component",
                 target: "/api/users/123?",
+                client_port_enabled: false,
+                headers: &[USER_AGENT],
                 outcome: Ok(StatusCode::OK),
                 expected_span_name: "GET /api/users/123",
                 expected_attributes: vec![
@@ -942,6 +1079,8 @@ mod tests {
             TestCase {
                 name: "a server error response carries error.type",
                 target: "/api/users/123",
+                client_port_enabled: false,
+                headers: &[USER_AGENT],
                 outcome: Ok(StatusCode::INTERNAL_SERVER_ERROR),
                 expected_span_name: "GET /api/users/123",
                 expected_attributes: vec![
@@ -961,6 +1100,8 @@ mod tests {
             TestCase {
                 name: "a client error response carries no error.type",
                 target: "/api/users/123",
+                client_port_enabled: false,
+                headers: &[USER_AGENT],
                 outcome: Ok(StatusCode::NOT_FOUND),
                 expected_span_name: "GET /api/users/123",
                 expected_attributes: vec![
@@ -979,6 +1120,8 @@ mod tests {
             TestCase {
                 name: "an uncommon server error response carries error.type",
                 target: "/api/users/123",
+                client_port_enabled: false,
+                headers: &[USER_AGENT],
                 outcome: Ok(StatusCode::from_u16(599).unwrap()),
                 expected_span_name: "GET /api/users/123",
                 expected_attributes: vec![
@@ -998,6 +1141,8 @@ mod tests {
             TestCase {
                 name: "an inner-service error carries the error type name",
                 target: "/api/users/123",
+                client_port_enabled: false,
+                headers: &[USER_AGENT],
                 outcome: Err(TestError),
                 expected_span_name: "GET /api/users/123",
                 expected_attributes: vec![
@@ -1013,6 +1158,172 @@ mod tests {
                 ],
                 expected_span_status: Status::error(format!("{:?}", TestError)),
             },
+            TestCase {
+                name: "an X-Forwarded-For header names the original client",
+                target: "/api/users/123",
+                client_port_enabled: false,
+                headers: &[
+                    USER_AGENT,
+                    Header {
+                        name: "X-Forwarded-For",
+                        value: "203.0.113.195, 70.41.3.18",
+                    },
+                ],
+                outcome: Ok(StatusCode::OK),
+                expected_span_name: "GET /api/users/123",
+                expected_attributes: vec![
+                    KeyValue::new(semconv::attribute::HTTP_REQUEST_METHOD, "GET".to_string()),
+                    KeyValue::new(semconv::attribute::URL_SCHEME, "".to_string()),
+                    KeyValue::new(semconv::attribute::URL_PATH, "/api/users/123".to_string()),
+                    KeyValue::new(
+                        semconv::attribute::USER_AGENT_ORIGINAL,
+                        "tower-test-client/1.0".to_string(),
+                    ),
+                    KeyValue::new(CLIENT_ADDRESS, "203.0.113.195"),
+                    KeyValue::new(semconv::attribute::HTTP_ROUTE, "/api/users/123".to_string()),
+                    KeyValue::new(semconv::attribute::HTTP_RESPONSE_STATUS_CODE, 200),
+                ],
+                expected_span_status: Status::Unset,
+            },
+            TestCase {
+                name: "a Forwarded header names the original client",
+                target: "/api/users/123",
+                client_port_enabled: false,
+                headers: &[
+                    USER_AGENT,
+                    Header {
+                        name: "Forwarded",
+                        value: "for=192.0.2.43;by=203.0.113.60",
+                    },
+                ],
+                outcome: Ok(StatusCode::OK),
+                expected_span_name: "GET /api/users/123",
+                expected_attributes: vec![
+                    KeyValue::new(semconv::attribute::HTTP_REQUEST_METHOD, "GET".to_string()),
+                    KeyValue::new(semconv::attribute::URL_SCHEME, "".to_string()),
+                    KeyValue::new(semconv::attribute::URL_PATH, "/api/users/123".to_string()),
+                    KeyValue::new(
+                        semconv::attribute::USER_AGENT_ORIGINAL,
+                        "tower-test-client/1.0".to_string(),
+                    ),
+                    KeyValue::new(CLIENT_ADDRESS, "192.0.2.43"),
+                    KeyValue::new(semconv::attribute::HTTP_ROUTE, "/api/users/123".to_string()),
+                    KeyValue::new(semconv::attribute::HTTP_RESPONSE_STATUS_CODE, 200),
+                ],
+                expected_span_status: Status::Unset,
+            },
+            TestCase {
+                name: "X-Forwarded-For wins over the Forwarded header",
+                target: "/api/users/123",
+                client_port_enabled: false,
+                headers: &[
+                    USER_AGENT,
+                    Header {
+                        name: "X-Forwarded-For",
+                        value: "203.0.113.195",
+                    },
+                    Header {
+                        name: "Forwarded",
+                        value: "for=192.0.2.43",
+                    },
+                ],
+                outcome: Ok(StatusCode::OK),
+                expected_span_name: "GET /api/users/123",
+                expected_attributes: vec![
+                    KeyValue::new(semconv::attribute::HTTP_REQUEST_METHOD, "GET".to_string()),
+                    KeyValue::new(semconv::attribute::URL_SCHEME, "".to_string()),
+                    KeyValue::new(semconv::attribute::URL_PATH, "/api/users/123".to_string()),
+                    KeyValue::new(
+                        semconv::attribute::USER_AGENT_ORIGINAL,
+                        "tower-test-client/1.0".to_string(),
+                    ),
+                    KeyValue::new(CLIENT_ADDRESS, "203.0.113.195"),
+                    KeyValue::new(semconv::attribute::HTTP_ROUTE, "/api/users/123".to_string()),
+                    KeyValue::new(semconv::attribute::HTTP_RESPONSE_STATUS_CODE, 200),
+                ],
+                expected_span_status: Status::Unset,
+            },
+            TestCase {
+                name: "client.port is opt-in, so the default emits only client.address",
+                target: "/api/users/123",
+                client_port_enabled: false,
+                headers: &[
+                    USER_AGENT,
+                    Header {
+                        name: "X-Forwarded-For",
+                        value: "203.0.113.195:4711",
+                    },
+                ],
+                outcome: Ok(StatusCode::OK),
+                expected_span_name: "GET /api/users/123",
+                expected_attributes: vec![
+                    KeyValue::new(semconv::attribute::HTTP_REQUEST_METHOD, "GET".to_string()),
+                    KeyValue::new(semconv::attribute::URL_SCHEME, "".to_string()),
+                    KeyValue::new(semconv::attribute::URL_PATH, "/api/users/123".to_string()),
+                    KeyValue::new(
+                        semconv::attribute::USER_AGENT_ORIGINAL,
+                        "tower-test-client/1.0".to_string(),
+                    ),
+                    KeyValue::new(CLIENT_ADDRESS, "203.0.113.195"),
+                    KeyValue::new(semconv::attribute::HTTP_ROUTE, "/api/users/123".to_string()),
+                    KeyValue::new(semconv::attribute::HTTP_RESPONSE_STATUS_CODE, 200),
+                ],
+                expected_span_status: Status::Unset,
+            },
+            TestCase {
+                name: "an enabled client.port carries the port of the client address",
+                target: "/api/users/123",
+                client_port_enabled: true,
+                headers: &[
+                    USER_AGENT,
+                    Header {
+                        name: "X-Forwarded-For",
+                        value: "203.0.113.195:4711",
+                    },
+                ],
+                outcome: Ok(StatusCode::OK),
+                expected_span_name: "GET /api/users/123",
+                expected_attributes: vec![
+                    KeyValue::new(semconv::attribute::HTTP_REQUEST_METHOD, "GET".to_string()),
+                    KeyValue::new(semconv::attribute::URL_SCHEME, "".to_string()),
+                    KeyValue::new(semconv::attribute::URL_PATH, "/api/users/123".to_string()),
+                    KeyValue::new(
+                        semconv::attribute::USER_AGENT_ORIGINAL,
+                        "tower-test-client/1.0".to_string(),
+                    ),
+                    KeyValue::new(CLIENT_ADDRESS, "203.0.113.195"),
+                    KeyValue::new(CLIENT_PORT, 4711),
+                    KeyValue::new(semconv::attribute::HTTP_ROUTE, "/api/users/123".to_string()),
+                    KeyValue::new(semconv::attribute::HTTP_RESPONSE_STATUS_CODE, 200),
+                ],
+                expected_span_status: Status::Unset,
+            },
+            TestCase {
+                name: "an empty X-Forwarded-For header emits no client.address",
+                target: "/api/users/123",
+                client_port_enabled: false,
+                headers: &[
+                    USER_AGENT,
+                    Header {
+                        name: "X-Forwarded-For",
+                        value: "",
+                    },
+                ],
+                outcome: Ok(StatusCode::OK),
+                expected_span_name: "GET /api/users/123",
+                expected_attributes: vec![
+                    KeyValue::new(semconv::attribute::HTTP_REQUEST_METHOD, "GET".to_string()),
+                    KeyValue::new(semconv::attribute::URL_SCHEME, "".to_string()),
+                    KeyValue::new(semconv::attribute::URL_PATH, "/api/users/123".to_string()),
+                    KeyValue::new(
+                        semconv::attribute::USER_AGENT_ORIGINAL,
+                        "tower-test-client/1.0".to_string(),
+                    ),
+                    KeyValue::new(semconv::attribute::HTTP_ROUTE, "/api/users/123".to_string()),
+                    KeyValue::new(semconv::attribute::HTTP_RESPONSE_STATUS_CODE, 200),
+                ],
+                expected_span_status: Status::Unset,
+            },
         ];
 
         for test_case in test_cases {
@@ -1027,6 +1338,8 @@ mod tests {
 
             let layer = LayerBuilder::builder()
                 .with_route_extractor(PathExtractor)
+                .with_client_address_extractor(ForwardedHeadersExtractor)
+                .with_client_port(test_case.client_port_enabled)
                 .with_tracer_provider(tracer_provider.clone())
                 .build()
                 .unwrap();
@@ -1050,10 +1363,12 @@ mod tests {
             let cx = OtelContext::current_with_span(parent_span);
 
             let request_body = "test".to_string();
-            let request = http::Request::builder()
-                .uri(test_case.target)
+            let mut request_builder = http::Request::builder().uri(test_case.target);
+            for header in test_case.headers {
+                request_builder = request_builder.header(header.name, header.value);
+            }
+            let request = request_builder
                 .header("Content-Length", request_body.len().to_string())
-                .header("User-Agent", "tower-test-client/1.0")
                 .body(request_body)
                 .unwrap();
 
@@ -1104,6 +1419,80 @@ mod tests {
 
     async fn echo(req: http::Request<String>) -> Result<http::Response<String>, Error> {
         Ok(http::Response::new(req.into_body()))
+    }
+
+    #[cfg(feature = "axum-connect-info")]
+    #[tokio::test(flavor = "current_thread")]
+    async fn the_socket_address_of_the_immediate_peer_is_the_client_address_fallback() {
+        struct TestCase {
+            name: &'static str,
+            connect_info: Option<SocketAddr>,
+            expected_client_address: Option<&'static str>,
+        }
+
+        let test_cases = [
+            TestCase {
+                name: "a socket address contributes its host",
+                connect_info: Some(SocketAddr::from(([10, 1, 2, 80], 65123))),
+                expected_client_address: Some("10.1.2.80"),
+            },
+            TestCase {
+                name: "an IPv6 socket address contributes its host without brackets",
+                connect_info: Some("[2001:db8::1]:443".parse().unwrap()),
+                expected_client_address: Some("2001:db8::1"),
+            },
+            TestCase {
+                name: "a missing socket address emits no client.address",
+                connect_info: None,
+                expected_client_address: None,
+            },
+        ];
+
+        for test_case in test_cases {
+            let trace_exporter = InMemorySpanExporterBuilder::new().build();
+            let tracer_provider = SdkTracerProvider::builder()
+                .with_simple_exporter(trace_exporter.clone())
+                .build();
+
+            let layer = LayerBuilder::builder()
+                .with_route_extractor(NoRouteExtractor)
+                .with_tracer_provider(tracer_provider.clone())
+                .build()
+                .unwrap();
+
+            let mut service = ServiceBuilder::new()
+                .layer(layer)
+                .service(tower::service_fn(echo));
+
+            let mut request = Request::builder()
+                .method("GET")
+                .uri("/api/users/123")
+                .body(String::from("body"))
+                .unwrap();
+            if let Some(connect_info) = test_case.connect_info {
+                request
+                    .extensions_mut()
+                    .insert(ConnectInfo::<SocketAddr>(connect_info));
+            }
+            let _response = service.call(request).await.unwrap();
+
+            tracer_provider.force_flush().unwrap();
+            let spans = trace_exporter.get_finished_spans().unwrap();
+            assert_eq!(spans.len(), 1, "{}", test_case.name);
+
+            let result = spans[0]
+                .attributes
+                .iter()
+                .find(|kv| kv.key.as_str() == CLIENT_ADDRESS)
+                .map(|kv| kv.value.as_str().to_string());
+
+            assert_eq!(
+                result.as_deref(),
+                test_case.expected_client_address,
+                "{}",
+                test_case.name
+            );
+        }
     }
 
     #[tokio::test(flavor = "current_thread")]
