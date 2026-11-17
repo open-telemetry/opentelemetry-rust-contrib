@@ -2031,22 +2031,22 @@ mod tests {
         );
     }
 
-    struct InnerSpanCase {
-        name: &'static str,
-        start_child_in_call: bool,
-    }
-
     /// A span that the inner service starts must be a child of the server span,
     /// both when the inner service starts it in `call` and when it starts it in
     /// the returned future.
     #[tokio::test(flavor = "current_thread")]
     async fn test_inner_service_span_is_child_of_server_span() {
+        struct TestCase {
+            name: &'static str,
+            start_child_in_call: bool,
+        }
+
         let cases = [
-            InnerSpanCase {
+            TestCase {
                 name: "span started in the response future",
                 start_child_in_call: false,
             },
-            InnerSpanCase {
+            TestCase {
                 name: "span started in call",
                 start_child_in_call: true,
             },
