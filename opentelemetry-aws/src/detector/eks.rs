@@ -11,6 +11,9 @@ use super::{
     utils::{debug_on_error, info_on_error, non_empty, opt_kv, warn_on_error},
 };
 
+#[cfg(feature = "detector-aws-eks-cluster-arn")]
+mod cluster_arn;
+
 /// Name reported in internal logs emitted by this detector.
 const DETECTOR: &str = "aws_eks";
 /// Filesystem path to the Kubernetes service-account namespace file.
@@ -45,7 +48,7 @@ const EKS_CLUSTER_NAME_ENV_VAR: &str = "AWS_CLUSTER_NAME";
 /// | `k8s.pod.uid`             | `POD_UID` environment variable (requires the downward API, see note below)                    |
 /// | `k8s.node.name`           | `NODE_NAME` environment variable (requires the downward API, see note below)                  |
 /// | `k8s.cluster.name`        | IMDSv2 instance tag `aws:eks:cluster-name`; falls back to `AWS_CLUSTER_NAME` (see note below) |
-/// | `aws.eks.cluster.arn`     | built from the partition, region, account ID and cluster name                                 |
+/// | `aws.eks.cluster.arn`     | built from the partition, region, account ID and cluster name, or read from EKS (see below)   |
 /// | `container.id`            | container ID parsed from `/proc/self/cgroup`, then from `/proc/self/mountinfo`                |
 /// | `cloud.region`            | instance identity document `region`; falls back to `AWS_REGION`                               |
 /// | `cloud.account.id`        | instance identity document `accountId`; falls back to `AWS_ACCOUNT_ID`                        |
@@ -82,6 +85,14 @@ const EKS_CLUSTER_NAME_ENV_VAR: &str = "AWS_CLUSTER_NAME";
 /// `aws.eks.cluster.arn` is built from the cluster name, so it inherits the
 /// same requirement, and additionally needs the region and the account ID.
 ///
+/// # Verified `aws.eks.cluster.arn`
+///
+/// The built ARN is never checked against the real cluster. With the
+/// `detector-aws-eks-cluster-arn` feature, the ARN comes from EKS
+/// `DescribeCluster` instead, and is only kept if it belongs to this pod's
+/// cluster. If the check fails, no ARN is reported. This also works on
+/// Fargate with IRSA, as long as the cluster name is known.
+///
 /// # `k8s.pod.uid` and `k8s.node.name` require the downward API
 ///
 /// Kubernetes does not expose these to containers by default. Add them to the
@@ -102,7 +113,8 @@ const EKS_CLUSTER_NAME_ENV_VAR: &str = "AWS_CLUSTER_NAME";
 /// # Blocking
 ///
 /// Detection performs blocking HTTP requests, each capped by a one second
-/// timeout, and will therefore stall the calling thread.
+/// timeout, and will therefore stall the calling thread. Verifying the cluster
+/// ARN can add up to five seconds.
 ///
 /// # Examples
 ///
@@ -122,6 +134,14 @@ const EKS_CLUSTER_NAME_ENV_VAR: &str = "AWS_CLUSTER_NAME";
 /// [`Resource`]: opentelemetry_sdk::Resource
 pub struct EksResourceDetector;
 
+/// Gets the verified ARN for a cluster name, or `None`.
+type VerifyClusterArn = fn(&str) -> Option<String>;
+
+#[cfg(feature = "detector-aws-eks-cluster-arn")]
+const VERIFY_CLUSTER_ARN: Option<VerifyClusterArn> = Some(cluster_arn::verify);
+#[cfg(not(feature = "detector-aws-eks-cluster-arn"))]
+const VERIFY_CLUSTER_ARN: Option<VerifyClusterArn> = None;
+
 impl ResourceDetector for EksResourceDetector {
     fn detect(&self) -> Resource {
         Self::detect_from(
@@ -129,6 +149,7 @@ impl ResourceDetector for EksResourceDetector {
             Path::new(K8S_NAMESPACE_FILE_PATH),
             Path::new(CGROUP_FILE_PATH),
             Path::new(MOUNTINFO_FILE_PATH),
+            VERIFY_CLUSTER_ARN,
         )
     }
 }
@@ -139,6 +160,7 @@ impl EksResourceDetector {
         namespace_path: &Path,
         cgroup_path: &Path,
         mountinfo_path: &Path,
+        verify_cluster_arn: Option<VerifyClusterArn>,
     ) -> Resource {
         // Kubernetes probe: without the service-account mount, this is not a
         // pod at all. An unreadable file is the normal case off-Kubernetes.
@@ -200,11 +222,10 @@ impl EksResourceDetector {
         let region = region.or_else(|| std::env::var("AWS_REGION").ok());
         let account_id = account_id.or_else(|| std::env::var("AWS_ACCOUNT_ID").ok());
 
-        // The cluster ARN needs a partition, which costs an extra IMDS request,
-        // so it is only fetched once the rest of the ARN is known.
-        // If partition is not retrievable from IMDS, assume "aws".
-        let cluster_arn = match (&region, &account_id, &cluster_name) {
-            (Some(region), Some(account_id), Some(cluster_name)) => {
+        // Verify the ARN if the feature is on, else build it from its parts.
+        let cluster_arn = match (verify_cluster_arn, &region, &account_id, &cluster_name) {
+            (Some(verify), _, _, Some(cluster_name)) => verify(cluster_name),
+            (None, Some(region), Some(account_id), Some(cluster_name)) => {
                 let partition = map_region_to_partition(region);
                 Some(format!(
                     "arn:{partition}:eks:{region}:{account_id}:cluster/{cluster_name}"
@@ -660,6 +681,7 @@ mod tests {
             Path::new("/nonexistent/path/to/namespace"),
             Path::new("/nonexistent/cgroup"),
             Path::new("/nonexistent/mountinfo"),
+            None,
         );
         assert_eq!(resource, Resource::builder_empty().build());
     }
@@ -685,6 +707,7 @@ mod tests {
                     &ns_path,
                     &cgroup_path,
                     &mi_path,
+                    None,
                 );
                 assert_eq!(resource, Resource::builder_empty().build());
             },
@@ -717,8 +740,13 @@ mod tests {
                 ("AWS_ACCOUNT_ID", None::<&str>),
             ],
             || {
-                let resource =
-                    EksResourceDetector::detect_from(Ok(fake), &ns_path, &cgroup_path, &mi_path);
+                let resource = EksResourceDetector::detect_from(
+                    Ok(fake),
+                    &ns_path,
+                    &cgroup_path,
+                    &mi_path,
+                    None,
+                );
 
                 let expected = Resource::builder_empty()
                     .with_attributes([
@@ -773,6 +801,7 @@ mod tests {
                     &ns_path,
                     &cgroup_path,
                     &mi_path,
+                    None,
                 );
 
                 // Partition falls back to "aws" when IMDS unavailable
@@ -824,8 +853,13 @@ mod tests {
                 ("AWS_ACCOUNT_ID", None::<&str>),
             ],
             || {
-                let resource =
-                    EksResourceDetector::detect_from(Ok(fake), &ns_path, &cgroup_path, &mi_path);
+                let resource = EksResourceDetector::detect_from(
+                    Ok(fake),
+                    &ns_path,
+                    &cgroup_path,
+                    &mi_path,
+                    None,
+                );
 
                 let attributes: std::collections::HashMap<_, _> = resource
                     .iter()
@@ -861,8 +895,13 @@ mod tests {
                 ("AWS_ACCOUNT_ID", None::<&str>),
             ],
             || {
-                let resource =
-                    EksResourceDetector::detect_from(Ok(fake), &ns_path, &cgroup_path, &mi_path);
+                let resource = EksResourceDetector::detect_from(
+                    Ok(fake),
+                    &ns_path,
+                    &cgroup_path,
+                    &mi_path,
+                    None,
+                );
 
                 let attributes: std::collections::HashMap<_, _> = resource
                     .iter()
@@ -874,6 +913,80 @@ mod tests {
                     "container.id should be absent when cgroup and mountinfo carry none"
                 );
             },
+        );
+    }
+
+    // ── Verified cluster ARN ─────────────────────────────────────────────────
+
+    const VERIFIED_ARN: &str = "arn:aws:eks:eu-west-1:999999999999:cluster/demo";
+
+    /// Runs detection like on Fargate (no IMDS), for the cluster `demo`.
+    fn fargate_detect(
+        region: Option<&str>,
+        account_id: Option<&str>,
+        verify: Option<VerifyClusterArn>,
+    ) -> Resource {
+        let (_ns_file, ns_path) = temp_file("default");
+        let (_cgroup_file, cgroup_path) = temp_file("0::/\n");
+        let (_mi_file, mi_path) = temp_file("");
+        temp_env::with_vars(
+            [
+                ("AWS_CLUSTER_NAME", Some("demo")),
+                ("AWS_REGION", region),
+                ("AWS_ACCOUNT_ID", account_id),
+            ],
+            || {
+                EksResourceDetector::detect_from(
+                    Err::<FakeImdsClient, _>(ImdsError::EmptyAuthToken),
+                    &ns_path,
+                    &cgroup_path,
+                    &mi_path,
+                    verify,
+                )
+            },
+        )
+    }
+
+    fn get(resource: &Resource, key: &'static str) -> Option<opentelemetry::Value> {
+        resource.get(&opentelemetry::Key::from_static_str(key))
+    }
+
+    fn verified(name: &str) -> Option<String> {
+        assert_eq!(name, "demo");
+        Some(VERIFIED_ARN.to_owned())
+    }
+
+    #[sealed_test]
+    fn verified_cluster_arn_replaces_the_built_one() {
+        let resource = fargate_detect(Some("us-east-1"), Some("123456789012"), Some(verified));
+        assert_eq!(
+            get(&resource, semco::AWS_EKS_CLUSTER_ARN),
+            Some(VERIFIED_ARN.into())
+        );
+    }
+
+    #[sealed_test]
+    fn failed_verification_leaves_the_arn_out() {
+        let resource = fargate_detect(Some("us-east-1"), Some("123456789012"), Some(|_| None));
+        assert_eq!(get(&resource, semco::AWS_EKS_CLUSTER_ARN), None);
+        // The other attributes are kept.
+        assert_eq!(get(&resource, semco::K8S_CLUSTER_NAME), Some("demo".into()));
+        assert_eq!(
+            get(&resource, semco::CLOUD_REGION),
+            Some("us-east-1".into())
+        );
+        assert_eq!(
+            get(&resource, semco::CLOUD_ACCOUNT_ID),
+            Some("123456789012".into())
+        );
+    }
+
+    #[sealed_test]
+    fn without_verification_the_arn_is_built() {
+        let resource = fargate_detect(Some("us-east-1"), Some("123456789012"), None);
+        assert_eq!(
+            get(&resource, semco::AWS_EKS_CLUSTER_ARN),
+            Some("arn:aws:eks:us-east-1:123456789012:cluster/demo".into())
         );
     }
 }
