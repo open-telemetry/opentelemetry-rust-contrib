@@ -25,12 +25,11 @@ fn verified_cluster_arn(name: &str) -> Result<String, ClusterArnError> {
     let issuer = token_issuer(Path::new(SERVICE_ACCOUNT_TOKEN_PATH))?;
     let region =
         issuer_region(&issuer).ok_or_else(|| ClusterArnError::NotEksIssuer(issuer.clone()))?;
-    matching_arn(&issuer, describe_cluster(region, name)?)
+    arn_if_issuer_matches(&issuer, describe_cluster(region, name)?)
 }
 
-/// The cluster's ARN, if its OIDC issuer is `issuer`. A cluster with the same name in another
-/// account has a different issuer, so it fails.
-fn matching_arn(issuer: &str, cluster: Cluster) -> Result<String, ClusterArnError> {
+/// Returns the ARN only if the cluster's OIDC issuer matches the pod's token.
+fn arn_if_issuer_matches(issuer: &str, cluster: Cluster) -> Result<String, ClusterArnError> {
     let described = cluster
         .identity
         .and_then(|identity| identity.oidc)
@@ -225,7 +224,7 @@ mod tests {
     #[test]
     fn matching_issuers_give_the_arn() {
         assert_eq!(
-            matching_arn(ISSUER, cluster(Some(ARN), ISSUER)).unwrap(),
+            arn_if_issuer_matches(ISSUER, cluster(Some(ARN), ISSUER)).unwrap(),
             ARN
         );
     }
@@ -237,14 +236,14 @@ mod tests {
             "https://oidc.eks.us-east-1.amazonaws.com/id/OTHER",
         );
         assert!(matches!(
-            matching_arn(ISSUER, other),
+            arn_if_issuer_matches(ISSUER, other),
             Err(ClusterArnError::IssuerMismatch { .. })
         ));
     }
 
     #[test]
     fn a_cluster_without_an_arn_is_rejected() {
-        assert!(matching_arn(ISSUER, cluster(None, ISSUER)).is_err());
+        assert!(arn_if_issuer_matches(ISSUER, cluster(None, ISSUER)).is_err());
     }
 
     #[sealed_test]
@@ -268,7 +267,7 @@ mod tests {
             || describe_cluster("us-east-1", "demo").unwrap(),
         );
         assert_eq!(server.join().unwrap(), "GET /clusters/demo HTTP/1.1");
-        assert_eq!(matching_arn(ISSUER, described).unwrap(), ARN);
+        assert_eq!(arn_if_issuer_matches(ISSUER, described).unwrap(), ARN);
     }
 
     #[test]
