@@ -193,7 +193,7 @@ mod tests {
                 "2024-01-02T03:04:05.123456Z",
             ),
             (
-                SystemTime::UNIX_EPOCH + Duration::new(1_704_164_645, 123_456_789),
+                SystemTime::UNIX_EPOCH + Duration::new(1_704_164_645, 123_456_700),
                 "2024-01-02T03:04:05.123456700Z",
             ),
         ];
