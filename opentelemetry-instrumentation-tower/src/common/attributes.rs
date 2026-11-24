@@ -72,7 +72,7 @@ pub(crate) fn split_and_format_protocol_version(
 /// Builds the `error.type` [`KeyValue`] for a response whose status code the
 /// HTTP conventions treat as an error.
 ///
-/// Promotes common 5xx codes to a `&'static str` for an
+/// Promotes common 4xx and 5xx codes to a `&'static str` for an
 /// allocation-free clone in the hot path, and falls back to an owned `String`
 /// for every other status code.
 #[inline]
@@ -81,6 +81,12 @@ pub(crate) fn error_type_kv(status: http::StatusCode) -> KeyValue {
     // error, `error.type` should be "the status code number (represented as a
     // string)".
     match status {
+        StatusCode::BAD_REQUEST => KeyValue::new(ERROR_TYPE, "400"),
+        StatusCode::UNAUTHORIZED => KeyValue::new(ERROR_TYPE, "401"),
+        StatusCode::FORBIDDEN => KeyValue::new(ERROR_TYPE, "403"),
+        StatusCode::NOT_FOUND => KeyValue::new(ERROR_TYPE, "404"),
+        StatusCode::CONFLICT => KeyValue::new(ERROR_TYPE, "409"),
+        StatusCode::TOO_MANY_REQUESTS => KeyValue::new(ERROR_TYPE, "429"),
         StatusCode::INTERNAL_SERVER_ERROR => KeyValue::new(ERROR_TYPE, "500"),
         StatusCode::NOT_IMPLEMENTED => KeyValue::new(ERROR_TYPE, "501"),
         StatusCode::BAD_GATEWAY => KeyValue::new(ERROR_TYPE, "502"),
@@ -146,6 +152,35 @@ where
         }
         None => Cow::Borrowed(query),
     }
+}
+
+/// Formats `uri` for `url.full`. The user information becomes
+/// `REDACTED:REDACTED`, and the query goes through [`redact_query`].
+#[cfg(feature = "http-client")]
+pub(crate) fn redact_url_full<S>(uri: &http::Uri, sensitive: &[S]) -> String
+where
+    S: AsRef<str>,
+{
+    let mut full = String::new();
+    if let Some(scheme) = uri.scheme_str() {
+        full.push_str(scheme);
+        full.push_str("://");
+    }
+    if let Some(authority) = uri.authority() {
+        match authority.as_str().rsplit_once('@') {
+            Some((_, host)) => {
+                full.push_str("REDACTED:REDACTED@");
+                full.push_str(host);
+            }
+            None => full.push_str(authority.as_str()),
+        }
+    }
+    full.push_str(uri.path());
+    if let Some(query) = uri.query() {
+        full.push('?');
+        full.push_str(&redact_query(query, sensitive));
+    }
+    full
 }
 
 #[cfg(test)]
@@ -286,6 +321,67 @@ mod tests {
         }
     }
 
+    #[cfg(feature = "http-client")]
+    #[test]
+    fn redact_url_full_redacts_credentials() {
+        struct TestCase {
+            name: &'static str,
+            uri: &'static str,
+            expected: &'static str,
+        }
+
+        let test_cases = [
+            TestCase {
+                name: "plain URL",
+                uri: "https://example.com/search?q=OpenTelemetry",
+                expected: "https://example.com/search?q=OpenTelemetry",
+            },
+            TestCase {
+                name: "URL with a port",
+                uri: "http://example.com:8080/",
+                expected: "http://example.com:8080/",
+            },
+            TestCase {
+                name: "URL without a path",
+                uri: "http://example.com",
+                expected: "http://example.com/",
+            },
+            TestCase {
+                name: "user information",
+                uri: "https://user:password@example.com/",
+                expected: "https://REDACTED:REDACTED@example.com/",
+            },
+            TestCase {
+                name: "user name only",
+                uri: "https://user@example.com/",
+                expected: "https://REDACTED:REDACTED@example.com/",
+            },
+            TestCase {
+                name: "sensitive query parameter",
+                uri: "https://example.com/path?q=OpenTelemetry&sig=abc123",
+                expected: "https://example.com/path?q=OpenTelemetry&sig=REDACTED",
+            },
+            TestCase {
+                name: "empty query",
+                uri: "https://example.com/path?",
+                expected: "https://example.com/path?",
+            },
+            TestCase {
+                name: "origin form",
+                uri: "/path?sig=abc123",
+                expected: "/path?sig=REDACTED",
+            },
+        ];
+
+        for test_case in test_cases {
+            let uri: http::Uri = test_case.uri.parse().unwrap();
+
+            let result = redact_url_full(&uri, DEFAULT_SENSITIVE_QUERY_PARAMETERS);
+
+            assert_eq!(result, test_case.expected, "{}", test_case.name);
+        }
+    }
+
     #[test]
     fn error_type_kv_builds_the_error_type_attribute() {
         struct TestCase {
@@ -295,6 +391,36 @@ mod tests {
         }
 
         let test_cases = [
+            TestCase {
+                name: "400 uses the static path",
+                status: http::StatusCode::BAD_REQUEST,
+                expected: KeyValue::new(semconv::attribute::ERROR_TYPE, "400"),
+            },
+            TestCase {
+                name: "401 uses the static path",
+                status: http::StatusCode::UNAUTHORIZED,
+                expected: KeyValue::new(semconv::attribute::ERROR_TYPE, "401"),
+            },
+            TestCase {
+                name: "403 uses the static path",
+                status: http::StatusCode::FORBIDDEN,
+                expected: KeyValue::new(semconv::attribute::ERROR_TYPE, "403"),
+            },
+            TestCase {
+                name: "404 uses the static path",
+                status: http::StatusCode::NOT_FOUND,
+                expected: KeyValue::new(semconv::attribute::ERROR_TYPE, "404"),
+            },
+            TestCase {
+                name: "409 uses the static path",
+                status: http::StatusCode::CONFLICT,
+                expected: KeyValue::new(semconv::attribute::ERROR_TYPE, "409"),
+            },
+            TestCase {
+                name: "429 uses the static path",
+                status: http::StatusCode::TOO_MANY_REQUESTS,
+                expected: KeyValue::new(semconv::attribute::ERROR_TYPE, "429"),
+            },
             TestCase {
                 name: "500 uses the static path",
                 status: http::StatusCode::INTERNAL_SERVER_ERROR,
