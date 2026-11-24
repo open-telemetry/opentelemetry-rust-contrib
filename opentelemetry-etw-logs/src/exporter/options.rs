@@ -83,7 +83,7 @@ impl std::fmt::Debug for dyn EventNameCallback {
     }
 }
 
-fn validate_etw_event_name(event_name: &str) -> Result<(), Box<dyn Error>> {
+fn validate_etw_event_name(event_name: &str) -> Result<(), Box<dyn Error + Send + Sync + 'static>> {
     if event_name.is_empty() {
         return Err("Event name cannot be empty.".into());
     }
