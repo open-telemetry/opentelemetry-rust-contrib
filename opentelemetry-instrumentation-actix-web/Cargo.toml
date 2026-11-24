@@ -40,7 +40,16 @@ time = ">=0.3.47"
 
 [dev-dependencies]
 actix-rt = "2"
-actix-web = { version = "4.18.2", features = ["macros"] }
+actix-web = { version = "4.18.2", default-features = false, features = [
+  "macros",
+  "compress-brotli",
+  "compress-gzip",
+  "compress-zstd",
+  "http2",
+  "unicode",
+  "compat",
+  "ws",
+] }
 awc = { version = "3.8", default-features = false, features = ["compress-zstd"] }
 criterion = { workspace = true, features = ["async_tokio"] }
 opentelemetry_sdk = { workspace = true, features = [
