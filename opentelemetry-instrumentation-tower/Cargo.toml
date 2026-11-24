@@ -15,6 +15,7 @@ include = ["src/", "benches/"]
 [features]
 default = []
 axum = ["dep:axum"]
+axum-connect-info = ["axum", "axum/tokio"]
 
 [dependencies]
 axum = { features = ["matched-path", "macros"], version = "0.8", default-features = false, optional = true }

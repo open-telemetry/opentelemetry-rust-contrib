@@ -91,6 +91,122 @@ pub(crate) fn error_type_kv(status: http::StatusCode) -> KeyValue {
     }
 }
 
+/// Extracts the first entry of an `X-Forwarded-For` header value.
+///
+/// The conventions ask for the original client address behind all proxies. When
+/// a chain of proxies has forwarded the request, the first entry of the header
+/// is the original client, and every following entry was added by an
+/// intermediary.
+fn first_forwarded_for_entry(value: &str) -> &str {
+    match value.find(',') {
+        Some(index) => value[..index].trim(),
+        None => value.trim(),
+    }
+}
+
+/// Finds the host and port of the original client in the forwarded headers.
+///
+/// `X-Forwarded-For` wins over `Forwarded`. The port belongs to the same header
+/// entry as the host, and an obfuscated `Forwarded` port is not a number, so it
+/// gives no port.
+pub(crate) fn forwarded_client_node<'a>(
+    forwarded_for: Option<&'a str>,
+    forwarded: Option<&'a str>,
+) -> Option<(&'a str, Option<u16>)> {
+    let non_empty = |(host, port): (&'a str, Option<&'a str>)| {
+        (!host.is_empty()).then(|| (host, port.and_then(|port| port.parse().ok())))
+    };
+    forwarded_for
+        .map(|value| split_host_port(first_forwarded_for_entry(value)))
+        .and_then(non_empty)
+        .or_else(|| {
+            forwarded
+                .and_then(for_node_name)
+                .map(split_host_port)
+                .and_then(non_empty)
+        })
+}
+
+/// Extracts the node name from an RFC 7239 `Forwarded` header value.
+///
+/// The `for` directive can appear several times, one per proxy hop, and the
+/// first one describes the original client. The node name may be quoted and may
+/// carry an obfuscated identifier, which the conventions accept as
+/// `client.address`.
+///
+/// RFC 7239 separates the elements of each hop with `,`, separates the pairs
+/// of an element with `;`, and treats parameter names case-insensitively. A
+/// quoted value can contain both separators.
+fn for_node_name(value: &str) -> Option<&str> {
+    split_unquoted(value, b',')
+        .flat_map(|element| split_unquoted(element, b';'))
+        .find_map(|pair| {
+            let (name, value) = pair.trim().split_once('=')?;
+            if !name.eq_ignore_ascii_case("for") {
+                return None;
+            }
+            match value.strip_prefix('"') {
+                Some(quoted) => quoted.strip_suffix('"'),
+                None => Some(value),
+            }
+        })
+}
+
+/// Splits `value` at every `separator` that is outside a quoted string.
+///
+/// The separator must be an ASCII byte, so every split lands on a UTF-8
+/// character boundary.
+fn split_unquoted(value: &str, separator: u8) -> impl Iterator<Item = &str> {
+    let mut rest = Some(value);
+    std::iter::from_fn(move || {
+        let current = rest?;
+        let mut quoted = false;
+        let mut escaped = false;
+        for (index, byte) in current.bytes().enumerate() {
+            if escaped {
+                escaped = false;
+            } else if quoted && byte == b'\\' {
+                escaped = true;
+            } else if byte == b'"' {
+                quoted = !quoted;
+            } else if !quoted && byte == separator {
+                rest = Some(&current[index + 1..]);
+                return Some(&current[..index]);
+            }
+        }
+        rest = None;
+        Some(current)
+    })
+}
+
+/// Splits a node into its host and port, for example `"192.0.2.43:4711"`,
+/// `"[2001:db8::1]:4711"` or `"[2001:db8::1]"`.
+///
+/// A port after an IPv6 address needs brackets around the address, so a bare
+/// IPv6 address such as `"2001:db8::1"` has no port. RFC 7239 also allows an
+/// obfuscated port that starts with `_`.
+fn split_host_port(node: &str) -> (&str, Option<&str>) {
+    let is_port = |port: &str| {
+        let digits = !port.is_empty() && port.bytes().all(|byte| byte.is_ascii_digit());
+        let obfuscated = port.len() > 1 && port.starts_with('_');
+        digits || obfuscated
+    };
+    if let Some(bracketed) = node.strip_prefix('[') {
+        return match bracketed.split_once(']') {
+            Some((host, "")) => (host, None),
+            Some((host, rest)) => match rest.strip_prefix(':') {
+                Some(port) if is_port(port) => (host, Some(port)),
+                _ => (node, None),
+            },
+            None => (node, None),
+        };
+    }
+    match node.split_once(':') {
+        Some((host, port)) if is_port(port) => (host, Some(port)),
+        _ => (node, None),
+    }
+}
+
 /// Query parameter keys whose values the conventions ask instrumentations to
 /// redact by default.
 ///
@@ -151,6 +267,163 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn forwarded_client_node_finds_the_original_client() {
+        struct TestCase {
+            name: &'static str,
+            forwarded_for: Option<&'static str>,
+            forwarded: Option<&'static str>,
+            expected: Option<(&'static str, Option<u16>)>,
+        }
+
+        let test_cases = [
+            TestCase {
+                name: "the first entry of a forwarded chain is the original client",
+                forwarded_for: Some("203.0.113.195, 70.41.3.18, 150.172.238.178"),
+                forwarded: None,
+                expected: Some(("203.0.113.195", None)),
+            },
+            TestCase {
+                name: "a value with spaces around it is trimmed",
+                forwarded_for: Some(" 203.0.113.195 , 70.41.3.18"),
+                forwarded: None,
+                expected: Some(("203.0.113.195", None)),
+            },
+            TestCase {
+                name: "an empty X-Forwarded-For header falls back to Forwarded",
+                forwarded_for: Some(""),
+                forwarded: Some("for=192.0.2.43"),
+                expected: Some(("192.0.2.43", None)),
+            },
+            TestCase {
+                name: "X-Forwarded-For wins over Forwarded",
+                forwarded_for: Some("203.0.113.195"),
+                forwarded: Some("for=192.0.2.43"),
+                expected: Some(("203.0.113.195", None)),
+            },
+            TestCase {
+                name: "an X-Forwarded-For IPv4 entry loses its port",
+                forwarded_for: Some("203.0.113.195:4711, 70.41.3.18"),
+                forwarded: None,
+                expected: Some(("203.0.113.195", Some(4711))),
+            },
+            TestCase {
+                name: "an X-Forwarded-For IPv6 entry loses its brackets and port",
+                forwarded_for: Some("[2001:db8::1]:4711"),
+                forwarded: None,
+                expected: Some(("2001:db8::1", Some(4711))),
+            },
+            TestCase {
+                name: "a bare X-Forwarded-For IPv6 entry is kept whole",
+                forwarded_for: Some("2001:db8::1, 70.41.3.18"),
+                forwarded: None,
+                expected: Some(("2001:db8::1", None)),
+            },
+            TestCase {
+                name: "an X-Forwarded-For entry with only a port is no client",
+                forwarded_for: Some(":4711"),
+                forwarded: None,
+                expected: None,
+            },
+            TestCase {
+                name: "a port above the port range is not a port",
+                forwarded_for: Some("203.0.113.195:65536"),
+                forwarded: None,
+                expected: Some(("203.0.113.195", None)),
+            },
+            TestCase {
+                name: "the first for directive of a Forwarded header is the original client",
+                forwarded_for: None,
+                forwarded: Some("for=192.0.2.43;by=203.0.113.60, for=198.51.100.17"),
+                expected: Some(("192.0.2.43", None)),
+            },
+            TestCase {
+                name: "the first of several Forwarded elements is the original client",
+                forwarded_for: None,
+                forwarded: Some("for=192.0.2.43, for=198.51.100.17"),
+                expected: Some(("192.0.2.43", None)),
+            },
+            TestCase {
+                name: "a Forwarded parameter name is matched case-insensitively",
+                forwarded_for: None,
+                forwarded: Some("For=192.0.2.43"),
+                expected: Some(("192.0.2.43", None)),
+            },
+            TestCase {
+                name: "a for directive after other pairs of the element is found",
+                forwarded_for: None,
+                forwarded: Some("by=203.0.113.60; for=192.0.2.43"),
+                expected: Some(("192.0.2.43", None)),
+            },
+            TestCase {
+                name: "a parameter name that ends with for is not the for directive",
+                forwarded_for: None,
+                forwarded: Some("xfor=192.0.2.1;for=192.0.2.43"),
+                expected: Some(("192.0.2.43", None)),
+            },
+            TestCase {
+                name: "separators inside a quoted value do not end the value",
+                forwarded_for: None,
+                forwarded: Some("by=\"a,b;c\";for=_hidden, for=198.51.100.17"),
+                expected: Some(("_hidden", None)),
+            },
+            TestCase {
+                name: "an unterminated quoted value is no client",
+                forwarded_for: None,
+                forwarded: Some("for=\"192.0.2.43"),
+                expected: None,
+            },
+            TestCase {
+                name: "a quoted Forwarded IPv6 node loses its brackets and port",
+                forwarded_for: None,
+                forwarded: Some("for=\"[2001:db8::1]:4711\""),
+                expected: Some(("2001:db8::1", Some(4711))),
+            },
+            TestCase {
+                name: "a quoted Forwarded IPv6 node without a port loses its brackets",
+                forwarded_for: None,
+                forwarded: Some("for=\"[2001:db8::1]\""),
+                expected: Some(("2001:db8::1", None)),
+            },
+            TestCase {
+                name: "a Forwarded IPv4 node loses its port",
+                forwarded_for: None,
+                forwarded: Some("for=\"192.0.2.43:4711\""),
+                expected: Some(("192.0.2.43", Some(4711))),
+            },
+            TestCase {
+                name: "an obfuscated Forwarded identifier is accepted as an address",
+                forwarded_for: None,
+                forwarded: Some("for=_hidden"),
+                expected: Some(("_hidden", None)),
+            },
+            TestCase {
+                name: "an obfuscated Forwarded port is no port",
+                forwarded_for: None,
+                forwarded: Some("for=\"_hidden:_port\""),
+                expected: Some(("_hidden", None)),
+            },
+            TestCase {
+                name: "a Forwarded header without a for directive is no client",
+                forwarded_for: None,
+                forwarded: Some("by=203.0.113.60;host=example.com"),
+                expected: None,
+            },
+            TestCase {
+                name: "no header at all is no client",
+                forwarded_for: None,
+                forwarded: None,
+                expected: None,
+            },
+        ];
+
+        for test_case in test_cases {
+            let result = forwarded_client_node(test_case.forwarded_for, test_case.forwarded);
+
+            assert_eq!(result, test_case.expected, "{}", test_case.name);
+        }
+    }
 
     #[test]
     fn redact_query_replaces_sensitive_values() {
