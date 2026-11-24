@@ -11,6 +11,9 @@
   [#839](https://github.com/open-telemetry/opentelemetry-rust-contrib/issues/839)
 * Failed requests retain route and custom request attributes on duration metrics.
   Spans end on completion even when the application retains their context.
+* The inner service's `call` now runs in the context of the server span. A
+  span or log that the inner service starts in `call`, before it returns its
+  future, was a root span or had no trace before.
 
 ### Added
 

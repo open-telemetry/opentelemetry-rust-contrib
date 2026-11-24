@@ -656,7 +656,13 @@ where
         let layer_state = self.state.clone();
         let response_extractor = self.response_extractor.clone();
 
-        let inner_future = self.inner_service.call(req);
+        // The inner service can do work in `call` before it returns its future,
+        // for example a middleware that logs or starts a span. That work belongs
+        // to the request, so it runs in the request context.
+        let inner_future = {
+            let _guard = cx.clone().attach();
+            self.inner_service.call(req)
+        };
 
         ResponseFuture {
             inner: inner_future,
@@ -2023,5 +2029,78 @@ mod tests {
             spans.is_empty(),
             "Expected no spans when tracing is disabled"
         );
+    }
+
+    /// A span that the inner service starts must be a child of the server span,
+    /// both when the inner service starts it in `call` and when it starts it in
+    /// the returned future.
+    #[tokio::test(flavor = "current_thread")]
+    async fn test_inner_service_span_is_child_of_server_span() {
+        struct TestCase {
+            name: &'static str,
+            start_child_in_call: bool,
+        }
+
+        let cases = [
+            TestCase {
+                name: "span started in the response future",
+                start_child_in_call: false,
+            },
+            TestCase {
+                name: "span started in call",
+                start_child_in_call: true,
+            },
+        ];
+
+        for case in cases {
+            let trace_exporter = InMemorySpanExporterBuilder::new().build();
+            let tracer_provider = SdkTracerProvider::builder()
+                .with_simple_exporter(trace_exporter.clone())
+                .build();
+            let layer = LayerBuilder::builder()
+                .with_route_extractor(PathExtractor)
+                .with_tracer_provider(tracer_provider.clone())
+                .build()
+                .unwrap();
+
+            let tracer = tracer_provider.tracer("inner_service");
+            let start_child_in_call = case.start_child_in_call;
+            // `service_fn` runs the closure in `call`, and the async block when the
+            // response future is polled.
+            let service = tower::service_fn(move |_req: Request<String>| {
+                if start_child_in_call {
+                    tracer.start("child").end();
+                }
+                let tracer = tracer.clone();
+                async move {
+                    if !start_child_in_call {
+                        tracer.start("child").end();
+                    }
+                    Ok::<_, std::convert::Infallible>(Response::new(String::new()))
+                }
+            });
+
+            let request = http::Request::builder()
+                .method("GET")
+                .uri("http://example.com/test")
+                .body("test".to_string())
+                .unwrap();
+            layer.layer(service).oneshot(request).await.unwrap();
+
+            tracer_provider.force_flush().unwrap();
+            let spans = trace_exporter.get_finished_spans().unwrap();
+            let span = |name: &str| {
+                spans
+                    .iter()
+                    .find(|span| span.name == name)
+                    .unwrap_or_else(|| panic!("{}: no span named {name}", case.name))
+            };
+            assert_eq!(
+                span("child").parent_span_id,
+                span("GET /test").span_context.span_id(),
+                "{}",
+                case.name
+            );
+        }
     }
 }
