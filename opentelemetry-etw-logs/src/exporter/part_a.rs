@@ -1,5 +1,4 @@
 use opentelemetry_sdk::logs::TraceContext;
-use std::fmt::Write as _;
 use std::time::{SystemTime, UNIX_EPOCH};
 use tracelogging_dynamic as tld;
 
@@ -97,13 +96,31 @@ fn populate_time(
 
     event.add_str8(
         "time",
-        format_timestamp(event_time).as_str(),
+        format_timestamp(event_time),
         tld::OutType::Default,
         field_tag,
     );
 }
 
-fn format_timestamp(time: SystemTime) -> String {
+struct Timestamp {
+    bytes: [u8; 40],
+    len: usize,
+}
+
+impl AsRef<[u8]> for Timestamp {
+    fn as_ref(&self) -> &[u8] {
+        &self.bytes[..self.len]
+    }
+}
+
+fn write_decimal(mut value: u64, output: &mut [u8]) {
+    for digit in output.iter_mut().rev() {
+        *digit = b'0' + (value % 10) as u8;
+        value /= 10;
+    }
+}
+
+fn format_timestamp(time: SystemTime) -> Timestamp {
     let (unix_seconds, nanosecond) = match time.duration_since(UNIX_EPOCH) {
         Ok(duration) => (i128::from(duration.as_secs()), duration.subsec_nanos()),
         Err(before_epoch) => {
@@ -119,27 +136,46 @@ fn format_timestamp(time: SystemTime) -> String {
         }
     };
 
-    let days = unix_seconds.div_euclid(86_400);
-    let seconds_of_day = unix_seconds.rem_euclid(86_400);
-    let (year, month, day) = civil_from_days(days);
+    format_unix_timestamp(unix_seconds, nanosecond)
+}
+
+fn format_unix_timestamp(unix_seconds: i128, nanosecond: u32) -> Timestamp {
+    let days = i64::try_from(unix_seconds.div_euclid(86_400))
+        .expect("days from a SystemTime duration fit in i64");
+    let seconds_of_day = unix_seconds.rem_euclid(86_400) as u64;
+    let (year, month, day) = date_from_days_since_unix_epoch(days);
     let hour = seconds_of_day / 3_600;
     let minute = seconds_of_day % 3_600 / 60;
     let second = seconds_of_day % 60;
 
-    let mut timestamp = String::with_capacity(40);
-    if year < 0 {
-        write!(&mut timestamp, "-{:04}", year.unsigned_abs())
-            .expect("writing to a String cannot fail");
-    } else if year > 9_999 {
-        write!(&mut timestamp, "+{year:04}").expect("writing to a String cannot fail");
-    } else {
-        write!(&mut timestamp, "{year:04}").expect("writing to a String cannot fail");
+    let mut timestamp = Timestamp {
+        bytes: [0; 40],
+        len: 0,
+    };
+    if !(0..=9999).contains(&year) {
+        timestamp.bytes[0] = if year < 0 { b'-' } else { b'+' };
+        timestamp.len = 1;
     }
-    write!(
-        &mut timestamp,
-        "-{month:02}-{day:02}T{hour:02}:{minute:02}:{second:02}"
-    )
-    .expect("writing to a String cannot fail");
+    let year = year.unsigned_abs();
+    let mut width = 4;
+    let mut remaining = year / 10_000;
+    while remaining > 0 {
+        width += 1;
+        remaining /= 10;
+    }
+    write_decimal(
+        year,
+        &mut timestamp.bytes[timestamp.len..timestamp.len + width],
+    );
+    timestamp.len += width;
+    let offset = timestamp.len;
+    timestamp.bytes[offset..offset + 15].copy_from_slice(b"-00-00T00:00:00");
+    write_decimal(month as u64, &mut timestamp.bytes[offset + 1..offset + 3]);
+    write_decimal(day as u64, &mut timestamp.bytes[offset + 4..offset + 6]);
+    write_decimal(hour, &mut timestamp.bytes[offset + 7..offset + 9]);
+    write_decimal(minute, &mut timestamp.bytes[offset + 10..offset + 12]);
+    write_decimal(second, &mut timestamp.bytes[offset + 13..offset + 15]);
+    timestamp.len += 15;
 
     if nanosecond != 0 {
         let (fraction, precision) = if nanosecond % 1_000_000 == 0 {
@@ -149,14 +185,21 @@ fn format_timestamp(time: SystemTime) -> String {
         } else {
             (nanosecond, 9)
         };
-        write!(&mut timestamp, ".{fraction:0precision$}").expect("writing to a String cannot fail");
+        timestamp.bytes[timestamp.len] = b'.';
+        timestamp.len += 1;
+        write_decimal(
+            u64::from(fraction),
+            &mut timestamp.bytes[timestamp.len..timestamp.len + precision],
+        );
+        timestamp.len += precision;
     }
-    timestamp.push('Z');
+    timestamp.bytes[timestamp.len] = b'Z';
+    timestamp.len += 1;
 
     timestamp
 }
 
-fn civil_from_days(days: i128) -> (i128, i128, i128) {
+const fn date_from_days_since_unix_epoch(days: i64) -> (i64, i64, i64) {
     let shifted_days = days + 719_468;
     let era = shifted_days.div_euclid(146_097);
     let day_of_era = shifted_days - era * 146_097;
@@ -174,7 +217,7 @@ fn civil_from_days(days: i128) -> (i128, i128, i128) {
 
 #[cfg(test)]
 mod tests {
-    use super::format_timestamp;
+    use super::{format_timestamp, format_unix_timestamp};
     use std::time::{Duration, SystemTime};
 
     #[test]
@@ -199,7 +242,7 @@ mod tests {
         ];
 
         for (time, expected) in cases {
-            assert_eq!(format_timestamp(time), expected);
+            assert_eq!(format_timestamp(time).as_ref(), expected.as_bytes());
         }
     }
 
@@ -221,7 +264,7 @@ mod tests {
         ];
 
         for (time, expected) in cases {
-            assert_eq!(format_timestamp(time), expected);
+            assert_eq!(format_timestamp(time).as_ref(), expected.as_bytes());
         }
     }
 
@@ -239,7 +282,44 @@ mod tests {
         ];
 
         for (time, expected) in cases {
-            assert_eq!(format_timestamp(time), expected);
+            assert_eq!(format_timestamp(time).as_ref(), expected.as_bytes());
+        }
+    }
+
+    #[test]
+    fn formats_extended_years_before_epoch() {
+        let cases = [
+            (-62_135_596_800, "0001-01-01T00:00:00Z"),
+            (-62_167_219_200, "0000-01-01T00:00:00Z"),
+            (-62_198_755_200, "-0001-01-01T00:00:00Z"),
+        ];
+
+        for (seconds, expected) in cases {
+            assert_eq!(
+                format_unix_timestamp(seconds, 0).as_ref(),
+                expected.as_bytes()
+            );
+        }
+    }
+
+    #[test]
+    fn formats_extreme_duration_seconds() {
+        let cases = [
+            (
+                i128::from(u64::MAX),
+                "+584554051223-11-09T07:00:15.999999999Z",
+            ),
+            (
+                -i128::from(u64::MAX) - 1,
+                "-584554047284-02-23T16:59:44.999999999Z",
+            ),
+        ];
+
+        for (seconds, expected) in cases {
+            assert_eq!(
+                format_unix_timestamp(seconds, 999_999_999).as_ref(),
+                expected.as_bytes()
+            );
         }
     }
 }
