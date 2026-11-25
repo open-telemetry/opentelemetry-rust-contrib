@@ -18,8 +18,8 @@ opentelemetry_sdk = { workspace = true }
 opentelemetry-semantic-conventions = { workspace = true }
 
 [dev-dependencies]
-temp-env = "0.3.6"
-tempfile = "3.27.0"
+temp-env = "=0.3.6"
+tempfile = "=3.27.0"
 
 [lints]
 workspace = true
