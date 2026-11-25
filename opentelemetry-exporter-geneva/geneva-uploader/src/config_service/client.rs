@@ -1,5 +1,8 @@
-// Geneva Config Client with TLS (PKCS#12), Azure Workload Identity, and Azure Managed Identity support, including local endpoint resource-ID flow.
+// Geneva Config Client with TLS (PKCS#12), Azure Workload Identity, Azure Managed Identity,
+// and externally supplied Entra token support.
 
+use crate::gcs_token_provider::{GcsTokenProvider, GcsTokenProviderError};
+use crate::secret_header::bearer_authorization_header;
 use base64::{engine::general_purpose, Engine as _};
 use reqwest::{
     header::{HeaderMap, HeaderValue, ACCEPT, AUTHORIZATION, USER_AGENT},
@@ -26,7 +29,7 @@ use std::fmt::Write;
 #[cfg(feature = "certificate-auth")]
 use std::fs;
 use std::path::PathBuf;
-use std::sync::RwLock;
+use std::sync::{Arc, RwLock};
 
 // Azure Identity imports for MSI and Workload Identity authentication
 use azure_core::credentials::TokenCredential;
@@ -50,6 +53,7 @@ compile_error!(
 /// - Certificate-based authentication (mTLS) using PKCS#12 (.p12) files
 /// - Azure Managed Identity (System-assigned or User-assigned)
 /// - Azure Workload Identity (Federated Identity for Kubernetes)
+/// - Externally supplied Entra access tokens
 /// - Mock authentication for testing (feature-gated)
 ///
 /// # Certificate Format
@@ -74,6 +78,7 @@ compile_error!(
 /// ```
 #[allow(dead_code)]
 #[derive(Clone, Debug)]
+#[non_exhaustive]
 pub enum AuthMethod {
     /// Certificate-based authentication
     ///
@@ -102,6 +107,13 @@ pub enum AuthMethod {
     /// * `resource` - Azure AD resource URI for token acquisition
     ///   (e.g., <https://monitor.azure.com> for Azure Public Cloud)
     WorkloadIdentity { resource: String },
+    /// Entra access tokens supplied by the embedding application.
+    ExternalToken {
+        /// Entra resource for which the provider must return a token.
+        resource: String,
+        /// Application-owned token provider.
+        provider: Arc<dyn GcsTokenProvider>,
+    },
     #[cfg(feature = "mock_auth")]
     MockAuth, // No authentication, used for testing purposes
 }
@@ -119,6 +131,10 @@ pub(crate) enum GenevaConfigClientError {
     WorkloadIdentityAuth(String),
     #[error("MSI authentication error: {0}")]
     MsiAuth(String),
+    #[error("External token provider failed: {0}")]
+    ExternalTokenProvider(#[source] GcsTokenProviderError),
+    #[error("External token provider returned an empty token")]
+    EmptyExternalToken,
 
     // Networking / HTTP / TLS
     #[error("HTTP error: {0}")]
@@ -422,6 +438,13 @@ impl GenevaConfigClient {
                 // No special HTTP client configuration needed for Workload Identity
                 // Authentication is done via Bearer token in request headers
             }
+            AuthMethod::ExternalToken { .. } => {
+                info!(
+                    name: "config_client.new.external_token_auth",
+                    target: "geneva-uploader",
+                    "Using externally supplied Entra token authentication"
+                );
+            }
             AuthMethod::SystemManagedIdentity
             | AuthMethod::UserManagedIdentity { .. }
             | AuthMethod::UserManagedIdentityByObjectId { .. }
@@ -459,7 +482,8 @@ impl GenevaConfigClient {
             | AuthMethod::UserManagedIdentity { .. }
             | AuthMethod::UserManagedIdentityByObjectId { .. }
             | AuthMethod::UserManagedIdentityByResourceId { .. }
-            | AuthMethod::WorkloadIdentity { .. } => "userapi",
+            | AuthMethod::WorkloadIdentity { .. }
+            | AuthMethod::ExternalToken { .. } => "userapi",
             #[cfg(feature = "mock_auth")]
             AuthMethod::MockAuth => "api", // treat mock like certificate path for URL shape
         };
@@ -694,6 +718,26 @@ impl GenevaConfigClient {
             "Managed Identity token acquisition failed. Scopes tried: {scopes}. Last error: {detail}. IMDS fallback intentionally disabled.",
             scopes = scope_candidates.join(", ")
         )))
+    }
+
+    async fn get_external_token(&self) -> Result<SecretString> {
+        let (resource, provider) = match &self.config.auth_method {
+            AuthMethod::ExternalToken { resource, provider } => (resource, provider),
+            _ => {
+                return Err(GenevaConfigClientError::InternalError(
+                    "get_external_token called for a different authentication method".to_string(),
+                ))
+            }
+        };
+
+        let token = provider
+            .get_token(resource)
+            .await
+            .map_err(GenevaConfigClientError::ExternalTokenProvider)?;
+        if token.expose_secret().trim().is_empty() {
+            return Err(GenevaConfigClientError::EmptyExternalToken);
+        }
+        Ok(token)
     }
 
     async fn try_get_local_managed_identity_token_by_resource_id(
@@ -973,15 +1017,34 @@ impl GenevaConfigClient {
         // Add appropriate authentication header
         match &self.config.auth_method {
             AuthMethod::WorkloadIdentity { .. } => {
-                let token = self.get_workload_identity_token().await?;
-                request = request.header(AUTHORIZATION, format!("Bearer {}", token));
+                let token = SecretString::from(self.get_workload_identity_token().await?);
+                let header = bearer_authorization_header(&token).map_err(|error| {
+                    GenevaConfigClientError::InternalError(format!(
+                        "Invalid workload identity token for Authorization header: {error}"
+                    ))
+                })?;
+                request = request.header(AUTHORIZATION, header);
             }
             AuthMethod::SystemManagedIdentity
             | AuthMethod::UserManagedIdentity { .. }
             | AuthMethod::UserManagedIdentityByObjectId { .. }
             | AuthMethod::UserManagedIdentityByResourceId { .. } => {
-                let token = self.get_msi_token().await?;
-                request = request.header(AUTHORIZATION, format!("Bearer {}", token));
+                let token = SecretString::from(self.get_msi_token().await?);
+                let header = bearer_authorization_header(&token).map_err(|error| {
+                    GenevaConfigClientError::InternalError(format!(
+                        "Invalid managed identity token for Authorization header: {error}"
+                    ))
+                })?;
+                request = request.header(AUTHORIZATION, header);
+            }
+            AuthMethod::ExternalToken { .. } => {
+                let token = self.get_external_token().await?;
+                let header = bearer_authorization_header(&token).map_err(|error| {
+                    GenevaConfigClientError::InternalError(format!(
+                        "Invalid external token for Authorization header: {error}"
+                    ))
+                })?;
+                request = request.header(AUTHORIZATION, header);
             }
             AuthMethod::Certificate { .. } => { /* mTLS only */ }
             #[cfg(feature = "mock_auth")]

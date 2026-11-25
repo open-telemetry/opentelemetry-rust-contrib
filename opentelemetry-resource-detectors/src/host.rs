@@ -9,6 +9,7 @@ use std::env::consts::ARCH;
 use std::fs::read_to_string;
 #[cfg(target_os = "linux")]
 use std::path::Path;
+#[cfg(target_os = "macos")]
 use std::process::Command;
 
 /// Detect host information.
@@ -67,7 +68,7 @@ fn host_id_detect() -> Option<String> {
 
 #[cfg(target_os = "macos")]
 fn host_id_detect() -> Option<String> {
-    let output = Command::new("ioreg")
+    let output = Command::new("/usr/sbin/ioreg")
         .arg("-rd1")
         .arg("-c")
         .arg("IOPlatformExpertDevice")
@@ -89,10 +90,16 @@ fn host_id_detect() -> Option<String> {
     None
 }
 
+#[cfg(any(unix, windows, target_os = "redox"))]
 fn host_name_detect() -> Option<String> {
-    let output = Command::new("hostname").output().ok()?.stdout;
-    let name = String::from_utf8(output).ok()?.trim().to_string();
+    let name = hostname::get().ok()?.into_string().ok()?;
+    let name = name.trim().to_owned();
     (!name.is_empty()).then_some(name)
+}
+
+#[cfg(not(any(unix, windows, target_os = "redox")))]
+fn host_name_detect() -> Option<String> {
+    None
 }
 
 impl Default for HostResourceDetector {

@@ -2,7 +2,12 @@
 
 ## vNext
 
+## v0.12.1
+
+Released 2026-Nov-24
+
 - Bump OpenTelemetry dependencies to 0.33.1.
+- Remove the Chrono dependency from ETW log timestamp formatting.
 
 ## v0.12.0
 

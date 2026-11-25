@@ -1,6 +1,6 @@
 [package]
 name = "opentelemetry-resource-detectors"
-version = "0.13.0"
+version = "0.13.1"
 edition = "2021"
 description = "A collection of community supported resource detectors for OpenTelemetry"
 homepage = "https://github.com/open-telemetry/opentelemetry-rust-contrib/tree/main/opentelemetry-resource-detectors"
@@ -19,6 +19,10 @@ opentelemetry-semantic-conventions = { workspace = true }
 
 [dev-dependencies]
 temp-env = "0.3.6"
+tempfile = "3.27.0"
 
 [lints]
 workspace = true
+
+[target.'cfg(any(unix, windows, target_os = "redox"))'.dependencies]
+hostname = "0.4.2"
