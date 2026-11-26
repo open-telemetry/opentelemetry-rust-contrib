@@ -39,7 +39,7 @@ impl ResourceDetector for HostResourceDetector {
                     // Get host.arch
                     Some(KeyValue::new(
                         opentelemetry_semantic_conventions::attribute::HOST_ARCH,
-                        ARCH,
+                        host_arch(ARCH),
                     )),
                     // Get host.name
                     (self.host_name_detect)().map(|host_name| {
@@ -53,6 +53,22 @@ impl ResourceDetector for HostResourceDetector {
                 .flatten(),
             )
             .build()
+    }
+}
+
+/// Map a Rust `target_arch` name to the `host.arch` value defined by the
+/// semantic conventions. Architectures without a defined value are reported
+/// as Rust names them.
+fn host_arch(arch: &'static str) -> &'static str {
+    match arch {
+        "x86_64" => "amd64",
+        "aarch64" => "arm64",
+        "arm" => "arm32",
+        "x86" => "x86",
+        "powerpc" => "ppc32",
+        "powerpc64" => "ppc64",
+        "s390x" => "s390x",
+        other => other,
     }
 }
 
@@ -113,7 +129,7 @@ impl Default for HostResourceDetector {
 
 #[cfg(test)]
 mod tests {
-    use super::HostResourceDetector;
+    use super::{host_arch, HostResourceDetector};
     use opentelemetry::{Key, Value};
     use opentelemetry_sdk::resource::ResourceDetector;
 
@@ -197,7 +213,7 @@ mod tests {
             resource.get(&Key::from_static_str(
                 opentelemetry_semantic_conventions::attribute::HOST_ARCH
             )),
-            Some(Value::from("x86_64"))
+            Some(Value::from("amd64"))
         );
 
         #[cfg(target_arch = "aarch64")]
@@ -205,7 +221,20 @@ mod tests {
             resource.get(&Key::from_static_str(
                 opentelemetry_semantic_conventions::attribute::HOST_ARCH
             )),
-            Some(Value::from("aarch64"))
+            Some(Value::from("arm64"))
         )
+    }
+
+    #[test]
+    fn test_host_arch_uses_semconv_values() {
+        assert_eq!(host_arch("x86_64"), "amd64");
+        assert_eq!(host_arch("aarch64"), "arm64");
+        assert_eq!(host_arch("arm"), "arm32");
+        assert_eq!(host_arch("x86"), "x86");
+        assert_eq!(host_arch("powerpc"), "ppc32");
+        assert_eq!(host_arch("powerpc64"), "ppc64");
+        assert_eq!(host_arch("s390x"), "s390x");
+        // No semconv value defined: keep the Rust name.
+        assert_eq!(host_arch("riscv64"), "riscv64");
     }
 }

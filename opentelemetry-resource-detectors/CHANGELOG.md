@@ -2,6 +2,8 @@
 
 ## vNext
 
+- Fix `host.arch` in `HostResourceDetector` to use the values defined by the semantic conventions (for example `amd64` and `arm64` instead of `x86_64` and `aarch64`).
+
 ## v0.13.1
 
 Released 2026-Nov-16
