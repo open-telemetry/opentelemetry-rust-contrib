@@ -41,6 +41,7 @@ opentelemetry-stdout = { version = "0.33.1", default-features = false }
 opentelemetry-semantic-conventions = { version = "0.33.1", features = [
     "semconv_experimental",
 ] }
+benchfmt = { git = "https://github.com/bwplotka/benchfmt.rs", rev = "fd25aece99f08b72b0c60094d0a4ae0ebb1edd74" }
 criterion = "0.8"
 
 [workspace.lints.rust]
