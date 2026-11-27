@@ -39,7 +39,7 @@ impl ResourceDetector for HostResourceDetector {
                     // Get host.arch
                     Some(KeyValue::new(
                         opentelemetry_semantic_conventions::attribute::HOST_ARCH,
-                        ARCH,
+                        arch_to_semconv(ARCH),
                     )),
                     // Get host.name
                     (self.host_name_detect)().map(|host_name| {
@@ -53,6 +53,37 @@ impl ResourceDetector for HostResourceDetector {
                 .flatten(),
             )
             .build()
+    }
+}
+
+/// Map a [`std::env::consts::ARCH`] value to the corresponding well-known
+/// [`host.arch` value](https://opentelemetry.io/docs/specs/semconv/resource/host/#host-arch-values)
+/// from the semantic conventions.
+///
+/// The semantic conventions require that one of the well-known values MUST be
+/// used when it applies; for any other architecture a custom value MAY be
+/// used, so unknown values are passed through unchanged.
+///
+/// Well-known values without a Rust target (e.g. `ia64`) need no mapping, as
+/// their raw value already matches the semantic convention.
+fn arch_to_semconv(arch: &str) -> &str {
+    match arch {
+        // 64-bit x86
+        "x86_64" => "amd64",
+        // 32-bit x86 (raw value already matches the semantic convention)
+        "x86" => "x86",
+        // 64-bit ARM
+        "aarch64" => "arm64",
+        // 32-bit ARM
+        "arm" => "arm32",
+        // 32-bit PowerPC
+        "powerpc" => "ppc32",
+        // 64-bit PowerPC
+        "powerpc64" => "ppc64",
+        // IBM z/Architecture (raw value already matches the semantic convention)
+        "s390x" => "s390x",
+        // No well-known value: pass the raw value through as a custom value
+        other => other,
     }
 }
 
@@ -113,7 +144,7 @@ impl Default for HostResourceDetector {
 
 #[cfg(test)]
 mod tests {
-    use super::HostResourceDetector;
+    use super::{arch_to_semconv, HostResourceDetector};
     use opentelemetry::{Key, Value};
     use opentelemetry_sdk::resource::ResourceDetector;
 
@@ -183,29 +214,58 @@ mod tests {
     }
 
     #[test]
+    fn test_arch_to_semconv_maps_to_well_known_values() {
+        // std::env::consts::ARCH values with a well-known host.arch equivalent
+        assert_eq!(arch_to_semconv("x86_64"), "amd64");
+        assert_eq!(arch_to_semconv("x86"), "x86");
+        assert_eq!(arch_to_semconv("aarch64"), "arm64");
+        assert_eq!(arch_to_semconv("arm"), "arm32");
+        assert_eq!(arch_to_semconv("powerpc"), "ppc32");
+        assert_eq!(arch_to_semconv("powerpc64"), "ppc64");
+        assert_eq!(arch_to_semconv("s390x"), "s390x");
+    }
+
+    #[test]
+    fn test_arch_to_semconv_passes_unknown_values_through() {
+        // Architectures without a well-known value are passed through as
+        // custom values, as allowed by the semantic conventions.
+        assert_eq!(arch_to_semconv("riscv64"), "riscv64");
+        assert_eq!(arch_to_semconv("loongarch64"), "loongarch64");
+        assert_eq!(arch_to_semconv("mips64"), "mips64");
+        assert_eq!(arch_to_semconv("wasm32"), "wasm32");
+    }
+
+    #[test]
     fn test_resource_host_arch_value() {
         let resource = HostResourceDetector::default().detect();
 
-        assert!(resource
+        let host_arch = resource
             .get(&Key::from_static_str(
-                opentelemetry_semantic_conventions::attribute::HOST_ARCH
+                opentelemetry_semantic_conventions::attribute::HOST_ARCH,
             ))
-            .is_some());
+            .expect("host.arch should always be present");
 
+        // host.arch MUST use the well-known values from the semantic
+        // conventions, not the raw Rust target arch strings.
         #[cfg(target_arch = "x86_64")]
-        assert_eq!(
-            resource.get(&Key::from_static_str(
-                opentelemetry_semantic_conventions::attribute::HOST_ARCH
-            )),
-            Some(Value::from("x86_64"))
-        );
+        assert_eq!(host_arch, Value::from("amd64"));
 
         #[cfg(target_arch = "aarch64")]
-        assert_eq!(
-            resource.get(&Key::from_static_str(
-                opentelemetry_semantic_conventions::attribute::HOST_ARCH
-            )),
-            Some(Value::from("aarch64"))
-        )
+        assert_eq!(host_arch, Value::from("arm64"));
+
+        #[cfg(target_arch = "x86")]
+        assert_eq!(host_arch, Value::from("x86"));
+
+        #[cfg(target_arch = "arm")]
+        assert_eq!(host_arch, Value::from("arm32"));
+
+        #[cfg(target_arch = "powerpc")]
+        assert_eq!(host_arch, Value::from("ppc32"));
+
+        #[cfg(target_arch = "powerpc64")]
+        assert_eq!(host_arch, Value::from("ppc64"));
+
+        #[cfg(target_arch = "s390x")]
+        assert_eq!(host_arch, Value::from("s390x"));
     }
 }
